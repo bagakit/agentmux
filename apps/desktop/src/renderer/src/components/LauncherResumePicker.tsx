@@ -3,7 +3,7 @@ import { ConversationMessage } from '@agentmux/client-ui'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import * as Dialog from '@radix-ui/react-dialog'
-import { ArrowRight, Check, ChevronDown, Clock3, FolderOpen, LoaderCircle, RotateCcw, Search, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { AgentLaunchInput, AgentTimelineSnapshot, NativeAgentSessionsInput, NativeAgentSessionsResult, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { useAppStore } from '../store'
@@ -18,6 +18,18 @@ import { resolveOverlayContainer } from './WindowOverlayHost'
 import { SettingsNavigation } from './SettingsNavigation'
 import { launcherCatalogWarnings, launcherDiscoveryKey, launcherNativeDiscovery, launcherNativeSourceKey, mergeLauncherNativeCatalog } from '../lib/launcher-native-discovery'
 import { launcherPreviewKey, useLauncherResumePreviews } from '../hooks/useLauncherResumePreviews'
+
+const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionClearIcon = semanticIconComponent('action.clear')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
+const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeObjectScheduleIcon = semanticIconComponent('object.schedule')
+
 
 type RecapRead = { state: 'loading' | 'ready' | 'error'; recap: LauncherRecap | null; error?: string }
 type NativeRead = RecapRead & { page?: import('@agentmux/core').AgentProviderSessionHistoryPage; loadingMore?: boolean; sourceKey: string }
@@ -317,7 +329,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
     <Dialog.Trigger asChild>
       <button type="button" className="small-button launcher-resume-trigger" disabled={disabled}
         title="Choose a saved Session from this project or all projects">
-        <RotateCcw size={13} aria-hidden="true" /><span>Resume</span><ChevronDown size={11} aria-hidden="true" />
+        <ThemeActionRotateResetIcon size={13} aria-hidden="true" /><span>Resume</span><ThemeNavigationDownIcon size={11} aria-hidden="true" />
       </button>
     </Dialog.Trigger>
     <Dialog.Portal container={resolveOverlayContainer()}>
@@ -327,7 +339,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
         <header className="launcher-resume__header">
           <div><Dialog.Title>Resume a Session</Dialog.Title>
             <Dialog.Description>Pick up where you left off, in its original project.</Dialog.Description></div>
-          <Dialog.Close className="icon-button" aria-label="Close resume picker"><X size={15} /></Dialog.Close>
+          <Dialog.Close className="icon-button" aria-label="Close resume picker"><ThemeActionCloseIcon size={15} /></Dialog.Close>
         </header>
         <div className="launcher-resume__controls">
           <div className="launcher-resume__scope" aria-label="Session scope">
@@ -338,7 +350,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
               All projects <span>{rows.length}</span>
             </button>
           </div>
-          <label className="launcher-resume__search"><Search size={14} aria-hidden="true" />
+          <label className="launcher-resume__search"><ThemeActionSearchIcon size={14} aria-hidden="true" />
             <TextInput ref={searchRef} aria-label="Search saved Sessions" role="combobox" aria-expanded="true"
               aria-controls={listId} aria-activedescendant={selectedKey ? `${listId}-${selectedKey}` : undefined}
               placeholder="Search Agent, ID, project or known recap…" value={query} onChange={event => changeQuery(event.target.value)}
@@ -346,10 +358,10 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
                 if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); moveSelection(event.key === 'ArrowDown' ? 1 : -1) }
                 if (event.key === 'Enter' && selected) { event.preventDefault(); void resume(selected) }
               }} />
-            {query ? <button type="button" className="icon-button" aria-label="Clear Session search" onClick={() => { changeQuery(''); searchRef.current?.focus() }}><X size={12} /></button> : null}
+            {query ? <button type="button" className="icon-button" aria-label="Clear Session search" onClick={() => { changeQuery(''); searchRef.current?.focus() }}><ThemeActionClearIcon size={12} /></button> : null}
           </label>
           <button type="button" className="icon-button" aria-label="Refresh discovery" title="Refresh saved conversations"
-            onClick={() => { setDiscoveryPaused(false); setDiscoveryRetry(value => value + 1); setRecapRetry(value => value + 1) }}><RotateCcw size={14} /></button>
+            onClick={() => { setDiscoveryPaused(false); setDiscoveryRetry(value => value + 1); setRecapRetry(value => value + 1) }}><ThemeActionRotateResetIcon size={14} /></button>
         </div>
         <div className="launcher-resume__body">
           <div className="launcher-resume__list" ref={setList} id={listId} role="listbox" aria-label="Saved Sessions">
@@ -366,7 +378,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
                   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); moveSelection(event.key === 'ArrowDown' ? 1 : -1); searchRef.current?.focus() }
                 }}>
                 <span className="launcher-resume__row-head"><AgentAvatar label={row.name} providerId={candidate.providerId} size={18} />
-                  <strong>{row.name}</strong>{active ? <Check size={12} aria-hidden="true" /> : null}
+                  <strong>{row.name}</strong>{active ? <ThemeStatusSelectedIcon size={12} aria-hidden="true" /> : null}
                   <time dateTime={new Date(candidate.updatedAt).toISOString()} title={new Date(candidate.updatedAt).toLocaleString()}>{formatRelativeAge(Date.now() - candidate.updatedAt, ' ago')}</time></span>
                 <span className="launcher-resume__row-recap" title={row.recap ? `${row.recap.source}: ${row.recap.displayText ?? row.recap.text}` : preview?.error}>
                   {row.recap ? <><span>{row.recap.source === 'Last assistant message' ? 'Reply' : 'Input'} · </span>{row.recap.displayText ?? row.recap.text}</>
@@ -379,19 +391,19 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
                   <code title={identity}>#{idLabels.get(identity)}</code><span className="launcher-resume__row-state">{row.stateLabel}</span></span>
               </button>
             })}
-            {!filtered.length ? <div className="launcher-resume__empty"><FolderOpen size={23} aria-hidden="true" />
+            {!filtered.length ? <div className="launcher-resume__empty"><ThemeObjectFolderOpenIcon size={23} aria-hidden="true" />
               <strong>{discovery.pending.length || discoveryPaused || discovery.errors.length ? query ? 'No matches among listed Sessions' : 'Discovering saved conversations'
                 : query ? 'No matching Sessions' : scope === 'project' ? 'No saved Sessions in this project' : 'No saved Sessions yet'}</strong>
               <p>{discovery.pending.length || discoveryPaused || discovery.errors.length ? 'Some conversation sources are still unconfirmed. Completed sources appear here as they are read.'
                 : query ? 'Try an Agent name, Session ID, project or a recap already available here.' : scope === 'project' ? 'Switch to All projects to continue work elsewhere.' : 'Your saved Sessions will appear here.'}</p>
-              {scope === 'project' ? <button type="button" className="small-button" onClick={() => changeScope('global')}>Browse all projects <ArrowRight size={12} /></button> : null}
+              {scope === 'project' ? <button type="button" className="small-button" onClick={() => changeScope('global')}>Browse all projects <ThemeNavigationForwardIcon size={12} /></button> : null}
             </div> : null}
           </div>
           {selected ? <section className="launcher-resume__detail" aria-label="Selected Session details">
             <div className="launcher-resume__detail-heading"><AgentAvatar label={selected.name} providerId={selected.candidate.providerId} size={24} />
               <div><strong>{selected.name}</strong><span>{selectedProviderLabel === selected.executorName ? selectedProviderLabel : `${selectedProviderLabel} · ${selected.executorName}`}</span></div></div>
             {nativeCandidate ? <div className="launcher-resume__conversation"><h3>Conversation</h3>
-              {selectedNativeRead?.state === 'loading' ? <p className="launcher-resume__muted"><LoaderCircle size={12} className="spin" /> Reading this saved conversation…</p> : null}
+              {selectedNativeRead?.state === 'loading' ? <p className="launcher-resume__muted"><ThemeStatusLoadingIcon size={12} className="spin" /> Reading this saved conversation…</p> : null}
               {selectedNativeRead?.page ? <>
                 {nativeMessages.map((item, index) => <article key={`${nativeSourceKey}:${item.id}`} ref={index === nativeMessages.length - 1 ? nativeLastMessageRef : undefined} className="launcher-resume__message">
                   <ConversationMessage compact content={item.contentParts} messageId={item.id} providerId={selectedNativeRead.page!.source.providerId}
@@ -407,7 +419,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
                 <button type="button" className="small-button" onClick={() => setRecapRetry(value => value + 1)}>Retry conversation</button></div> : null}
             </div> : <div className="launcher-resume__recap"><h3>Recap</h3>
               {selected.recap ? <><p>{selected.recap.text}</p><small>{selected.recap.source} · {selected.recap.origin === 'native' ? 'Provider conversation' : 'Captured conversation'}</small></>
-                : selectedRead?.state === 'loading' ? <p className="launcher-resume__muted"><LoaderCircle size={12} className="spin" /> Reading this Session’s recap…</p>
+                : selectedRead?.state === 'loading' ? <p className="launcher-resume__muted"><ThemeStatusLoadingIcon size={12} className="spin" /> Reading this Session’s recap…</p>
                   : <p className="launcher-resume__muted">No recap available. This Session has no readable conversation excerpt.</p>}
               {!selected.recap && selectedRead?.state === 'error' ? <div className="launcher-resume__recap-notice" role="status">
                 <span>Recap could not be read: {selectedRead.error}. Resume remains available.</span>
@@ -420,7 +432,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
               <div><dt>Host</dt><dd>{selected.hostName}{selected.hostName !== selected.candidate.hostId ? <small>{selected.candidate.hostId}</small> : null}</dd></div>
               <div><dt>{'native' in selected.candidate ? 'Provider Session ID' : 'Session ID'}</dt><dd><code>{launcherCandidateIdentity(selected.candidate)}</code></dd></div>
               {!('native' in selected.candidate) && selected.candidate.nativeSessionId ? <div><dt>Provider Session ID</dt><dd><code>{selected.candidate.nativeSessionId}</code></dd></div> : null}
-              <div><dt>Last active</dt><dd><Clock3 size={11} aria-hidden="true" /><time dateTime={new Date(selected.candidate.updatedAt).toISOString()}>{new Date(selected.candidate.updatedAt).toLocaleString()}</time></dd></div>
+              <div><dt>Last active</dt><dd><ThemeObjectScheduleIcon size={11} aria-hidden="true" /><time dateTime={new Date(selected.candidate.updatedAt).toISOString()}>{new Date(selected.candidate.updatedAt).toLocaleString()}</time></dd></div>
             </dl>
             <div className="launcher-resume__state" role="status"><strong>{selected.stateLabel}</strong><p>{selected.stateDetail}</p></div>
             {!selectedHostConfigured ? <div className="launcher-resume__state" role="status"><strong>Host is not configured</strong><p>Configure this Session’s original Host to open its project.</p>
@@ -428,7 +440,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
           </section> : null}
         </div>
         {discovery.pending.length || discoveryPaused ? <div className="launcher-resume__discovery" role="status">
-          <div><span>{discoveryPaused ? 'Discovery updates paused' : <><LoaderCircle size={12} className="spin" /> Reading saved conversations</>} · {discovery.total - discovery.pending.length}/{discovery.total} sources checked</span>
+          <div><span>{discoveryPaused ? 'Discovery updates paused' : <><ThemeStatusLoadingIcon size={12} className="spin" /> Reading saved conversations</>} · {discovery.total - discovery.pending.length}/{discovery.total} sources checked</span>
             <button type="button" className="small-button" onClick={() => { if (discoveryPaused) { setDiscoveryPaused(false); setDiscoveryRetry(value => value + 1) } else setDiscoveryPaused(true) }}>
               {discoveryPaused ? 'Refresh discovery' : 'Pause updates'}</button></div>
           <details><summary>{discovery.pending.length} {discovery.pending.length === 1 ? 'source' : 'sources'} still unconfirmed · Listed Sessions remain available</summary>
@@ -443,7 +455,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
         <footer className="launcher-resume__footer"><span>{filtered.length} {filtered.length === 1 ? 'Session' : 'Sessions'}{workspace && scope === 'project' ? ` · ${workspace.name}` : ' · all projects'}</span>
           <button type="button" className="primary-button" disabled={!selected || busyId !== null || disabled}
             onClick={() => selected && void resume(selected)}>
-            {busyId ? <LoaderCircle size={13} className="spin" /> : <RotateCcw size={13} />}
+            {busyId ? <ThemeStatusLoadingIcon size={13} className="spin" /> : <ThemeActionRotateResetIcon size={13} />}
             {busyId ? 'Restoring…' : selectedSession?.status.continuityConflict === 'session-run-changed' ? 'Open current Session' : selected && !selected.workspace && selectedHostConfigured ? 'Open project & resume' : 'Resume Session'}
           </button></footer>
       </Dialog.Content>

@@ -1,4 +1,4 @@
-import { ArrowUpRight, ChevronDown, Plus, RefreshCw } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
@@ -11,6 +11,12 @@ import { fileNavigationSelection, useAppStore } from '../store'
 import { MoteBehaviorAction } from './MoteBehaviorDialog'
 import { SelectionField } from './SelectionField'
 import { GoalContinuationControl } from './GoalContinuationControl'
+
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeActionCreateGoalIcon = semanticIconComponent('action.create-goal')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+
 
 /** A reading surface over the original Goal owner; it has no timer or execution state. */
 export function MoteCurrentWork({ scope, reference, active = true }: {
@@ -120,8 +126,8 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
   }
   return <section className="mote-current-work" aria-label="This Mote’s work">
     <div className="mote-details__section-actions"><span>{showAll ? 'All work' : 'Current work'}<small className="mote-current-work__count">{showAll ? goals.length : currentGoals.length}</small></span><div className="mote-current-work__actions">
-      <MoteBehaviorAction label="Refresh this Mote’s goals" onClick={() => void refresh()}><RefreshCw size={13} /></MoteBehaviorAction>
-      <MoteBehaviorAction label="Choose or create a goal" expanded={chooser} onClick={() => { associationIntent.current = {}; setChooser(value => !value) }}><Plus size={14} /></MoteBehaviorAction>
+      <MoteBehaviorAction label="Refresh this Mote’s goals" onClick={() => void refresh()}><ThemeActionRefreshIcon size={13} /></MoteBehaviorAction>
+      <MoteBehaviorAction label="Choose or create a goal" expanded={chooser} onClick={() => { associationIntent.current = {}; setChooser(value => !value) }}><ThemeActionCreateGoalIcon size={14} /></MoteBehaviorAction>
     </div></div>
     {context.issue || issue ? <p role="status" className="mote-details__issue">{issue ?? context.issue} Last confirmed goals are kept.</p> : null}
     {loading ? <p role="status" className="mote-details__hint">Reading original goals…</p> : null}
@@ -131,7 +137,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
       return <div className="mote-current-work__goal" key={goal.id} data-mote-goal={goal.id}>
         <div className="mote-current-work__row"><button type="button" className="mote-current-work__copy" aria-expanded={open}
           onClick={() => { associationIntent.current = {}; setExpanded(open ? null : goal.id) }}><strong>{goal.title}</strong><span>{summary.next}</span></button>
-          <MoteBehaviorAction label={`Open goal and results: ${goal.title}`} onClick={() => void openGoal(goal.id)}><ArrowUpRight size={15} /></MoteBehaviorAction>
+          <MoteBehaviorAction label={`Open goal and results: ${goal.title}`} onClick={() => void openGoal(goal.id)}><ThemeActionOpenExternalIcon size={15} /></MoteBehaviorAction>
         </div>
         {open && summary.detail ? <p className="mote-current-work__detail">{summary.detail}</p> : null}
         {unloaded.length ? <p className="mote-details__hint">{unloaded.length} linked discussion{unloaded.length > 1 ? 's' : ''} not loaded. Original references retained.</p> : null}
@@ -140,16 +146,16 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
     })}
     {!showAll && goals.length && !currentGoals.length ? <p className="mote-details__hint">No current work. Original results are kept below.</p> : null}
     {showAll || goals.length > visibleGoals.length ? <button type="button" className="mote-current-work__navigation mote-current-work__all" aria-expanded={showAll}
-      onClick={() => { associationIntent.current = {}; setShowAll(value => !value) }}>{showAll ? 'Current summary' : 'All work'}<span>{showAll ? currentGoals.length : goals.length}<ChevronDown size={12} /></span></button> : null}
+      onClick={() => { associationIntent.current = {}; setShowAll(value => !value) }}>{showAll ? 'Current summary' : 'All work'}<span>{showAll ? currentGoals.length : goals.length}<ThemeNavigationDownIcon size={12} /></span></button> : null}
     {chooser ? <div className="mote-current-work__chooser">
-      <button type="button" className="mote-current-work__navigation" onClick={() => void openGoal(null)}>Create or review in Goals<ArrowUpRight size={13} /></button>
+      <button type="button" className="mote-current-work__navigation" onClick={() => void openGoal(null)}>Create or review in Goals<ThemeActionOpenExternalIcon size={13} /></button>
       <SelectionField label="Goal to associate with this Mote" value={selectedGoal}
         onValueChange={value => { associationIntent.current = {}; setSelectedGoal(value) }}
         options={[{ value: '', label: 'Choose an existing goal…' }, ...Object.values(demands).map(goal => ({ value: goal.id, label: goal.title }))]} />
       <SelectionField label="Mote discussion for the goal" value={sessionId}
         onValueChange={value => { associationIntent.current = {}; setSessionId(value) }}
         options={[{ value: '', label: 'Choose a discussion…' }, ...context.sessionIds.map(id => ({ value: id, label: labels[id] ?? 'Retained discussion · ' + id }))]} />
-      <button type="button" className="mote-current-work__navigation" onClick={() => void link()} disabled={loading || !selectedGoal || !sessionId}>Link this discussion<ChevronDown size={12} /></button>
+      <button type="button" className="mote-current-work__navigation" onClick={() => void link()} disabled={loading || !selectedGoal || !sessionId}>Link this discussion<ThemeNavigationDownIcon size={12} /></button>
       <p className="mote-details__hint">Linking does not start work. Confirm the scope and choose its executing Agent before continuing.</p>
     </div> : null}
   </section>

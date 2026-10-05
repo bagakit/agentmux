@@ -1,7 +1,7 @@
 import type { SpaceObjectImageTarget } from '../../../shared/object-avatars'
 import { SpaceDirectoryImage } from './SpaceDirectoryImage'
 import { memo, useEffect, useState } from 'react'
-import { NotebookText } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SPACE_ICON_CATALOG, type SpaceIconChoice, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { isMoteFace, type MoteAvatarImage, type MoteAvatarRef } from '../../../shared/mote-avatars'
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
@@ -15,6 +15,9 @@ import { ProjectIcon } from './ProjectIcon'
 import { MoteFace, type MoteExpression } from './MoteFace'
 import { MoteIdentityMotion, type MoteIdentityMotionProps } from './MoteIdentityMotion'
 import { moteExpression } from '../lib/mote-expression'
+
+const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+
 
 // Share only live consumers of the same immutable content, not saved identities.
 type ActiveAvatarRead = { consumers: number; promise: Promise<MoteAvatarImage>; reported: boolean }
@@ -85,10 +88,10 @@ export const SpaceObjectIcon = memo(function SpaceObjectIcon(props: SpaceObjectI
 })
 function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, folderIdentityKey, lastActivityAt, visible, topicGlyph = false, avatarWorkspaceId, avatarTopicId, avatarObjectKey, imageTarget, expression }: SpaceObjectIconProps & { expression?: MoteExpression }) {
   if (isMoteFace(manualIcon)) return <span className="project-rail-row__icon space-object-icon" data-space-icon-kind={kind} data-space-icon-source="face" aria-hidden="true">
-    {kind === 'mote' ? <MoteFace face={manualIcon} expression={expression} /> : <NotebookText size={14} />}
+    {kind === 'mote' ? <MoteFace face={manualIcon} expression={expression} /> : <ThemeObjectNotebookIcon size={14} />}
   </span>
   if (manualIcon && typeof manualIcon === 'object') {
-    if (imageTarget) return <SpaceDirectoryImage target={imageTarget} choice={manualIcon} fallback={<NotebookText size={14} />} />
+    if (imageTarget) return <SpaceDirectoryImage target={imageTarget} choice={manualIcon} fallback={<ThemeObjectNotebookIcon size={14} />} />
     if (!avatarWorkspaceId || !avatarTopicId || !avatarObjectKey) return <span className="space-object-icon" data-space-icon-kind={kind} data-space-icon-source="image" title="Saved avatar target is unavailable" aria-hidden="true"><MoteIcon size={14} /></span>
     return <MoteAvatar kind={kind} workspaceId={avatarWorkspaceId} topicId={avatarTopicId} choice={manualIcon} objectKey={avatarObjectKey} />
   }
@@ -101,10 +104,10 @@ function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, folderId
     if (!workspaceId) throw new Error('Automatic Folder icons require their registered Workspace.')
     return <ProjectIcon workspaceId={workspaceId} name={name} folderIdentityKey={folderIdentityKey} lastActivityAt={lastActivityAt} visible={visible} />
   }
-  if (imageTarget) return <SpaceDirectoryImage target={imageTarget} choice={null} fallback={kind === 'topic' && !topicGlyph && projectMonogram(name) ? <span>{projectMonogram(name)}</span> : <NotebookText size={14} />} />
+  if (imageTarget) return <SpaceDirectoryImage target={imageTarget} choice={null} fallback={kind === 'topic' && !topicGlyph && projectMonogram(name) ? <span>{projectMonogram(name)}</span> : <ThemeObjectNotebookIcon size={14} />} />
   const monogram = kind === 'topic' && !topicGlyph ? projectMonogram(name) : ''
   return <span className="project-rail-row__icon space-object-icon" data-space-icon-kind={kind} data-space-icon-source="automatic"
     {...(monogram ? { 'data-monogram': '' } : {})} title={kind === 'mote' ? 'Mote' : kind === 'category' ? 'Category' : 'Topic'} aria-hidden="true">
-    {kind === 'mote' ? avatarTopicId === PMO_TEAMS_TOPIC_ID ? <span className="mote-image-follow"><img className="space-object-icon__avatar" src={defaultMoteAvatar} alt="" draggable={false} /></span> : <MoteIcon size={14} /> : monogram ? <span>{monogram}</span> : <NotebookText size={14} />}
+    {kind === 'mote' ? avatarTopicId === PMO_TEAMS_TOPIC_ID ? <span className="mote-image-follow"><img className="space-object-icon__avatar" src={defaultMoteAvatar} alt="" draggable={false} /></span> : <MoteIcon size={14} /> : monogram ? <span>{monogram}</span> : <ThemeObjectNotebookIcon size={14} />}
   </span>
 }

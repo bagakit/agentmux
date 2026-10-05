@@ -1,10 +1,19 @@
 import type { TopicRegionCell } from '../lib/scratch-topic-layout'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, FileCode2, GitCompareArrows, Globe2, PanelTop, PanelsTopLeft, SquareTerminal } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { AgentAvatar } from './AgentAvatar'
 import { SelectorPresence, type SelectorPresenceAgent } from './SelectorList'
 import { getWindowOverlayHost } from './WindowOverlayHost'
+
+const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
+const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+const ThemeFileCodeIcon = semanticIconComponent('file.code')
+const ThemeGitCompareIcon = semanticIconComponent('git.compare')
+const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+const ThemeLayoutDockIcon = semanticIconComponent('layout.dock')
+
 
 const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
@@ -105,14 +114,14 @@ function TopicRegionMark({ region }: { region: TopicRegionDetail }) {
     />
   }
   switch (region.surfaceKind) {
-    case 'terminal': return <SquareTerminal size={14} aria-hidden="true" />
-    case 'browser': return <Globe2 size={14} aria-hidden="true" />
-    case 'file': return <FileCode2 size={14} aria-hidden="true" />
+    case 'terminal': return <ThemeObjectTerminalIcon size={14} aria-hidden="true" />
+    case 'browser': return <ThemeObjectBrowserIcon size={14} aria-hidden="true" />
+    case 'file': return <ThemeFileCodeIcon size={14} aria-hidden="true" />
     case 'git':
-    case 'git-diff': return <GitCompareArrows size={14} aria-hidden="true" />
-    case 'launcher': return <PanelsTopLeft size={14} aria-hidden="true" />
-    case 'agent': return <Bot size={14} aria-hidden="true" />
-    default: return <PanelTop size={14} aria-hidden="true" />
+    case 'git-diff': return <ThemeGitCompareIcon size={14} aria-hidden="true" />
+    case 'launcher': return <ThemeObjectLauncherIcon size={14} aria-hidden="true" />
+    case 'agent': return <ThemeObjectAgentIcon size={14} aria-hidden="true" />
+    default: return <ThemeLayoutDockIcon size={14} aria-hidden="true" />
   }
 }
 
@@ -232,7 +241,7 @@ export function TopicWorkbenchTopology({ tabs, onSelectTab }: { tabs: readonly T
         : undefined}
     >
       <span className="topic-workbench-topology__inspector-head">
-        <span><PanelTop size={13} /><strong>{inspected?.title ?? 'Topic workbench'}</strong></span>
+        <span><ThemeLayoutDockIcon size={13} /><strong>{inspected?.title ?? 'Topic workbench'}</strong></span>
       </span>
       {inspected ? <RegionLayout regions={inspected.regions} aspectRatio={aspectRatio} className="topic-workbench-topology__inspector-regions" /> : null}
     </span>

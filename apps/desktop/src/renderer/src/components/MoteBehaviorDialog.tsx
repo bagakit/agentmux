@@ -1,7 +1,7 @@
 import { ComposerTextarea, InputGroup } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
 import { useLayoutEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { ArrowRight, Check, FileText, MessageCircle, Plus, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { MOTE_SOUL_PATH } from '../../../shared/scratch-topics'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
@@ -13,6 +13,14 @@ import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { resolveOverlayContainer, WindowOverlayPortal } from './WindowOverlayHost'
+
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
+const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
+const ThemeFileTextIcon = semanticIconComponent('file.text')
+const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
+
 
 /** Familiar icon operations retain a visible tooltip and full accessible name. */
 export function MoteBehaviorAction({ label, children, onClick, expanded, disabled, busy }: {
@@ -95,7 +103,7 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
         <header className="mote-behavior-header"><div>
           <Dialog.Title>Behavior settings</Dialog.Title>
           <Dialog.Description>Choose how {scope.topic.title} works with you.</Dialog.Description>
-        </div><MoteBehaviorAction label="Close behavior settings" onClick={onClose}><X size={16} /></MoteBehaviorAction></header>
+        </div><MoteBehaviorAction label="Close behavior settings" onClick={onClose}><ThemeActionCloseIcon size={16} /></MoteBehaviorAction></header>
         <div className="mote-behavior-body">
           <aside className="mote-behavior-preview" aria-label="Behavior preview">
             <div className="mote-behavior-identity"><div className="mote-behavior-avatar">
@@ -117,13 +125,13 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
                     update({ ...form.current, [axis.id]: axis.choices[next]!.value })
                     event.currentTarget.closest('fieldset')?.querySelectorAll<HTMLInputElement>('input')[next]?.focus()
                   }} />
-                <span>{choice.title}</span><Check size={13} aria-hidden="true" />
+                <span>{choice.title}</span><ThemeStatusSelectedIcon size={13} aria-hidden="true" />
               </label>)}</div>
             </fieldset>)}
             <div className="mote-behavior-tools">
-              <MoteBehaviorAction label="Extra preferences" expanded={extra === 'custom'} onClick={() => setExtra(value => value === 'custom' ? null : 'custom')}><Plus size={16} /></MoteBehaviorAction>
-              <MoteBehaviorAction label="Try a cooperation question" expanded={extra === 'trial'} onClick={() => setExtra(value => value === 'trial' ? null : 'trial')}><MessageCircle size={16} /></MoteBehaviorAction>
-              <MoteBehaviorAction label="Open original behavior file" onClick={() => void inspect()}><FileText size={16} /></MoteBehaviorAction>
+              <MoteBehaviorAction label="Extra preferences" expanded={extra === 'custom'} onClick={() => setExtra(value => value === 'custom' ? null : 'custom')}><ThemeActionAdjustIcon size={16} /></MoteBehaviorAction>
+              <MoteBehaviorAction label="Try a cooperation question" expanded={extra === 'trial'} onClick={() => setExtra(value => value === 'trial' ? null : 'trial')}><ThemeObjectConversationIcon size={16} /></MoteBehaviorAction>
+              <MoteBehaviorAction label="Open original behavior file" onClick={() => void inspect()}><ThemeFileTextIcon size={16} /></MoteBehaviorAction>
             </div>
             {extra === 'custom' ? <label className="mote-behavior-extra">Extra preferences<ComposerTextarea aria-label="Custom cooperation preferences" rows={3}
               value={draft.custom} onValueChange={value => update({ ...form.current, custom: value })} placeholder="What helps us work together?" /></label> : null}
@@ -134,7 +142,7 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
                 <MoteBehaviorAction label="Prepare new discussion" onClick={() => {
                 if (openMoteDiscussionDraft(scope, question, { reference })) onClose()
                 else setIssue('The new Launcher is unconfirmed. Your question is kept; inspect the original Group and retry.')
-                }}><ArrowRight size={16} /></MoteBehaviorAction>
+                }}><ThemeNavigationForwardIcon size={16} /></MoteBehaviorAction>
               </InputGroup>
               <p className="mote-details__hint">Uses saved settings. Edit the question in the new Launcher, then Start.</p>
             </div> : null}

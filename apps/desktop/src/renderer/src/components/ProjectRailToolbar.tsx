@@ -1,5 +1,9 @@
-import { Keyboard, Settings2 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { SettingsPageId } from './SettingsPanel'
+
+const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
+const ThemeObjectKeyboardIcon = semanticIconComponent('object.keyboard')
+
 
 type ProjectRailToolbarProps = {
   collapsed?: boolean
@@ -25,7 +29,7 @@ function SettingsButton({
       data-settings-section="overview"
       onClick={() => onOpenSettings('overview')}
     >
-      <Settings2 size={13} />
+      <ThemeObjectSettingsIcon size={13} />
     </button>
   )
 }
@@ -33,7 +37,7 @@ function SettingsButton({
 function ShortcutHelpButton({ onOpenSettings }: { onOpenSettings: (section: SettingsPageId) => void }) {
   return <button type="button" className="icon-button project-rail-toolbar__button"
     aria-label="Keyboard shortcuts" title="Keyboard shortcuts" data-shortcut-help-open
-    onClick={() => onOpenSettings('keyboard-shortcuts')}><Keyboard size={13} /></button>
+    onClick={() => onOpenSettings('keyboard-shortcuts')}><ThemeObjectKeyboardIcon size={13} /></button>
 }
 
 export function ProjectRailToolbar({

@@ -1,10 +1,16 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Link, MoreHorizontal, Pencil, Shapes } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
 import type { SpaceIconTarget } from '../lib/space-object-appearance'
 import { useSpaceObjectActionsMenu, useSpaceObjectMenu } from './SpaceObjectContextMenu'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeObjectShapesIcon = semanticIconComponent('object.shapes')
+const ThemeActionEditIcon = semanticIconComponent('action.edit')
+const ThemeObjectLinkIcon = semanticIconComponent('object.link')
+const ThemeActionMoreIcon = semanticIconComponent('action.more')
+
 
 type CategoryMenuActions = {
   target: SpaceIconTarget
@@ -17,10 +23,10 @@ type CategoryMenuActions = {
 function categoryMenuItems(Item: typeof ContextMenu.Item, Separator: typeof ContextMenu.Separator,
   actions: CategoryMenuActions, openDialog: (callback: () => void) => void) {
   return <>
-    <Item className="tab-context-menu__item" onSelect={() => openDialog(() => actions.onChangeIcon(actions.target))}><Shapes size={14} /><span>Change avatar…</span></Item>
-    <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onRename)}><Pencil size={14} /><span>Rename category…</span></Item>
+    <Item className="tab-context-menu__item" onSelect={() => openDialog(() => actions.onChangeIcon(actions.target))}><ThemeObjectShapesIcon size={14} /><span>Change avatar…</span></Item>
+    <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onRename)}><ThemeActionEditIcon size={14} /><span>Rename category…</span></Item>
     <Separator className="tab-context-menu__separator" />
-    <Item className="tab-context-menu__item" onSelect={actions.onCopyLink}><Link size={14} /><span>Copy Category link</span></Item>
+    <Item className="tab-context-menu__item" onSelect={actions.onCopyLink}><ThemeObjectLinkIcon size={14} /><span>Copy Category link</span></Item>
   </>
 }
 
@@ -42,7 +48,7 @@ export function TopicCategoryActionsMenu(actions: CategoryMenuActions) {
     <DropdownMenu.Trigger asChild><button ref={menu.trigger} type="button" className="icon-button space-row-action"
       aria-label={`Actions for category ${actions.target.name}`} title={`Actions for category ${actions.target.name}`}
       onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
-      onKeyDown={event => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) event.stopPropagation() }}><MoreHorizontal size={13} /></button></DropdownMenu.Trigger>
+      onKeyDown={event => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) event.stopPropagation() }}><ThemeActionMoreIcon size={13} /></button></DropdownMenu.Trigger>
     <DropdownMenu.Portal container={resolveOverlayContainer()}>
       <DropdownMenu.Content className="tab-context-menu" align="end" collisionPadding={8}
         onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}

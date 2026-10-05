@@ -1,5 +1,5 @@
 import { ComposerTextarea, InputGroup } from '@agentmux/client-ui/input'
-import { ArrowRight, LoaderCircle } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -10,6 +10,10 @@ import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { MoteBehaviorAction } from './MoteBehaviorDialog'
 import { isMacPlatform } from '../lib/host-platform'
+
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
+
 
 /** Optional real-question entry. Original Launcher owns the input and original Files own its sources. */
 export function MoteFirstCooperation({ scope, reference }: {
@@ -52,7 +56,7 @@ export function MoteFirstCooperation({ scope, reference }: {
         }} />
       <MoteBehaviorAction label={pending ? 'Reading original materials' : 'Prepare this question in a new discussion'}
         disabled={pending || !question.trim()} busy={pending}
-        onClick={() => void prepare()}>{pending ? <LoaderCircle size={14} className="spin" /> : <ArrowRight size={16} />}</MoteBehaviorAction>
+        onClick={() => void prepare()}>{pending ? <ThemeStatusLoadingIcon size={14} className="spin" /> : <ThemeNavigationForwardIcon size={16} />}</MoteBehaviorAction>
     </InputGroup>
     <span className="mote-cooperation-entry__shortcut" aria-hidden="true">{isMacPlatform() ? '⌘' : 'Ctrl'} ↵</span>
     {pending ? <p className="mote-details__hint" role="status">Reading the saved profile…</p> : null}

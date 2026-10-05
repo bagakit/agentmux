@@ -1,7 +1,7 @@
 import type { FileReadResource, FileReadResult, TopicKnowledgeDocument } from '@agentmux/core'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { ArrowUpRight, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
@@ -9,6 +9,10 @@ import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { spatialCatalog, spatialDestination, zoneContext } from '../lib/space-agent-control'
 import { fileWorkbenchIdentity } from '../lib/file-workbench-state'
 import { useAppStore } from '../store'
+
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
 
 /** A view of the original Files receipt. It never creates a knowledge entry or saves its body. */
 export function TopicKnowledgeDocumentReader({ document: original, refresh, onClose }: {
@@ -68,8 +72,8 @@ export function TopicKnowledgeDocumentReader({ document: original, refresh, onCl
     if (event.key === 'Escape' && !isImeCompositionKeyDown(event)) { event.preventDefault(); event.stopPropagation(); onClose() }
   }}>
     <header><span><strong title={original.title}>{original.title}</strong><small title={original.target.path}>Original file · {original.target.path}</small></span>
-      <button type="button" className="icon-button" aria-label="Open original file" title="Open original file" onClick={() => void openOriginal()}><ArrowUpRight size={13} /></button>
-      <button type="button" className="icon-button" aria-label="Close document detail" title="Back to results" onClick={onClose}><X size={13} /></button>
+      <button type="button" className="icon-button" aria-label="Open original file" title="Open original file" onClick={() => void openOriginal()}><ThemeActionOpenExternalIcon size={13} /></button>
+      <button type="button" className="icon-button" aria-label="Close document detail" title="Back to results" onClick={onClose}><ThemeActionCloseIcon size={13} /></button>
     </header>
     <div className="topic-knowledge-entry__body">
       {reading ? <p className="topic-knowledge-hint" role="status">Reading original file…</p> : null}

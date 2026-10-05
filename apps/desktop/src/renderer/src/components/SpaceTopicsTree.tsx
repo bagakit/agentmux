@@ -1,5 +1,5 @@
 import { usePathDisplay } from '../hooks/usePathDisplay'
-import { Archive, ArchiveRestore, Check, Ellipsis, NotebookText, Pin, NotebookPen, FolderPlus, Pencil } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { MoteIcon } from './MoteIcon'
 import { ProjectActivity } from './ProjectActivity'
@@ -29,6 +29,16 @@ import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
 import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
 import { MoteRenameDialog } from './MoteRenameDialog'
 import '../styles/mote-directory.css'
+
+const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeActionMoreIcon = semanticIconComponent('action.more')
+const ThemeActionPinIcon = semanticIconComponent('action.pin')
+const ThemeActionEditNoteIcon = semanticIconComponent('action.edit-note')
+const ThemeActionRestoreIcon = semanticIconComponent('action.restore')
+const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+const ThemeActionCreateFolderIcon = semanticIconComponent('action.create-folder')
+
 
 /** Filesystem objects and existing Session facts; no separate Space or heat registry. */
 const NO_TOPICS: readonly ScratchTopicSnapshot[] = []
@@ -146,7 +156,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
         navigationId={key} createLabel="Create Mote" onCreate={() => createTopic('mote')}
         actions={<button type="button" className="icon-button mote-directory-archive" aria-label="Show archived Motes in Space"
           aria-pressed={showArchived} title={`${showArchived ? 'Hide' : 'Show'} archived Motes · ${archivedMotes.length}`}
-          onClick={() => setShowArchived(value => !value)}><Archive size={13} /><span>{archivedMotes.length}</span></button>}
+          onClick={() => setShowArchived(value => !value)}><ThemeActionArchiveIcon size={13} /><span>{archivedMotes.length}</span></button>}
         activity={!expanded && sectionSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sectionSessions} contexts={contexts} /> : undefined} /></div>
       {filtering && ids.length === 0 ? <p className="space-tree-empty" role="status">No matching {label}</p> : null}
       <div className="mote-directory" data-mote-directory-view={directoryView} style={{ '--mote-directory-avatar-size': `${avatarSize}px` } as CSSProperties}>
@@ -188,7 +198,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
               onClick={() => isMote ? void openMote(id) : void openTopic(id, workspace.id).catch(reportError)}>
               <SpaceObjectIcon kind={isMote ? 'mote' : 'topic'} name={name} manualIcon={target ? icons[target.key] ?? null : null} imageTarget={target?.imageTarget} avatarObjectKey={target?.key} avatarWorkspaceId={target?.avatarTarget?.workspaceId} avatarTopicId={target?.avatarTarget?.topicId} visible={visible} />
               <span className="project-rail-row__identity"><strong>{name}</strong>{archived ? <small>Archived</small> : null}</span>
-              {selected ? <Check className="mote-directory-current" size={11} aria-hidden="true" /> : null}
+              {selected ? <ThemeStatusSelectedIcon className="mote-directory-current" size={11} aria-hidden="true" /> : null}
             </button>
             <button type="button" className="icon-button space-row-action mote-directory-more" aria-label={`More actions for ${name}`} title={`More actions for ${name}`}
               onClick={event => {
@@ -196,14 +206,14 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
                 event.currentTarget.closest('[data-space-entry]')?.dispatchEvent(new MouseEvent('contextmenu', {
                   bubbles: true, cancelable: true, button: 2, clientX: rect.left, clientY: rect.bottom
                 }))
-              }}><Ellipsis size={14} /></button>
+              }}><ThemeActionMoreIcon size={14} /></button>
             <button type="button" className={`icon-button space-row-action space-pin${isPinned ? ' space-pin--pinned' : ''}`}
               aria-label={`${isPinned ? 'Unpin' : 'Pin'} ${name}`} aria-pressed={isPinned} title={`${isPinned ? 'Unpin' : 'Pin'} ${name}`}
-              onClick={togglePin}><Pin size={11} /></button>
+              onClick={togglePin}><ThemeActionPinIcon size={11} /></button>
             {isMote ? <button type="button" className="icon-button space-row-action space-mote-edit" aria-label={`Edit ${name} SOUL.md`}
-              title="Edit SOUL.md · New sessions use saved changes" onClick={editMote}><NotebookPen size={12} /></button> : null}
+              title="Edit SOUL.md · New sessions use saved changes" onClick={editMote}><ThemeActionEditNoteIcon size={12} /></button> : null}
             {archived ? <button type="button" className="icon-button space-row-action" aria-label={`Restore Mote ${name}`} title="Restore Mote"
-              disabled={archive.pending === id} onClick={() => void archive.change(topic, false)}><ArchiveRestore size={12} /></button> : null}
+              disabled={archive.pending === id} onClick={() => void archive.change(topic, false)}><ThemeActionRestoreIcon size={12} /></button> : null}
             {bucket.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={bucket} contexts={contextById.has(id) ? [contextById.get(id)!] : []} /> : null}
           </div>
           {topic.readError ? <div className="surface-inline-error" role="alert">{name}: {topic.readError}. Its work surface is retained.</div> : null}
@@ -228,9 +238,9 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
     categoryTopics.get(category.spaceId)!.some(topic => matchesSpaceQuery(query, 'Topics', category.title, topic.title, topic.summary, scratchTopicPhysicalPath(workspace, topic), workspace.hostId)))
   return <div ref={tree} className="space-topics-tree">
     {moteSection(motes.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived))}
-    <div className="space-section space-topics-section"><SpaceSectionHeader label="Topics" count={categories.length} icon={<NotebookText size={14} />}
+    <div className="space-section space-topics-section"><SpaceSectionHeader label="Topics" count={categories.length} icon={<ThemeObjectNotebookIcon size={14} />}
       expanded={filtering || collapsedGroups['space:topics'] !== true} filtering={filtering} onToggle={() => toggleGroup('space:topics')}
-      onOpen={() => void openOverview()} createLabel="Create Category" createIcon={<FolderPlus size={13} />}
+      onOpen={() => void openOverview()} createLabel="Create Category" createIcon={<ThemeActionCreateFolderIcon size={13} />}
       onCreate={async () => editCategory('create')} />
       {filtering || collapsedGroups['space:topics'] !== true ? <>
         {matchingCategories.map(category => {

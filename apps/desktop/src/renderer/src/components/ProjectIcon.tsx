@@ -1,11 +1,15 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { Folder, GitBranch } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { projectMonogram } from '../lib/project-monogram'
 import { folderIconRecency } from '../lib/space-folder-icon-recency'
 import { speakerColorHue } from '../lib/conversation-avatar-color'
+
+const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
+const ThemeObjectFolderIcon = semanticIconComponent('object.folder')
+
 
 type Appearance = { kind: 'repository' | 'directory'; icon: string | null }
 
@@ -73,6 +77,6 @@ export function ProjectIcon({ workspaceId, name, folderIdentityKey, lastActivity
     {appearance === null ? null
       : appearance.icon ? <img src={appearance.icon} alt="Project icon" data-folder-icon-recency={recency?.tone} onError={() => setAppearance({ ...appearance, icon: null })} />
       : monogram ? <span aria-hidden="true">{monogram}</span>
-      : appearance.kind === 'repository' ? <GitBranch size={15} /> : <Folder size={15} />}
+      : appearance.kind === 'repository' ? <ThemeObjectBranchIcon size={15} /> : <ThemeObjectFolderIcon size={15} />}
   </span>
 }

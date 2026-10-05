@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { Contact, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import { useMoteWorkfaceScope, type MoteWorkfaceScope } from '../lib/mote-workface'
@@ -7,6 +7,10 @@ import { useMoteMaterialsActions } from '../lib/mote-materials-actions'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { MoteDetailsPanel } from './MoteDetailsPanel'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeObjectContactIcon = semanticIconComponent('object.contact')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
 
 /** The same Profile, opened from the Tab row without moving its original input tree. */
 export function MoteProfilePopover({ workspaceId, topicId, reference, active, onReferenceSelect, children }: {
@@ -52,13 +56,13 @@ export function MoteProfilePopover({ workspaceId, topicId, reference, active, on
     setOpen(next)
   }}>
     {children(<Dialog.Trigger asChild><button ref={setAnchor} type="button" className="pane-action mote-profile-trigger" aria-label="Show Mote profile"
-      aria-pressed={open && active} title="Mote profile"><Contact size={14} /></button></Dialog.Trigger>)}
+      aria-pressed={open && active} title="Mote profile"><ThemeObjectContactIcon size={14} /></button></Dialog.Trigger>)}
     <Dialog.Portal container={resolveOverlayContainer()}>
       <Dialog.Content ref={attach} className="mote-profile-popover" style={{ visibility: 'hidden' }}
         onOpenAutoFocus={event => { event.preventDefault(); surface.current?.focus({ preventScroll: true }) }}>
         <Dialog.Title hidden>Mote profile</Dialog.Title>
         <Dialog.Description hidden>Identity, behavior, current work and ideas for the selected Mote.</Dialog.Description>
-        <Dialog.Close className="icon-button mote-profile-popover__close" aria-label="Close Mote profile" title="Close profile"><X size={14} /></Dialog.Close>
+        <Dialog.Close className="icon-button mote-profile-popover__close" aria-label="Close Mote profile" title="Close profile"><ThemeActionCloseIcon size={14} /></Dialog.Close>
         {scope?.issue ? <p role="status" className="mote-details__hint">{scope.issue}</p> : null}
         {scope ? <MoteDetailsPanel key={owner.topicId} scope={scope} reference={owner.reference} active={active && open && !scope.issue}
           onOpenPath={materials.open} />

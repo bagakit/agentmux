@@ -1,9 +1,15 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { FolderOpen, Link2, NotebookText, Plus } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { MoteIcon } from './MoteIcon'
 import { useState } from 'react'
 import { useAppStore } from '../store'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeActionCreateSpaceIcon = semanticIconComponent('action.create-space')
+const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
+const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+const ThemeObjectLinkIcon = semanticIconComponent('object.link')
+
 
 export function SpaceCreateMenu({ onOpenFolder, onCreateProjectGroup }: { onOpenFolder(): Promise<void>; onCreateProjectGroup?(): void }) {
   const createTopic = useAppStore((state) => state.createScratchTopic)
@@ -16,21 +22,21 @@ export function SpaceCreateMenu({ onOpenFolder, onCreateProjectGroup }: { onOpen
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button type="button" className="icon-button" aria-label="Add Space" title="Add Space" disabled={busy}><Plus size={15} /></button>
+        <button type="button" className="icon-button" aria-label="Add Space" title="Add Space" disabled={busy}><ThemeActionCreateSpaceIcon size={15} /></button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <DropdownMenu.Content className="tab-context-menu" collisionPadding={8} align="end">
           <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => void run(onOpenFolder)}>
-            <FolderOpen size={14} /><span>Open Folder As a Project</span>
+            <ThemeObjectFolderOpenIcon size={14} /><span>Open Folder As a Project</span>
           </DropdownMenu.Item>
           <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => void run(() => createTopic())}>
-            <NotebookText size={14} /><span>Create Another Topic</span>
+            <ThemeObjectNotebookIcon size={14} /><span>Create Another Topic</span>
           </DropdownMenu.Item>
           <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => void run(() => createTopic('mote'))}>
             <MoteIcon size={14} /><span>Create Mote</span>
           </DropdownMenu.Item>
           {onCreateProjectGroup ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={onCreateProjectGroup}>
-            <Link2 size={14} /><span>Create project group</span>
+            <ThemeObjectLinkIcon size={14} /><span>Create project group</span>
           </DropdownMenu.Item> : null}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

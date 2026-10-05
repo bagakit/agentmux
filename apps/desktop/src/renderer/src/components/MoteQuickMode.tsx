@@ -1,7 +1,7 @@
 import { sessionPresentationById } from '../lib/session-presentation'
 import * as Dialog from '@radix-ui/react-dialog'
 import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Bot, Clock3, FileText, MessageCircle, Pencil, Pin, X, Zap } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useShallow } from 'zustand/react/shallow'
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
@@ -20,6 +20,16 @@ import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import '../styles/mote-quick-mode.css'
 
+const ThemeActionQuickModeIcon = semanticIconComponent('action.quick-mode')
+const ThemeActionEditIcon = semanticIconComponent('action.edit')
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
+const ThemeActionPinIcon = semanticIconComponent('action.pin')
+const ThemeObjectScheduleIcon = semanticIconComponent('object.schedule')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeFileTextIcon = semanticIconComponent('file.text')
+
+
 export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; active: boolean
   onOpenPath(path: string): Promise<unknown>
@@ -33,10 +43,10 @@ export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
   const conversationLabel = useAppStore(state => defaults.conversation ? moteConversationLabel(state, defaults.conversation) : undefined)
   const edit = () => { invoker.current = document.activeElement as HTMLElement; setEditing(true) }
   return <section className="mote-quick-mode" aria-label="Quick mode">
-    <div className="mote-details__section-actions"><span><Zap size={13} />Quick mode</span><MoteBehaviorAction label="Edit quick mode" onClick={edit}><Pencil size={14} /></MoteBehaviorAction></div>
-    <button className="mote-quick-mode__row" type="button" onClick={edit}><Bot size={14} /><span>Executor for new chat</span><strong title={defaults.executorId}>{executorLabel ?? 'Choose Executor'}</strong></button>
-    <button className="mote-quick-mode__row" type="button" onClick={edit}><MessageCircle size={14} /><span>Default conversation</span><strong title={defaults.conversation?.sessionId}>{conversationLabel ?? (defaults.conversation ? 'Saved conversation' : 'Choose conversation')}</strong>{defaults.conversation ? <Pin size={12} aria-label="Kept open" /> : null}</button>
-    <button className="mote-quick-mode__row" type="button" onClick={edit}><Clock3 size={14} /><span>Reconnect</span><strong>{moteRecoveryTiming(scope.topic) === 'startup' ? 'At app startup' : 'When opened'}</strong></button>
+    <div className="mote-details__section-actions"><span><ThemeActionQuickModeIcon size={13} />Quick mode</span><MoteBehaviorAction label="Edit quick mode" onClick={edit}><ThemeActionEditIcon size={14} /></MoteBehaviorAction></div>
+    <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectAgentIcon size={14} /><span>Executor for new chat</span><strong title={defaults.executorId}>{executorLabel ?? 'Choose Executor'}</strong></button>
+    <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectConversationIcon size={14} /><span>Default conversation</span><strong title={defaults.conversation?.sessionId}>{conversationLabel ?? (defaults.conversation ? 'Saved conversation' : 'Choose conversation')}</strong>{defaults.conversation ? <ThemeActionPinIcon size={12} aria-label="Kept open" /> : null}</button>
+    <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectScheduleIcon size={14} /><span>Reconnect</span><strong>{moteRecoveryTiming(scope.topic) === 'startup' ? 'At app startup' : 'When opened'}</strong></button>
     {resolved.issue ? <p role="status" className="mote-details__issue">{resolved.issue}</p> : null}
     {editing ? <MoteQuickModeDialog key={scope.workspace.hostId + scope.topic.id + scope.rootPath} scope={scope} reference={reference} onOpenPath={onOpenPath}
       onClose={() => setEditing(false)} returnFocus={() => invoker.current?.isConnected ? invoker.current : null} /> : null}
@@ -97,18 +107,18 @@ function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, returnFocu
       onOpenAutoFocus={event => { event.preventDefault(); content.current?.querySelector<HTMLButtonElement>('.selection-field')?.focus() }}
       onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus(), active = document.activeElement
         if (node?.isConnected && (active === document.body || active === node || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}>
-      <header className="mote-behavior-header"><div><Dialog.Title>Quick mode</Dialog.Title><Dialog.Description>{scope.topic.title} · ready to continue</Dialog.Description></div><MoteBehaviorAction label="Close quick mode" onClick={onClose}><X size={16} /></MoteBehaviorAction></header>
+      <header className="mote-behavior-header"><div><Dialog.Title>Quick mode</Dialog.Title><Dialog.Description>{scope.topic.title} · ready to continue</Dialog.Description></div><MoteBehaviorAction label="Close quick mode" onClick={onClose}><ThemeActionCloseIcon size={16} /></MoteBehaviorAction></header>
       <div className="mote-quick-mode-dialog__body">
-        <label htmlFor={id + '-agent'}><Bot size={16} /><span>Executor for new chat<small>Preselected for new conversations.</small></span></label>
+        <label htmlFor={id + '-agent'}><ThemeObjectAgentIcon size={16} /><span>Executor for new chat<small>Preselected for new conversations.</small></span></label>
         <AgentExecutorPicker presentation="field" id={id + '-agent'} label="Executor for new chat"
           selected={draft.executorId ?? null} executors={executors} unsetLabel="Use normal Launcher choice"
           onSelect={value => { const { executorId: _, ...rest } = form.current; update(value ? { ...rest, executorId: value } : rest) }} />
-        <label htmlFor={id + '-conversation'}><Pin size={16} /><span>Default conversation<small>Opens first and stays in this Mote’s tab row.</small></span></label>
+        <label htmlFor={id + '-conversation'}><ThemeActionPinIcon size={16} /><span>Default conversation<small>Opens first and stays in this Mote’s tab row.</small></span></label>
         <SelectionField id={id + '-conversation'} label="Default conversation" value={selected}
           onValueChange={value => { const { conversation: _, ...rest } = form.current; const choice = choices.find(choice => JSON.stringify(choice) === value); if (value && !choice) { setIssue('The chosen conversation is no longer confirmed. Your choices are kept.'); return } update(choice ? { ...rest, conversation: choice } : rest) }}
           options={[{ value: '', label: 'No fixed conversation' }, ...(selected && !hasSelected ? [{ value: selected, label: 'Saved location · unconfirmed' }] : []),
             ...choices.map(choice => ({ value: JSON.stringify(choice), label: `${conversationLabels[choice.sessionId]} · ${facts.config?.workspaces.find(item => item.id === choice.displayWorkspaceId)?.name ?? 'Workspace'} / ${1 + (facts.layouts[choice.displayWorkspaceId]?.groups.findIndex(group => group.id === choice.groupId) ?? -1)}` }))]} />
-        <label htmlFor={id + '-recovery'}><Clock3 size={16} /><span>Reconnect<small>Continues the original conversation. Sends no message.</small></span></label>
+        <label htmlFor={id + '-recovery'}><ThemeObjectScheduleIcon size={16} /><span>Reconnect<small>Continues the original conversation. Sends no message.</small></span></label>
         {scope.topic.id === PMO_TEAMS_TOPIC_ID ? <div id={id + '-recovery'} className="mote-details__hint">At app startup · Main Mote</div> :
           <SelectionField id={id + '-recovery'} label="Reconnect conversation" value={draft.recovery ?? 'on-open'}
             onValueChange={value => { if (value === 'startup' || value === 'on-open') update({ ...form.current, recovery: value }) }}
@@ -117,7 +127,7 @@ function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, returnFocu
         {loading ? <p role="status" className="mote-details__hint">Reading MOTE.md…</p> : null}
         {issue ? <div role="status" className="mote-details__issue">{issue}<button className="small-button" type="button" onClick={() => setAttempt(value => value + 1)}>Reread</button></div> : null}
       </div>
-      <footer className="mote-quick-mode-dialog__footer"><button className="icon-button" type="button" title="Inspect MOTE.md" aria-label="Inspect MOTE.md" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_QUICK_MODE_PATH).then(opened => { if (opened) onClose() }).catch(cause => setIssue(presentError(cause)))}><FileText size={15} /></button><span>Saving sends no message.</span><button type="button" className="small-button" onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={loading || busy || !saved || Boolean(saved.issue)} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button></footer>
+      <footer className="mote-quick-mode-dialog__footer"><button className="icon-button" type="button" title="Inspect MOTE.md" aria-label="Inspect MOTE.md" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_QUICK_MODE_PATH).then(opened => { if (opened) onClose() }).catch(cause => setIssue(presentError(cause)))}><ThemeFileTextIcon size={15} /></button><span>Saving sends no message.</span><button type="button" className="small-button" onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={loading || busy || !saved || Boolean(saved.issue)} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button></footer>
     </Dialog.Content>
   </Dialog.Portal></Dialog.Root>
 }

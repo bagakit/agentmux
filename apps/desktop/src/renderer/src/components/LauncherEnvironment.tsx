@@ -1,4 +1,4 @@
-import { ChevronDown, Folder, RadioTower, SquareTerminal, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
@@ -7,6 +7,13 @@ import type { HostCheckState } from '../store'
 import { hostCheckLabel } from '../lib/host-check'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { LauncherExecutionPicker } from './LauncherExecutionPicker'
+
+const ThemeObjectBroadcastIcon = semanticIconComponent('object.broadcast')
+const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
+const ThemeObjectFolderIcon = semanticIconComponent('object.folder')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
 
 /** Select a future execution resource without checking or changing any existing Run. */
 export function LauncherEnvironment({ workspace, host, check, displayPath, active, contextName, hosts, workspaces, onSelectWorkspace, selectionDisabled = false, onManageProjects }: {
@@ -28,7 +35,7 @@ export function LauncherEnvironment({ workspace, host, check, displayPath, activ
   const label = host?.label ?? workspace?.hostId ?? 'No host'
   const name = contextName ?? workspace?.name ?? 'Choose a workspace'
   const kind = host?.kind === 'local' ? 'Local host' : host?.kind === 'ssh' ? 'SSH host' : 'Host unconfirmed'
-  const Icon = host?.kind === 'ssh' ? RadioTower : SquareTerminal
+  const Icon = host?.kind === 'ssh' ? ThemeObjectBroadcastIcon : ThemeObjectTerminalIcon
   useEffect(() => { if (!active) setOpen(false) }, [active])
   useLayoutEffect(() => {
     const anchor = trigger.current
@@ -44,19 +51,19 @@ export function LauncherEnvironment({ workspace, host, check, displayPath, activ
   }, [active, open, panel])
 
   return <header className="launcher-environment">
-    <div className="launcher-environment__project"><Folder size={20} /><div>
+    <div className="launcher-environment__project"><ThemeObjectFolderIcon size={20} /><div>
       <h2 title={name}>{name}</h2>
       <span className="launcher-environment__path" title={displayPath || undefined}>{displayPath || 'No working directory selected'}</span>
     </div></div>
     <Dialog.Root modal={false} open={open && active} onOpenChange={setOpen}>
       <Dialog.Trigger asChild><button type="button" className="launcher-environment__host" ref={trigger} disabled={!active} aria-label="Runtime environment" title={`${kind} · ${label}`}>
-        <Icon size={14} /><span>{label}</span><ChevronDown size={12} />
+        <Icon size={14} /><span>{label}</span><ThemeNavigationDownIcon size={12} />
       </button></Dialog.Trigger>
       {active ? <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <Dialog.Content ref={setPanel} className="launcher-environment__panel" inert={!open} style={{ visibility: 'hidden' }}
           onEscapeKeyDown={() => trigger.current?.focus()} onCloseAutoFocus={event => event.preventDefault()}>
           <header><div className="launcher-environment__identity"><Icon size={18} /><div><Dialog.Title>Choose where to start</Dialog.Title><Dialog.Description>Current target · {label} · {kind}</Dialog.Description></div></div>
-            <Dialog.Close className="icon-button" aria-label="Close runtime environment" onClick={() => trigger.current?.focus()}><X size={14} /></Dialog.Close></header>
+            <Dialog.Close className="icon-button" aria-label="Close runtime environment" onClick={() => trigger.current?.focus()}><ThemeActionCloseIcon size={14} /></Dialog.Close></header>
           {open ? <LauncherExecutionPicker hosts={hosts} workspaces={workspaces} selected={workspace} disabled={selectionDisabled}
             onSelect={workspaceId => { onSelectWorkspace(workspaceId); setOpen(false); trigger.current?.focus() }}
             onManageProjects={() => { setOpen(false); onManageProjects() }} /> : null}

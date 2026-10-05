@@ -1,6 +1,6 @@
 import { HostBadge } from './HostBadge'
 import { hostIdentityProjection } from '../lib/region-execution-host'
-import { Folder, Link2, Pencil, Unlink } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useMemo, type CSSProperties, type ReactNode } from 'react'
 import type { AgentMuxProjectGroupFact } from '@agentmux/core/control'
 import type { WorkspaceProject } from '../lib/workspace-projects'
@@ -16,6 +16,12 @@ import { folderLastActivityAt } from '../lib/space-folder-icon-recency'
 import { ProjectActivity } from './ProjectActivity'
 import { activityContextsForWorkspaces } from '../lib/activity-groups'
 import { SpaceDisclosure, SpaceSectionHeader } from './SpaceSectionHeader'
+
+const ThemeObjectLinkIcon = semanticIconComponent('object.link')
+const ThemeActionEditIcon = semanticIconComponent('action.edit')
+const ThemeActionUnlinkIcon = semanticIconComponent('action.unlink')
+const ThemeObjectFolderIcon = semanticIconComponent('object.folder')
+
 
 export function ProjectGroupsTree({ projects, query, activeProjectId, onCreate, onEdit, onDissolve, visible }: {
   visible: boolean
@@ -40,7 +46,7 @@ export function ProjectGroupsTree({ projects, query, activeProjectId, onCreate, 
   const filtering = Boolean(query.trim()), sectionCollapsed = !filtering && collapsed['space:project-groups'] === true
   if (!groups.length) return null
   return <nav className="project-list project-groups" aria-label="Project groups">
-    <SpaceSectionHeader label="Project groups" count={groups.length} icon={<Link2 size={14} />}
+    <SpaceSectionHeader label="Project groups" count={groups.length} icon={<ThemeObjectLinkIcon size={14} />}
       expanded={!sectionCollapsed} filtering={filtering} onToggle={() => toggle('space:project-groups')}
       createLabel="Create project group" onCreate={async () => onCreate()} />
     {sectionCollapsed ? null : groups.map(group => {
@@ -53,7 +59,7 @@ export function ProjectGroupsTree({ projects, query, activeProjectId, onCreate, 
       const depth = { '--rail-depth': 1 } as CSSProperties
       return <div key={group.groupId} className="project-group" data-project-group={group.groupId}>
         <div className="project-rail-row-shell project-group__heading" style={depth} data-space-entry>
-          <SpaceDisclosure icon={<Link2 size={13} />} expanded={!folded} label={`${folded ? 'Expand' : 'Collapse'} ${group.name}`}
+          <SpaceDisclosure icon={<ThemeObjectLinkIcon size={13} />} expanded={!folded} label={`${folded ? 'Expand' : 'Collapse'} ${group.name}`}
             disabled={filtering} onToggle={() => toggle(key)} />
           <button type="button" className="project-rail-row project-rail-row--disclosure" title={`${group.name} · ${members.length} projects · Double-click to edit`}
             onDoubleClick={() => onEdit(group)}
@@ -66,8 +72,8 @@ export function ProjectGroupsTree({ projects, query, activeProjectId, onCreate, 
             <span className="project-rail-row__identity"><strong>{group.name}</strong></span><small className="project-group__count">{members.length}</small>
           </button>
           <GroupActivity projects={projects} projectIds={group.projectIds} visible={visible} />
-          <span className="project-group__actions"><button type="button" className="icon-button" aria-label={`Edit ${group.name}`} title="Edit project group" onClick={() => onEdit(group)}><Pencil size={12} /></button>
-            <button type="button" className="icon-button" aria-label={`Dissolve ${group.name}`} title="Dissolve project group" onClick={() => onDissolve(group)}><Unlink size={12} /></button></span>
+          <span className="project-group__actions"><button type="button" className="icon-button" aria-label={`Edit ${group.name}`} title="Edit project group" onClick={() => onEdit(group)}><ThemeActionEditIcon size={12} /></button>
+            <button type="button" className="icon-button" aria-label={`Dissolve ${group.name}`} title="Dissolve project group" onClick={() => onDissolve(group)}><ThemeActionUnlinkIcon size={12} /></button></span>
         </div>
         {folded ? null : shown.map(member => {
           const hostIdentity = hostIdentityProjection(member.hostId, hosts?.find(host => host.id === member.hostId))
@@ -84,7 +90,7 @@ export function ProjectGroupsTree({ projects, query, activeProjectId, onCreate, 
             aria-disabled={!member.project} onClick={() => { if (member.project) void select(memberWorkspace(member.project)) }}>
             {member.project || manualIcon ? <SpaceObjectIcon kind="folder" name={member.name} manualIcon={manualIcon}
               {...(member.project ? { workspaceId: member.project.preferredWorkspaceId } : {})} folderIdentityKey={target?.key}
-              lastActivityAt={lastActivityAt} visible={visible} /> : <span className="project-rail-row__icon" aria-hidden="true" title="Project registration unavailable"><Folder size={14} /></span>}
+              lastActivityAt={lastActivityAt} visible={visible} /> : <span className="project-rail-row__icon" aria-hidden="true" title="Project registration unavailable"><ThemeObjectFolderIcon size={14} /></span>}
             <span className="project-rail-row__identity"><strong>{member.name}</strong><small><HostBadge context="Host" host={hostIdentity} />{member.project ? '' : ' · Unavailable'}</small></span>
           </button>
           {sessions.some(session => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sessions} contexts={contexts} /> : null}
