@@ -895,7 +895,7 @@ export function resolveAgentMuxRegion(regions: readonly AgentMuxRegion[], target
  * 请求走两条不同的路到达执行方，两条各自有一个等待方：
  *   - CLI → daemon 的 socket（control-host.ts 的 `socket.setTimeout`）
  *   - Renderer 拥有屏幕时，main 经 IPC 转给 Renderer（DesktopControlIpcBridge 的 `setTimeout`）
- * 两条都必须用同一个预算：同一条 `agentmux agent open`，若一条等 60 秒另一条等 2 秒，用户看到的就是
+ * 两条都必须用同一个预算：同一条 `amux agent open`，若一条等 60 秒另一条等 2 秒，用户看到的就是
  * 「同一个命令有时能开出来、有时报 CONTROL_TIMEOUT」，而差别只在当时是谁拥有屏幕。
  *
  * **为什么连 {@link isLongAgentMuxControlOperation} 也必须在这里而不是各写一遍：**

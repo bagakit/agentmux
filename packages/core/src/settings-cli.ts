@@ -71,5 +71,5 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
     if (action === 'forget' && args.length === 3) return { method: 'settings.browser-links.forget', params: { input: { scheme: id } } }
     if (action === 'forget' && args.length === 4 && id === '--input') return { method: 'settings.browser-links.forget', params: { input: await input(args[3]!) } }
   }
-  return invalid('Unsupported settings command. Run agentmux settings --help.')
+  return invalid('Unsupported settings command. Run amux settings --help.')
 }

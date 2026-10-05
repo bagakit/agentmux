@@ -64,7 +64,7 @@ export type BrowserPageCapability = {
  * `WebContentsView`），它没有自己的标签页——所以 `openOrReuseTab` / `switchTab` /
  * `listTabs` 这类动词不在这里。注入一个必定失败的名字比不注入更糟：Agent 会把它当成可用
  * 能力来规划，然后在半途撞上一句拒绝，而此时前面的动作已经做过了。要另一个页面就
- * `agentmux browser open`。
+ * `amux browser open`。
  *
  * 动作类一律经 ref 派发，**不接受屏幕坐标、不接受 selector**。ref 由我方快照发出，是闭环
  * 内自洽的把手；坐标和 selector 都会引入「Agent 以为的目标 vs 实际命中的元素」这条裂缝，

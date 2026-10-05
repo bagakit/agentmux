@@ -61,7 +61,7 @@ export function isSplitDirection(value: string): value is SplitDirection {
 }
 
 /**
- * `agentmux terminal open` / `agentmux browser open` 的方向 flag → {@link SplitDirection} 的**总映射**，取代旧入口里
+ * `amux terminal open` / `amux browser open` 的方向 flag → {@link SplitDirection} 的**总映射**，取代旧入口里
  * `? 'left' : … : 'down'` 那条带兜底桶的三元。
  *
  * 三处收敛买到两样 tsc 保证：

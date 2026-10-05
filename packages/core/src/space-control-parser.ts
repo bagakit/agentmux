@@ -76,7 +76,7 @@ function destination(value: unknown, code: Code): AgentMuxSpaceDestination {
   const result: AgentMuxSpaceDestination = selector(selected, code)
   if (Object.hasOwn(source, 'newTab') && bool(source.newTab, 'newTab', code)) result.newTab = true
   if (Object.hasOwn(source, 'split')) result.split = member(source.split, SPLIT_DIRECTIONS, 'split', code)
-  if (result.split && !result.regionId) fail('Split requires an exact Region; discover it with agentmux space ls --zone <zone-id>.', code)
+  if (result.split && !result.regionId) fail('Split requires an exact Region; discover it with amux space ls --zone <zone-id>.', code)
   if (result.newTab && (result.tabId || result.regionId || result.split)) fail('New Tab cannot also target a Tab or Region.', code)
   if (Object.hasOwn(source, 'newZone')) {
     const resource = fields(source.newZone, ['kind', 'projectId', 'sourceWorkspaceId', 'path', 'branch', 'createBranch'], code)
@@ -93,12 +93,12 @@ function destination(value: unknown, code: Code): AgentMuxSpaceDestination {
       if (!branch.length || branch.includes('\0')) fail('Worktree branch is invalid.', code)
       result.newZone = { kind: 'worktree', projectId, ...sourceWorkspace, path, branch, createBranch: bool(resource.createBranch, 'createBranch', code) }
     } else fail('New Zone resource is invalid.', code)
-    if (!result.spaceId || result.zoneId || result.tabId || result.regionId || result.split) fail('New Zone requires only an exact parent Space; discover it with agentmux space ls.', code)
+    if (!result.spaceId || result.zoneId || result.tabId || result.regionId || result.split) fail('New Zone requires only an exact parent Space; discover it with amux space ls.', code)
     // Every new Zone opens its first Tab, whether the caller spells out --new-tab or not.
     result.newTab = true
   }
   if (!result.spaceId && !result.zoneId && !result.tabId && !result.regionId) {
-    fail('A spatial target is required before opening or moving. Run agentmux space ls, then agentmux space ls --space <space-id>.', code)
+    fail('A spatial target is required before opening or moving. Run amux space ls, then amux space ls --space <space-id>.', code)
   }
   if (!result.tabId && !result.regionId) result.newTab = true
   return result
