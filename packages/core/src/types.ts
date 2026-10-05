@@ -1470,6 +1470,10 @@ export type AgentMuxAcpEvent =
 export type AgentMuxObservationOrigin = { kind: 'attachment-refresh'; operationId: string; run: AgentMuxRunRef }
 
 export type AgentMuxClientEvent = (
+  | (import('./control-endpoint-state.js').AgentMuxControlEndpointState & {
+      type: 'control-endpoint-state'
+      evidence: AgentMuxEvidence
+    })
   | ({
       /** This consumer's exact Run observation; never a child lifecycle or endpoint verdict. */
       type: 'attachment-state'

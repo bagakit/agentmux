@@ -463,7 +463,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.browser-links.forget', '<scheme>|--input <file|->', 'Forget one exact remembered scheme decision.', 1),
   command('system.storage', '--host HOST --run RUN', 'Read original Runtime storage failure, watermarks and effective capacity for one exact Run.', { '--host': 'data', '--run': 'data' }, f => ({ hostId: id(f, '--host'), runId: id(f, '--run') })),
   command('system.doctor', '[--workspace PATH]', 'Read original Runtime and Provider diagnostics through their owners.', { '--workspace': 'data' }, f => fields(f, { '--workspace': 'workspacePath' })),
-  { ...command('system.endpoint', '[--stdio]', 'Describe the selected endpoint with connection=not-attempted, or relay strict RPC stdio.', { '--stdio': 'boolean' }, f => ({ stdio: f.booleans.has('--stdio') })), local: true },
+  { ...command('system.endpoint', '[--stdio | --inspect]', 'Describe the endpoint, inspect its current owner publication, or relay strict RPC stdio.', { '--stdio': 'boolean', '--inspect': 'boolean' }, f => { if (f.booleans.has('--stdio') && f.booleans.has('--inspect')) throw new AgentMuxError('--stdio and --inspect are mutually exclusive.', 'INVALID_CLI_ARGUMENT'); return { stdio: f.booleans.has('--stdio'), inspect: f.booleans.has('--inspect') } }), local: true },
   empty('system.crash-log.inspect', 'Read retained original crash-log facts.'),
   empty('system.crash-log.reveal', 'Reveal the retained crash-log through the client owner.'),
   empty('system.metrics.get', 'Read per-source bounded metrics with availability and observation times.'),

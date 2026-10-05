@@ -1,3 +1,4 @@
+import { parseControlEndpointState } from './control-endpoint-state.js'
 import { randomClientRequestId } from './client-request-id.js'
 import { AgentMuxError } from './errors.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
@@ -28,6 +29,7 @@ export async function connectHostedAgentMux(options: {
     if (controlOwner && (controlOwner.runtimeId !== owner.runtimeId || controlOwner.ownerInstanceId !== owner.ownerInstanceId)) controlEpoch++
     controlOwner = structuredClone(owner)
   }
+  let endpointState: Extract<AgentMuxClientEvent, { type: 'control-endpoint-state' }> | undefined
   let bootstrap: AgentMuxHostedBootstrap | undefined, stream: AgentMuxHostedSubscription | undefined
   let connecting: Promise<void> | undefined, disposed = false, retry: ReturnType<typeof setTimeout> | undefined
   let reconnectDelay = 100
@@ -48,19 +50,42 @@ export async function connectHostedAgentMux(options: {
     if (!controlOwner) throw new AgentMuxError('Confirm the original semantic owner before another Runtime intent.', 'RUNTIME_UNAVAILABLE')
     return { runtimeId: controlOwner.runtimeId, ownerInstanceId: controlOwner.ownerInstanceId }
   }
+  const discoverControlOwner = async (expectedRuntimeId?: string): Promise<AgentMuxRuntimeOwnerIdentity> => {
+    const previous = controlOwner
+    try {
+      const discovery = await rpc.call('runtime.owner.identity', expectedRuntimeId === undefined ? {} : { expectedRuntimeId })
+      return parseHostedRuntimeOwnerIdentity(discovery.owner)
+    } catch (error) {
+      // A failed control identity read differs from a failed observation lease.
+      // Keep its exact fence; a late failure cannot revoke a newer confirmed owner.
+      if (!disposed && previous && controlOwner === previous) controlOwner = { ...previous, availability: 'unverified' }
+      throw error
+    }
+  }
   const connectControl = async (refresh = false): Promise<void> => {
     if (disposed) throw new AgentMuxError('Hosted consumer is disposed.', 'CONTROL_CANCELLED')
     if (controlConnecting) return await controlConnecting
     if (controlOwner && !refresh) return
     controlConnecting = (async () => {
       const expectedRuntimeId = options.expectedRuntimeId ?? controlOwner?.runtimeId
-      const discovered = await rpc.call('runtime.owner.identity', expectedRuntimeId === undefined ? {} : { expectedRuntimeId })
+      const discovered = await discoverControlOwner(expectedRuntimeId)
       if (disposed) throw new AgentMuxError('Hosted consumer was disposed during owner discovery.', 'CONTROL_CANCELLED')
-      acceptOwner(parseHostedRuntimeOwnerIdentity(discovered.owner))
+      acceptOwner(discovered)
     })().finally(() => { controlConnecting = undefined })
     await controlConnecting
   }
   const emit = (event: AgentMuxClientEvent): void => {
+    if (event.type === 'control-endpoint-state') {
+      try {
+        const { type: _type, evidence, ...state } = event
+        parseControlEndpointState(state)
+        if (!evidence || evidence.source !== 'agentmux' || !Number.isSafeInteger(evidence.observedAt) || evidence.observedAt < 0) throw new AgentMuxError('Invalid control publication evidence.', 'CONTROL_PROTOCOL_ERROR')
+      } catch {
+        publisher.publish({ type: 'agent-error', code: 'CONTROL_PROTOCOL_ERROR', message: 'The Host supplied invalid control endpoint publication evidence. Its existing connection and input remain available.', evidence: { source: 'agentmux', observedAt: Date.now() } })
+        return
+      }
+      endpointState = structuredClone(event)
+    }
     if (event.type === 'agent-error' && event.evidence?.outputGap !== undefined) {
       try { parseOutputGapEvidence(event.evidence) }
       catch (error) {
@@ -264,8 +289,7 @@ export async function connectHostedAgentMux(options: {
         if (ended || epoch !== eventEpoch) throw new AgentMuxError('The original Host observation ended during connection admission. Retained Session metadata is unchanged; reconnect its original Host.', 'CONTROL_UNAVAILABLE')
       }
       const expectedRuntimeId = options.expectedRuntimeId ?? previous?.owner.runtimeId
-      const discovery = await rpc.call('runtime.owner.identity', expectedRuntimeId === undefined ? {} : { expectedRuntimeId })
-      const owner = parseHostedRuntimeOwnerIdentity(discovery.owner)
+      const owner = await discoverControlOwner(expectedRuntimeId)
       acceptOwner(owner)
       const expected = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
       const transfer = new AgentMuxHostedTransferReader()
@@ -557,7 +581,7 @@ export async function connectHostedAgentMux(options: {
       if (finalFence) await rpc.call('runtime.release-consumer', { consumerId, fence: finalFence }).catch(() => {})
       attached.clear()
     },
-    onEvent: <Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions) => publisher.onEvent(listener, options)
+    onEvent: <Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions) => publisher.onEvent(listener, options, () => endpointState ? structuredClone(endpointState) : undefined)
   }
   for (const method of AGENTMUX_HOSTED_METHODS) client[method] = async (...args: unknown[]) => {
     if (method === 'releaseRunAttachment') {

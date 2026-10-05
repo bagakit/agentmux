@@ -134,7 +134,7 @@ async function main(): Promise<number> {
     write({ ok: true, operation: method, result: agentMuxPmoPlaybook() }); return 0
   }
   const endpoint = agentMuxRpcEndpoint(invocation.endpoint)
-  if (method === 'system.endpoint') {
+  if (method === 'system.endpoint' && !invocation.params.inspect) {
     if (invocation.params.stdio) {
       const controller = new AbortController()
       const stop = () => controller.abort()
@@ -147,6 +147,7 @@ async function main(): Promise<number> {
     }
     return 0
   }
+  if (method === 'system.endpoint') invocation.params = {}
   if (!isAgentMuxRpcMethod(method)) throw new AgentMuxError('Command has no public service method.', 'INVALID_CLI_ARGUMENT')
   const sid = process.env.AGENTMUX_AGENT_SESSION_ID
   const capability = process.env.AGENTMUX_AGENT_CAPABILITY

@@ -1,3 +1,4 @@
+import { parseControlEndpointState } from './control-endpoint-state.js'
 import { parseNotesStorageOperation } from './notes-storage.js'
 import { parseDeliveryAttemptLookup } from './delivery-attempt.js'
 
@@ -391,7 +392,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         array(p.locations,item => { const l = record(item); if (l.tabId !== record(params).tabId || !p.region || l.regionId !== record(p.region).regionId) fail() })
         break
       }
-      case 'system.endpoint': { record(p, ['protocol', 'framing', 'endpoint', 'connection']); member(p.connection, ['responded']); if (p.protocol !== 'jsonrpc-2.0' || p.framing !== 'json-lines') fail()
+      case 'system.endpoint': { record(p, ['protocol', 'framing', 'endpoint', 'connection', 'publication']); if (p.publication !== null) parseControlEndpointState(p.publication); member(p.connection, ['responded']); if (p.protocol !== 'jsonrpc-2.0' || p.framing !== 'json-lines') fail()
         const endpoint = record(p.endpoint); member(endpoint.transport, ['unix', 'http', 'ssh', 'relay']); if (endpoint.transport === 'relay') { parseConnectionOffer(endpoint.offer) } else string(endpoint.transport === 'unix' ? endpoint.path : endpoint.transport === 'http' ? endpoint.url : endpoint.host); break }
       case 'system.subscription.cancel': record(p, ['disposed']); bool(p.disposed); break
       case 'system.storage': {

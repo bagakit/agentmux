@@ -75,6 +75,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   /** Optional host aggregation of original named owners; Core interprets no host target kinds. */
   nameHistory?(query: import('./display-label.js').AgentMuxNameHistoryQuery): Promise<import('./display-label.js').AgentMuxNameHistoryPage>
   endpoint?: import('./public-rpc.js').AgentMuxRpcEndpoint
+  endpointPublication?(): import('./control-endpoint-state.js').AgentMuxControlEndpointState
   /** Borrow existing SDK clients. Their lifecycle remains with their host. */
   coreClients?(): readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
   /** Client-owned real filesystem/config observations, not a second registry. */
@@ -666,7 +667,7 @@ export class AgentMuxRpcService {
         result = resolveSpatialRegion(state.graph,{tabId,regionId,direction:p.direction as import('./spatial-layout.js').SplitDirection}); break
       }
       case 'system.endpoint': result = { protocol: 'jsonrpc-2.0', framing: 'json-lines', connection: 'responded',
-        endpoint: this.ports.endpoint ?? { transport: 'unix', path: defaultAgentMuxControlSocketPath() } }; break
+        endpoint: this.ports.endpoint ?? { transport: 'unix', path: defaultAgentMuxControlSocketPath() }, publication: this.ports.endpointPublication?.() ?? null }; break
       case 'system.storage': {
         const hostId = rpcString(p.hostId, 'Host ID'), runId = rpcString(p.runId, 'Run ID')
         const owner = (await this.clients()).find(entry => entry.hostId === hostId)

@@ -159,6 +159,7 @@ Via this service's configured remote Host (use the actual returned routeHostId):
   amux agent context --host build-host --session SID
 Find configured route IDs with amux settings hosts ls. A listed configuration is not a connection check.
 system endpoint reports connection=not-attempted and does not verify reachability or Agent health.
+system endpoint --inspect reads the owner publication observation through RPC.
 An RPC system.endpoint response reports connection=responded; this certifies that response only.
 SSH uses the remote amux system endpoint --stdio bridge and requires an existing remote service.
 The ssh URI may specify URI-encoded socket and command query parameters; system SSH owns aliases and credentials.

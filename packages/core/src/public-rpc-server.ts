@@ -1,7 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
-import { mkdir, chmod, lstat, rm } from 'node:fs/promises'
-import { dirname } from 'node:path'
-import { createServer, type Server, type Socket } from 'node:net'
+import { type Socket } from 'node:net'
 import { createServer as createHttpServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { Readable } from 'node:stream'
@@ -10,7 +8,8 @@ import { createJSONRPCErrorResponse } from 'json-rpc-2.0'
 import { AgentMuxError } from './errors.js'
 import { AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS } from './control.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
-import { probeSocketLiveness } from './socket-liveness.js'
+import { ControlEndpointPublication } from './control-endpoint-publication.js'
+import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
 import { AgentMuxRpcService, type AgentMuxRpcServiceOptions } from './public-rpc-service.js'
 import { AgentMuxRpcDispatcher, AgentMuxRpcLines, rpcEncode, AGENTMUX_RPC_MAX_MESSAGE_BYTES,
   type AgentMuxRpcFrame, type AgentMuxRpcConnection } from './public-rpc-wire.js'
@@ -34,6 +33,7 @@ export type AgentMuxRpcHttpOptions = {
 }
 export type AgentMuxControlServerOptions = AgentMuxRpcServiceOptions & {
   socketPath?: string
+  onControlEndpointState?(state: AgentMuxControlEndpointState): void
   /** HTTP is absent by default. Binding and authorization must both be explicit. */
   http?: AgentMuxRpcHttpOptions
 }
@@ -51,19 +51,21 @@ export function agentMuxRpcHttpOptions(env: Readonly<Record<string, string | und
 
 /** The Desktop and headless hosts register the same public business service. */
 export class AgentMuxControlServer {
-  private server: Server | undefined
+  private readonly publication: ControlEndpointPublication
+  private started = false
+  private stopped = false
   private httpServer: HttpServer | undefined
   private readonly sockets = new Set<Socket>()
   private readonly externalReaders = new Set<() => void>()
   private readonly service: AgentMuxRpcService
   private readonly dispatcher: AgentMuxRpcDispatcher
-  private endpointIdentity: { dev: number; ino: number } | undefined
   private httpFailure: AgentMuxError | null = null
   private readonly localPrincipal: AgentMuxRpcPrincipal = { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }
   readonly path: string
   constructor(private readonly options: AgentMuxControlServerOptions = {}, path?: string) {
     this.path = path ?? options.socketPath ?? defaultAgentMuxControlSocketPath()
-    this.service = new AgentMuxRpcService({ ...options, endpoint: { transport: 'unix', path: this.path } })
+    this.publication = new ControlEndpointPublication(this.path, socket => this.accept(socket), options.onControlEndpointState)
+    this.service = new AgentMuxRpcService({ ...options, endpoint: { transport: 'unix', path: this.path }, endpointPublication: () => this.publication.state() })
     this.dispatcher = new AgentMuxRpcDispatcher(this.service)
     if (options.http && (!options.http.host || !Number.isInteger(options.http.port) || options.http.port < 0 || options.http.port > 65535 ||
       (!options.http.authorize && (typeof options.http.token !== 'string' || !options.http.token || /[\r\n]/u.test(options.http.token))) ||
@@ -75,50 +77,40 @@ export class AgentMuxControlServer {
     const address = this.httpServer?.address()
     return address && typeof address === 'object' ? { host: address.address, port: address.port } : null
   }
+  controlEndpointState(): AgentMuxControlEndpointState { return this.publication.state() }
   get httpUnavailable(): AgentMuxError | null { return this.httpFailure }
   async start(): Promise<void> {
-    if (this.server) return
-    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 }); await chmod(dirname(this.path), 0o700)
-    try {
-      const existing = await lstat(this.path), uid = process.getuid?.() ?? existing.uid
-      if (!existing.isSocket() || existing.uid !== uid) throw new AgentMuxError('Another owner occupies the RPC endpoint.', 'CONTROL_OWNER_BUSY')
-      const liveness = await probeSocketLiveness(this.path)
-      if (liveness !== 'dead') throw new AgentMuxError('RPC endpoint owner is alive or unconfirmed.', liveness === 'alive' ? 'CONTROL_OWNER_BUSY' : 'CONTROL_UNAVAILABLE')
-      await rm(this.path)
-    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-    const server = createServer(socket => this.accept(socket))
-    this.server = server
-    try {
-      await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(this.path, resolve) })
-      await chmod(this.path, 0o600)
-      const identity = await lstat(this.path); this.endpointIdentity = { dev: identity.dev, ino: identity.ino }
-    } catch (error) { await this.stop(); throw error }
+    if (this.started) return
+    await this.publication.start()
+    if (this.stopped) throw new AgentMuxError('Control endpoint startup was stopped.', 'CONTROL_CANCELLED')
+    this.started = true
     if (this.options.http) {
       try {
         const receive = (request: IncomingMessage, response: ServerResponse) => { void this.acceptHttp(request, response) }
         const http = this.options.http.tls ? createHttpsServer(this.options.http.tls, receive) : createHttpServer(receive)
         this.httpServer = http
-        http.on('connection', socket => { this.sockets.add(socket); socket.once('close', () => this.sockets.delete(socket)) })
-        await new Promise<void>((resolve, reject) => { http.once('error', reject); http.listen(this.options.http!.port, this.options.http!.host, resolve) })
+        http.on('connection', socket => { if (this.stopped) { socket.destroy(); return }; this.sockets.add(socket); socket.once('close', () => this.sockets.delete(socket)) })
+        await new Promise<void>((resolve, reject) => {
+          const cancelled = () => reject(new AgentMuxError('HTTP endpoint startup was stopped.', 'CONTROL_CANCELLED'))
+          http.once('close', cancelled); http.once('error', reject)
+          http.listen(this.options.http!.port, this.options.http!.host, () => { http.off('close', cancelled); resolve() })
+        })
         this.httpFailure = null
       } catch (error) {
         const http = this.httpServer; this.httpServer = undefined
         if (http?.listening) await new Promise<void>(resolve => http.close(() => resolve()))
+        if (this.stopped) throw error
         this.httpFailure = new AgentMuxError('HTTP RPC is unavailable; the existing Unix service and Core remain available.',
           'CONTROL_UNAVAILABLE', error instanceof Error ? error.message : String(error))
       }
     }
   }
   async stop(): Promise<void> {
-    const server = this.server, http = this.httpServer; this.server = undefined; this.httpServer = undefined
+    this.stopped = true
+    const http = this.httpServer; this.started = false; this.httpServer = undefined
     for (const socket of this.sockets) socket.destroy()
-    await Promise.all([server, http].filter(Boolean).map(owner => new Promise<void>(resolve => owner!.close(() => resolve()))))
-    if (this.endpointIdentity) {
-      try { const identity = await lstat(this.path)
-        if (identity.dev === this.endpointIdentity.dev && identity.ino === this.endpointIdentity.ino) await rm(this.path)
-      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-      this.endpointIdentity = undefined
-    }
+    await this.publication.stop()
+    if (http) await new Promise<void>(resolve => http.close(() => resolve()))
     for (const release of [...this.externalReaders]) release()
     await this.service.dispose()
   }

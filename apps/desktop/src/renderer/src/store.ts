@@ -1810,7 +1810,7 @@ type SessionMembershipEventBuffer = {
   // volume or historical Run generations. Timeline mutations need their canonical reader.
   retainedFacts: Map<string, BufferedSessionEvent>
   timelineGaps: Set<string>
-  endpointWarnings: Map<string, { hostId: string; warning: RuntimeEndpointWarning | null; restored: boolean }>
+  endpointWarnings: Map<string, { hostId: string; warning: RuntimeEndpointWarning | null; restored: boolean; observationStep?: string }>
   overflowed: boolean
   sequence: number
 }
@@ -1845,6 +1845,9 @@ function enqueueSessionMembershipEvent(
   if (event.endpointWarning !== undefined) entry.endpointWarnings.set(JSON.stringify([event.hostId,
     event.endpointWarning?.scope === 'observation' ? event.endpointWarning.step : null]), {
     hostId: event.hostId, warning: event.endpointWarning, restored: event.event.type === 'connection-state' && event.event.state === 'restored'
+  })
+  if (event.endpointObservation) entry.endpointWarnings.set(JSON.stringify([event.hostId, event.endpointObservation.step]), {
+    hostId: event.hostId, warning: event.endpointObservation.warning, observationStep: event.endpointObservation.step, restored: false
   })
   entry.events.push({ event, pendingLaunchAgentSessionId, sequence: ++entry.sequence })
   if (entry.events.length <= MAX_SESSION_MEMBERSHIP_EVENTS) return
@@ -1890,11 +1893,13 @@ function delaySessionMembershipRead(entry: SessionMembershipResync, milliseconds
 }
 
 function runtimeEndpointWarningsAfterObservation(
-  warnings: RuntimeEndpointWarning[] | undefined, hostId: string, warning: RuntimeEndpointWarning | null | undefined
+  warnings: RuntimeEndpointWarning[] | undefined, hostId: string, warning: RuntimeEndpointWarning | null | undefined,
+  observationStep?: string
 ): RuntimeEndpointWarning[] | undefined {
   if (warning === undefined) return warnings
-  const retained = (warnings ?? []).filter(previous => previous.hostId !== hostId || (warning?.scope === 'observation'
-    ? previous.scope !== 'observation' || previous.step !== warning.step : previous.scope === 'observation'))
+  const step = observationStep ?? (warning?.scope === 'observation' ? warning.step : undefined)
+  const retained = (warnings ?? []).filter(previous => previous.hostId !== hostId || (step !== undefined
+    ? previous.scope !== 'observation' || previous.step !== step : previous.scope === 'observation'))
   return warning === null ? retained : [...retained, warning]
 }
 
@@ -2187,12 +2192,15 @@ function startSessionMembershipResync(
           for (const session of snapshot.sessions) {
             if (!runtimeSnapshotHostUnavailable(snapshot, session.hostId)) reconciled = reconcileDeliveredSteers(reconciled, session.id)
           }
-          let runtimeEndpointWarnings = events.reduce<RuntimeEndpointWarning[] | undefined>((warnings, pending) =>
-            pending.event.event.type === 'connection-state' && pending.event.event.state === 'restored' && pending.event.endpointWarning === null
-              ? warnings : runtimeEndpointWarningsAfterObservation(warnings, pending.event.hostId, pending.event.endpointWarning), snapshot.runtimeEndpointWarnings ?? [])
-          for (const { hostId, warning, restored } of entry.endpointWarnings.values()) {
+          let runtimeEndpointWarnings = events.reduce<RuntimeEndpointWarning[] | undefined>((warnings, pending) => {
+            const next = pending.event.event.type === 'connection-state' && pending.event.event.state === 'restored' && pending.event.endpointWarning === null
+              ? warnings : runtimeEndpointWarningsAfterObservation(warnings, pending.event.hostId, pending.event.endpointWarning)
+            return pending.event.endpointObservation ? runtimeEndpointWarningsAfterObservation(next, pending.event.hostId,
+              pending.event.endpointObservation.warning, pending.event.endpointObservation.step) : next
+          }, snapshot.runtimeEndpointWarnings ?? [])
+          for (const { hostId, warning, restored, observationStep } of entry.endpointWarnings.values()) {
             if (restored && warning === null) continue
-            runtimeEndpointWarnings = runtimeEndpointWarningsAfterObservation(runtimeEndpointWarnings, hostId, warning)
+            runtimeEndpointWarnings = runtimeEndpointWarningsAfterObservation(runtimeEndpointWarnings, hostId, warning, observationStep)
           }
           entry.endpointWarnings.clear()
           return { ...reconciled, sessionNameMetadata: snapshot.sessionNameMetadataWarning ? state.sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], state.sessionNameMetadata), sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
@@ -3828,9 +3836,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       for (const pending of drainSessionMembershipEvents(pendingSessionEvents)) get().applyEvent(pending.event)
       for (const sessionId of pendingSessionEvents.timelineGaps) void get().resyncTimeline(sessionId)
-      for (const { hostId, warning } of pendingSessionEvents.endpointWarnings.values()) {
+      for (const { hostId, warning, observationStep } of pendingSessionEvents.endpointWarnings.values()) {
         set(state => {
-          const warnings = runtimeEndpointWarningsAfterObservation(state.runtimeEndpointWarnings, hostId, warning)
+          const warnings = runtimeEndpointWarningsAfterObservation(state.runtimeEndpointWarnings, hostId, warning, observationStep)
           return { runtimeEndpointWarnings: warnings, sessions: projectRuntimeEndpointSessions(state.sessions, warnings) }
         })
       }
@@ -9586,6 +9594,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const observationStarted = rendererPerformance.start()
     try {
     const core = event.event
+    const endpointObservation = event.endpointObservation
+    if (endpointObservation) set(state => ({ runtimeEndpointWarnings: runtimeEndpointWarningsAfterObservation(
+      state.runtimeEndpointWarnings, event.hostId, endpointObservation.warning, endpointObservation.step) }))
+    if (core.type === 'control-endpoint-state') {
+      if (sessionMembershipResync) enqueueSessionMembershipEvent(sessionMembershipResync, event)
+      return
+    }
     if (event.endpointWarning !== undefined && !(core.type === 'connection-state' && core.state === 'restored' && event.endpointWarning === null)) set((state) => {
       const runtimeEndpointWarnings = runtimeEndpointWarningsAfterObservation(state.runtimeEndpointWarnings, event.hostId, event.endpointWarning)
       return { runtimeEndpointWarnings, sessions: projectRuntimeEndpointSessions(state.sessions, runtimeEndpointWarnings) }
