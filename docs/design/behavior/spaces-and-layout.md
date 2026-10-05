@@ -86,6 +86,14 @@ The stable spatial graph is part of amux and is maintained by Core even on a rem
 
 因此，组织工作面的 Space 和实体 Space 使用同一身份，是模型约束，不是名称碰巧相同；Space 视图本身则是入口。树中的父子关系帮助查找，实体的全部合法绑定和多个展示位置仍可查询。一个 Session 可以在多个 Region 展示；它的 cwd、Host、Provider／Executor、Run 和协调角色继续由原 owner 持有。Mote 是可作为 Space 的持久产品对象，左下 Mote 面板是该对象的快捷呈现；两个入口不产生两个 Mote，也不合并面板与 Work 的选择。
 
+### 产品实体 ID 分配
+
+AgentMux 自主发号的可寻址产品实体统一使用固定12位 Base58 新 ID，包括 AgentSession、Tab、TabGroup、Region，以及自主创建的目录／知识／目标／消息／资源记录；对象类型由类型字段或 URI 路径表达，各类身份仍独立，不由显示名、位置或共同编码合并。目录 `[host,path]` 的 Space／Project 身份、Zone 资源坐标、文档键与 Git 对象坐标继续按原资源合同确定，不为统一发号改写资源寻址。原外部 Provider 身份、ctxmux Run、operation／request／lease、内容哈希及安全令牌沿各自 owner 和用途，不强制12位。
+
+编码与安全随机分配由同一无 UI、无宿主依赖的工具持有，Core 提供公开出口，依赖 Core 的领域包也消费同一底层工具，不复制实现或增加发号服务。随机分配取9字节密码学安全样本；确定性分配按无歧义的业务域及原业务键派生。两者共用整样本溢出拒绝与左补 `1` 至12位规则，空间为 `58^12`（约70.3bit），不截断或取模，不把 ID 当权限凭证。
+
+已存在的 ID、链接、目录与持久引用不重写；显式合法原 ID 不按新格式收紧。文件Tab、Session Tab、首个Region等确定性展示身份保留同一资源查重、恢复、重试和关系语义，先沿原已存事实取回身份，再为新对象按独立业务域派生；不能机械随机化、从短 ID 反推资源、凭格式猜类型或另建别名注册表。原资源坐标的解释仍由原资源 owner 持有。所有生产消费者与公开发现／inspect／动作回执准确传递原身份，未知或冲突如实保留原对象，不猜首目标。Session 持久创建／首句操作的身份保全继续见[Session、Run 与 View](session-recovery.md#sessionrun-与-view)。
+
 ### Zone→Tabs→Regions 的实体与展示绑定
 
 同一个 Zone→Tabs→Regions 组件须能在 Space、Focus、Survey、Recall、Mote 等位置灵活加载任一级。同一实体与其资源 Workspace／Host／目录、Session／Run，以及展示绑定各自可辨；一个实体可以有多个准确可枚举的位置，不从某个 surface、Topic 或 Group 重新铸身份或指定唯一归属。每次加载明确来源实体与本次绑定，复用原组成、内容和动作 owner，不复制布局或生命周期。某处收起、遮挡或取消绑定不搬走其它位置、不关闭实体、不改资源或后来焦点；显式关闭实体仍沿原确认与清理合同。位置查询、导航及关系增删消费同一全位置事实，不取首地址代替明确目标。各导航上下文的选择范围只见[Work、Survey、Recall 与 Mote 的导航上下文](#worksurveyrecall-与-mote-的导航上下文)；共用组件不要求共用当前目标。Focus 内明确选择文件、Browser、Launcher 或其他原内容时，只改变当前 Work 的空间展示引用，原语义 Agent 与执行历史保持；展示位置独立于初始 Agent 定位，同一上下文内不另建平行选择字段。原持久关联必须保留，重启保原实体、所有持久绑定与选择，foreign 展示位置或暂缺恢复事实不构成删除理由。同实体多处实际显示须由真实呈现能力证明，引用、单宿主搬移、截图、重复新页面或 Run 都不能冒充实时并显；输入／尺寸与遮挡沿原权威 owner，隐藏或目录中未显示的绑定不新增页读、bytes 订阅或 fit。
