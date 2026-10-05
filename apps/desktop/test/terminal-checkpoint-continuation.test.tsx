@@ -12,6 +12,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
 import { TERMINAL_REPLAY_BATCH_BYTES } from '@agentmux/client-ui/terminal/replay'
+import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
 import { readTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
 
 // Real public xterm parser/buffers/modes, TerminalView, Store and viewport synchronizer.
@@ -19,6 +20,7 @@ import { readTerminalViewObservation } from '../src/renderer/src/lib/terminal-vi
 // separately owns the real PTY checkpoint/SDK and Chromium wheel delivery.
 const fixture = vi.hoisted(() => ({
   terminals: [] as BrowserTerminal[],
+  beforeCallback: null as (() => void) | null, holdCallbacks: false, callbacks: [] as Array<() => void>,
   focus: vi.fn(), writes: [] as Uint8Array[], grids: [] as Array<{cols:number;rows:number}>,
   writeFacts: [] as Array<{ cols: number; rows: number; scrollback: number | undefined }>
 }))
@@ -33,7 +35,10 @@ vi.mock('@xterm/xterm', async () => {
     write(data: string | Uint8Array, callback?: () => void) {
       fixture.writes.push(typeof data === 'string' ? new TextEncoder().encode(data) : data.slice())
       fixture.writeFacts.push({ cols: this.cols, rows: this.rows, scrollback: this.options.scrollback })
-      super.write(data, callback)
+      super.write(data, () => {
+        const complete = () => { fixture.beforeCallback?.(); callback?.() }
+        if (fixture.holdCallbacks) fixture.callbacks.push(complete); else complete()
+      })
     }
     resize(cols: number, rows: number) { fixture.grids.push({cols,rows}); super.resize(cols,rows) }
     refresh() {}
@@ -54,7 +59,7 @@ vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({ TerminalC
 
 const originalState = useAppStore.getState()
 const session: Extract<SessionSnapshot, { kind: 'agent' }> = {
-  id: 'wheel-agent', hostId: 'local', workspacePath: _hygiene_fixturePath("synthetic"), label: 'Wheel Agent', createdAt: 1, updatedAt: 1,
+  id: 'wheel-agent', hostId: 'local', workspacePath: _hygiene_fixturePath("synthetic"), label: 'Wheel Agent', createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1,
   kind: 'agent', providerId: 'codex', executorId: 'codex', processState: 'running',
   status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0,
   capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
@@ -81,9 +86,9 @@ function replay(data: string, current: SessionSnapshot = session): SessionAttach
   return { attachmentId: 'wheel-attachment', session: current, currentSize: { cols: 80, rows: 24 }, gap: null, terminal: { type: 'unknown', reason: 'origin_unknown' }, resizeRevision: 0,
     replay: [{ type: 'data', runId: current.control.run.runId, startByte: 0, endByte: data.length, data, dataBytes: new TextEncoder().encode(data) }] }
 }
-async function render(current: SessionSnapshot = session, visible = true) {
+async function render(current: SessionSnapshot = session, visible = true, linkOrigin = origin) {
   await act(async () => root.render(createElement(TerminalView, { session: current,
-    interactiveResize: false, visible, autoFocus: false, themeId: configuration.appearance.terminalTheme, linkOrigin: origin,
+    interactiveResize: false, visible, autoFocus: false, themeId: configuration.appearance.terminalTheme, linkOrigin,
     onObservationRefresh: (refresh: (() => Promise<void>) | null) => { refreshObservation = refresh } })))
 }
 async function ready(result: SessionAttachResult) {
@@ -93,6 +98,7 @@ async function ready(result: SessionAttachResult) {
 }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  fixture.beforeCallback = null; fixture.holdCallbacks = false; fixture.callbacks.length = 0
   fixture.terminals.length = 0; fixture.writes.length = 0; fixture.grids.length = 0; fixture.writeFacts.length = 0; fixture.focus.mockClear()
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   attach = vi.spyOn(api.sessions, 'attach').mockResolvedValue(replay(repaint))
@@ -157,12 +163,12 @@ it('imports prefix and suffix at their distinct owner grids with temporary scrol
     await new Promise<void>(resolve => reference.write(prefix, resolve))
     reference.resize(80, 24)
     await new Promise<void>(resolve => reference.write(suffix, resolve))
-    reference.options.scrollback = terminal.options.scrollback
+    reference.options.scrollback = terminal.options.scrollback!
     expect(contents(terminal)).toBe(contents(reference))
     await delivered(output(fence, 'RAW'))
     expect(contents(terminal)).toContain('final-seedRAW')
     await act(async () => terminal.input('z'))
-    expect(write).toHaveBeenCalledExactlyOnceWith(session.control, 'z', 'user')
+    expect(write).toHaveBeenCalledExactlyOnceWith(session.control, 'z', 'user', expect.objectContaining({ source: 'user' }))
   } finally { reference.dispose() }
 })
 async function delivered(event: RuntimeEvent) {
@@ -184,7 +190,7 @@ it('restores both buffers and declared mouse modes from an independent seed afte
   expect(terminal.buffer.active.type).toBe('normal')
   expect(contents(terminal)).toContain('normal-44')
   await act(async () => terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user', expect.objectContaining({ source: 'user' }))
   expect(attach).toHaveBeenCalledExactlyOnceWith(session.control,0)
 })
 
@@ -246,7 +252,7 @@ it.each(['unknown','unavailable'] as const)('keeps %s continuation visible and a
   expect(terminal.buffer.active.type).toBe('normal')
   expect(terminal.modes.mouseTrackingMode).toBe('none')
   await act(async () => terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user', expect.objectContaining({ source: 'user' }))
   expect(recover).not.toHaveBeenCalled()
 })
 
@@ -260,7 +266,7 @@ it('bounds synthetic parser writes without advancing the original byte cursor or
   await delivered(output(fence,'RAW'))
   expect(contents(terminal)).toContain('seed-tailRAW')
   await act(async () => terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user', expect.objectContaining({ source: 'user' }))
 })
 
 it('shows a lost live geometry ordering proof without blocking the same Run input', async () => {
@@ -268,12 +274,12 @@ it('shows a lost live geometry ordering proof without blocking the same Run inpu
   await delivered(resized(fence,5,80,24))
   expect(container.textContent).toContain('source gap')
   await act(async () => terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user', expect.objectContaining({ source: 'user' }))
   expect(recover).not.toHaveBeenCalled()
 })
 
 function snapshot(result: SessionAttachResult): RuntimeEvent {
-  const run: AgentMuxRunAttachment['run'] = {runId:session.control.run.runId,kind:'agent',providerId:'codex',executorId:'codex',
+  const run: AgentMuxRunAttachment['run'] = {nativeService:null,runId:session.control.run.runId,kind:'agent',providerId:'codex',executorId:'codex',
     agentSessionId:session.id,workspacePath:session.workspacePath,pid:123,state:'running',
     cols:result.currentSize?.cols ?? null,rows:result.currentSize?.rows ?? null,observedAt:2,
     latestOutputBytes:result.session.latestOutputBytes,acceptedInputBytes:0}
@@ -332,7 +338,7 @@ it('keeps healthy raw input available during a held reconnect seed and suppresse
   expect(readTerminalViewObservation({regionId:origin.regionId,sessionId:session.id,runId:session.control.run.runId}))
     .toMatchObject({liveReady:true,acceptsInput:true})
   await act(async()=>terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user', expect.objectContaining({ source: 'user' }))
   await act(async()=>{held.release();await vi.waitFor(()=>expect(contents(terminal)).toContain('new-canvas'))})
   expect(write).toHaveBeenCalledTimes(1)
   expect(fixture.terminals).toEqual([terminal])
@@ -357,7 +363,7 @@ it.each(['unknown','unavailable'] as const)('keeps the canvas on %s reconnect, s
   expect(replaySpy).not.toHaveBeenCalled()
   expect(write).not.toHaveBeenCalled()
   await act(async()=>terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user', expect.objectContaining({ source: 'user' }))
   const known=continuation('\x1bcproven-canvas')
   if(known.terminal.type==='basic-vt') known.terminal.checkpoint.throughByte=uncertain.session.latestOutputBytes+8
   known.session={...session,latestOutputBytes:uncertain.session.latestOutputBytes+8}
@@ -382,7 +388,7 @@ it('uses an empty unknown snapshot processing fence without historical backfill 
   expect(api.sessions.resize).toHaveBeenCalledTimes(resizeCalls)
   expect(write).not.toHaveBeenCalled()
   await act(async()=>terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user', expect.objectContaining({ source: 'user' }))
 })
 
 it('reports an invalid reconnect checkpoint without closing healthy input or retrying unproven history', async () => {
@@ -402,7 +408,7 @@ it('reports an invalid reconnect checkpoint without closing healthy input or ret
   expect(replaySpy).not.toHaveBeenCalled()
   expect(container.textContent).toContain('existing display may be incomplete')
   await act(async()=>terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user', expect.objectContaining({ source: 'user' }))
   expect(fixture.terminals).toEqual([terminal])
   expect(recover).not.toHaveBeenCalled()
 })
@@ -487,4 +493,77 @@ it('keeps the tracked reading line when a successful observation refresh applies
   expect(terminal.markers).toEqual([])
   expect(write).not.toHaveBeenCalled()
   expect(attach).toHaveBeenCalledExactlyOnceWith(session.control, 0)
+})
+
+
+it('actual mounted checkpoint, history and live parser writers retain explicit cause, units and begin owner', async () => {
+  let mono = performance.now() + 1
+  vi.spyOn(performance, 'now').mockImplementation(() => mono)
+  fixture.beforeCallback = () => { mono += 80 }
+  const observed = vi.spyOn(rendererPerformance, 'terminalWrite')
+  const result = continuation('checkpoint-seed', 'replayed-tail')
+  if (result.terminal.type !== 'basic-vt') throw new Error('Expected checkpoint fixture')
+  result.terminal.checkpoint.resizeAfterRestoreBytes = 5
+  const terminal = await ready(result)
+  await delivered(output(fence + 'replayed-tail'.length, 'LIVE'))
+  const calls = observed.mock.calls
+  expect(calls.length).toBeGreaterThanOrEqual(4)
+  expect(calls.map(call => call[3].cause)).toEqual(['checkpoint', 'checkpoint', 'history', 'live'])
+  const instanceId = calls[0]![3].instanceId
+  expect(instanceId).toBeGreaterThan(0)
+  for (const call of calls) expect(call[3]).toEqual({ hostId: 'local', sessionId: session.control.agentSessionId,
+    runId: session.control.run.runId, regionId: origin.regionId, instanceId, cause: call[3].cause })
+  const recorded = rendererPerformance.snapshot().slowEvents.filter(event => event.terminal?.instanceId === instanceId)
+  expect(recorded.length).toBeGreaterThanOrEqual(4)
+  expect(recorded.map(event => event.terminal!.cause)).toEqual(['checkpoint', 'checkpoint', 'history', 'live'])
+  expect(recorded.every(event => event.terminal!.payload.unit === 'bytes')).toBe(true)
+  expect(recorded.at(-1)!.terminal!.payload.length).toBe(4)
+  expect(contents(terminal)).toContain('checkpoint-seedreplayed-tailLIVE')
+  expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+})
+
+it('actual pending parser completion keeps its begin Region/Run and a replacement or remount gets a fresh recorder serial', async () => {
+  let mono = performance.now() + 1
+  vi.spyOn(performance, 'now').mockImplementation(() => mono)
+  fixture.beforeCallback = () => { mono += 80 }
+  const observed = vi.spyOn(rendererPerformance, 'terminalWrite')
+  await ready(continuation('seed'))
+  const originalInstance = observed.mock.calls[0]![3].instanceId
+  fixture.holdCallbacks = true
+  await act(async () => { receive(output(fence, 'PENDING')); await vi.waitFor(() => expect(fixture.callbacks).toHaveLength(1)) })
+  const nextOrigin = { ...origin, regionId: 'replacement-region' }
+  await render(session, false, nextOrigin)
+  fixture.holdCallbacks = false
+  const replacement = { ...session, control: { ...session.control, run: { runId: 'replacement-run' } } }
+  attach.mockResolvedValue(replay('replacement', replacement))
+  state(replacement)
+  await render(replacement, false, nextOrigin)
+  await act(async () => { await vi.waitFor(() => expect(observed.mock.calls.some(call => call[3].runId === 'replacement-run')).toBe(true)) })
+  await act(async () => { mono += 100; fixture.callbacks.splice(0).forEach(done => done()); await Promise.resolve() })
+  const late = observed.mock.calls.find(call => new TextDecoder().decode(call[1] as Uint8Array) === 'PENDING')!
+  expect(late).toBeDefined()
+  expect(late[3]).toEqual({ hostId: 'local', sessionId: session.control.agentSessionId, runId: 'wheel-run', regionId: origin.regionId, instanceId: originalInstance, cause: 'live' })
+  const replacementInstance = observed.mock.calls.find(call => call[3].runId === 'replacement-run')![3].instanceId
+  expect(replacementInstance).toBeGreaterThan(originalInstance)
+  await act(async () => root.render(null))
+  await render(replacement, false, nextOrigin)
+  await act(async () => { await vi.waitFor(() => expect(observed.mock.calls.some(call => call[3].instanceId > replacementInstance)).toBe(true)) })
+  expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+})
+
+
+it('actual retained backfill writer reports history and preserves the original continuous byte cursor', async () => {
+  let mono = performance.now() + 1
+  vi.spyOn(performance, 'now').mockImplementation(() => mono)
+  fixture.beforeCallback = () => { mono += 80 }
+  const observed = vi.spyOn(rendererPerformance, 'terminalWrite')
+  const terminal = await ready(continuation('seed'))
+  const instance = observed.mock.calls[0]![3].instanceId
+  const history = encoder.encode('GAP')
+  const read = vi.spyOn(api.sessions, 'replay').mockResolvedValue({ replay: [{ type: 'data', runId: 'wheel-run', startByte: fence, endByte: fence + 3, data: 'GAP', dataBytes: history }], gap: null })
+  await delivered(output(fence + 3, 'LIVE'))
+  expect(read).toHaveBeenCalledExactlyOnceWith('wheel-attachment', fence)
+  expect(contents(terminal)).toContain('seedGAPLIVE')
+  expect(observed.mock.calls.filter(call => call[3].instanceId === instance).map(call => call[3].cause)).toEqual(['checkpoint', 'history', 'live'])
+  expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
 })

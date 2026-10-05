@@ -1,3 +1,5 @@
+import { rendererMemoryFixture } from '../../../packages/core/test/helpers/toolkit-metrics'
+import { terminalWriteContextFixture } from '../../../packages/core/test/helpers/renderer-performance'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -30,7 +32,7 @@ it('retains bounded independent facts, releases terminal readers, and does not i
   const releaseBroken = costs.registerTerminal(() => { throw new Error('gone') })
   const snap = parseRendererPerformanceSnapshot(costs.snapshot())
   expect(snap.terminals).toHaveLength(64); expect(reads).toBe(64)
-  expect(snap.omittedTerminals).toBe(7); expect(snap.slowEvents).toHaveLength(6)
+  expect(snap.omittedTerminals).toBe(7); expect(snap.slowEvents).toHaveLength(5)
   expect(snap.sessionEvents).toEqual({ count: 1000, totalMs: 60_000, maxMs: 60 })
   expect(snap.consumers.composer.hidden).toEqual({ checks: 1000, changes: 0, commits: 0 })
   snap.sessionEvents.count = 0; snap.consumers.composer.hidden.checks = 0
@@ -107,8 +109,8 @@ it('distinguishes selector checks and changed selections from committed renders 
 it('reports parser callback wall time and queue bytes in constant time, without treating text units as bytes', () => {
   let time = 0
   const costs = createRendererPerformance(() => time)
-  const start = costs.start(); time = 75; costs.terminalWrite(false, '中文', start)
-  time = 80; costs.terminalWrite(true, new Uint8Array(6), start)
+  const start = costs.start(); time = 75; costs.terminalWrite(false, '中文', start, terminalWriteContextFixture())
+  time = 80; costs.terminalWrite(true, new Uint8Array(6), start, terminalWriteContextFixture())
   expect(costs.snapshot().terminalWrites).toEqual({ visible: { count: 1, totalMs: 80, maxMs: 80 }, hidden: { count: 1, totalMs: 75, maxMs: 75 }, stringCodeUnits: 2, bytes: 6 })
   const queue = new TerminalLiveOutputQueue()
   queue.admit({ dataBytes: new Uint8Array(6), startByte: 0, endByte: 6 })
@@ -118,7 +120,7 @@ it('reports parser callback wall time and queue bytes in constant time, without 
 
 it('rejects malformed and excessive performance facts in the real Renderer response parser', () => {
   const performance = createRendererPerformance().snapshot()
-  const result = { operation: 'metrics.renderer', window: { windowId: 1, webContentsId: 1, generation: 1 }, observedAt: 1,
+  const result = { ...rendererMemoryFixture(), operation: 'metrics.renderer', window: { windowId: 1, webContentsId: 1, generation: 1 }, observedAt: 1,
     counts: { monacoEditors: null, monacoModels: null, documents: 0, runtimeSubscriptions: 1, terminalViews: 0, terminalAddons: 0, terminalListeners: 0 }, performance }
   expect(parseMetricsRendererResult(result).performance.recording).toBe('bounded-lifetime')
   for (const bad of [

@@ -1,5 +1,5 @@
 import { createInputPerformanceRecorder } from '../../src/performance-diagnostics.js'
-import type { RendererPerformanceSnapshot } from '../../src/metrics.js'
+import type { RendererPerformanceSnapshot, RendererTerminalWriteContext } from '../../src/metrics.js'
 export function performanceFixture(): RendererPerformanceSnapshot {
   const timing = () => ({ count: 0, totalMs: 0, maxMs: 0 })
   const kinds = ['session-event', 'terminal-write', 'long-task', 'input-delay', 'terminal-interaction'] as const
@@ -18,4 +18,8 @@ export function performanceFixture(): RendererPerformanceSnapshot {
     timingEpochs: { durationMs: 10000, basis: 'monotonic-occurrence-start', recordingSinceMonoMs: 0, observedMonoMs: 0,
       current: { startMonoMs: 0, endMonoMs: 10000, timings: kindTiming() }, previous: null, late: kindCounts(), unknown: kindCounts() },
     observerCost: { snapshots: timing(), performanceCallbacks: timing() } }
+}
+
+export function terminalWriteContextFixture(): RendererTerminalWriteContext {
+  return { hostId: 'local', sessionId: 'fixture-session', runId: 'fixture-run', regionId: 'fixture-region', instanceId: 1, cause: 'history' }
 }

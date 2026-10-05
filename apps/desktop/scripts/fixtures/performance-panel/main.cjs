@@ -38,7 +38,7 @@ app.whenReady().then(async()=>{
     stage('config-read')
     const owner = new ConfigOwner({read:()=>current,save:next=>configStore.save(next),publish:saved=>{current=saved;win?.webContents.send('proof:config:changed',saved)}})
     ipcMain.handle('proof:setup',async(_event,preview)=>{
-      if(phase==='control'||phase==='placement'||phase==='buttons'||phase==='attribution'||phase==='agent-cards') { assert.equal(initialConfigExists,false,'首次私有Config来源为空');await owner.update(()=>({...preview,
+      if(phase==='control'||phase==='placement'||phase==='buttons'||phase==='attribution'||phase==='agent-cards'||phase==='epoch-peak') { assert.equal(initialConfigExists,false,'首次私有Config来源为空');await owner.update(()=>({...preview,
         workspaces:[...preview.workspaces,...current.workspaces.filter(workspace=>!preview.workspaces.some(item=>item.id===workspace.id))],
         appearance:{...preview.appearance,appAppearance:'dark'},toolkit:{...preview.toolkit,performance:{enabled:true,statusBar:'label'},...(customSnapshot?{tools:[customSnapshot.definition]}:{})},
         composerShortcuts:[{id:'original',keyword:'original',label:'Original authored prompt',body:'Original saved body remains exact.'}]})) }
@@ -239,6 +239,43 @@ app.whenReady().then(async()=>{
       raw.custom={snapshotSHA256:createHash('sha256').update(JSON.stringify(customSnapshot)).digest('hex'),executionProof:customProof.executionProof,reference:'local/session-codex',boundary:'Exact prior ordinary-script/CustomToolkitOwner/Unix/CLI confirmed result replayed through actual App registered IPC; Runtime execution is qualified separately.'}
       await click(q('[data-toolkit-close]'))
       raw.surface=await read('window.performanceScene.surface()');assert.deepEqual(raw.surface,surface,'Cards/observation preserve original workface and unsent draft')
+    } else if(phase==='epoch-peak') {
+      raw.qualificationScope='epoch-peak-only'
+      const originalWrites=await read('window.performanceScene.writes.length')
+      await click(q('.performance-trigger'))
+      const focusByKeyboard=async selector=>{
+        for(let i=0;i<40;i++) {
+          if(await read('document.activeElement===document.querySelector('+JSON.stringify(selector)+')'))return
+          await key('Tab')
+        }
+        throw Error('Native Tab did not reach peak control: '+selector)
+      }
+      const renderer='details[data-performance-role="renderer"]'
+      await focusByKeyboard(renderer+' > summary');await key('Return')
+      assert.equal(await read('document.querySelector('+JSON.stringify(renderer)+').open'),true)
+      const work='[data-performance-work]'
+      await focusByKeyboard(work+' > summary');await key('Return')
+      assert.equal(await read('document.querySelector('+JSON.stringify(work)+').open'),true)
+      assert.ok(await read('document.querySelector("[data-performance-peak=terminal-write]").textContent.includes("No retained slow event")'),'Current empty period stays explicit')
+      const previous='[data-performance-period=previous]'
+      await focusByKeyboard(previous);await key('Return')
+      const peak='[data-performance-peak=terminal-write]'
+      raw.peak=await read('document.querySelector('+JSON.stringify(peak)+').textContent')
+      for(const fact of ['Peak #','520.0 ms','history','7 string-code-units','Host local','Session preparation-session','Run preparation-run','Region preparation-region','instance 1'])assert.ok(raw.peak.includes(fact),fact)
+      assert.equal(await read('document.querySelector('+JSON.stringify(previous)+').getAttribute("aria-pressed")'), 'true')
+      await read('document.querySelector('+JSON.stringify(work)+').scrollIntoView({block:"start"})');await settle()
+      await capture('1480-dark-epoch-peak.png','Actual expanded Work and wait / Previous peak with exact terminal owner and cause / wide dark')
+      await read('window.peakReading={peak:document.querySelector('+JSON.stringify(peak)+'),focus:document.activeElement,body:document.querySelector(".performance-body"),scroll:document.querySelector(".performance-body").scrollTop}')
+      assert.ok(await read('window.peakReading.scroll')>0,'Expanded pane reading scroll is nonzero')
+      await read('window.performanceScene.publishAttribution("waiting")');await settle()
+      raw.refresh=await read('({samePeak:window.peakReading.peak===document.querySelector('+JSON.stringify(peak)+'),sameFocus:window.peakReading.focus===document.activeElement,sameBody:window.peakReading.body===document.querySelector(".performance-body"),scrollBefore:window.peakReading.scroll,scrollAfter:window.peakReading.body.scrollTop})')
+      assert.equal(raw.refresh.samePeak,true);assert.equal(raw.refresh.sameFocus,true);assert.equal(raw.refresh.sameBody,true)
+      assert.ok(Math.abs(raw.refresh.scrollBefore-raw.refresh.scrollAfter)<=1)
+      await scene(380,'light')
+      await read('document.querySelector('+JSON.stringify(work)+').scrollIntoView({block:"start"})');await settle()
+      await capture('380-light-epoch-peak.png','Actual expanded Work and wait / same Previous peak and owner / narrow light')
+      assert.equal(await read('window.performanceScene.writes.length'),originalWrites,'Diagnostic UI sends no terminal input')
+      await close();raw.surface=await read('window.performanceScene.surface()');assert.deepEqual(raw.surface,surface)
     } else if(phase==='attribution') {
       raw.qualificationScope='resource-attribution-only'
       raw.boundary='Actual App/Toolkit/isolated sandbox preload with controlled Metrics DTO; bounded keyboard/refresh/scroll captures only. No full control/restart/joined/Native or user Run actions.'

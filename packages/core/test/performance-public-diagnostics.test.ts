@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process'
+import { terminalWriteContextFixture } from './helpers/renderer-performance.js'
 import { expect, it, vi } from 'vitest'
 import { createRendererPerformance } from '../../../apps/desktop/src/renderer/src/lib/renderer-performance'
 import { createTabSwitchObservation } from '../../../apps/desktop/src/renderer/src/lib/tab-switch-observation'
@@ -7,7 +9,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../src/control.js'
 import { parseAgentMuxControlReceipt } from '../src/control-codec.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { AgentMuxControlServer } from '../src/control-host.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { parseMetricsObservation } from '../src/metrics.js'
@@ -36,7 +38,8 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
   let time = 1000
   const renderer = createRendererPerformance(() => time, () => 1000 + time)
   time = 1070; renderer.sessionEvent('status', 1000)
-  for (let i = 0; i < 40; i++) renderer.terminalWrite(false, new Uint8Array(1), 1000)
+  time = 2900; renderer.terminalWrite(false, 'private-output', 1083.3, { ...terminalWriteContextFixture(), runId: 'exact-peak-run', cause: 'checkpoint' })
+  for (let i = 0; i < 40; i++) { time += 100; renderer.terminalWrite(false, new Uint8Array(1), time - 70, terminalWriteContextFixture()) }
   const callbacks: FrameRequestCallback[] = []
   const navigation = createTabSwitchObservation(() => time, () => 1000 + time,
     callback => { callbacks.push(callback); return callbacks.length }, () => {})
@@ -51,9 +54,10 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
   expect(pendingRequest.parent).toBeDefined()
   observation.renderer.data!.performance.inputRequestDetails = renderer.snapshot().inputRequestDetails
   const expectedRenderer = observation.renderer.data!.performance
-  expect(expectedRenderer.slowEventsOmitted['terminal-write']).toBe(34)
+  expect(expectedRenderer.slowEventsOmitted['terminal-write']).toBe(36)
   expect(expectedRenderer.slowEvents.some(event => event.kind === 'session-event')).toBe(true)
-  expect(expectedRenderer.timingEpochs.current.timings['terminal-write']).toEqual({ count: 40, totalMs: 2800, maxMs: 70 })
+  expect(expectedRenderer.slowEvents.find(event => event.retainedAs.includes('current-peak') && event.kind === 'terminal-write')).toMatchObject({ terminal: { runId: 'exact-peak-run', cause: 'checkpoint', payload: { unit: 'string-code-units', length: 14 } } })
+  expect(expectedRenderer.timingEpochs.current.timings['terminal-write']).toEqual({ count: 41, totalMs: 4616.7, maxMs: 1816.7 })
   expect(expectedRenderer.tabSwitches[0]).toMatchObject({ state: 'pending', pendingStage: 'input-gate', elapsedMs: 1500 })
   expect(parseToolkitSnapshot(toolkit)).toEqual(toolkit)
   const receipt = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'correlated-input', operation: 'toolkit.get', ok: true, result: { snapshot: toolkit } }
@@ -97,6 +101,20 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
     const toolkitCli = await runCompiledObjectCli(['--endpoint', 'unix://' + path, 'toolkit', 'inspect', 'performance'], objectCliEnvironment(directory))
     expect(toolkitCli.code).toBe(0); expect(toolkitCli.stderr).toBe('')
     expect(JSON.parse(toolkitCli.stdout.trim()).result.snapshot).toEqual(toolkit)
+    const child = spawn(process.execPath, [resolve('apps/desktop/resources/toolkit/performance.mjs'), resolve('packages/core/bin/amux')], {
+      env: objectCliEnvironment(directory), stdio: ['ignore', 'pipe', 'pipe'] })
+    let scriptOutput = '', scriptError = ''
+    child.stdout.on('data', bytes => { scriptOutput += bytes.toString() }); child.stderr.on('data', bytes => { scriptError += bytes.toString() })
+    const closed = new Promise(resolve => child.once('close', resolve))
+    try {
+      await vi.waitFor(() => expect(scriptOutput.split('\n').filter(Boolean).length, scriptError).toBeGreaterThan(0), { timeout: 5000 })
+      const frame = JSON.parse(scriptOutput.split('\n')[0]!)
+      expect(frame.event, scriptError).toBe('result')
+      expect(frame.payload.renderer.data.performance).toEqual(expectedRenderer)
+      expect(parseToolkitSnapshot({ ...toolkit, observation: frame.payload, document: frame.document })).toMatchObject({ observation: { renderer: { data: { performance: expectedRenderer } } } })
+      expect(scriptError).toBe('')
+    } finally { child.kill('SIGTERM'); await closed }
+
     const evidencePath = process.env.AGENTMUX_TERMINAL_INPUT_LOADED
     if (evidencePath) appendFileSync(evidencePath + '.correlation', JSON.stringify({ case: 'actual-unix-compiled-cli-typed-toolkit',
       diagnostics: observation.diagnostics, rendererInput: expectedRenderer.inputRequestDetails, toolkitReceiptParsed: true,

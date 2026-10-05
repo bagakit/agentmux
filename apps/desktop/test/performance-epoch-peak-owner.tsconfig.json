@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.test.json",
+  "include": [
+    "performance-epoch-peak-owner.test.tsx",
+    "renderer-performance-event-coverage.test.tsx",
+    "renderer-performance.test.tsx",
+    "terminal-checkpoint-continuation.test.tsx",
+    "performance-attribution.test.tsx",
+    "../../../packages/core/test/performance-public-diagnostics.test.ts",
+    "../src/renderer/src/global.d.ts"
+  ]
+}
