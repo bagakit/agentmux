@@ -1,6 +1,8 @@
 import { expect, it } from 'vitest'
 import { ToolkitFailureCapture, parseToolkitPerformanceFailureDetails, parseToolkitPerformanceFailure, toolkitFailureError } from '../src/toolkit-performance-failure.js'
 import { parseToolkitRequest, parseToolkitSnapshot } from '../src/toolkit.js'
+import { parseToolkitCommand } from '../src/toolkit-cli.js'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../src/control.js'
 import { deepMetricsSnapshot } from './helpers/toolkit-metrics.js'
 const details = () => ({ stage: 'toolkit-json' as const, error: toolkitFailureError(new SyntaxError('original syntax failure')), bytes: null, exit: null })
 it('retains non-overlapping byte ranges across chunks without retaining input storage', () => {
@@ -33,6 +35,15 @@ it('bounds error UTF8 bytes and explicitly reports clipped text', () => {
   expect(primary).toMatchObject({messageTruncated:true,stackTruncated:true})
   expect(()=>parseToolkitPerformanceFailureDetails({...details(),error:primary})).not.toThrow()
 })
+it('uses exact Toolkit public option and CLI flag only for Performance watch', async () => {
+  expect(await parseToolkitCommand(['watch','performance','--capture-failure'])).toEqual({method:'toolkit.watch',params:{toolId:'performance',captureFailure:true}})
+  await expect(parseToolkitCommand(['watch','phone','--capture-failure'])).rejects.toThrow()
+  const base={schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:'request',operation:'toolkit.watch',toolId:'performance'}
+  expect(parseToolkitRequest({...base,captureFailure:true})).toMatchObject({captureFailure:true})
+  expect(()=>parseToolkitRequest({...base,captureFailure:false})).toThrow()
+  expect(()=>parseToolkitRequest({...base,toolId:'phone',captureFailure:true})).toThrow()
+  expect(()=>parseToolkitRequest({...base,operation:'toolkit.get',captureFailure:true})).toThrow()
+})
 it('retains the failure original identity after current Run cleanup through typed snapshot', () => {
   const snapshot=deepMetricsSnapshot()
   const failure=parseToolkitPerformanceFailure({schema:'agentmux.performance.failure.v1',executionId:'prior-execution',run:{hostId:'local',runId:'original-run'},recordedAt:1000,details:details()})
@@ -49,6 +60,16 @@ it('admits the largest legal escaped error and fragments within the derived file
  expect(()=>parseToolkitPerformanceFailure(failure)).not.toThrow()
 })
 
+it('requires independent capture and raw-read opt-ins through CLI and typed requests',async()=>{
+ expect(await parseToolkitCommand(['inspect','performance','--failure-evidence'])).toEqual({method:'toolkit.inspect',params:{toolId:'performance',includeFailureEvidence:true}})
+ expect(await parseToolkitCommand(['watch','performance','--capture-failure','--failure-evidence'])).toEqual({method:'toolkit.watch',params:{toolId:'performance',captureFailure:true,includeFailureEvidence:true}})
+ const base={schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:'request',operation:'toolkit.get',toolId:'performance'}
+ expect(parseToolkitRequest({...base,includeFailureEvidence:true})).toMatchObject({includeFailureEvidence:true})
+ expect(()=>parseToolkitRequest({...base,toolId:'phone',includeFailureEvidence:true})).toThrow()
+ expect(()=>parseToolkitRequest({...base,operation:'toolkit.script',includeFailureEvidence:true})).toThrow()
+ await expect(parseToolkitCommand(['inspect','performance','--capture-failure'])).rejects.toThrow()
+ await expect(parseToolkitCommand(['watch','performance','--failure-evidence','--failure-evidence'])).rejects.toThrow()
+})
 it('ordinary failure metadata neither reads nor retains an Error stack',()=>{
  const error=new Error('original');let reads=0;Object.defineProperty(error,'stack',{get(){reads++;return 'private raw stack'}})
  expect(toolkitFailureError(error)).toMatchObject({stack:null,stackTruncated:false});expect(reads).toBe(0)
