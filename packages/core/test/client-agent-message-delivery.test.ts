@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { DOMParser } from '@xmldom/xmldom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient as DefaultClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
@@ -24,6 +25,15 @@ type Internals = {
   promptSubmission: { submitInputPlan: unknown }; messageQueue: DurableAgentMuxMessageQueue
 }
 const body = '  unchanged <body> & "quotes"\nSecond line.  '
+function agentMuxContext(outbound: unknown): string {
+  if (typeof outbound !== 'string') throw new Error('Expected the original outbound text')
+  expect(outbound.startsWith('<amux from="amux">')).toBe(true)
+  const end = outbound.indexOf('</amux>')
+  expect(end).toBeGreaterThan(0)
+  // Only the platform context is XML; the following authored body remains literal text.
+  return new DOMParser().parseFromString(outbound.slice(0, end + '</amux>'.length), 'application/xml')
+    .documentElement!.textContent ?? ''
+}
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amux-a2a-owner-'))
   roots.push(root)
@@ -201,11 +211,11 @@ describe('initial Agent messages retain the single creation transport', () => {
     expect(f.start).toHaveBeenCalledTimes(1)
     if (providerId === 'claude') {
       expect(f.start.mock.calls[0]![0].args.filter((arg: string) => arg.includes(wrapped))).toHaveLength(1)
-      expect(f.start.mock.calls[0]![0].args.filter((arg: string) => arg.includes(wrapped))[0]).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+      expect(agentMuxContext(f.start.mock.calls[0]![0].args.filter((arg: string) => arg.includes(wrapped))[0])).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
       expect(initialInput).not.toHaveBeenCalled()
     } else {
       expect(f.start.mock.calls[0]![0].args.filter((arg: string) => arg.includes(wrapped))).toEqual([])
-      expect(initialInput).toHaveBeenCalledTimes(1); expect(initialInput.mock.calls[0]![3]).toContain(wrapped); expect(initialInput.mock.calls[0]![3]).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+      expect(initialInput).toHaveBeenCalledTimes(1); expect(initialInput.mock.calls[0]![3]).toContain(wrapped); expect(agentMuxContext(initialInput.mock.calls[0]![3])).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
     }
     const records = await new DurableAgentMuxMessageQueue(f.queue.path).listAfter()
     expect(records).toHaveLength(1)

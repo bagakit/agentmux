@@ -127,7 +127,8 @@ describe('public Agent creation retains the original first-prompt delivery fact'
     expect(start.mock.calls[0]![0].args).not.toContain(task)
     expect(submit.mock.calls).toEqual([[expect.objectContaining({ agentSessionId: sessionId, run: { runId } }),
       expect.objectContaining({ runId }), `launch-prompt:${start.mock.calls[0]![0].operationKey}`, task, expect.any(Object),
-      { expectedRun: { runId }, afterSubmissionId: null }, undefined, undefined, false, expect.any(AbortSignal)]])
+      { expectedRun: { runId }, afterSubmissionId: null }, undefined, undefined, false, expect.any(AbortSignal),
+      undefined, { userContent: task }]])
     expect((await store.loadTimeline(sessionId)).items.map(({ content, status }) => ({ content, status })))
       .toEqual([{ content: task, status: 'complete' }])
     healthyOneCreation()
@@ -153,14 +154,19 @@ describe('public Agent creation retains the original first-prompt delivery fact'
 
   it('returns the actual Input confirmation and leaves durable unknown if saving that fact fails', async () => {
     providerId = 'kimi'
-    const cas = store.compareAndSwap.bind(store)
-    vi.spyOn(store, 'compareAndSwap').mockImplementation(async (expected, next, signal) => {
-      if ((next as AgentMuxStoredAgentSession | null)?.creation?.initialPrompt === 'confirmed') {
+    const metadataCas = store.compareAndSwapMetadata.bind(store)
+    let failedReceiptWrites = 0
+    vi.spyOn(store, 'compareAndSwapMetadata').mockImplementation(async (expected, next, signal, future) => {
+      if (next?.creation?.initialPrompt === 'confirmed') {
+        expect(expected?.creation?.initialPrompt).toBe('unknown')
+        expect(submit).toHaveBeenCalledTimes(1)
+        failedReceiptWrites++
         throw new Error('Private fixture cannot save the delivery fact after Input')
       }
-      return await cas(expected, next, signal)
+      return await metadataCas(expected, next, signal, future)
     })
     const result = await create(task)
+    expect(failedReceiptWrites).toBe(1)
     expect(result).toMatchObject({ promptConfirmed: true,
       creation: { createOperationId: requestId, initialPrompt: 'confirmed' } })
     const retained = { createOperationId: requestId, initialPrompt: 'unknown' }
