@@ -305,7 +305,9 @@ export function parseRpcControlResult(method: keyof typeof AGENTMUX_RPC_CONTROL_
   if (['schemaVersion', 'requestId', 'operation'].some(key => Object.hasOwn(body, key))) {
     throw new AgentMuxError('RPC result contains an internal Control envelope.', 'CONTROL_PROTOCOL_ERROR')
   }
-  const legacy = operationKeys(method.startsWith('goal.') && method !== 'goal.focus' ? goalKeys(body, true) : body, true)
+  // Maintenance receipts already own operationId; it is not a Control requestId.
+  const legacy = method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect' ? body
+    : operationKeys(method.startsWith('goal.') && method !== 'goal.focus' ? goalKeys(body, true) : body, true)
   const operation = AGENTMUX_RPC_CONTROL_METHODS[method]
   // The spatial owner validates this envelope against the same durable business
   // ID. JSON-RPC's correlation ID is deliberately absent from this DTO.
