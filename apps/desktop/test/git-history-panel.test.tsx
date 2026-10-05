@@ -1,7 +1,7 @@
 const { fixturePath: _hygiene_fixturePath, fixtureTime: _hygiene_fixtureTime } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { installGitHistoryViewport } from './helpers/git-history-viewport'
 // @vitest-environment happy-dom
-import { act, createElement, Profiler, useRef } from 'react'
+import { act, createElement, Profiler, useRef, useLayoutEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -13,7 +13,7 @@ const fixture = vi.hoisted(() => ({
 }))
 vi.mock('../src/renderer/src/store.js', () => ({ useAppStore: (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state) }))
 import { GitHistoryPanel, type GitHistoryViewportState } from '../src/renderer/src/features/git/history/GitHistoryPanel.js'
-import { useGitHistory } from '../src/renderer/src/features/git/history/useGitHistory.js'
+import { useGitHistory, type GitHistoryWindow } from '../src/renderer/src/features/git/history/useGitHistory.js'
 vi.mock('../src/renderer/src/lib/conversation-avatar-color.js', async original => {
   const actual = await original<typeof import('../src/renderer/src/lib/conversation-avatar-color.js')>()
   return { ...actual, speakerColorHue: vi.fn(actual.speakerColorHue) }
@@ -438,6 +438,8 @@ describe('History viewport work and controlled boundary', () => {
     expect(controls.loadMore).toBe(before.loadMore)
     expect(controls.refresh).toBe(before.refresh)
     expect(controls.selectReference).toBe(before.selectReference)
+    expect(controls.captureWindow).toBe(before.captureWindow)
+    expect(controls.adoptWindow).toBe(before.adoptWindow)
     expect(controls.result).toBe(before.result)
     expect(history).toHaveBeenCalledTimes(1)
   })
@@ -480,6 +482,60 @@ describe('History viewport work and controlled boundary', () => {
     await act(async () => root.render(createElement(Controlled, { selectedOid: target })))
     await act(async () => root.render(createElement(Controlled, { selectedOid: target, revealOid: target })))
     expect(scroll().scrollTop).toBeGreaterThan(1200)
+  })
+
+  it('hands completed pages/ref/viewport to a new exact owner before enabling and rejects old/foreign replies', async () => {
+    const pinned = { ...snapshot, selectedRef: 'refs/heads/main' }
+    const pending = deferred<GitHistoryResult>()
+    history.mockResolvedValueOnce(page(chain(100))).mockResolvedValueOnce(page(chain(100), true, pinned)).mockReturnValueOnce(pending.promise)
+      .mockResolvedValue(page([commit(d, 'Other workspace', [])], false, { ...snapshot, repoPath: _hygiene_fixturePath("other"), checkedAt: 2 }))
+    const position = { current: null as GitHistoryViewportState | null }
+    let owner!: ReturnType<typeof useGitHistory>
+    function First() {
+      owner = useGitHistory(workspace, true)
+      return createElement(GitHistoryPanel, { workspace, history: owner, viewportState: position, onSelectCommit: () => {} })
+    }
+    await act(async () => root.render(createElement(First)))
+    await select('refs/heads/main')
+    let captured = owner.captureWindow()!
+    await move(1200)
+    captured = owner.captureWindow()!
+    const originalOwner = owner
+    await act(async () => { void owner.loadMore() })
+    expect(history).toHaveBeenCalledTimes(3)
+    await act(async () => owner.adoptWindow(captured))
+    await act(async () => pending.resolve(page([commit(e, 'Obsolete pending reply', [])], false, pinned)))
+    expect(owner.result?.kind === 'ready' && owner.result.commits).toHaveLength(100)
+    function Next({ target, window }: { target: WorkspaceRecord; window: GitHistoryWindow }) {
+      owner = useGitHistory(target, true)
+      useLayoutEffect(() => { owner.adoptWindow(window) }, [owner.adoptWindow, window])
+      return createElement(GitHistoryPanel, { workspace: target, history: owner, viewportState: position, onSelectCommit: () => {} })
+    }
+    await act(async () => root.render(createElement(Next, { target: workspace, window: captured })))
+    expect(history).toHaveBeenCalledTimes(3)
+    expect(owner.reference).toBe('refs/heads/main')
+    expect(owner.result?.kind === 'ready' && owner.result.commits).toHaveLength(100)
+    expect(scroll().scrollTop).toBe(1200)
+    expect(owner.loading).toBe(false)
+    await act(async () => pending.resolve(page([commit(e, 'Obsolete pending reply', [])], false, pinned)))
+    expect(owner.result?.kind === 'ready' && owner.result.commits).toHaveLength(100)
+    expect(host.textContent).not.toContain('Obsolete pending reply')
+    const captureForA = owner.captureWindow
+    const other = { ...workspace, id: 'other', path: _hygiene_fixturePath("other") }
+    await act(async () => root.render(createElement(Next, { target: other, window: captured })))
+    expect(history).toHaveBeenCalledTimes(4)
+    expect(history).toHaveBeenLastCalledWith(other.id, { ref: null })
+    expect(owner.captureWindow()?.key).toBe(JSON.stringify([other.id, other.hostId, other.path]))
+    expect(captureForA()).toBeNull()
+    expect(scroll().scrollTop).toBe(0)
+    const foreignResult = owner.result
+    await act(async () => owner.adoptWindow(captured))
+    expect(owner.result).toBe(foreignResult)
+    await act(async () => root.render(createElement(Next, { target: workspace, window: captured })))
+    expect(history).toHaveBeenCalledTimes(4)
+    expect(owner.reference).toBe('refs/heads/main')
+    expect(owner.result?.kind === 'ready' && owner.result.commits).toHaveLength(100)
+    expect(originalOwner.captureWindow()?.key).toBe(captured.key)
   })
 
   it('opens repository history as a separate explicit action without selecting a fabricated latest commit', async () => {
