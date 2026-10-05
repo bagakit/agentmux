@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { NoteSource } from '@agentmux/core/notebook-catalog'
 import { NOTES_WORKSPACE_ID } from '../../../shared/notes-library'
 import { newNoteDocument, readNoteDocument } from '../../../shared/note-document'
@@ -47,7 +48,7 @@ async function save(target: SurveyRecallCapture, notebookId: string, draft: stri
   if (!workspace) throw new Error('The Notes folder is unavailable. Your browser and capture draft are kept; reconnect it and retry.')
   const groupId = state.prepareWorkbenchLayout(workspace.id).activeGroupId
   if (!receipt) {
-    receipt = { intentId: crypto.randomUUID(), createdAt: Date.now(), noteId: crypto.randomUUID(), blockIds: [crypto.randomUUID()],
+    receipt = { intentId: crypto.randomUUID(), createdAt: Date.now(), noteId: mintObjectId(), blockIds: [mintObjectId()],
       draft, path: '', status: 'pending', revealed: false, notebook: { notebookId, source: target.source },
       target: { workspaceId: workspace.id, hostId: workspace.hostId, workspacePath: workspace.path, directoryPath: workspace.path,
         relativeDirectory: '', zoneId: null, sourceSpaceId: null, displayWorkspaceId: workspace.id, groupId } }

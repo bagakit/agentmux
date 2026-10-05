@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { durableWriteFile } from '@agentmux/core'
@@ -81,7 +81,13 @@ export class BrowserDemonstrationRecorder {
 
   constructor(private readonly store: BrowserDemonstrationStore, options: { now?: () => number; id?: () => string } = {}) {
     this.now = options.now ?? Date.now
-    this.makeId = options.id ?? randomUUID
+    this.makeId = options.id ?? mintObjectId
+  }
+
+  private allocateId(): string {
+    let id: string
+    do { id = identity(this.makeId()) } while (this.document.drafts.some(draft => draft.id === id || draft.steps.some(step => step.id === id)))
+    return id
   }
 
   async ready(): Promise<void> {
@@ -99,7 +105,7 @@ export class BrowserDemonstrationRecorder {
       if (this.document.drafts.length >= MAX_DRAFTS) throw new Error('Recording draft budget reached; retain or remove existing drafts before recording again.')
       const at = this.now()
       const draft: BrowserDemonstrationDraft = {
-        id: identity(this.makeId()), browserId, navigationId: identity(input.navigationId),
+        id: this.allocateId(), browserId, navigationId: identity(input.navigationId),
         url: safeUrl(input.url), revision: 1, status: 'recording', startedAt: at, updatedAt: at, steps: []
       }
       this.document.drafts.push(draft)
@@ -135,7 +141,7 @@ export class BrowserDemonstrationRecorder {
       if (draft.steps.length >= MAX_STEPS) return this.limit(draft)
       const sequence = draft.steps.length + 1
       draft.steps.push({
-        id: identity(this.makeId()), sequence, recordedAt, navigationId: draft.navigationId,
+        id: this.allocateId(), sequence, recordedAt, navigationId: draft.navigationId,
         source: 'native-human', method: input.kind === 'fill' ? 'fillInput' : 'click', url: draft.url,
         args: [], ...(target ? { target } : {}),
         ...(input.kind === 'fill' ? { inputKey: `input-${sequence}` } : {}),
@@ -160,7 +166,7 @@ export class BrowserDemonstrationRecorder {
       this.gestures.delete(input.browserId)
       if (draft.steps.length >= MAX_STEPS) return this.limit(draft)
       draft.steps.push({
-        id: identity(this.makeId()), sequence: draft.steps.length + 1, recordedAt,
+        id: this.allocateId(), sequence: draft.steps.length + 1, recordedAt,
         navigationId: draft.navigationId, source: human ? 'native-human' : 'navigation',
         method: 'gotoUrl', url, args: url ? [url] : [],
         blockedReason: !human && !gesture ? 'Navigation provenance is unknown; inspect the destination before replay.'

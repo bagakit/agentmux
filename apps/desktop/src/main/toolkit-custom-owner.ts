@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { AgentMuxError, type AgentMuxClientEvent, type AgentMuxRunAttachment } from '@agentmux/core'
 import { parseToolkitSnapshot, parseToolkitRunInput, parseToolkitActionInput, TOOLKIT_TEXT_MAX_BYTES, TOOLKIT_TEXT_MAX_JSON_BYTES,
@@ -204,7 +205,9 @@ export class CustomToolkitOwner {
       if (latest !== input.expectedLatestExecutionId) throw new AgentMuxError('Tool result changed; inspect it before running.', 'CONFIG_CONFLICT')
       if (!definition.enabled) throw new AgentMuxError('Tool is disabled.', 'CONTROL_UNAVAILABLE')
       if (action) this.savedAction(definition, action.id)
-      const admission: ToolkitAdmission = { executionId: randomUUID(), invocationId: input.invocationId,
+      let executionId: string
+      do { executionId = mintObjectId() } while ([...this.tools.values()].some(known => known.latest?.executionId === executionId || known.admission?.executionId === executionId))
+      const admission: ToolkitAdmission = { executionId, invocationId: input.invocationId,
         definition: structuredClone(definition), expectedLatestExecutionId: input.expectedLatestExecutionId, action,
         target: { workspacePath: definition.workspacePath }, run: null, startedAt: this.now(), text: '', state: 'pending', reason: null }
       tool.admission = admission

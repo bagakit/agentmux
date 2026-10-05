@@ -1,6 +1,6 @@
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult, AgentMuxSpatialIssue, AgentMuxSpatialSave } from '@agentmux/core/control'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
-import { fileTabId, initialWorkbenchRegionId } from './workbench-tabs'
+import { fileWorkbenchIdentity } from './file-workbench-state'
 import type { FileOpenPlacement, FileOpenResult, FileWorkbenchState } from './file-workbench-state'
 import { spatialCatalog, spatialDestination, selectSpatialCatalog, zoneContext, type SpatialWorkbench } from './space-agent-control'
 import { zoneFileResource } from '../../../shared/zone-file-resource'
@@ -41,7 +41,7 @@ export async function executeWorkfaceFileOpen(ports: WorkfaceFileOpenPorts,
     const mapped = zoneFileResource(workspace, zone, request.path, topics)
     report.resource = { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path,
       zoneId: zone.zoneId, zonePath: mapped.directoryPath, path: mapped.path }
-    const tabId = fileTabId(workspace.id, mapped.path), regionId = initialWorkbenchRegionId(tabId)
+    const { tabId, regionId } = fileWorkbenchIdentity(state, workspace.id, mapped.path, { space: { spaceId: zoneContext(state, topics, zone), zoneId: zone.zoneId } })
     const target = spatialDestination(catalog, { zoneId: zone.zoneId, ...(request.spaceId ? { spaceId: request.spaceId } : {}),
       ...(request.displayWorkspaceId ? { displayWorkspaceId: request.displayWorkspaceId, groupId: request.groupId } : {}),
       ...(request.tabId ? { tabId: request.tabId, ...(request.regionId ? { regionId: request.regionId } : {}), ...(request.split ? { split: request.split } : {}) } : { newTab: true }) },

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { groupIds } from '@agentmux/layout'
 import { directoryIdentity, homeZoneId } from '../../../shared/space-addresses'
 import { fileNavigationSelection, useAppStore } from '../store'
-import { fileTabId } from './workbench-tabs'
+import { fileWorkbenchIdentity } from './file-workbench-state'
 import { fileExplorerContains } from './file-explorer-scope'
 import { spatialCatalog } from './space-agent-control'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjectionSelection } from './workbench-projection'
@@ -179,7 +179,8 @@ export function useMoteMaterialsActions(scope: MoteWorkfaceScope | null, options
     const destination = reference ?? emptyMoteDestination(state, owner, captured.options)
     if (!destination) { state.reportError(new Error('The exact original Mote display is unconfirmed. Your work is kept; choose its Tab and Region, or an exact empty destination, then retry opening the file.')); return }
     const { displayWorkspaceId, groupId } = destination
-    const tabId = fileTabId(workspaceId, path)
+    const identity = fileWorkbenchIdentity(state, workspaceId, path, { displayWorkspaceId })
+    const tabId = identity.tabId
     const existing = state.tabs[tabId]
     const topic = scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace)?.find(item => {
       const root = scratchTopicLogicalPath(owner.workspace, item)
@@ -195,7 +196,7 @@ export function useMoteMaterialsActions(scope: MoteWorkfaceScope | null, options
     if (existing && !heldFileRegion && fileRegions.length !== 1) {
       state.reportError(new Error('The original File Region is unconfirmed or ambiguous. Its content is kept; choose the exact File Region and retry.')); return
     }
-    const regionId = heldFileRegion?.regionId ?? fileRegions[0]?.regionId ?? 'region:' + tabId
+    const regionId = heldFileRegion?.regionId ?? fileRegions[0]?.regionId ?? identity.regionId
     const fileReference = { displayWorkspaceId, groupId, tabId, regionId }
     const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace) ?? [owner.topic])
     const alreadyPlaced = catalog.locations.some(location => sameWorkbenchProjectionSelection(location, fileReference))

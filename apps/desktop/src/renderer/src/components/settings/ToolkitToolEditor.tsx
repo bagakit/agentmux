@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { ArrowLeft, Code2, Folder, Play, Plus, Trash2, X } from 'lucide-react'
 import { lazy, Suspense, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
@@ -45,7 +46,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   function chooseAction(next: string) { focusAction.current = true; setActionId(next) }
   function addAction() {
     if (actions.length >= 16) return
-    const next = `action-${crypto.randomUUID()}`
+    const next = mintObjectId()
     onEdit({ actions: [...actions, { id: next, label: '', script: "console.log('Action ready')\n", args: [] }] })
     chooseAction(next)
   }

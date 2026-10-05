@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import type {
   AgentMuxControlSettingsWorkspaceAddRequest,
   AgentMuxControlResult
@@ -34,7 +34,7 @@ export async function registerWorkspace(
       invalid(`Host “${input.hostId}” is unavailable. Review Hosts settings before adding this project.`)
     }
     const insertion = insertOrGetWorkspace(current, {
-      id: randomUUID(),
+      id: mintObjectId(),
       name: input.name?.trim() || input.path.split(/[\\/]/).filter(Boolean).pop() || input.path,
       hostId: input.hostId,
       path: input.path,

@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { zoneFileResource } from './zone-file-resource'
 import type { AgentMuxAgentSession } from '@agentmux/core'
 import type {
@@ -5,7 +6,6 @@ import type {
   AgentMuxSpaceControlResult, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport,
   AgentMuxSpaceSelector, AgentMuxSpatialIssue, AgentMuxSpatialSave, AgentMuxZoneFact, AgentMuxSpaceBindingReport, AgentMuxSpaceBindingTarget, TopicCategory
 } from '@agentmux/core/control'
-import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { addTabOrThrow, addTabOccurrence, createWorkspaceLayout, findGroupForTab, groupIds, regionIds,
   removeTab, replaceLeaf, type WorkspaceLayout } from '@agentmux/layout'
 import type { AgentLaunchInput, AgentLaunchResult, AppConfig, ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
@@ -211,7 +211,7 @@ export async function createSpatialZone(ports: Pick<SpatialControlPorts, 'get' |
   const catalog = spatialCatalog(ports.get(), topics)
   for (const spaceId of input.spaceIds) if (!catalog.spaces.some(space => space.spaceId === spaceId)) failure('SPACE_TARGET_UNKNOWN', 'The exact initial Space is not known.')
   const spaceId = directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path)
-  const zoneId = `zone:${crypto.randomUUID()}`
+  const zoneId = mintObjectId()
   ports.patch({ spaceZoneBindings: { ...ports.get().spaceZoneBindings, [zoneId]: {
     workspaceId: workspace.id, spaceId, relations: { [spaceId]: false, ...Object.fromEntries(input.spaceIds.map(id => [id, true])) }
   } } })
@@ -295,7 +295,7 @@ export function spatialDestination(catalog: AgentMuxSpaceCatalog, dest: AgentMux
   const displayWorkspaceId = dest.displayWorkspaceId ?? zone.workspaceId
   const layout = dest.displayWorkspaceId ? exactDisplayLayout(layouts, displayWorkspaceId, dest.groupId) : layouts[displayWorkspaceId]
   if (dest.groupId && (!layout || !groupIds(layout.root).includes(dest.groupId))) failure('SPACE_LOCATION_UNKNOWN', 'The requested Group is not available.')
-  const groupId = dest.groupId ?? layout?.activeGroupId ?? `group:${crypto.randomUUID()}`
+  const groupId = dest.groupId ?? layout?.activeGroupId ?? mintObjectId()
   return { kind: 'new-tab', address: { spaceId: dest.spaceId ?? members[0]?.spaceId ?? null, zoneId: zone.zoneId,
     workspaceId: zone.workspaceId, displayWorkspaceId, groupId, ...mint } }
 }
@@ -547,7 +547,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
         selfMove = true
       }
     } else {
-      sessionId = request.content.kind === 'agent-session' ? request.content.agentSessionId : mintAgentSessionId()
+      sessionId = request.content.kind === 'agent-session' ? request.content.agentSessionId : mintObjectId()
       if (request.content.kind === 'new-agent') {
         executorId = request.content.executorId
         const executionWorkspaceId = request.content.executionWorkspaceId
@@ -582,7 +582,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
         report.agent = snapshotFact(existingSession)
       }
     }
-    const mint = { tabId: `view:${crypto.randomUUID()}`, regionId: from?.regionId ?? `region:${crypto.randomUUID()}` }
+    const mint = { tabId: mintObjectId(), regionId: from?.regionId ?? mintObjectId() }
     let destination: Destination | undefined
     const resourceInput = request.destination.newZone
     let resourceReference: SpatialRequestBinding['resource']

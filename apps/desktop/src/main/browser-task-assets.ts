@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { NameChangeAudit } from './name-change-audit.js'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -67,7 +67,14 @@ export class BrowserTaskAssets {
   private readonly now: () => number
   private readonly id: () => string
   constructor(private readonly store: BrowserTaskAssetStore, private readonly options: { now?: () => number; id?: () => string; nameAudit?: NameChangeAudit } = {}) {
-    this.now = options.now ?? Date.now; this.id = options.id ?? randomUUID
+    this.now = options.now ?? Date.now; this.id = options.id ?? mintObjectId
+  }
+
+  private allocateId(): string {
+    let id: string
+    do { id = identity(this.id()) } while (this.document.assets.some(asset => asset.id === id) ||
+      this.document.runs.some(run => run.id === id) || this.document.batches?.some(batch => batch.id === id))
+    return id
   }
 
   async ready(): Promise<void> { this.loaded ??= this.load(); await this.loaded }
@@ -198,7 +205,7 @@ export class BrowserTaskAssets {
       }))
       const keys = [...new Set(steps.flatMap(step => step.parameterKey ? [step.parameterKey] : []))]
       const asset: BrowserTaskAsset = {
-        id: identity(this.id()), browserId: identity(recording.browserId), sourceRecordingId: identity(recording.id),
+        id: this.allocateId(), browserId: identity(recording.browserId), sourceRecordingId: identity(recording.id),
         revision: 1, draft: content({ name, url: steps[0]?.url ?? safeUrl(recording.url), steps,
           parameters: keys.map(key => ({ key, label: key, secret: true })) }), versions: [], createdAt: at, updatedAt: at
       }
@@ -291,7 +298,7 @@ export class BrowserTaskAssets {
         const batchItem = batch?.items[batch.nextItem]
         if (budget && (!batchItem || (batchItem.runId && batchItem.runId !== existing?.id) || this.activeBrowsers.get(browserId)?.batchId !== budget.batchId)) throw new Error('The original batch item changed before its task was prepared.')
         const next = existing ?? {
-          id: identity(this.id()), assetId: asset.id, version: version.version, browserId,
+          id: this.allocateId(), assetId: asset.id, version: version.version, browserId,
           nextStep: 0, status: 'ready' as const, operationIds: [], stepExecutions: [], branchDecisions: [], executedMillis: 0, humanCheckpoints: [], startedAt: this.now(), updatedAt: this.now()
         }
         if (!existing) {
@@ -475,7 +482,7 @@ export class BrowserTaskAssets {
         if (previous && (previous.browserId !== browserId || previous.assetId !== asset.id || previous.version !== version.version ||
             previous.items.length !== supplied.items.length || previous.items.some((item, index) => item.id !== supplied.items[index]?.id))) throw new Error('Batch identity or item order changed; original progress was retained.')
         if (previous && previous.status !== 'ready' && previous.status !== 'waiting-human') throw new Error('This batch cannot continue automatically. Inspect its completed and uncertain original runs.')
-        const next: BrowserTaskBatchRun = previous ?? { id: identity(this.id()), browserId, assetId: asset.id, version: version.version,
+        const next: BrowserTaskBatchRun = previous ?? { id: this.allocateId(), browserId, assetId: asset.id, version: version.version,
           items: supplied.items.map(item => ({ id: item.id })), nextItem: 0, status: 'ready', operationCount: 0, executedMillis: 0, startedAt: this.now(), updatedAt: this.now() }
         if (!previous) {
           this.document.batches ??= []

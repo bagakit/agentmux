@@ -1,5 +1,5 @@
+import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { constants } from 'node:fs'
-import { randomUUID } from 'node:crypto'
 import { mkdir, open, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { DownloadItem, WebContents } from 'electron'
@@ -15,7 +15,8 @@ import type { WorkspaceFiles } from './workspace-files.js'
 const SCHEMA = 'agentmux.browser-download.v1'
 const MAX_RECEIPTS = 128
 const MAX_METADATA_BYTES = 32 * 1024
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const LEGACY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const storedId = (value: unknown): value is string => isObjectId(value) || typeof value === 'string' && LEGACY_ID.test(value)
 const terminal = new Set(['completed', 'cancelled', 'failed'])
 const states = new Set(['waiting', 'received', 'in-progress', ...terminal])
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
@@ -73,9 +74,10 @@ export class BrowserDownloads {
     this.active.add(contents.id)
     try {
       await this.ready()
-      const id = randomUUID(), stagingPath = join(this.directory, `${id}.part`), now = Date.now()
-      let receipt: BrowserDownloadReceipt = { ...source, id, status: 'waiting', path: options.path, filename: null, mime: null, receivedBytes: 0, totalBytes: null, createdAt: now, updatedAt: now }
-      await this.reserve(receipt)
+      const now = Date.now()
+      let receipt: BrowserDownloadReceipt = { ...source, id: mintObjectId(), status: 'waiting', path: options.path, filename: null, mime: null, receivedBytes: 0, totalBytes: null, createdAt: now, updatedAt: now }
+      receipt = await this.reserve(receipt)
+      const id = receipt.id, stagingPath = join(this.directory, `${id}.part`)
       return await new Promise<BrowserDownloadReceipt>((resolve) => {
         let item: DownloadItem | null = null, finishing = false
         const notify = (): void => {
@@ -160,7 +162,7 @@ export class BrowserDownloads {
 
   async read(reference: BrowserDownloadReference, current: BrowserDownloadCurrentOwner, options: BrowserDownloadReadOptions = {}): Promise<BrowserDownloadChunk> {
     await this.ready()
-    if (!reference || reference.kind !== 'browser-download-file' || !UUID.test(reference.id) || !current.workspaceId ||
+    if (!reference || reference.kind !== 'browser-download-file' || !storedId(reference.id) || !current.workspaceId ||
       reference.workspaceId !== current.workspaceId || reference.browserId !== current.browserId) throw new Error('Download reference does not belong to this Workspace and Browser.')
     const receipt = await this.load(reference.id)
     const original = receipt.reference
@@ -189,10 +191,17 @@ export class BrowserDownloads {
     await durableWriteFile(join(this.directory, `${receipt.id}.json`), document)
   }
 
-  private async reserve(receipt: BrowserDownloadReceipt): Promise<void> {
-    const reservation = this.receiptTail.then(async () => { await this.makeRoom(); await this.save(receipt) })
-    this.receiptTail = reservation.catch(() => {})
-    await reservation
+  private async reserve(receipt: BrowserDownloadReceipt): Promise<BrowserDownloadReceipt> {
+    const reservation = this.receiptTail.then(async () => {
+      const ids = await this.makeRoom()
+      let id = receipt.id
+      while (ids.has(id)) id = mintObjectId()
+      const reserved = { ...receipt, id }
+      await this.save(reserved)
+      return reserved
+    })
+    this.receiptTail = reservation.then(() => {}, () => {})
+    return await reservation
   }
 
   private async load(id: string): Promise<BrowserDownloadReceipt> {
@@ -209,20 +218,21 @@ export class BrowserDownloads {
   }
 
   private async ids(): Promise<string[]> {
-    return (await readdir(this.directory)).filter(name => name.endsWith('.json') && UUID.test(name.slice(0, -5))).map(name => name.slice(0, -5))
+    return (await readdir(this.directory)).filter(name => name.endsWith('.json') && storedId(name.slice(0, -5))).map(name => name.slice(0, -5))
   }
 
-  private async makeRoom(): Promise<void> {
-    const ids = await this.ids()
-    if (ids.length < MAX_RECEIPTS) return
+  private async makeRoom(): Promise<Set<string>> {
+    const ids = await this.ids(), retained = new Set(ids)
+    if (ids.length < MAX_RECEIPTS) return retained
     const receipts = (await Promise.all(ids.map(id => this.load(id)))).filter(receipt => terminal.has(receipt.status)).sort((a, b) => a.createdAt - b.createdAt)
     let count = ids.length
     for (const receipt of receipts) {
       if (count < MAX_RECEIPTS) break
       await rm(join(this.directory, `${receipt.id}.json`), { force: true })
-      count--
+      count--; retained.delete(receipt.id)
     }
     if (count >= MAX_RECEIPTS) throw new Error('The download receipt budget is occupied by pending transfers.')
+    return retained
   }
 
   private ready(): Promise<void> {

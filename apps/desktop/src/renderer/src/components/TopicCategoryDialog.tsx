@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { TopicCategory } from '@agentmux/core/control'
@@ -12,7 +13,7 @@ export function TopicCategoryDialog({ target, onClose, returnFocus }: { target: 
   const [name, setName] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null)
   const input = useRef<HTMLInputElement>(null), id = useRef('')
   const content = useRef<HTMLDivElement>(null)
-  useEffect(() => { setName(target && target !== 'create' ? target.title : ''); id.current = crypto.randomUUID(); setError(null) }, [target])
+  useEffect(() => { setName(target && target !== 'create' ? target.title : ''); id.current = mintObjectId(); setError(null) }, [target])
   async function save() {
     if (!target || busy || !name.trim()) return
     setBusy(true); setError(null)

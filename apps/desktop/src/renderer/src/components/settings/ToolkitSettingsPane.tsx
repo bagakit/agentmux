@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { Activity, ArrowLeft, Check, LockKeyhole, Plus, Search, Smartphone, Wrench, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -72,13 +73,13 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
   function open(id: string) { setSelectedId(id); setView('editor') }
   function add() {
     if (entries.length >= 128) return
-    const id = `tool-${crypto.randomUUID()}`
+    const id = mintObjectId()
     resource.add(id, { name: '', icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: '', script: "console.log('Hello from your toolkit')\n", args: [], actions: [] })
     focusNewName.current = true; setQuery(''); open(id)
   }
   function install() {
     if (entries.length >= 128) return
-    const id = `tool-${crypto.randomUUID()}`
+    const id = mintObjectId()
     resource.add(id, { kind: 'package', packagePath: '', enabled: true, statusBar: 'icon', workspacePath: '', args: [] })
     focusNewName.current = true; setQuery(''); open(id)
   }

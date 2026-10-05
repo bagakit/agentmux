@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { mkdir, open, readdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { durableWriteFile } from '@agentmux/core'
@@ -15,7 +15,8 @@ const MAX_STORE_BYTES = 64 * 1024 * 1024
 const MAX_PAYLOADS = 128
 const MAX_PAGE_NODES = 128
 const MAX_PAGE_CHARS = 32_768
-const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const LEGACY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const storedId = (value: unknown): value is string => isObjectId(value) || typeof value === 'string' && LEGACY_ID.test(value)
 const SCHEMA = 'agentmux.browser-step-evidence.v1'
 
 function sameIdentity(a: BrowserEvidenceIdentity, b: BrowserEvidenceIdentity): boolean {
@@ -34,7 +35,8 @@ export class BrowserStepEvidenceStore {
   async write(identity: BrowserEvidenceIdentity, content: BrowserStepEvidenceContent): Promise<BrowserStepEvidenceReference> {
     const write = this.tail.catch(() => {}).then(async () => {
       await this.ready()
-      const id = randomUUID()
+      let id: string
+      do { id = mintObjectId() } while (this.files.has(id))
       const bytes = Buffer.byteLength(JSON.stringify(content))
       const reference: BrowserStepEvidenceReference = {
         ...identity, id, kind: content.kind, capturedAt: Date.now(), byteLength: bytes,
@@ -59,7 +61,7 @@ export class BrowserStepEvidenceStore {
   }
 
   async read(reference: BrowserStepEvidenceReference): Promise<BrowserStepEvidenceItem> {
-    if (!ID.test(reference.id)) throw new Error('Invalid step evidence identity.')
+    if (!storedId(reference.id)) throw new Error('Invalid step evidence identity.')
     const file = await open(join(this.directory, `${reference.id}.json`), 'r')
     try {
       // Read with a fixed buffer, rather than trusting a mutable on-disk file size.
@@ -91,7 +93,7 @@ export class BrowserStepEvidenceStore {
     const names = await readdir(this.directory)
     for (const name of names) {
       const id = name.replace(/\.json$/, '')
-      if (name !== `${id}.json` || !ID.test(id)) continue
+      if (name !== `${id}.json` || !storedId(id)) continue
       const info = await stat(join(this.directory, name))
       if (info.isFile()) this.files.set(id, { bytes: info.size, at: info.mtimeMs })
     }

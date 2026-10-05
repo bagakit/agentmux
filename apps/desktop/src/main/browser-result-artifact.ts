@@ -1,5 +1,6 @@
+import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { constants } from 'node:fs'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { mkdir, open, readdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { durableWriteFile } from '@agentmux/core'
@@ -13,7 +14,8 @@ const MAX_STORE_BYTES = 64 * 1024 * 1024
 const MAX_ARTIFACTS = 128
 const MAX_METADATA_BYTES = 16 * 1024
 const CHUNK_BYTES = BROWSER_RESULT_MAX_READ_BYTES
-const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const LEGACY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const storedId = (value: unknown): value is string => isObjectId(value) || typeof value === 'string' && LEGACY_ID.test(value)
 const SCHEMA = 'agentmux.browser-result-artifact'
 type Metadata = { schema: string; reference: BrowserResultArtifactReference; chunks: string[] }
 const hash = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex')
@@ -76,7 +78,8 @@ export class BrowserResultArtifactStore {
       await this.ready()
       const bytes = await load()
       JSON.parse(bytes.toString('utf8')) // A result is JSON, not an arbitrary file transfer.
-      const id = randomUUID()
+      let id: string
+      do { id = mintObjectId() } while (this.files.has(id))
       const reference: BrowserResultArtifactReference = {
         ...source, kind: 'browser-result-artifact', id, format: 'json',
         byteLength: bytes.length, capturedAt: Date.now(), maxReadBytes: BROWSER_RESULT_MAX_READ_BYTES
@@ -110,7 +113,7 @@ export class BrowserResultArtifactStore {
 
   async read(reference: BrowserResultArtifactReference, current: BrowserResultCurrentOwner,
     options: BrowserResultReadOptions = {}): Promise<BrowserResultArtifactChunk> {
-    if (!reference || !ID.test(reference.id) || reference.kind !== 'browser-result-artifact' ||
+    if (!reference || !storedId(reference.id) || reference.kind !== 'browser-result-artifact' ||
         reference.format !== 'json' || !reference.workspaceId || !current.workspaceId ||
         current.workspaceId !== reference.workspaceId || current.browserId !== reference.browserId) {
       throw new Error('Result artifact does not belong to this Workspace and Browser.')
@@ -173,12 +176,12 @@ export class BrowserResultArtifactStore {
     const present = new Set(names)
     for (const name of names) {
       const payloadId = name.replace(/\.data$/, '')
-      if (name === `${payloadId}.data` && ID.test(payloadId) && !present.has(`${payloadId}.json`)) {
+      if (name === `${payloadId}.data` && storedId(payloadId) && !present.has(`${payloadId}.json`)) {
         await rm(join(this.directory, name), { force: true }) // Interrupted publish; never a durable reference.
         continue
       }
       const id = name.replace(/\.json$/, '')
-      if (name !== `${id}.json` || !ID.test(id)) continue
+      if (name !== `${id}.json` || !storedId(id)) continue
       try {
         const metadata = await stat(join(this.directory, name))
         const payload = await stat(join(this.directory, `${id}.data`))

@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useState, type MouseEvent } from 'react'
 import { Plus, Square, Trash2 } from 'lucide-react'
@@ -17,10 +18,10 @@ type Props = {
 export function BrowserTaskBatchEditor({ version, batch, runs, busy, onRun, onStop }: Props) {
   const [startNew, setStartNew] = useState(false)
   const original = !startNew && batch?.version === version.version ? batch : null
-  const [items, setItems] = useState<{ id: string; parameters: Record<string, string> }[]>(() => original?.items.map(item => ({ id: item.id, parameters: {} })) ?? [{ id: crypto.randomUUID(), parameters: {} }])
+  const [items, setItems] = useState<{ id: string; parameters: Record<string, string> }[]>(() => original?.items.map(item => ({ id: item.id, parameters: {} })) ?? [{ id: mintObjectId(), parameters: {} }])
   const [fresh, setFresh] = useState<Record<string, string>>({})
   const [error, setError] = useState<string>()
-  useEffect(() => { setItems(original?.items.map(item => ({ id: item.id, parameters: {} })) ?? [{ id: crypto.randomUUID(), parameters: {} }]); setFresh({}); setError(undefined) }, [version.version, original?.id])
+  useEffect(() => { setItems(original?.items.map(item => ({ id: item.id, parameters: {} })) ?? [{ id: mintObjectId(), parameters: {} }]); setFresh({}); setError(undefined) }, [version.version, original?.id])
   useEffect(() => { setStartNew(false) }, [version.version, batch?.id])
   const currentRun = runs.find(run => run.id === original?.items[original.nextItem]?.runId)
   const required = new Set(browserTaskSegment(version.steps, currentRun?.nextStep ?? 0).flatMap(step => step.parameterKey ? [step.parameterKey] : []))
@@ -51,7 +52,7 @@ export function BrowserTaskBatchEditor({ version, batch, runs, busy, onRun, onSt
         {!original ? <button type="button" className="browser-rsi-icon-button" aria-label={`Remove batch item ${index + 1}`} disabled={busy || items.length <= 1} onClick={() => setItems(current => current.filter(row => row.id !== item.id))}><Trash2 size={11} aria-hidden="true" /></button> : null}
       </div>
     })}
-    {!original ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy || items.length >= 16} onClick={() => setItems(current => [...current, { id: crypto.randomUUID(), parameters: {} }])}><Plus size={11} aria-hidden="true" />Add item</button> : null}
+    {!original ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy || items.length >= 16} onClick={() => setItems(current => [...current, { id: mintObjectId(), parameters: {} }])}><Plus size={11} aria-hidden="true" />Add item</button> : null}
     {secrets.map(parameter => <label key={parameter.key} className="browser-task-asset__field"><span>{parameter.label} · fresh</span><TextInput type="password" autoComplete="off" aria-label={`Batch fresh ${parameter.label}`} maxLength={16_384} value={fresh[parameter.key] ?? ''} disabled={!editable} onChange={event => setFresh(current => ({ ...current, [parameter.key]: event.target.value }))} /></label>)}
     <footer className="browser-rsi-replay__actions"><button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={!editable} onClick={event => void execute(event)}>{original ? 'Return control and continue batch' : 'Run batch'}</button>
       {original && ['completed', 'interrupted', 'failed', 'stopped'].includes(original.status) ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy} onClick={() => setStartNew(true)}>New batch</button> : null}

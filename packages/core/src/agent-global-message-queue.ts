@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
 import { chmod, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
@@ -493,7 +494,7 @@ export class DurableAgentMuxMessageQueue {
 
   async append(input: AgentMuxMessageAppendInput): Promise<AgentMuxMessageReceipt> {
     return this.withLock(async () => {
-      const messageId = input.messageId ?? randomUUID()
+      const messageId = input.messageId ?? mintObjectId()
       if (input.execution !== undefined && input.execution !== 'default' && input.execution !== 'immediate') throw new AgentMuxError('Message execution is invalid.', 'INVALID_CONTROL_REQUEST')
       const execution = input.execution ?? 'default'
       const sourceChannel = input.sourceChannel === undefined ? undefined : normalizeMessageChannel(input.sourceChannel)

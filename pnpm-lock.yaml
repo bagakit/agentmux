@@ -405,6 +405,9 @@ importers:
       '@agentmux/git':
         specifier: workspace:*
         version: link:../git
+      '@agentmux/identity':
+        specifier: workspace:*
+        version: link:../identity
       '@agentmux/relay':
         specifier: workspace:*
         version: link:../relay
@@ -414,9 +417,6 @@ importers:
       '@noble/hashes':
         specifier: 2.4.0
         version: 2.4.0
-      '@scure/base':
-        specifier: 2.2.0
-        version: 2.2.0
       '@xmldom/xmldom':
         specifier: 0.9.12
         version: 0.9.12
@@ -456,6 +456,10 @@ importers:
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.3)(happy-dom@20.14.0)(yaml@2.9.0)
 
   packages/demand:
+    dependencies:
+      '@agentmux/identity':
+        specifier: workspace:*
+        version: link:../identity
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -478,6 +482,19 @@ importers:
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.3)(happy-dom@20.14.0)(yaml@2.9.0)
+
+  packages/identity:
+    dependencies:
+      '@noble/hashes':
+        specifier: 2.4.0
+        version: 2.4.0
+      '@scure/base':
+        specifier: 2.2.0
+        version: 2.2.0
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
 
   packages/layout:
     dependencies:

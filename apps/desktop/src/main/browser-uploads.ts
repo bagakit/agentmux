@@ -1,4 +1,5 @@
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
+import { lstat, mkdir, readFile, readdir, rm } from 'node:fs/promises'
 import { durableWriteFile } from '@agentmux/core'
 import { z } from 'zod'
 import { basename, join } from 'node:path'
@@ -69,7 +70,7 @@ export class BrowserUploads {
     requireCurrent()
     if (this.unaccounted) throw new Error('Some retained upload snapshots have no verified document metadata. Inspect selected files in Browser settings before adding another upload.')
     if (this.selectionCount >= MAX_SELECTIONS) throw new Error('Upload staging is full. Navigate or close an unused Browser to release its selected files.')
-    const selection: Selection = { directory: await mkdtemp(join(this.directory, 'upload-')), browserId: context.browserId, navigationId: context.navigationId, workspaceId: context.workspaceId, operationId: context.operationId, documentSurvivesClient: context.documentSurvivesClient, bytes: 0, files: [], released: false, unknown: false }
+    const selection: Selection = { directory: await this.allocateSelectionDirectory(), browserId: context.browserId, navigationId: context.navigationId, workspaceId: context.workspaceId, operationId: context.operationId, documentSurvivesClient: context.documentSurvivesClient, bytes: 0, files: [], released: false, unknown: false }
     if (this.disposed || this.selectionCount >= MAX_SELECTIONS) {
       await rm(selection.directory, { recursive: true, force: true })
       throw new Error('Upload staging is full. Navigate or close an unused Browser to release its selected files.')
@@ -197,13 +198,21 @@ export class BrowserUploads {
     }
   }
 
+  private async allocateSelectionDirectory(): Promise<string> {
+    for (;;) {
+      const directory = join(this.directory, mintObjectId())
+      try { await mkdir(directory, { mode: 0o700 }); return directory }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+    }
+  }
+
   private ready(): Promise<void> {
     return this.readyPromise ??= (async () => {
       await mkdir(this.directory, { recursive: true, mode: 0o700 })
       // Only a native document ends with this Client. Independent documents keep
       // their original files; restoring metadata never reconnects or observes a page.
       for (const entry of await readdir(this.directory, { withFileTypes: true })) {
-        if (!entry.isDirectory() || !/^upload-[A-Za-z0-9]{6}$/.test(entry.name)) continue
+        if (!entry.isDirectory() || (!isObjectId(entry.name) && !/^upload-[A-Za-z0-9]{6}$/.test(entry.name))) continue
         const directory = join(this.directory, entry.name)
         let data: z.infer<typeof selectionMetadata> | undefined
         try {

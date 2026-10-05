@@ -1,3 +1,5 @@
+import { fileWorkbenchIdentity } from './lib/file-workbench-state'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { readAgentPromptPreparationWait } from '@agentmux/core/prompt-preparation'
 import { submitWithPreparationRetry, type PromptPreparationRetryProgress } from './lib/prompt-preparation-retry'
 import { moteDefaultExecutor, moteDefaultConversation } from './lib/mote-quick-preferences'
@@ -101,7 +103,6 @@ import type { AgentMuxDemandDecision } from '@agentmux/core/control'
 import type { AgentCatalogEntry, AgentMuxInteractionResponse, AgentSessionHistoryDescriptor } from '@agentmux/core'
 import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherOptionDrafts, type LauncherProviderOptions } from './lib/launcher-option-draft'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
-import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { primaryMoteExecutorId } from './lib/primary-mote-executor'
 import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
@@ -291,12 +292,12 @@ import {
   addWorkbenchRegion,
   createWorkbenchTab,
   documentKey,
-  fileTabId,
   gitDiffIdentity,
   findWorkbenchRegion,
   focusWorkbenchTabRegion,
   inheritedTopicIdForNewTab,
   initialWorkbenchRegionId,
+  availableWorkbenchTabIdentity,
   tabGroupForTab,
   removeWorkbenchRegion,
   renameWorkbenchTab,
@@ -928,8 +929,8 @@ type AppState = {
   reloadRegionDiff(regionId: string, workspaceId: string, path: string): Promise<void>
   /**
    * 从 Changes 面板点一个文件：打开它（走既有 openFile），并把它的 canonical Region 切到 diff 模式。
-   * 是「minimal end-to-end」那条路——点变更 → 看该文件的 diff。regionId 由 openFile 的落点唯一决定
-   * （`initialWorkbenchRegionId(fileTabId(...))`），所以这里在 openFile 之后据同一规则算出它、再 setEditorRegionMode，
+   * 是「minimal end-to-end」那条路——点变更 → 看该文件的 diff。regionId 由原 File owner 的持久事实决定，
+   * 所以这里在 openFile 之后查回实际落点、再 setEditorRegionMode，
    * 而不是让调用方各自推导 regionId（推错就切错 Region 的模式）。
    */
   openFileDiff(path: string, workspaceId?: string): Promise<void>
@@ -2361,16 +2362,16 @@ if (typeof window !== 'undefined') {
 }
 
 function newTabGroupId(): string {
-  return `tab-group:${crypto.randomUUID()}`
+  return mintObjectId()
 }
 
 function newRegionId(): string {
-  return `region:${crypto.randomUUID()}`
+  return mintObjectId()
 }
 
 function newLauncherTab(workspaceId: string, topicId?: string): WorkbenchTab {
   const executorId = moteDefaultExecutor(useAppStore.getState(), workspaceId, topicId)
-  const tabId = `launcher:${crypto.randomUUID()}`
+  const tabId = mintObjectId()
   const surface: LauncherWorkbenchSurface = {
     regionId: initialWorkbenchRegionId(tabId),
     kind: 'launcher',
@@ -4909,7 +4910,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         workspaceId: region.workspaceId,
         tabId: region.tabId,
         regionId: region.regionId,
-        mint: { tabId: `view:${crypto.randomUUID()}` }
+        mint: { tabId: mintObjectId() }
       })
       if (result.kind !== 'promoted') {
         // 'already-sole' 是调用方**能据以行动**的那种拒绝：这一格已经独占整张 Tab，没有可搬的东西。
@@ -5112,7 +5113,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       input(),
       request.destination,
       request.caller,
-      `view:${crypto.randomUUID()}`,
+      mintObjectId(),
       newRegionId(),
       request.operation
     )
@@ -5201,7 +5202,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }
 
-    const browserId = `browser:${crypto.randomUUID()}`
+    const browserId = mintObjectId()
     // Control places a Browser; explicit focus is a separate request. The human UI open path
     // keeps its own selection intent, while this path retains the current work and input owner.
     set({ tabs: plan.tabs, layouts: plan.layouts })
@@ -5297,11 +5298,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const session = get().sessions.find((candidate) => candidate.id === id)
     const workspace = session ? workspaceForSession(get().config, session, scratchTopicsForConfig(get().config, get().scratchTopicSnapshots)) : null
     if (!session || !workspace) return
-    const tabId = sessionTabId(id)
+    const { tabId, regionId } = availableWorkbenchTabIdentity(current.tabs, incarnation => sessionTabId(id, incarnation))
     const layout = get().layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
     const existingTabGroupId = tabGroupForTab(layout, tabId)
     const targetTabGroupId = existingTabGroupId ?? preferredTabGroupId ?? layout.activeGroupId
-    const regionId = initialWorkbenchRegionId(tabId)
     const surface: AgentWorkbenchSurface | TerminalWorkbenchSurface = {
       regionId,
       kind: session.kind,
@@ -5672,7 +5672,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       sessionId: surface.sessionId,
       targetWorkspaceId,
       workspaceIds: (state.config?.workspaces ?? []).map((workspace) => workspace.id),
-      mint: { tabId: `view:${crypto.randomUUID()}`, tabGroupId: newTabGroupId(), regionId: newRegionId() }
+      mint: { tabId: mintObjectId(), tabGroupId: newTabGroupId(), regionId: newRegionId() }
     })
     if (result.kind !== 'moved') return
     // One atomic layout replacement, then navigate with the same focus path selectSession uses —
@@ -5744,7 +5744,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       workspaceId,
       tabId,
       regionId,
-      mint: { tabId: `view:${crypto.randomUUID()}` }
+      mint: { tabId: mintObjectId() }
     })
     if (result.kind !== 'promoted') return
     // One atomic state replacement. The reducer's layout already made the new Tab the active Tab of its
@@ -5952,7 +5952,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       surface.scope.hostId === snapshot.hostId && surface.scope.repoPath === snapshot.repoPath &&
       surface.scope.workspacePath === workspace.path
         ? [{ tab, surface }] : []))[0]
-    const tabId = existing?.tab.id ?? 'view:' + crypto.randomUUID()
+    const tabId = existing?.tab.id ?? mintObjectId()
     const regionId = existing?.surface.regionId ?? newRegionId()
     const layout = state.layouts[workspaceId] ?? createWorkspaceLayout(newTabGroupId())
     const groupId = tabGroupForTab(layout, tabId) ?? layout.activeGroupId
@@ -5985,7 +5985,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       surface.kind === 'git-diff' && gitDiffIdentity(surface.workspaceId, surface.comparison) === id
         ? [{ tab, surface }] : []
     )))[0]
-    const tabId = existing?.tab.id ?? `view:${crypto.randomUUID()}`
+    const tabId = existing?.tab.id ?? mintObjectId()
     const layout = state.layouts[workspaceId] ?? createWorkspaceLayout(newTabGroupId())
     const groupId = tabGroupForTab(layout, tabId) ?? layout.activeGroupId
     const nextLayout = existing ? activateLayoutTab(layout, groupId, tabId) : addTabPlacement(layout, groupId, tabId)
@@ -6463,8 +6463,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
     const displayId = placement?.displayWorkspaceId ?? workspaceId
     const background = placement?.focus === false
-    const canonicalTabId = workspaceId ? fileTabId(workspaceId, path) : null
-    let exactRegionId = placement?.launcher?.regionId ?? placement?.reference?.regionId ?? (canonicalTabId ? initialWorkbenchRegionId(canonicalTabId) : null)
+    const fileIdentity = workspaceId ? fileWorkbenchIdentity(navigation, workspaceId, path, placement) : null
+    const canonicalTabId = fileIdentity?.tabId ?? null
+    let exactRegionId = placement?.launcher?.regionId ?? placement?.reference?.regionId ?? fileIdentity?.regionId ?? null
     let destinationTabId = placement?.split?.tabId ?? placement?.launcher?.tabId ?? placement?.reference?.tabId ?? canonicalTabId
     const originalTab = destinationTabId ? navigation.tabs[destinationTabId] : undefined
     const splitAnchor = placement?.split ? originalTab?.regions[placement.split.regionId] : undefined
@@ -6586,7 +6587,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return
       }
       if (placement.reference && !bookmarkOpened) { placement.projection.onSelect(placement.reference); return }
-      const tabId = bookmarkOpened ? destinationTabId! : placement.split?.tabId ?? placement.launcher?.tabId ?? fileTabId(workspaceId, path), tab = get().tabs[tabId]
+      const tabId = bookmarkOpened ? destinationTabId! : placement.split?.tabId ?? placement.launcher?.tabId ?? destinationTabId!, tab = get().tabs[tabId]
       if (!tab || !tabGroupId || !findGroup(get().layouts[displayId!]!, tabGroupId)?.tabOrder.includes(tabId)) throw new Error('The exact Note display occurrence could not be confirmed.')
       const reference = { displayWorkspaceId: displayId!, groupId: tabGroupId, tabId, regionId: placement.split && exactRegionId ? exactRegionId : tab.layout.activeRegionId }
       placement.projection.onSelect(reference)
@@ -7004,7 +7005,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const layout = state.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
     // A Topic owns its directory before any Tab or Session exists. The launcher is a projection,
     // not the identity from which the Topic is derived.
-    const topicId = `launcher:${crypto.randomUUID()}`
+    const topicId = mintObjectId()
     const bornSpaceId = directoryIdentity(workspace.hostId, scratchTopicIdentityPath(workspace, { directoryPath: scratchTopicDirectoryName(topicId) }))
     const targetTab = { ...newLauncherTab(workspace.id, topicId), ...(preset === 'mote' ? {} : { space: { spaceId: bornSpaceId, zoneId: homeZoneId(bornSpaceId) } }),
       ...(initialRequest && preset === 'mote' ? { topicPreparation: 'mote' as const } : {}) }
@@ -7500,7 +7501,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!originalResource) throw new Error('The Note resource Workspace is unavailable.')
     const notebookContext = notebook ?? { notebookId: projection?.presentationId === 'recall-workbench' && captured.mainSurface === 'recall' && captured.recallNotebookId
       ? captured.recallNotebookId : DEFAULT_NOTEBOOK_ID }
-    const noteId = retrying ? previous.noteId : crypto.randomUUID(), blockId = retrying ? previous.blockIds[0]! : crypto.randomUUID(), draft = retrying ? previous.draft : initialContent ?? ''
+    const noteId = retrying ? previous.noteId : mintObjectId(), blockId = retrying ? previous.blockIds[0]! : mintObjectId(), draft = retrying ? previous.draft : initialContent ?? ''
     let receipt: NoteCreationReceipt = { intentId: retrying ? previous.intentId : crypto.randomUUID(), createdAt: retrying ? previous.createdAt : Date.now(), noteId, blockIds: [blockId], draft, path: '', status: 'pending', revealed: false,
       ...(launcher ? { launcher } : {}),
       notebook: retrying && previous.notebook ? previous.notebook : notebookContext,
@@ -7640,25 +7641,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       for (const observedPath of observedPaths) {
         advanceDocumentLifetime(documentKey(workspaceId, observedPath))
       }
-      set((state) => {
-        const { tabIds, ...renamed } = reduceFileRename(state, workspaceId, path, nextPath)
-        // The File owner confirmed these legacy Tab identities were replaced. Retire
-        // only the replaced Tabs; their original Region identities remain in the new Tabs.
-        for (const [oldTabId, newTabId] of tabIds) {
-          if (oldTabId !== newTabId) coreSpatialPersistence?.removeEntity(oldTabId)
-        }
-        const remap = (reference: NonNullable<AppState['surveyZoneSelection']>['selection'][number]) => tabIds.has(reference.tabId) ? { ...reference, tabId: tabIds.get(reference.tabId)! } : reference
-        return { ...renamed,
-        surveyZoneSelection: state.surveyZoneSelection ? { ...state.surveyZoneSelection,
-          selection: state.surveyZoneSelection.selection.map(remap), active: state.surveyZoneSelection.active ? remap(state.surveyZoneSelection.active) : null } : null,
-        recallZoneSelection: state.recallZoneSelection ? { ...state.recallZoneSelection,
-          selection: state.recallZoneSelection.selection.map(remap), active: state.recallZoneSelection.active ? remap(state.recallZoneSelection.active) : null } : null,
+      set((state) => ({
+        ...reduceFileRename(state, workspaceId, path, nextPath),
         // Same reason as `createPath`: the Topics panel and the Board read this counter and nothing
         // else. Moving a Topic's `topic.md` out breaks the Topic's identity, and only the file tree
         // would notice. Folded into the projection's own `set` so it is one render, not two.
         workspaceFileRevisions: bumpWorkspaceFileRevision(state.workspaceFileRevisions, workspaceId)
-        }
-      })
+      }))
       for (const observedPath of observedPaths) {
         const renamedPath = remapPathWithinSubtree(observedPath, path, nextPath)
         transferFileSaveTail(workspaceId, observedPath, renamedPath)
@@ -7853,7 +7842,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const originalOptions = providerId ? state.launcherOptionDrafts[regionId]?.[providerId] : undefined
     const submittedOptions = originalOptions && launchOptions && shallow(originalOptions, launchOptions) ? originalOptions : undefined
     const launchNote = agentMuxNote ?? state.agentComposerNotes[regionId]
-    const sessionId = mintAgentSessionId()
+    const sessionId = mintObjectId()
     const createOperationId = crypto.randomUUID()
     const priorFailure = lifecycleFailureBelongsTo(state.errorNoticeContext?.lifecycle, { regionId })
       ? state.errorNoticeContext : null
@@ -8486,7 +8475,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const sourceTab = placementOrigin.tabId ? opening.tabs[placementOrigin.tabId] : undefined
     if (placementOrigin.tabId && (!sourceTab || !placementOrigin.regionId || !sourceTab.regions[placementOrigin.regionId])) throw new Error('The original link Region is unconfirmed; its work surface is kept.')
     const resourceWorkspaceId = sourceTab?.workspaceId ?? placementOrigin.workspaceId
-    const tabId = destination === 'tab' ? `launcher:${crypto.randomUUID()}` : placementOrigin.tabId!
+    const tabId = destination === 'tab' ? mintObjectId() : placementOrigin.tabId!
     const regionId = destination === 'tab' ? initialWorkbenchRegionId(tabId) : newRegionId()
     const pendingLauncher: LauncherWorkbenchSurface = {
       regionId,

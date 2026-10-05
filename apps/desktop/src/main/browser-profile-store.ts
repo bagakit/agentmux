@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
@@ -17,7 +17,7 @@ const BROWSER_PROFILE_PARTITION_PREFIX = 'persist:agentmux-browser-profile:'
 const BROWSER_PROFILE_LABEL_MAX_LENGTH = 128
 const PROFILE_UUID_RE = /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/
 
-const profileIdSchema = z.string().regex(PROFILE_UUID_RE, 'Browser Profile id must be a canonical UUID v4')
+const profileIdSchema = z.string().refine(value => isObjectId(value) || PROFILE_UUID_RE.test(value), 'Browser Profile id must be a stored object identity')
 const profileLabelSchema = z
   .string()
   .min(1)
@@ -261,7 +261,7 @@ export class BrowserProfileStore {
       if (!isMissingFileError(error)) throw error
     }
 
-    const id = randomUUID()
+    const id = mintObjectId()
     const metadata = metadataSchema.parse({
       version: BROWSER_PROFILE_METADATA_VERSION,
       defaultProfileId: id,
@@ -273,13 +273,11 @@ export class BrowserProfileStore {
   }
 
   private createUnusedProfileId(metadata: BrowserProfileMetadata): string {
-    const id = randomUUID()
-    if (
+    let id: string
+    do { id = mintObjectId() } while (
       metadata.profiles.some((profile) => profile.id === id) ||
       metadata.pendingImports.some((pending) => pending.profileId === id)
-    ) {
-      throw new Error('Generated duplicate Browser Profile id')
-    }
+    )
     return id
   }
 

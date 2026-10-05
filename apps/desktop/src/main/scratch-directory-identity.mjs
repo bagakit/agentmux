@@ -1,3 +1,4 @@
+import { isScratchTopicId, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName } from '../shared/scratch-topic-identity.mjs'
 import { createHash, randomUUID } from 'node:crypto'
 import { constants, lstat, mkdir, open, readdir, unlink } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
@@ -7,15 +8,13 @@ export const SCRATCH_DIRECTORY_IDENTITY_PATH = '.agentmux/directory-identity.jso
 export const SCRATCH_DIRECTORY_IDENTITY_PENDING_PATH = '.agentmux/directory-identity.pending.json'
 export const SCRATCH_DIRECTORY_ALIAS_PENDING_PATH = '.agentmux/directory-identity.pending.alias'
 const defaultHelper = resolve(import.meta.dirname, '../../resources/bin/agentmux-workspace-move')
-const directoryName = /^topic--(launcher|session|view)--([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/
 const invalid = message => Object.assign(new Error(message), { code: 'DIRECTORY_IDENTITY_INVALID' })
 const same = (a, b) => a.dev === b.dev && a.ino === b.ino
 const hash = path => createHash('sha256').update(path).digest('hex')
 
-const contentId = /^(launcher|session|view):([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/
 const roles = ['scratch', 'topics', 'motes']
 export function moteDirectoryName(topicId) {
-  if (!contentId.test(topicId)) throw invalid('The full Mote content identity is unconfirmed.')
+  if (!isScratchTopicId(topicId)) throw invalid('The full Mote content identity is unconfirmed.')
   return hash(topicId).slice(0, 16)
 }
 
@@ -27,14 +26,14 @@ function identityCandidates(context, name, role) {
 export function directoryIdentityRecord(original) {
   if (typeof original === 'string') {
     const name = basename(original)
-    if (!directoryName.test(name)) throw invalid('The original directory name is unconfirmed.')
+    if (!scratchTopicIdFromDirectoryName(name)) throw invalid('The original directory name is unconfirmed.')
     return { version: 2, identityDirectoryName: name, identityPathHash: hash(original) }
   }
   const name = basename(original.original ?? '')
   const id = original.topicId
-  if (!contentId.test(id) || !original.original) throw invalid('The original full content identity is unconfirmed.')
+  if (!isScratchTopicId(id) || !original.original) throw invalid('The original full content identity is unconfirmed.')
   const matched = roles.filter(role => identityCandidates(original, name, role).includes(original.original))
-  if (matched.length !== 1 || !(name === `topic--${id.replace(':', '--')}` || matched[0] === 'motes' && name === moteDirectoryName(id)))
+  if (matched.length !== 1 || !(name === scratchTopicDirectoryName(id) || matched[0] === 'motes' && name === moteDirectoryName(id)))
     throw invalid('The original identity root or name is unconfirmed.')
   return { version: 3, topicId: id, identityRoot: matched[0], identityDirectoryName: name, identityPathHash: hash(original.original) }
 }
@@ -53,10 +52,9 @@ function verifiedRecord(value, original) {
   const current = value?.version === 3 && keys === 'identityDirectoryName,identityPathHash,identityRoot,topicId,version'
   if (!legacy && !relative && !current) throw invalid('Directory content identity record is invalid.')
   const name = legacy ? basename(value.identityDirectoryPath) : value.identityDirectoryName
-  const match = typeof name === 'string' ? directoryName.exec(name) : null
-  const id = current ? value.topicId : match ? `${match[1]}:${match[2]}` : null
-  if (!contentId.test(id) || original.topicId && original.topicId !== id ||
-      !(name === `topic--${id.replace(':', '--')}` || current && value.identityRoot === 'motes' && name === moteDirectoryName(id)) ||
+  const id = current ? value.topicId : typeof name === 'string' ? scratchTopicIdFromDirectoryName(name) : null
+  if (!isScratchTopicId(id) || original.topicId && original.topicId !== id ||
+      !(name === scratchTopicDirectoryName(id) || current && value.identityRoot === 'motes' && name === moteDirectoryName(id)) ||
       current && !roles.includes(value.identityRoot)) throw invalid('Directory full content ID or original root is unconfirmed.')
   const candidates = identityCandidates(original, name, current ? value.identityRoot : undefined)
     .filter(path => legacy ? path === value.identityDirectoryPath : /^[0-9a-f]{64}$/.test(value.identityPathHash) && hash(path) === value.identityPathHash)

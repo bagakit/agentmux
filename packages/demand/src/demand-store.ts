@@ -1,5 +1,6 @@
 import { appendDemandContentReferences, parseDemandContentReferences } from './content-references.js'
 import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/identity'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import {
@@ -311,7 +312,7 @@ export class DemandStore {
     return this.mutate('create', (snapshot) => {
       const title = inputString(input.title, 'title')
       if (!title) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'title is required')
-      const id = input.id ?? `demand_${randomUUID()}`
+      const id = input.id ?? mintObjectId()
       inputString(id, 'id')
       if (snapshot.demands.some((entry) => entry.id === id)) {
         throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, `Demand ${id} already exists`)
@@ -389,7 +390,7 @@ export class DemandStore {
           const current = demand.grounding
           const content = current && { alignmentRevision: current.alignmentRevision, summary: current.summary, checks: current.checks }
           if (JSON.stringify(proposal) !== JSON.stringify(content)) {
-            demand.grounding = { ...proposal, submissionId: `grounding_${randomUUID()}`, acceptedAt: null }
+            demand.grounding = { ...proposal, submissionId: mintObjectId(), acceptedAt: null }
           }
         }
       } catch (error) {
@@ -420,7 +421,7 @@ export class DemandStore {
       if (issue) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, issue)
       if (demand.alignment.confirmedAt === null) {
         demand.alignment.confirmedAt = Date.now()
-        demand.activities.push({ id: `activity_${randomUUID()}`, kind: 'goal-confirmed', message: `User confirmed goal revision ${expectedRevision}.`, createdAt: demand.alignment.confirmedAt, actorId: null })
+        demand.activities.push({ id: mintObjectId(), kind: 'goal-confirmed', message: `User confirmed goal revision ${expectedRevision}.`, createdAt: demand.alignment.confirmedAt, actorId: null })
       }
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
@@ -439,7 +440,7 @@ export class DemandStore {
       if (issue) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, issue)
       if (demand.grounding.acceptedAt === null) {
         demand.grounding.acceptedAt = Date.now()
-        demand.activities.push({ id: `activity_${randomUUID()}`, kind: 'results-accepted', message: acceptGaps ? 'User accepted these results while retaining the reported gaps.' : 'User accepted these results.', createdAt: demand.grounding.acceptedAt, actorId: null })
+        demand.activities.push({ id: mintObjectId(), kind: 'results-accepted', message: acceptGaps ? 'User accepted these results while retaining the reported gaps.' : 'User accepted these results.', createdAt: demand.grounding.acceptedAt, actorId: null })
       }
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
@@ -492,7 +493,7 @@ export class DemandStore {
     return this.mutate('activity', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
       const activity: DemandActivity = {
-        id: input.id ?? `activity_${randomUUID()}`,
+        id: input.id ?? mintObjectId(),
         kind: input.kind,
         message: input.message,
         actorId: input.actorId,
@@ -513,7 +514,7 @@ export class DemandStore {
     return this.mutate('decision-log', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
       const decision: DemandDecision = {
-        id: input.id ?? `decision_${randomUUID()}`,
+        id: input.id ?? mintObjectId(),
         question: input.question,
         decision: input.decision,
         rationale: input.rationale,
@@ -595,7 +596,7 @@ export class DemandStore {
             status: failure ? 'failed' : 'applied', startedAt, settledAt: Math.max(startedAt, Date.now()),
             reason: failure?.message ?? (original!.title === demand.title ? 'unchanged' : null) }
           snapshot.nameHistory.push(nameChange)
-          demand.activities.push({ id: `activity_${randomUUID()}`, kind: 'name-change', message: failure ? 'Title change failed.' : nameChange.reason === 'unchanged' ? 'Title unchanged.' : 'Title changed.',
+          demand.activities.push({ id: mintObjectId(), kind: 'name-change', message: failure ? 'Title change failed.' : nameChange.reason === 'unchanged' ? 'Title unchanged.' : 'Title changed.',
             createdAt: nameChange.settledAt, actorId: context!.actor.verified ? context!.actor.id : null, nameChangeId: nameChange.id })
           demand.updatedAt = Math.max(snapshot.updatedAt, original!.updatedAt + 1, demand.updatedAt)
         }

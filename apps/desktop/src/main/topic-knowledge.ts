@@ -1,6 +1,7 @@
+import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { constants, lstat, open, readdir, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { AgentMuxError, type AgentMuxRpcCallContext, type TopicCategory, type KnowledgeTopic,
   type TopicMethod, type TopicParams, type TopicResult, type AgentMuxRpcTopicsOwner,
   parseFileListResult, parseFileReadResult, type FileReadParams,
@@ -25,10 +26,12 @@ const DOCUMENT_FORMATS = new Set(['md', 'markdown', 'txt', 'rst', 'adoc', 'org',
 const DOCUMENT_ARTIFACTS = new Set(['node_modules', 'dist', 'build', 'coverage', 'target'])
 type KnowledgeReadBudget = { chargedBytes: number; readBytes: number; unconfirmedReads: number; candidates: number;
   topicsVisited: number; stopped: boolean; stopReason: TopicSearchRecord['stopReason']; signal: AbortSignal }
+const LEGACY_OBJECT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u
+const storedObjectId = (value: string): boolean => isObjectId(value) || LEGACY_OBJECT_ID.test(value)
 function isOriginalDocument(path: string): boolean {
   if (path === SCRATCH_TOPIC_WIKI_PATH) return true
   if (path.split('/').some(part => part.startsWith('.') || DOCUMENT_ARTIFACTS.has(part))) return false
-  if (/^knowledge\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/u.test(path)) return false
+  if (path.startsWith('knowledge/') && path.endsWith('.json') && storedObjectId(path.slice('knowledge/'.length, -5))) return false
   return DOCUMENT_FORMATS.has(path.split('.').at(-1)!.toLowerCase())
 }
 
@@ -116,7 +119,7 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
     let names: string[]
     try { await regularDirectory(root); names = await readdir(root) }
     catch (error) { if (missing(error)) return []; throw error }
-    return await Promise.all(names.filter(name => /^category--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(name)).sort().map(async name => {
+    return await Promise.all(names.filter(name => name.startsWith('category--') && storedObjectId(name.slice('category--'.length))).sort().map(async name => {
       const id = name.slice('category--'.length), descriptor = this.categoryDescriptor(id, id)
       try { return await this.readCategory(id) }
       catch (error) { return { ...descriptor, readError: issue(error).message } }
@@ -254,7 +257,7 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
     entries: TopicKnowledgeItem[], unavailable: TopicUnavailable[], budget: KnowledgeReadBudget): Promise<void> {
     let directory: string
     try { directory = await this.knowledgeDirectory(topic) } catch (error) { if (missing(error)) return; throw error }
-    const names = (await readdir(directory)).filter(name => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/u.test(name)).sort()
+    const names = (await readdir(directory)).filter(name => name.endsWith('.json') && storedObjectId(name.slice(0, -5))).sort()
     for (const name of names) {
       if (!this.canContinue(topic, budget, entries.length, limit, unavailable)) return
       budget.candidates++
@@ -372,7 +375,7 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
         || source !== undefined && (!source.length || source.length > 4096 || /[\0\r\n]/u.test(source))) { omittedIssueCount++; continue }
       issues.push({ code, ...(source ? { source } : {}) })
     }
-    const record: TopicSearchRecord = { searchId: randomUUID(), query: params.query, topicId: params.topicId ?? null, limit,
+    const record: TopicSearchRecord = { searchId: mintObjectId(), query: params.query, topicId: params.topicId ?? null, limit,
       startedAt, finishedAt: Math.max(startedAt, Date.now()), durationMs: Math.max(0, Math.round(performance.now() - clock)),
       outcome: cancelled ? 'cancelled' : failed ? 'error' : unavailable.length ? 'partial' : 'complete',
       counters: { topicsVisited: budget.topicsVisited, candidates: budget.candidates, readBytes: budget.readBytes,

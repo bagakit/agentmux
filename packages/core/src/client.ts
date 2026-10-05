@@ -1,6 +1,6 @@
 import { createInputPerformanceRecorder, hostedCarrierPerformance, type ClientPerformanceDiagnostics, type InputPerformanceHandle } from './performance-diagnostics.js'
 import { DeliveryAttemptStore } from './delivery-attempt-store.js'
-import { deliveryFailure, type DeliveryAttempt, type DeliveryAttemptLookup, type DeliveryInputPhase } from './delivery-attempt.js'
+import { deliveryFailure, newDeliveryLogId, type DeliveryAttempt, type DeliveryAttemptLookup, type DeliveryInputPhase } from './delivery-attempt.js'
 import type { AgentMuxRunStorageObservation } from './run-storage-observation.js'
 
 import { createHash, randomUUID } from 'node:crypto'
@@ -4751,7 +4751,7 @@ export class AgentMuxClient {
       const admission = session?.promptCompletionAdmission, submission = session?.terminalPromptSubmission
       const matching = operationId !== null && submission?.submissionId === operationId ? submission : undefined
       const record: DeliveryAttempt = {
-        ...captured, logId: `delivery-${randomUUID()}`, source: 'core', hostId: session?.hostId ?? null,
+        ...captured, logId: newDeliveryLogId(), source: 'core', hostId: session?.hostId ?? null,
         startedAt, failedAt: Date.now(), stage, error: deliveryFailure(error),
         ...(session ? { observation: { source: 'core-session-projection' as const, observedAt: Date.now(), runId: session.run.runId,
           submissionId: admission?.submissionId ?? null,
