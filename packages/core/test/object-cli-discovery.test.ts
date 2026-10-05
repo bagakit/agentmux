@@ -16,9 +16,9 @@ import { SELF_CONTEXT_TOPIC_HINT } from '../src/agent-self-context.js'
 
 const goals: AgentMuxDemand[] = [
   { id: 'original-G1', title: 'First', description: 'saved', status: 'in_progress', priority: 'normal', projectId: 'P1', projectName: 'One',
-    assigneeExecutorId: 'E1', activityLog: ['original Goal activity'], sessionIds: ['generic-session'], createdAt: 1, updatedAt: 20, source: 'session' },
+    assigneeExecutorId: 'E1', activities: [{ id: 'A1', kind: 'progress', message: 'original Goal activity', actorId: null, createdAt: 15 }], sessionIds: ['generic-session'], createdAt: 1, updatedAt: 20, source: 'session' },
   { id: 'original-G2', title: 'Second', description: 'saved too', status: 'done', priority: 'low', projectId: 'P2', projectName: 'Two',
-    assigneeExecutorId: 'E2', activityLog: ['other Goal activity'], sessionIds: ['other-session'], createdAt: 2, updatedAt: 30, source: 'session' }
+    assigneeExecutorId: 'E2', activities: [{ id: 'A2', kind: 'review', message: 'other Goal activity', actorId: null, createdAt: 25 }], sessionIds: ['other-session'], createdAt: 2, updatedAt: 30, source: 'session' }
 ]
 let root: string, server: AgentMuxControlServer
 const seen: AgentMuxControlRequest[] = []
@@ -28,7 +28,8 @@ beforeEach(async () => {
     async execute(request): Promise<AgentMuxControlResult> {
       seen.push(request)
       if (request.operation === 'demand.list') return { operation: request.operation, demands: structuredClone(goals) }
-      if (request.operation === 'demand.show') return { operation: request.operation, demand: goals.find(goal => goal.id === request.demandId) ?? null }
+      if (request.operation === 'demand.show') return { operation: request.operation, demand: goals.find(goal => goal.id === request.demandId) ?? null, goalContinuations: [] }
+      if (request.operation === 'demand.activity.read') return { operation: request.operation, demandId: request.demandId, activities: goals.find(goal => goal.id === request.demandId)?.activities ?? [], diskDurability: 'confirmed' }
       if (request.operation === 'list.projects') return { operation: request.operation, projects: [
         { projectId: 'P1', name: 'One', hostId: 'fixture', path: root, kind: 'folder', repoPath: null, branch: null, activeAgentSessionIds: [] },
         { projectId: 'P2', name: 'Two', hostId: 'fixture', path: join(root, 'two'), kind: 'folder', repoPath: null, branch: null, activeAgentSessionIds: [] }
@@ -54,8 +55,8 @@ describe('compiled object discovery through the actual public service and origin
     expect(body.result.workspaces).toEqual([{ workspaceId: 'W1', projectId: 'P1', path: root, hostId: 'fixture', name: 'One', kind: 'folder', repoPath: null, branch: null }])
     expect(body.result.goals.map((goal: { id: string }) => goal.id)).toEqual(['original-G1', 'original-G2'])
     expect(body.result.activity).toEqual([
-      { goalId: 'original-G1', message: 'original Goal activity', updatedAt: 20 },
-      { goalId: 'original-G2', message: 'other Goal activity', updatedAt: 30 }
+      { goalId: 'original-G1', ...goals[0]!.activities![0] },
+      { goalId: 'original-G2', ...goals[1]!.activities![0] }
     ])
     expect(body.result.unavailable.length).toBeGreaterThan(0)
     expect(body.result.unavailable).toContainEqual(expect.objectContaining({ source: 'topics', code: 'TOPIC_FILESYSTEM_UNAVAILABLE' }))
@@ -70,12 +71,12 @@ describe('compiled object discovery through the actual public service and origin
     const activity = await run(['goal', 'activity', '--goal', 'original-G1', '--project', 'P1', '--session', 'generic-session', '--since', '10'])
     expect(activity.code, activity.stderr).toBe(0)
     expect(JSON.parse(activity.stdout)).toEqual({ ok: true, operation: 'goal.activity', result: {
-      activity: [{ goalId: 'original-G1', message: 'original Goal activity', updatedAt: 20 }]
+      activity: [{ goalId: 'original-G1', ...goals[0]!.activities![0] }], diskDurability: 'confirmed'
     } })
     const inspected = await run(['goal', 'inspect', '--goal', 'original-G1'])
     expect(inspected.code, inspected.stderr).toBe(0)
-    expect(JSON.parse(inspected.stdout)).toEqual({ ok: true, operation: 'goal.inspect', result: { goal: goals[0] } })
-    expect(seen.map(request => request.operation)).toEqual(['demand.list', 'demand.list', 'demand.show'])
+    expect(JSON.parse(inspected.stdout)).toEqual({ ok: true, operation: 'goal.inspect', result: { goal: goals[0], goalContinuations: [] } })
+    expect(seen.map(request => request.operation)).toEqual(['demand.list', 'demand.list', 'demand.activity.read', 'demand.show'])
   })
 
   it('reads original Desktop facts with exact canonical output, without an Agent caller', async () => {

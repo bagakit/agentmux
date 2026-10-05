@@ -122,6 +122,8 @@ export function objectCliSeed(method: string, input: string): string[] {
     'goal.discuss': ['--goal', ids.goal, '--mode', 'open'], 'goal.confirm': ['--goal', ids.goal, '--revision', '1'], 'goal.accept': ['--goal', ids.goal, '--revision', '1', '--submission', 'report'],
     'goal.focus': ['--goal', ids.goal], 'goal.link-session': ['--goal', ids.goal, '--session', ids.agent],
     'goal.link-project': ['--goal', ids.goal, '--project', 'P'], 'goal.decisions': ['--goal', ids.goal], 'goal.activity': [],
+    'goal.activity.append': ['--goal', ids.goal, '--kind', 'review', '--message', 'Original evidence', '--operation-id', 'ACTIVITY'],
+    'goal.activity.inspect': ['--goal', ids.goal, '--operation-id', 'ACTIVITY'],
     'message.inbox.check': ['--limit', '5'], 'message.inbox.ack': ['--generation', '3', '--reader-run', 'RUN'],
     'message.dispatch.open': ['--source-message', 'M'], 'message.dispatch.inspect': ['--source-message', 'M'],
     'message.dispatch.report': ['--source-message', 'M', '--reply-message', 'REPLY', '--kind', 'worker_done'],

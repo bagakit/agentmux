@@ -64,7 +64,7 @@ describe('public service uses the original Core and Desktop business owners', ()
     const filled = new AgentMuxRpcService({ coreClients: h.coreClients })
     await expect(empty.call('goal.activity', { since: -1 })).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
     for (const service of [empty, filled]) await expect(service.call('agent.ls', { executorId: [] } as any)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
-    expect(await empty.call('goal.activity', {})).toEqual({ activity: [] })
+    expect(await empty.call('goal.activity', {})).toEqual({ activity: [], diskDurability: 'confirmed' })
     expect(await empty.call('agent.ls', {})).toEqual({ sessions: [], errors: [] })
   })
   it('keeps Core Sessions and per-item status failures when no Desktop exists', async () => {
@@ -166,9 +166,12 @@ describe('public service uses the original Core and Desktop business owners', ()
   })
   it('preserves original Goal activity in both canonical read and snapshot', async () => {
     const goal = { id: 'g', title: 'demandId is literal prose', description: '', status: 'todo', priority: 'normal',
-      projectId: null, projectName: null, assigneeExecutorId: null, sessionIds: [], tags: [], createdAt: 1, updatedAt: 2, source: 'default-topic' as const, activityLog: ['Real retained activity'] }
-    const service = new AgentMuxRpcService({ coreClients: () => [], execute: async () => ({ operation: 'demand.list', demands: [goal] }) })
-    expect(await service.call('goal.activity', {})).toEqual({ activity: [{ goalId: 'g', message: 'Real retained activity', updatedAt: 2 }] })
+      projectId: null, projectName: null, assigneeExecutorId: null, sessionIds: [], tags: [], createdAt: 1, updatedAt: 2, source: 'default-topic' as const,
+      activities: [{ id: 'activity-original', kind: 'progress', message: 'Real retained activity', createdAt: 1, actorId: 'caller', operationId: 'activity-op' }] }
+    const service = new AgentMuxRpcService({ coreClients: () => [], execute: async request => request.operation === 'demand.activity.read'
+      ? { operation: request.operation, demandId: goal.id, activities: goal.activities, diskDurability: 'confirmed' }
+      : { operation: 'demand.list', demands: [goal] } })
+    expect(await service.call('goal.activity', {})).toEqual({ activity: [{ goalId: 'g', ...goal.activities[0] }], diskDurability: 'confirmed' })
     const snapshot = await service.call('app.snapshot', { include: ['goals', 'activity'] })
     expect(snapshot.goals).toHaveLength(1); expect(snapshot.goals[0]!.title).toBe(goal.title); expect(snapshot.activity).toHaveLength(1)
   })
