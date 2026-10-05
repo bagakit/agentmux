@@ -56,7 +56,7 @@ class SpatialFailure extends Error {
 }
 function failure(code: string, message: string, candidates?: AgentMuxSpaceSelector[]): never {
   throw new SpatialFailure({ step: 'target', code, message,
-    recovery: 'Use agentmux space ls, then choose the exact Space/Zone/Tab/Region.',
+    recovery: 'Use amux space ls, then choose the exact Space/Zone/Tab/Region.',
     ...(candidates ? { candidates } : {}) })
 }
 function issue(step: string, code: string, error: unknown): AgentMuxSpatialIssue {
