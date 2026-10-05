@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixtureDisplayPath, fixturePath } from './helpers/fixture-values.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -11,6 +11,8 @@ import { runProcess } from '../src/process-runner.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
+import { readAgentPromptPreparationWait } from '../src/prompt-preparation.js'
+import { renderAgentMuxMessageEnvelope } from '../src/agent-message-render.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -18,7 +20,7 @@ const defer = () => { let resolve!: () => void; const promise = new Promise<void
 type Phase = 'handshake' | 'verify' | 'read'
 
 // Actual public Client/Coordinator/FileStore/Screen and RPC; only Runtime bytes and Provider facts are controlled.
-async function fixture(phase: Phase, execution: 'default' | 'immediate' = 'immediate', memory = false) {
+async function fixture(phase: Phase, execution: 'default' | 'immediate' = 'immediate', memory = false, nativePane?: 'working' | 'compact') {
   const root = await mkdtemp(join(tmpdir(), 'amx-observation-continuity-'))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', root); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
@@ -29,25 +31,38 @@ async function fixture(phase: Phase, execution: 'default' | 'immediate' = 'immed
   const { providerFork: _fork, ...capabilities } = template.catalog.capabilities
   let cursor = 0, output = 0, text = '', ready = true, closed = false, cols = 80, rows = 24, revision = 0
   let source = 'original-source', pid = 123, fault = '', readCount = 0, verifyCount = 0
-  const nativeEvidence = { sourceId: source, id: 'idle', state: 'idle' as const }
+  let paneState = nativePane
+  const nativeEvidence = { sourceId: source, id: 'idle', state: nativePane ? 'working' as const : 'idle' as const }
   const verifying = defer(), reading = defer()
   let readFailure: (() => Promise<void>) | undefined
   const preparation = vi.fn(async () => { throw new Error('Direct input must not use interrupt preparation.') })
   const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'controlled-steer', capabilities: { ...capabilities, promptExecution: { immediate: 'native-steer' } }, hookStrategy: { kind: 'none' } },
-    hook: { rules: [] }, buildArgs: (_, args) => [...args], terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: '>' },
+    hook: { rules: [] }, buildArgs: (_, args) => [...args], terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: nativePane ? '›' : '>' },
     planPromptInput: text => ({ kind: 'render-then-submit', payload: text, renderedText: text, submit: '\r' }),
     readPromptExecutionEvidence: async () => { await readFailure?.(); readCount++; if (phase === 'read') { reading.resolve(); await release.promise }
       return nativeEvidence },
     preparePromptExecutionTransport: preparation,
     verifyPromptExecutionTransport: async context => { verifyCount++; if (phase === 'verify') { verifying.resolve(); await release.promise }
       return fault !== 'verify' && context.nativeSourceId === source },
-    inspectPromptExecution: snapshot => snapshot.lines[snapshot.cursor.row]?.text.trimEnd() === '>' ? 'idle' : 'unavailable' })
+    ...(nativePane ? { inspectPromptPreparationWait: template.inspectPromptPreparationWait! } : {}),
+    inspectPromptExecution: nativePane ? template.inspectPromptExecution! : snapshot => snapshot.lines[snapshot.cursor.row]?.text.trimEnd() === '>' ? 'idle' : 'unavailable' })
   const client = new AgentMuxClient({ store, providers: [provider] }), owner = client as any
   await owner.registry.load('local'); owner.connected = true
   const entered = defer(), release = defer(), waiting = defer(), listeners: Array<(event: any) => void> = [], writes: string[] = []
   const run = () => ({ nativeService: null, lifecycleOperationId: null, runId: record.run.runId, program: 'controlled-steer', args: [], workspacePath: root, pid,
     state: { type: 'running' }, cols, rows, firstAvailableByte: 0, latestOutputBytes: output, acceptedInputBytes: cursor })
-  const frame = () => Buffer.from(`\x1b[?2026h\x1b[2J\x1b[10;1H${ready ? '> ' + text : 'NOT_READY'}\x1b[10;${ready ? 3 + text.length : 1}H\x1b[?2026l`)
+  const frame = () => {
+    if (!nativePane) return Buffer.from(`\x1b[?2026h\x1b[2J\x1b[10;1H${ready ? '> ' + text : 'NOT_READY'}\x1b[10;${ready ? 3 + text.length : 1}H\x1b[?2026l`)
+    const status = paneState === 'compact'
+      ? '\x1b[13;1H• Compacting context (44s • esc to interrupt)\x1b[14;3H└ Making room to continue.\x1b[15;3H\x1b[2m└ \x1b[22mTip: Use /mcp to list configured tools.'
+      : '\x1b[15;1H• Working (4s • esc to interrupt)'
+    const warning = '⚠ 4 warnings · f2 to view'
+    const body = text.split('\n')
+    const continuation = body.slice(1).map((line, index) => `\x1b[${19 + index};1H${line}`).join('')
+    const cursorRow = ready ? 17 + body.length : 18
+    const cursorColumn = ready ? body.length === 1 ? 3 + body[0]!.length : 1 + body.at(-1)!.length : 1
+    return Buffer.from(`\x1b[?2026h\x1b[2J${status}\x1b[18;1H${ready ? '› ' + (body[0] || '\x1b[2mAsk Codex to do anything\x1b[22m') : 'NOT_READY'}${continuation}\x1b[${rows - 1};3HGPT-6.1-Sol max · ${fixtureDisplayPath("project")} · Main\x1b[${rows};3H? for shortcuts\x1b[${rows};${cols - warning.length}H${warning}\x1b[${cursorRow};${cursorColumn}H\x1b[?2026l`)
+  }
   let current = frame(); output = current.length
   const history = [{ startByte: 0, endByte: output, dataBytes: current }]
   const draw = () => { current = frame(); const startByte = output; output += current.length; history.push({ startByte, endByte: output, dataBytes: current }); for (const accept of listeners) accept({ type: 'data', runId: record.run.runId, startByte, endByte: output, dataBytes: current, data: current.toString() }) }
@@ -61,7 +76,7 @@ async function fixture(phase: Phase, execution: 'default' | 'immediate' = 'immed
     const prior = receipts.get(input.operationId); if (prior) return { run: run(), appliedByteRange: prior }
     expect(input.expectedByte).toBe(cursor); writes.push(input.data)
     const range = { startByte: cursor, endByte: cursor + Buffer.byteLength(input.data) }; cursor = range.endByte; receipts.set(input.operationId, range)
-    if (input.data === 'ORIGINAL_BODY') { text = input.data; draw() }
+    if (input.data === 'ORIGINAL_BODY' || nativePane && input.data.includes('ORIGINAL_BODY')) { text = input.data; draw() }
     if (input.data === 'ORIGINAL_BODY' && fault === 'body-ack') throw new AgentMuxError('Original payload ACK unknown.', 'CTXMUX_INPUT_UNCONFIRMED', 'unknown', { disposition: 'unknown', confirmedInputBytes: null })
     if (input.data.startsWith('\x1b[')) {
       if (fault === 'source') { source = 'other-source'; nativeEvidence.sourceId = source }
@@ -94,9 +109,61 @@ async function fixture(phase: Phase, execution: 'default' | 'immediate' = 'immed
   return { client, owner, root, store, record, request, entered: entered.promise, verifying: verifying.promise, reading: reading.promise, release, send, resize, writes, draw, preparation,
     readFailure: (read: () => Promise<void>) => { readFailure = read },
     change: (value: string) => { fault = value }, statistics: () => ({ readCount, verifyCount }),
+    finishCompaction: () => { paneState = 'working'; draw() },
     allow: () => { ready = true }, listener: () => listeners.at(-1)!, counts: () => ({ observations, scans }),
     close: async () => { closed = true; release.resolve(); await client.dispose(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 10 }) } }
 }
+
+it('sends through the actual CLI while the max-effort native pane is working', async () => {
+  const f = await fixture('handshake', 'immediate', false, 'working')
+  const server = new AgentMuxControlServer({ socketPath: join(f.root, 'control.sock'), coreClients: () => [{ hostId: 'local', client: f.client }] })
+  try {
+    await server.start()
+    const cli = runCompiledObjectCli(['agent', 'send', '--to-session', f.record.agentSessionId, '--text', 'ORIGINAL_BODY', '--execution', 'immediate', '--operation-id', 'running-max-operation'], objectCliEnvironment(f.root))
+    const first = await Promise.race([f.entered.then(() => null), cli])
+    expect(first, first ? JSON.stringify(first) : undefined).toBeNull()
+    f.release.resolve()
+    const result = await cli
+    expect(result.code, result.stderr).toBe(0)
+    const message = JSON.parse(result.stdout).result
+    expect(message.delivery.state).toBe('delivered')
+    expect(message.envelope.body).toBe('ORIGINAL_BODY')
+    expect(f.writes).toEqual([renderAgentMuxMessageEnvelope(message.envelope), '\r'])
+    expect(f.client.agentSession(f.record.agentSessionId).run).toEqual(f.record.run)
+    expect(f.preparation).not.toHaveBeenCalled(); expect(f.owner.kernel.stop).not.toHaveBeenCalled()
+  } finally { await server.stop(); await f.close() }
+}, 15_000)
+
+it('keeps max compaction zero-input and queryable, then submits that exact original operation once', async () => {
+  const f = await fixture('read', 'immediate', false, 'compact')
+  const server = new AgentMuxControlServer({ socketPath: join(f.root, 'control.sock'), coreClients: () => [{ hostId: 'local', client: f.client }] })
+  let rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
+  try {
+    const sent = f.send().then(() => null, error => error)
+    const first = await Promise.race([f.reading.then(() => null), sent])
+    expect(first, first ? String(first) : undefined).toBeNull()
+    f.release.resolve()
+    const error = await sent
+    expect(error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+    const wait = readAgentPromptPreparationWait(error)
+    expect(wait).toMatchObject({ reason: 'context-compaction', retrySafe: true, agentSessionId: f.record.agentSessionId,
+      runId: f.record.run.runId, operationId: f.request.operationId, inputByte: 0, nativeSourceId: 'original-source' })
+    expect(f.writes).toEqual([])
+    const sdk = await f.client.readDeliveryAttempt(error.logId)
+    await server.start(); rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(f.root, 'control.sock') } })
+    expect(await rpc.call('message.delivery.inspect', { hostId: 'local', logId: error.logId })).toEqual(sdk)
+    const cli = await runCompiledObjectCli(['message', 'delivery', 'inspect', '--logid', error.logId], objectCliEnvironment(f.root))
+    expect(cli.code, cli.stderr).toBe(0)
+    expect(JSON.parse(cli.stdout).result).toEqual(sdk)
+    expect(JSON.stringify(sdk)).toContain('context-compaction')
+    f.finishCompaction()
+    await f.client.submitAgentPrompt({ ...f.request, preparationRetry: { inputByte: wait!.inputByte, nativeSourceId: wait!.nativeSourceId } })
+    await f.send()
+    expect(f.writes).toEqual(['ORIGINAL_BODY', '\r'])
+    expect(f.client.agentSession(f.record.agentSessionId).run).toEqual(f.record.run)
+    expect(f.owner.kernel.stop).not.toHaveBeenCalled(); expect(f.preparation).not.toHaveBeenCalled()
+  } finally { await rpc?.dispose(); await server.stop(); await f.close() }
+}, 15_000)
 
 
 
