@@ -50,6 +50,7 @@ import {
 import { composeScreenshot } from './browser-screenshot/compose'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { BrowserOperationHistory, BrowserOperationStatus, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
+import { SurveyStartBrand } from './SurveyStartBrand'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { selectedBrowserPresentationId } from '../lib/browser-presentation-selection'
 import { BrowserDemonstrationSurface } from './BrowserDemonstrationSurface'
@@ -987,7 +988,7 @@ function BrowserPaneContent({
             })}><RefreshCw size={12} /> Retry</button>
           </div>
         ) : tab.url === 'about:blank' ? (
-          inSurvey ? <div className="survey-start browser-empty"><Globe2 size={30} aria-hidden="true" />
+          inSurvey ? <div className="survey-start browser-empty"><SurveyStartBrand />
             <form className="survey-start-input" onSubmit={event => { event.preventDefault(); addressInput.current?.submit() }}>
               <BrowserAddressInput ref={addressInput} aria-label="Search or enter a web address" placeholder="Search or enter a web address" value={address}
                 historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}

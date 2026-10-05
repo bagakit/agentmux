@@ -17,6 +17,10 @@ import { useAppStore } from '../store'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { BrowserToolsPanel } from './BrowserToolsPanel'
 import { SurveyZoneItem } from './SurveyZoneItem'
+import { SurveyStartBrand } from './SurveyStartBrand'
+import { SurveyPanelChoices } from './SurveyPanelChoices'
+import { groupIds, regionIds } from '@agentmux/layout'
+import { resolveWorkbenchZone } from '../lib/workbench-projection'
 import { SelectorPresence, type SelectorPresenceAgent } from './SelectorList'
 import { SurveyItemOptions } from './SurveyItemOptions'
 import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
@@ -29,6 +33,7 @@ import { surveySidebarBounds } from '../lib/survey-sidebar-width'
 import { clampSidebarResizeWidth, useSidebarResize } from '../hooks/useSidebarResize'
 import { isMacPlatform } from '../lib/host-platform'
 import { api } from '../lib/api'
+import { useLauncherState } from '../lib/launcher-state'
 import { directoryIdentity } from '../../../shared/space-addresses'
 
 export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible = true, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, selection, viewTargets, onSelectReference }: {
@@ -96,6 +101,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const [creationNotice, setCreationNotice] = useState<string | null>(null)
   const [capture, setCapture] = useState<{ title: string; sources: TopicKnowledgeSource[]; noteIds: string[] } | null>(null)
   const [recallCapture, setRecallCapture] = useState<RecallCaptureTarget | null>(null)
+  const [locationChoice, setLocationChoice] = useState<{ kind: 'note' | 'agent'; zoneId: string; choices: WorkbenchProjectionSelection[] } | null>(null)
   const [toolsVisited, setToolsVisited] = useState(toolsOpen)
   const surfaceRef = useRef<HTMLElement>(null)
   const managementRef = useRef<HTMLElement>(null)
@@ -124,7 +130,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     surfaceRef.current?.style.setProperty('--survey-navigation-width', `${sidebarCollapsed ? 40 : clampSidebarResizeWidth(width, minWidth, maxWidth)}px`)
   }, [minWidth, maxWidth, sidebarCollapsed])
   const { containerRef: sidebarRef, isResizing, onResizeStart } = useSidebarResize<HTMLElement>({
-    isOpen: !sidebarCollapsed, width: sidebarWidth, setWidth: setSidebarWidth, deltaSign: 1, minWidth, maxWidth, onDraftWidthChange: reportDraftWidth
+    isOpen: true, width: sidebarCollapsed ? 40 : sidebarWidth, setWidth: setSidebarWidth, deltaSign: 1, minWidth: sidebarCollapsed ? 40 : minWidth, maxWidth: sidebarCollapsed ? 40 : maxWidth, onDraftWidthChange: reportDraftWidth
   })
   const selectionKey = selection ? JSON.stringify([selection.zoneId, selection.active]) : null
   const intent = useRef(0)
@@ -253,6 +259,65 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     finally { setOpening(false) }
   }
 
+  function itemProjection(zoneId: string) {
+    const state = useAppStore.getState()
+    if (!catalog) return null
+    return resolveWorkbenchZone(zoneId, catalog, state.layouts, state.tabs, 'survey-workbench', [], () => {})
+  }
+
+  function itemReferences(zoneId: string) {
+    const original = itemProjection(zoneId), state = useAppStore.getState()
+    const members = new Set(catalog?.tabs.filter(tab => tab.zoneId === zoneId).map(tab => tab.tabId))
+    const layout = original?.composition
+    const groups = new Set(layout ? groupIds(layout.root) : [])
+    return layout?.groups.filter(group => groups.has(group.id)).flatMap(group => group.tabOrder.filter(id => members.has(id)).flatMap(tabId => {
+      const tab = state.tabs[tabId]
+      return tab ? regionIds(tab.layout.root).filter(regionId => !!tab.regions[regionId]).map(regionId => ({ displayWorkspaceId: original!.displayWorkspaceId, groupId: group.id, tabId, regionId })) : []
+    })) ?? []
+  }
+
+  function newItemNote(zoneId: string, chosen?: WorkbenchProjectionSelection) {
+    const state = useAppStore.getState()
+    const candidates = itemReferences(zoneId).filter(reference => state.tabs[reference.tabId]?.regions[reference.regionId]?.kind === 'browser')
+    const active = selection?.zoneId === zoneId ? selection.active : null
+    const exact = chosen ?? active
+    const confirmed = exact ? candidates.find(reference => reference.displayWorkspaceId === exact.displayWorkspaceId && reference.groupId === exact.groupId && reference.tabId === exact.tabId && reference.regionId === exact.regionId) : undefined
+    const reference = confirmed ?? (!chosen && candidates.length === 1 ? candidates[0] : undefined)
+    if (!reference && !chosen && candidates.length > 1) { setLocationChoice({ kind: 'note', zoneId, choices: candidates }); return }
+    const browser = reference ? state.tabs[reference.tabId]?.regions[reference.regionId] : null
+    if (!reference || browser?.kind !== 'browser') {
+      // An active Agent/File is not a Browser source; offer the original Browser choices instead.
+      if (!chosen && candidates.length) { setLocationChoice({ kind: 'note', zoneId, choices: candidates }); return }
+      setError('This item’s original browser source is not confirmed. Its work surface is kept; open the original page and retry.'); return
+    }
+    setLocationChoice(null)
+    setRecallCapture({ draftId: `survey-new-note:${zoneId}:${browser.browserId}:${encodeURIComponent(browser.url)}`,
+      source: { sourceId: crypto.randomUUID(), url: browser.url, title: browser.title || itemTitle(catalog!.zones.find(zone => zone.zoneId === zoneId)!), recordedAt: Date.now(),
+        position: { zoneId, tabId: reference.tabId, regionId: reference.regionId } } })
+  }
+
+  function newItemAgent(zoneId: string, chosen?: WorkbenchProjectionSelection) {
+    const before = useAppStore.getState(), zone = catalog?.zones.find(zone => zone.zoneId === zoneId)
+    const candidates = itemReferences(zoneId).filter(reference => before.layouts[reference.displayWorkspaceId]?.groups.some(group => group.id === reference.groupId && group.tabOrder.includes(reference.tabId)))
+    const groups = new Set(candidates.map(reference => JSON.stringify([reference.displayWorkspaceId, reference.groupId])))
+    const active = selection?.zoneId === zoneId ? selection.active : null
+    const exact = chosen ?? active
+    const confirmed = exact ? candidates.find(reference => reference.displayWorkspaceId === exact.displayWorkspaceId && reference.groupId === exact.groupId && reference.tabId === exact.tabId && reference.regionId === exact.regionId) : undefined
+    const reference = confirmed ?? (!chosen && groups.size === 1 ? candidates[0] : undefined)
+    if (!reference && !chosen && candidates.length) { setLocationChoice({ kind: 'agent', zoneId, choices: candidates }); return }
+    if (!zone || !reference) { setError('This item’s original display location is not confirmed. Its content is kept; restore that item and retry.'); return }
+    const id = before.openLauncher({ workspaceId: zone.workspaceId, displayWorkspaceId: reference.displayWorkspaceId,
+      tabGroupId: reference.groupId, zoneId, reveal: false })
+    const tab = id ? useAppStore.getState().tabs[id] : null
+    if (!tab) { setError('The original Agent location is still restoring. Existing content is kept.'); return }
+    setLocationChoice(null)
+    useLauncherState.getState().setSection(zone.workspaceId, 'agents', 'expanded')
+    intent.current += 1
+    setError(null)
+    setSelection(surveySelectReference(surveyInitialZoneSelection(catalog!, zoneId, before.layouts, before.tabs, reference.displayWorkspaceId),
+      { tabId: tab.id, regionId: tab.layout.activeRegionId }))
+  }
+
   function saveToTopic(scope: 'research' | 'panel'): void {
     if (!currentZone || !collected[currentZone.zoneId] || (scope === 'panel' && !currentPanel)) return
     const panel = currentPanel ? tabs[currentPanel.tabId]?.regions[currentPanel.regionId] : null
@@ -288,8 +353,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       <div className="survey-titlebar project-rail-titlebar" role="group" aria-label="Survey window controls">
         <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button>
       </div>
-      <aside className="survey-tabs" aria-label="Survey items" hidden={sidebarCollapsed} inert={sidebarCollapsed} data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
-        <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New webpage" disabled={opening} onClick={() => void openBrowser('about:blank', true)}><Globe2 size={14} /><span>Webpage</span></button></div>
+      <aside className="survey-tabs" aria-label="Survey items" data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
         <div className="survey-page-list">
           {Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => <div key={zoneId} className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
             <button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><CircleHelp size={14} /><strong>Retained exploration</strong></button>
@@ -299,11 +363,14 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             (tabsByZone.get(zone.zoneId) ?? []).length > 0 && (tabsByZone.get(zone.zoneId) ?? []).every(tabId => !!tabs[tabId] && workbenchSurfaces(tabs[tabId]!).every(surface => surface.kind === 'file' && pages.some(member => member.resource.workspaceId === surface.workspaceId && member.resource.path === surface.path))))).map(zone => {
             const status = activity(zone)
             return <SurveyZoneItem key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId}
-              activity={status.summary} editing={renamingZoneId === zone.zoneId} onEdit={editing => setRenamingZoneId(editing ? zone.zoneId : null)}
+              onNewNote={newItemNote} onNewAgent={newItemAgent} activity={status.summary} editing={renamingZoneId === zone.zoneId} onEdit={editing => setRenamingZoneId(editing ? zone.zoneId : null)}
               onRename={async (name, revision) => { const applied = await useAppStore.getState().setSurveyExplorationName(zone.zoneId, name, revision); if (!applied) setError('The exploration source or name revision is unconfirmed. Your name draft is kept here.'); return applied }} onSelect={chooseZone} />
           })}
         </div>
       </aside>
+      {locationChoice ? <SurveyPanelChoices mode="button" open visible={visible && !controlsCoverPage} choices={locationChoice.choices} facts={useAppStore.getState()}
+        onOpenChange={open => { if (!open) setLocationChoice(null) }} onSelect={reference => locationChoice.kind === 'note' ? newItemNote(locationChoice.zoneId, reference) : newItemAgent(locationChoice.zoneId, reference)} /> : null}
+      <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New browser" disabled={opening} onClick={() => void openBrowser('about:blank', true)}><Plus size={16} /><span>New browser</span></button></div>
       <div className="survey-item-actions" role="group" aria-label="Current exploration actions">{options}
         {currentBrowser && currentBrowser.url !== 'about:blank' && currentPanel ? <button type="button" className="survey-tab-view" aria-label="Save to Recall" title="Save this finding to Recall" onClick={saveToRecall}>
           <ArrowUpRight size={14} />{sidebarCollapsed ? null : <span>Save to Recall…</span>}
@@ -321,7 +388,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     <div className="survey-content">
       <div className="survey-page-content" inert={controlsCoverPage} aria-hidden={controlsCoverPage}>
         {error ? <p className="survey-error" role="alert">{error}{failedCreation.current ? <button type="button" disabled={opening} onClick={() => void openBrowser(query.trim() ? query : 'about:blank')}>Retry original item</button> : null}</p> : null}
-        {!selection ? <div className="survey-start" aria-label="New browser tab"><div className="survey-start-heading"><h1>Survey</h1><p>Search or open a page.</p></div>
+        {!selection ? <div className="survey-start" aria-label="New browser tab"><SurveyStartBrand />
           <form className="survey-start-input" onSubmit={event => { event.preventDefault(); browserInput.current?.submit() }}>
             <BrowserAddressInput ref={browserInput} value={query} aria-label="Search or enter a web address" placeholder="Search or enter a web address" disabled={opening} historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null} onValueChange={value => { setQuery(value); setError(null) }} onSubmit={value => { if (value.trim()) void openBrowser(value) }} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
             <button type="submit" aria-label="Search or open page" disabled={opening || !query.trim()}>{opening ? <LoaderCircle className="spin" size={16} /> : <ArrowUpRight size={16} />}</button></form>{inputHistoryNotice ? <p className="survey-relation-notice" role="status">{inputHistoryNotice}</p> : null}
