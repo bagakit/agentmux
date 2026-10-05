@@ -47,7 +47,7 @@ export function topicSpatialAddress(config: AppConfig | null, topic: ScratchTopi
 export function projectResourceWorkspace(workspaces: readonly WorkspaceRecord[], projectId: string, sourceWorkspaceId?: string): WorkspaceRecord {
   const candidates = workspaces.filter(workspace => workspace.id !== SCRATCH_WORKSPACE_ID &&
     directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path) === projectId)
-  if (!candidates.length) throw Object.assign(new Error('The exact resource Project is unknown. Discover it with agentmux app snapshot.'), { code: 'SPACE_RESOURCE_PROJECT_UNKNOWN' })
+  if (!candidates.length) throw Object.assign(new Error('The exact resource Project is unknown. Discover it with amux app snapshot.'), { code: 'SPACE_RESOURCE_PROJECT_UNKNOWN' })
   if (sourceWorkspaceId !== undefined) {
     const selected = candidates.find(workspace => workspace.id === sourceWorkspaceId)
     if (!selected) throw Object.assign(new Error('The resource Workspace is not in the specified Project.'), { code: 'SPACE_RESOURCE_PROJECT_UNKNOWN' })

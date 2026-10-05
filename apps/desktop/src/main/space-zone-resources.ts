@@ -18,7 +18,7 @@ export async function createSpaceZoneResource(input: SpaceZoneResourceInput, por
   const config = ports.config()
   const sources = spatialSources(config, await ports.topics())
   const space = sources.spaces.find(item => item.spaceId === input.spaceId)
-  if (!space) throw Object.assign(new Error('Space is not known. Run agentmux space ls.'), { code: 'UNKNOWN_SPACE' })
+  if (!space) throw Object.assign(new Error('Space is not known. Run amux space ls.'), { code: 'UNKNOWN_SPACE' })
   const resource = input.resource
   const source = projectResourceWorkspace(config.workspaces, resource.projectId, resource.sourceWorkspaceId)
   if (!resource.path.startsWith('/') || resource.path.includes('\0')) throw new Error('A Zone needs an absolute directory.')
