@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { Component, Fragment, useEffect, useState, type ReactNode, type RefObject } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
@@ -54,7 +55,7 @@ function BrowserRenderingFailure({ tab, addressDraft, failure, retry, onRegionCl
   useEffect(() => { if (!addressDraft.current.edited) setAddress(addressDraft.current.value) }, [tab.url, addressDraft])
   return <section className={`browser-surface${survey ? ' browser-surface--survey' : ''}`}>
     <form className="browser-toolbar" onSubmit={event => { event.preventDefault(); retry() }}>
-      <label><input aria-label="Browser address" value={address} onChange={event => {
+      <label><TextInput aria-label="Browser address" value={address} onChange={event => {
         const value = event.target.value
         addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value)
       }} /></label>
