@@ -292,11 +292,13 @@ export async function registerIpc(args: {
   const diagramPreviews = new FileDiagramRenderer()
   const builds = fileBuilds = new FileBuilds(id => args.runtime.executionHost(id), id => config.workspaces.find(item => item.id === id), files)
   const releaseHtmlPreviews = () => { htmlPreviews.releaseAll(); previewResources.cancelAll(); diagramPreviews.cancelAll(); void builds.releaseAll() }
-  const releaseNavigatedHtmlPreviews = (_event: unknown, _url: string, _inPlace: boolean, mainFrame: boolean) => {
-    if (mainFrame) releaseHtmlPreviews()
+  const releaseRendererResources = () => { controlBridge.dispose(); releaseHtmlPreviews() }
+  const releaseNavigatedHtmlPreviews = (_event: unknown, _url: string, inPlace: boolean, mainFrame: boolean) => {
+    if (mainFrame) {
+      if (!inPlace) controlBridge.dispose()
+      releaseHtmlPreviews()
+    }
   }
-  args.window.webContents.on('render-process-gone', releaseHtmlPreviews)
-  args.window.webContents.on('did-start-navigation', releaseNavigatedHtmlPreviews)
   const deliveryAttempts = { hostId: 'local', store: new DeliveryAttemptStore(join(app.getPath('userData'), 'client-delivery-attempts')) }
   const demands = args.demands ?? openDemandStore({ root: join(app.getPath('userData'), 'demands') })
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), { save: (next, expected) => configOwner.edit(expected, next) })
@@ -402,6 +404,8 @@ export async function registerIpc(args: {
     sendRequest: (request) => args.window.webContents.send(CONTROL_REQUEST_CHANNEL, request),
     sendCancellation: (cancellation) => args.window.webContents.send(CONTROL_CANCEL_CHANNEL, cancellation)
   })
+  args.window.webContents.on('render-process-gone', releaseRendererResources)
+  args.window.webContents.on('did-start-navigation', releaseNavigatedHtmlPreviews)
   const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow })
   const closeMetrics = () => metrics.dispose()
   args.window.webContents.once('destroyed', closeMetrics)
@@ -1801,7 +1805,7 @@ export async function registerIpc(args: {
       { owner: 'file-builds', dispose: () => builds.dispose() },
       { owner: 'diagram-previews', dispose: () => diagramPreviews.dispose() },
       { owner: 'html-preview-listeners', dispose: () => {
-        args.window.webContents.off('render-process-gone', releaseHtmlPreviews)
+        args.window.webContents.off('render-process-gone', releaseRendererResources)
         args.window.webContents.off('did-start-navigation', releaseNavigatedHtmlPreviews)
       } },
       { owner: 'preview-resources', dispose: () => previewResources.dispose() },

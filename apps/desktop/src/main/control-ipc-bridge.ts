@@ -57,14 +57,14 @@ export class DesktopControlIpcBridge {
       throw bridgeError('CONTROL_REQUEST_CONFLICT', 'Desktop Control request ID is already pending.')
     }
     if (signal?.aborted) throw bridgeError('CONTROL_UNAVAILABLE', 'Automatic input observation was cancelled.')
-    const abort = () => this.cancel(request.requestId, bridgeError('CONTROL_UNAVAILABLE', 'Automatic input observation was cancelled.'))
+    const abort = () => this.endObservation(request.requestId, bridgeError('CONTROL_UNAVAILABLE', 'Automatic input observation was cancelled.'))
     try { return await new Promise<DesktopControlResult>((resolve, reject) => {
       // 预算与判据都取 core 的那一处（agentMuxControlTimeoutMs）：这条 IPC 路与 CLI→daemon 的 socket
       // 路是同一个请求的两条到达方式，等待方不同而预算必须相同。此前两侧各手抄 2_000/60_000，且
       // 「哪些操作算慢」在这里被内联展开成四项析取——加一个慢操作时只改 core 的人会得到一个全绿的
       // 仓库，而这条路静默给它 2 秒。
       const timeout = setTimeout(() => {
-        this.cancel(
+        this.endObservation(
           request.requestId,
           bridgeError('CONTROL_TIMEOUT', 'Desktop Control request timed out.')
         )
@@ -111,6 +111,17 @@ export class DesktopControlIpcBridge {
         bridgeError('CONTROL_UNAVAILABLE', 'Desktop Control owner was disposed.')
       )
     }
+  }
+
+  private endObservation(requestId: string, error: Error & { code: AgentMuxControlErrorCode }): void {
+    const pending = this.pending.get(requestId)
+    if (pending?.request.operation !== 'file.format') return this.cancel(requestId, error)
+    // An accepted format owns a draft edit. Ending its reader cannot cancel that edit.
+    // Retain the ID until the actual reply or owner disposal, so retry cannot start it twice.
+    clearTimeout(pending.timeout)
+    pending.reject(Object.assign(new Error(
+      'Observation of file formatting has ended. The accepted formatting may still finish in the original File Region. Inspect its current draft before deciding whether to retry.'
+    ), { code: error.code }))
   }
 
   private cancel(requestId: string, error: Error & { code: AgentMuxControlErrorCode }): void {
