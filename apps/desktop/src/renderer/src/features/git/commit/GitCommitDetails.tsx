@@ -1,5 +1,8 @@
-import { RefreshCw } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { GitCommitDetailsResult, GitCommitSnapshot } from '../../../../../shared/git-contracts'
+
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+
 
 type ReadyCommit = Extract<GitCommitDetailsResult, { kind: 'ready' }>
 type ChangedFile = ReadyCommit['entries'][number]
@@ -13,7 +16,7 @@ export function GitCommitDetails({ regionId, selection, result, loading, error, 
     {!selection && <div className="pane-state"><strong>Select a commit</strong><span>Choose a commit to read its message and files.</span></div>}
     {selection && <div className="git-workbench__target">
       <code title={selection.commitOid}>{selection.commitOid.slice(0, 12)}</code>
-      <button className="icon-button" aria-label="Reload commit details" title="Reload this fixed commit" disabled={loading} onClick={onReload}><RefreshCw size={13} /></button>
+      <button className="icon-button" aria-label="Reload commit details" title="Reload this fixed commit" disabled={loading} onClick={onReload}><ThemeActionRefreshIcon size={13} /></button>
     </div>}
     {error && <div className="git-history-error" role="alert"><span>{error}</span><button onClick={onReload}>Retry</button></div>}
     {selection && !result && !error && <div className="pane-state"><span>Reading commit…</span></div>}

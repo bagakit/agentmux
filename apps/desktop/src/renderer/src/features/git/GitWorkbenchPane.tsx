@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react'
-import { ExternalLink, GitCommitHorizontal, List, PanelLeftClose, RefreshCw, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { WorkspaceRecord } from '../../../../shared/contracts'
 import type { GitCommitSnapshot } from '../../../../shared/git-contracts'
 import type { GitWorkbenchSurface } from '../../lib/workbench-tabs'
@@ -14,6 +14,14 @@ import { GitCommitDetails } from './commit/GitCommitDetails'
 import { useGitCommitDetails } from './commit/useGitCommitDetails'
 import { GitDiffCanvas } from './diff/GitDiffCanvas'
 
+const ThemeGitCommitIcon = semanticIconComponent('git.commit')
+const ThemeObjectListIcon = semanticIconComponent('object.list')
+const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
+
 type PaneProps = { surface: GitWorkbenchSurface; visible?: boolean; released?: boolean }
 /** A durable Git Region keeps its exact saved resource, independently of the active sidebar. */
 export const GitWorkbenchPane = memo(function GitWorkbenchPane({ surface, visible = true, released = false }: PaneProps) {
@@ -26,7 +34,7 @@ export const GitWorkbenchPane = memo(function GitWorkbenchPane({ surface, visibl
 })
 type ViewProps = { surface: GitWorkbenchSurface; workspace: WorkspaceRecord; visible: boolean; released: boolean }
 function Header({ surface, workspace, children }: Pick<ViewProps, 'surface' | 'workspace'> & { children?: ReactNode }) {
-  return <header className="git-workbench__header"><GitCommitHorizontal size={15} />
+  return <header className="git-workbench__header"><ThemeGitCommitIcon size={15} />
     <strong>{surface.history ? 'Repository history' : surface.selection ? `Commit ${surface.selection.commitOid.slice(0, 8)}` : 'Commit details'}</strong>
     <span title={surface.scope.repoPath}>{workspace.name}</span><span className="git-workbench__readonly">Read only</span>{children}
   </header>
@@ -38,7 +46,7 @@ function CommitView(props: ViewProps) {
   const reference = shared?.history.reference
   return <section className="git-workbench" data-git-workbench-region={surface.regionId} aria-label="Git commit details">
     <Header surface={surface} workspace={workspace}>
-      <button className="small-button" aria-label="View repository history" onClick={() => openHistory(workspace.id, surface.scope, reference)}><List size={13} /><span>History</span></button>
+      <button className="small-button" aria-label="View repository history" onClick={() => openHistory(workspace.id, surface.scope, reference)}><ThemeObjectListIcon size={13} /><span>History</span></button>
       {surface.selection && <button className="small-button" aria-label="Locate commit in history" onClick={() => openHistory(workspace.id, surface.scope, reference, { ...surface.scope, ...surface.selection! })}>Locate in history</button>}
     </Header>
     <CommitReview {...props} />
@@ -93,7 +101,7 @@ function RepositoryView({ history, viewportState, ...props }: ViewProps & {
   const found = Boolean(focusOid && ready?.commits.some(commit => commit.oid === focusOid))
   return <section className="git-workbench" data-git-workbench-region={surface.regionId} aria-label="Git repository history">
     <Header surface={surface} workspace={workspace}>
-      <button className="small-button" aria-label="Move history to sidebar" onClick={() => showDetails(surface.regionId)}><PanelLeftClose size={13} /><span>To sidebar</span></button>
+      <button className="small-button" aria-label="Move history to sidebar" onClick={() => showDetails(surface.regionId)}><ThemeLayoutCloseLeftIcon size={13} /><span>To sidebar</span></button>
     </Header>
     {focusOid && !found && <div className="git-workbench__locating" role="status">
       <span>{foreign ? 'The repository changed; the saved commit is retained.' : history.error ? 'Locating paused. Retry history to continue.' : ready && !ready.nextCursor ? 'This commit is outside the current history range.' : 'This commit has not been loaded in the current range.'}</span>
@@ -135,9 +143,9 @@ function InlineCommitDiff({ surface, visible, released }: Required<Pick<PaneProp
   return <section className="git-workbench__diff" aria-label="Commit file diff">
     <header className="editor-header"><span title={file.origPath ? file.origPath + ' → ' + file.path : file.path}>{file.path}</span>
       <div className="editor-header__actions">
-        <button className="icon-button" aria-label="Reload fixed diff" title="Reload fixed diff" disabled={Boolean(diff?.loading)} onClick={() => void load(surface.regionId)}><RefreshCw size={13} /></button>
-        <button className="icon-button" aria-label="Open diff in separate tab" title="Open diff in separate tab" onClick={() => openDiff(surface.workspaceId, { kind: 'commit', snapshot: { hostId: surface.scope.hostId, repoPath: surface.scope.repoPath, ...selection }, file })}><ExternalLink size={13} /></button>
-        <button className="icon-button" aria-label="Close file diff" title="Close file diff" onClick={() => selectFile(surface.regionId, null)}><X size={13} /></button>
+        <button className="icon-button" aria-label="Reload fixed diff" title="Reload fixed diff" disabled={Boolean(diff?.loading)} onClick={() => void load(surface.regionId)}><ThemeActionRefreshIcon size={13} /></button>
+        <button className="icon-button" aria-label="Open diff in separate tab" title="Open diff in separate tab" onClick={() => openDiff(surface.workspaceId, { kind: 'commit', snapshot: { hostId: surface.scope.hostId, repoPath: surface.scope.repoPath, ...selection }, file })}><ThemeActionOpenExternalIcon size={13} /></button>
+        <button className="icon-button" aria-label="Close file diff" title="Close file diff" onClick={() => selectFile(surface.regionId, null)}><ThemeActionCloseIcon size={13} /></button>
       </div>
     </header>
     <div className="git-branch-diff__commits" aria-label="Fixed comparison commits"><span title={selection.parentOid ?? 'Empty tree'}>{selection.parentOid ? 'Parent · ' + selection.parentOid.slice(0, 8) : 'Empty tree'}</span><span title={selection.commitOid}>Commit · {selection.commitOid.slice(0, 8)}</span></div>

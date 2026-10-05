@@ -1,7 +1,14 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Copy, FolderOpen, GitFork, RefreshCw, Trash2 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
+const ThemeGitForkIcon = semanticIconComponent('git.fork')
+const ThemeActionCopyIcon = semanticIconComponent('action.copy')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+
 
 export function BranchContextMenu({
   children,
@@ -30,23 +37,23 @@ export function BranchContextMenu({
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onOpen}>
-            {hasWorktree ? <FolderOpen size={14} /> : <GitFork size={14} />}
+            {hasWorktree ? <ThemeObjectFolderOpenIcon size={14} /> : <ThemeGitForkIcon size={14} />}
             <span>{hasWorktree ? 'Open Workspace' : 'Create Worktree'}</span>
           </ContextMenu.Item>
           <ContextMenu.Separator className="tab-context-menu__separator" />
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopyBranchName}>
-            <Copy size={14} />
+            <ThemeActionCopyIcon size={14} />
             <span>Copy Branch Name</span>
           </ContextMenu.Item>
           {hasWorktree ? (
             <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopyWorktreePath}>
-              <Copy size={14} />
+              <ThemeActionCopyIcon size={14} />
               <span>Copy Worktree Path</span>
             </ContextMenu.Item>
           ) : null}
           <ContextMenu.Separator className="tab-context-menu__separator" />
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onRefresh}>
-            <RefreshCw size={14} />
+            <ThemeActionRefreshIcon size={14} />
             <span>Refresh Branches</span>
           </ContextMenu.Item>
           {/*
@@ -61,7 +68,7 @@ export function BranchContextMenu({
                 className="tab-context-menu__item file-context-menu__danger"
                 onSelect={onRemoveWorktree}
               >
-                <Trash2 size={14} />
+                <ThemeActionRemoveIcon size={14} />
                 <span>Remove Worktree</span>
               </ContextMenu.Item>
             </>
