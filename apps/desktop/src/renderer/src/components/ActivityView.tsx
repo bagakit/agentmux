@@ -652,6 +652,27 @@ export function ActivityView({
     setShowJump(shouldShowJumpToLatest(followRef.current))
   }, [unifiedItems, nativeHistoryPage, sessionId, feedEl, readingWindow.historical, readingEnabled])
 
+  // Current readers should not repeatedly click Current after the shared source
+  // advances beyond this local window. Historical reading and selection own their position.
+  useEffect(() => {
+    if (!conversationReading?.enabled || !readingWindow.newerOutside || readingWindow.historical
+      || readingWindow.loading || !followRef.current.following || !feedEl) return
+    const document = feedEl.ownerDocument
+    const attempt = (): void => {
+      if (!followRef.current.following || !conversationReading.enabled) return
+      const selection = document.defaultView?.getSelection()
+      if (selection && !selection.isCollapsed && selection.rangeCount) {
+        try { if (selection.getRangeAt(0).intersectsNode(feedEl)) return }
+        catch { return }
+      }
+      readingWindow.showLatestAutomatically()
+    }
+    attempt()
+    document.addEventListener('selectionchange', attempt)
+    return () => document.removeEventListener('selectionchange', attempt)
+  }, [conversationReading?.enabled, readingWindow.newerOutside, readingWindow.historical,
+    readingWindow.loading, readingWindow.error, recentNativePage, showJump, feedEl])
+
   useEffect(() => {
     if (!readingEnabled || !revealRequest || !feedEl) return
     const target = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]'))

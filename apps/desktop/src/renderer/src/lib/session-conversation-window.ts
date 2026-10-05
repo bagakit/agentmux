@@ -199,6 +199,8 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const generation = useRef(0), pending = useRef(false), retry = useRef<{ direction: ReadDirection; source?: AgentSessionHistorySource }>({ direction: 'seed' })
   const appliedRecent = useRef<AgentSessionHistoryPage | null>(null)
   const automaticSeedBlocked = useRef(false)
+  // One attempt per exact observed page and native binding, never a render-driven retry.
+  const automaticLatest = useRef<{ key: string; bindingKey: string; recent: AgentSessionHistoryPage; interrupted: boolean } | null>(null)
   const coverageDemand = useRef(false)
   const window = state.key === key ? state.window : null
   const committedPage = useRef<{ key: string; bindingKey: string; page: AgentSessionHistoryPage | null }>({ key, bindingKey, page: null })
@@ -328,12 +330,30 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     generation.current++; pending.current = false; automaticSeedBlocked.current = false
     void read('current', source)
   }
+  function showLatestAutomatically(): void {
+    const start = live.current
+    const before = stateRef.current.key === start.key ? stateRef.current.window : null
+    const attempt = automaticLatest.current
+    if (!start.reading?.enabled || pending.current || !before || before.parts[0]!.index !== 0
+      || before.bindingKey !== start.bindingKey || !start.recent || !sameSource(before.page, start.recent)) return
+    if (stateRef.current.error && !attempt?.interrupted) return
+    if (attempt?.key === start.key && attempt.bindingKey === start.bindingKey
+      && attempt.recent === start.recent && !attempt.interrupted) return
+    automaticLatest.current = { key: start.key, bindingKey: start.bindingKey, recent: start.recent,
+      interrupted: false }
+    void read('seed')
+  }
   useEffect(() => {
+    automaticLatest.current = null
     generation.current++; pending.current = false; appliedRecent.current = null; automaticSeedBlocked.current = false; coverageDemand.current = false
     update({ key, window: null, loading: false, error: null })
   }, [key])
   useEffect(() => {
     if (!reading?.enabled) {
+      // Hiding is cancellation, not a failed native read. A visible current-tail
+      // consumer may resume this seed once; genuine failures still require Retry.
+      if (pending.current && retry.current.direction === 'seed' && live.current.recent) automaticLatest.current = {
+        key, bindingKey, recent: live.current.recent, interrupted: true }
       coverageDemand.current = false
       generation.current++; pending.current = false
       if (stateRef.current.loading) update({ ...stateRef.current, loading: false,
@@ -426,6 +446,6 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     historyBoundary: window?.boundary?.confirmed && window.records.has(window.boundary.recordId) ? { beforeRecordId: window.boundary.recordId } : null,
     newerOutside, hasNewer: Boolean(window && window.parts[0]!.index > 0), hasMore: Boolean(page?.nextCursor),
     readEarlier: () => void read('earlier'), readNewer: () => void read('newer'), retry: () => { automaticSeedBlocked.current = false; if (retry.current.direction === 'coverage') coverageDemand.current = true; void read(retry.current.direction, retry.current.source, true) },
-    showCurrent: () => showCurrent(), showCurrentSource: () => showCurrent(handleSource(live.current.reading?.nativeSourceFacts?.nativeHandle)),
+    showLatestAutomatically, showCurrent: () => showCurrent(), showCurrentSource: () => showCurrent(handleSource(live.current.reading?.nativeSourceFacts?.nativeHandle)),
     showPreviousSource: () => showCurrent(handleSource(live.current.reading?.nativeSourceFacts?.nativeConfirmation?.previousNativeHandle)) }
 }
