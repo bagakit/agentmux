@@ -2,7 +2,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 import { emptyNotebookState, applyNotebookChange } from '@agentmux/core/notebook-catalog'
 import { changeNotebook, useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 // @vitest-environment happy-dom
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -148,11 +148,11 @@ afterEach(async () => {
 })
 async function renderApp() { await dom.render(<DesktopClientUiProvider><App /></DesktopClientUiProvider>) }
 /** Name writes require the production durable owner, not the Browser preview transport. */
-async function realNameOwner() {
-  const directory = await mkdtemp(join(tmpdir(), 'amux-survey-name-'))
+async function realNameOwner(retainedDirectory?: string) {
+  const directory = retainedDirectory ?? await mkdtemp(join(tmpdir(), 'amux-survey-name-'))
   const owner = new AgentMuxSpatialStateStore(join(directory, 'spatial.json'))
   const state = useAppStore.getState()
-  await owner.commit({ expectedRevision: 0, graph: desktopSpatialGraph(state, []) })
+  if (!retainedDirectory || process.env.SURVEY_LAST_TAB_RESTART_PHASE === 'write') await owner.commit({ expectedRevision: 0, graph: desktopSpatialGraph(state, []) })
   vi.spyOn(api.spatial, 'read').mockImplementation(() => owner.readForLayout())
   vi.spyOn(api.spatial, 'commit').mockImplementation(input => owner.commit(input))
   vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => owner.retainDisplayLabels(values))
@@ -167,7 +167,7 @@ async function realNameOwner() {
   useAppStore.setState({ nameLabels: {}, nameAuthorityRevision: 0, nameAcknowledgementRevision: 0,
     restoredWorkbench: { tabs: state.tabs, layouts: state.layouts } })
   const dispose = await realInitialize()
-  nameOwnerCleanup = async () => { await useAppStore.getState().retryWorkbenchSave(); dispose(); await rm(directory, { recursive: true, force: true }) }
+  nameOwnerCleanup = async () => { await useAppStore.getState().retryWorkbenchSave(); dispose(); if (!retainedDirectory) await rm(directory, { recursive: true, force: true }) }
 }
 function savedNotes() { return Object.values(useLauncherState.getState().drafts).flatMap(draft => draft.noteCreation ? [draft.noteCreation] : []) }
 function pendingNoteReference() { const receipt = savedNotes().at(-1)!; expect(receipt.launcher).toBeDefined(); return receipt.launcher! }
@@ -1630,4 +1630,156 @@ it('survey item context menu retargets the original invoker during consecutive r
   await act(async () => document.querySelector('[data-survey-context-zone-id]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
   await vi.waitFor(() => expect(document.activeElement).toBe(latest))
   expect(useAppStore.getState().surveyZoneSelection).toBe(held); healthy()
+})
+
+async function lastTabResearch(retainedDirectory?: string) {
+  await renderApp(); await enterSurvey(); await choose()
+  const original = useAppStore.getState().surveyZoneSelection!.zoneId
+  await dom.click('[aria-label="New webpage"]')
+  await vi.waitFor(() => expect(useAppStore.getState().surveyZoneSelection?.zoneId).not.toBe(original))
+  const state = useAppStore.getState(), selected = state.surveyZoneSelection!, tab = state.tabs[selected.active!.tabId]!
+  expect(tab.space?.zoneId).toBe(selected.zoneId)
+  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([])
+  await realNameOwner(retainedDirectory)
+  return { original, zoneId: selected.zoneId, tab }
+}
+async function closeResearchTab(tabId: string) {
+  const button = dom.container.querySelector<HTMLElement>(`.global-survey-surface [data-workbench-tab-id="${tabId}"] .workbench-tab__close`)!
+  expect(button).not.toBeNull(); await act(async () => button.click())
+}
+
+it('last-tab closure removes its Survey item and selection through the real Tab close consumer', async () => {
+  const { original, zoneId, tab } = await lastTabResearch()
+  const before = useAppStore.getState(), bindings = before.spaceZoneBindings
+  await closeResearchTab(tab.id)
+  await vi.waitFor(() => expect(useAppStore.getState().tabs[tab.id]).toBeUndefined())
+  const after = useAppStore.getState()
+  expect(after.surveyCollectedZones).toEqual({ [original]: true }); expect(after.surveyZoneSelection).toBeNull()
+  expect(dom.container.querySelector(`[data-survey-zone-id="${zoneId}"]`)).toBeNull()
+  expect(after.tabs[mixed.id]).toBe(before.tabs[mixed.id]); expect(after.spaceZoneBindings).toBe(bindings)
+  expect(catalog().zones.some(zone => zone.zoneId === zoneId)).toBe(true)
+  // Discrete close flushes the existing UI preference owner without waiting for later editing.
+  await vi.waitFor(() => expect(JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state.surveyCollectedZones).toEqual({ [original]: true }))
+  healthy()
+})
+
+it('last-tab closure keeps its Survey item until every original Tab closes and keeps another item selection', async () => {
+  const { original, zoneId, tab } = await lastTabResearch()
+  await dom.click('.global-survey-surface [title="New tab"]')
+  const second = useAppStore.getState().surveyZoneSelection!.active!.tabId
+  expect(second).not.toBe(tab.id)
+  await closeResearchTab(tab.id)
+  await vi.waitFor(() => expect(useAppStore.getState().tabs[tab.id]).toBeUndefined())
+  expect(useAppStore.getState().surveyCollectedZones[zoneId]).toBe(true)
+  await choose(original)
+  const held = useAppStore.getState().surveyZoneSelection
+  const state = useAppStore.getState(), group = state.layouts[SCRATCH_WORKSPACE_ID].groups.find(group => group.tabOrder.includes(second))!
+  await act(async () => { expect(await state.closeTab(SCRATCH_WORKSPACE_ID, group.id, second)).toBe(true) })
+  expect(useAppStore.getState().surveyCollectedZones[zoneId]).toBeUndefined()
+  expect(useAppStore.getState().surveyZoneSelection).toBe(held); healthy()
+})
+
+it('last-tab closure failure preserves its exact Survey item and Browser owner', async () => {
+  const { zoneId, tab } = await lastTabResearch(), before = useAppStore.getState()
+  vi.mocked(api.browser.close).mockRejectedValueOnce(new Error('Owner unavailable'))
+  await closeResearchTab(tab.id)
+  await vi.waitFor(() => expect(useAppStore.getState().error).toContain('Owner unavailable'))
+  expect(useAppStore.getState().tabs[tab.id]?.regions).toEqual(tab.regions)
+  expect(useAppStore.getState().surveyCollectedZones).toBe(before.surveyCollectedZones)
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+  expect(dom.container.querySelector(`[data-survey-zone-id="${zoneId}"]`)).not.toBeNull(); healthy()
+})
+
+it('last-tab closure uses latest members when a new Tab appears during Browser shutdown', async () => {
+  const { zoneId, tab } = await lastTabResearch()
+  let release!: () => void
+  vi.mocked(api.browser.close).mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve }))
+  await closeResearchTab(tab.id)
+  await vi.waitFor(() => expect(release).toBeDefined())
+  const late = { ...createWorkbenchTab('late-research-tab', { regionId: 'late-note', kind: 'file' as const, workspaceId: tab.workspaceId, path: 'late.note.json' }), space: tab.space }
+  await act(async () => { const current = useAppStore.getState(); useAppStore.setState({ tabs: { ...current.tabs, [late.id]: late } }); release() })
+  await vi.waitFor(() => expect(useAppStore.getState().tabs[tab.id]).toBeUndefined())
+  expect(useAppStore.getState().tabs[late.id]).toBe(late)
+  expect(useAppStore.getState().surveyCollectedZones[zoneId]).toBe(true)
+  expect(dom.container.querySelector(`[data-survey-zone-id="${zoneId}"]`)).not.toBeNull(); healthy()
+})
+
+it('last-tab closure keeps the item when another member in its resource is unconfirmed', async () => {
+  const { zoneId, tab } = await lastTabResearch()
+  const unknown = createWorkbenchTab('unknown-member', { regionId: 'unknown-member-region', kind: 'launcher', workspaceId: tab.workspaceId })
+  unknown.topicId = 'unavailable-topic'
+  await act(async () => { const current = useAppStore.getState(); useAppStore.setState({ tabs: { ...current.tabs, [unknown.id]: unknown } }) })
+  expect(catalog().tabs.find(fact => fact.tabId === unknown.id)?.zoneId).toBeNull()
+  await closeResearchTab(tab.id)
+  await vi.waitFor(() => expect(useAppStore.getState().tabs[tab.id]).toBeUndefined())
+  expect(useAppStore.getState().surveyCollectedZones[zoneId]).toBe(true); healthy()
+})
+
+it('last-tab closure only detaches one display when the original Tab has another occurrence', async () => {
+  const { zoneId, tab } = await lastTabResearch()
+  const alias = createWorkspaceLayout('research-alias', [tab.id])
+  await act(async () => { const state = useAppStore.getState(); useAppStore.setState({ layouts: { ...state.layouts, [workspace.id]: alias } }) })
+  const before = useAppStore.getState()
+  await closeResearchTab(tab.id)
+  await vi.waitFor(() => expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID].groups.every(group => !group.tabOrder.includes(tab.id))).toBe(true))
+  expect(useAppStore.getState().tabs[tab.id]).toBe(before.tabs[tab.id])
+  expect(useAppStore.getState().surveyCollectedZones[zoneId]).toBe(true)
+  expect(api.browser.close).not.toHaveBeenCalled(); healthy()
+})
+
+it('last-tab closure preserves a durable same-Zone member whose Host descriptor is unavailable', async () => {
+  const { zoneId, tab } = await lastTabResearch()
+  await act(async () => { await useAppStore.getState().retryWorkbenchSave() })
+  const saved = (await api.spatial.read())!, graph = structuredClone(saved.graph)
+  const original = graph.tabs.find(fact => fact.tabId === tab.id)!
+  const absentId = 'unavailable-saved-tab', absentRegion = 'unavailable-saved-region'
+  graph.tabs.push({ ...original, tabId: absentId, regionIds: [absentRegion] })
+  graph.regions.push({ tabId: absentId, regionId: absentRegion, kind: 'file', agentSessionId: null, runId: null, execution: null })
+  graph.tabLayouts[absentId] = { root: { type: 'leaf', regionId: absentRegion }, activeRegionId: absentRegion }
+  // Core retains this member identity; Desktop cannot build it without its Host descriptors.
+  await act(async () => { await api.spatial.commit({ expectedRevision: saved.revision, graph }) })
+  expect(useAppStore.getState().tabs[absentId]).toBeUndefined()
+  expect((await api.spatial.read())!.graph.tabs.some(fact => fact.tabId === absentId)).toBe(true)
+  await closeResearchTab(tab.id)
+  await vi.waitFor(() => expect(useAppStore.getState().tabs[tab.id]).toBeUndefined())
+  expect(useAppStore.getState().surveyCollectedZones[zoneId]).toBe(true)
+  expect(dom.container.querySelector(`[data-survey-zone-id="${zoneId}"]`)).not.toBeNull(); healthy()
+})
+
+it.runIf(process.env.SURVEY_LAST_TAB_RESTART_PHASE === 'write')('last-tab closure writes original workface through durable owners for a fresh process', async () => {
+  const { original, zoneId, tab } = await lastTabResearch(process.env.SURVEY_LAST_TAB_RESTART_DIR!)
+  const before = useAppStore.getState(), bindings = before.spaceZoneBindings
+  await closeResearchTab(tab.id)
+  await vi.waitFor(() => expect(useAppStore.getState().surveyCollectedZones).toEqual({ [original]: true }))
+  await useAppStore.getState().retryWorkbenchSave()
+  const durable = await api.spatial.read()
+  expect(durable?.graph.tabs.some(value => value.tabId === tab.id)).toBe(false)
+  expect(durable?.graph.tabs.some(value => value.tabId === mixed.id)).toBe(true)
+  const current = useAppStore.getState()
+  expect(current.spaceZoneBindings).toEqual(bindings); expect(current.tabs[mixed.id]).toEqual(before.tabs[mixed.id]); healthy()
+  writeFileSync(process.env.SURVEY_LAST_TAB_RESTART_FILE!, JSON.stringify({ config: current.config, ui: JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state,
+    original, closedZoneId: zoneId, closedTabId: tab.id, workbench: projectPersistedWorkbench(current), bindings, pid: process.pid }))
+})
+
+it.runIf(process.env.SURVEY_LAST_TAB_RESTART_PHASE === 'read')('last-tab closure restores the remaining original workface in a fresh process without recreating the closed item', async () => {
+  const fixture = JSON.parse(readFileSync(process.env.SURVEY_LAST_TAB_RESTART_FILE!, 'utf8'))
+  expect(process.pid).not.toBe(fixture.pid)
+  useAppStore.setState({ loading: true, mainSurface: 'workbench', config: fixture.config, tabs: {}, layouts: {}, restoredWorkbench: null, sessions: [session] })
+  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([])
+  localStorage.setItem('agentmux-workbench-v1', JSON.stringify({ version: 1, state: fixture.ui }))
+  await useAppStore.persist.rehydrate()
+  await realNameOwner(process.env.SURVEY_LAST_TAB_RESTART_DIR!)
+  await renderApp()
+  const current = useAppStore.getState()
+  expect(current.surveyCollectedZones).toEqual({ [fixture.original]: true }); expect(current.surveyZoneSelection).toBeNull()
+  expect(projectPersistedWorkbench(current)).toEqual(fixture.workbench)
+  expect(current.spaceZoneBindings).toEqual(fixture.bindings)
+  expect(current.tabs[fixture.closedTabId]).toBeUndefined()
+  expect(catalog().zones.some(zone => zone.zoneId === fixture.closedZoneId)).toBe(true)
+  expect(dom.container.querySelector(`[data-survey-zone-id="${fixture.closedZoneId}"]`)).toBeNull()
+  await choose(fixture.original)
+  expect(slot().querySelectorAll('[data-workbench-region-id]')).toHaveLength(4)
+  expect(slot().querySelector('[data-terminal-probe]')).not.toBeNull()
+  await selectRegion(file.regionId)
+  await vi.waitFor(() => expect(slot().querySelector('[data-file-probe]')).not.toBeNull()); healthy()
 })
