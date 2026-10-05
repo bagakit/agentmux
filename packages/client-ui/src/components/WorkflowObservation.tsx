@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useState, type ReactNode } from 'react'
-import { ChevronRight, CircleDot, CheckCircle2, CircleX, Ban, PauseCircle, Circle } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 export type WorkflowObservationStatus = 'streaming' | 'complete' | 'failed' | 'running' | 'interrupted'
 export type WorkflowRecordedTime = { from: string; to: string; offset: string }
 type ObservationProps = {
@@ -36,15 +36,8 @@ type ObservedToolProps = {
 }
 
 export function WorkflowStatusGlyph({ status, size = 12, recorded = false }: { status: 'running' | 'completed' | 'failed' | 'killed' | 'paused' | 'queued'; size?: number; recorded?: boolean }) {
-  if (status === 'running') {
-    return <svg className={`wf-ico wf-ico--running${recorded ? '' : ' wf-streaming-glyph'}`} width={size} height={size}
-      viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" focusable="false">
-      <circle cx="8" cy="8" r="5.5" opacity=".16" />
-      <circle cx="8" cy="8" r="5.5" pathLength="100" strokeDasharray="30 70" strokeLinecap="round" />
-    </svg>
-  }
-  const Icon = { completed: CheckCircle2, failed: CircleX, killed: Ban, paused: PauseCircle, queued: Circle }[status]
-  return <Icon size={size} className={`semantic-icon wf-ico wf-ico--${status}`} aria-hidden="true" />
+  return <SemanticIcon name={status === 'running' ? recorded ? 'status.running' : 'status.working' : `status.${status}`}
+    size={size} className={`wf-ico wf-ico--${status}`} />
 }
 
 export function RecordedStepsCard({ observation, compact = false, expanded, onExpandedChange, children }: ObservationProps) {
@@ -57,7 +50,7 @@ export function RecordedStepsCard({ observation, compact = false, expanded, onEx
     <button type="button" className="log-fold wf-head" data-open={expanded ? '' : undefined}
       aria-expanded={expanded} aria-controls={contentId} aria-description={recordedTime?.offset}
       onClick={() => onExpandedChange(!expanded)}>
-      <span className="log-fold__node"><ChevronRight size={12} className="wf-chev log-fold__chevron" /></span>
+      <span className="log-fold__node"><SemanticIcon name="navigation.disclosure" size={12} className="wf-chev log-fold__chevron" /></span>
       <span className="log-fold__label">
         {observation.label ? <span className="wf-observation__recorded">{observation.label}</span> : null}
         {recordedTime && !compact ? <span className="log-fold__time" title={recordedTime.offset}>
@@ -100,7 +93,7 @@ export function RecordedToolRow({ observation, className, icon, expanded, onTogg
       {status === 'failed' ? <span className="log-row__chip log-row__chip--failed"><WorkflowStatusGlyph status="failed" />Failed</span> : null}
       {status === undefined ? <span className="wf-observation__recorded">Status not recorded</span> : null}
       <span className="log-row__source" data-persistent={observation.persistentSource ? '' : undefined}>{observation.source}</span>
-      {onToggle ? <ChevronRight size={12} className="log-row__chevron" data-open={expanded ? '' : undefined} /> : null}
+      {onToggle ? <SemanticIcon name="navigation.disclosure" size={12} className="log-row__chevron" data-open={expanded ? '' : undefined} /> : null}
     </span>
   </>
   const rowClass = `${className} wf-tool-row wf-tool-row--observation`
@@ -128,10 +121,10 @@ export function RecordedAgentRow({ observation }: {
     <li className="wf-agent wf-agent--observation" data-recorded-agent-id={observation.id}>
       <button type="button" className="wf-agent__button" aria-expanded={expanded}
         aria-controls={detailId} onClick={() => setExpanded(value => !value)}>
-        <span className="wf-agent__state">{state === undefined || state === 'not-found' ? <CircleDot size={12} className="semantic-icon" aria-hidden="true" /> : <WorkflowStatusGlyph status={glyph} recorded />}</span>
+        <span className="wf-agent__state">{state === undefined || state === 'not-found' ? <SemanticIcon name="status.neutral" size={12} className="semantic-icon" aria-hidden="true" /> : <WorkflowStatusGlyph status={glyph} recorded />}</span>
         <span className="wf-agent__label"><span className="wf-agent__name" title={observation.label}>{observation.label}</span></span>
         <span className="wf-agent__meta" title="Last recorded target state">
-          <span>{state ?? 'State not recorded'}</span><ChevronRight className="wf-chev" size={12} aria-hidden="true" />
+          <span>{state ?? 'State not recorded'}</span><SemanticIcon name="navigation.disclosure" className="wf-chev" size={12} aria-hidden="true" />
         </span>
       </button>
     </li>

@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { ListTree, X } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 import { useMemo, useRef, useState } from 'react'
 import { markdownHeadingText, type MarkdownHeading } from '../lib/agent-markdown.js'
 
@@ -19,7 +19,7 @@ export function MarkdownOutline({ headings, onNavigate }: {
     <Dialog.Root modal={false} open={open} onOpenChange={setOpen}>
       <Dialog.Trigger asChild>
         <button type="button" className="md-outline__trigger" aria-label="Show document outline" title="Document outline">
-          <ListTree size={14} aria-hidden="true" />Contents
+          <SemanticIcon name="object.list" size={14} aria-hidden="true" />Contents
         </button>
       </Dialog.Trigger>
       <Dialog.Content className="md-outline__popover" aria-describedby={undefined}
@@ -29,7 +29,7 @@ export function MarkdownOutline({ headings, onNavigate }: {
         }}>
         <div className="md-outline__header">
           <Dialog.Title className="md-outline__title">On this page</Dialog.Title>
-          <Dialog.Close asChild><button type="button" className="md-outline__close" aria-label="Close document outline"><X size={13} aria-hidden="true" /></button></Dialog.Close>
+          <Dialog.Close asChild><button type="button" className="md-outline__close" aria-label="Close document outline"><SemanticIcon name="action.close" size={13} aria-hidden="true" /></button></Dialog.Close>
         </div>
         <nav aria-label="Document outline" className="md-outline__entries">
           {entries.map(entry => <button key={entry.anchor} type="button" className="md-outline__entry"

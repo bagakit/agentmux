@@ -1,5 +1,5 @@
 import type { AgentSessionUserMessageSource } from '@agentmux/core'
-import { Flag, Info } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 import { useId, useState, type ReactNode } from 'react'
 import type { ConversationSenderDetails, ConversationSpeaker, DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { useClientUiPlatform } from '../platform.js'
@@ -37,7 +37,7 @@ export function ConversationInputDetails({ messageId, source, executionHostId, s
   const details = open ? opened.details : undefined
   return <div className="conversation-input-details">
     <button type="button" className="conversation-input-details__toggle" title="Message details" aria-label="Message details"
-      aria-expanded={open} aria-controls={contentId} onClick={toggle}><Info size={14} aria-hidden="true" /></button>
+      aria-expanded={open} aria-controls={contentId} onClick={toggle}><SemanticIcon name="status.info" size={14} aria-hidden="true" /></button>
     {open ? <section id={contentId} className="conversation-input-details__body" aria-label="Message details">
       {source ? <dl className="conversation-input-details__facts">
         <dt>Source</dt><dd>{source.kind === 'native' ? `Provider native input · ${source.providerId}` : 'AgentMux submitted record'}</dd>
@@ -61,7 +61,7 @@ export function ConversationInputDetails({ messageId, source, executionHostId, s
           <dl><dt>Session</dt><dd><code>{details.sessionId}</code></dd><dt>Provider</dt><dd>{details.providerId}</dd>
             <dt>Lifecycle start</dt><dd>{Number.isFinite(details.createdAt) ? new Date(details.createdAt).toLocaleString() : 'Unknown'}</dd>
             <dt>Lifecycle end</dt><dd>Not recorded</dd></dl>
-          {details.goals.length ? <div className="conversation-input-details__goals"><h4><Flag size={11} aria-hidden="true" />Explicitly linked goals</h4>
+          {details.goals.length ? <div className="conversation-input-details__goals"><h4><SemanticIcon name="object.marker" size={11} aria-hidden="true" />Explicitly linked goals</h4>
             <ul>{details.goals.map((goal) => <li key={goal.id}>{goal.title}</li>)}</ul></div> : <p>No linked goal recorded.</p>}
           <p className="conversation-input-details__notice">Current metadata; title, project and goals at message time were not recorded.</p>
         </> : <p>No current sender metadata for this exact session.</p>}

@@ -1,6 +1,6 @@
 import type { ComposerInsertionHandle, ComposerPasteImage } from '../lib/composer-insertion.js'
 import type { ReactNode, Ref } from 'react'
-import { AtSign, ArrowUp, Square } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 import { composerKeywordAtCaret } from '../lib/composer-keywords.js'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
 import { InlineComposer } from './InlineComposer.js'
@@ -214,7 +214,7 @@ export function AgentComposer({
               onClick={onReferenceActiveFile}
               aria-label={`Reference ${activeFile}`} title={`Reference ${activeFile}`}
             >
-              <AtSign size={14} /> <span className="composer-tool__label">{activeFile.split('/').at(-1)}</span>
+              <SemanticIcon name="action.mention" size={14} /> <span className="composer-tool__label">{activeFile.split('/').at(-1)}</span>
             </button>
           ) : null}
           {/* Absence hides: only a Provider that declared an addressable posture control renders this,
@@ -233,8 +233,8 @@ export function AgentComposer({
               title={primaryAction === 'stop' ? 'Interrupt the current reply — keep this session' : 'Send'}
             >
               {primaryAction === 'stop'
-                ? <Square size={12} fill="currentColor" strokeWidth={0} aria-hidden="true" />
-                : <ArrowUp size={15} aria-hidden="true" />}
+                ? <SemanticIcon name="action.stop" size={12} fill="currentColor" strokeWidth={0} aria-hidden="true" />
+                : <SemanticIcon name="action.submit" size={15} aria-hidden="true" />}
             </button>
             {mailbox}
             {identity}

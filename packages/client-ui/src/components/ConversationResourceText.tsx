@@ -3,7 +3,7 @@ import { readSessionHistoryTextResource } from '@agentmux/core/session-history-c
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { useEffect, useRef, useState } from 'react'
-import { Copy, FileText, LoaderCircle } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 import { useClientUiPlatform } from '../platform.js'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown.js'
 import type { ReadPastedImage } from './ConversationImage.js'
@@ -50,10 +50,10 @@ export function ConversationResourceText({ part, partIndex, record, readResource
   return <div className="conversation-resource-text">
     <div className="conversation-resource-text__controls">
       {!content ? <button type="button" onClick={() => { void load() }} disabled={loading}>
-        {loading ? <LoaderCircle size={13} aria-hidden="true" /> : <FileText size={13} aria-hidden="true" />}
+        {loading ? <SemanticIcon name="status.loading" size={13} aria-hidden="true" /> : <SemanticIcon name="file.text" size={13} aria-hidden="true" />}
         {loading ? 'Reading complete content…' : error ? 'Retry complete content' : 'Read complete content'}
         <span>{Math.ceil((part.content?.byteLength ?? 0) / 1024).toLocaleString()} KiB</span>
-      </button> : <button type="button" onClick={() => { void copy() }}><Copy size={13} aria-hidden="true" />{copied ? 'Complete content copied' : 'Copy complete content'}</button>}
+      </button> : <button type="button" onClick={() => { void copy() }}><SemanticIcon name="action.copy" size={13} aria-hidden="true" />{copied ? 'Complete content copied' : 'Copy complete content'}</button>}
       {content ? <button type="button" onClick={() => { pending.current?.abort(); setContent(null); setCopied(false) }}>Close content</button> : null}
     </div>
     {error ? <p className="conversation-resource-text__error" role="alert">{error}</p> : null}

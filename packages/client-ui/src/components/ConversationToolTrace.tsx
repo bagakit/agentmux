@@ -1,5 +1,5 @@
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
-import { ChevronRight, CircleX, Terminal } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 import { memo, useId, useState } from 'react'
 import { stepTitle } from '../lib/activity-step-summary.js'
 
@@ -33,11 +33,11 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
           if (onToggle) onToggle(!open)
           else setLocalOpen(!open)
         }} title={name}>
-        {failed ? <CircleX size={13} aria-hidden="true" /> : <Terminal size={13} aria-hidden="true" />}
+        {failed ? <SemanticIcon name="status.failed" size={13} aria-hidden="true" /> : <SemanticIcon name="object.terminal" size={13} aria-hidden="true" />}
         <span className="conversation-tool-trace__title">{title}</span>
         <span className="conversation-tool-trace__kind">{isCall ? 'Tool call' : 'Tool result'}</span>
         {failed ? <span className="conversation-tool-trace__failure">Failed</span> : null}
-        <ChevronRight className="conversation-tool-trace__chevron" size={12} aria-hidden="true" />
+        <SemanticIcon name="navigation.disclosure" className="conversation-tool-trace__chevron" size={12} aria-hidden="true" />
       </button>
       {open ? <div id={panelId} className="conversation-tool-trace__payload">
         {part.callId ? <span className="conversation-tool-trace__identity">Call <code>{part.callId}</code></span> : null}

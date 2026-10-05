@@ -2,7 +2,7 @@ import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHisto
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
 import { readSessionHistoryTextResource } from '@agentmux/core/session-history-content'
-import { Check, ChevronRight, Copy, CornerDownRight } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { formatClock, formatOffset } from '../lib/conversation-time.js'
 import { useClientUiPlatform } from '../platform.js'
@@ -303,7 +303,7 @@ export function ConversationMessage({
             aria-label={systemContextOpen ? '收起系统记录' : '展开系统记录'}
             aria-expanded={systemContextOpen} aria-controls={hasContent ? systemContentId : undefined}
             disabled={!hasContent} onClick={() => setSystemContextOpen(open => !open)}>
-            {hasContent ? <ChevronRight size={12} aria-hidden="true" /> : null}
+            {hasContent ? <SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" /> : null}
             <span className="log-turn__system-title">{recordTitle || '系统记录'}</span>
             {systemSummary ? <span className="log-turn__system-summary">{systemSummary}</span> : null}
           </button> : <span className="log-turn__sender">
@@ -313,7 +313,7 @@ export function ConversationMessage({
               <button type="button" className="log-turn__id-copy" title={idCopyState === 'copied' ? 'Agent ID copied' : idCopyState === 'failed' ? 'Copy Agent ID failed; retry' : 'Copy Agent ID'}
                 aria-label={idCopyState === 'copied' ? 'Agent ID copied' : 'Copy Agent ID'}
                 onClick={() => { void copyValue(agentReference.speaker.id, 'agent-id') }}>
-                {idCopyState === 'copied' ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+                {idCopyState === 'copied' ? <SemanticIcon name="action.confirm" size={12} aria-hidden="true" /> : <SemanticIcon name="action.copy" size={12} aria-hidden="true" />}
               </button>
               {idCopyState === 'failed' ? <span className="log-turn__id-copy-error" role="alert">Copy failed · retry</span> : null}
             </span> : null}
@@ -340,7 +340,7 @@ export function ConversationMessage({
             <span className="log-turn__copy-error" role="alert">{copyReadError ?? 'Copy failed'}</span>
           ) : null}
           {hasCopyContent ? <button type="button" className="log-turn__action" onClick={() => { void copyMessage() }} title="Copy message" aria-label={copyState === 'copied' ? 'Message copied' : 'Copy message'}>
-            <Copy size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
+            <SemanticIcon name="action.copy" size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
           </button> : null}
         </span> : null}
         {isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity ? <ConversationInputDetails messageId={messageId} source={inputSource} executionHostId={executionHostId} speaker={recordedSpeaker}
@@ -350,7 +350,7 @@ export function ConversationMessage({
         {described?.project ? <span className="log-turn__context" title={`${described.project.name}${described.project.branch ? ` · ${described.project.branch}` : ''} · Current project`}>{described.project.name}{described.project.branch ? <span> · {described.project.branch}</span> : null}</span> : null}
         {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
         {showOrigin && inputOrigin ? <span className="log-turn__input-source" title={inputOrigin.title}>
-          <CornerDownRight size={11} aria-hidden="true" /><span>{inputOrigin.caption}</span></span> : null}
+          <SemanticIcon name="action.reply" size={11} aria-hidden="true" /><span>{inputOrigin.caption}</span></span> : null}
         {located ? <span className="log-turn__location" role="status">已定位此消息</span> : null}
         {prefix && prefix.sourceLabel.length > 0 && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
         {prefix?.packet && (!isDeclaredSender || !agentReference) ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
@@ -362,7 +362,7 @@ export function ConversationMessage({
             const key = partKey(part)
             return part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}>
               {index === 0 ? prefix?.declaredContexts?.map((context, contextIndex) => <details key={contextIndex} className="log-turn__declared-context">
-                <summary><ChevronRight size={12} aria-hidden="true" />Declared context{prefix.declaredContexts!.length > 1 ? ` ${contextIndex + 1}` : ''}</summary>
+                <summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />Declared context{prefix.declaredContexts!.length > 1 ? ` ${contextIndex + 1}` : ''}</summary>
                 <pre>{context.raw}</pre>
               </details>) : null}
               {index === 0 && prefix?.declaredContexts && prefix.body.length === 0 ? null : index === 0 && prefix?.packet ? prefix.packet.parts.map((packetPart, packetIndex) => packetPart.kind === 'text'

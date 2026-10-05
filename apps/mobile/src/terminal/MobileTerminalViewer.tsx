@@ -1,7 +1,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
-import { Copy, RefreshCw, SquareTerminal, Keyboard, Eye } from 'lucide-react'
-import { Terminal } from '@xterm/xterm'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { Terminal, type ITheme } from '@xterm/xterm'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import type { MobileConnection } from '../conversation/MobileConversationSurface'
@@ -13,10 +13,11 @@ import './terminal.css'
 
 const noticeSummary = (message: string) => message.split(/[；。]/u, 1)[0]
 
-export function MobileTerminalViewer({ client, agentSessionId, connection, platform, visible }: {
+export function MobileTerminalViewer({ client, agentSessionId, connection, platform, visible, terminalPalette }: {
   client: AgentMuxHostedClient | null; agentSessionId: string | null; connection: MobileConnection
-  platform: ClientUiPlatform; visible: boolean
+  platform: ClientUiPlatform; visible: boolean; terminalPalette?: ITheme | undefined
 }) {
+  const paletteRef = useRef(terminalPalette); paletteRef.current = terminalPalette
   const container = useRef<HTMLDivElement>(null)
   const terminal = useRef<Terminal | null>(null)
   const canvasSession = useRef<string | null>(null)
@@ -44,7 +45,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
     const canvas = new Terminal({ cols: 80, rows: 24, scrollback: 10_000, fontSize: 12, lineHeight: 1.15,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', disableStdin: true,
       altClickMovesCursor: false, mouseEventsRequireAlt: true, cursorBlink: false, cursorInactiveStyle: 'none', scrollOnUserInput: false,
-      windowOptions: {}, theme: { background: '#151b1b', foreground: '#dce4e0', selectionBackground: '#bedbba40' } })
+      windowOptions: {}, theme: paletteRef.current ?? { background: '#151b1b', foreground: '#dce4e0', selectionBackground: '#bedbba40' } })
     canvas.open(container.current)
     if (canvas.textarea) { canvas.textarea.readOnly = true; canvas.textarea.tabIndex = -1; canvas.textarea.inputMode = 'none' }
     // Terminal output cannot read/write the OS clipboard. Copy requires the explicit button below.
@@ -52,6 +53,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
     terminal.current = canvas
     setCurrentCanvas(canvas)
   }, [agentSessionId, visible])
+  useEffect(() => { if (terminal.current && terminalPalette) terminal.current.options.theme = terminalPalette }, [terminalPalette])
   useEffect(() => () => {
     if (reader.current) { released.current = reader.current.dispose(); reader.current = null }
     terminal.current?.dispose(); terminal.current = null
@@ -130,10 +132,10 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
   }
   const originalPending = control.current === controls.current.get(agentSessionId ?? '') ? control.current?.facts().pending : null
   return <section className="mobile-terminal" data-control={inputState.mode} data-agent-session-id={agentSessionId ?? undefined} data-reading={client && agentSessionId ? reading.phase : 'unavailable'}>
-    <div className="mobile-terminal-toolbar"><span><SquareTerminal size={16} />{inputState.mode === 'control' ? '控制终端' : '观看终端'}</span><button aria-label="复制选中文字" onClick={() => { void copy() }}><Copy size={17} /></button><button aria-label="重新核实终端输出" onClick={() => { void reader.current?.retry() }}><RefreshCw size={17} /></button></div>
+    <div className="mobile-terminal-toolbar"><span><SemanticIcon name="object.terminal" size={16} />{inputState.mode === 'control' ? '控制终端' : '观看终端'}</span><button aria-label="复制选中文字" onClick={() => { void copy() }}><SemanticIcon name="action.copy" size={17} /></button><button aria-label="重新核实终端输出" onClick={() => { void reader.current?.retry() }}><SemanticIcon name="action.refresh" size={17} /></button></div>
     {agentSessionId && <div className="mobile-terminal-actions">
-      {inputState.mode === 'watch' ? <button disabled={!client || connection.state !== 'connected' || inputState.phase === 'unknown'} onClick={enableControl}><Keyboard size={16} />控制终端</button>
-        : <button onClick={() => control.current?.watch()}><Eye size={16} />回到观看</button>}
+      {inputState.mode === 'watch' ? <button disabled={!client || connection.state !== 'connected' || inputState.phase === 'unknown'} onClick={enableControl}><SemanticIcon name="object.keyboard" size={16} />控制终端</button>
+        : <button onClick={() => control.current?.watch()}><SemanticIcon name="action.reveal" size={16} />回到观看</button>}
       <button disabled={inputState.mode !== 'control'} aria-expanded={sizeOpen} onClick={() => { setCols(String(terminal.current?.cols ?? 80)); setRows(String(terminal.current?.rows ?? 24)); setSizeOpen(value => !value) }}>PTY 尺寸</button>
     </div>}
     {inputState.mode === 'control' && <div className="mobile-terminal-keys" aria-label="终端常用按键">

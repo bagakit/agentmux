@@ -3,7 +3,7 @@ import type { ConversationProcessProps } from './ConversationRecordSequence.js'
 import { describeActivityRecordTime } from '../lib/activity-record-time.js'
 import { stepTitle } from '../lib/activity-step-summary.js'
 import { useId, useState, type ReactNode } from 'react'
-import { GitBranch, Terminal } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 import { RecordedStepsCard as WorkflowCard, RecordedToolRow as WorkflowToolRow, RecordedAgentRow as WorkflowAgentRow, type WorkflowObservationStatus, type WorkflowRecordedTime } from './WorkflowObservation.js'
 
 function recordedStatus(item: AgentSessionHistoryItem): WorkflowObservationStatus | undefined {
@@ -77,7 +77,7 @@ function NativeProcessStep({ item, origin, children }: {
   return <div className="wf-native-process" data-native-step-id={item.id}>
     <WorkflowToolRow observation={{ id: item.id, title, source: 'Native', persistentSource: true,
       ...(status ? { status } : {}), ...(time ? { recordedTime: time } : {}) }}
-      className="log-row" icon={collaboration ? <GitBranch size={12} /> : <Terminal size={12} />}
+      className="log-row" icon={collaboration ? <SemanticIcon name="object.branch" size={12} /> : <SemanticIcon name="object.terminal" size={12} />}
       expanded={expanded} controls={bodyId} onToggle={toggle} />
     <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>
       {expanded || readOnce ? <>
