@@ -1805,7 +1805,7 @@ export class RuntimeController {
 
   async interrupt(control: SessionControl): Promise<void> {
     const client = await this.connectedClient(control.hostId, 'runtime')
-    if (control.kind === 'agent') await client.signalAgent(control.agentSessionId, 'SIGINT')
+    if (control.kind === 'agent') await client.signalAgent(control.agentSessionId, control.run, 'SIGINT')
     else await client.signalTerminal(control.run, 'SIGINT')
   }
 
