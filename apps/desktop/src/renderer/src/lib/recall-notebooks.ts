@@ -40,7 +40,9 @@ export async function openNotebookPage(page: NotebookPage, onSelectReference?: (
   const displayWorkspaceId = reference?.displayWorkspaceId ?? page.resource.workspaceId
   const heldBook = before.recallNotebookId, heldNote = before.recallNoteId
   const initial = surveyInitialZoneSelection(catalog, zone.zoneId, before.layouts, before.tabs, page.resource.workspaceId)
-  before.setRecallZoneSelection(initial)
+  // Keep an already confirmed page visible while the canonical read is pending.
+  // The layout's active sibling is not an intermediate navigation destination.
+  before.setRecallZoneSelection(reference ? surveySelectReference(initial, reference) : initial)
   const heldSelection = useAppStore.getState().recallZoneSelection
   const observed = await api.files.read(page.resource.workspaceId, page.resource.path)
   const read = observed.status === 'read' ? readNoteDocument(observed.document.content) : null
