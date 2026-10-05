@@ -35,6 +35,7 @@ it('makes the three Work views one readable group, with independent Survey, sett
   expect(work.querySelectorAll('[tabindex]')).toHaveLength(0)
   expect([...utilities.querySelectorAll('button')].map(item => item.getAttribute('aria-label')?.split(':')[0])).toEqual(['Survey', 'Recall'])
   const settings = container.querySelector('[role="group"][aria-label="App settings"]')!
+  expect(settings).not.toBeNull()
   expect([...settings.querySelectorAll('button')].map(item => item.getAttribute('aria-label'))).toEqual(['Settings'])
   expect(utilities.nextElementSibling).toBe(settings)
   expect(work.contains(button('Survey'))).toBe(false); expect(work.contains(button('Settings'))).toBe(false)
