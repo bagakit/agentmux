@@ -85,19 +85,6 @@
 .performance-script textarea { display:block; width:100%; height:min(360px,50vh); resize:none; border:1px solid var(--line-soft); border-radius:var(--radius-sm); padding:var(--sp-4); background:var(--surface-1); color:var(--text-2); font:var(--fs-meta)/1.6 var(--font-mono); tab-size:2; }
 @media(max-width:400px) { .performance-header { padding-left:var(--sp-5); } .performance-observation { margin-inline:var(--sp-5); } .performance-body { padding-inline:var(--sp-5); } .performance-table-head,.performance-role-row,.performance-contributor__row { grid-template-columns:minmax(0,1fr) 48px 64px; gap:var(--sp-2); } .performance-metrics { gap:var(--sp-5); } .performance-actions { gap:var(--sp-1); } }
 
-.mobile-connection-toolkit { padding-top:var(--sp-4); }
-.mobile-connection-toolkit .settings-group { margin:0; border:0; padding:0; background:transparent; }
-.mobile-connection-toolkit .settings-group > header { margin-bottom:var(--sp-3); }
-.mobile-connection-toolkit .settings-group > header small { font-size:var(--fs-meta); color:var(--text-2); }
-.mobile-connection-toolkit .settings-pane-toolbar { flex-wrap:wrap; }
-.mobile-connection-toolkit .host-settings-card { padding:var(--sp-4) 0; border:0; border-top:1px solid var(--line-soft); border-radius:0; background:transparent; }
-.mobile-connection-toolkit .host-settings-card header { display:flex; align-items:center; flex-wrap:wrap; gap:var(--sp-3); }
-.mobile-connection-toolkit .host-settings-card header > div { flex:1; min-width:100px; }
-.mobile-connection-toolkit .host-settings-card strong { overflow-wrap:anywhere; }
-.mobile-connection-toolkit .host-settings-card small { color:var(--text-3); }
-.mobile-connection-toolkit .host-settings-card ol { padding-left:var(--sp-6); font-size:var(--fs-meta); line-height:1.6; overflow-wrap:anywhere; }
-.mobile-connection-toolkit .host-edit-grid { grid-template-columns:minmax(0,1fr); }
-.mobile-connection-toolkit input { min-width:0; max-width:100%; }
 
 /* Bounded process heatmap: fixed identities and metric columns, no update animation. */
 .performance-core-equivalent { display:block; color:var(--text-3); font-size:var(--fs-micro); font-weight:400; white-space:nowrap; }

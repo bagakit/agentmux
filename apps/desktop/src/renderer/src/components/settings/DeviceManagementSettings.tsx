@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxRpcResult } from '@agentmux/core'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
+import { ConnectionLinkCode } from '../toolkit/ConnectionLinkCode'
 
 type DeviceList = AgentMuxRpcResult<'device.ls'>
 const operationLabels: Readonly<Record<string, string>> = { submitAgentPrompt: 'Send message', writeAgent: 'Terminal input', pasteAgent: 'Paste input', respondAgentPermission: 'Respond to permission', answerAgentRequest: 'Answer request', resizeAgent: 'Resize terminal', signalAgent: 'Send signal', stopAgent: 'Stop Agent', resumeAgent: 'Resume Agent', createAgent: 'Create Agent', removeAgent: 'Remove Agent' }
@@ -53,7 +54,7 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
   return <section className="settings-group device-management" data-device-view="settings">
     <div className="device-management__connection">
       <h3>Connect your phone</h3>
-      <p className="settings-group-note">Connect your phone and Mac to the same Wi-Fi, then open the copied link in your phone’s browser.</p>
+      <p className="settings-group-note">Connect both devices to the same Wi-Fi, then scan the code with your phone’s camera or open the copied link.</p>
       <p className="settings-group-note">{list ? `${devices.filter(device => device.online).length} online · ${devices.length} authorized` : 'Device status not yet confirmed'}</p>
   
       <div className="settings-pane-toolbar">
@@ -62,7 +63,7 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
       {list && <p className="settings-group-note" role="status">{list.mobileAccess.state === 'connected' ? 'Ready to connect' : list.mobileAccess.state === 'starting' ? 'Connection service is starting. Try again shortly.' : 'Connection service unavailable'}</p>}
       {list && list.mobileAccess.state !== 'connected' && <details><summary>Connection details</summary><p className="settings-group-note">{list.mobileAccess.message}</p></details>}
       {notice && <p className="device-management__feedback" role="status">{notice}</p>}
-      {url && <details className="device-management__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={url} onFocus={event => event.target.select()} /></details>}
+      {url && <><ConnectionLinkCode url={url} /><details className="device-management__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={url} onFocus={event => event.target.select()} /></details></>}
     </div>
     <div className="device-management__devices">
       <div className="settings-pane-toolbar"><h3>Connected devices</h3><button className="small-button" disabled={refreshing} onClick={() => { void read() }}>{refreshing ? <LoaderCircle size={16} className="device-management__spinner" /> : <RefreshCw size={16} />}{refreshing ? 'Checking…' : 'Refresh'}</button></div>
