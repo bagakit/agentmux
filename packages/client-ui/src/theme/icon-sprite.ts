@@ -2,8 +2,29 @@ import { SEMANTIC_ICON_IDS, type SemanticIconId, type IconShape } from './icon-c
 import { iconShapes } from './icon-assets.js'
 import { themeColorSchema, type ThemeValue } from './schema.js'
 
+/** Browser-native widgets consume these semantic masks while retaining their original DOM state. */
+const NATIVE_ICON_PROJECTIONS = {
+  '--native-checkbox-mask': 'control.checkbox-checked',
+  '--native-radio-mask': 'control.radio-checked',
+  '--native-disclosure-mask': 'navigation.disclosure',
+  '--native-select-open-mask': 'control.select-open',
+  '--native-connection-connected-mask': 'status.connection-connected',
+  '--native-connection-unconfirmed-mask': 'status.connection-unconfirmed',
+  '--native-presence-unknown-mask': 'status.presence-unknown',
+  '--native-presence-starting-mask': 'status.presence-starting',
+  '--native-presence-neutral-mask': 'status.presence-neutral',
+  '--native-presence-working-mask': 'status.presence-working',
+  '--native-presence-running-mask': 'status.presence-running',
+  '--native-presence-waiting-mask': 'status.presence-waiting',
+  '--native-presence-blocked-mask': 'status.presence-blocked',
+  '--native-presence-error-mask': 'status.presence-error',
+  '--native-presence-exited-mask': 'status.presence-exited',
+  '--native-presence-done-mask': 'status.presence-done',
+  '--native-presence-disconnected-mask': 'status.presence-disconnected'
+} as const satisfies Record<string, SemanticIconId>
+
 const SVG_NS = 'http://www.w3.org/2000/svg'
-const sprites = new WeakMap<Document, { element: SVGSVGElement; signature: string }>()
+const sprites = new WeakMap<Document, { element: SVGSVGElement; signature: string; nativeSignature: string }>()
 export function semanticIconHref(name: SemanticIconId): string { return `#agentmux-icon-${name}` }
 
 /** The document root owns one sprite. Existing React and editor DOM keep stable references. */
@@ -19,13 +40,18 @@ export function updateIconSprite(document: Document, theme: Pick<ThemeValue, 'ic
     element.style.cssText = 'position:absolute;overflow:hidden;pointer-events:none'
     // No display:none: several browsers omit its referenced symbols from rendering.
     document.body.prepend(element)
-    sprite = { element, signature: '' }
+    sprite = { element, signature: '', nativeSignature: '' }
     sprites.set(document, sprite)
   }
   const root = document.documentElement.style
   root.setProperty('--icon-stroke-width', String(theme.iconStyle.strokeWidth))
   root.setProperty('--icon-linecap', theme.iconStyle.linecap)
   root.setProperty('--icon-linejoin', theme.iconStyle.linejoin)
+  const nativeSignature = JSON.stringify([theme.icons, theme.iconStyle])
+  if (sprite.nativeSignature !== nativeSignature) {
+    for (const [property, name] of Object.entries(NATIVE_ICON_PROJECTIONS)) root.setProperty(property, iconMaskDataUrl(iconShapes(name, theme.icons), theme.iconStyle))
+    sprite.nativeSignature = nativeSignature
+  }
   if (sprite.signature === signature) return
   const symbols = document.createDocumentFragment()
   for (const name of SEMANTIC_ICON_IDS) {

@@ -1,3 +1,4 @@
+@import '@agentmux/client-ui/styles/native-controls.css';
 /**
  * reset、html/body、滚动条、以及被所有表面复用的原子控件
  * （.icon-button / .small-button / .primary-button / .eyebrow / .status 状态语汇）。
