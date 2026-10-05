@@ -52,7 +52,7 @@ Core 另持有 Provider、AgentSession 等 Agent 语义。此处的公共物理�
 空间操作走另一条正交路径：
 
 ```text
-managed Agent → agentmux CLI → control.sock → Desktop Main Control Host
+managed Agent → amux CLI     → control.sock → Desktop Main Control Host
                                                 │ typed IPC request/receipt
                                                 ▼
                                   Renderer Layout Store / reducer

@@ -59,7 +59,7 @@ Desktop 二级内容由 [`WorkspaceFilesTool`](../../apps/desktop/src/renderer/s
 ```mermaid
 flowchart LR
   Package["包消费者"] --> Core["AgentMuxClient"]
-  CLI["agentmux CLI"] --> Service["共享 JSON-RPC 业务服务"]
+  CLI["amux CLI"] --> Service["共享 JSON-RPC 业务服务"]
   Service --> Main["Desktop Main handlers"]
   Service --> Core
   Renderer["Desktop Renderer"] --> Main
