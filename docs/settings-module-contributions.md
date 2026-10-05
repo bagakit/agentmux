@@ -37,7 +37,7 @@ booleanSetting('feature.enabled', false,
   (config, enabled) => ({ ...config, feature: { ...config.feature, enabled } }))
 ```
 
-这是字段声明的形状示例，当前没有 `feature.enabled` 配置。新增实际 AppConfig 字段时，必须同时明确类型、默认值、生效范围与 ConfigStore 的持久化校验；注册模块不自动创造可保存的字段。新字段随后由原 `agentmux settings inspect <key>` 与 `agentmux settings set <key> <value>` 消费，不增加 CLI 解析分支或任意路径 setter。公共接口影响与完整交付按[公共能力贡献约定](guides/public-capability-contributions.md)判断。
+这是字段声明的形状示例，当前没有 `feature.enabled` 配置。新增实际 AppConfig 字段时，必须同时明确类型、默认值、生效范围与 ConfigStore 的持久化校验；注册模块不自动创造可保存的字段。新字段随后由原 `amux settings inspect <key>` 与 `amux settings set <key> <value>` 消费，不增加 CLI 解析分支或任意路径 setter。公共接口影响与完整交付按[公共能力贡献约定](guides/public-capability-contributions.md)判断。
 
 Main 通过原 ConfigOwner 排队，持久保存、Runtime commit 与发布完成后才回复成功。有效默认未改变时不回填配置或写盘。资源 CRUD、权限选择等有独立合同，不能为了套进 scalar helper 而降低原身份、引用与 expected 校验。当前公开 prefix 由 Main 的明确范围决定，见[设置目录的查询方式](settings-catalog.md#查询与修改)及 Main dispatcher；模块名称不自动成为 CLI target，输出继续明确 `partial: true`。个人资料、Focus 与 Goals 示例沿此机制，不增加独立解析器或配置 owner。
 
