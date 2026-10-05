@@ -15,7 +15,7 @@ const target = { hostId: 'local', agentSessionId: 'original', providerId: 'gener
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'ag-daily-goal-')); now = 1; readsFail = false; confirmed = false; occupied = false; delayedObserve = false; runId = 'original-run'; sent = []
   goals = openDemandStore({ root: join(root, 'goals') }); store = new ContinuousProgressLoopStore(join(root, 'loops.json'))
-  await goals.create({ id: 'goal', title: 'Work', description: 'Original content', sessionIds: ['original'] })
+  await goals.create({ id: 'goal', title: 'Work', description: 'Original content', sessionIds: ['original'], assigneeSessionIds: ['original'], supervisorSessionId: 'original' })
   await goals.proposeAlignment('goal', { summary: 'Useful work', criteria: [{ id: 'result', text: 'Real result' }], openQuestions: [] }); await goals.confirmAlignment('goal', 1)
   manager = make()
 })
@@ -25,6 +25,45 @@ function make() { return new ContinuousProgressLoopManager(store, async (_loop, 
   undefined, { read: id => readsFail ? Promise.reject(new Error('Original Goal owner is unreadable')) : goals.get(id), subscribe: listener => goals.subscribe(snapshot => listener(snapshot.demands)), inspectInitial: async () => confirmed ? 'confirmed' : 'unconfirmed' }) }
 const begin = () => manager.prepareGoal({ ...target, goalId: 'goal', alignmentRevision: 1, intervalMs: 100, operationId: 'original-start', prompt: 'Original content' })
 afterEach(async () => { await manager.stop(); vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }) })
+it('Demand Supervisor: Main qualifies only a new saved Supervisor, and frozen operation lookup survives owner changes', async () => {
+  await goals.update('goal', { assigneeSessionIds: ['original', 'alternate'], supervisorSessionId: 'alternate' })
+  await expect(begin()).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+  expect(manager.list()).toEqual([])
+  await goals.update('goal', { supervisorSessionId: 'original' })
+  const original = await begin(); confirmed = true; await manager.initialGoalInput(target, original.loopId, 'original-start', 'confirm')
+  await goals.update('goal', { assigneeSessionIds: ['alternate'], supervisorSessionId: 'alternate' })
+  expect(manager.list()[0]).toMatchObject({ agentSessionId: 'original', status: 'active' })
+  readsFail = true
+  await expect(begin()).resolves.toMatchObject({ loopId: original.loopId, agentSessionId: 'original', initialDelivery: { state: 'confirmed' } })
+  readsFail = false
+  const other = { ...target, agentSessionId: 'alternate', goalId: 'goal', alignmentRevision: 1, intervalMs: 100, operationId: 'new-supervisor-start', prompt: 'Original content' }
+  await expect(manager.prepareGoal(other)).rejects.toThrow('already exists')
+  const paused = await manager.goalAction('goal', original.loopId, 'pause', original.revision!, 'old-supervisor-pause')
+  await expect(manager.goalAction('goal', original.loopId, 'resume', paused.revision!, 'old-supervisor-resume')).resolves.toMatchObject({ agentSessionId: 'original', status: 'active' })
+  const active = manager.list()[0]!
+  await manager.goalAction('goal', active.loopId, 'stop', active.revision!, 'old-supervisor-stop')
+  await expect(manager.prepareGoal(other)).resolves.toMatchObject({ agentSessionId: 'alternate', creationOperationId: 'new-supervisor-start' })
+  expect(manager.list().map(loop => [loop.agentSessionId, loop.status])).toEqual([['original', 'stopped'], ['alternate', 'paused']])
+})
+
+it('Demand Supervisor: concurrent starts across a Supervisor change retain one original Goal loop', async () => {
+  await goals.update('goal', { assigneeSessionIds: ['original', 'alternate'] })
+  const observe = (manager as any).observe as Function
+  let entered!: () => void, release!: () => void
+  const inside = new Promise<void>(resolve => entered = resolve), gate = new Promise<void>(resolve => release = resolve)
+  vi.spyOn(manager as any, 'observe').mockImplementation(async (...args: any[]) => {
+    if (args[0].agentSessionId === 'original') { await goals.update('goal', { supervisorSessionId: 'alternate' }); entered(); await gate }
+    return observe(...args)
+  })
+  const original = begin(); await inside
+  const next = manager.prepareGoal({ ...target, agentSessionId: 'alternate', goalId: 'goal', alignmentRevision: 1, intervalMs: 100, operationId: 'concurrent-alternate', prompt: 'Original content' })
+  const timer = setTimeout(release, 35)
+  try {
+    const results = await Promise.allSettled([original, next])
+    expect(results.map(result => result.status)).toEqual(['fulfilled', 'rejected'])
+    expect(manager.list().map(loop => loop.agentSessionId)).toEqual(['original'])
+  } finally { clearTimeout(timer); release() }
+})
 it('persisted initial unknown cannot be reconstructed from a missing original input receipt after cold load', async () => {
   const loop = await begin(); await manager.initialGoalInput(target, loop.loopId, 'original-start', 'begin')
   await manager.stop(); manager = make(); await manager.start()

@@ -32,8 +32,8 @@ export async function injectedContextCore(root: string, initial?: AgentMuxStored
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
   const persistNative = async () => writeFile(nativePath, JSON.stringify({ receipts: [...receipts], cursors: [...cursors], writes }))
   let loseAck = false
-  const start = vi.fn(async (input: { workspacePath: string }) => {
-    const created = run(`private-fresh-run-${start.mock.calls.length}`, input.workspacePath)
+  const start = vi.fn(async (input: { cwd: string }) => {
+    const created = run(`private-fresh-run-${start.mock.calls.length}`, input.cwd)
     runs.set(created.runId, created); return created
   }), stop = vi.fn()
   const clients: AgentMuxClient[] = []

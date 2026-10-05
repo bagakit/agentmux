@@ -1,19 +1,23 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { injectedContextCore } from './helpers/injected-context-core'
+import { startDirectGoal, retryDirectGoal, directGoalRequest } from '../src/renderer/src/lib/goals-direct-pmo'
+import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
+import { goalPmoOperation } from '../src/shared/goal-pmo-origin'
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { act } from 'react'
+import { act, Profiler } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, beforeAll, afterAll, expect, it, vi } from 'vitest'
-import { AGENTMUX_AGENT_MESSAGING_GUIDANCE, AgentMuxClient, AgentMuxMemoryAgentSessionStore, type AgentMuxStoredAgentSession } from '@agentmux/core'
+import { AGENTMUX_AGENT_MESSAGING_GUIDANCE, AgentMuxClient, AgentMuxMemoryAgentSessionStore, normalizeAgentSession, type AgentMuxStoredAgentSession } from '@agentmux/core'
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig, SessionSnapshot } from '../src/shared/contracts'
-import type { ConfigStore } from '../src/main/config-store'
+import { ConfigStore } from '../src/main/config-store'
 import type { WorkspaceFiles } from '../src/main/workspace-files'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(),
@@ -32,7 +36,7 @@ vi.mock('electron', () => ({
     removeHandler: (channel: string) => bridge.handlers.delete(channel),
     on: (channel: string, fn: (...args: any[]) => any) => { const set = bridge.main.get(channel) ?? new Set(); set.add(fn); bridge.main.set(channel, set) },
     removeListener: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn) },
-  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.storagePath, getAppPath: () => bridge.storagePath, isPackaged: false },
+  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.storagePath, getAppPath: () => process.env.AGENTMUX_DAILY_GOAL_REPOSITORY + '/apps/desktop', isPackaged: false },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
@@ -82,7 +86,7 @@ import { EMPTY_GOAL_ACKNOWLEDGEMENT } from '../src/renderer/src/components/GoalA
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { privateTracker } from './helpers/continuous-progress-tracker'
 import { CONTINUOUS_PROGRESS_CHANGED } from '../src/shared/contracts'
-import { CONTROL_REQUEST_CHANNEL } from '../src/shared/contracts'
+import { CONTROL_REQUEST_CHANNEL, SESSION_EVENT_CHANNEL } from '../src/shared/contracts'
 
 // Target product owners run: Composer → leaf → preload → registered IPC → Main loop → public
 // Core ingress; Store initialize installs its actual request handler. Electron transport, startup
@@ -156,7 +160,7 @@ beforeEach(async () => {
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: '__scratch__', name: 'Owned topics', hostId: 'local', path: scratchRoot, kind: 'folder' }] }
   demands = openDemandStore({ root: join(directory, 'goals') })
-  await demands.create({ id: 'goal', title: 'Original useful work', description: 'Complete the original useful result.', sessionIds: [session.agentSessionId], status: 'todo' })
+  await demands.create({ id: 'goal', title: 'Original useful work', description: 'Complete the original useful result.', sessionIds: [session.agentSessionId], assigneeSessionIds: [session.agentSessionId], supervisorSessionId: session.agentSessionId, status: 'todo' })
   await demands.update('goal', { alignment: { summary: 'Useful result', criteria: [{ id: 'real', text: 'Original output exists' }], openQuestions: [] } })
   await demands.confirmAlignment('goal', 1)
   manager = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(directory, 'loops.json')),
@@ -180,9 +184,12 @@ beforeEach(async () => {
       const once = afterInputObservation; afterInputObservation = undefined; void once().then(send)
     } else send()
   }
+  const fixtureConfigStore = new ConfigStore(join(directory, 'original-config.json'))
   disposeIpc = await registerIpc({ window: { webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
-    runtime, progressLoops: manager, demands, configStore: { get: async () => config } as unknown as ConfigStore,
-    scratchTopics: new ScratchTopics(), workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as unknown as WorkspaceFiles })
+    runtime, progressLoops: manager, demands, configStore: { get: async () => config, validate: (next: AppConfig) => fixtureConfigStore.validate(next), save: async (next: AppConfig) => { config = await fixtureConfigStore.save(next); return config } } as unknown as ConfigStore,
+    scratchTopics: new ScratchTopics(), workspaceFiles: expect.getState().currentTestName?.startsWith('Mote new-chat origin:')
+      ? new MoteOriginWorkspaceFiles(() => ({ kind: 'local' }) as never)
+      : { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return handler!({ sender: bridge.sender } as IpcMainInvokeEvent, ...values)
@@ -206,7 +213,7 @@ afterEach(async () => {
   const cleanup = await Promise.allSettled([manager?.stop(), disposeIpc?.(), runtime?.dispose()])
   disposeIpc = undefined
   bridge.main.clear(); bridge.renderer.clear(); bridge.handlers.clear(); bridge.invoke.mockReset()
-  vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(directory, { recursive: true, force: true })
+  vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 30 })
   expect(cleanup.filter(r => r.status === 'rejected')).toEqual([])
 })
 
@@ -289,6 +296,203 @@ it('original activity public Source CLI authenticates the author and reaches Mai
   } finally { await typed.dispose(); await human.dispose(); await server.stop() }
 })
 async function start() { return useAppStore.getState().executeControl(request()) }
+
+it('Demand Supervisor: new Continue needs a saved responsible Supervisor while ordinary manual input stays usable', async () => {
+  await demands.update('goal', { supervisorSessionId: null })
+  useAppStore.getState().setAgentComposerDraft(session.agentSessionId, 'My healthy manual draft')
+  await expect(start()).rejects.toThrow('Supervisor')
+  expect(manager.list()).toEqual([]); expect(writes).toEqual([])
+  expect(useAppStore.getState().agentComposerDrafts[session.agentSessionId]).toBe('My healthy manual draft')
+  useAppStore.getState().setAgentComposerDraft(session.agentSessionId, '')
+  await expect(useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'finite-without-supervisor', operation: 'demand.start', demandId: 'goal' })).resolves.toMatchObject({ receipt: { sessionId: session.agentSessionId } })
+  expect(writes.length).toBeGreaterThan(0); expect(manager.list()).toEqual([])
+})
+
+it('Demand Supervisor: finite start uses only the explicit responsible Session or unique assignee and never creates an Agent', async () => {
+  const launch = vi.spyOn(useAppStore.getState(), 'launchBoardAgent')
+  await demands.update('goal', { sessionIds: [session.agentSessionId, 'last-history-only'] })
+  await expect(useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'unique-owner-start', operation: 'demand.start', demandId: 'goal' })).resolves.toMatchObject({ receipt: { sessionId: session.agentSessionId } })
+  const before = [...writes]
+  await demands.update('goal', { assigneeSessionIds: [session.agentSessionId, 'second-owner'] })
+  await expect(useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'ambiguous-owners', operation: 'demand.start', demandId: 'goal' })).rejects.toThrow('responsible Session')
+  await expect(useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'history-is-not-assignment', operation: 'demand.start', demandId: 'goal', sessionId: 'last-history-only' })).rejects.toThrow('responsible Session')
+  await demands.update('goal', { assigneeSessionIds: [], supervisorSessionId: null })
+  await expect(useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'no-assignee', operation: 'demand.start', demandId: 'goal' })).rejects.toThrow('responsible Session')
+  await expect(useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'removed-owner-explicit', operation: 'demand.start', demandId: 'goal', sessionId: session.agentSessionId })).rejects.toThrow('responsible Session')
+  expect(writes).toEqual(before); expect(launch).not.toHaveBeenCalled()
+  expect((await demands.get('goal'))!.sessionIds).toEqual([session.agentSessionId, 'last-history-only', 'second-owner'])
+})
+
+it('Demand Supervisor: confirmed original start replays its frozen receipt after Supervisor changes and its Run leaves observation', async () => {
+  await start(); const loop = manager.list()[0]!, before = [...writes]
+  await demands.update('goal', { assigneeSessionIds: ['new-retained-supervisor'], supervisorSessionId: 'new-retained-supervisor', status: 'done' })
+  const originalGoal = (await demands.get('goal'))!
+  useAppStore.setState({ sessions: [] })
+  await expect(start()).resolves.toMatchObject({ demand: { status: 'done', supervisorSessionId: 'new-retained-supervisor' }, continuation: { loopId: loop.loopId, agentSessionId: session.agentSessionId, status: 'stopped', initialDelivery: { state: 'confirmed' } } })
+  const warn = vi.spyOn(useAppStore.getState(), 'reportError')
+  vi.spyOn(api.demands, 'list').mockRejectedValueOnce(new Error('Current Goal observation unavailable'))
+  await expect(start()).resolves.toMatchObject({ continuation: { loopId: loop.loopId, agentSessionId: session.agentSessionId, initialDelivery: { state: 'confirmed' } } })
+  expect(warn).toHaveBeenCalledWith(expect.any(Error), expect.objectContaining({ kind: 'indeterminate', summary: expect.stringContaining('Reading the current Goal is unconfirmed') }))
+  expect(await demands.get('goal')).toEqual(originalGoal); expect(writes).toEqual(before)
+  expect(manager.list()).toHaveLength(1)
+})
+
+it('Demand Supervisor: the no-Supervisor banner opens the shared choice without starting or changing saved relationships', async () => {
+  await demands.update('goal', { supervisorSessionId: null }); await useAppStore.getState().refreshDemand('goal')
+  const choose = vi.fn(), goal = useAppStore.getState().demands.goal!
+  await act(async () => root.render(<GoalContinuationControl demand={goal} onChooseSupervisor={choose} />))
+  await vi.waitFor(() => expect(container.textContent).toContain('Choose one assignee'))
+  const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Choose Supervisor')!
+  expect(button).toBeDefined(); await act(async () => button.click())
+  expect(choose).toHaveBeenCalledTimes(1); expect(container.querySelector('form')).toBeNull()
+  expect((await demands.get('goal'))!.supervisorSessionId).toBeNull(); expect(writes).toEqual([]); expect(manager.list()).toEqual([])
+})
+
+it('Demand Supervisor: shared Continue uses the saved Supervisor instead of Mote selection or first historical association', async () => {
+  await demands.update('goal', { sessionIds: ['first-history-only', session.agentSessionId] }); await useAppStore.getState().refreshDemand('goal')
+  const goal = useAppStore.getState().demands.goal!
+  await act(async () => root.render(<GoalContinuationControl demand={goal} initialSessionId="first-history-only" />))
+  await vi.waitFor(() => expect(container.querySelector('form')).not.toBeNull())
+  expect(container.querySelector('[aria-label="Goal continuation Agent"]')).toBeNull()
+  const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Start and continue')!
+  expect(button.disabled).toBe(false); await act(async () => button.click())
+  await vi.waitFor(() => expect(manager.list()[0]?.initialDelivery?.state).toBe('confirmed'))
+  expect(manager.list()[0]).toMatchObject({ agentSessionId: session.agentSessionId, initialDelivery: { condition: { expectedRun: session.run } } })
+  expect(writes.length).toBeGreaterThan(0)
+})
+
+it('Demand Supervisor: an unknown start retains one original attempt and locks interval changes until explicit inspection', async () => {
+  const prepare = api.continuousProgress.prepareGoal
+  const calls: any[] = []
+  vi.spyOn(api.continuousProgress, 'prepareGoal').mockImplementation(async (...args) => {
+    calls.push(structuredClone(args[0])); if (calls.length === 1) throw new Error('Original start receipt is unknown')
+    return prepare(...args)
+  })
+  const goal = useAppStore.getState().demands.goal!
+  await act(async () => root.render(<GoalContinuationControl demand={goal} />))
+  await vi.waitFor(() => expect(container.querySelector('form')).not.toBeNull())
+  const startButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Start and continue')!
+  await act(async () => startButton.click())
+  await vi.waitFor(() => expect(container.textContent).toContain('Original start receipt is unknown'))
+  expect(startButton.disabled).toBe(true)
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Goal continuation minutes"]')!.disabled).toBe(true)
+  const retry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Inspect and retry original start')!
+  expect(retry).toBeDefined(); await act(async () => retry.click())
+  await vi.waitFor(() => expect(manager.list()[0]?.initialDelivery?.state).toBe('confirmed'))
+  expect(calls).toHaveLength(2); expect(calls[1]).toEqual(calls[0]); expect(manager.list()).toHaveLength(1)
+})
+it('Demand Supervisor: canonical identities display their original presentation name and artwork while old loops qualify the exact Host', async () => {
+  await start()
+  const originalLoops = structuredClone(manager.list()), originalWrites = [...writes]
+  const sourceId = 'local:presentation-source', nativeTimeline = await client.sessionTimeline(session.agentSessionId)
+  expect(nativeTimeline.items.some(item => item.kind === 'user_message')).toBe(true)
+  const source = { ...snapshot, id: sourceId, label: 'Provider fallback only' }
+  const artwork = { ...config, executors: { ...config.executors, [source.executorId]: { ...config.executors[source.executorId]!, avatar: { badge: 'shield' as const } } } }
+  useAppStore.setState({ sessions: [source], agentNames: { [sourceId]: 'User chosen canonical name' }, timelines: { [sourceId]: nativeTimeline }, config: artwork })
+  const goal = useAppStore.getState().demands.goal!, render = vi.fn()
+  await act(async () => root.render(<Profiler id="continuation" onRender={render}><GoalContinuationControl demand={goal} /></Profiler>))
+  await vi.waitFor(() => expect(container.querySelector('.goals-continuation__saved')).not.toBeNull())
+  expect(container.querySelector('.goals-supervisor-identity strong')!.textContent).toBe('User chosen canonical name')
+  expect(container.querySelector('.goals-continuation__original-agent strong')!.textContent).toBe('User chosen canonical name')
+  expect(container.querySelectorAll('[data-avatar-badge="shield"]')).toHaveLength(2)
+  await act(async () => useAppStore.setState({ agentNames: { [sourceId]: '' } }))
+  expect(container.querySelector('.goals-supervisor-identity strong')!.textContent).toBe('Complete the original useful result.')
+  const previousRenders = render.mock.calls.length
+  await act(async () => {
+    for (let index = 0; index < 20; index++) useAppStore.setState(state => ({ timelines: { ...state.timelines, unrelated: { agentSessionId: 'unrelated', revision: index, items: [] } } }))
+  })
+  expect(render.mock.calls).toHaveLength(previousRenders)
+  const otherHost = { ...source, id: 'remote:presentation-source', hostId: 'remote', control: { ...source.control, hostId: 'remote' } }
+  await act(async () => useAppStore.setState({ sessions: [source, otherHost], agentNames: { [otherHost.id]: 'Wrong other Host name' } }))
+  expect(container.querySelector('.goals-supervisor-identity strong')!.textContent).toBe(`Session ${session.agentSessionId} · Hosts local, remote`)
+  expect(container.querySelector('.goals-supervisor-identity [data-avatar-badge]')).toBeNull()
+  expect(container.querySelector('.goals-continuation__original-agent strong')!.textContent).toBe('Complete the original useful result.')
+  expect(container.querySelector('.goals-continuation__original-agent strong')!.getAttribute('title')).toContain('Host local')
+  expect(container.querySelector('.goals-continuation__original-agent [data-avatar-badge="shield"]')).not.toBeNull()
+  expect(writes).toEqual(originalWrites); expect(manager.list()).toEqual(originalLoops)
+})
+it.each(['finite', 'continue'] as const)('Demand Supervisor: canonical %s start reaches original Main/Core through a unique presentation and retains the same unknown operation', async mode => {
+  await act(async () => root.render(null))
+  const sourceId = 'local:business-presentation', source = { ...snapshot, id: sourceId }
+  const otherHost = { ...source, id: 'remote:business-presentation', hostId: 'remote', control: { ...source.control, hostId: 'remote' } }
+  useAppStore.setState({ sessions: [source, otherHost], timelines: { [sourceId]: await client.sessionTimeline(session.agentSessionId) } })
+  const publicOwner = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client }], execute: request => useAppStore.getState().executeControl(request) })
+  const input = { goalId: 'goal', sessionId: session.agentSessionId, operationId: `canonical-${mode}-unknown`, ...(mode === 'continue' ? { continuation: { intervalMs: 60_000, alignmentRevision: 1 } } : {}) }
+  await expect(publicOwner.call('goal.start', input)).rejects.toThrow('ambiguous')
+  expect(writes).toEqual([]); expect(manager.list()).toEqual([])
+  useAppStore.setState({ sessions: [source] })
+  const deliver = bridge.deliver, held: any[][] = []
+  // Lose the actual observation transport, not the original Core write/receipt. Replay its
+  // unchanged native facts after explicit inspection, as a recovered Host subscription does.
+  bridge.deliver = (channel, ...args) => {
+    if (channel === SESSION_EVENT_CHANNEL && args[0]?.event?.type === 'agent-timeline') { held.push(structuredClone(args)); return }
+    deliver(channel, ...args)
+  }
+  if (mode === 'continue') {
+    useAppStore.getState().setAgentComposerDraft(sourceId, 'My original healthy draft')
+    await expect(publicOwner.call('goal.start', input)).rejects.toThrow('Keep your draft and queued messages')
+    expect(useAppStore.getState().agentComposerDrafts[sourceId]).toBe('My original healthy draft')
+    expect(writes).toEqual([]); expect(manager.list()).toEqual([])
+    useAppStore.getState().setAgentComposerDraft(sourceId, '')
+    const confirm = api.continuousProgress.initialGoalInput; let lost = false
+    vi.spyOn(api.continuousProgress, 'initialGoalInput').mockImplementation(async (...args) => {
+      const result = await confirm(...args)
+      if (args[3] === 'confirm' && !lost) { lost = true; throw new Error('Canonical original prompt receipt lost') }
+      return result
+    })
+    await expect(publicOwner.call('goal.start', input)).rejects.toThrow('prompt receipt lost')
+    expect(manager.list()[0]).toMatchObject({ hostId: 'local', agentSessionId: session.agentSessionId, initialDelivery: { operationId: input.operationId, state: 'confirmed', condition: { expectedRun: session.run } } })
+  } else {
+    const submit = api.sessions.submitPrompt; let lost = false
+    vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (...args) => {
+      const result = await submit(...args)
+      expect(args[0]).toMatchObject({ hostId: 'local', agentSessionId: session.agentSessionId, run: session.run })
+      if (!lost) { lost = true; throw new Error('Canonical original finite receipt lost') }
+      return result
+    })
+    await expect(publicOwner.call('goal.start', input)).rejects.toThrow('finite receipt lost')
+    expect(useAppStore.getState().agentSteerQueues[sourceId]![0]).toMatchObject({ operationId: input.operationId, execution: 'default', promptCondition: { expectedRun: session.run } })
+    expect(useAppStore.getState().agentSteerQueues[session.agentSessionId]).toBeUndefined()
+    expect(manager.list()).toEqual([])
+  }
+  expect(held.some(args => args[0].event.mutation.type === 'append' && args[0].event.mutation.item.id === `prompt:${input.operationId}`)).toBe(true)
+  expect(useAppStore.getState().sessions.map(item => item.id)).toEqual([sourceId])
+  expect(useAppStore.getState().agentSteerQueues[sourceId]![0]).toMatchObject({ operationId: input.operationId, awaitingExplicitSend: true })
+  const ambiguous = { ...source, id: 'same-host:ambiguous-presentation' }
+  useAppStore.setState({ sessions: [source, ambiguous] })
+  const originalQueues = useAppStore.getState().agentSteerQueues, originalTimelines = useAppStore.getState().timelines
+  for (const args of held) deliver(SESSION_EVENT_CHANNEL, ...args)
+  expect(useAppStore.getState().agentSteerQueues).toBe(originalQueues)
+  expect(useAppStore.getState().timelines).toBe(originalTimelines)
+  expect(useAppStore.getState().sessions.map(item => item.id)).toEqual([sourceId, ambiguous.id])
+  useAppStore.setState({ sessions: [source] })
+  for (const args of held) {
+    const foreignHost = structuredClone(args), foreignRun = structuredClone(args)
+    foreignHost[0].hostId = 'other-host'
+    foreignRun[0].event.evidence.run = { runId: 'other-run' }
+    deliver(SESSION_EVENT_CHANNEL, ...foreignHost); deliver(SESSION_EVENT_CHANNEL, ...foreignRun)
+  }
+  expect(useAppStore.getState().agentSteerQueues).toBe(originalQueues)
+  expect(useAppStore.getState().timelines).toBe(originalTimelines)
+  const accepted = [...writes]; expect(accepted.length).toBeGreaterThan(0)
+  await useAppStore.getState().flushAgentSteerQueue(sourceId)
+  expect(writes).toEqual(accepted)
+  bridge.deliver = deliver
+  for (const args of held) deliver(SESSION_EVENT_CHANNEL, ...args)
+  expect(useAppStore.getState().sessions.map(item => item.id)).toEqual([sourceId])
+  expect(useAppStore.getState().timelines[sourceId]).toMatchObject({ agentSessionId: session.agentSessionId })
+  expect(useAppStore.getState().timelines[sourceId]!.items.some(item => item.id === `prompt:${input.operationId}` && item.agentSessionId === session.agentSessionId)).toBe(true)
+  expect(await publicOwner.call('goal.start', input)).toMatchObject({ receipt: { goalId: 'goal', sessionId: session.agentSessionId } })
+  expect(writes).toEqual(accepted)
+  expect(useAppStore.getState().agentSteerQueues[sourceId] ?? []).toEqual([])
+  useAppStore.setState({ timelines: { [sourceId]: { agentSessionId: session.agentSessionId, revision: 0, items: [] } } })
+  await useAppStore.getState().resyncTimeline(sourceId)
+  expect(useAppStore.getState().timelines[sourceId]!.items.some(item => item.id === `prompt:${input.operationId}`)).toBe(true)
+  expect(Object.keys(useAppStore.getState().timelines)).toEqual([sourceId])
+  expect(useAppStore.getState().timelines[sourceId]!.agentSessionId).toBe(session.agentSessionId)
+  expect((await publicOwner.call('goal.inspect', { goalId: 'goal' })).goal).toMatchObject({ supervisorSessionId: session.agentSessionId, assigneeSessionIds: [session.agentSessionId] })
+  expect((await demands.get('goal'))!.sessionIds).toEqual([session.agentSessionId])
+})
 function refuseImmediatePreparation() {
   return vi.spyOn((client as any).promptSubmission, 'qualifyInputTransport')
     .mockRejectedValue(new Error('Native immediate preparation is unavailable'))
@@ -677,6 +881,221 @@ it('collaboration public Source CLI saves exact relations atomically and reaches
   } finally { await typed.dispose(); await server.stop() }
 })
 
+it('origin Supervisor first-default public Source CLI settings and authenticated creation reach the same durable Goal and GUI', async () => {
+  const server = new PublicServer({ socketPath: join(directory, 'first-default.sock'), coreClients: () => [{ hostId: 'local', client }], execute: (...args) => bridge.controlOptions.execute(...args) })
+  await server.start()
+  const typed = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path }, credentials: { agentSessionId: session.agentSessionId, capability: activityCapability } })
+  const environment = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_'))), AGENTMUX_AGENT_SESSION_ID: session.agentSessionId, AGENTMUX_AGENT_CAPABILITY: activityCapability }
+  const run = async (args: string[]) => { let reply: any; await act(async () => {
+    try { reply = JSON.parse((await promisify(execFile)(process.execPath, [sourceCli, '--endpoint', 'unix:' + server.path, ...args], { env: environment, timeout: 15_000 })).stdout) }
+    catch (error) { const output = (error as any).stdout || (error as any).stderr; if (!output) throw error; reply = JSON.parse(output) }
+  }); return reply }
+  const create = async (id: string) => { const result = await run(['goal', 'create', '--goal', id, '--title', 'Original request', '--risk', 'low', '--confirm', 'user', '--operation-id', id + '-create']); expect(result.ok, JSON.stringify(result)).toBe(true); return result.result.goal }
+  try {
+    const on = await create('public-on')
+    expect(on).toMatchObject({ supervisorSessionId: session.agentSessionId, assigneeSessionIds: [session.agentSessionId], sessionIds: [session.agentSessionId], creationOrigin: { operationId: 'public-on-create', requesterAsSupervisor: true, requesterParticipationId: on.participations[0].id, supervisorDefaultPending: false } })
+    const settingOff = await run(['settings', 'set', 'goals.requesterAsSupervisor', 'false']); expect(settingOff.ok, JSON.stringify(settingOff)).toBe(true)
+    expect(JSON.parse(await readFile(join(directory, 'original-config.json'), 'utf8')).goals.requesterAsSupervisor).toBe(false)
+    const off = await create('public-off')
+    expect(off).toMatchObject({ supervisorSessionId: null, assigneeSessionIds: [], sessionIds: [], creationOrigin: { requesterAsSupervisor: false, requesterParticipationId: off.participations[0].id, supervisorDefaultPending: false } })
+    expect(off.participations[0]).toMatchObject({ kind: 'create', agentSessionId: session.agentSessionId, hostId: 'local' })
+    expect((await run(['settings', 'set', 'goals.requesterAsSupervisor', 'true'])).ok).toBe(true)
+    const second = await create('public-second')
+    expect(second.supervisorSessionId).toBe(session.agentSessionId)
+    expect((await demands.get('public-off'))!.supervisorSessionId).toBeNull()
+    expect((await demands.get('goal'))!.creationOrigin).toBeUndefined()
+    await expect(typed.call('goal.create', { title: 'body claim', creationOrigin: { requesterAsSupervisor: true } } as any)).rejects.toThrow()
+    await act(async () => { await useAppStore.getState().refreshDemand('public-on'); root.render(<GoalDetail demand={{ ...useAppStore.getState().demands['public-on']!, sessions: [], workspacePath: null }} onClose={() => {}} onOpenMote={() => {}} onGrill={() => {}} onGrounding={() => {}} acknowledgementFeedback={EMPTY_GOAL_ACKNOWLEDGEMENT} onAcknowledgementFeedbackChange={() => {}} moteError={null} onRetryMote={() => {}} />) })
+    expect(useAppStore.getState().demands['public-on']!.supervisorSessionId).toBe(session.agentSessionId)
+    expect(container.textContent).toContain('Original request')
+    const source = { kind: 'discussion' as const, agentSessionId: session.agentSessionId, hostId: 'local', entryPoint: 'confirmed-original-PMO' }
+    const manual = await demands.create({ id: 'manual-origin', title: 'Manual override' }, { operationId: 'manual-create', creationOrigin: { requesterAsSupervisor: true } })
+    await demands.update(manual.demand.id, { supervisorSessionId: null })
+    const current = (await demands.get(manual.demand.id))!
+    const resolved = await demands.resolveCreationOrigin(current.id, { creationOperationId: 'manual-create', source, sourceOperationId: 'manual-original-source' }, { expectedUpdatedAt: current.updatedAt, allowSupervisorDefault: true })
+    expect(resolved.demand).toMatchObject({ supervisorSessionId: null, assigneeSessionIds: [], creationOrigin: { requesterParticipationId: resolved.demand.participations[0]!.id, supervisorDefaultPending: false } })
+    const replay = await demands.resolveCreationOrigin(current.id, { creationOperationId: 'manual-create', source, sourceOperationId: 'manual-original-source' }, { expectedUpdatedAt: manual.demand.updatedAt, allowSupervisorDefault: true })
+    expect(replay.demand.participations).toEqual(resolved.demand.participations)
+    await expect(demands.resolveCreationOrigin('goal', { creationOperationId: 'legacy-no-origin', source, sourceOperationId: 'legacy-source' }, { expectedUpdatedAt: 1, allowSupervisorDefault: true })).rejects.toThrow('original Goal creation')
+    await expect(demands.resolveCreationOrigin(current.id, { creationOperationId: 'manual-create', source: { ...source, kind: 'requirements' }, sourceOperationId: 'later-source' }, { expectedUpdatedAt: current.updatedAt, allowSupervisorDefault: true })).rejects.toThrow('Later requirements')
+    const stale = await demands.create({ id: 'stale-origin', title: 'Version protected' }, { operationId: 'stale-create', creationOrigin: { requesterAsSupervisor: true } })
+    await demands.update(stale.demand.id, { description: 'A later edit' })
+    await expect(demands.resolveCreationOrigin(stale.demand.id, { creationOperationId: 'stale-create', source, sourceOperationId: 'stale-source' }, { expectedUpdatedAt: stale.demand.updatedAt, allowSupervisorDefault: true })).rejects.toThrow('Goal changed')
+    expect((await demands.get(stale.demand.id))!.participations).toEqual([])
+    expect(writes).toEqual([]); expect(manager.list()).toEqual([])
+  } finally { await typed.dispose(); await server.stop() }
+})
+
+it('origin Supervisor first-default mapped PMO records only confirmed original input and survives focus, manual and loop changes', async () => {
+  const privateRoot = join(directory, 'mapped-private-core'); await mkdir(privateRoot)
+  const f = await injectedContextCore(privateRoot, { ...session, providerId: 'traex' })
+  runtime.commit({ hosts: [{ id: 'local', config: config.hosts.find(host => host.id === 'local')!, client: f.core, executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
+  ;(runtime as any).agentSessionStore = f.store
+  const originalTarget = await api.sessions.refresh(snapshot.control)
+  if (originalTarget.kind !== 'agent') throw new Error('Expected original Agent')
+  useAppStore.setState({ sessions: [originalTarget] })
+  const make = async (id: string) => { await act(async () => { await useAppStore.getState().createDemand({ id, title: 'Fresh GUI request' }) }); return (await demands.get(id))! }
+  const first = await make('mapped-origin')
+  const tab = { ...createWorkbenchTab('origin-pmo', { kind: 'agent', phase: 'attached', regionId: 'origin-recipient', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: session.agentSessionId }), topicId: PMO_TEAMS_TOPIC_ID }
+  useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('origin-group', [tab.id]) }, demandPmoTabIds: { [first.id]: tab.id } })
+  const submit = runtime.submitPrompt.bind(runtime)
+  let release!: () => void
+  const wait = vi.spyOn(runtime, 'submitPrompt').mockImplementationOnce(async (...args) => { await new Promise<void>(resolve => { release = resolve }); return submit(...args) })
+  let receipt: any
+  try {
+  await act(async () => { expect(await useAppStore.getState().requestDemandPmoTask(first.id, 'grill', { creationOperationId: first.creationOrigin!.operationId, onReceipt: value => { receipt = value } })).toBe(tab.id) })
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+  expect((await demands.get(first.id))!.participations).toEqual([])
+  expect((await demands.get(first.id))!.supervisorSessionId).toBeNull()
+  expect(receipt.agentSessionId).toBe(session.agentSessionId)
+  useAppStore.setState({ tabs: { [tab.id]: { ...tab, layout: { ...tab.layout, activeRegionId: 'unrelated-region' }, regions: { ...tab.regions, 'unrelated-region': { kind: 'agent', phase: 'attached', regionId: 'unrelated-region', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'unrelated-focus' } } } } })
+  release()
+  await act(async () => { await useAppStore.getState().flushAgentSteerQueue(session.agentSessionId) })
+  wait.mockRestore()
+  const saved = (await demands.get(first.id))!
+  expect(saved.participations, JSON.stringify(useAppStore.getState().agentSteerQueues[session.agentSessionId])).toHaveLength(1)
+  expect(saved).toMatchObject({ supervisorSessionId: session.agentSessionId, assigneeSessionIds: [session.agentSessionId], sessionIds: [session.agentSessionId], creationOrigin: { supervisorDefaultPending: false, requesterParticipationId: saved.participations[0]!.id } })
+  expect(saved.participations[0]).toMatchObject({ kind: 'discussion', agentSessionId: session.agentSessionId, operationId: await goalPmoOperation({ goalId: first.id, creationOperationId: first.creationOrigin!.operationId }, 'discussion') })
+  expect(f.writes).toHaveLength(1)
+  const second = await make('mapped-second')
+  useAppStore.setState({ tabs: { [tab.id]: tab }, demandPmoTabIds: { ...useAppStore.getState().demandPmoTabIds, [second.id]: tab.id } })
+  vi.spyOn(demands, 'resolveCreationOrigin').mockRejectedValueOnce(new Error('Original input confirmed; source observation unavailable'))
+  await act(async () => { await useAppStore.getState().requestDemandPmoTask(second.id, 'grill', { creationOperationId: second.creationOrigin!.operationId }); await useAppStore.getState().flushAgentSteerQueue(session.agentSessionId) })
+  expect((await demands.get(second.id))!.supervisorSessionId).toBeNull()
+  expect(f.writes).toHaveLength(2)
+  const originalTimeline = await api.sessions.timeline(originalTarget.control)
+  useAppStore.setState({ timelines: { ...useAppStore.getState().timelines, [session.agentSessionId]: originalTimeline }, tabs: { [tab.id]: { ...tab, layout: { ...tab.layout, activeRegionId: 'newer-focus' }, regions: { ...tab.regions, 'newer-focus': { kind: 'agent', phase: 'attached', regionId: 'newer-focus', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'another-recipient' } } } } })
+  await act(async () => { await useAppStore.getState().flushAgentSteerQueue(session.agentSessionId) })
+  const sourceQueue = useAppStore.getState().agentSteerQueues[session.agentSessionId] ?? []
+  expect(sourceQueue).toContainEqual(expect.objectContaining({ goalPmo: { goalId: second.id, creationOperationId: second.creationOrigin!.operationId } }))
+  const retainedSource = sourceQueue.find(entry => entry.goalPmo?.goalId === second.id)!
+  expect(retainedSource).toMatchObject({ goalPmo: { goalId: second.id, creationOperationId: second.creationOrigin!.operationId } })
+  const readonlyRetry = vi.spyOn(runtime, 'submitPrompt')
+  await act(async () => { await expect(useAppStore.getState().sendQueuedAgentSteer(session.agentSessionId, retainedSource.operationId)).resolves.toBe('submitted') })
+  expect(readonlyRetry).not.toHaveBeenCalled(); readonlyRetry.mockRestore()
+  await act(async () => { await useAppStore.getState().requestDemandPmoTask(second.id, 'grill', { creationOperationId: second.creationOrigin!.operationId }) })
+  expect((await demands.get(second.id))!.supervisorSessionId).toBe(session.agentSessionId)
+  expect(f.writes).toHaveLength(2)
+  expect(useAppStore.getState().agentSteerQueues[session.agentSessionId] ?? []).toEqual([])
+  // Real Core authority stays canonical while this client has a different presentation ID.
+  const presentation = { ...originalTarget, id: 'original-pmo-presentation' }
+  const foreignPresentation = { ...presentation, id: 'foreign-pmo-presentation', hostId: 'foreign-host', control: { ...presentation.control, hostId: 'foreign-host' } }
+  const aliasTab = { ...useAppStore.getState().tabs[tab.id]!, regions: { ...useAppStore.getState().tabs[tab.id]!.regions,
+    'origin-recipient': { ...tab.regions['origin-recipient']!, sessionId: presentation.id } } }
+  useAppStore.setState({ sessions: [presentation, foreignPresentation], tabs: { [tab.id]: aliasTab }, agentComposerDrafts: { ...useAppStore.getState().agentComposerDrafts, 'origin-recipient': 'Original independent unsent draft' } })
+  const beforeAlias = structuredClone(useAppStore.getState().tabs), beforeInput = [...f.writes]
+  let aliasReceipt: any
+  await act(async () => { await expect(useAppStore.getState().requestDemandPmoTask(second.id, 'grill', { creationOperationId: second.creationOrigin!.operationId, onReceipt: value => { aliasReceipt = value } })).resolves.toBe(tab.id) })
+  expect(aliasReceipt).toEqual({ tabId: tab.id, agentSessionId: originalTarget.control.agentSessionId })
+  expect(useAppStore.getState().tabs).toEqual(beforeAlias)
+  expect(f.writes).toEqual(beforeInput); expect(f.start).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts['origin-recipient']).toBe('Original independent unsent draft')
+  const exactAliasState = useAppStore.getState()
+  for (const sessions of [[], [foreignPresentation], [presentation, { ...presentation, id: 'ambiguous-pmo-presentation' }]]) {
+    useAppStore.setState({ sessions })
+    await act(async () => { await expect(useAppStore.getState().requestDemandPmoTask(second.id, 'grill', { creationOperationId: second.creationOrigin!.operationId })).rejects.toThrow('unconfirmed or ambiguous') })
+    expect(useAppStore.getState().tabs).toEqual(beforeAlias); expect(f.writes).toEqual(beforeInput); expect(f.start).not.toHaveBeenCalled()
+  }
+  useAppStore.setState({ sessions: exactAliasState.sessions, tabs: { [tab.id]: { ...aliasTab, regions: { ...aliasTab.regions,
+    duplicate: { ...aliasTab.regions['origin-recipient']!, regionId: 'duplicate' } } } } })
+  await act(async () => { await expect(useAppStore.getState().requestDemandPmoTask(second.id, 'grill', { creationOperationId: second.creationOrigin!.operationId })).rejects.toThrow('Region is unconfirmed or ambiguous') })
+  expect(f.writes).toEqual(beforeInput); expect(f.start).not.toHaveBeenCalled()
+  useAppStore.setState({ sessions: exactAliasState.sessions, tabs: { [tab.id]: { ...aliasTab, layout: { ...aliasTab.layout, activeRegionId: 'origin-recipient' } } } })
+  const canonicalServer = new PublicServer({ socketPath: join(directory, 'canonical-pmo.sock'), coreClients: () => [{ hostId: 'local', client: f.core }], execute: (...args) => bridge.controlOptions.execute(...args) })
+  await canonicalServer.start()
+  const canonicalRpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: canonicalServer.path } })
+  try {
+    let publicReceipt: any
+    await act(async () => { publicReceipt = await (canonicalRpc.call as any)('goal.discuss', { goalId: second.id, mode: 'open', operationId: 'original-canonical-public-open' }) })
+    expect(publicReceipt.receipt).toMatchObject({ tabId: tab.id, agentSessionId: originalTarget.control.agentSessionId })
+    expect(publicReceipt.receipt.agentSessionId).not.toBe(presentation.id)
+    expect(useAppStore.getState().tabs[tab.id]!.regions['origin-recipient']).toMatchObject({ kind: 'agent', sessionId: presentation.id })
+    expect(useAppStore.getState().agentComposerDrafts['origin-recipient']).toBe('Original independent unsent draft')
+    expect(f.writes).toEqual(beforeInput); expect(f.start).not.toHaveBeenCalled()
+    expect(f.core.agentSession(originalTarget.control.agentSessionId).run).toEqual(session.run)
+    expect(f.core.agentSession(originalTarget.control.agentSessionId).workspacePath).toBe(session.workspacePath)
+  } finally { await canonicalRpc.dispose(); await canonicalServer.stop() }
+  useAppStore.setState({ sessions: [originalTarget], tabs: { [tab.id]: tab } })
+  const manual = await make('mapped-manual')
+  await demands.update(manual.id, { supervisorSessionId: null }); await useAppStore.getState().refreshDemand(manual.id)
+  const manualTarget = await api.sessions.refresh(originalTarget.control)
+  expect(manualTarget).toMatchObject({ kind: 'agent', control: { agentSessionId: originalTarget.control.agentSessionId, run: session.run } })
+  useAppStore.setState({ sessions: [manualTarget], tabs: { [tab.id]: tab }, demandPmoTabIds: { ...useAppStore.getState().demandPmoTabIds, [manual.id]: tab.id } })
+  await act(async () => { await useAppStore.getState().requestDemandPmoTask(manual.id, 'grill', { creationOperationId: manual.creationOrigin!.operationId }); await useAppStore.getState().flushAgentSteerQueue(session.agentSessionId) })
+  expect((await demands.get(manual.id))!.supervisorSessionId).toBeNull(); expect((await demands.get(manual.id))!.participations).toHaveLength(1)
+  const loopGoal = await make('loop-origin')
+  await demands.update(loopGoal.id, { sessionIds: [session.agentSessionId], alignment: { summary: 'Original frozen scope', criteria: [{ id: 'retained-scope', text: 'Original work remains' }], openQuestions: [] } })
+  await demands.confirmAlignment(loopGoal.id, 1)
+  const loop = await manager.create({ hostId: 'local', agentSessionId: session.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath, intervalMs: 60_000, prompt: 'Original frozen scope', taskSource: { kind: 'goal', goalId: loopGoal.id, alignmentRevision: 1 } })
+  const before = structuredClone(manager.list())
+  const intent = { goalId: loopGoal.id, creationOperationId: loopGoal.creationOrigin!.operationId }, operationId = await goalPmoOperation(intent, 'discussion')
+  const refreshed = await api.sessions.refresh(snapshot.control)
+  if (refreshed.kind !== 'agent') throw new Error('Expected the original Agent snapshot')
+  await f.core.submitAgentPrompt({ agentSessionId: session.agentSessionId, operationId, prompt: 'Original source already submitted', allowUncertainTurn: true, expectedRun: session.run, afterSubmissionId: refreshed.promptSubmissionPredecessor ?? null })
+  const reconciled = await api.demands.reconcilePmoInput(intent, snapshot.control, operationId)
+  expect(reconciled.demand.supervisorSessionId).toBeNull(); expect(reconciled.demand.participations).toHaveLength(1)
+  expect(manager.list()).toEqual(before); expect(manager.list()[0]!.loopId).toBe(loop.loopId)
+  expect(f.core.agentSession(session.agentSessionId).run).toEqual(session.run)
+  } finally { release?.(); await useAppStore.getState().flushAgentSteerQueue(session.agentSessionId); wait.mockRestore() }
+})
+
+it('origin Supervisor first-default real NewGoal PMO creation consumes exact Core receipt despite changed active Region and lost observer receipt', async () => {
+  const privateRoot = join(directory, 'origin-private-core'); await mkdir(privateRoot)
+  const f = await injectedContextCore(privateRoot)
+  config.executors = { 'origin-fixture': { providerId: 'claude', label: 'Private origin fixture', command: _hygiene_fixturePath("private/claude"), args: [], env: {}, injectAgentMuxGuide: false } }
+  runtime.commit({ hosts: [{ id: 'local', config: config.hosts.find(host => host.id === 'local')!, client: f.core, executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
+  ;(runtime as any).agentSessionStore = f.store
+  useLauncherState.setState({ executors: { [SCRATCH_WORKSPACE_ID]: 'origin-fixture' } })
+  useAppStore.setState({ config, sessions: [], tabs: {}, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('fresh-origin-group') }, activeWorkspaceId: SCRATCH_WORKSPACE_ID, mainSurface: 'board', selectedDemandId: null, demandPmoTabIds: {}, pendingAgentLaunches: {} })
+  const scratch = (runtime as any).scratchTopics as ScratchTopics, prepare = scratch.prepareAgent.bind(scratch)
+  const invoke = bridge.invoke.getMockImplementation()!
+  let lostReceipt = false
+  bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
+    const result = await invoke(channel, ...values)
+    if (channel === 'sessions:launchAgent' && !lostReceipt) { lostReceipt = true; throw new Error('Private Main confirmed; observer receipt lost') }
+    return result
+  })
+  let release!: () => void
+  const delayed = vi.spyOn(scratch, 'prepareAgent').mockImplementationOnce(async (...args) => { await new Promise<void>(resolve => { release = resolve }); return prepare(...args) })
+  let pending!: Promise<void>
+  try {
+  await act(async () => { pending = startDirectGoal() })
+  await vi.waitFor(() => expect(release, JSON.stringify({ direct: directGoalRequest(), error: useAppStore.getState().error, pending: useAppStore.getState().pendingAgentLaunches, tabs: Object.values(useAppStore.getState().tabs).map(tab=>[tab.topicId,tab.topicPreparation,tab.regions]), executors: useAppStore.getState().config?.executors })).toBeTypeOf('function'))
+  const goalId = directGoalRequest()!.id, original = (await demands.get(goalId))!, pendingEntries = Object.entries(useAppStore.getState().pendingAgentLaunches)
+  expect(pendingEntries).toHaveLength(1)
+  const [reservedId, launch] = pendingEntries[0]!, createOperationId = await goalPmoOperation({ goalId, creationOperationId: original.creationOrigin!.operationId }, 'create')
+  expect(launch.request).toMatchObject({ createOperationId, goalPmo: { goalId, creationOperationId: original.creationOrigin!.operationId } })
+  expect(reservedId).toBe(await f.core.resolveAgentCreationSessionId(createOperationId))
+  expect(original.supervisorSessionId).toBeNull(); expect(original.participations).toEqual([]); expect(f.start).not.toHaveBeenCalled()
+  const tabId = useAppStore.getState().demandPmoTabIds[goalId]!, tab = useAppStore.getState().tabs[tabId]!
+  useAppStore.setState({ tabs: { [tabId]: { ...tab, layout: { ...tab.layout, activeRegionId: 'fresh-other-region' }, regions: { ...tab.regions, 'fresh-other-region': { kind: 'launcher', regionId: 'fresh-other-region', workspaceId: SCRATCH_WORKSPACE_ID } } } } })
+  release(); await act(async () => { await pending }); delayed.mockRestore()
+  const saved = (await demands.get(goalId))!
+  expect(saved).toMatchObject({ supervisorSessionId: reservedId, assigneeSessionIds: [reservedId], sessionIds: [reservedId], creationOrigin: { requesterParticipationId: saved.participations[0]!.id, supervisorDefaultPending: false } })
+  expect(saved.participations[0]).toMatchObject({ kind: 'discussion', agentSessionId: reservedId, hostId: 'local', operationId: createOperationId })
+  expect(saved.participations[0]!.mote?.topicId).toBe(PMO_TEAMS_TOPIC_ID)
+  expect(f.start).toHaveBeenCalledTimes(1); expect(f.writes).toEqual([]); expect(f.stop).not.toHaveBeenCalled()
+  expect(useAppStore.getState().tabs[tabId]!.layout.activeRegionId).toBe('fresh-other-region')
+  expect(lostReceipt).toBe(true)
+  expect(directGoalRequest()).toMatchObject({ id: goalId, phase: 'pmo', pending: false, creationOperationId: original.creationOrigin!.operationId })
+  expect(useAppStore.getState().pendingAgentLaunches[reservedId]!.request?.createOperationId).toBe(createOperationId)
+  await act(async () => { await retryDirectGoal() })
+  expect(directGoalRequest()).toBeNull()
+  expect(f.start).toHaveBeenCalledTimes(1); expect(f.writes).toEqual([])
+  expect(Object.values(useAppStore.getState().tabs[tabId]!.regions).find(surface => surface.kind === 'agent' && surface.sessionId === reservedId)).toMatchObject({ kind: 'agent', phase: 'attached', sessionId: reservedId })
+  const readback = await api.demands.reconcilePmoCreation({ goalId, creationOperationId: original.creationOrigin!.operationId }, 'local', reservedId, createOperationId)
+  expect(readback.demand.participations).toEqual(saved.participations)
+  expect(f.start).toHaveBeenCalledTimes(1); expect(f.writes).toEqual([]); expect(manager.list()).toEqual([])
+  const stored = (await f.store.load()).map(row => normalizeAgentSession(row)).find(row => row.agentSessionId === reservedId)
+  expect(stored?.creation?.createOperationId).toBe(createOperationId)
+  await expect(api.demands.reconcilePmoCreation({ goalId, creationOperationId: 'different-goal-create' }, 'local', reservedId, createOperationId)).rejects.toThrow('exact original')
+  const intent = { goalId, creationOperationId: original.creationOrigin!.operationId }, before = structuredClone(saved)
+  const foreign = bridge.handlers.get('demands:reconcilePmoCreation')!
+  await expect(foreign({ sender: { id: -1 } }, intent, 'local', reservedId, createOperationId)).rejects.toThrow('Untrusted')
+  expect((await demands.get(goalId))!.participations).toEqual(before.participations)
+  } finally { release?.(); await pending; delayed.mockRestore() }
+})
+
 it('collaboration original provenance authenticates create and requirements while protecting old identities and first-default eligibility', async () => {
   const server = new PublicServer({ socketPath: join(directory, 'origin.sock'), coreClients: () => [{ hostId: 'local', client }], execute: (...args) => bridge.controlOptions.execute(...args) })
   await server.start()
@@ -685,7 +1104,7 @@ it('collaboration original provenance authenticates create and requirements whil
   try {
     const created = await mutate('goal.create', { goalId: 'authored-goal', title: 'Precisely authored request', risk: 'low', confirmation: 'user', assigneeSessionIds: ['progress-agent'], supervisorSessionId: 'progress-agent', operationId: 'original-create-source' })
     expect(created.goal.participations).toMatchObject([{ kind: 'create', agentSessionId: 'progress-agent', hostId: 'local', entryPoint: 'goal.create', operationId: 'original-create-source' }])
-    expect(created.goal.participations[0].mote).toBeUndefined(); expect(created.goal.creationOrigin).toBeUndefined()
+    expect(created.goal.participations[0].mote).toBeUndefined(); expect(created.goal.creationOrigin).toEqual({ operationId: 'original-create-source', requesterAsSupervisor: true, requesterParticipationId: created.goal.participations[0].id, supervisorDefaultPending: false })
     const requirements = await mutate('goal.update', { goalId: 'authored-goal', patch: { description: 'Actual clarified requirement' }, expectedUpdatedAt: created.goal.updatedAt, operationId: 'actual-requirements-source' })
     expect(requirements.goal.participations.map((source: any) => [source.kind, source.agentSessionId, source.operationId])).toEqual([['create', 'progress-agent', 'original-create-source'], ['requirements', 'progress-agent', 'actual-requirements-source']])
     const body = { goalId: 'authored-goal', kind: 'requirements', message: 'Original append also records its actual participant', operationId: 'requirements-activity' }
@@ -757,8 +1176,307 @@ it('collaboration Mobile original controls save exact assignees and Supervisor t
     await enter(input, ''); await enter(supervisor, '')
     await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '保存交接关系')!.click())
     await vi.waitFor(() => expect(container.textContent).toContain('交接关系已保存'))
-    expect((await demands.get('goal'))!).toMatchObject({ assigneeSessionIds: [], supervisorSessionId: null, sessionIds: ['progress-agent'] })
+    await vi.waitFor(async () => expect((await demands.get('goal'))!.assigneeSessionIds).toEqual([]))
+  expect((await demands.get('goal'))!).toMatchObject({ assigneeSessionIds: [], supervisorSessionId: null, sessionIds: ['progress-agent'] })
     expect(forwardRpc.mock.calls.every(([, params]) => !Object.hasOwn(params, 'assigneeExecutorId'))).toBe(true)
     expect(writes).toEqual([]); expect(await manager.list()).toEqual([])
   } finally { await typed.dispose(); await server.stop() }
+})
+
+// T009: original MOTE.md file owner → Main snapshot → PMO new-chat → original Core.
+import { WorkspaceFiles as MoteOriginWorkspaceFiles } from '../src/main/workspace-files'
+import { primaryMoteExecutorChoice, primaryMoteExecutorId } from '../src/renderer/src/lib/primary-mote-executor'
+import { executorDetectionKey as moteOriginDetectionKey } from '../src/renderer/src/lib/executor-detection'
+async function moteOriginFiles() {
+  const workspace = config.workspaces[0]!, topic = await api.scratch.ensureMote(workspace.id, PMO_TEAMS_TOPIC_ID)
+  const relativePath = scratchTopicLogicalPath(workspace, topic)!
+  expect(relativePath).toBeTruthy()
+  const path = relativePath + '/MOTE.md'
+  return { workspace, topic, path, save: async (content: string) => {
+    const read = await api.files.read(workspace.id, path)
+    expect(['deleted', 'read']).toContain(read.status)
+    const written = await api.files.write(workspace.id, { path, content, expectedRevision: read.status === 'read' ? read.document.revision : null })
+    expect(written.status).toBe('written')
+    expect((await api.files.read(workspace.id, path))).toMatchObject({ status: 'read', document: { content } })
+    const readback = await api.scratch.readTopic(workspace.id, PMO_TEAMS_TOPIC_ID)
+    if (!readback) throw new Error('Expected the original Mote file owner readback')
+    return readback
+  } }
+}
+async function moteOriginCore(initial?: AgentMuxStoredAgentSession) {
+  const privateRoot = join(directory, 'mote-origin-core'); await mkdir(privateRoot)
+  const f = await injectedContextCore(privateRoot, initial)
+  config.executors = { 'mote-origin-claude': { providerId: 'claude', label: 'Original saved Mote Agent', command: _hygiene_fixturePath("private/claude"), args: [], env: {}, injectAgentMuxGuide: false },
+    'workspace-other': { providerId: 'claude', label: 'Unrelated workspace preference', command: _hygiene_fixturePath("private/other"), args: [], env: {}, injectAgentMuxGuide: false } }
+  runtime.commit({ hosts: [{ id: 'local', config: config.hosts.find(host => host.id === 'local')!, client: f.core, executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
+  ;(runtime as any).agentSessionStore = f.store
+  useLauncherState.setState({ executors: { [SCRATCH_WORKSPACE_ID]: 'workspace-other' } })
+  useAppStore.setState({ config, sessions: [], tabs: {}, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-origin-group') }, activeWorkspaceId: SCRATCH_WORKSPACE_ID, mainSurface: 'board', selectedDemandId: null, demandPmoTabIds: {}, pendingAgentLaunches: {}, scratchTopicSnapshots: {} })
+  return f
+}
+async function moteOriginGoal(id: string, body = 'Original user demand body') {
+  await act(async () => { await useAppStore.getState().createDemand({ id, title: id, description: body }) })
+  const original = (await demands.get(id))!
+  let tabId!: string
+  await act(async () => { tabId = await useAppStore.getState().requestDemandPmoTask(id, 'grill', { creationOperationId: original.creationOrigin!.operationId }) })
+  return { original, tab: useAppStore.getState().tabs[tabId]! }
+}
+it('Mote new-chat origin: actual File/Main/PMO/Core saved config wins across two bots and cold observation', async () => {
+  const f = await moteOriginCore(), source = await moteOriginFiles()
+  const content = '---\nversion: 1\ndefaults:\n  executorId: mote-origin-claude\n---\nOriginal Mote prose stays.\n'
+  const saved = await source.save(content)
+  expect(saved.quickMode).toMatchObject({ status: 'saved', defaults: { executorId: 'mote-origin-claude' } })
+  const first = await moteOriginGoal('mote-new-one'), second = await moteOriginGoal('mote-new-two')
+  expect(f.start).toHaveBeenCalledTimes(2)
+  const retained = [first.tab, second.tab].map(tab => Object.values(tab.regions).find(region => region.kind === 'agent')!)
+  expect(retained.every(region => region.kind === 'agent')).toBe(true)
+  const oldIds = retained.map(region => region.kind === 'agent' ? region.sessionId : '')
+  expect(new Set(oldIds).size).toBe(2)
+  useAppStore.setState({ scratchTopicSnapshots: {} })
+  expect(primaryMoteExecutorId(useAppStore.getState())).toBeUndefined()
+  const third = await moteOriginGoal('mote-new-three', 'Third exact request with two healthy bots')
+  expect(f.start).toHaveBeenCalledTimes(3)
+  const target = Object.values(third.tab.regions).find(region => region.kind === 'agent')!
+  if (target.kind !== 'agent') throw new Error('Expected new exact Core Agent')
+  const stored = (await f.store.load()).map(row => normalizeAgentSession(row))
+  expect(stored).toHaveLength(3)
+  expect(stored.map(row => row.executorId)).toEqual(['mote-origin-claude', 'mote-origin-claude', 'mote-origin-claude'])
+  const current = stored.find(row => row.agentSessionId === target.sessionId)!
+  expect(current.creation).toMatchObject({ createOperationId: await goalPmoOperation({ goalId: third.original.id, creationOperationId: third.original.creationOrigin!.operationId }, 'create'), initialPrompt: 'confirmed' })
+  expect(f.start.mock.calls[2]![0].cwd).toBe(current.workspacePath)
+  expect(current.workspacePath).toBe(saved.identityDirectoryPath)
+  const startInput = f.start.mock.calls[2]![0] as unknown as { program: string; args: string[] }
+  expect(startInput.program).toBe(_hygiene_fixturePath("private/claude")); expect(startInput.args.join(' ')).toContain('Third exact request with two healthy bots')
+  for (const id of oldIds) expect(f.core.agentSession(id).run).toEqual(stored.find(row => row.agentSessionId === id)!.run)
+  expect(f.stop).not.toHaveBeenCalled(); expect(f.writes).toEqual([]); expect(manager.list()).toEqual([])
+  expect((await demands.get(third.original.id))!.supervisorSessionId).toBe(target.sessionId)
+  expect((await api.files.read(source.workspace.id, source.path))).toMatchObject({ status: 'read', document: { content } })
+})
+it('Mote new-chat origin: unconfirmed and unsaved multiple bots keep original launcher without guessed identity', async () => {
+  const f = await moteOriginCore(), source = await moteOriginFiles()
+  const unconfirmed = await source.save('---\nversion: 99\ndefaults:\n  executorId: mote-origin-claude\n---\nKept invalid reference\n')
+  expect(unconfirmed.quickMode?.status).toBe('unconfirmed')
+  if (unconfirmed.quickMode?.status !== 'unconfirmed') throw new Error('Expected original file diagnosis')
+  const first = await moteOriginGoal('mote-file-unknown', 'Kept exact original request')
+  expect(f.start).not.toHaveBeenCalled(); expect(f.writes).toEqual([])
+  expect(Object.values(first.tab.regions)).toMatchObject([{ kind: 'launcher' }])
+  expect(useAppStore.getState().agentComposerDrafts[first.tab.layout.activeRegionId]).toBe('Clarify goal')
+  expect(useAppStore.getState().error).toContain(unconfirmed.quickMode.message)
+  expect((await demands.get(first.original.id))!.creationOrigin).toMatchObject({ requesterParticipationId: null, supervisorDefaultPending: true })
+  const saved = await source.save('---\nversion: 1\ndefaults:\n  executorId: mote-origin-claude\n---\n')
+  useAppStore.setState({ scratchTopicSnapshots: { [source.workspace.id]: { scope: scratchTopicsScope(source.workspace), revision: 1, topics: [saved], error: null, reading: false } } })
+  await act(async () => { await useAppStore.getState().requestDemandPmoTask(first.original.id, 'grill', { creationOperationId: first.original.creationOrigin!.operationId }) })
+  expect(f.start).toHaveBeenCalledTimes(1)
+  await moteOriginGoal('mote-known-second')
+  expect(f.start).toHaveBeenCalledTimes(2)
+  const noDefault = await source.save('---\nversion: 1\ndefaults: {}\n---\nOriginal Mote without a saved executor.\n')
+  expect(noDefault.quickMode).toMatchObject({ status: 'saved', defaults: {} })
+  useAppStore.setState({ scratchTopicSnapshots: { [source.workspace.id]: { scope: scratchTopicsScope(source.workspace), revision: 2, topics: [noDefault], error: null, reading: false } } })
+  const before = (await f.store.load()).map(row => normalizeAgentSession(row))
+  const blocked = await moteOriginGoal('mote-two-unsaved')
+  expect(f.start).toHaveBeenCalledTimes(2); expect(Object.values(blocked.tab.regions)).toMatchObject([{ kind: 'launcher' }])
+  expect((await f.store.load()).map(row => normalizeAgentSession(row))).toEqual(before)
+  expect(primaryMoteExecutorId(useAppStore.getState())).toBeUndefined()
+  expect(f.stop).not.toHaveBeenCalled(); expect(manager.list()).toEqual([])
+})
+it('Mote new-chat origin: exact Host validation and mapped Core Session survive another new-chat default and unknown file', async () => {
+  const f = await moteOriginCore({ ...session, providerId: 'traex' }), source = await moteOriginFiles()
+  const saved = await source.save('---\nversion: 1\ndefaults:\n  executorId: mote-origin-claude\n---\n')
+  const remote = { id: 'mote-remote', label: 'Exact remote', kind: 'ssh' as const, hostname: 'private-remote', user: 'private', port: 22 }
+  const state = useAppStore.getState(), remoteWorkspace = { ...source.workspace, hostId: remote.id }
+  const remoteState = { ...state, config: { ...config, hosts: [...config.hosts, remote], workspaces: [remoteWorkspace] },
+    scratchTopicSnapshots: { [source.workspace.id]: { scope: scratchTopicsScope(remoteWorkspace), revision: 3, topics: [saved], error: null, reading: false } }, hostExecutorInventories: {} }
+  expect(primaryMoteExecutorChoice(remoteState as typeof state)).toMatchObject({ issue: expect.stringContaining('mote-remote') })
+  expect(primaryMoteExecutorId(remoteState as typeof state)).toBeUndefined()
+  // A local config with the same ID is not metadata from this remote Host.
+  const localHost = config.hosts.find(host => host.id === 'local')!
+  const detectionKey = moteOriginDetectionKey('local', 'mote-origin-claude')
+  const wrongInventory = { ...remoteState, hostExecutorInventories: { [remote.id]: { input: localHost, state: 'ready', result: { executors: [{ executorId: 'mote-origin-claude', providerId: 'claude', label: 'Wrong Host', command: _hygiene_fixturePath("private/claude"), configRevision: 'wrong-host', availability: 'available' }] } } }, executorDetections: { ...state.executorDetections, [detectionKey]: { state: 'ready', input: { executorId: 'mote-origin-claude', providerId: 'claude', command: _hygiene_fixturePath("private/claude"), host: localHost } } } }
+  expect(primaryMoteExecutorId(wrongInventory as unknown as typeof state)).toBeUndefined()
+  useAppStore.setState({ executorDetections: { [detectionKey]: { state: 'missing', input: { executorId: 'mote-origin-claude', providerId: 'claude', command: _hygiene_fixturePath("private/claude"), host: localHost } } } })
+  const missing = await moteOriginGoal('mote-saved-unavailable')
+  expect(f.start).not.toHaveBeenCalled(); expect(Object.values(missing.tab.regions)).toMatchObject([{ kind: 'launcher' }])
+  expect(useAppStore.getState().error).toContain('mote-origin-claude')
+  expect(f.core.agentSession(session.agentSessionId).run).toEqual(session.run)
+  useAppStore.setState({ executorDetections: {} })
+  const original = await api.sessions.refresh(snapshot.control)
+  if (original.kind !== 'agent') throw new Error('Expected original mapped Core Session')
+  const tab = { ...createWorkbenchTab('mote-mapped-tab', { kind: 'agent', phase: 'attached', regionId: 'mote-mapped-region', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: original.id }), topicId: PMO_TEAMS_TOPIC_ID }
+  await act(async () => { await useAppStore.getState().createDemand({ id: 'mote-mapped', title: 'Mapped original demand' }) })
+  const goal = (await demands.get('mote-mapped'))!
+  useAppStore.setState({ sessions: [original], tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-mapped-group', [tab.id]) }, demandPmoTabIds: { [goal.id]: tab.id } })
+  const unknown = await source.save('---\nversion: 999\n---\nExisting Agent remains healthy\n')
+  useAppStore.setState({ scratchTopicSnapshots: { [source.workspace.id]: { scope: scratchTopicsScope(source.workspace), revision: 4, topics: [unknown], error: null, reading: false } } })
+  await act(async () => { await useAppStore.getState().requestDemandPmoTask(goal.id, 'grill', { creationOperationId: goal.creationOrigin!.operationId }); await useAppStore.getState().flushAgentSteerQueue(original.id) })
+  expect(f.start).not.toHaveBeenCalled(); expect(f.writes).toHaveLength(1); expect(f.writes[0]).toContain('Clarify goal'); expect(f.writes[0]).toContain('Mapped original demand')
+  expect(f.core.agentSession(original.id).run).toEqual(session.run)
+  expect(f.core.agentSession(original.id).workspacePath).toBe(session.workspacePath)
+  expect((await demands.get(goal.id))!.supervisorSessionId).toBe(original.id)
+  expect(Object.values(useAppStore.getState().tabs[tab.id]!.regions)).toMatchObject([{ kind: 'agent', sessionId: original.id }])
+  expect(f.stop).not.toHaveBeenCalled(); expect(manager.list()).toEqual([])
+})
+
+// T003: actual Goal detail/picker → original Store/preload/Main → original Core creation.
+import { chooseField } from './helpers/selection-field'
+import { GoalAgentPicker } from '../src/renderer/src/components/GoalAgentPicker'
+import { goalAgentRows, goalCreationDraftKey, restoredGoalAgentCreationDrafts, restoredGoalAgentSelectionDrafts } from '../src/renderer/src/lib/goal-agent-selection'
+import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
+import { scratchTopicIdentityPath } from '../src/shared/scratch-topics'
+function PickerDetail() {
+  const demand = useAppStore(state => state.demands.goal)!
+  return <GoalDetail demand={{ ...demand, sessions: [], workspacePath: null }} onClose={() => {}} onOpenMote={() => {}} onGrill={() => {}} onGrounding={() => {}} acknowledgementFeedback={EMPTY_GOAL_ACKNOWLEDGEMENT} onAcknowledgementFeedbackChange={() => {}} moteError={null} onRetryMote={() => {}} />
+}
+async function pickerButton(label: string) {
+  const node = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.getAttribute('aria-label') === label || button.textContent?.trim() === label)
+  expect(node, label).toBeDefined(); await act(async () => node!.click()); return node!
+}
+async function pickerCore() {
+  const privateRoot = join(directory, 'picker-private-core'); await mkdir(privateRoot)
+  const f = await injectedContextCore(privateRoot, session)
+  config.executors = { 'picker-fixture': { providerId: 'claude', label: 'Private picker fixture', command: _hygiene_fixturePath("private/claude"), args: [], env: {}, injectAgentMuxGuide: false } }
+  runtime.commit({ hosts: [{ id: 'local', config: config.hosts.find(host => host.id === 'local')!, client: f.core, executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
+  ;(runtime as any).agentSessionStore = f.store
+  useAppStore.setState({ config })
+  return f
+}
+it('Demand picker: common properties and accurate names are in the actual body; source participants rank before Project without changing roles', async () => {
+  const workspace = { id: 'picker-project', name: 'Registered Project', hostId: 'local', path: join(directory, 'project'), kind: 'folder' as const }
+  const source = { ...snapshot, id: 'source-view', label: 'Source label', control: { ...snapshot.control, agentSessionId: 'accurate-source' } }, project = { ...snapshot, id: 'project-view', label: 'Project Agent', workspacePath: workspace.path, control: { ...snapshot.control, agentSessionId: 'project-agent' } }
+  const demand = { ...useAppStore.getState().demands.goal!, sessions: [], workspacePath: null, projectId: workspaceProjectId(workspace), sessionIds: [], assigneeSessionIds: [], supervisorSessionId: null,
+    participations: [{ id: 'source-record', operationId: 'origin-op', recordedAt: 1, kind: 'create' as const, agentSessionId: 'accurate-source', hostId: 'local', entryPoint: 'goal.create' }] }
+  const rows = goalAgentRows({ ...useAppStore.getState(), config: { ...config, workspaces: [...config.workspaces, workspace] }, sessions: [project, source], agentNames: { 'source-view': 'Named requester' } }, demand, ['unavailable-original'])
+  expect(rows.map(row => row.id)).toEqual(['accurate-source', 'project-agent', 'unavailable-original'])
+  expect(rows[0]).toMatchObject({ name: 'Named requester', participated: true, related: false, selectable: true }); expect(demand.sessionIds).toEqual([])
+  useAppStore.setState({ sessions: useAppStore.getState().sessions.map(item => item.id === session.agentSessionId ? { ...item, id: 'local:original-presentation' } : item), agentNames: { 'local:original-presentation': 'Named original colleague' } })
+  await act(async () => root.render(<PickerDetail />))
+  expect(container.querySelector('.goals-common-properties')).not.toBeNull()
+  expect(container.querySelector('.goals-common-properties')!.compareDocumentPosition(container.querySelector('.goals-intent-body') ?? container.querySelector('.goals-alignment')!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  expect(container.querySelector('.goal-collaboration')).not.toBeNull(); expect(container.querySelector('.goals-execution')).toBeNull()
+  await pickerButton('Choose Goal assignees')
+  expect(document.querySelector(`[data-session-id="${session.agentSessionId}"]`)?.textContent).toContain('Named original colleague')
+  expect(document.querySelector<HTMLInputElement>(`[data-session-id="${session.agentSessionId}"] input`)!.checked).toBe(true)
+  await pickerButton('Save relationships')
+  await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker')).toBeNull())
+  expect((await demands.get('goal'))!.assigneeSessionIds).toEqual([session.agentSessionId])
+  await pickerButton('Choose Goal assignees')
+  expect(document.querySelector('input[aria-label="Search Agents"]')).not.toBeNull()
+  expect(writes).toEqual([]); expect(manager.list()).toEqual([])
+})
+it('Demand picker: retained multiselect and opening CAS survive remount and conflict cannot escape through the global retry', async () => {
+  const f = await pickerCore(), second = await f.core.createAgent({ providerId: 'claude', executorId: 'picker-fixture', workspacePath: snapshot.workspacePath, injectAgentMuxGuide: false })
+  useAppStore.setState({ sessions: (await runtime.snapshot(config)).sessions })
+  await act(async () => root.render(<PickerDetail />)); await pickerButton('Choose Goal assignees')
+  const opening = (await demands.get('goal'))!.updatedAt
+  await act(async () => document.querySelector<HTMLInputElement>(`[data-session-id="${second.agentSessionId}"] input`)!.click())
+  expect(useAppStore.getState().goalAgentSelectionDrafts[goalCreationDraftKey('goal', 'assignees')]!.selected).toEqual([session.agentSessionId, second.agentSessionId])
+  await pickerButton('Cancel'); await pickerButton('Choose Goal assignees')
+  for (const id of [session.agentSessionId, second.agentSessionId]) expect(document.querySelector<HTMLInputElement>(`[data-session-id="${id}"] input`)!.checked).toBe(true)
+  await act(async () => document.querySelector<HTMLInputElement>(`[data-session-id="${second.agentSessionId}"] input`)!.click())
+  // Retained identities stay explicit even when unavailable; removing the sole Supervisor needs explicit clear.
+  await act(async () => document.querySelector<HTMLInputElement>(`[data-session-id="${session.agentSessionId}"] input`)!.click())
+  await chooseField(document.querySelector<HTMLElement>('[aria-label="Replacement Supervisor"]')!, '')
+  const retained = useAppStore.getState().goalAgentSelectionDrafts[goalCreationDraftKey('goal', 'assignees')]!
+  expect(retained).toMatchObject({ selected: [], expectedUpdatedAt: opening, replacement: '' })
+  const written = JSON.parse(window.localStorage.getItem('agentmux-workbench-v1')!).state
+  expect(restoredGoalAgentSelectionDrafts(written.goalAgentSelectionDrafts)).toEqual(useAppStore.getState().goalAgentSelectionDrafts)
+  await pickerButton('Cancel')
+  await demands.update('goal', { priority: 'urgent' }); await act(async () => useAppStore.getState().refreshDemand('goal'))
+  await pickerButton('Choose Goal assignees')
+  expect(document.querySelector<HTMLInputElement>(`[data-session-id="${session.agentSessionId}"] input`)!.checked).toBe(false)
+  expect(document.querySelector<HTMLElement>('[aria-label="Replacement Supervisor"]')?.dataset.value).toBe('')
+  await pickerButton('Save relationships')
+  expect((await demands.get('goal'))!.assigneeSessionIds).toEqual([session.agentSessionId]); expect((await demands.get('goal'))!.supervisorSessionId).toBe(session.agentSessionId)
+  await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker')?.textContent).toContain('Relationships are not saved'))
+  expect([...container.querySelectorAll('button')].some(button => button.textContent === 'Retry save')).toBe(false)
+  await pickerButton('Use current Goal version for this draft'); await pickerButton('Save relationships')
+  await vi.waitFor(async () => expect((await demands.get('goal'))!.assigneeSessionIds).toEqual([]))
+  expect((await demands.get('goal'))!).toMatchObject({ assigneeSessionIds: [], supervisorSessionId: null, sessionIds: [session.agentSessionId], priority: 'urgent' })
+  expect(writes).toEqual([]); expect(manager.list()).toEqual([])
+})
+it('Demand picker: Mote creation waits on the original owner, freezes one OP, preserves active Region and inspects a lost receipt without recreating or sending', async () => {
+  const scope = await exactContentScope(), f = await pickerCore()
+  const scratch = (runtime as any).scratchTopics as ScratchTopics, prepare = scratch.prepareAgent.bind(scratch)
+  let release!: () => void
+  const delayed = vi.spyOn(scratch, 'prepareAgent').mockImplementationOnce(async (...args) => { await new Promise<void>(resolve => { release = resolve }); return prepare(...args) })
+  await act(async () => root.render(<PickerDetail />)); await pickerButton('Choose Goal assignees'); await pickerButton('Mote · new Session')
+  await chooseField(document.querySelector<HTMLElement>('[aria-label="Mote for new Session"]')!, scope.topic.id)
+  await chooseField(document.querySelector<HTMLElement>('[aria-label="New Session Agent configuration"]')!, 'picker-fixture')
+  const actual = useAppStore.getState().executeControl, lost = vi.spyOn(useAppStore.getState(), 'executeControl').mockImplementation(async request => {
+    const result = await actual(request); if (request.operation === 'agent.open') throw new Error('Original creation acknowledgement lost'); return result
+  })
+  useAppStore.getState().setAgentComposerDraft(session.agentSessionId, 'Original useful unsent draft')
+  const activeBefore = structuredClone(useAppStore.getState().workbenchSpaceSelection), originalTab = structuredClone(useAppStore.getState().tabs['content-tab'])
+  expect(activeBefore).toMatchObject({ tabId: 'content-tab', regionId: 'content-region' })
+  expect(originalTab?.regions['content-region']).toMatchObject({ kind: 'agent', sessionId: session.agentSessionId })
+  await pickerButton('Create Mote Session'); await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+  const draft = useAppStore.getState().goalAgentCreationDrafts[goalCreationDraftKey('goal', 'assignees')]!
+  expect(draft).toMatchObject({ phase: 'may-have-dispatched', request: { focus: false, content: { kind: 'new-agent', executorId: 'picker-fixture' } } })
+  expect(draft.request.content).not.toHaveProperty('prompt'); expect(draft.request.content).not.toHaveProperty('executionWorkspaceId')
+  expect(document.querySelector<HTMLButtonElement>('[aria-label="Close Agent picker"]')!.disabled).toBe(true)
+  expect(document.querySelector<HTMLButtonElement>('.goal-agent-picker button[type=submit]')!.disabled).toBe(true)
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+  expect(lost.mock.calls.filter(([request]) => request.operation === 'space.inspect')).toEqual([])
+  expect(f.start).not.toHaveBeenCalled()
+  release(); await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker')!.textContent).toContain('acknowledgement lost'))
+  const originalPrepared = await delayed.mock.results[0]!.value
+  expect(originalPrepared.absolutePath).toBe(scratchTopicIdentityPath(scope.workspace, scope.topic))
+  expect(originalPrepared.prompt).toContain('Mote personality from')
+  if (scope.topic.wiki?.enabled) expect(originalPrepared.prompt).toContain(scope.topic.wiki.content)
+  delayed.mockRestore(); lost.mockRestore()
+  expect(useAppStore.getState().workbenchSpaceSelection).toEqual(activeBefore)
+  expect(useAppStore.getState().tabs['content-tab']).toEqual(originalTab)
+  expect(useAppStore.getState().agentComposerDrafts[session.agentSessionId]).toBe('Original useful unsent draft')
+  expect(f.start).toHaveBeenCalledTimes(1)
+  expect((f.start.mock.calls[0]![0] as any).cwd).toBe(scratchTopicIdentityPath(scope.workspace, scope.topic))
+  expect(f.writes).toEqual([]); expect(manager.list()).toEqual([])
+  await pickerButton('Cancel'); await pickerButton('Choose Goal assignees')
+  await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker')!.textContent).toContain('Original Session observed'))
+  const inspected = useAppStore.getState().spatialRequests[draft.operationId]!
+  expect(inspected.requestId).toBe(draft.operationId)
+  const createdId = inspected.agentSessionId!
+  expect(createdId).toBe(await f.core.resolveAgentCreationSessionId(draft.operationId))
+  expect(restoredGoalAgentCreationDrafts(JSON.parse(window.localStorage.getItem('agentmux-workbench-v1')!).state.goalAgentCreationDrafts)[goalCreationDraftKey('goal', 'assignees')]?.operationId).toBe(draft.operationId)
+  await pickerButton('Save relationships')
+  await vi.waitFor(async () => expect((await demands.get('goal'))!.assigneeSessionIds).toEqual([session.agentSessionId, createdId]))
+  expect((await demands.get('goal'))!.assigneeSessionIds).toEqual([session.agentSessionId, createdId]); expect((await demands.get('goal'))!.sessionIds).toContain(createdId)
+  expect(f.start).toHaveBeenCalledTimes(1); expect(f.writes).toEqual([])
+})
+it('Demand picker: failed pre-dispatch save retains the exact request and explicit recovery creates one Agent in the chosen directory', async () => {
+  const f = await pickerCore(), path = join(directory, 'chosen-project'); await mkdir(path)
+  const workspace = { id: 'picker-chosen', name: 'Chosen directory', hostId: 'local', path, kind: 'folder' as const }
+  config.workspaces = [...config.workspaces, workspace]; useAppStore.setState({ config, layouts: { ...useAppStore.getState().layouts, [workspace.id]: createWorkspaceLayout('picker-group') } })
+  await act(async () => root.render(<PickerDetail />)); await pickerButton('Choose Goal assignees'); await pickerButton('New Agent')
+  await chooseField(document.querySelector<HTMLElement>('[aria-label="New Agent execution directory"]')!, workspace.id)
+  await chooseField(document.querySelector<HTMLElement>('[aria-label="New Session Agent configuration"]')!, 'picker-fixture')
+  const originalWrite = window.localStorage.setItem.bind(window.localStorage)
+  const failed = vi.spyOn(window.localStorage, 'setItem').mockImplementation((...args) => { if (args[0] === 'agentmux-workbench-v1') throw new Error('Private pre-dispatch save failed'); return originalWrite(...args) })
+  await pickerButton('Create Agent')
+  await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker')!.textContent).toContain('Creation has not been dispatched'))
+  const draft = useAppStore.getState().goalAgentCreationDrafts[goalCreationDraftKey('goal', 'assignees')]!
+  expect(draft.phase).toBe('not-dispatched'); expect(f.start).not.toHaveBeenCalled()
+  failed.mockRestore()
+  await pickerButton('Cancel'); await pickerButton('Choose Goal assignees')
+  expect(f.start).not.toHaveBeenCalled()
+  await pickerButton('Save selection and create once')
+  await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(1))
+  await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker')!.textContent).toContain('Original Session observed'))
+  expect((f.start.mock.calls[0]![0] as any).cwd).toBe(path)
+  expect(useAppStore.getState().goalAgentCreationDrafts[goalCreationDraftKey('goal', 'assignees')]!.operationId).toBe(draft.operationId)
+  expect((await f.core.resolveAgentCreationSessionId(draft.operationId))).toBe(useAppStore.getState().spatialRequests[draft.operationId]!.agentSessionId)
+  expect(f.writes).toEqual([]); expect(manager.list()).toEqual([])
+})
+
+it('Demand picker: hidden assignee directory does no work for unrelated Session output and Tab observations', async () => {
+  const commits = vi.fn()
+  await act(async () => root.render(<Profiler id="actual-goal-directory" onRender={commits}><GlobalBoardSurface /></Profiler>))
+  await act(async () => useAppStore.getState().setSelectedDemand('goal'))
+  await vi.waitFor(() => expect(container.querySelector('.goal-collaboration')).not.toBeNull())
+  await vi.waitFor(() => expect(container.textContent).not.toContain('Checking the original continuation'))
+  expect(container.querySelector('.goals-filters')).toBeNull()
+  const state = useAppStore.getState(), before = commits.mock.calls.length
+  expect(before).toBeGreaterThan(0)
+  const unrelated = { ...snapshot, id: 'unrelated-renderer-view', control: { ...snapshot.control, agentSessionId: 'unrelated-core-session' }, latestOutputBytes: 900000 }
+  await act(async () => useAppStore.setState({ sessions: [...state.sessions, unrelated], tabs: { ...state.tabs } }))
+  expect(commits.mock.calls.length).toBe(before)
+  expect(container.querySelector('.goal-collaboration')!.textContent).not.toContain('unrelated-core-session')
 })

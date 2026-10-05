@@ -15,7 +15,7 @@ const workspace = join(root, 'work'), targetPath = join(root, 'target.json')
 const store = new AgentMuxFileAgentSessionStore(join(root, 'state/sessions.json')), goals = openDemandStore({ root: join(root, 'goals') })
 const loopStore = new ContinuousProgressLoopStore(join(root, 'loops.json'))
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private Core' }], workspaces: [{ id: 'work', hostId: 'local', path: workspace, name: 'Private work', kind: 'folder' }],
-  executors: { proof: { label: 'Original native protocol', providerId: 'codex', command: process.execPath, args: [nativeCli], env: { AGENTMUX_FAKE_READY_MODE: 'before', DIRECTORY_RUNTIME_ORIGINAL_ALIAS: workspace }, injectAgentMuxGuide: false } },
+  executors: { proof: { label: 'Original native protocol', providerId: 'codex', command: process.execPath, args: [nativeCli], env: { AGENTMUX_FAKE_READY_MODE: 'before', AGENTMUX_FAKE_NATIVE_RECORD: '1', DIRECTORY_RUNTIME_ORIGINAL_ALIAS: workspace }, injectAgentMuxGuide: false } },
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 let host: Awaited<ReturnType<typeof startHeadlessAgentMux>> | undefined, runtime: RuntimeController | undefined, manager: ContinuousProgressLoopManager | undefined
 let observe: Awaited<ReturnType<NonNullable<typeof host>['client']['observeAgentOutput']>> | undefined, output = '', now = 0
@@ -50,7 +50,7 @@ try {
   if (phase === 'seed') {
     const launch = await runtime.launchAgent({ hostId: 'local', executorId: 'proof', workspacePath: workspace, agentSessionId: target.agentSessionId, createOperationId: 'original-goal-agent' }, config)
     assert.equal(launch.created.agentSessionId, target.agentSessionId); target.runId = launch.created.run.runId; await writeFile(targetPath, JSON.stringify(target))
-    await goals.create({ id: 'goal', title: 'Original bounded work', description: 'Produce the original useful result.', sessionIds: [target.agentSessionId] })
+    await goals.create({ id: 'goal', title: 'Original bounded work', description: 'Produce the original useful result.', sessionIds: [target.agentSessionId], assigneeSessionIds: [target.agentSessionId], supervisorSessionId: target.agentSessionId })
     await goals.proposeAlignment('goal', { summary: 'Original work', criteria: [{ id: 'real', text: 'A real result exists' }], openQuestions: [] }); await goals.confirmAlignment('goal', 1)
   }
   observe = await host.client.observeAgentOutput(target.agentSessionId, 0, event => { if (event.type === 'terminal-output' && event.run.runId === target.runId) output += event.data })
@@ -70,9 +70,16 @@ try {
     await manager.submitGoalInitial(original, 'goal', loop.loopId, 'original-goal-start', loop.initialDelivery!.prompt, loop.initialDelivery!.condition,
       (isCurrent, signal) => runtime!.submitPrompt({ kind: 'agent', hostId: 'local', agentSessionId: target.agentSessionId, run: status.session.run }, loop.initialDelivery!.prompt, 'original-goal-start', loop.initialDelivery!.condition, { isCurrent, signal }))
     await until(() => host!.client.statusAgent(target.agentSessionId), current => current.session.semanticStatus?.state === 'done' && (current.session.semanticStatus.observedAt ?? 0) > (status.session.semanticStatus?.observedAt ?? 0), 'original initial turn completes')
+    // This distinct saved choice is retained domain identity, not a replacement Run.
+    // Reconciliation and actions below must still consume the original frozen loop.
+    await goals.update('goal', { assigneeSessionIds: ['retained-next-supervisor'], supervisorSessionId: 'retained-next-supervisor' })
   } else {
     const recovered = await runtime.recoverSession({ kind: 'agent', hostId: 'local', agentSessionId: target.agentSessionId, run: { runId: target.runId! } }, config, undefined, 'goal-private-cold-continuity')
     assert.equal(recovered.kind, 'reattachable')
+    const loop = manager.list()[0]!
+    const original = await manager.prepareGoal({ hostId: loop.hostId, agentSessionId: loop.agentSessionId, providerId: loop.providerId, workspacePath: loop.workspacePath, goalId: 'goal', alignmentRevision: loop.taskSource!.kind === 'goal' ? loop.taskSource!.alignmentRevision : 0, intervalMs: loop.intervalMs, operationId: loop.creationOperationId!, prompt: loop.initialDelivery!.prompt })
+    assert.equal(original.loopId, loop.loopId); assert.equal(original.agentSessionId, target.agentSessionId)
+    assert.equal((await goals.get('goal'))!.supervisorSessionId, 'retained-next-supervisor')
   }
   process.stdout.write(JSON.stringify({ ready: true, ...await facts() }) + '\n')
   process.on('message', (message: { request: number; action: string }) => { serial = serial.then(async () => {

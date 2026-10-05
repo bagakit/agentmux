@@ -106,7 +106,7 @@ describe('Demand dedicated PMO Tab context', () => {
     state.setAgentComposerDraft(regionId, '  Edited original body <amux from="amux">literal</amux>  ')
     expect(useAppStore.getState().agentComposerNotes).toEqual(state.agentComposerNotes)
   })
-  it('creates a unique PMO Tab, persists its binding, and launches a fresh context', async () => {
+  it('creates unique PMO Tabs and retains the second launcher when its primary target is unconfirmed', async () => {
     vi.spyOn(api.scratch, 'ensureTopic').mockResolvedValue({ id: PMO_TEAMS_TOPIC_ID } as never)
     const launchAgent = vi.fn().mockResolvedValue(undefined)
     const secondDemand = { ...demand, id: 'demand:two', title: 'Two demand' }
@@ -131,8 +131,14 @@ describe('Demand dedicated PMO Tab context', () => {
     expect(state.layouts[SCRATCH_WORKSPACE_ID]?.groups[0]?.tabOrder).toContain(secondTabId)
     expect(state.demandPmoTabIds[demand.id]).toBe(tabId)
     expect(state.demandPmoTabIds[secondDemand.id]).toBe(secondTabId)
-    expect(launchAgent).toHaveBeenCalledWith('codex', 'Clarify goal', 'scratch-group', expect.objectContaining({ tabId, regionId: tab?.layout.activeRegionId }), undefined, { tabName: 'PMO · One demand' }, expect.stringContaining('Grill:'))
-    expect(launchAgent).toHaveBeenCalledWith('codex', 'Ask agent to check work', 'scratch-group', expect.objectContaining({ tabId: secondTabId, regionId: state.tabs[secondTabId]?.layout.activeRegionId }), undefined, { tabName: 'PMO · Two demand' }, expect.stringContaining('Grounding:'))
+    expect(launchAgent).toHaveBeenCalledWith('codex', 'Clarify goal', 'scratch-group', expect.objectContaining({ tabId, regionId: tab?.layout.activeRegionId }), undefined, { tabName: 'PMO · One demand' }, expect.stringContaining('Grill:'), expect.objectContaining({ intent: { goalId: demand.id } }))
+    expect(launchAgent).toHaveBeenCalledTimes(1)
+    const secondRegion = state.tabs[secondTabId]!.layout.activeRegionId
+    expect(state.tabs[secondTabId]!.regions[secondRegion]).toMatchObject({ kind: 'launcher' })
+    expect(state.agentComposerDrafts[secondRegion]).toBe('Ask agent to check work')
+    expect(state.agentComposerNotes[secondRegion]).toContain('Grounding:')
+    expect(state.errorNoticeContext).toMatchObject({ kind: 'indeterminate' })
+    expect(state.error).toContain('primary Mote Agent configuration is unconfirmed')
     expect(launchAgent.mock.calls[0]?.[6]).toContain('Read-only execution Agent context')
   })
 
@@ -164,8 +170,8 @@ describe('Demand dedicated PMO Tab context', () => {
     await expect(useAppStore.getState().requestDemandPmoTask(demand.id, 'grill')).resolves.toBe(tab.id)
     await expect(useAppStore.getState().requestDemandPmoTask(demand.id, 'grounding')).resolves.toBe(tab.id)
     expect(send).toHaveBeenCalledTimes(2)
-    expect(send.mock.calls[0]).toEqual(['session-one', 'Clarify goal', undefined, undefined, expect.stringContaining('Grill:')])
-    expect(send.mock.calls[1]).toEqual(['session-one', 'Ask agent to check work', undefined, undefined, expect.stringContaining('Grounding:')])
+    expect(send.mock.calls[0]).toEqual(['session-one', 'Clarify goal', undefined, undefined, expect.stringContaining('Grill:'), { goalPmo: { goalId: demand.id } }])
+    expect(send.mock.calls[1]).toEqual(['session-one', 'Ask agent to check work', undefined, undefined, expect.stringContaining('Grounding:'), { goalPmo: { goalId: demand.id } }])
     expect(send.mock.calls[1]![4]).toContain('Clarify one outcome')
     expect(launchAgent).not.toHaveBeenCalled()
     expect(Object.keys(useAppStore.getState().tabs)).toEqual([tab.id])
@@ -176,8 +182,9 @@ describe('Demand dedicated PMO Tab context', () => {
   })
 
   it('retains a real queued Mote task on a healthy busy Run and sends it on retry', async () => {
-    const session = { id: 'session-one', kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'session-one', run: { runId: 'healthy-run' } }, status: { state: 'working', observedAt: 1 }, processState: 'running', promptSubmissionPredecessor: null }
+    const session = { id: 'session-one', kind: 'agent', hostId: 'local', workspacePath: _hygiene_fixturePath("scratch/topic--launcher--leader"), control: { kind: 'agent', hostId: 'local', agentSessionId: 'session-one', run: { runId: 'healthy-run' } }, status: { state: 'working', observedAt: 1 }, processState: 'running', promptSubmissionPredecessor: null, capabilities: { promptExecution: { immediate: 'native-steer' } } }
     const quotedDemand = { ...demand, projectId: workspaceProjectId(projectRoot), id: "goal's-id", alignment: { revision: 1, summary: 'User goal', criteria: [{ id: "criterion's-id", text: 'Current criterion' }], openQuestions: [], confirmedAt: 1 } }
+    vi.spyOn(api.demands, 'list').mockResolvedValue([{ ...quotedDemand, assigneeSessionIds: [], supervisorSessionId: null, participations: [], activities: [], decisions: [], tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, contentRefs: [] } as never])
     const tab = { ...createWorkbenchTab('pmo-tab-one', { regionId: 'region-one', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: session.id }, 'PMO'), topicId: PMO_TEAMS_TOPIC_ID }
     vi.spyOn(api.sessions, 'refresh').mockResolvedValue(session as never)
     vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
@@ -192,12 +199,12 @@ describe('Demand dedicated PMO Tab context', () => {
     expectProjectPayload(retained.agentMuxNote!)
     expect(retained.agentMuxNote).toContain("--goal 'goal'\"'\"'s-id'")
     expect(retained.agentMuxNote).toContain("criterion'\"'\"'s-id")
-    expect(submit).toHaveBeenCalledWith(session.control, retained.text, retained.operationId, expect.objectContaining({ expectedRun: { runId: 'healthy-run' } }), { allowUncertainTurn: true }, false, retained.agentMuxNote)
+    expect(submit).toHaveBeenCalledWith(session.control, retained.text, retained.operationId, expect.objectContaining({ expectedRun: { runId: 'healthy-run' } }), expect.objectContaining({ allowUncertainTurn: true }), false, retained.agentMuxNote, undefined, undefined, { goalId: quotedDemand.id })
     expect(useAppStore.getState().sessions).toEqual([session])
     expect(launch).not.toHaveBeenCalled()
     submit.mockResolvedValue(undefined)
     useAppStore.setState({ config: { ...projectConfig, workspaces: [scratchWorkspace, otherHostProject] } })
-    await useAppStore.getState().flushAgentSteerQueue(session.id, retained.operationId)
+    await useAppStore.getState().sendQueuedAgentSteer(session.id, retained.operationId)
     expect(useAppStore.getState().agentSteerQueues[session.id]).toBeUndefined()
     expect(submit.mock.calls.at(-1)?.[2]).toBe(retained.operationId)
     expect(submit.mock.calls.at(-1)?.[1]).toBe(retained.text)
@@ -206,7 +213,7 @@ describe('Demand dedicated PMO Tab context', () => {
 
   it('delivers the signed existing Goal exception on a healthy mapped Run despite missing bot configuration and unreadable metadata', async () => {
     const active = { id: 'mapped-healthy', kind: 'agent', executorId: 'codex-2', providerId: 'claude', hostId: 'local', workspacePath: _hygiene_fixturePath("scratch/topic--launcher--leader"),
-      control: { kind: 'agent', hostId: 'local', agentSessionId: 'mapped-healthy', run: { runId: 'original-healthy-run' } }, status: { state: 'working', observedAt: 1 }, processState: 'running', promptSubmissionPredecessor: null }
+      control: { kind: 'agent', hostId: 'local', agentSessionId: 'mapped-healthy', run: { runId: 'original-healthy-run' } }, status: { state: 'working', observedAt: 1 }, processState: 'running', promptSubmissionPredecessor: null, capabilities: { promptExecution: { immediate: 'native-steer' } } }
     const current = { ...demand, title: 'Untitled goal', description: ("我授权在 " + _hygiene_fixturePath("tmp/agentmux-authorized-attempt") + " 做一个小型可检查尝试；请建立最小初始指令，并派其他执行 Agent 完成。保留已有文件。") }
     const tab = { ...createWorkbenchTab('mapped-tab', { kind: 'agent', phase: 'attached', regionId: 'mapped-region', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: active.id }), topicId: PMO_TEAMS_TOPIC_ID }
     const metadata = vi.spyOn(api.scratch, 'readTopic').mockRejectedValue(new Error('Topic metadata unavailable'))
@@ -288,7 +295,7 @@ describe('Demand dedicated PMO Tab context', () => {
   it('focuses the requested PMO Tab even when another Demand owns the first Tab', async () => {
     const firstTab = { ...createWorkbenchTab('pmo-tab-one', { regionId: 'region-one', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'session-one' }, 'PMO · One demand'), topicId: PMO_TEAMS_TOPIC_ID }
     const secondTab = { ...createWorkbenchTab('pmo-tab-two', { regionId: 'region-two', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'session-two' }, 'PMO · Two demand'), topicId: PMO_TEAMS_TOPIC_ID }
-    vi.spyOn(api.scratch, 'readTopic').mockResolvedValue({ id: PMO_TEAMS_TOPIC_ID } as never)
+    vi.spyOn(api.scratch, 'readTopic').mockResolvedValue({ id: PMO_TEAMS_TOPIC_ID, directoryPath: 'teams', topicPath: 'teams/topic.md' } as never)
     useAppStore.setState({
       config,
       tabs: { [firstTab.id]: firstTab, [secondTab.id]: secondTab },
@@ -315,7 +322,7 @@ it('keeps the Demand-to-PMO mapping in renderer persistence and exposes both PMO
   expect(source.length).toBeGreaterThan(0)
   expect(board.length).toBeGreaterThan(0)
   expect(source).toContain('demandPmoTabIds: state.demandPmoTabIds')
-  expect(source).toContain('requestDemandPmoTask(demandId, mode)')
+  expect(source).toContain('requestDemandPmoTask(demandId, mode, options)')
   expect(board).toContain('onOpenMote=')
   expect(board).toContain("await openDemandPmo(demandId)")
 })
