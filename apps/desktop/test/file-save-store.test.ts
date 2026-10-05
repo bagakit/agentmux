@@ -186,6 +186,10 @@ describe('revision-aware file save Store', () => {
       status: 'read',
       document: { path: 'src/renamed.ts', content: 'bravo', revision: 'revision-bravo' }
     })
+    await rename
+    // Settle an erroneous redirected write so a mutant fails assertions rather than timing out.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    fileApi.writes[1]?.resolve({ status: 'written', revision: 'unexpected-redirect' })
     await Promise.all([firstSave, rename, saveDuringMove])
 
     const nextKey = documentKey(workspace.id, 'src/renamed.ts')
@@ -193,6 +197,71 @@ describe('revision-aware file save Store', () => {
     expect(useAppStore.getState().tabs[tab.id]!.regions[tab.titleRegionId]).toMatchObject({ path: 'src/renamed.ts' })
     expect(useAppStore.getState().documents[nextKey]).toMatchObject({ content: 'charlie' })
     expect(useAppStore.getState().dirtyDocuments[nextKey]).toBe(true)
+    expect(useAppStore.getState().error).toContain('save the current file to continue')
+
+    const freshSave = useAppStore.getState().saveDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 2)
+    expect(fileApi.writes[1]!.input).toEqual({
+      path: 'src/renamed.ts', content: 'charlie', expectedRevision: 'revision-bravo'
+    })
+    fileApi.writes[1]!.resolve({ status: 'written', revision: 'revision-charlie' })
+    await freshSave
+    expect(useAppStore.getState().dirtyDocuments[nextKey]).toBe(false)
+  })
+
+  it('does not redirect a queued save when the same Region is rebound to another file', async () => {
+    const { workspace, tab, key } = seed()
+    useAppStore.getState().updateDocument(tab.id, 'bravo')
+    const firstSave = useAppStore.getState().saveDocument(tab.id, tab.titleRegionId)
+    await waitFor(() => fileApi.writes.length === 1)
+    const queuedSave = useAppStore.getState().saveDocument(tab.id, tab.titleRegionId)
+    const otherPath = 'src/other.ts'
+    const otherKey = documentKey(workspace.id, otherPath)
+    useAppStore.setState((state) => ({
+      tabs: { ...state.tabs, [tab.id]: createWorkbenchTab(tab.id, {
+        regionId: tab.titleRegionId, kind: 'file', workspaceId: workspace.id, path: otherPath
+      }) },
+      documents: { ...state.documents, [otherKey]: { path: otherPath, content: 'other-draft', revision: 'other-revision' } },
+      dirtyDocuments: { ...state.dirtyDocuments, [otherKey]: true }
+    }))
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-bravo' })
+    await firstSave
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    fileApi.writes[1]?.resolve({ status: 'written', revision: 'unexpected-other-write' })
+    await queuedSave
+    expect(fileApi.writes).toHaveLength(1)
+    expect(useAppStore.getState().documents[key]?.content).toBe('bravo')
+    expect(useAppStore.getState().documents[otherKey]?.content).toBe('other-draft')
+    expect(useAppStore.getState().dirtyDocuments[otherKey]).toBe(true)
+    expect(useAppStore.getState().error).toContain('No write was sent')
+  })
+
+  it('does not send a queued save into a reopened lifetime at the same file key', async () => {
+    const { workspace, tab, key } = seed()
+    useAppStore.getState().updateDocument(tab.id, 'old-draft')
+    const firstSave = useAppStore.getState().saveDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+    const queuedSave = useAppStore.getState().saveDocument(tab.id)
+    await useAppStore.getState().closeTab(workspace.id, 'pane', tab.id)
+    const reopen = useAppStore.getState().openFile(tab.path, 'pane')
+    await waitFor(() => fileApi.reads.length === 1)
+    fileApi.reads[0]!.resolve({
+      status: 'read', document: { path: tab.path, content: 'reopened', revision: 'revision-reopened' }
+    })
+    await reopen
+    expect(useAppStore.getState().tabs[tab.id]).toBeDefined()
+    useAppStore.getState().updateDocument(tab.id, 'new-draft')
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-old-draft' })
+    await firstSave
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    fileApi.writes[1]?.resolve({ status: 'written', revision: 'unexpected-new-lifetime-write' })
+    await queuedSave
+    expect(fileApi.writes).toHaveLength(1)
+    expect(useAppStore.getState().documents[key]).toEqual({
+      path: tab.path, content: 'new-draft', revision: 'revision-reopened'
+    })
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+    expect(useAppStore.getState().error).toContain('No write was sent')
   })
 
   it('serializes each file and binds save completion to the captured edit generation', async () => {
