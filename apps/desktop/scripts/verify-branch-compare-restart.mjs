@@ -81,7 +81,7 @@ async function identity() {
     'apps/desktop/src/main/git-service.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/preload/index.ts',
     'apps/desktop/src/shared/git-contracts.ts', 'apps/desktop/src/shared/contracts.ts',
     'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/BranchComparisonPanel.tsx',
-    'apps/desktop/src/renderer/src/components/GitBranchDiffPane.tsx', 'apps/desktop/src/renderer/src/components/GitDiffCanvas.tsx',
+    'apps/desktop/src/renderer/src/features/git/diff/GitBranchDiffPane.tsx', 'apps/desktop/src/renderer/src/features/git/diff/GitDiffCanvas.tsx',
     'apps/desktop/src/renderer/src/lib/control.ts', 'apps/desktop/src/renderer/src/lib/workbench-tabs.ts',
     'apps/desktop/src/renderer/src/lib/workbench-persistence.ts', 'packages/core/src/control.ts', 'packages/core/src/control-host.ts',
     'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/verify-branch-compare-restart.mjs']

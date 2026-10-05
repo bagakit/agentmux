@@ -2,7 +2,7 @@ import { verifyRendererSourceMutations } from './lib/verify-renderer-source-muta
 
 const field = 'packages/client-ui/src/components/InlineRenameField.tsx'
 const source = 'apps/desktop/src/renderer/src/components/EditorPane.tsx'
-const diff = 'apps/desktop/src/renderer/src/components/GitDiffCanvas.tsx'
+const diff = 'apps/desktop/src/renderer/src/features/git/diff/GitDiffCanvas.tsx'
 const typography = 'apps/desktop/src/renderer/src/hooks/useEditorTypography.ts'
 const appearance = 'apps/desktop/src/main/settings/modules/appearance.ts'
 const explorer = 'apps/desktop/src/renderer/src/components/FileExplorer.tsx'

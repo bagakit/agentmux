@@ -1,6 +1,6 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
-import { parseGitParams, parseGitResult, parseGitOpenResult, type AgentMuxRpcGitOwner } from '../src/public-rpc-git.js'
+import { parseGitParams, parseGitResult, parseGitOpenResult, parseGitOpenParams, type AgentMuxRpcGitOwner } from '../src/public-rpc-git.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from '../src/control-codec.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
@@ -63,6 +63,21 @@ describe('public Git target and result contracts', () => {
     expect(() => parseGitOpenResult({ ...result, presentation: { tabId: 'git-tab' } })).toThrow()
     expect(() => parseAgentMuxControlRequest({ ...request, checkout: true })).toThrow()
   })
+  it('distinguishes repository browsing from an exact commit through the same strict public entry', async () => {
+    const repository = { workspaceId: target.workspaceId, read: { kind: 'ready' as const, snapshot: { hostId: 'local', repoPath: fixturePath("original") } }, presentation: { tabId: 'repo-tab', regionId: 'repo-region' } }
+    expect(parseGitOpenParams(target)).toEqual(target)
+    expect(parseGitOpenResult(repository, target)).toBe(repository)
+    const request = parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'browse', operation: 'open.git', ...target })
+    assertControlResultTarget(request, { operation: 'open.git', ...repository })
+    expect(() => parseGitOpenParams({ ...target, parentOid: parent })).toThrow('requires an exact commit')
+    expect(() => parseGitOpenResult(repository, { ...target, oid })).toThrow()
+    expect(() => parseGitOpenResult({ ...repository, read: { kind: 'ready', snapshot } }, target)).toThrow()
+    expect(() => parseGitOpenResult({ ...repository, read: { kind: 'ready', snapshot: { hostId: 'local', repoPath: fixturePath("original"), extra: true } } }, target)).toThrow()
+    const parsed = await parseAgentMuxCliInvocation(['git', 'open', '--workspace', target.workspaceId, '--host', 'local', '--workspace-path', target.expectedResource.workspacePath])
+    expect(parsed).toMatchObject({ params: target })
+    expect(agentMuxCommandHelp('git.open')).toContain('Omit --oid')
+    expect(AGENTMUX_CLI_SKILL).toContain('[--oid OID [--parent OID]]')
+  })
   it('delegates to the original owner and keeps malformed result or owner absence explicit', async () => {
     const call = vi.fn(async () => details)
     const service = new AgentMuxRpcService({ git: { call } as AgentMuxRpcGitOwner })
@@ -81,7 +96,7 @@ describe('public Git target and result contracts', () => {
     for (const method of ['git.history', 'git.commit', 'git.diff', 'git.open']) {
       expect(AGENTMUX_CLI_COMMANDS.filter(command => command.method === method)).toHaveLength(1)
       expect(agentMuxCommandHelp(method)).toContain('--workspace ID --host ID --workspace-path PATH')
-      expect(AGENTMUX_CLI_HELP).toContain('agentmux ' + method.replace('.', ' '))
+      expect(AGENTMUX_CLI_HELP).toContain('amux ' + method.replace('.', ' '))
     }
     expect(AGENTMUX_CLI_SKILL).toContain('Reading never checks out, stages or writes Git')
     expect(agentMuxCommandHelp('git.open')).toContain('read and presentation are separate facts')
