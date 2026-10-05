@@ -29,7 +29,8 @@ const defaults = [
   { key: 'notes.fontSize', kind: 'number', value: 13, default: 13, enum: Array.from({ length: 15 }, (_, index) => index + 10) },
   { key: 'notes.contentWidth', kind: 'string', value: 'standard', default: 'standard', enum: ['standard', 'wide'] },
   { key: 'goals.defaultView', kind: 'string', value: 'list', default: 'list', enum: ['list', 'board'] },
-  { key: 'goals.showFinished', kind: 'boolean', value: false, default: false }
+  { key: 'goals.showFinished', kind: 'boolean', value: false, default: false },
+  { key: 'goals.requesterAsSupervisor', kind: 'boolean', value: true, default: true }
 ] as const
 
 it('CLI/RPC discover each actual Work field and its two domain prefixes without materializing defaults', async () => {
