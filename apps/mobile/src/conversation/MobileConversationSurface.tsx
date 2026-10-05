@@ -7,7 +7,7 @@ import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentMuxInteractionResponse } from '@agentmux/core'
-import { agentPromptCondition, validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
+import { agentPromptCondition, agentPromptNotApplied, validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import {
   AgentComposer, AgentInteractionCard, ClientUiProvider, NativeProcessObservation, ConversationMessage, ConversationView,
@@ -59,6 +59,15 @@ function originalPromptRequest(session: AgentMuxAgentSession | null | undefined,
   return { agentSessionId: session.agentSessionId, operationId: attempt.operationId, expectedRun: { ...intent.run },
     afterSubmissionId: attempt.operationId, prompt: intent.prompt, authorHuman: true as const, execution: intent.execution,
     ...(intent.execution === 'immediate' ? { allowUncertainTurn: true } : {}) }
+}
+function originalPromptRefused(session: AgentMuxAgentSession | null | undefined, agentSessionId: string | null,
+  attempt: PromptAttempt | undefined, runtimeId: string | null | undefined): boolean {
+  const request = attempt?.request, originalRuntime = request?.runtimeId ?? attempt?.originalRuntimeId
+  if (!session || !attempt || attempt.inputRequested !== true || !request || !originalRuntime || originalRuntime !== runtimeId
+    || session.agentSessionId !== agentSessionId || !attempt.originalHostId || session.hostId !== attempt.originalHostId
+    || request.condition.expectedRun.runId !== attempt.runId || session.run.runId !== attempt.runId) return false
+  const fact = agentPromptNotApplied(session)
+  return fact?.submissionId === attempt.operationId && fact.run.runId === attempt.runId
 }
 export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink'> & {
@@ -124,9 +133,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   useEffect(() => {
     const pending = attempts.current.get(draftKey)
     if (!pending || pending.phase !== 'unknown') return
-    const admission = reading.session?.promptCompletionAdmission
-    if (admission?.submissionId === pending.operationId && admission.notApplied === true
-      && admission.intent?.run.runId === pending.runId && reading.session?.run.runId === pending.runId) {
+    if (originalPromptRefused(reading.session, agentSessionId, pending, client?.runtimeOwnerIdentity?.()?.runtimeId)) {
       pending.phase = 'rejected'
       pending.message = 'Core 已确认原输入未应用；草稿保留，可由你重新发送。'
       local.save()
@@ -157,7 +164,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     const owner = original.request?.runtimeId ? `runtime:${original.request.runtimeId}` : diagnosticOwner(originalClient)
     const log = await diagnostics.failed(seed, error, stage, owner)
     reportDiagnostics(originalClient)
-    if (!mounted.current) return
+    if (!mounted.current || attempts.current.get(key) !== original) return
     // A refusal of this click cannot settle an older unknown logical message.
     original.phase = original.inputRequested === false ? 'rejected'
       : retry && original.phase !== 'rejected' ? 'unknown' : deliveryOutcome(error, 'prompt')
@@ -166,10 +173,13 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     if (attempts.current.get(key) === original) local.save()
     if (mounted.current) redraw(value => value + 1)
   }
-  async function submit(explicit = true): Promise<void> {
+  async function submit(explicit = true, originalBody?: PromptAttempt): Promise<void> {
     const existing = attempts.current.get(draftKey)
-    if (existing?.phase === 'sending' || !draft.trim()) return
-    if (existing?.phase === 'unknown' && existing.draft !== draft) {
+    const body = originalBody?.draft ?? draft
+    if (existing?.phase === 'sending' || !body.trim() || originalBody && originalBody !== existing) return
+    const refused = originalPromptRefused(reading.session, agentSessionId, existing, client?.runtimeOwnerIdentity?.()?.runtimeId)
+    if (originalBody && !refused) return
+    if (!refused && existing?.phase === 'unknown' && existing.draft !== body) {
       const seed = startDeliveryAttempt({ agentSessionId, operationId: null,
         hostId: reading.session?.hostId ?? null, prompt: expandSemanticReferences(draft) })
       await retainFailure(existing, seed, Object.assign(new Error(
@@ -177,21 +187,26 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' }), 'editor-validation', client, draftKey, true)
       return
     }
-    if (existing?.phase === 'unknown' || existing?.phase === 'rejected' && existing.draft === draft) { await retryOriginalPrompt(); return }
+    if (!refused && (existing?.phase === 'unknown' || existing?.phase === 'rejected' && existing.draft === body)) { await retryOriginalPrompt(); return }
     const originalClient = client, originalId = agentSessionId, originalKey = draftKey
     const original: PromptAttempt = { operationId: randomClientRequestId(), runId: reading.session?.run.runId ?? null,
-      draft, phase: 'sending', message: '正在发送输入…', inputRequested: false,
+      draft: body, phase: 'sending', message: '正在发送输入…', inputRequested: false,
       originalRuntimeId: originalClient?.runtimeOwnerIdentity?.()?.runtimeId ?? null,
       originalHostId: reading.session?.hostId ?? null, explicit }
     let seed = startDeliveryAttempt({ agentSessionId: originalId, operationId: original.operationId,
-      hostId: reading.session?.hostId ?? null, prompt: expandSemanticReferences(draft) })
+      hostId: reading.session?.hostId ?? null, prompt: expandSemanticReferences(body) })
+    if (refused && existing) {
+      existing.phase = 'rejected'
+      attempts.current.set(JSON.stringify(['refused-prompt', originalId, existing.operationId]), existing)
+    }
     attempts.current.set(originalKey, original)
     let stage = 'client-validation'
     try {
       if (!available || !originalClient || !originalId) throw Object.assign(new Error(
         `原会话当前不能投递：${connection.issue ?? connection.message}${reading.disconnected ? '；会话连接已断开' : ''}。草稿已保留，可继续点击发送重试。`), { code: 'CONTROL_UNAVAILABLE' })
       const originalSession = originalClient.agentSession(originalId), condition = agentPromptCondition(originalSession)
-      const capability = explicit ? promptExecutionFor(originalClient, originalSession) : { execution: 'default' as const }
+      const capability = originalBody?.request ? { execution: originalBody.request.execution }
+        : explicit ? promptExecutionFor(originalClient, originalSession) : { execution: 'default' as const }
       setInputCapability({ sessionId: originalId, runId: condition.expectedRun.runId, ...capability })
       original.runId = condition.expectedRun.runId
       original.request = { condition: structuredClone(condition), execution: capability.execution, explicit,
@@ -215,6 +230,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   async function retryOriginalPrompt(): Promise<void> {
     const original = attempts.current.get(draftKey)
     if (!original || original.phase === 'sending' || original.phase === 'confirmed') return
+    if (originalPromptRefused(reading.session, agentSessionId, original, client?.runtimeOwnerIdentity?.()?.runtimeId)) {
+      await submit(original.request!.explicit, original)
+      return
+    }
     const originalClient = client, originalId = agentSessionId, originalKey = draftKey
     let seed = startDeliveryAttempt({ agentSessionId: originalId, operationId: original.operationId,
       hostId: reading.session?.hostId ?? null, condition: original.request?.condition,
@@ -441,7 +460,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           <div className="mobile-send-status__summary">
             <span>{attempt.phase === 'sending' ? '正在发送…' : attempt.phase === 'unknown' ? '发送结果未确认 · 草稿已保留' : '尚未发送 · 草稿已保留'}</span>
             {attempt.phase !== 'sending' ? <div className="mobile-send-status__actions">
-              <button type="button" onClick={() => { void retryOriginalPrompt() }}>重试原请求</button>
+              <button type="button" onClick={() => { void retryOriginalPrompt() }}>{originalPromptRefused(reading.session, agentSessionId, attempt, client?.runtimeOwnerIdentity?.()?.runtimeId) ? '重新发送原正文' : '重试原请求'}</button>
               <button type="button" onClick={() => { void reading.refresh() }}>刷新</button>
             </div> : null}
           </div>
