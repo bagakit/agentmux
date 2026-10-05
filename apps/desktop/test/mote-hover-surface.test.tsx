@@ -349,7 +349,7 @@ describe('one operative Mote hover surface', () => {
     expect(panel().querySelector('[aria-label="Message Agent"]')).toBeNull()
     expect(saved()).toBeNull()
     const original = useAppStore.getState()
-    const choices = Array.from(panel().querySelectorAll<HTMLButtonElement>('button')).filter(button => button.textContent?.includes(defaultTab.name!))
+    const choices = Array.from(panel().querySelectorAll<HTMLButtonElement>(`.workbench-tab-strip button[data-workbench-tab-id="${defaultTab.id}"]`))
     expect(choices).toHaveLength(1)
     await click(choices[0]!)
     expect(panel().dataset.moteTargetTab).toBe(defaultTab.id)
@@ -572,19 +572,22 @@ describe('one operative Mote hover surface', () => {
   it('does not reread files or rescan all Tabs for 35 unrelated output events while all Motes are visible', async () => {
     seedMoteWorkface({ directory: false })
     const tabs = useAppStore.getState().tabs, values = Object.values
-    let scans = 0
+    let scans = 0, workbenchScans = 0
     vi.spyOn(Object, 'values').mockImplementation((value: object) => {
       // Count actual scans by the navigation resolver, including non-rendering
       // Zustand selector calls. The independent persistence owner also scans
       // these Tabs and is not changed or claimed by this feature.
-      if (value === tabs && new Error().stack?.includes('pmoTeamsTopicFloatingTargetTabId')) scans++
+      const stack = new Error().stack ?? ''
+      if (value === tabs && stack.includes('pmoTeamsTopicFloatingTargetTabId')) scans++
+      if (stack.includes('at WorkspaceWorkbench (')) workbenchScans++
       return values(value)
     })
     await mount(); await hover()
-    const before = scans, list = vi.mocked(api.scratch.listTopics)
+    const before = scans, workbenchBefore = workbenchScans, list = vi.mocked(api.scratch.listTopics)
     // A confirmed explicit target need not scan candidates at all. The count
     // must still remain identical across unrelated output events.
     expect(panel().dataset.moteTargetTab).toBe(defaultTab.id)
+    expect(workbenchBefore).toBeGreaterThan(0)
     expect(list).toHaveBeenCalledOnce()
     expect(panel().querySelectorAll('[data-mote-topic-id]')).toHaveLength(3)
     const original = panel().querySelector('[data-activity-session]')
@@ -594,6 +597,7 @@ describe('one operative Mote hover surface', () => {
       agentNames: { [executionAgent.id]: 'Unrelated ' + revision }
     }))
     expect(scans).toBe(before)
+    expect(workbenchScans).toBe(workbenchBefore)
     expect(list).toHaveBeenCalledOnce()
     expect(panel().querySelector('[data-activity-session]')).toBe(original)
     expect(panel().dataset.moteTargetTab).toBe(defaultTab.id)
