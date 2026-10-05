@@ -186,6 +186,7 @@ type NativeParams = TopicParameterMap & HostSettingsParameterMap & FileParameter
   'agent.ls': { agentSessionId?: string; executorId?: string; status?: string; since?: number; limit?: number }
   'agent.inspect': { target: AgentMuxRpcSessionTarget }
   'agent.native.confirm': import('./types.js').AgentMuxNativeSessionConfirmationInput
+  'agent.native.ls': { hostId: string; executorId: string; workspacePath?: string }
   'agent.context': import('./agent-context.js').AgentContextParams
   'agent.question.reply': Omit<import('./client.js').AgentMuxSessionQuestionReplyInput, 'authorHuman' | 'sourceDevice' | 'signal' | 'commandOverride' | 'args' | 'env'>
   'agent.history.resource': import('./session-history-resource.js').AgentSessionHistoryResourceParams
@@ -232,6 +233,7 @@ type NativeResult = TopicResultMap & HostSettingsResultMap & FileResultMap & Git
     errors: Array<{ agentSessionId: string | null; hostId: string; code: string; message: string }> }
   'agent.inspect': AgentMuxRpcAgentInspection
   'agent.native.confirm': import('./types.js').AgentMuxNativeSessionConfirmation
+  'agent.native.ls': import('./types.js').AgentNativeSessionCatalog & { hostId: string; executorId: string }
   'agent.context': import('./agent-context.js').AgentContextPage
   'agent.question.reply': import('./types.js').AgentSessionQuestionReplyReceipt
   'agent.history.resource': import('./session-history-resource.js').AgentSessionHistoryResourceResult
@@ -286,7 +288,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_HOSTED_RPC_METHODS,
   'notebook.ls': 'short', 'notebook.inspect': 'short', 'notebook.apply': 'long',
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
-  whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.native.confirm': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.history.resource': 'long', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
+  whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.history.resource': 'long', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',
   'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
   'system.diagnostics.inspect': 'short',

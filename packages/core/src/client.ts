@@ -16,6 +16,8 @@ import { normalizeNativeSessionId, normalizeNativeTranscriptPath } from './agent
 import { captureAgentNativeSessionIdentity } from './agent-native-session-capture.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
+import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
+import { nativeCatalogIssue } from './providers/native-session-catalog-files.js'
 import { agentForkIdentityReminder, assertAgentForkSource, parseAgentForkSource, type AgentMuxAgentForkSource } from './agent-fork.js'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionResponseSettled } from './agent-interaction-state.js'
 import {
@@ -170,6 +172,9 @@ import type {
   AgentMuxRuntimeIdentity,
   AgentMuxRuntimeResourceSnapshot,
   AgentNativeSessionHandle,
+  AgentNativeResumeSource,
+  AgentNativeSessionCatalog,
+  AgentNativeSessionCandidate,
   AgentSessionHistoryMetadata,
   AgentSessionHistoryPage,
   AgentSessionHistoryPageOptions,
@@ -228,6 +233,8 @@ export type AgentMuxAgentCreateInput = {
   createOperationId?: string
   /** Native context copy into this new Session; the source retains its original Run. */
   forkSource?: AgentMuxAgentForkSource
+  /** Continue an exact persisted Provider conversation that has no existing Core owner. */
+  nativeResumeSource?: AgentNativeResumeSource
   providerId: AgentProviderId
   executorId: AgentExecutorId
   workspacePath: string
@@ -256,7 +263,7 @@ export type AgentMuxAgentCreateInput = {
 /** Target-owned configuration, with a frozen revision; no source machine argv or environment. */
 export type AgentMuxHostAgentCreateInput = Pick<AgentMuxAgentCreateInput,
   'agentSessionId' | 'createOperationId' | 'executorId' | 'workspacePath' | 'prompt' | 'agentMuxNote' |
-  'launchOptions' | 'cols' | 'rows'> & {
+  'launchOptions' | 'cols' | 'rows' | 'nativeResumeSource'> & {
   executorRevision: string
   initialMessageAdmission?: AgentMuxCreationAdmission
   threadId?: string
@@ -760,6 +767,14 @@ export class AgentMuxClient {
     return await this.hostExecutorOwner.list(input)
   }
 
+  /** The original target Executor owns its Provider and environment; no secrets leave this owner. */
+  async listHostNativeAgentSessions(input: { executorId: string; workspacePath?: string }): Promise<AgentNativeSessionCatalog> {
+    if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
+    const { config } = await this.hostExecutorOwner.resolve(input.executorId)
+    return await this.listNativeAgentSessions({ providerId: config.providerId, env: config.env,
+      ...(input.workspacePath === undefined ? {} : { workspacePath: input.workspacePath }) })
+  }
+
   async configureHostExecutor(input: AgentMuxHostExecutorConfigureInput) {
     if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
     return await this.hostExecutorOwner.configure(input)
@@ -768,7 +783,7 @@ export class AgentMuxClient {
   async createHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput) {
     if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
     const allowed = ['agentSessionId', 'createOperationId', 'executorId', 'executorRevision', 'workspacePath', 'prompt',
-      'agentMuxNote', 'launchOptions', 'cols', 'rows', 'initialMessageAdmission', 'threadId']
+      'agentMuxNote', 'launchOptions', 'cols', 'rows', 'initialMessageAdmission', 'threadId', 'nativeResumeSource']
     if (!input || Object.keys(input).some(key => !allowed.includes(key)) || !input.agentSessionId || !input.createOperationId || !input.executorRevision) {
       throw new AgentMuxError('Target creation requires exact Session, operation and Executor revision, without command overrides.', 'INVALID_CONTROL_REQUEST')
     }
@@ -799,6 +814,7 @@ export class AgentMuxClient {
       injectAgentMuxGuide: config.injectAgentMuxGuide, args: config.args, env: config.env, commandOverride: config.command,
       ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
       ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: input.agentMuxNote }),
+      ...(input.nativeResumeSource === undefined ? {} : { nativeResumeSource: input.nativeResumeSource }),
       ...(input.launchOptions === undefined ? {} : { launchOptions: input.launchOptions }),
       ...(input.cols === undefined ? {} : { cols: input.cols }), ...(input.rows === undefined ? {} : { rows: input.rows })
     }, { intentDigest, executorRevision: input.executorRevision, ...(origin ? { origin } : {}), ...(input.threadId ? { threadId: input.threadId } : {}) })
@@ -2115,6 +2131,50 @@ export class AgentMuxClient {
     return await loadSessionHistorySources(this.store)
   }
 
+  /** Discover native persisted conversations without requiring a Run, installing hooks or starting input. */
+  async listNativeAgentSessions(input: { providerId: AgentProviderId; workspacePath?: string; env?: Readonly<Record<string, string>> }): Promise<AgentNativeSessionCatalog> {
+    const provider = this.providers.get(input.providerId), capabilities = structuredClone(provider.catalog.capabilities)
+    if (!provider.listNativeSessions) return { providerId: provider.id, capabilities, availability: 'unsupported', sessions: [], issues: [] }
+    const catalog = await provider.listNativeSessions({ ...(input.workspacePath === undefined ? {} : { workspacePath: input.workspacePath }),
+      env: input.env ?? {}, signal: new AbortController().signal })
+    try {
+      const managed = await this.managedNativeIndex()
+      for (const entry of catalog.sessions) {
+        const matches = managed.get(JSON.stringify([entry.source.nativeHandle.providerId, entry.source.nativeHandle.sessionId])) ?? []
+        if (matches.length === 1) entry.managed = matches[0]!
+        else if (matches.length > 1) catalog.issues.push({ code: 'AGENT_NATIVE_SESSION_AMBIGUOUS',
+          message: `Native conversation ${entry.source.nativeHandle.sessionId} belongs to several Core Sessions: ${matches.map(match => match.agentSessionId).join(', ')}. Inspect their original identities before continuing.` })
+      }
+    } catch (error) { catalog.issues.push(nativeCatalogIssue(error)) }
+    return { ...catalog, capabilities }
+  }
+
+  private async managedNativeSessions(source: AgentNativeResumeSource): Promise<Array<NonNullable<AgentNativeSessionCandidate['managed']>>> {
+    return (await this.managedNativeIndex()).get(JSON.stringify([source.nativeHandle.providerId, source.nativeHandle.sessionId])) ?? []
+  }
+
+  private async managedNativeIndex(): Promise<Map<string, Array<NonNullable<AgentNativeSessionCandidate['managed']>>>> {
+    const [active, retired] = await Promise.all([loadAgentSessionMetadata(this.store), this.store.loadRetiredAgentSessions()])
+    const index = new Map<string, Array<NonNullable<AgentNativeSessionCandidate['managed']>>>()
+    const append = (handle: AgentNativeSessionHandle | undefined, managed: NonNullable<AgentNativeSessionCandidate['managed']>): void => {
+      if (handle?.kind !== 'provider') return
+      const key = JSON.stringify([handle.providerId, handle.sessionId]), bindings = index.get(key) ?? []
+      bindings.push(managed); index.set(key, bindings)
+    }
+    for (const session of active) if (session.hostId === 'local') {
+      const binding = { agentSessionId: session.agentSessionId, executorId: session.executorId, run: { ...session.run }, state: 'active' as const }
+      append(session.nativeHandle, binding)
+      // A witnessed source change still belongs to this original active Run.
+      // Unconfirmed semantic rebinding never authorizes cloning that conversation.
+      if (session.nativeSourceObservation?.state === 'changed' && !sameNativeHandle(session.nativeHandle, session.observedNativeHandle)) {
+        append(session.observedNativeHandle, binding)
+      }
+    }
+    for (const session of retired) if (session.hostId === 'local' && session.history) append(session.history.nativeHandle, { agentSessionId: session.agentSessionId,
+      executorId: session.history.executorId, run: { ...session.run }, state: 'retired', retiredAt: session.observedAt })
+    return index
+  }
+
   private async historyDescriptor(agentSessionId: string): Promise<AgentSessionHistoryDescriptor> {
     const descriptor = await this.store.readHistorySource(agentSessionId)
     if (!descriptor) throw new AgentMuxError(`Unknown Agent Session: ${agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
@@ -3417,10 +3477,14 @@ export class AgentMuxClient {
   }> {
     this.requireConnected()
     const forkSource = input.forkSource === undefined ? undefined : parseAgentForkSource(input.forkSource)
+    const nativeResumeSource = input.nativeResumeSource === undefined ? undefined : parseAgentNativeResumeSource(input.nativeResumeSource)
+    if (nativeResumeSource && (forkSource || nativeResumeSource.nativeHandle.providerId !== input.providerId || nativeResumeSource.workspacePath !== input.workspacePath)) {
+      throw new AgentMuxError('Native resume must keep its exact Provider and execution directory, without a fork source.', 'INVALID_AGENT_NATIVE_RESUME_SOURCE')
+    }
     if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use an authenticated initial message.', 'MESSAGE_ENVELOPE_REQUIRED')
     if (input.prompt !== undefined) assertAgentPromptSize(input.prompt)
     const createOperationId = input.createOperationId ?? randomUUID()
-    const agentSessionId = safeId(input.agentSessionId ?? (input.initialMessage || forkSource
+    const agentSessionId = safeId(input.agentSessionId ?? (input.initialMessage || forkSource || nativeResumeSource
       ? await this.resolveAgentCreationSessionId(createOperationId)
       : mintAgentSessionId()), 'Agent Session id')
     const executorId = safeId(input.executorId, 'Agent Executor id')
@@ -3430,7 +3494,7 @@ export class AgentMuxClient {
       initialAuthor = await this.currentStoredAgentSession(input.initialMessage.callerAgentSessionId)
       this.resolveMessageAuthor(input.initialMessage.capability, input.initialMessage.callerAgentSessionId, initialAuthor)
     }
-    const intentDigest = admitted?.intentDigest ?? (forkSource ? creationIntentDigest(input, agentSessionId, executorId, createOperationId, initialAuthor) : undefined)
+    const intentDigest = admitted?.intentDigest ?? (forkSource || nativeResumeSource ? creationIntentDigest(input, agentSessionId, executorId, createOperationId, initialAuthor) : undefined)
     const durableCreate = intentDigest !== undefined
     const lifecycleOperationId = agentLifecycleOperationIdentity('create', agentSessionId, createOperationId)
     // A replay reads the original created identity and receipt before checking a now-changed parent.
@@ -3451,6 +3515,11 @@ export class AgentMuxClient {
         return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: false }
       }
       if (forkSource) assertAgentForkSource(forkSource, await this.currentStoredAgentSession(forkSource.agentSessionId), input)
+    }
+    if (nativeResumeSource) {
+      const managed = await this.managedNativeSessions(nativeResumeSource)
+      if (managed.length) throw new AgentMuxError('This native conversation already has Core ownership. Continue its original Session; no Run was started.',
+        managed.length > 1 ? 'AGENT_NATIVE_SESSION_AMBIGUOUS' : 'AGENT_NATIVE_SESSION_ALREADY_MANAGED', JSON.stringify({ managed }))
     }
     let initialEnvelope: AgentMuxMessageEnvelope | undefined
     if (input.initialMessage || admitted?.origin) {
@@ -3489,6 +3558,12 @@ export class AgentMuxClient {
     let preservePreparedCreation = false
     try {
       const provider = this.providers.get(input.providerId)
+      if (nativeResumeSource && !provider.assertNativeResumeSource) {
+        throw new AgentMuxError(`${provider.label} does not support exact persisted conversation discovery.`, 'AGENT_NATIVE_SESSION_DISCOVERY_UNSUPPORTED')
+      }
+      const assertNativeSource = nativeResumeSource ? async () => await provider.assertNativeResumeSource!({ source: nativeResumeSource,
+        workspacePath: input.workspacePath, env: input.env ?? {}, signal: new AbortController().signal }) : undefined
+      await assertNativeSource?.()
       // 这个 Run 的说话凭证。raw 只进受管进程的环境，Core 侧只留 hash。
       const invocationCapability = issueAgentCapability()
       const capability = await this.probeAgent(input.providerId, input.commandOverride)
@@ -3500,7 +3575,7 @@ export class AgentMuxClient {
       // 拒绝，而运行时引导默认开、`composeAgentLaunchPrompt` 因此几乎总是非空，那等于这个
       // Provider 根本起不来。分流由 splitLaunchPromptByDelivery 唯一决定，两条生命周期路径共用；
       // 它同时交出 deferred 的那一半，下面必须真的送出去（见 deliverPostLaunchPrompt）。
-      const composed = composeAgentLaunchPrompt(originalPrompt, forkSource ? true : input.injectAgentMuxGuide,
+      const composed = nativeResumeSource && !originalPrompt?.trim() ? { text: '', systemContext: undefined } : composeAgentLaunchPrompt(originalPrompt, forkSource ? true : input.injectAgentMuxGuide,
         [forkSource ? agentForkIdentityReminder(agentSessionId, forkSource) : undefined, input.agentMuxNote].filter(Boolean).join('\n\n') || undefined)
       assertAgentPromptSize(composed.text)
       const { atLaunch: launchPrompt, deferred: deferredPrompt } = splitLaunchPromptByDelivery(
@@ -3536,6 +3611,7 @@ export class AgentMuxClient {
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride })
       }
       const plan = forkSource ? provider.buildForkLaunch!({ ...launchContext, nativeHandle: forkSource.expectedNativeHandle })
+        : nativeResumeSource ? provider.buildResumeLaunch({ ...launchContext, nativeHandle: nativeResumeSource.nativeHandle })
         : provider.buildLaunch(launchContext)
       // Binding 必须先于 Hook 安装：一个把 hook 投递代码**写进文件**的 Provider（opencode 的 JS
       // 插件）跑在自己进程里，拿不到 AgentMux 注入 PTY 的 `AGENTMUX_HOOK_URL`/`TOKEN`，所以 endpoint
@@ -3562,7 +3638,8 @@ export class AgentMuxClient {
           workspacePath: input.workspacePath, hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
           capabilityHash: hashAgentCapability(invocationCapability), createdAt: preparedAt, updatedAt: preparedAt,
           creation: { createOperationId, intentDigest: intentDigest!, initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested', agentMuxContext: 'unknown', ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
-          ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}), ...(launchOptions ? { launchOptions } : {}) }
+          ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
+          ...(nativeResumeSource ? { nativeHandle: structuredClone(nativeResumeSource.nativeHandle) } : {}), ...(launchOptions ? { launchOptions } : {}) }
         reservation = await this.registry.prepareCreate(reservation, preparedCreation!)
         this.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding)
       }
@@ -3570,6 +3647,7 @@ export class AgentMuxClient {
         assertAgentForkSource(forkSource, await this.currentStoredAgentSession(forkSource.agentSessionId), input)
         await assertForkCurrent?.()
       }
+      await assertNativeSource?.()
       if (durableCreate) preservePreparedCreation = true
       const run = await this.kernel.start({
         operationKey: lifecycleOperationId,
@@ -3615,6 +3693,7 @@ export class AgentMuxClient {
           ...(durableCreate ? { intentDigest: intentDigest!, agentMuxContext: 'unknown' as const } : {}),
           ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
         ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
+        ...(nativeResumeSource ? { nativeHandle: structuredClone(nativeResumeSource.nativeHandle) } : {}),
         ...(launchOptions ? { launchOptions } : {})
       }
       if (

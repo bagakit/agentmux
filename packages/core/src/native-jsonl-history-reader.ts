@@ -88,6 +88,7 @@ export class NativeJsonlHistoryReader {
   private position: number
   private cut: number
   private lastRecordEnd: number | undefined
+  private forwardPosition = 0
   private cache: Buffer = Buffer.alloc(0)
   private cacheStart = 0
   private head = ''
@@ -311,6 +312,29 @@ export class NativeJsonlHistoryReader {
       position += block.length
     }
     return position ? await this.parseRange(0, position) : null
+  }
+
+  /** Forward metadata reads reuse the same bounded parser; large message text stays unmaterialized. */
+  async readNext(): Promise<NativeJsonlHistoryRecord | null> {
+    while (this.forwardPosition < this.cut) {
+      const start = this.forwardPosition
+      let position = start
+      while (position < this.cut) {
+        const block = await this.read(position, Math.min(64 * 1024, this.cut - position))
+        const newline = block.indexOf(10)
+        if (newline >= 0) {
+          const end = position + newline
+          this.forwardPosition = end + 1
+          if (end === start) break
+          const value = await this.parseRange(start, end)
+          if (value) return { value, start }
+          break
+        }
+        position += block.length
+      }
+      if (position === this.cut) { this.forwardPosition = this.cut; return null }
+    }
+    return null
   }
 
   private async fingerprints(): Promise<{ head: string; tail: string }> {

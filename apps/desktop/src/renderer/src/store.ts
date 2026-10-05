@@ -103,7 +103,7 @@ import {
   type AgentMuxSpaceAddress, type AgentMuxZoneFact, type AgentMuxSpaceBindingReport
 } from '@agentmux/core/control'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
-import type { AgentCatalogEntry, AgentMuxInteractionResponse, AgentSessionHistoryDescriptor } from '@agentmux/core'
+import type { AgentCapabilities, AgentCatalogEntry, AgentMuxInteractionResponse, AgentSessionHistoryDescriptor } from '@agentmux/core'
 import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherOptionDrafts, type LauncherProviderOptions } from './lib/launcher-option-draft'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
 import { primaryMoteExecutorChoice } from './lib/primary-mote-executor'
@@ -1152,6 +1152,7 @@ type AppState = {
   interrupt(sessionId: string): Promise<void>
   refreshSession(sessionId: string): Promise<SessionSnapshot | undefined>
   reopenRetiredSession(source: AgentSessionHistoryDescriptor, operationId?: string, observeOnly?: boolean): Promise<SessionSnapshot | undefined>
+  resumeNativeSession(input: import('../../shared/contracts').AgentLaunchInput, source: import('@agentmux/core').AgentNativeSessionCandidate, capabilities: AgentCapabilities, reveal?: () => boolean, retry?: boolean): Promise<SessionSnapshot | undefined>
   recoverSession(sessionId: string, operationId?: string, options?: { preserveView?: boolean; stillCurrent?: () => boolean }): Promise<SessionSnapshot | undefined>
   stopSession(sessionId: string): Promise<void>
   canonicalizeAgentLaunch(result: AgentLaunchResult): Promise<AgentLaunchResult | null>
@@ -9829,6 +9830,84 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Closing the display while Core works does not authorize stopping the new healthy Run or
     // inventing a replacement Tab. Navigation and drafts remain owned by the original workbench.
     return attached ? session : undefined
+  },
+  async resumeNativeSession(input, source, capabilities, reveal = () => true, retry = false) {
+    // Listing is read-only. Only this explicit action enters Core's original create/recovery owner.
+    // The caller retains its exact creation identity across an unknown reply.
+    let session: SessionSnapshot | undefined
+    const assertSource: (observed: SessionSnapshot | undefined) => asserts observed is Extract<SessionSnapshot, { kind: 'agent' }> = observed => {
+      const currentNative = observed?.kind === 'agent' ? observed.observedNativeHandle : undefined
+      if (!observed || observed.kind !== 'agent' || observed.control.hostId !== input.hostId ||
+        observed.id !== (source.managed?.agentSessionId ?? input.agentSessionId) ||
+        observed.control.agentSessionId !== observed.id ||
+        observed.workspacePath !== source.source.workspacePath || observed.providerId !== source.source.nativeHandle.providerId ||
+        observed.nativeSessionId !== source.source.nativeHandle.sessionId ||
+        (currentNative && (currentNative.kind !== 'provider' || currentNative.providerId !== source.source.nativeHandle.providerId || currentNative.sessionId !== source.source.nativeHandle.sessionId))) {
+        throw new Error('Native resume returned another conversation identity. Keep the original source and inspect this resume operation.')
+      }
+    }
+    if (source.managed?.state === 'retired' && source.managed.retiredAt !== undefined) {
+      const reference = { hostId: input.hostId, agentSessionId: source.managed.agentSessionId }
+      try { session = await api.sessions.reopen(reference, source.managed.retiredAt, input.createOperationId!) }
+      catch (error) {
+        // A missing reopen ACK can already own the healthy Run. This check observes the
+        // original operation and never dispatches another start or prompt.
+        session = await api.sessions.reconcileReopen(reference, source.managed.retiredAt, input.createOperationId!).catch(() => undefined)
+        if (!session) {
+          const canonical = await api.sessions.creation(reference.hostId, reference.agentSessionId).catch(() => undefined)
+          if (canonical?.agentSessionId === reference.agentSessionId && canonical.nativeHandle?.kind === 'provider' &&
+            canonical.nativeHandle.sessionId === source.source.nativeHandle.sessionId) {
+            const observed = await api.sessions.refresh({ kind: 'agent', ...reference, run: canonical.run }).catch(() => undefined)
+            if (observed?.processState === 'running') session = observed
+          }
+        }
+        if (!session) throw error
+      }
+    } else if (source.managed?.state === 'active') {
+      const managed = source.managed
+      session = await api.sessions.refresh({ kind: 'agent', hostId: input.hostId, agentSessionId: managed.agentSessionId, run: managed.run })
+      assertSource(session)
+      set(state => ({ sessions: [...state.sessions.filter(item => item.id !== session!.id), session!] }))
+      const recovered = await get().recoverSession(managed.agentSessionId, input.createOperationId, { stillCurrent: reveal })
+      if (recovered) assertSource(recovered)
+      return recovered
+    } else {
+      let launched: AgentLaunchResult
+      if (retry) {
+        // Executor settings may have changed since the unknown launch. Inspect the saved
+        // operation; resolving today's configuration cannot reproduce that original intent.
+        const created = await api.sessions.creation(input.hostId, input.agentSessionId!)
+        if (created.creation?.createOperationId !== input.createOperationId) {
+          throw new Error('This saved Session belongs to another creation operation. Keep the original resume identity and inspect its receipt.')
+        }
+        const observed = await api.sessions.refresh({ kind: 'agent', hostId: input.hostId,
+          agentSessionId: created.agentSessionId, run: created.run }).catch(() => undefined)
+        launched = { created, ...(observed?.kind === 'agent' ? { session: observed } : {}),
+          projectionFailures: observed ? [] : [{ step: 'session', message: 'The original resume is retained; its current Run observation is unavailable. Check this same Session again.' }] }
+      } else launched = await api.sessions.launchAgent(input)
+      const result = await get().canonicalizeAgentLaunch(launched) ?? launched
+      // A missing display observation never revokes the created native conversation or its Run.
+      const created = result.created
+      const handle = created.nativeHandle
+      if (created.agentSessionId !== input.agentSessionId || created.workspacePath !== source.source.workspacePath ||
+        created.providerId !== source.source.nativeHandle.providerId || handle?.kind !== 'provider' ||
+        handle.providerId !== source.source.nativeHandle.providerId || handle.sessionId !== source.source.nativeHandle.sessionId) {
+        throw new Error(`Resume has Core Session ${created.agentSessionId} and Run ${created.run.runId}, but its original native conversation is unconfirmed. Keep this operation and check its identity; no replacement was started.`)
+      }
+      session = result.session ?? recoveryCandidateSession({
+        agentSessionId: created.agentSessionId, hostId: input.hostId, workspacePath: created.workspacePath,
+        providerId: created.providerId, executorId: created.executorId,
+        capabilities,
+        label: source.title ?? created.executorId, createdAt: created.createdAt, updatedAt: created.updatedAt,
+        run: created.run, nativeSessionId: source.source.nativeHandle.sessionId,
+        ...(created.nativeHandle ? { nativeHandle: created.nativeHandle } : {})
+      }, { kind: 'pending', detail: result.projectionFailures.map(failure => failure.message).join(' ') || 'The native conversation was started; its display observation is unconfirmed. Check this Session again.' })
+      if (result.timeline) set(state => ({ timelines: { ...state.timelines, [created.agentSessionId]: result.timeline! } }))
+    }
+    assertSource(session)
+    set(state => ({ sessions: [...state.sessions.filter(item => item.id !== session!.id), session!] }))
+    if (reveal()) get().selectSession(session.id)
+    return session
   },
   async recoverSession(sessionId, operationId, options) {
     const before = get()

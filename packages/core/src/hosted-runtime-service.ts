@@ -12,6 +12,7 @@ import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_RUNTIME_METHODS, AGENTMUX_HOST
 import { decodeHostedValue, encodeHostedValue, hostedTransfer, AGENTMUX_HOSTED_TRANSFER_MAX_BYTES } from './hosted-value.js'
 
 const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
+  'listNativeAgentSessions', 'listHostNativeAgentSessions',
   'clientPerformanceDiagnostics',
   'listHostExecutors', 'configureHostExecutor',
   'readDeliveryAttempt', 'resolveAgentCreationSessionId',

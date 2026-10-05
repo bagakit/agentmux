@@ -871,6 +871,9 @@ const mockApi: AgentMuxDesktopApi = {
     cancel: async () => { throw new Error('Cancelling an arrangement requires the connected desktop Host. Its state is unconfirmed.') }
   },
   sessions: {
+    nativeSessions: async input => ({ hostId: input.hostId, executorId: input.executorId,
+      providerId: mockConfig.executors[input.executorId]?.providerId ?? 'codex',
+      availability: 'unsupported', capabilities: mockStructuredCapabilities, sessions: [], issues: [] }),
     observeStorage: async (control) => ({
       run: control.run,
       runtime: { hostId: control.hostId, instanceId: 'preview-runtime', processId: null, buildIdentity: 'web-preview', protocolVersion: 22 },

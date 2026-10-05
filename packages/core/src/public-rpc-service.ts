@@ -17,6 +17,7 @@ import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult, ty
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
 import { displayLabel, type AgentMuxNameContext } from './display-label.js'
 import { createHash, randomUUID } from 'node:crypto'
+import { isAbsolute } from 'node:path'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
 import type { AgentMuxClient } from './client.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxMessageTargetCandidates, agentMuxControlTimeoutMs,
@@ -45,6 +46,7 @@ import { isAgentMuxRpcDeviceMethod, parseAgentMuxRpcDeviceParams, parseAgentMuxR
   type AgentMuxRpcDeviceAdministration } from './public-rpc-device.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { rpcControlRequest, rpcControlResult, assertControlResultTarget, rpcRecord, rpcString, rpcText, rpcCount } from './rpc-business-codec.js'
+import { parseRpcNativeResult } from './rpc-native-codec.js'
 import { isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult, type HostSettingsMethod } from './public-rpc-host-settings.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcCredentials,
@@ -57,7 +59,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'startDiscussion' | 'checkDeliveries' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'recordDispatchEvent' |
-  'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' |
+  'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' |
   'readDeliveryAttempt' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
     forwardRpc?: import('./hosted-client-contract.js').AgentMuxHostedForwardRpc
@@ -85,6 +87,8 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   coreClients?(): readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
   /** Client-owned real filesystem/config observations, not a second registry. */
   snapshot?(params: AgentMuxRpcSnapshotParams): Promise<Partial<AgentMuxRpcSnapshot>>
+  /** Native catalog uses the selected Host's original Executor configuration. */
+  nativeAgentSessions?(params: AgentMuxRpcParams<'agent.native.ls'>): Promise<AgentMuxRpcResult<'agent.native.ls'>>
   /** Original Host Authority and native confirmation owner; never constructed here. */
   deviceAdministration?: AgentMuxRpcDeviceAdministration
   /** Original Desktop consumes its in-memory, trusted IPC user intent. */
@@ -116,6 +120,7 @@ const NATIVE_FIELDS = {
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'agent.inspect': ['target'],
   'agent.native.confirm': ['agentSessionId', 'expectedRun', 'expectedNativeHandle', 'candidateNativeHandle', 'expectedObservationAt', 'operationId'],
+  'agent.native.ls': ['hostId', 'executorId', 'workspacePath'],
   'agent.context': ['hostId', 'agentSessionId', 'cursor', 'limit'],
   'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel'],
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes'],
@@ -701,6 +706,24 @@ export class AgentMuxRpcService {
       }
       case 'system.diagnostics.inspect':
         result = await inspectDiagnosticEvidence(this.diagnosticQuery, parseDiagnosticEvidenceParams(p), this.ports, caller, context.signal); break
+      case 'agent.native.ls': {
+        const hostId = rpcString(p.hostId, 'Native Session Host'), executorId = rpcString(p.executorId, 'Native Session Executor')
+        if (p.workspacePath !== undefined && (typeof p.workspacePath !== 'string' || !isAbsolute(p.workspacePath) || p.workspacePath.includes('\0'))) {
+          throw new AgentMuxError('Native Session filtering requires an exact absolute Workspace directory.', 'INVALID_CONTROL_REQUEST')
+        }
+        const input = { hostId, executorId, ...(p.workspacePath === undefined ? {} : { workspacePath: p.workspacePath as string }) }
+        context.signal?.throwIfAborted()
+        if (this.ports.nativeAgentSessions) result = await this.ports.nativeAgentSessions(input)
+        else {
+          const targets = (await this.clients()).filter(entry => entry.hostId === hostId)
+          if (targets.length !== 1) throw new AgentMuxError('The exact native Session Host is unavailable or ambiguous.', 'UNKNOWN_HOST')
+          const client = targets[0]!.client
+          result = { hostId, executorId, ...await client.listHostNativeAgentSessions({ executorId,
+            ...(input.workspacePath === undefined ? {} : { workspacePath: input.workspacePath }) }) }
+        }
+        result = parseRpcNativeResult('agent.native.ls', result, input)
+        break
+      }
       case 'message.delivery.inspect': {
         const logId = validateDeliveryLogId(p.logId)
         const hostId = p.hostId === undefined ? undefined : rpcString(p.hostId, 'Original diagnostic Host')

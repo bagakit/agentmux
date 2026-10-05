@@ -270,7 +270,7 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'space.ls'; target: AgentMuxSpaceSelector; presentation?: boolean }
   | { operation: 'space.inspect'; presentation?: boolean; target: AgentMuxSpaceSelector | { requestId: string } }
   | { operation: 'agent.open'; content:
-      | { kind: 'new-agent'; executorId: string; executionWorkspaceId?: string; prompt?: string }
+      | { kind: 'new-agent'; executorId: string; executionWorkspaceId?: string; nativeResumeSource?: import('./types.js').AgentNativeResumeSource; prompt?: string }
       | { kind: 'fork-agent'; source: import('./agent-fork.js').AgentMuxAgentForkSource; prompt?: string }
       | { kind: 'agent-session'; agentSessionId: string };
       destination: AgentMuxSpaceDestination; focus: boolean;

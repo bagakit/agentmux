@@ -1,4 +1,5 @@
 import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVerifier } from './codex-prompt-execution-evidence.js'
+import { listCodexNativeSessions, assertCodexNativeResumeSource } from './codex-native-catalog.js'
 import { createCodexPromptTransportPreparation } from './codex-prompt-transport-preparation.js'
 import { inspectCodexPromptExecution, inspectCodexPromptPreparationWait } from './codex-prompt-execution.js'
 import { createCodexInteractionResponsePreparation } from './codex-interaction-target.js'
@@ -204,6 +205,8 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     prepareInteractionResponse: createCodexInteractionResponsePreparation(interaction.planResponse),
     hook: CODEX_HOOKS,
     discoverNativeSession: context => discoverAppServerNativeSession(context, 'codex'),
+    listNativeSessions: listCodexNativeSessions,
+    assertNativeResumeSource: assertCodexNativeResumeSource,
     readSessionHistoryPage: readAppServerSessionHistoryPage,
     readSessionHistoryRecord: readAppServerSessionHistoryRecord,
     prepareSessionQuestionReply: prepareAppServerSessionQuestionReply,

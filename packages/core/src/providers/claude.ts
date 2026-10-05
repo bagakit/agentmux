@@ -1,4 +1,5 @@
 import { inspectHookDisableSetting } from './shared.js'
+import { listClaudeNativeSessions, assertClaudeNativeResumeSource } from './claude-native-catalog.js'
 import { readClaudeSessionHistoryPage } from './claude-native-history.js'
 import { discoverClaudeNativeSession } from './claude-native-session.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
@@ -121,6 +122,8 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
     planManagedHooks: ({ workspacePath }) => createClaudeManagedHookPlan(workspacePath),
     readSessionHistoryPage: readClaudeSessionHistoryPage,
     discoverNativeSession: discoverClaudeNativeSession,
+    listNativeSessions: listClaudeNativeSessions,
+    assertNativeResumeSource: assertClaudeNativeResumeSource,
     observeSessionHistory: observeNativeJsonlHistory,
     catalog: catalog({
       composer: {"skillRoots": [".claude/skills", ".agents/skills"], "commands": [{"text": "/help", "description": "Available commands"}, {"text": "/model", "description": "Choose model"}, {"text": "/compact", "description": "Compact context"}, {"text": "/cost", "description": "Session usage"}, {"text": "/context", "description": "Context usage"}]},

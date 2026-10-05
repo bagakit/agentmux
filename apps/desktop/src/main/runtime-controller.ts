@@ -5,9 +5,11 @@ import type { ToolkitRunPort } from './toolkit-run-port.js'
 import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE, type AgentScheduleCheckInPolicy } from '@agentmux/core/schedule'
 import { checkInHumanObservation, type CheckInObservation } from './agent-schedule-check-in.js'
 import { randomUUID } from 'node:crypto'
+import { isAbsolute } from 'node:path'
 import {
   AgentMuxError,
   createInputPerformanceRecorder, hostedCarrierPerformance,
+  parseAgentNativeResumeSource,
   hostAgentCreationIntent,
   type AgentMuxHostAgentCreateInput,
   AGENTMUX_AGENT_MESSAGING_GUIDANCE,
@@ -58,6 +60,8 @@ import type {
   ExecutorDetection,
   AgentLaunchResult,
   AgentLaunchInput,
+  NativeAgentSessionsInput,
+  NativeAgentSessionsResult,
   AgentSessionControl,
   AgentSessionRecoveryCandidate,
   AgentSessionNameMetadata,
@@ -1000,6 +1004,25 @@ export class RuntimeController {
     }
   }
 
+  async nativeAgentSessions(input: NativeAgentSessionsInput, config: AppConfig): Promise<NativeAgentSessionsResult> {
+    if (!input || typeof input !== 'object' || Object.keys(input).some(key => !['hostId', 'executorId', 'workspacePath'].includes(key)) ||
+      typeof input.hostId !== 'string' || !input.hostId || typeof input.executorId !== 'string' || !input.executorId ||
+      (input.workspacePath !== undefined && (typeof input.workspacePath !== 'string' || !isAbsolute(input.workspacePath) || input.workspacePath.includes('\0')))) {
+      throw new AgentMuxError('Native Session discovery requires an exact Host, Executor and optional absolute Workspace directory.', 'INVALID_CONTROL_REQUEST')
+    }
+    const host = config.hosts.find(host => host.id === input.hostId)
+    if (!host) throw new AgentMuxError('The selected native Session Host is unknown.', 'UNKNOWN_HOST')
+    const client = this.hosts.get(input.hostId)?.client
+    if (!client) throw new AgentMuxError('The original native Session Host owner is unavailable. Existing work is retained; retry its connection.', 'RUNTIME_UNAVAILABLE')
+    const workspace = input.workspacePath === undefined ? {} : { workspacePath: input.workspacePath }
+    if (host.kind === 'ssh') return { hostId: input.hostId, executorId: input.executorId,
+      ...await client.listHostNativeAgentSessions({ executorId: input.executorId, ...workspace }) }
+    const executor = Object.hasOwn(config.executors, input.executorId) ? config.executors[input.executorId] : undefined
+    if (!executor) throw new AgentMuxError(`Missing Executor on the selected Host: ${input.executorId}`, 'EXECUTOR_UNKNOWN')
+    return { hostId: input.hostId, executorId: input.executorId,
+      ...await client.listNativeAgentSessions({ providerId: executor.providerId, env: executor.env, ...workspace }) }
+  }
+
   async launchAgent(request: AgentLaunchInput, config: AppConfig): Promise<AgentLaunchResult> {
     if (!request.forkSource && config.hosts.find(host => host.id === request.hostId)?.kind === 'ssh') {
       return await this.launchAdmittedAgent(request, config)
@@ -1025,6 +1048,12 @@ export class RuntimeController {
       const selected = inventory?.executors.find(executor => executor.executorId === request.executorId)
       const executor = remoteCreation ? selected : Object.hasOwn(config.executors, request.executorId) ? config.executors[request.executorId] : undefined
       if (!executor) throw new AgentMuxError(`Missing Executor on the selected Host: ${request.executorId}`, 'EXECUTOR_UNKNOWN')
+      if (request.nativeResumeSource !== undefined) {
+        const source = parseAgentNativeResumeSource(request.nativeResumeSource)
+        if (source.nativeHandle.providerId !== executor.providerId || source.workspacePath !== request.workspacePath || request.scratchTopicId !== undefined || request.forkSource !== undefined) {
+          throw new AgentMuxError('Native resume must use the original Provider and execution directory without a Scratch Topic or fork.', 'INVALID_AGENT_NATIVE_RESUME_SOURCE')
+        }
+      }
       let preparedTopic: PreparedScratchAgentTopic | null = null
       let created: AgentLaunchResult['created']
       let creation: AgentLaunchResult['creation']
@@ -1053,6 +1082,7 @@ export class RuntimeController {
           ...(agentMuxNote ? { agentMuxNote } : {}),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
           ...(request.launchOptions === undefined ? {} : { launchOptions: request.launchOptions }),
+          ...(request.nativeResumeSource === undefined ? {} : { nativeResumeSource: request.nativeResumeSource }),
           ...(request.cols === undefined ? {} : { cols: request.cols }), ...(request.rows === undefined ? {} : { rows: request.rows })
         } : undefined
         if (hostIntent) {
@@ -1085,6 +1115,7 @@ export class RuntimeController {
           ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }),
           ...(request.createOperationId === undefined ? {} : { createOperationId: request.createOperationId }),
           ...(request.forkSource === undefined ? {} : { forkSource: request.forkSource }),
+          ...(request.nativeResumeSource === undefined ? {} : { nativeResumeSource: request.nativeResumeSource }),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
           ...(request.initialMessage ? { initialMessage: request.initialMessage } : {}),
           ...(request.cols === undefined ? {} : { cols: request.cols }),

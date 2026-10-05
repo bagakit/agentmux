@@ -8,6 +8,18 @@ export { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 const syntax = (entry: AgentMuxCliCommand) => `amux ${entry.method.replaceAll('.', ' ')}${entry.usage ? ' ' + entry.usage : ''}`
 const entries = (path: string) => AGENTMUX_CLI_COMMANDS.filter(entry => entry.method === path || entry.method.startsWith(path + '.'))
 const list = (selected: readonly AgentMuxCliCommand[]) => selected.map(entry => `  ${syntax(entry)}\n    ${entry.summary}`).join('\n')
+const NATIVE_RESUME_GUIDE = `Discover original Provider conversations with agent native ls --host HOST --executor EXECUTOR.
+Use --workspace-path PATH to filter their original execution directory; listing starts no Run.
+Keep partial issues and unsupported availability visible. A managed candidate names the original
+AgentMux Session, Executor and Run. Inspect and reuse that Session: attach its healthy Run,
+recover its active identity, or agent reopen its exact retired identity. Do not create a duplicate.
+For an unmanaged candidate, save only its exact source {nativeHandle,workspacePath,revision}
+to FILE and use agent open --executor EXECUTOR --native-source FILE at a discovered destination.
+Select --execution-workspace WORKSPACE when display and execution differ. Its Host, directory
+and Provider must match the source; presentation placement never changes execution cwd.
+Omit --prompt when only continuing the conversation: no user request is invented.
+Keep the same --operation-id after an unknown result and inspect space inspect --operation-id ID;
+do not relaunch or replay input with new identities. A refused source retains existing work.`
 const GIT_GUIDE = `Discover the original workspace ID, hostId and path with amux app snapshot.
 Pass all three to git history, commit, diff and open; an endpoint or current cwd is not that target.
 History pages bind fixed roots. Reuse nextCursor unchanged; omit cursor to refresh.
@@ -203,7 +215,9 @@ export function agentMuxCommandHelp(path: string): string | null {
   const exact = selected.find(entry => entry.method === path)
   const guide = path === 'device' || path.startsWith('device.') ? DEVICE_GUIDE
     : path === 'git' || path.startsWith('git.') ? GIT_GUIDE
-    : path === 'space' || path.startsWith('space.') || path === 'agent.open' || path === 'file.open' ? SPATIAL_GUIDE
+    : path === 'agent.native' || path.startsWith('agent.native.') ? NATIVE_RESUME_GUIDE
+    : path === 'agent.open' ? `${SPATIAL_GUIDE}\n\n${NATIVE_RESUME_GUIDE}`
+    : path === 'space' || path.startsWith('space.') || path === 'file.open' ? SPATIAL_GUIDE
     : path === 'toolkit' || path.startsWith('toolkit.') ? AGENTMUX_TOOLKIT_GUIDE
     : path === 'settings' || path.startsWith('settings.') ? AGENTMUX_SETTINGS_RESOURCE_GUIDE
     : path === 'goal.create' ? AGENTMUX_GOAL_CREATE_GUIDE
@@ -233,6 +247,8 @@ ${list(AGENTMUX_CLI_COMMANDS)}
 ${COMMON}
 
 ${SPATIAL_GUIDE}
+
+${NATIVE_RESUME_GUIDE}
 
 ${GIT_GUIDE}
 

@@ -20,6 +20,7 @@ import { isFileMethod, parseFileCreateParams, parseFileCreateResult, parseFileWr
 import { isGitMethod, parseGitParams, parseGitResult } from './public-rpc-git.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult } from './public-rpc-schedules.js'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
+import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { parseNameChangeRecord } from './display-label.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
@@ -46,6 +47,7 @@ function string(value: unknown, nullable = false): void {
 }
 function text(value: unknown): void { if (typeof value !== 'string') fail() }
 function count(value: unknown, nullable = false): void { if (!(nullable && value === null) && (!Number.isSafeInteger(value) || (value as number) < 0)) fail() }
+function timestamp(value: unknown): void { if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) fail() }
 function bool(value: unknown): void { if (typeof value !== 'boolean') fail() }
 function member(value: unknown, values: readonly unknown[]): void { if (!values.includes(value)) fail() }
 function array(value: unknown, consume: (item: unknown) => void): void { if (!Array.isArray(value)) return fail(); for (const item of value) consume(item) }
@@ -53,6 +55,22 @@ function promptExecution(value: unknown): void {
   if (value === undefined) return
   const capability = record(value, ['immediate'])
   member(capability.immediate, ['interrupt-before-input', 'native-steer'])
+}
+function agentCapabilities(value: unknown): void {
+  const capabilities = record(value)
+  promptExecution(capabilities.promptExecution)
+  if (capabilities.terminal !== true) fail()
+  member(capabilities.timeline, ['unavailable', 'complete-events', 'streaming'])
+  member(capabilities.permission, ['none', 'observe', 'respond']); bool(capabilities.providerResume)
+  if (capabilities.providerFork !== undefined) {
+    const fork = record(capabilities.providerFork, ['current'])
+    if (fork.current !== true) fail()
+  }
+  member(capabilities.replyCorrelation, ['none', 'native-turn-id', 'acp-turn-id'])
+  if (capabilities.usage !== undefined) {
+    const usage = record(capabilities.usage, ['kind', 'transcriptFormat'])
+    member(usage.kind, ['native-transcript']); member(usage.transcriptFormat, ['claude-jsonl', 'codex-rollout'])
+  }
 }
 function runRef(value: unknown): Record<string, unknown> { const run = record(value, ['runId']); string(run.runId); return run }
 function issues(value: unknown, source = false): void {
@@ -107,16 +125,7 @@ function status(value: unknown, expected?: ReturnType<typeof normalizeAgentSessi
   for (const key of ['pid', 'cols', 'rows']) count(run[key], true)
   for (const key of ['observedAt', 'latestOutputBytes']) count(run[key])
   count(run.acceptedInputBytes, true)
-  const capabilities = record(p.capabilities)
-  promptExecution(capabilities.promptExecution)
-  if (capabilities.terminal !== true) fail()
-  member(capabilities.timeline, ['unavailable', 'complete-events', 'streaming'])
-  member(capabilities.permission, ['none', 'observe', 'respond']); bool(capabilities.providerResume)
-  if (capabilities.providerFork !== undefined) {
-    const fork = record(capabilities.providerFork, ['current'])
-    if (fork.current !== true) fail()
-  }
-  member(capabilities.replyCorrelation, ['none', 'native-turn-id', 'acp-turn-id'])
+  agentCapabilities(p.capabilities)
   const observation = record(p.observation)
   if (observation.process !== run.state) fail()
   member(observation.semantic, ['active', 'idle', 'awaiting-input', 'unknown', 'unsupported'])
@@ -168,6 +177,32 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'system.diagnostics.inspect': return parseDiagnosticEvidenceResult(value, input) as unknown as Record<string, unknown>
       case 'message.delivery.inspect': return parseDeliveryAttemptLookup(value, input.logId as string) as unknown as Record<string, unknown>
       case 'message.delivery.report': return parseDeliveryAttemptLookup(value, (input.record as import('./delivery-attempt.js').DeliveryAttempt).logId) as unknown as Record<string, unknown>
+      case 'agent.native.ls': {
+        record(p, ['hostId', 'executorId', 'providerId', 'capabilities', 'availability', 'sessions', 'issues'])
+        string(p.hostId); string(p.executorId); string(p.providerId)
+        record(p.capabilities, ['terminal', 'timeline', 'permission', 'providerResume', 'providerFork', 'replyCorrelation', 'promptExecution', 'usage'])
+        agentCapabilities(p.capabilities)
+        if (p.hostId !== input.hostId || p.executorId !== input.executorId) fail()
+        member(p.availability, ['available', 'unsupported'])
+        array(p.sessions, value => {
+          const candidate = record(value, ['source', 'title', 'createdAt', 'updatedAt', 'managed'])
+          const source = parseAgentNativeResumeSource(candidate.source)
+          if (source.nativeHandle.providerId !== p.providerId) fail()
+          if (candidate.title !== undefined) text(candidate.title)
+          if (candidate.createdAt !== undefined) timestamp(candidate.createdAt)
+          timestamp(candidate.updatedAt)
+          if (candidate.managed !== undefined) {
+            const managed = record(candidate.managed, ['agentSessionId', 'executorId', 'run', 'state', 'retiredAt'])
+            string(managed.agentSessionId); string(managed.executorId); runRef(managed.run)
+            member(managed.state, ['active', 'retired'])
+            if (managed.retiredAt !== undefined) count(managed.retiredAt)
+            if (managed.state === 'retired' && managed.retiredAt === undefined) fail()
+          }
+        })
+        if (p.availability === 'unsupported' && (p.sessions as unknown[]).length) fail()
+        array(p.issues, value => { const issue = record(value, ['code', 'message']); string(issue.code); text(issue.message) })
+        break
+      }
       case 'agent.native.confirm': {
         record(p, ['session', 'confirmation', 'persisted', 'current'])
         const request = parseAgentNativeSessionConfirmation(input), session = parseRpcAgentSession(p.session)

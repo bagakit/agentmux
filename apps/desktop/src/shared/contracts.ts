@@ -858,6 +858,7 @@ export type AgentLaunchInput = {
   agentSessionId?: string
   createOperationId?: string
   forkSource?: AgentMuxAgentCreateInput['forkSource']
+  nativeResumeSource?: AgentMuxAgentCreateInput['nativeResumeSource']
   prompt?: string
   /** Host-generated content, kept separate from the original request. */
   agentMuxNote?: string
@@ -872,6 +873,9 @@ export type AgentLaunchInput = {
   cols?: number
   rows?: number
 }
+
+export type NativeAgentSessionsInput = Pick<AgentMuxRpcParams<'agent.native.ls'>, 'hostId' | 'executorId' | 'workspacePath'>
+export type NativeAgentSessionsResult = AgentMuxRpcResult<'agent.native.ls'>
 
 export type TerminalLaunchInput = {
   hostId: string
@@ -1752,6 +1756,7 @@ export type AgentMuxDesktopApi = {
   }
   sessions: {
     snapshot(): Promise<RuntimeSnapshot>
+    nativeSessions(input: NativeAgentSessionsInput): Promise<NativeAgentSessionsResult>
     observeStorage(session: SessionControl): Promise<import('@agentmux/core').AgentMuxRunStorageObservation>
     launchAgent(input: AgentLaunchInput, goalPmo?: import('./goal-pmo-origin').GoalPmoIntent): Promise<AgentLaunchResult>
     resolveCreationSessionId(hostId: string, createOperationId: string): Promise<string>
