@@ -34,9 +34,15 @@ export async function preflightMacosSigning({ argv = process.argv.slice(2), env 
   let inventory
   try { inventory = await run('/usr/bin/security', ['find-identity', '-v', '-p', 'codesigning']) }
   catch (error) { reject(`Could not confirm the configured signing identity: ${error instanceof Error ? error.message : String(error)}`) }
-  const identities = [...inventory.stdout.matchAll(/^\s*\d+\)\s+([A-F0-9]{40})\s+"([^"\n]+)"\s*$/gmi)]
+  // Count every selected local row before accepting its observed warning suffix.
+  // A discarded unknown suffix must not turn a duplicate identity into a unique one.
+  const rows = local ? /^\s*\d+\)\s+([A-F0-9]{40})\s+"([^"\n]+)"([^\n]*)$/gmi :
+    /^\s*\d+\)\s+([A-F0-9]{40})\s+"([^"\n]+)"\s*$/gmi
+  const identities = [...inventory.stdout.matchAll(rows)]
   const selected = identities.filter(match => match[1].toUpperCase() === fingerprint)
-  if (selected.length !== 1) reject('The configured signing identity is not uniquely available and valid for codesigning.')
+  if (selected.length !== 1 || (local && !['', '(CSSMERR_TP_NOT_TRUSTED)'].includes(selected[0][3].trim()))) {
+    reject('The configured signing identity is not uniquely available and valid for codesigning.')
+  }
   if (local) { requireSigningPlan(local); return Object.freeze({ kind: 'certificate', profile: 'local', identity: fingerprint }) }
   const team = /^Developer ID Application: .+ \(([A-Z0-9]{10})\)$/.exec(selected[0][2])
   if (!team) reject('The configured Developer ID Application identity is not uniquely available and valid.')
@@ -48,7 +54,7 @@ export async function verifyMacosSigning(appPath, plan, { run = runNative, bundl
   requireSigningPlan(plan)
   const verification = ['--verify', '--deep', '--strict', '--verbose=2']
   if (plan.kind === 'certificate') verification.push('--test-requirement',
-    plan.profile === 'local' ? `=identifier "${bundleId}" and certificate leaf = H"${plan.identity}"` :
+    plan.profile === 'local' ? `=identifier "${bundleId}" and certificate leaf = H"${plan.identity}" and certificate leaf trusted` :
       `=identifier "${bundleId}" and anchor apple generic and certificate leaf[subject.OU] = "${plan.teamId}"`)
   await run('/usr/bin/codesign', [...verification, appPath])
   const metadataResult = await run('/usr/bin/codesign', ['--display', '--verbose=4', appPath])
@@ -68,7 +74,9 @@ export async function verifyMacosSigning(appPath, plan, { run = runNative, bundl
     /^designated\s*=>\s*\(*\s*identifier\s+"[^"\n]+"\s*\)*\s*$/.test(requirement)) {
     reject('The candidate default designated requirement could not be confirmed as certificate-backed.')
   }
-  if (plan.profile === 'local' && !requirement.includes(`anchor H"${plan.identity.toLowerCase()}"`) && !requirement.includes(`anchor H"${plan.identity}"`)) {
+  const originalCertificatePins = [plan.identity, plan.identity.toLowerCase()]
+    .flatMap(hash => [`anchor H"${hash}"`, `certificate leaf = H"${hash}"`])
+  if (plan.profile === 'local' && !originalCertificatePins.some(pin => requirement.includes(pin))) {
     reject('The local candidate default requirement did not pin its original certificate anchor.')
   }
   return Object.freeze({ kind: 'certificate', ...(plan.profile === 'local' ? { profile: 'local', identity: plan.identity } : { teamId: plan.teamId }), designatedRequirement: requirement, authorizationContinuity: 'unverified', notarized: false })
@@ -86,7 +94,7 @@ export async function signMacosApplication(appPath, plan, { signer = sign } = {}
     await writeFile(entitlements, '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict/></plist>\n')
     await signer({ app: appPath, platform: 'darwin', identity: plan.kind === 'certificate' ? plan.identity : '-',
       ignore: file => pinnedRuntimeBinaries.has(resolve(file)),
-      // osx-sign checks X.509 basic policy; our native preflight checks code-signing policy.
+      // osx-sign checks X.509 basic policy; staged verification checks the trusted code-signing leaf.
       identityValidation: plan.kind === 'certificate' && plan.profile !== 'local', strictVerify: true, preAutoEntitlements: false,
       preEmbedProvisioningProfile: false, optionsForFile: () => ({ hardenedRuntime: false, entitlements,
         ...(plan.kind === 'ad-hoc' || plan.profile === 'local' ? { timestamp: 'none' } : {}) }) })
