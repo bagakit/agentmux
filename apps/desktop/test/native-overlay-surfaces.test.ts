@@ -14,7 +14,7 @@ vi.mock('electron', () => ({ WebContentsView: class {
         visible: this.visible, documentLoaded: this.documentLoaded, contentLoaded: this.contentLoaded })
     }),
     setWindowOpenHandler: vi.fn(), on: vi.fn((name, callback) => { this.listeners[name] = callback }),
-    isDestroyed: () => this.destroyed, getOSProcessId: () => 4201, close: vi.fn(() => { this.destroyed = true }) }
+    isFocused: vi.fn(() => false), isDestroyed: () => this.destroyed, getOSProcessId: () => 4201, close: vi.fn(() => { this.destroyed = true }) }
   listeners: Record<string, (...args: any[]) => void> = {}
   destroyed = false
   ownerWindow: unknown = null
@@ -42,7 +42,7 @@ function fixture() {
     getZoomFactor: () => 1.25, sendInputEvent: vi.fn(), isDestroyed: () => false, focus: vi.fn() }
   const pageView = originalPage({ x: 100, y: 100, width: 600, height: 500 })
   const window = { getContentBounds: () => ({ width: 1000, height: 700 }), webContents: contents,
-    contentView: { children: [pageView] as any[], addChildView: vi.fn(), removeChildView: vi.fn() }, isDestroyed: () => false }
+    contentView: { children: [pageView] as any[], addChildView: vi.fn(), removeChildView: vi.fn() }, isDestroyed: () => false, isFocused: vi.fn(() => true) }
   window.contentView.addChildView.mockImplementation(view => {
     const index = window.contentView.children.indexOf(view)
     if (index >= 0) window.contentView.children.splice(index, 1)
@@ -65,6 +65,28 @@ function originalPage(bounds: { x: number; y: number; width: number; height: num
   return page
 }
 const float = { id: 'chrome-1', bounds: { x: 120, y: 150, width: 100, height: 80 }, radius: 8 }
+
+it('confirms focus only for its attached visible live projection in the active window', async () => {
+  const { owner, window } = fixture()
+  expect(owner.hasFocusedProjection()).toBe(false)
+  await owner.update([float])
+  const projection = fake.views.at(-1)
+  projection.webContents.isFocused.mockReturnValue(true)
+  expect(owner.hasFocusedProjection()).toBe(true)
+  window.isFocused.mockReturnValue(false)
+  expect(owner.hasFocusedProjection()).toBe(false)
+  window.isFocused.mockReturnValue(true)
+  projection.setVisible(false)
+  expect(owner.hasFocusedProjection()).toBe(false)
+  projection.setVisible(true)
+  window.contentView.removeChildView(projection)
+  expect(owner.hasFocusedProjection()).toBe(false)
+  window.contentView.addChildView(projection)
+  projection.webContents.close()
+  expect(owner.hasFocusedProjection()).toBe(false)
+  owner.dispose()
+  expect(owner.hasFocusedProjection()).toBe(false)
+})
 
 // A separate process observes real unhandled-rejection delivery without changing Vitest's
 // own handler. It compiles the current production module; only Electron's native boundary is modeled.
