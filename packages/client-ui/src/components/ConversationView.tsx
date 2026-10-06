@@ -8,7 +8,8 @@ import { ConversationMessage, type ConversationMessageProps } from './Conversati
 import { ConversationRecordSequence, type ConversationProcessRenderer, type ConversationRecordRenderer, type ConversationRecordBoundary } from './ConversationRecordSequence.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 import { AgentAsyncQuestionCard, type QuestionNoticeRenderer } from './AgentAsyncQuestionCard.js'
-import { recordedQuestionAnswers, type ConversationQuestionInput, type ConversationQuestionTarget, type QuestionReplyState } from '../lib/conversation-question-reply.js'
+import type { ConversationQuestionInput, ConversationQuestionTarget, QuestionReplyState } from '../lib/conversation-question-reply.js'
+import { projectConversationQuestions } from '@agentmux/core/conversation'
 import { completedNativeReply } from '../lib/conversation-files.js'
 
 type ReadingProps = Pick<ConversationMessageProps,
@@ -45,12 +46,14 @@ export const ConversationView = memo(function ConversationView({
     [page, sessionId, reading.executionHostId])
   if (page.agentSessionId !== sessionId || page.items.length === 0) return null
   const descriptions = new Map(describedRecords.map(record => [record.rawId, record]))
-  const answers = recordedQuestionAnswers(page, questionAnswerContext)
+  const questions = new Map(projectConversationQuestions({ agentSessionId: sessionId, executionHostId: reading.executionHostId, historyPage: page, answerContext: questionAnswerContext })
+    .map(question => [question.recordId, question]))
   const records = describedRecords.flatMap(record => record.original.kind === 'native' ? [record.original.item] : [])
 
   const renderRecord: ConversationRecordRenderer = (item, wrapBody) => {
       const record = descriptions.get(item.id)!
       const recordId = record.id
+      const question = questions.get(item.id)
       const user = record.input
       const speaker = record.speaker
       const described = speaker && item.kind !== 'system-message' ? describeSpeaker?.(speaker) : undefined
@@ -73,12 +76,12 @@ export const ConversationView = memo(function ConversationView({
           {...reading} />
       return <div key={recordId} className="conversation-native-thread__record" data-native-record-id={item.id}>
         {wrapBody ? wrapBody(body) : body}
-        {item.questionRequest ? <AgentAsyncQuestionCard key={JSON.stringify([sessionId, recordId])} request={item.questionRequest} recordedAnswers={answers}
-          {...(onReplyQuestion && item.turnId ? { onSubmit: selected => onReplyQuestion({
-            source: { ...page.source }, turnId: item.turnId!, recordId: item.id, answers: selected }) } : {})}
-          {...(questionReplyState && item.turnId ? { attempt: questionReplyState({ source: page.source, turnId: item.turnId, recordId: item.id }) } : {})}
-          {...(questionReplyDraft && item.turnId ? { draftAnswers: questionReplyDraft({ source: page.source, turnId: item.turnId, recordId: item.id }) } : {})}
-          {...(onQuestionDraftChange && item.turnId ? { onDraftChange: selected => onQuestionDraftChange({ source: page.source, turnId: item.turnId!, recordId: item.id }, selected) } : {})}
+        {question ? <AgentAsyncQuestionCard key={JSON.stringify([sessionId, recordId])} request={question.request} recordedAnswers={question.recordedAnswers}
+          {...(onReplyQuestion && question.turnId ? { onSubmit: selected => onReplyQuestion({
+            source: { ...question.source }, turnId: question.turnId!, recordId: question.recordId, answers: selected }) } : {})}
+          {...(questionReplyState && question.turnId ? { attempt: questionReplyState({ source: question.source, turnId: question.turnId, recordId: question.recordId }) } : {})}
+          {...(questionReplyDraft && question.turnId ? { draftAnswers: questionReplyDraft({ source: question.source, turnId: question.turnId, recordId: question.recordId }) } : {})}
+          {...(onQuestionDraftChange && question.turnId ? { onDraftChange: selected => onQuestionDraftChange({ source: question.source, turnId: question.turnId!, recordId: question.recordId }, selected) } : {})}
           {...(renderQuestionNotice ? { renderNotice: renderQuestionNotice } : {})} /> : null}
         {item.questionDiagnostic ? renderQuestionNotice ? renderQuestionNotice(item.questionDiagnostic)
           : <p className="agent-interaction__error" role="status">{item.questionDiagnostic.message}</p> : null}

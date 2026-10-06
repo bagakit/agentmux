@@ -74,3 +74,4 @@ export type AgentConversationReadPage = import('./session-history-read-codec.js'
 export { parseAgentSessionHistoryReadPage as parseConversationReadPage } from './session-history-read-codec.js'
 
 export * from './conversation-changes.js'
+export * from './conversation-questions.js'
