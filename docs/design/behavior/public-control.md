@@ -225,6 +225,8 @@ Category／Topic／Chat／Thread 的对象、默认「未分类」、来源知�
 
 ## 手机版 Relay 连接
 
+Mac 设置与手机连接 Toolkit 消费同一 Host 设备 owner 的连接事实和完整链接，不各自维护地址、offer 或设备状态。Toolkit 的结果传递与呈现失败须明确说明并保留原结果及恢复入口，不能静默停在没有二维码的扫码提示；机器结果与终端诊断的边界沿[Toolkit 合同](settings-and-observation.md#toolkit-与官方-performance-工具)。
+
 手机是适合移动使用的 AgentMux 第一方 client。连通后的一级导航从左到右为 Goals、Topics、Mote、Focus、Space，Mote 位于正中；原会话内也可切换主工作面。Survey、连接与设备设置及其他辅助能力收进菜单，不重复五个主入口。Mote 只列原协调对象；Space 沿原 Space→Zone→Tab→Region 绑定导航；Focus 按原 Core 执行状态与待处理交互组织，已有 Session 继续可达。目录不可读不按 cwd 或 Session ID 猜归属，原会话、草稿与阅读引用保留。默认主页可在五个主入口中选择并保存在本设备，原有三项设置原样保留，未知记录不覆盖；连通后直接进入该主页，未连通时才默认显示接入页。连接恢复不抢走用户后来选择的工作面。
 
 目录展示消费原 Focus 的名称、项目、状态与 recap，以及原 Mote 自定义头像。公共 carrier 保留这些 owner 的原展示值，不另加字段容量或再次截断摘要；类型、准确身份、权限和既有整条传输容量边界仍成立。正常中文与 emoji 展示数据不能使整份目录不可读。
