@@ -22,7 +22,7 @@ assert.ok(root.includes('agentmux-viewport-'))
 app.setPath('userData', join(root, 'user-data'))
 app.commandLine.appendSwitch('no-proxy-server'); app.commandLine.appendSwitch('disk-cache-size', '1048576')
 const originalId = 'private-viewport-original', siblingId = 'private-viewport-sibling', workspaceId = 'private-viewport-workspace'
-const receipt: any = { label, pid: process.pid, passed: false, cases: [], images: [], warnings: [], calls: [], events: [], public: [], transitions: [], publications: [] }
+const receipt: any = { label, pid: process.pid, passed: false, cases: [], images: [], warnings: [], calls: [], events: [], public: [], transitions: [], publications: [], windowFocus: [] }
 let window: BrowserWindow, manager: BrowserViewManager, overlays: NativeOverlaySurfaces, server: Server, rpcServer: AgentMuxControlServer
 let original: WebContentsView, sibling: WebContentsView, baseline: any, siblingBaseline: any, baseUrl: string
 let uninstallNativeOverlayFocus: (() => void) | undefined
@@ -298,12 +298,17 @@ async function run() {
   }
   await stage('module-loaded')
   await app.whenReady()
-  if (process.platform === 'darwin') app.setActivationPolicy('regular')
+  if (process.platform === 'darwin') {
+    app.setActivationPolicy('regular')
+    await app.dock!.show()
+  }
   await stage('electron-ready')
   receipt.compiled = Object.fromEntries(await Promise.all(['main.mjs', 'renderer.js', 'renderer.css', 'preload.cjs'].map(async name => [name, sha(await readFile(join(root, name)))])))
   server = createServer((request, response) => { response.setHeader('content-type', 'text/html; charset=utf-8'); response.end(html(request.url !== '/no-meta', request.url === '/sibling')) })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); baseUrl = 'http://127.0.0.1:' + (server.address() as any).port
   window = new BrowserWindow({ width: 1200, height: 800, useContentSize: true, show: false, backgroundColor: '#171d24', webPreferences: { preload: join(root, 'preload.cjs'), sandbox: true, contextIsolation: true, backgroundThrottling: false } })
+  for (const event of ['focus', 'blur'] as const) window.on(event, () => receipt.windowFocus.push({ event,
+    at: performance.now(), transition: receipt.transitions.length, focused: window.isFocused() }))
   window.webContents.on('console-message', event => { if (event.level === 'error') receipt.warnings.push({ kind: 'renderer', message: event.message }) })
   manager = new BrowserViewManager(window, { defaultProfileId: () => 'private-viewport-profile', resolvePartition: () => 'viewport-' + process.pid }, new BrowserRefLedgerStore(join(root, 'refs.json')),
     { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal: async () => { throw new Error('Private viewport fixture cannot open system links') } })
@@ -390,7 +395,7 @@ async function run() {
 }
 void run().catch(async error => {
   receipt.failure = { message: error.message, stack: error.stack }
-  try { receipt.failure.ui = await uiFacts(); receipt.failure.layers = window.contentView.children.filter(view => view.getVisible()).map(view => ({ bounds: view.getBounds(), original: view === original, sibling: view === sibling })) } catch {}
+  try { receipt.failure.windowFocused = window.isFocused(); receipt.failure.ui = await uiFacts(); receipt.failure.layers = window.contentView.children.filter(view => view.getVisible()).map(view => ({ bounds: view.getBounds(), original: view === original, sibling: view === sibling })) } catch {}
 }).finally(async () => {
   await writeFile(join(out, label + '.json'), JSON.stringify(receipt, null, 2))
   if (window && !window.isDestroyed()) { await evaluate('window.viewportProbe?.dispose()').catch(() => {}); await delay(40) }
