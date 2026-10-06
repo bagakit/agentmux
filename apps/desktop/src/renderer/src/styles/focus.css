@@ -425,3 +425,10 @@
 .focus-retained-projects__row:hover, .focus-retained-projects__toggle:hover { background: var(--surface-2); color: var(--text); }
 .focus-retained-projects__row:focus-visible, .focus-retained-projects__toggle:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
 .focus-retained-projects__row:disabled { cursor: default; }
+
+.focus-project-lanes__activity { flex: 0 1 auto; margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); color: var(--text-3); font-variant-numeric: tabular-nums; }
+@container (max-width: 560px) {
+  .focus-project-lanes__summary, .focus-project-lanes__axis .host-identity { display: none; }
+  .focus-project-lanes__axis { flex: 1 1 auto; max-width: none; }
+  .focus-project-lanes__activity { flex: none; }
+}

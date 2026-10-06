@@ -1,13 +1,14 @@
 import { HostBadge } from './HostBadge'
 import { hostIdentityProjection } from '../lib/region-execution-host'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useMemo, useState, type ReactNode, type Ref } from 'react'
+import { useEffect, useMemo, useState, type ReactNode, type Ref } from 'react'
 import { focusProjectKey, type FocusProjectLane, type FocusRetainedProject } from '../lib/focus-project-lanes'
 import { createFocusTimeFormatters } from '../lib/focus-timeline-ruler'
 import { ProjectIcon } from './ProjectIcon'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { useAppStore } from '../store'
 import { usePathDisplay } from '../hooks/usePathDisplay'
+import { formatRelativeAge } from '../lib/relative-age'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeObjectIdentifierIcon = semanticIconComponent('object.identifier')
@@ -15,7 +16,8 @@ const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 
 
-export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, onSelect, renderLane, rowsRef, recentProjects = [], onRead }: {
+export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, onSelect, renderLane, rowsRef, recentProjects = [], onRead, visible = true }: {
+  visible?: boolean
   rowsRef?: Ref<HTMLDivElement>
   lanes: readonly FocusProjectLane[]; selectedProjectKey: string
   currentLaneId?: string | null | undefined
@@ -25,12 +27,19 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, on
   const displayPath = usePathDisplay()
   const icons = useAppStore(state => state.spaceObjectIcons)
   const hosts = useAppStore(state => state.config?.hosts)
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (!visible) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(timer)
+  }, [visible])
   return <section className="focus-project-lanes" aria-label="Project contexts">
     <div className="focus-project-lanes__rows" ref={rowsRef}>
       {lanes.map(lane => <article className={`focus-project-lanes__row${selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId) ? ' is-selected' : ''}`} data-focus-current={currentLaneId === lane.id || undefined} data-project-id={lane.projectId} data-project-key={focusProjectKey(lane.hostId, lane.projectId)} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
         <div className="focus-project-lanes__track">{renderLane(lane,
         <span className="focus-project-lanes__heading">
-          <button type="button" className="focus-project-lanes__axis" aria-current={currentLaneId === lane.id ? 'location' : undefined} aria-pressed={selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId)} title={`${lane.name} · ${lane.activeAgentIds.length} live · ${displayPath(lane.path, lane.hostId)}`} onClick={() => onSelect(focusProjectKey(lane.hostId, lane.projectId))}>
+          <button type="button" className="focus-project-lanes__axis" aria-current={currentLaneId === lane.id ? 'location' : undefined} aria-pressed={selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId)} title={[`${lane.name} · ${lane.activeAgentIds.length} live`, hosts?.find(host => host.id === lane.hostId)?.label ?? lane.hostId, displayPath(lane.path, lane.hostId), lane.summary].filter(Boolean).join('\n')} onClick={() => onSelect(focusProjectKey(lane.hostId, lane.projectId))}>
             {lane.objectKind === 'topic' || lane.objectKind === 'mote'
               ? <><SpaceObjectIcon kind={lane.objectKind} name={lane.labels.at(-1)!} topicGlyph manualIcon={lane.objectIconKey ? icons[lane.objectIconKey] ?? null : null} avatarWorkspaceId={lane.workspaceId} avatarTopicId={lane.topicId ?? undefined} avatarObjectKey={lane.objectIconKey} /><span className="focus-project-lanes__label"><strong>{lane.labels.at(-1)}</strong></span></>
               : <>{lane.projectWorkspaceId ? <ProjectIcon workspaceId={lane.projectWorkspaceId} name={lane.labels[0]!} /> : null}
@@ -38,6 +47,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, on
             <HostBadge context="Host" host={hostIdentityProjection(lane.hostId, hosts?.find(host => host.id === lane.hostId))} />
           </button>
           {lane.summary ? <span className="focus-project-lanes__summary" title={lane.summary}>{lane.summary}</span> : null}
+          <FocusProjectActivity at={lane.lastActivityAt ?? null} now={now} />
           {lane.recovery ? <span className="focus-project-lanes__recovery">{lane.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
         </span>
         )}</div>
@@ -48,6 +58,14 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, on
     </div>
     {lanes.length === 0 && recentProjects.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
   </section>
+}
+
+function FocusProjectActivity({ at, now }: { at: number | null; now: number }) {
+  const zone = useAppStore(state => state.focusTimelineRuler.timeZone)
+  const time = useMemo(() => createFocusTimeFormatters(zone), [zone])
+  return <span className="focus-project-lanes__activity" title={at === null ? 'Project task activity not recorded' : `Latest task activity across project Sessions · ${time.detailed(at)}`}>
+    {at === null ? 'Activity unknown' : <>Active <time dateTime={new Date(at).toISOString()}>{formatRelativeAge(Math.max(now, Date.now()) - at, ' ago')}</time></>}
+  </span>
 }
 
 function FocusProjectObservation({ project, recent = false, onRead }: { project: FocusRetainedProject; recent?: boolean; onRead(project: FocusRetainedProject): void }) {
