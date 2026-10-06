@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from '../helpers/fixture-epoch.mjs'
 import { tmpdir as fixtureTmpdir } from 'node:os'
 import { join as fixtureJoin, sep as fixtureSep } from 'node:path'
 const fixturePath = relative => { const temporary = relative.replace(/^(?:private\/)?tmp\//u, ''); return (temporary === relative ? fixtureJoin(fixtureTmpdir(), 'agentmux-fixtures') : fixtureTmpdir()) + fixtureSep + temporary.replaceAll('/', fixtureSep) }
@@ -122,7 +123,7 @@ export async function runDispatchProof(scenario) {
     }
     const session = id => sessions.find(value => value.agentSessionId === id)
     const message = (id, sender = 'owner', recipient = 'worker', replyTo = null) => ({
-      messageId: id, operationId: `operation-${id}`, createdAt: 100,
+      messageId: id, operationId: `operation-${id}`, createdAt: reshapeFixtureEpoch(0, 0, 100),
       sender: { kind: 'agent-session', agentSessionId: sender }, recipient: { kind: 'agent-session', agentSessionId: recipient },
       senderSessionId: sender, senderRunId: session(sender).run.runId,
       recipientSessionId: recipient, recipientRunId: session(recipient).run.runId,
@@ -130,12 +131,12 @@ export async function runDispatchProof(scenario) {
       workspaceId: fixtureRoot, body: `Synthetic ${id}`
     })
     const invoke = async (agentSessionId, args, keepAlive = false) => {
-      const capability = credentials.get(agentSessionId).capability
+      const capability = agentSessionId === null ? undefined : credentials.get(agentSessionId).capability
       const child = spawn(process.execPath, [...(keepAlive ? ['--import', hold] : []),
         join(packageRoot, 'dist/agentmux.js'), ...args], {
         detached: true, cwd: fixtureRoot, stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...fixtureEnvironment, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: agentSessionId,
-          AGENTMUX_AGENT_CAPABILITY: capability }
+        env: { ...fixtureEnvironment, AGENTMUX_ENV: '1', ...(capability === undefined ? {} : {
+          AGENTMUX_AGENT_SESSION_ID: agentSessionId, AGENTMUX_AGENT_CAPABILITY: capability }) }
       })
       cliChildren.push(child)
       let stdout = '', stderr = '', spawnError
@@ -150,7 +151,7 @@ export async function runDispatchProof(scenario) {
         return undefined
       }, 'actual CLI receipt')
       if (!keepAlive) await waitFor(async () => exited(child) ? true : undefined, 'actual CLI exit')
-      assert(!`${stdout}\n${stderr}`.includes(capability), 'CLI receipt must never disclose its capability')
+      if (capability !== undefined) assert(!`${stdout}\n${stderr}`.includes(capability), 'CLI receipt must never disclose its capability')
       operations.push({ pid: child.pid, command: args[0], verb: args[1], ok: receipt.ok,
         ...(receipt.error ? { errorCode: receipt.error.code } : {}) })
       return { child, receipt }
@@ -214,6 +215,22 @@ export async function runDispatchProof(scenario) {
     assert.equal(done.ok, true)
     assert.equal(done.result.originAwaits, false)
     assert.deepEqual((await dispatch('owner', 'show')).receipt.result, done.result)
+    const observation = (await dispatch('owner', 'read')).receipt
+    assert.equal(observation.ok, true)
+    assert.equal(observation.result.hostId, 'local')
+    assert.deepEqual(observation.result.dispatch, done.result)
+    assert.equal(observation.result.source.envelope.body, 'Synthetic source')
+    assert.deepEqual(observation.result.replies.map(item => item.envelope.messageId), ['question-one', 'question-two', 'done'])
+    assert.deepEqual(observation.result.identityDiagnostics, [])
+    const directory = (await invoke('owner', ['message', 'dispatch', 'ls'])).receipt
+    assert.equal(directory.ok, true)
+    assert.equal(directory.result.participantSessionId, 'owner')
+    assert.deepEqual(directory.result.dispatches, [done.result])
+    assert.equal((await invoke('owner', ['message', 'dispatch', 'ls', '--participant', 'worker'])).receipt.error.code, 'DISPATCH_PARTICIPANT_MISMATCH')
+    const trusted = (await invoke(null, ['message', 'dispatch', 'read', '--host', 'local', '--source-message', 'source'])).receipt
+    assert.equal(trusted.ok, true)
+    assert.deepEqual(trusted.result, observation.result)
+    assert.equal((await invoke(null, ['message', 'dispatch', 'read', '--source-message', 'source'])).receipt.error.code, 'INVALID_CONTROL_REQUEST')
     const healthyAfter = await client.statusAgent('owner')
     assert.deepEqual(healthyAfter.run.runId, healthyBefore.run.runId)
     assert.equal(healthyAfter.run.pid, healthyBefore.run.pid)
@@ -235,7 +252,7 @@ export async function runDispatchProof(scenario) {
     assert.equal(journal.filter(record => record.kind === 'dispatch-open').length, 1)
     assert.deepEqual(journal.filter(record => record.kind === 'dispatch-event').map(record => record.replyMessageId),
       ['question-one', 'question-two', 'done'])
-    report = { ...report, messageIds: ['question-one', 'question-two', 'done'], dispatch: done.result,
+    report = { ...report, messageIds: ['question-one', 'question-two', 'done'], dispatch: done.result, observation: observation.result, directory: directory.result,
       operations, durableDispatchRecordCount: 4 }
   } catch (error) { failure = error } finally {
     const failures = []

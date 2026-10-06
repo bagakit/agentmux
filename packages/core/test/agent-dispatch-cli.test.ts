@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -34,7 +35,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 function message(id: string, sender = 'owner', recipient = 'worker', replyTo: string | null = null): AgentMuxMessageAppendInput {
-  return { messageId: id, operationId: `operation-${id}`, createdAt: 100,
+  return { messageId: id, operationId: `operation-${id}`, createdAt: reshapeFixtureEpoch(0, 0, 100),
     sender: { kind: 'agent-session', agentSessionId: sender }, recipient: { kind: 'agent-session', agentSessionId: recipient },
     senderSessionId: sender, senderRunId: `${sender}-run`, recipientSessionId: recipient, recipientRunId: `${recipient}-run`,
     threadId: 'synthetic-thread', correlationId: `correlation-${id}`, replyTo, workspaceId: fixturePath("synthetic"), body: `Synthetic ${id}` }
@@ -49,7 +50,7 @@ async function publicFixture() {
     await store.compareAndSwap(null, { kind: 'agent', agentSessionId: id, providerId: 'traex', executorId: 'traex',
       hostId: 'local', workspacePath: root, run: { runId: `${id}-run` }, retiredRuns: [],
       hookBindingId: `binding-${id}`, hookToken: `synthetic-token-${id}`, capabilityHash: hashAgentCapability(capability),
-      createdAt: 100, updatedAt: 100 })
+      createdAt: reshapeFixtureEpoch(0, 0, 100), updatedAt: reshapeFixtureEpoch(0, 0, 100) })
   }
   const queuePath = join(root, 'global-messages.ndjson')
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', queuePath)
@@ -62,6 +63,67 @@ async function publicFixture() {
 }
 
 describe('public durable Dispatch authority', () => {
+  it('keeps original records readable with identity diagnostics when the worker observation fails', async () => {
+    const f = await publicFixture()
+    await f.queue.append(message('source'))
+    await f.queue.append(message('done', 'worker', 'owner', 'source'))
+    await f.client.openDispatch({ ...f.input('owner'), sourceMessageId: 'source' })
+    await f.client.recordDispatchEvent({ ...f.input('worker'), sourceMessageId: 'source', replyMessageId: 'done', kind: 'worker_done' })
+    const read = f.store.readMetadata.bind(f.store)
+    vi.spyOn(f.store, 'readMetadata').mockImplementation(async id => {
+      if (id === 'worker') throw new Error('worker identity observation unavailable')
+      return read(id)
+    })
+    const result = await f.client.readDispatch({ sourceMessageId: 'source', caller: {
+      agentSessionId: 'owner', capability: f.capabilities.get('owner')! } })
+    expect(result.source.envelope).toMatchObject({ messageId: 'source', body: 'Synthetic source' })
+    expect(result.replies.map(item => item.envelope.messageId)).toEqual(['done'])
+    expect(result.identityDiagnostics).toEqual([expect.objectContaining({ agentSessionId: 'worker', runId: 'worker-run',
+      code: 'AGENT_SESSION_STORE_READ_UNCONFIRMED' })])
+    await expect(f.client.readDispatch({ sourceMessageId: 'source', caller: {
+      agentSessionId: 'stranger', capability: f.capabilities.get('stranger')! } })).rejects.toMatchObject({ code: 'DISPATCH_PARTICIPANT_MISMATCH' })
+    expect((await f.client.readDispatch({ sourceMessageId: 'source' })).dispatch.originAwaits).toBe(false)
+  })
+  it('paginates exact participation without consulting unrelated Session metadata', async () => {
+    const f = await publicFixture()
+    for (const id of ['source-one', 'source-two']) {
+      await f.queue.append(message(id))
+      await f.client.openDispatch({ ...f.input('owner'), sourceMessageId: id })
+    }
+    await f.queue.append(message('other', 'stranger', 'worker'))
+    await f.client.openDispatch({ ...f.input('stranger'), sourceMessageId: 'other' })
+    const read = vi.spyOn(f.store, 'readMetadata')
+    const first = await f.client.listDispatches({ participantSessionId: 'owner', limit: 1,
+      caller: { agentSessionId: 'owner', capability: f.capabilities.get('owner')! } })
+    expect(first.dispatches.map(item => item.sourceMessageId)).toEqual(['source-one'])
+    expect(first.nextSourceMessageId).toBe('source-one')
+    expect(read.mock.calls.map(([id]) => id)).toEqual(['owner'])
+    const next = await f.client.listDispatches({ participantSessionId: 'owner', afterSourceMessageId: first.nextSourceMessageId!, limit: 1 })
+    expect(next.dispatches.map(item => item.sourceMessageId)).toEqual(['source-two'])
+    expect(next.nextSourceMessageId).toBeNull()
+    await expect(f.client.listDispatches({ participantSessionId: 'owner', afterSourceMessageId: 'other' }))
+      .rejects.toMatchObject({ code: 'DISPATCH_PARTICIPANT_MISMATCH' })
+    await expect(f.client.listDispatches({ participantSessionId: 'worker', caller: {
+      agentSessionId: 'owner', capability: f.capabilities.get('owner')! } })).rejects.toMatchObject({ code: 'DISPATCH_PARTICIPANT_MISMATCH' })
+    expect((await f.client.listDispatches({ participantSessionId: 'absent' })).dispatches).toEqual([])
+  })
+  it('notifies only after the original journal has committed and preserves the event identity on duplicate reports', async () => {
+    const f = await publicFixture(), events: Array<{ sourceMessageId: string; replyMessageId?: string }> = []
+    f.client.onEvent(event => { if (event.type === 'dispatch-changed') events.push({ sourceMessageId: event.sourceMessageId,
+      ...(event.event ? { replyMessageId: event.event.replyMessageId } : {}) }) })
+    await f.queue.append(message('source'))
+    await f.queue.append(message('done', 'worker', 'owner', 'source'))
+    await f.client.openDispatch({ ...f.input('owner'), sourceMessageId: 'source' })
+    const reported = await f.client.recordDispatchEvent({ ...f.input('worker'), sourceMessageId: 'source', replyMessageId: 'done', kind: 'worker_done' })
+    expect(events).toEqual([{ sourceMessageId: 'source' }, { sourceMessageId: 'source', replyMessageId: 'done' }])
+    expect((await new DurableAgentMuxMessageQueue(f.queue.path).readDispatch({ sourceMessageId: 'source' }, async () => [])).dispatch).toEqual(reported)
+    await f.client.recordDispatchEvent({ ...f.input('worker'), sourceMessageId: 'source', replyMessageId: 'done', kind: 'worker_done' })
+    expect(events.at(-1)).toEqual({ sourceMessageId: 'source', replyMessageId: 'done' })
+    expect((await f.queue.readJournal()).filter(record => record.kind === 'dispatch-event')).toHaveLength(1)
+    await expect(f.client.recordDispatchEvent({ ...f.input('owner'), sourceMessageId: 'source', replyMessageId: 'done', kind: 'worker_done' }))
+      .rejects.toMatchObject({ code: 'DISPATCH_PARTICIPANT_MISMATCH' })
+    expect(events).toHaveLength(3)
+  })
   it('admits only exact deduplicated participants when the unrelated Session catalogue is unavailable', async () => {
     const f = await publicFixture()
     await f.queue.append(message('source'))
@@ -180,12 +242,12 @@ describe('public durable Dispatch authority', () => {
     const original = (await loadAgentSessions(f.store)).find(session => session.agentSessionId === 'owner')!
     const newCapability = issueAgentCapability()
     const replacement = { ...original, run: { runId: 'owner-new-run' }, retiredRuns: [original.run],
-      capabilityHash: hashAgentCapability(newCapability), updatedAt: 200 }
+      capabilityHash: hashAgentCapability(newCapability), updatedAt: reshapeFixtureEpoch(0, 0, 200) }
     await f.store.compareAndSwap(original, replacement); f.capabilities.set('owner', newCapability)
     const report = await f.client.recordDispatchEvent({ ...f.input('worker'), sourceMessageId: 'source', replyMessageId: 'question', kind: 'question' })
     expect(await f.client.showDispatch({ ...f.input('owner'), sourceMessageId: 'source' })).toEqual(report)
     const before = await readFile(f.queue.path)
-    await f.store.compareAndSwap(replacement, { ...replacement, retiredRuns: [], updatedAt: 300 })
+    await f.store.compareAndSwap(replacement, { ...replacement, retiredRuns: [], updatedAt: reshapeFixtureEpoch(0, 0, 300) })
     await expect(f.client.showDispatch({ ...f.input('owner'), sourceMessageId: 'source' })).rejects.toMatchObject({ code: 'DISPATCH_IDENTITY_UNAVAILABLE' })
     await expect(f.client.openDispatch({ ...f.input('owner'), sourceMessageId: 'source' })).rejects.toMatchObject({ code: 'DISPATCH_IDENTITY_UNAVAILABLE' })
     expect(await readFile(f.queue.path)).toEqual(before)
@@ -219,7 +281,7 @@ describe('public durable Dispatch authority', () => {
     const current = (await loadAgentSessions(f.store)).find(session => session.agentSessionId === 'owner')!
     const capability = rotateCapability ? issueAgentCapability() : f.capabilities.get('owner')!
     await f.store.compareAndSwap(current, { ...current, run: { runId: 'replacement-owner-run' },
-      retiredRuns: [current.run], capabilityHash: hashAgentCapability(capability), updatedAt: 200 })
+      retiredRuns: [current.run], capabilityHash: hashAgentCapability(capability), updatedAt: reshapeFixtureEpoch(0, 0, 200) })
     release.resolve(); await holder
     expect(await oldCaller).toMatchObject({ error: { code } })
     expect(await readFile(f.queue.path)).toEqual(before)
