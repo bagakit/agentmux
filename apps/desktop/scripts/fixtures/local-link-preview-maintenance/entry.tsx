@@ -4,7 +4,7 @@ import { flushSync } from 'react-dom'
 import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'
 import { FileExplorer } from '../../../src/renderer/src/components/FileExplorer'
 import { WindowOverlayHost } from '../../../src/renderer/src/components/WindowOverlayHost'
-import { TransientErrorNotice } from '../../../src/renderer/src/components/TransientErrorNotice'
+import { GlobalSystemNotices } from '../../../src/renderer/src/components/GlobalSystemNotices'
 import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { addWorkbenchRegion, createWorkbenchTab, documentKey, fileTabId } from '../../../src/renderer/src/lib/workbench-tabs'
@@ -36,16 +36,15 @@ const root = createRoot(document.getElementById('root')!)
 let messageProjection: { content: string; ratio: number } | null = null
 const readImage = (path: string) => api.ui.readPastedImage(path)
 function Shell() {
-  const warning = useNativeOverlayChrome(), error = useAppStore(state => state.error), dismissed = useAppStore(state => state.errorDismissed), lastError = useAppStore(state => state.lastError)
+  const warning = useNativeOverlayChrome()
   return <><aside id="fixture-tree"><FileExplorer /></aside><div id="fixture-center" data-chrome-warning={warning}>
     {messageProjection ? <section id="fixture-conversation" className="activity-feed" style={{ flex: '0 0 260px', minHeight: 0, overflow: 'auto' }}>
       <div data-message-width style={{ width: `calc((100% - 24px) * ${messageProjection.ratio})`, minWidth: 0, padding: 12 }}>
         <ConversationMessage messageId="original-image-message" conversationSessionId="recorded-author" speaker={{ role: 'agent', id: 'recorded-author' }} name="Preview conversation"
           content={messageProjection.content} status="complete" createdAt={1} workspaceRoot={boot.config.workspaces[0].path} homeDir={boot.home} readPastedImage={readImage} />
       </div></section> : null}
-    <div id="fixture-workbench"><WorkspaceWorkbench workspaceId={workspaceId} /></div><div className="main-shell__notices">
-      <TransientErrorNotice error={error} dismissed={dismissed} lastError={lastError} onDismiss={() => useAppStore.getState().dismissError()} onReopen={() => useAppStore.getState().reopenError()} />
-    </div></div><WindowOverlayHost /></>
+    <div id="fixture-workbench"><WorkspaceWorkbench workspaceId={workspaceId} /></div></div>
+    <footer className="window-status-bar" style={{ position: 'fixed', left: 0, right: 0, bottom: 0 }}><GlobalSystemNotices nativeOverlayWarning={warning} /></footer><WindowOverlayHost /></>
 }
 flushSync(() => root.render(<DesktopClientUiProvider><Shell /></DesktopClientUiProvider>))
 const sourceTabId = fileTabId(workspaceId, 'docs/readme.md')

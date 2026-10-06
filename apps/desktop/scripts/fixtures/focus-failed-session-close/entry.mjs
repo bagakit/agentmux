@@ -8,7 +8,7 @@ import { spatialCatalog } from '../../../src/renderer/src/lib/space-agent-contro
 import { ordinaryWorkbenchViewTargets } from '../../../src/renderer/src/lib/workbench-resource-display'
 import { workbenchProjectionSlotId } from '../../../src/renderer/src/lib/workbench-projection'
 import { GlobalFocusSurface } from '../../../src/renderer/src/components/GlobalFocusSurface'
-import { TransientErrorNotice } from '../../../src/renderer/src/components/TransientErrorNotice'
+import { GlobalSystemNotices } from '../../../src/renderer/src/components/GlobalSystemNotices'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { api } from '../../../src/renderer/src/lib/api'
 import { createRendererSessionEvents } from '../../../src/renderer/src/lib/session-events'
@@ -67,10 +67,6 @@ function seed() {
     agentNames: Object.fromEntries(runtime.sessions.map(session => [session.id, session.label])), agentComposerDrafts: originalDrafts,
     documents: { [fileKey]: { path: filePath, content: 'Unsaved original release note — preserve across closing and restart.', revision: 'original-revision' } }, dirtyDocuments: { [fileKey]: true } })
 }
-function ErrorSurface() {
-  const error = useAppStore(state => state.error), lastError = useAppStore(state => state.lastError), dismissed = useAppStore(state => state.errorDismissed)
-  return h(TransientErrorNotice, { error, lastError, dismissed, onDismiss: () => useAppStore.getState().dismissError(), onReopen: () => useAppStore.getState().reopenError() })
-}
 function Scene() {
   const state = useAppStore()
   const presentation = useMemo(() => executionFocusPresentation(state.agentFocus.execution, state.tabs, spatialCatalog(state, []), reference => useAppStore.getState().selectExecutionFocusReference(reference, state.agentFocus.execution)), [state.agentFocus.execution, state.tabs, state.layouts, state.sessions])
@@ -83,7 +79,7 @@ function Scene() {
     return result
   }, [state.tabs, state.layouts, state.agentFocus.execution, presentation])
   return h('main', { style: { height: '100vh', display: 'flex', flexDirection: 'column', minHeight: 0 } }, h(GlobalFocusSurface, { presentation, viewTargets: targets }),
-    h('div', { className: 'workspace-workbench-registry workspace-workbench-registry--parked' }, h(WorkspaceWorkbench, { workspaceId: workspace.id, visible: false, viewTargets: targets })), h(ErrorSurface))
+    h('div', { className: 'workspace-workbench-registry workspace-workbench-registry--parked' }, h(WorkspaceWorkbench, { workspaceId: workspace.id, visible: false, viewTargets: targets })), h('footer', { className: 'window-status-bar', style: { position: 'fixed', left: 0, right: 0, bottom: 0 } }, h(GlobalSystemNotices)))
 }
 createRoot(document.getElementById('root')).render(h(DesktopClientUiProvider, null, h(Scene)))
 window.failedCloseProof = {

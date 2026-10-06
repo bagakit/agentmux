@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom'
 import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'
 import { FileExplorer } from '../../../src/renderer/src/components/FileExplorer'
 import { WindowOverlayHost } from '../../../src/renderer/src/components/WindowOverlayHost'
-import { TransientErrorNotice } from '../../../src/renderer/src/components/TransientErrorNotice'
+import { GlobalSystemNotices } from '../../../src/renderer/src/components/GlobalSystemNotices'
 import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { addWorkbenchRegion } from '../../../src/renderer/src/lib/workbench-tabs'
@@ -39,10 +39,8 @@ useAppStore.setState({ toolsOpen: false })
 const root = createRoot(document.getElementById('root')!)
 function Shell() {
   const chromeWarning = useNativeOverlayChrome()
-  const error = useAppStore(state => state.error), dismissed = useAppStore(state => state.errorDismissed), lastError = useAppStore(state => state.lastError)
   return <><aside id="fixture-tree"><FileExplorer /></aside><div id="fixture-center" data-chrome-warning={chromeWarning}><div id="fixture-workbench"><WorkspaceWorkbench workspaceId={workspaceId} /></div>
-    <div className="main-shell__notices"><TransientErrorNotice error={error} dismissed={dismissed} lastError={lastError}
-      onDismiss={() => useAppStore.getState().dismissError()} onReopen={() => useAppStore.getState().reopenError()} /></div></div><WindowOverlayHost /></>
+    </div><footer className="window-status-bar" style={{ position: 'fixed', left: 0, right: 0, bottom: 0 }}><GlobalSystemNotices nativeOverlayWarning={chromeWarning} /></footer><WindowOverlayHost /></>
 }
 flushSync(() => root.render(<Shell />))
 const probe = {

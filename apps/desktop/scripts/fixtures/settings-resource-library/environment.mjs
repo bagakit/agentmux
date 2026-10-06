@@ -19,6 +19,12 @@ for (const name of ['core', 'demand', 'layout']) {
 }
 const client = resolve(root, 'packages/client-ui/src')
 aliases.unshift(
+  { find: /^@agentmux\/client-ui\/input$/u, replacement: client + '/input/index.ts' },
+  { find: /^@agentmux\/client-ui\/input\/styles.css$/u, replacement: client + '/input/input.css' },
+  { find: /^@agentmux\/client-ui\/theme$/u, replacement: client + '/theme/index.ts' },
+  { find: /^@agentmux\/client-ui\/icons$/u, replacement: client + '/theme/icons.tsx' },
+  { find: /^@agentmux\/client-ui\/styles.css$/u, replacement: client + '/styles/index.css' },
+  { find: /^@agentmux\/client-ui\/note\/(.+)$/u, replacement: client + '/note/$1.ts' },
   { find: /^@agentmux\/client-ui\/styles\/(.+)$/u, replacement: client + '/styles/$1' },
   { find: /^@agentmux\/client-ui\/components\/(.+)$/u, replacement: client + '/components/$1.tsx' },
   { find: /^@agentmux\/client-ui\/terminal\/(.+)$/u, replacement: client + '/terminal/$1.ts' },

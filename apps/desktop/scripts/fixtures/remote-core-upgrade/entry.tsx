@@ -2,10 +2,9 @@ import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mj
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { api } from '../../../src/renderer/src/lib/api'
-import { applyAppAppearance } from '../../../src/renderer/src/lib/app-appearance'
+import { mountThemeRuntime } from '@agentmux/client-ui/theme'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
-import { RemoteCoreUpgradeNotices } from '../../../src/renderer/src/components/RemoteCoreUpgradeNotices'
 import { GlobalSystemNotices } from '../../../src/renderer/src/components/GlobalSystemNotices'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { SettingsNavigation, type SettingsNavigationRequest } from '../../../src/renderer/src/components/SettingsNavigation'
@@ -17,7 +16,7 @@ config.hosts = [{ id: 'local', kind: 'local', label: 'This Mac' },
     remoteCommand: _hygiene_fixturePath("opt/agentmux/bin/agentmux-public"), remoteSocketPath: _hygiene_fixturePath("srv/agentmux/runtime/control.sock"), runtimeId: 'original-runtime' },
   { id: 'analysis', kind: 'ssh', label: 'Analysis server', hostname: 'analysis.example.invalid' }]
 config.workspaces = []
-applyAppAppearance('dark')
+mountThemeRuntime(window, { appAppearance: 'dark' })
 useAppStore.setState({ config, loading: false, sessions: [], sessionSnapshots: {}, hostChecks: {},
   runtimeOwnershipWarnings: [], environmentWarning: undefined, displacedAgentSessionIds: [],
   runtimeEndpointWarnings: [{ hostId: 'build', step: 'Connecting to Runtime', availability: 'unverified',
@@ -52,10 +51,9 @@ function Fixture() {
   return <DesktopClientUiProvider><SettingsNavigation.Provider value={navigation}><div className="app-shell app-shell--project-rail-collapsed">
     <div className="app-shell__workspace" aria-hidden={Boolean(request)} inert={Boolean(request)}><main className="main-shell main-shell--merged">
       <div className="workbench-shell"><section className="workspace-main-surface"><div className="focus-empty"><h2>AgentMux</h2><p>Remote connection observation</p></div></section></div>
-      <div className="main-shell__notices"><RemoteCoreUpgradeNotices /></div>
     </main></div>
     {request ? <SettingsPanel initialSection={request.section} navigationRequest={request} onClose={() => setRequest(null)} /> : null}
-    <footer className="window-status-bar"><GlobalSystemNotices /></footer>
+    <footer className="window-status-bar" style={{ position: 'fixed', left: 0, right: 0, bottom: 0 }}><GlobalSystemNotices /></footer>
   </div></SettingsNavigation.Provider></DesktopClientUiProvider>
 }
 Object.assign(window, { remoteUpgradePreview: { ready: true, calls, copied, setMode: (value: typeof mode) => { mode = value }, releaseCheck: () => { const release = releaseCheck; releaseCheck = undefined; release?.() },

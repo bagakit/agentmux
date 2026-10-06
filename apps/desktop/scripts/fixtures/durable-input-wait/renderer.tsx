@@ -2,19 +2,13 @@ import { createRoot } from 'react-dom/client'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { AgentSessionComposer } from '../../../src/renderer/src/components/AgentSessionComposer'
-import { TransientErrorNotice } from '../../../src/renderer/src/components/TransientErrorNotice'
+import { GlobalSystemNotices } from '../../../src/renderer/src/components/GlobalSystemNotices'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import '../../../src/renderer/src/styles/index.css'
 
 let disposeStartup: (() => void) | undefined
 const root = createRoot(document.querySelector('#composer')!)
 const noticeRoot = createRoot(document.querySelector('#notices')!)
-function OriginalNotice() {
-  const error = useAppStore(state => state.error), lastError = useAppStore(state => state.lastError)
-  const dismissed = useAppStore(state => state.errorDismissed), context = useAppStore(state => state.errorNoticeContext)
-  return <TransientErrorNotice error={error} lastError={lastError} dismissed={dismissed} summary={context?.summary}
-    kind={context?.kind} onDismiss={() => useAppStore.getState().dismissError()} onReopen={() => useAppStore.getState().reopenError()} />
-}
 const observedErrors: any[] = []
 const reportOriginalError = useAppStore.getState().reportError
 useAppStore.setState({ reportError(error: any, context: any) {
@@ -26,7 +20,7 @@ Object.assign(window, { waitProof: {
     disposeStartup = await useAppStore.getState().initialize()
     useAppStore.setState({ config, sessions: [session], loading: false, agentSteerQueues: {}, agentSteerInFlight: {}, agentSteerInFlightPhase: {} } as never)
     root.render(<DesktopClientUiProvider><AgentSessionComposer sessionId={session.id} /></DesktopClientUiProvider>)
-    noticeRoot.render(<OriginalNotice />)
+    noticeRoot.render(<GlobalSystemNotices />)
   },
   draft(sid: string, body: string) { useAppStore.getState().setAgentComposerDraft(sid, body) },
   entries(sid: string) { return structuredClone(useAppStore.getState().agentSteerQueues[sid] ?? []) },
