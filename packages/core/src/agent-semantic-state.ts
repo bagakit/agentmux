@@ -16,14 +16,12 @@ export function transitionAgentSemanticStatus(
     ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }) }
 }
 
-/** Input consumes idle evidence; it does not prove a new semantic state or recent activity. */
+/** Semantic submission consumes idle evidence; raw terminal ACKs do not. */
 export function invalidateAgentIdleEvidence(
-  current: AgentMuxStoredAgentSession,
-  expectedStateEnteredAt?: number
+  current: AgentMuxStoredAgentSession
 ): AgentMuxStoredAgentSession {
   const status = current.semanticStatus
-  if (status?.state !== 'done' || (status.idleEvidenceConsumed && status.aggregateActivityAt === undefined) ||
-      (expectedStateEnteredAt !== undefined && status.stateEnteredAt !== expectedStateEnteredAt)) return current
+  if (status?.state !== 'done' || (status.idleEvidenceConsumed && status.aggregateActivityAt === undefined)) return current
   const { stateEnteredAt: _consumedEntryTime, aggregateActivityAt: _consumedChildActivity, ...semanticStatus } = status
   return { ...current, semanticStatus: { ...semanticStatus, idleEvidenceConsumed: true,
     currentActivityRevision: (status.currentActivityRevision ?? 0) + 1 } }
