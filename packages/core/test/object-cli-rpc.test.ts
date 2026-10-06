@@ -33,6 +33,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     const nativeSource = { nativeHandle: { kind: 'provider', providerId: 'private', sessionId: 'saved-native',
       transcriptPath: join(fixture.root, 'saved-native.jsonl') }, workspacePath: fixture.root, revision: 'a'.repeat(64) }
     const stdinByMethod: Record<string, string> = {
+      'connection.configure': JSON.stringify({ operationId: 'connection-save', expectedRevision: null, connection: { connectionId: 'connection-a', adapterId: 'sample', application: { domain: 'chat.example', appId: 'app-a' }, label: 'Team', enabled: true, credentialRef: 'credential-a' } }),
       'agent.native.history': JSON.stringify({ hostId: 'local', executorId: 'private', source: nativeSource }),
       'agent.native.history.resource': JSON.stringify({ hostId: 'local', executorId: 'private', nativeSource,
         source: { providerId: 'private', nativeSessionId: 'saved-native' }, recordId: 'original-record',
