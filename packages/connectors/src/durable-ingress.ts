@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError, parseAgentExternalMessageAuthor, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
-import { parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressReadPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
+import { CONNECTION_INGRESS_AUTHORITY_CODES, parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressAuthority, type ConnectionIngressAuthorityCode, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressReadPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 
 /** Returned only by a Host-registered adapter after verifying the original transport proof. */
@@ -45,6 +45,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       CREATE TABLE IF NOT EXISTS connection_ingress_message (sequence INTEGER PRIMARY KEY AUTOINCREMENT, ingress_id TEXT NOT NULL UNIQUE, domain TEXT NOT NULL, app_id TEXT NOT NULL, message_id TEXT NOT NULL, connection_id TEXT NOT NULL, event_json TEXT NOT NULL, record_json TEXT NOT NULL, UNIQUE(domain, app_id, message_id));
       CREATE TABLE IF NOT EXISTS connection_ingress_event (domain TEXT NOT NULL, app_id TEXT NOT NULL, event_id TEXT NOT NULL, ingress_id TEXT NOT NULL, event_json TEXT NOT NULL, raw_payload TEXT NOT NULL, PRIMARY KEY(domain, app_id, event_id));
       CREATE INDEX IF NOT EXISTS connection_ingress_received ON connection_ingress_message(connection_id,sequence) WHERE json_extract(record_json,'$.state')='received';
+      CREATE UNIQUE INDEX IF NOT EXISTS connection_ingress_input_operation ON connection_ingress_message(json_extract(record_json,'$.input.operationId')) WHERE json_extract(record_json,'$.input.operationId') IS NOT NULL;
     `))
   }
   private safe<T>(read: () => T): T {
@@ -173,6 +174,24 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       const inputReceipt = await client.inspectAgentInput({ kind: 'message-control', originalControlOperationId: ingress.input.operationId })
       return parseIngressResult('connection.ingress.inspect', { ingress, inputReceipt, observation: 'observed' }, input)
     } catch { return { ingress, inputReceipt: null, observation: 'unavailable' } }
+  }
+  /** Read only original DB authority. Calling Core here would cycle back into an executing input callback. */
+  async authority(value: { operationId: string }): Promise<ConnectionIngressAuthority> {
+    const input = parseIngressParams('connection.ingress.authority', value)
+    let ingress: ConnectionIngressRecord | null = null
+    try {
+      return this.safe(() => {
+        const row = this.database.prepare("SELECT ingress_id FROM connection_ingress_message WHERE json_extract(record_json,'$.input.operationId')=?").get(input.operationId)
+        ingress = row ? this.read(String(row.ingress_id)) : null
+        if (!ingress?.input || ingress.state !== 'claimed') return { ingress: null, authority: 'refused', code: 'INGRESS_CLAIM_UNAVAILABLE' }
+        this.authorize(ingress, ingress.input)
+        return { ingress, authority: 'current' }
+      })
+    } catch (error) {
+      const code: ConnectionIngressAuthorityCode = error instanceof AgentMuxError && CONNECTION_INGRESS_AUTHORITY_CODES.includes(error.code as never)
+        ? error.code as ConnectionIngressAuthorityCode : 'INGRESS_STORAGE_UNCONFIRMED'
+      return { ingress, authority: code === 'INGRESS_STORAGE_UNCONFIRMED' || code === 'INGRESS_ADDRESSING_UNCONFIRMED' ? 'unavailable' : 'refused', code }
+    }
   }
   /** Explicitly rejoin a positively saved original Core wait; unknown effects are read only. */
   async rejoin(ingressId: string): Promise<ConnectionIngressInspection> {
