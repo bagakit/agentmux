@@ -1951,6 +1951,7 @@ export class AgentMuxClient {
   /** @internal Read-only opening port on this Client's existing metadata owner. Not a wire method. */
   readonly metadata = {
     pendingIds: (): readonly string[] => this.registry.pendingMetadataIds(),
+    resolveRaw: async (agentSessionId: string): Promise<AgentMuxAgentSession> => this.projectSession(await this.resolveRawAgentSession(agentSessionId)),
     read: async (agentSessionId: string, consume: (session: AgentMuxAgentSession | null) => void, signal?: AbortSignal): Promise<void> => {
       await this.registry.readMetadata(agentSessionId, session => {
         const started = !session && this.registry.has(agentSessionId) ? this.registry.get(agentSessionId) : null
@@ -2050,6 +2051,7 @@ export class AgentMuxClient {
   /** Read one exact durable Session binding without starting, attaching or stopping its Run. */
   async refreshAgentSession(agentSessionId: string, expectedRun: AgentMuxRunRef): Promise<AgentMuxAgentSession> {
     this.requireConnected()
+    await this.resolveRawAgentSession(agentSessionId)
     const session = await this.registry.refresh(agentSessionId, expectedRun)
     this.hookNativeWitnesses.delete(session.run.runId)
     this.queueNativeIdentityCapture(session)
@@ -4294,7 +4296,7 @@ export class AgentMuxClient {
   async observeAgentOutput(agentSessionId: string, afterByte: number,
     listener: (event: AgentMuxClientEvent) => void): Promise<AgentMuxAgentAttachment & { close(): Promise<void> }> {
     this.requireConnected()
-    const session = this.requireAgentSession(agentSessionId)
+    const session = await this.resolveRawAgentSession(agentSessionId)
     const publisher = new AgentMuxClientEventPublisher()
     publisher.onEvent(listener)
     const off = this.publisher.onStatusEvent(event => {
@@ -4361,7 +4363,7 @@ export class AgentMuxClient {
     observationOrigin?: AgentMuxObservationOrigin
   ): Promise<{ session: AgentMuxStoredAgentSession; attached: CtxmuxAdapterAttachment }> {
     this.requireConnected()
-    const session = this.requireAgentSession(agentSessionId)
+    const session = await this.resolveRawAgentSession(agentSessionId)
     const validate = (snapshot: CtxmuxAdapterAttachment): void => {
       const current = this.requireAgentSession(agentSessionId)
       if (current.run.runId !== session.run.runId) {
@@ -5061,7 +5063,7 @@ export class AgentMuxClient {
 
   async writeAgent(input: AgentMuxAgentWriteInput): Promise<AgentMuxRunInputAck> {
     this.requireConnected()
-    const session = this.requireAgentSession(input.agentSessionId)
+    const session = await this.resolveRawAgentSession(input.agentSessionId)
     if (!sameRun(session.run, input.expectedRun)) {
       throw new AgentMuxError('Agent Session changed before native input.', 'STALE_AGENT_SESSION')
     }
@@ -5073,7 +5075,7 @@ export class AgentMuxClient {
 
   async pasteAgent(input: AgentMuxAgentPasteInput): Promise<AgentMuxRunInputAck> {
     this.requireConnected()
-    const session = this.requireAgentSession(input.agentSessionId)
+    const session = await this.resolveRawAgentSession(input.agentSessionId)
     if (!sameRun(session.run, input.expectedRun)) {
       throw new AgentMuxError('Agent Session changed before paste.', 'STALE_AGENT_SESSION')
     }
@@ -5971,7 +5973,7 @@ export class AgentMuxClient {
     rows: number
   ): Promise<AgentMuxRunAppliedSize> {
     this.requireConnected()
-    const session = this.requireAgentSession(agentSessionId)
+    const session = await this.resolveRawAgentSession(agentSessionId)
     if (!sameRun(session.run, expectedRun)) {
       throw new AgentMuxError(
         'Agent Session changed before its Run was resized.',
@@ -6024,7 +6026,7 @@ export class AgentMuxClient {
 
   async signalAgent(agentSessionId: string, expectedRun: AgentMuxRunRef, signal: string): Promise<void> {
     this.requireConnected()
-    const session = this.requireAgentSession(agentSessionId)
+    const session = await this.resolveRawAgentSession(agentSessionId)
     if (!sameRun(session.run, expectedRun)) {
       throw new AgentMuxError('Agent Session changed before its Run was interrupted.', 'STALE_AGENT_SESSION')
     }
@@ -7906,6 +7908,14 @@ export class AgentMuxClient {
 
   private requireAgentSession(agentSessionId: string): AgentMuxStoredAgentSession {
     return this.registry.get(agentSessionId)
+  }
+
+  private async resolveRawAgentSession(agentSessionId: string): Promise<AgentMuxStoredAgentSession> {
+    const epoch = this.connectionEpoch
+    return await this.registry.resolveMetadata(agentSessionId, 'local', () => {
+      this.assertConnectionEpoch(epoch)
+      this.requireConnected()
+    })
   }
 
   /** A cancelled Hook must finish draining even if its read-only Runtime query never replies. */
