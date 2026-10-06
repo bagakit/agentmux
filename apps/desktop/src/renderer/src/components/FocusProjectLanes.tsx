@@ -9,6 +9,7 @@ import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { useAppStore } from '../store'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { formatRelativeAge } from '../lib/relative-age'
+import type { FocusLaneOrigin } from '../lib/focus-lane-origin'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeObjectIdentifierIcon = semanticIconComponent('object.identifier')
@@ -16,7 +17,8 @@ const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 
 
-export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, onSelect, renderLane, rowsRef, recentProjects = [], onRead, visible = true }: {
+export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, onSelect, renderLane, rowsRef, recentProjects = [], onRead, visible = true, origins }: {
+  origins?: ReadonlyMap<string, FocusLaneOrigin>
   visible?: boolean
   rowsRef?: Ref<HTMLDivElement>
   lanes: readonly FocusProjectLane[]; selectedProjectKey: string
@@ -36,9 +38,10 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, on
   }, [visible])
   return <section className="focus-project-lanes" aria-label="Project contexts">
     <div className="focus-project-lanes__rows" ref={rowsRef}>
-      {lanes.map(lane => <article className={`focus-project-lanes__row${selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId) ? ' is-selected' : ''}`} data-focus-current={currentLaneId === lane.id || undefined} data-project-id={lane.projectId} data-project-key={focusProjectKey(lane.hostId, lane.projectId)} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
+      {lanes.map(lane => <article className={`focus-project-lanes__row${selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId) ? ' is-selected' : ''}`} data-focus-source={origins?.get(lane.id)?.kind} data-focus-current={currentLaneId === lane.id || undefined} data-project-id={lane.projectId} data-project-key={focusProjectKey(lane.hostId, lane.projectId)} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
         <div className="focus-project-lanes__track">{renderLane(lane,
         <span className="focus-project-lanes__heading">
+          <FocusProjectOrigin origin={origins?.get(lane.id)} />
           <button type="button" className="focus-project-lanes__axis" aria-current={currentLaneId === lane.id ? 'location' : undefined} aria-pressed={selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId)} title={[`${lane.name} · ${lane.activeAgentIds.length} live`, hosts?.find(host => host.id === lane.hostId)?.label ?? lane.hostId, displayPath(lane.path, lane.hostId), lane.summary].filter(Boolean).join('\n')} onClick={() => onSelect(focusProjectKey(lane.hostId, lane.projectId))}>
             {lane.objectKind === 'topic' || lane.objectKind === 'mote'
               ? <><SpaceObjectIcon kind={lane.objectKind} name={lane.labels.at(-1)!} topicGlyph manualIcon={lane.objectIconKey ? icons[lane.objectIconKey] ?? null : null} avatarWorkspaceId={lane.workspaceId} avatarTopicId={lane.topicId ?? undefined} avatarObjectKey={lane.objectIconKey} /><span className="focus-project-lanes__label"><strong>{lane.labels.at(-1)}</strong></span></>
@@ -58,6 +61,13 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, on
     </div>
     {lanes.length === 0 && recentProjects.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
   </section>
+}
+
+function FocusProjectOrigin({ origin }: { origin: FocusLaneOrigin | undefined }) {
+  if (!origin || origin.kind === 'project') return null
+  return <span className="focus-project-lanes__source" title={[origin.label, ...(origin.addresses.length ? origin.addresses : origin.locations)].join('\n')}>
+    {origin.label}{origin.locations.length ? <span> · {origin.locations.join(' / ')}</span> : null}
+  </span>
 }
 
 function FocusProjectActivity({ at, now }: { at: number | null; now: number }) {
