@@ -7,6 +7,7 @@ import { settingsNavGroups } from '../src/renderer/src/components/settings/setti
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM, composerConfig } from './helpers/composer-dom-fixture'
+import { COMPOSER_KEYBOARD_BINDINGS } from '@agentmux/client-ui/composer-keyboard'
 
 const dom = composerDOM()
 beforeEach(() => useAppStore.setState({ config: { ...composerConfig,
@@ -20,6 +21,22 @@ async function fill(selector: string, value: string) {
     node.dispatchEvent(new Event('input', { bubbles: true }))
   })
 }
+
+it('the mounted local and global manuals expose the same actual Message Tool gestures without a second config editor', async () => {
+  const save = vi.spyOn(api.config, 'save')
+  await dom.render(<SettingsPanel initialSection="message-tool" onClose={() => {}} />)
+  const local = dom.container.querySelector('[data-message-tool-settings]')!
+  const ids = COMPOSER_KEYBOARD_BINDINGS.map(binding => binding.id)
+  expect(ids.length).toBeGreaterThan(0)
+  expect([...local.querySelectorAll<HTMLElement>('[data-binding-id]')].map(row => row.dataset.bindingId)).toEqual(ids)
+  expect(local.querySelector('[data-shortcut-group="terminal"]')).toBeNull()
+  expect(local.querySelector('[data-binding-id="message-tool.send-immediately"]')?.textContent).toContain('Does not interrupt')
+  await dom.click('[data-settings-target="keyboard-shortcuts"]')
+  const global = dom.container.querySelector('[data-settings-pane="keyboard-shortcuts"]')!
+  expect([...global.querySelectorAll<HTMLElement>('[data-shortcut-group="message-tool"] [data-binding-id]')].map(row => row.dataset.bindingId)).toEqual(ids)
+  expect(global.querySelector('[data-settings-save-bar]')).toBeNull()
+  expect(save).not.toHaveBeenCalled()
+})
 
 it('groups Input & Mailbox and the original Prompts once across the real catalog, Overview, navigation and search', async () => {
   const groups = settingsNavGroups('')
