@@ -139,8 +139,8 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
       <button disabled={inputState.mode !== 'control'} aria-expanded={sizeOpen} onClick={() => { setCols(String(terminal.current?.cols ?? 80)); setRows(String(terminal.current?.rows ?? 24)); setSizeOpen(value => !value) }}>PTY 尺寸</button>
     </div>}
     {inputState.mode === 'control' && <div className="mobile-terminal-keys" aria-label="终端常用按键">
-      {([['Esc', '\x1b'], ['Tab', '\t'], ['Ctrl-C', '\x03'], ['↑', '\x1b[A'], ['↓', '\x1b[B'], ['←', '\x1b[D'], ['→', '\x1b[C'], ['Enter', '\r']] as const).map(([label, data]) =>
-        <button key={label} disabled={inputState.phase === 'unknown' || connection.state !== 'connected'} aria-label={`终端 ${label}`} onClick={() => terminal.current?.input(data, true)}>{label}</button>)}
+      {([['Esc', '\x1b', null], ['Tab', '\t', null], ['Ctrl-C', '\x03', null], ['↑', '\x1b[A', 'control.key-up'], ['↓', '\x1b[B', 'control.key-down'], ['←', '\x1b[D', 'control.key-left'], ['→', '\x1b[C', 'control.key-right'], ['Enter', '\r', null]] as const).map(([label, data, icon]) =>
+        <button key={label} disabled={inputState.phase === 'unknown' || connection.state !== 'connected'} aria-label={`终端 ${label}`} onClick={() => terminal.current?.input(data, true)}>{icon ? <SemanticIcon name={icon} size={16} /> : label}</button>)}
     </div>}
     {sizeOpen && <form className="mobile-terminal-size" onSubmit={event => {
       event.preventDefault(); if (control.current?.resize(Number(cols), Number(rows))) setSizeOpen(false)
