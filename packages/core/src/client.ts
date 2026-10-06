@@ -3268,7 +3268,7 @@ export class AgentMuxClient {
     const durable = await this.currentStoredAgentSession(agentSessionId)
     // The SessionStore enforces durable Run uniqueness; this exact refresh also
     // checks the original registry bindings before observing that one Run.
-    let session: AgentMuxAgentSession = await this.registry.refresh(agentSessionId, durable.run)
+    let session: AgentMuxAgentSession = this.projectSession(await this.registry.refresh(agentSessionId, durable.run))
     const run = await this.requireCurrentAgentRun(session)
     if (run.state.type === 'running') {
       await this.ensureNativeStatusObservation(session)
