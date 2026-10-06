@@ -11,7 +11,7 @@ import { readSurveyPresentation } from '../../desktop/src/renderer/src/lib/mobil
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
 import { parseSpaceControlSuccessReceipt } from '../../../packages/core/src/space-control-parser'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
-import { newNoteDocument, readNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 const mounted: { root: Root; element: HTMLElement }[] = [], resources: { files: WorkspaceFiles; path: string }[] = []
@@ -25,13 +25,13 @@ async function fixture(initialContext?: MobileSurveyContext) {
   await mkdir(join(path, 'docs'))
   await writeFile(join(path, 'docs/first.md'), '# 首个无关文件\n\n不能替代原选择。')
   await writeFile(join(path, 'docs/original.md'), '# 准确原 Markdown\n\n原文件的完整正文。')
-  await writeFile(join(path, 'docs/original.note.json'), JSON.stringify(newNoteDocument('准确原 Note 正文', 'note-original-owner', 'block-original-owner')))
+  await writeFile(join(path, 'docs/original.note.md'), serializeNoteDocument(newNoteDocument('准确原 Note 正文', 'note-original-owner', 'block-original-owner')))
   const workspace = { id: 'workspace-original-owner', hostId: 'local', name: '原资料', path, kind: 'folder' as const }
   const zone = { zoneId: 'zone-original-owner', workspaceId: workspace.id, kind: 'directory' as const, hostId: workspace.hostId, directoryPath: join(path, 'docs'), branch: null }
   const tabId = 'tab-original-owner'
   let original: AgentMuxSpaceCatalog = { spaces: [], zones: [zone], tabs: [{ tabId, zoneId: zone.zoneId, workspaceId: workspace.id, name: '准确原工作面', regionIds: ['first-region', 'original-region', 'note-region', 'browser-region'] }],
     regions: ['first', 'original', 'note'].map((name, index) => ({ regionId: ['first-region', 'original-region', 'note-region'][index]!, tabId, kind: 'file', agentSessionId: null, runId: null, execution: null,
-      file: { workspaceId: workspace.id, path: name === 'note' ? 'docs/original.note.json' : `docs/${name}.md`, zoneRelativePath: name === 'note' ? 'original.note.json' : `${name}.md` } })), bindings: [], locations: [] }
+      file: { workspaceId: workspace.id, path: name === 'note' ? 'docs/original.note.md' : `docs/${name}.md`, zoneRelativePath: name === 'note' ? 'original.note.md' : `${name}.md` } })), bindings: [], locations: [] }
   original.regions.push({ regionId: 'browser-region', tabId, kind: 'browser', browserId: 'browser-original-owner', agentSessionId: null, runId: null, execution: null })
   original.locations = original.regions.flatMap(region => ['display-first', 'display-exact-second'].map(displayWorkspaceId => ({ spaceId: null, zoneId: zone.zoneId, workspaceId: workspace.id, displayWorkspaceId, groupId: 'group-original', tabId, regionId: region.regionId })))
   const state = { surveyCollectedZones: { [zone.zoneId]: true }, surveyExplorationNames: { [zone.zoneId]: '原研究目录' }, surveyZoneSelection: { zoneId: zone.zoneId, selection: [{ tabId, regionId: 'first-region' }], active: { tabId, regionId: 'first-region' } }, tabs: { [tabId]: { id: tabId, regions: {} } } } as any
@@ -99,20 +99,20 @@ describe('T-007 original Survey selected content frame', () => {
   })
   it('keeps the exact mounted Note editor and unknown save across Region back and a different Browser, without retrying or selecting the first file', async () => {
     const view = await fixture()
-    await view.click('原研究目录'); await view.click('original.note.json'); await view.click('编辑原笔记')
+    await view.click('原研究目录'); await view.click('original.note.md'); await view.click('编辑原笔记')
     await view.edit('本机未确认保存的原补充')
     const originalEditor = view.editor(), registrations = view.back.mock.calls.length
     await view.edit('后来编辑不重注册Back'); expect(view.back.mock.calls).toHaveLength(registrations)
     view.failReceipt(); await view.click('保存原笔记')
     await vi.waitFor(() => expect(view.element.textContent).toContain('保存回执未知'))
-    const saved = readNoteDocument(await readFile(join(view.path, 'docs/original.note.json'), 'utf8'))
+    const saved = readNoteDocument(await readFile(join(view.path, 'docs/original.note.md'), 'utf8'))
     expect(saved.status).toBe('valid'); expect(JSON.stringify(saved)).toContain('本机未确认保存的原补充')
     expect(JSON.stringify(saved)).toContain('note-original-owner'); expect(JSON.stringify(saved)).toContain('block-original-owner')
     const reads = view.fileRead.mock.calls.length
     await view.stepBack(); await view.click('查看原网页')
     expect(view.element.querySelector('a')?.href).toBe('http://original.example/read')
     expect(view.element.textContent).toContain('不控制 Mac 原 Browser')
-    await view.stepBack(); await view.click('original.note.json')
+    await view.stepBack(); await view.click('original.note.md')
     expect(view.editor()).toBe(originalEditor); expect(view.editor().textContent).toContain('后来编辑不重注册Back')
     expect(view.fileRead).toHaveBeenCalledTimes(reads); expect(view.fileWrite).toHaveBeenCalledTimes(1)
     expect(view.element.textContent).toContain('保存回执未知')

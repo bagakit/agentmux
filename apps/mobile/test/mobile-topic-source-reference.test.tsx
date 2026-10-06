@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { AgentMuxRpcService, type ExecutionHost } from '@agentmux/core'
 import { parseFileListResult, parseFileReadResult } from '@agentmux/core/files'
-import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { FileReadOwner } from '../../desktop/src/main/file-read-owner'
 import { WorkspaceFiles } from '../../desktop/src/main/workspace-files'
 import { MobileTopicSource, type MobileTopicSourceProps } from '../src/topics/MobileTopicSource'
@@ -68,16 +68,16 @@ describe('source content references without saved bodies or substituted resource
     expect(() => parseMobileTopicSourceContentReference({ kind: 'file', trail: [{ ...filePin('docs'), target: { ...filePin('docs').target, path: '../second.md' } }] }, source)).toThrow()
     expect(() => parseMobileTopicSourceContentReference(reference, { kind: 'notebook', notebookId: 'original-book' })).toThrow()
     expect(() => parseMobileTopicSourceContentReference({ kind: 'file', trail: [{ ...filePin('docs'), resource: { ...filePin('docs').resource, path: 'another.md' } }] }, source)).toThrow()
-    const mapping = { noteId: 'second-note', blockId: 'second-block', resource: { ...expectedResource, path: 'second.note.json' }, workface: { zoneId: zone.zoneId, workspaceId: workspace.workspaceId } }
-    const note = { kind: 'note' as const, mapping, trail: [filePin('second.note.json')] }
+    const mapping = { noteId: 'second-note', blockId: 'second-block', resource: { ...expectedResource, path: 'second.note.md' }, workface: { zoneId: zone.zoneId, workspaceId: workspace.workspaceId } }
+    const note = { kind: 'note' as const, mapping, trail: [filePin('second.note.md')] }
     expect(parseMobileTopicSourceContentReference(note, { kind: 'note', noteId: mapping.noteId, blockId: mapping.blockId })).toEqual(note)
     expect(() => parseMobileTopicSourceContentReference(note, { kind: 'note', noteId: 'other-note', blockId: mapping.blockId })).toThrow()
-    expect(() => parseMobileTopicSourceContentReference({ ...note, trail: [filePin('first.note.json')] }, { kind: 'note', noteId: mapping.noteId, blockId: mapping.blockId })).toThrow()
+    expect(() => parseMobileTopicSourceContentReference({ ...note, trail: [filePin('first.note.md')] }, { kind: 'note', noteId: mapping.noteId, blockId: mapping.blockId })).toThrow()
   })
 
   it('rejects a second independently valid File resource under the same original Note ID', () => {
-    const mapping = { noteId: 'second-note', resource: { ...expectedResource, path: 'second.note.json' }, workface: { zoneId: zone.zoneId, workspaceId: workspace.workspaceId } }
-    const first = filePin('second.note.json'), copy = filePin('same-note-copy.note.json')
+    const mapping = { noteId: 'second-note', resource: { ...expectedResource, path: 'second.note.md' }, workface: { zoneId: zone.zoneId, workspaceId: workspace.workspaceId } }
+    const first = filePin('second.note.md'), copy = filePin('same-note-copy.note.md')
     // Each resource is valid in the original Files protocol. The Source Note contract rejects the second file.
     for (const pin of [first, copy]) expect(parseFileReadResult({ resource: pin.resource, result: { status: 'directory' } }, pin.target).resource).toEqual(pin.resource)
     const reference = { kind: 'note' as const, mapping, trail: [first, copy] }
@@ -125,7 +125,7 @@ describe('source content references without saved bodies or substituted resource
     await click(first.element, 'second.md')
     await waitFor(() => expect(first.element.querySelector('article h1')?.textContent).toBe('准确第二文件'))
     expect(record!.kind).toBe('file')
-    if (record!.kind !== 'file') throw new Error('The original Source must save a File trail')
+    if (!record || record.kind !== 'file') throw new Error('The original Source must save a File trail')
     expect(record!.trail.map(item => item.target.path)).toEqual(['docs', 'docs/second.md'])
     expect(JSON.stringify(record)).not.toContain('原 owner 的非空正文')
     await unmount(first.element)
@@ -174,11 +174,11 @@ describe('source content references without saved bodies or substituted resource
 
   it('restores the second Notebook Note with its original unknown input, later draft and block identity after remount', async () => {
     const actual = await actualFiles(true), noteId = 'second-note'
-    const note = (id: string, text: string) => JSON.stringify({ schema: 'agentmux.note.v1', noteId: id, content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: `${id}-block` }, content: [{ type: 'text', text }] }] } })
-    await writeFile(join(actual.path, 'first.note.json'), note('first-note', '不自动选择的第一页'))
-    await writeFile(join(actual.path, 'second.note.json'), note(noteId, '准确原第二页'))
+    const note = (id: string, text: string) => serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: id, content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: `${id}-block` }, content: [{ type: 'text', text }] }] } })
+    await writeFile(join(actual.path, 'first.note.md'), note('first-note', '不自动选择的第一页'))
+    await writeFile(join(actual.path, 'second.note.md'), note(noteId, '准确原第二页'))
     const pages = ['first', 'second'].map(name => ({ noteId: `${name}-note`, title: name === 'first' ? '第一页' : '第二页', resource: {
-      ...expectedResource, workspacePath: actual.path, path: `${name}.note.json` }, workface: { zoneId: zone.zoneId, workspaceId: workspace.workspaceId } }))
+      ...expectedResource, workspacePath: actual.path, path: `${name}.note.md` }, workface: { zoneId: zone.zoneId, workspaceId: workspace.workspaceId } }))
     const call = vi.fn(async (method: string, params: any) => method === 'notebook.inspect' ? { notebook: { notebookId: 'original-book', name: '原笔记本' }, pages: params.noteId ? pages.filter(page => page.noteId === params.noteId) : pages }
       : method === 'app.snapshot' ? { workspaces: [actual.originalWorkspace], unavailable: [] }
         : method === 'space.ls' ? { catalog: { zones: [actual.originalZone] } } : actual.service.call(method as any, params))
@@ -187,7 +187,7 @@ describe('source content references without saved bodies or substituted resource
     const props = { ...callbacks(), source: original, rpc: call as unknown as TopicsRpc,
       onReferenceChange: (value: MobileTopicSourceContentReference) => { record = parseMobileTopicSourceContentReference(value, original) } }
     const first = await mount(<MobileTopicSource {...props} />)
-    await click(first.element, '第二页second.note.json')
+    await click(first.element, '第二页second.note.md')
     await waitFor(() => expect(first.element.querySelector('[data-note-id]')?.getAttribute('data-note-id')).toBe(noteId))
     await click(first.element, '编辑原笔记')
     const editor = first.element.querySelector<HTMLElement>('[contenteditable="true"]') as HTMLElement & { editor: { commands: { insertContent(text: string): void } } }
@@ -200,6 +200,7 @@ describe('source content references without saved bodies or substituted resource
     expect(draft.attempt.phase).toBe('unknown'); expect(draft.attempt.content).toContain('明确写入的原未知稿')
     expect(draft.attempt.content).not.toContain('后来未发送稿'); expect(draft.draft).toContain('后来未发送稿')
     expect(record!.kind === 'notebook' && record!.selectedNote?.noteId).toBe(noteId)
+    if (!record || record.kind !== 'notebook') throw new Error('The original Source must save its Notebook Note reference')
     await unmount(first.element)
     const before = call.mock.calls.length
     const reopened = await mount(<MobileTopicSource {...props} initialReference={record} />)
@@ -208,9 +209,9 @@ describe('source content references without saved bodies or substituted resource
     expect(newEditor).not.toBe(editor); expect(newEditor.textContent).toContain('后来未发送稿')
     expect(reopened.element.querySelector('[data-block-id="second-note-block"]')).not.toBeNull()
     expect(reopened.element.textContent).toContain('原保存回执未确认')
-    expect(call.mock.calls.slice(before).filter(([method]) => method === 'file.read').map(([, params]) => params.path)).toEqual(['second.note.json'])
+    expect(call.mock.calls.slice(before).filter(([method]) => method === 'file.read').map(([, params]) => params.path)).toEqual(['second.note.md'])
     expect(call.mock.calls.filter(([method]) => method === 'file.write')).toHaveLength(1)
-    const saved = readNoteDocument(await readFile(join(actual.path, 'second.note.json'), 'utf8'))
+    const saved = readNoteDocument(await readFile(join(actual.path, 'second.note.md'), 'utf8'))
     expect(saved.status === 'valid' && saved.note.noteId).toBe(noteId)
     expect(JSON.stringify(saved)).not.toContain('后来未发送稿')
   })
@@ -218,10 +219,10 @@ describe('source content references without saved bodies or substituted resource
   it('does not replace a restored second Note with the first page or a same-ID different resource', async () => {
     const original = { kind: 'notebook' as const, notebookId: 'original-book' }
     const saved: MobileTopicSourceContentReference = { kind: 'notebook', selectedNote: { noteId: 'second-note', resource: {
-      ...expectedResource, path: 'second.note.json' }, workface: { zoneId: zone.zoneId, workspaceId: workspace.workspaceId }, trail: [] } }
+      ...expectedResource, path: 'second.note.md' }, workface: { zoneId: zone.zoneId, workspaceId: workspace.workspaceId }, trail: [] } }
     const call = vi.fn(async () => ({ notebook: { notebookId: original.notebookId, name: '原笔记本' }, pages: [
-      { noteId: 'first-note', title: '第一页', resource: { ...expectedResource, path: 'first.note.json' } },
-      { noteId: 'second-note', title: '第二页', resource: { ...expectedResource, path: 'wrong/second.note.json' }, workface: { zoneId: zone.zoneId, workspaceId: workspace.workspaceId } }] }))
+      { noteId: 'first-note', title: '第一页', resource: { ...expectedResource, path: 'first.note.md' } },
+      { noteId: 'second-note', title: '第二页', resource: { ...expectedResource, path: 'wrong/second.note.md' }, workface: { zoneId: zone.zoneId, workspaceId: workspace.workspaceId } }] }))
     const props = { ...callbacks(), source: original, rpc: call as unknown as TopicsRpc, initialReference: saved }
     const view = await mount(<MobileTopicSource {...props} />)
     expect(view.element.querySelector('[aria-label="原笔记页待核实"]')?.textContent).toContain('映射尚未确认或已改变')
