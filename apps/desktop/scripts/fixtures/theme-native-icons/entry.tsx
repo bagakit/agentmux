@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { useEffect, useRef, useState } from 'react'
 import * as monaco from 'monaco-editor'
+import { MONACO_THEME_ID } from '../../../src/renderer/src/lib/monaco-theme'
 import { FileSourceEditor } from '../../../src/renderer/src/components/FileSourceEditor'
 import { GitDiffCanvas } from '../../../src/renderer/src/features/git/diff/GitDiffCanvas'
 import { ExcalidrawFilePreview } from '../../../src/renderer/src/components/file-preview/ExcalidrawFilePreview'
@@ -18,7 +19,10 @@ const source = `function originalWorkspace() {\n  const preserved = "draft";\n  
 useAppStore.setState({ config: { appearance: { appAppearance: 'light', editorFontSize: 14 } }, documents: { [key]: { path: 'source.ts', content: source, revision: 'private-v1' } } } as never)
 const custom = structuredClone(GRAPHITE_THEME)
 custom.id = 'custom.native-icons'; custom.name = 'Native icon proof'
+custom.variants.light.colors.surface0 = '#fff8ed'; custom.variants.light.colors.text = '#23364e'
+custom.variants.light.colors.info = '#246899'; custom.variants.light.colors.danger = '#ac3838'
 custom.icons = {
+  'control.select-open': { kind: 'glyph', glyph: 'gem' },
   'editor.match-case': { kind: 'paths', paths: [{ d: 'M3 3 L21 3 L12 21 Z' }] },
   'editor.fold': { kind: 'glyph', glyph: 'circle-help' },
   'editor.symbol-method': { kind: 'glyph', glyph: 'gem' },
@@ -66,13 +70,14 @@ function Fixture() {
       <div id="source-host"><FileSourceEditor tabId="proof" surface={{ regionId: 'source-proof', kind: 'file', workspaceId: 'icons-proof', path: 'source.ts' }} viewState={state} /></div>
       <div><ExcalidrawFilePreview content={scene} /></div>
     </section>
-    <section><GitDiffCanvas theme="vs" wordWrap={false} language="typescript" diff={{ loading: false, error: null, diff: {
+    <section><GitDiffCanvas theme={MONACO_THEME_ID} wordWrap={false} language="typescript" diff={{ loading: false, error: null, diff: {
       binary: false, old: { present: true, binary: false, text: 'const before = 1;\n' }, new: { present: true, binary: false, text: 'const after = 2;\n' }, path: 'diff.ts', status: 'modified'
     } as never }} /></section>
   </main>
 }
 createRoot(document.getElementById('root')!).render(<Fixture />)
 Object.assign(window, { nativeIconProof: {
+  consumeOwnerAppearance: (appearance: import('../../../src/shared/contracts').AppearanceConfig) => updateThemeSelection(appearance),
   sourceEditor: () => monaco.editor.getEditors().find(editor => editor.getModel()?.uri.scheme === 'agentmux-file'),
   facts: () => ({ models: monaco.editor.getModels().length, editors: monaco.editor.getEditors().length,
     value: monaco.editor.getEditors().find(editor => editor.getModel()?.uri.scheme === 'agentmux-file')?.getValue(),
