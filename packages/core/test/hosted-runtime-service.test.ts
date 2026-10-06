@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
@@ -23,7 +24,7 @@ function fixture() {
     nativeService: null,
     runId: 'original-run', kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
     workspacePath: fixturePath("private-workspace"), pid: 421, state: 'running', cols: 100, rows: 30,
-    observedAt: 1, latestOutputBytes: 0, acceptedInputBytes: 0
+    observedAt: reshapeFixtureEpoch(0, 0, 1), latestOutputBytes: 0, acceptedInputBytes: 0
   }, replay: [], gap: null, terminal: { type: 'not-requested' }, resizeRevision: 0 }
   const core = {
     connect: vi.fn(async () => {}),
@@ -48,7 +49,7 @@ function fixture() {
   }
   const invoke = (consumerId: string, method: string, args: unknown[]) => service.call('runtime.invoke', { fence, consumerId, invocation: { method, args } })
   const output = (runId: string) => eventListener!({ type: 'terminal-output', run: { runId }, data: 'x', dataBytes: Uint8Array.of(120),
-    evidence: { source: 'terminal-output', observedAt: 2, run: { runId }, outputByteRange: { startByte: 0, endByte: 1 } } })
+    evidence: { source: 'terminal-output', observedAt: reshapeFixtureEpoch(0, 0, 2), run: { runId }, outputByteRange: { startByte: 0, endByte: 1 } } })
   return { core, service, eventsA, eventsB, subscribe, invoke, output, emit: (event: AgentMuxClientEvent) => eventListener!(event) }
 }
 
@@ -96,12 +97,33 @@ function watchedEventPort(service: AgentMuxHostedRuntimeService) {
 
 describe('failed Hosted event lease release', () => {
   const original = { kind: 'agent', agentSessionId: 'a123456789012345', providerId: 'codex', executorId: 'codex',
-    hostId: 'local', workspacePath: fixturePath("private-workspace"), run: { runId: 'original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }
+    hostId: 'local', workspacePath: fixturePath("private-workspace"), run: { runId: 'original-run' }, retiredRuns: [], createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
   const corrupt = (handlers: Parameters<AgentMuxHostedRpcPort['subscribe']>[2], shape: string) => {
     if (shape === 'repeated-initial') {
       for (const data of hostedTransfer({ kind: 'initial', value: {} }, 'repeated-initial')) handlers.onEvent({ type: 'snapshot', data })
     } else handlers.onEvent({ type: 'snapshot', data: { transferId: 'invalid-order', index: 1, dataBase64: 'e30=', final: true } })
   }
+
+  it('does not admit a late identity into a disposed consumer when its borrowed port finishes after cancellation', async () => {
+    const f = fixture(), bridge = rpcPort(f.service)
+    const call = bridge.port.call
+    let finish!: () => void
+    bridge.port.call = (async (...args: Parameters<AgentMuxHostedRpcPort['call']>) => {
+      if (args[0] === 'runtime.owner.identity') await new Promise<void>(resolve => { finish = resolve })
+      return await call(...args)
+    }) as AgentMuxHostedRpcPort['call']
+    const client = await connectHostedAgentMux({ rpc: bridge.port, waitForReady: false })
+    const events = vi.fn(); client.onEvent(events)
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    await client.dispose()
+    finish()
+    await vi.waitFor(() => expect(bridge.calls).toHaveLength(1))
+    await Promise.resolve(); await Promise.resolve()
+    expect(client.runtimeOwnerIdentity()).toBeNull()
+    expect(bridge.connections).toEqual([]); expect(events).not.toHaveBeenCalled()
+    expect(f.core.stopTerminal).not.toHaveBeenCalled()
+    await f.service.dispose()
+  })
 
   it.each(['repeated-initial', 'invalid-transfer-order'])('releases %s once and restores observation without replaying input or disturbing another consumer', async shape => {
     const f = fixture(), bridge = watchedEventPort(f.service)
@@ -126,7 +148,7 @@ describe('failed Hosted event lease release', () => {
       expect(f.core.submitAgentPrompt).toHaveBeenCalledTimes(1)
       expect(f.core.stopTerminal).not.toHaveBeenCalled()
       for (const data of hostedTransfer({ kind: 'event', event: { type: 'run-removed', agentSessionId: original.agentSessionId,
-        run: original.run, evidence: { source: 'user', observedAt: 3 } } }, 'stale-removal')) old.handlers.onEvent({ type: 'snapshot', data })
+        run: original.run, evidence: { source: 'user', observedAt: reshapeFixtureEpoch(0, 0, 3) } } }, 'stale-removal')) old.handlers.onEvent({ type: 'snapshot', data })
       old.handlers.onEnd?.(new Error('Late old lease callback'))
       expect(client.agentSessions()).toEqual([original])
       expect(client.runtimeOwnerIdentity()?.availability).toBe('connected')
@@ -222,7 +244,7 @@ describe('semantic Host observation consumers', () => {
     const f = fixture(), bridge = rpcPort(f.service), client = await connectHostedAgentMux({ rpc: bridge.port }), events: AgentMuxClientEvent[] = []
     try {
       client.onEvent(event => events.push(event))
-      f.emit({ type: 'control-endpoint-state', state: 'unavailable', diagnostic: { code: 'ENOSPC', message: 'Untrusted fact' }, evidence: { source: 'run-process', observedAt: 1 } } as AgentMuxClientEvent)
+      f.emit({ type: 'control-endpoint-state', state: 'unavailable', diagnostic: { code: 'ENOSPC', message: 'Untrusted fact' }, evidence: { source: 'run-process', observedAt: reshapeFixtureEpoch(0, 0, 1) } } as AgentMuxClientEvent)
       await vi.waitFor(() => expect(events).toMatchObject([{ type: 'agent-error', code: 'CONTROL_PROTOCOL_ERROR' }]))
       expect(client.runtimeOwnerIdentity()?.availability).toBe('connected')
       await expect(client.runtimeProjection()).resolves.toMatchObject({ hostId: 'local' })
@@ -236,10 +258,10 @@ describe('semantic Host observation consumers', () => {
     client.onEvent(invalid as unknown as (event: AgentMuxClientEvent) => void, { onError: diagnostic })
     client.onEvent(event => { events.push(event) })
     try {
-      const observation: AgentMuxClientEvent = { type: 'process-state', run: { runId: 'original-run' }, state: 'running', pid: 421, evidence: { source: 'run-process', observedAt: 2 } }
+      const observation: AgentMuxClientEvent = { type: 'process-state', run: { runId: 'original-run' }, state: 'running', pid: 421, evidence: { source: 'run-process', observedAt: reshapeFixtureEpoch(0, 0, 2) } }
       f.emit(observation)
       await vi.waitFor(() => expect(events.filter(event => event.type === 'process-state')).toHaveLength(1))
-      f.emit({ ...observation, evidence: { ...observation.evidence, observedAt: 3 } })
+      f.emit({ ...observation, evidence: { ...observation.evidence, observedAt: reshapeFixtureEpoch(0, 0, 3) } })
       await vi.waitFor(() => expect(events.filter(event => event.type === 'process-state')).toHaveLength(2))
       expect(invalid).toHaveBeenCalledOnce()
       expect(diagnostic).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code: 'CLIENT_EVENT_LISTENER_ASYNC' }))
@@ -320,7 +342,7 @@ describe('semantic Host observation consumers', () => {
   })
   it('acquires an exact Agent attachment while general Session observation is unavailable', async () => {
     const f = fixture(), bridge = rpcPort(f.service), subscribe = bridge.port.subscribe
-    const original = { kind: 'agent', agentSessionId: 'a123456789012345', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: fixturePath("private-workspace"), run: { runId: 'original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }
+    const original = { kind: 'agent', agentSessionId: 'a123456789012345', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: fixturePath("private-workspace"), run: { runId: 'original-run' }, retiredRuns: [], createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
     Object.assign(f.core, { agentSession: (id: string) => { expect(id).toBe(original.agentSessionId); return original } })
     bridge.port.subscribe = (async (...args: Parameters<AgentMuxHostedRpcPort['subscribe']>) => {
       if (args[0] === 'runtime.events') throw new Error('Private general observation unavailable')
@@ -342,7 +364,7 @@ describe('semantic Host observation consumers', () => {
     expect(f.core.refreshRunAttachment).toHaveBeenCalledTimes(1)
     expect(f.core.readRunReplay).toHaveBeenCalledTimes(1)
     const state: AgentMuxClientEvent = { type: 'process-state', run: { runId: 'original-run' }, state: 'running', pid: 421,
-      evidence: { source: 'run-process', observedAt: 2, run: { runId: 'original-run' } } }
+      evidence: { source: 'run-process', observedAt: reshapeFixtureEpoch(0, 0, 2), run: { runId: 'original-run' } } }
     f.emit(state)
     await new Promise(resolve => setImmediate(resolve))
     const fact = encodeHostedValue({ type: 'snapshot', data: { event: state } })
@@ -390,12 +412,95 @@ describe('semantic Host observation consumers', () => {
   it('refuses an unattached consumer, another event owner and functions outside the public finite methods', async () => {
     const f = fixture()
     await expect(f.invoke('consumer-a', 'attachTerminal', ['original-run'])).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+    expect(await f.service.releaseConsumer('consumer-a')).toBe(false)
     const first = await f.subscribe('consumer-a', f.eventsA)
     await expect(f.subscribe('consumer-a', f.eventsB)).rejects.toMatchObject({ code: 'CONTROL_OWNER_BUSY' })
     await expect(f.invoke('consumer-a', 'dispose', [])).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
     expect(f.core.refreshRunAttachment).not.toHaveBeenCalled()
     expect(f.eventsA).toEqual([])
     await first.dispose(); await f.service.dispose()
+  })
+  it.each([false, true])('prunes a cancelled pending history observer and releases its late handle once (throwing=%s)', async throwing => {
+    const f = fixture(), controller = new AbortController()
+    let finish!: (observer: Awaited<ReturnType<typeof f.core.observeSessionHistory>>) => void
+    f.core.observeSessionHistory.mockImplementationOnce(async () => await new Promise(resolve => { finish = resolve }))
+    // The source Core event publisher is the real service's diagnostic destination.
+    const diagnostics: unknown[] = []
+    const healthy = await f.subscribe('consumer-healthy', diagnostics)
+    const bridge = rpcPort(f.service)
+    const pending = bridge.port.subscribe('runtime.history-watch', { fence, consumerId: 'consumer-opening',
+      agentSessionId: 'a123456789012345', options: {} }, { signal: controller.signal,
+      onInitial: () => {}, onEvent: () => {}, onEnd: () => {} }).catch(error => error)
+    await vi.waitFor(() => expect(f.core.observeSessionHistory).toHaveBeenCalledOnce())
+    controller.abort(new AgentMuxError('Original history reader cancelled.', 'CONTROL_CANCELLED'))
+    expect(await pending).toMatchObject({ code: 'CONTROL_CANCELLED' })
+    expect(await f.service.releaseConsumer('consumer-opening')).toBe(false)
+    const dispose = vi.fn(() => { if (throwing) throw new Error('Original late history release failed') })
+    finish({ source: { providerId: 'codex', nativeSessionId: 'original-native' }, dispose })
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
+    if (throwing) await vi.waitFor(() => expect(diagnostics).toMatchObject([{ type: 'snapshot', data: { event: {
+      type: 'agent-error', code: 'HOST_OBSERVATION_RELEASE_UNCONFIRMED', message: expect.stringContaining('Original late history release failed')
+    } } }]))
+    else expect(diagnostics).toEqual([])
+    expect(f.core.stopTerminal).not.toHaveBeenCalled()
+    await healthy.dispose(); await f.service.dispose()
+    expect(dispose).toHaveBeenCalledOnce()
+  })
+  it('releases a history handle once when cancellation races its fulfilled admission', async () => {
+    const f = fixture(), controller = new AbortController(), dispose = vi.fn()
+    let finish!: () => void
+    const acquired = new Promise<Awaited<ReturnType<typeof f.core.observeSessionHistory>>>(resolve => {
+      finish = () => resolve({ source: { providerId: 'codex', nativeSessionId: 'original-native' }, dispose })
+    })
+    // Queue cancellation directly after the original promise becomes fulfilled,
+    // before the outer awaited admission can publish its handle.
+    void acquired.then(() => controller.abort(new AgentMuxError('Original observer cancelled.', 'CONTROL_CANCELLED')))
+    f.core.observeSessionHistory.mockImplementationOnce(() => acquired)
+    const pending = f.service.subscribe('runtime.history-watch', { fence, consumerId: 'consumer-racing',
+      agentSessionId: 'a123456789012345', options: {} }, () => {}, { signal: controller.signal }).catch(error => error)
+    await vi.waitFor(() => expect(f.core.observeSessionHistory).toHaveBeenCalledOnce())
+    finish()
+    expect(await pending).toMatchObject({ code: 'CONTROL_CANCELLED' })
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(await f.service.releaseConsumer('consumer-racing')).toBe(false)
+    await f.service.dispose()
+    expect(dispose).toHaveBeenCalledOnce()
+  })
+  it('prunes a cancelled replay-only opening without acquiring or detaching a live attachment', async () => {
+    const f = fixture(), controller = new AbortController()
+    const attachment = await f.core.readRunReplay(); f.core.readRunReplay.mockClear()
+    let finish!: (value: Awaited<ReturnType<typeof f.core.readRunReplay>>) => void
+    f.core.readRunReplay.mockImplementationOnce(async () => await new Promise(resolve => { finish = resolve }))
+    const pending = f.service.subscribe('runtime.replay-watch', { fence, consumerId: 'consumer-replay',
+      target: { kind: 'terminal-run', runId: 'original-run' }, afterByte: 0, view: 'raw' }, () => {}, { signal: controller.signal }).catch(error => error)
+    await vi.waitFor(() => expect(f.core.readRunReplay).toHaveBeenCalledOnce())
+    controller.abort(new AgentMuxError('Original replay reader cancelled.', 'CONTROL_CANCELLED'))
+    expect(await pending).toMatchObject({ code: 'CONTROL_CANCELLED' })
+    expect(await f.service.releaseConsumer('consumer-replay')).toBe(false)
+    finish(attachment)
+    await Promise.resolve(); await Promise.resolve()
+    expect(f.core.refreshRunAttachment).not.toHaveBeenCalled(); expect(f.core.releaseRunAttachment).not.toHaveBeenCalled(); expect(f.core.stopTerminal).not.toHaveBeenCalled()
+    await f.service.dispose()
+  })
+  it('releases a cancelled direct attachment invocation while preserving its independent event consumer', async () => {
+    const f = fixture(), controller = new AbortController(), events = await f.subscribe('consumer-direct', f.eventsA)
+    const attachment = await f.core.refreshRunAttachment()
+    let finish!: () => void
+    f.core.refreshRunAttachment.mockClear()
+    f.core.refreshRunAttachment.mockImplementationOnce(async () => await new Promise(resolve => { finish = () => resolve(attachment) }))
+    const pending = f.service.call('runtime.invoke', { fence, consumerId: 'consumer-direct',
+      invocation: { method: 'attachTerminal', args: ['original-run'] } }, { signal: controller.signal }).catch(error => error)
+    await vi.waitFor(() => expect(f.core.refreshRunAttachment).toHaveBeenCalledOnce())
+    controller.abort(new AgentMuxError('Original direct attachment reader cancelled.', 'CONTROL_CANCELLED'))
+    expect(await pending).toMatchObject({ code: 'CONTROL_CANCELLED' })
+    await expect(f.invoke('consumer-direct', 'submitAgentPrompt', [{}])).resolves.toBeDefined()
+    expect(f.core.submitAgentPrompt).toHaveBeenCalledOnce()
+    await events.dispose()
+    expect(await f.service.releaseConsumer('consumer-direct')).toBe(false)
+    finish()
+    await vi.waitFor(() => expect(f.core.releaseRunAttachment).toHaveBeenCalledExactlyOnceWith({ runId: 'original-run' }))
+    expect(f.core.stopTerminal).not.toHaveBeenCalled()
+    await f.service.dispose()
   })
   it('validates durable Store identity before exposing a confirmed Hosted client', async () => {
     const f = fixture()
@@ -412,13 +517,13 @@ describe('semantic Host observation consumers', () => {
   it('uses terminal retirement facts to remove the exact Session cache while retaining unrelated Sessions', async () => {
     const f = fixture(), bridge = rpcPort(f.service)
     const original = { kind: 'agent', agentSessionId: 'a123456789012345', providerId: 'codex', executorId: 'codex',
-      hostId: 'local', workspacePath: fixturePath("private-workspace"), run: { runId: 'original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }
+      hostId: 'local', workspacePath: fixturePath("private-workspace"), run: { runId: 'original-run' }, retiredRuns: [], createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
     f.core.agentSessions = () => [original, { ...original, agentSessionId: 'b123456789012345', run: { runId: 'unrelated-run' } }] as never
     const client = await connectHostedAgentMux({ rpc: bridge.port })
     expect(client.agentSessions().map(value => value.agentSessionId)).toEqual(['a123456789012345', 'b123456789012345'])
-    f.emit({ type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: 2 } })
+    f.emit({ type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: reshapeFixtureEpoch(0, 0, 2) } })
     expect(client.agentSessions().map(value => value.agentSessionId)).toEqual(['a123456789012345', 'b123456789012345'])
-    f.emit({ type: 'run-removed', agentSessionId: 'a123456789012345', run: { runId: 'original-run' }, evidence: { source: 'user', observedAt: 3 } })
+    f.emit({ type: 'run-removed', agentSessionId: 'a123456789012345', run: { runId: 'original-run' }, evidence: { source: 'user', observedAt: reshapeFixtureEpoch(0, 0, 3) } })
     await vi.waitFor(() => expect(client.agentSessions().map(value => value.agentSessionId)).toEqual(['b123456789012345']))
     await client.dispose(); await f.service.dispose()
   })
@@ -438,7 +543,7 @@ describe('semantic Host observation consumers', () => {
     const events: AgentMuxClientEvent[] = [], message = 'An actual transport and Agent can share this diagnostic text'
     client.onEvent(event => events.push(event))
     f.emit({ type: 'agent-error', agentSessionId: 'a123456789012345', code: 'RUNTIME_UNAVAILABLE', message,
-      evidence: { source: 'agentmux', observedAt: 2, run: { runId: 'original-run' } } })
+      evidence: { source: 'agentmux', observedAt: reshapeFixtureEpoch(0, 0, 2), run: { runId: 'original-run' } } })
     await vi.waitFor(() => expect(events.filter(event => event.type === 'agent-error')).toHaveLength(1))
     await bridge.connections[0]!.close(new AgentMuxError(message, 'RUNTIME_UNAVAILABLE'))
     const retryCall = vi.spyOn(bridge.port, 'call').mockRejectedValueOnce(new AgentMuxError(message, 'RUNTIME_UNAVAILABLE'))
@@ -470,7 +575,7 @@ describe('semantic Host observation consumers', () => {
   it('releases a late ended event lease and reconnects without letting its old callbacks overwrite the new observation', async () => {
     const f = fixture(), bridge = rpcPort(f.service)
     const original = { kind: 'agent', agentSessionId: 'a123456789012345', providerId: 'codex', executorId: 'codex',
-      hostId: 'local', workspacePath: fixturePath("private-workspace"), run: { runId: 'original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }
+      hostId: 'local', workspacePath: fixturePath("private-workspace"), run: { runId: 'original-run' }, retiredRuns: [], createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
     f.core.agentSessions = () => [original] as never
     const nativeSubscribe = bridge.port.subscribe
     let finish!: () => void, first = true
@@ -492,7 +597,7 @@ describe('semantic Host observation consumers', () => {
     await client.connect()
     expect(bridge.connections.map(value => value.method)).toEqual(['runtime.events', 'runtime.events'])
     for (const data of hostedTransfer({ kind: 'event', event: { type: 'run-removed', agentSessionId: original.agentSessionId,
-      run: original.run, evidence: { source: 'user', observedAt: 3 } } }, 'late-old-epoch')) oldHandlers.onEvent({ type: 'snapshot', data })
+      run: original.run, evidence: { source: 'user', observedAt: reshapeFixtureEpoch(0, 0, 3) } } }, 'late-old-epoch')) oldHandlers.onEvent({ type: 'snapshot', data })
     oldHandlers.onEnd?.(new Error('Old private stream repeated its late end callback'))
     expect(client.agentSessions()).toEqual([original])
     await client.connect()
@@ -505,7 +610,7 @@ describe('semantic Host observation consumers', () => {
   it('retains a releasable confirmed Host lease and exact Core input while a process-projection read is unconfirmed', async () => {
     const f = fixture(), bridge = rpcPort(f.service)
     const original = { kind: 'agent', agentSessionId: 'a123456789012345', providerId: 'codex', executorId: 'codex',
-      hostId: 'local', workspacePath: fixturePath("private-workspace"), run: { runId: 'original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }
+      hostId: 'local', workspacePath: fixturePath("private-workspace"), run: { runId: 'original-run' }, retiredRuns: [], createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
     f.core.agentSessions = () => [original] as never
     f.core.runtimeProjection.mockRejectedValueOnce(new Error('Private process-projection handshake timeout'))
     const client = await connectHostedAgentMux({ rpc: bridge.port, consumerId: 'consumer-a' })
@@ -610,7 +715,7 @@ describe('semantic Host observation consumers', () => {
     const f = fixture(), bridge = rpcPort(f.service)
     const create = vi.fn(async (input: Parameters<AgentMuxHostedClient['createAgent']>[0]) => ({
       kind: 'agent' as const, agentSessionId: 'a123456789012345', providerId: input.providerId, executorId: input.executorId,
-      hostId: 'local', workspacePath: input.workspacePath, run: { runId: 'original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1
+      hostId: 'local', workspacePath: input.workspacePath, run: { runId: 'original-run' }, retiredRuns: [], createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1)
     }))
     Object.assign(f.core, { createAgent: create })
     const client = await connectHostedAgentMux({ rpc: bridge.port })
@@ -636,12 +741,12 @@ describe('semantic Host observation consumers', () => {
     }
     await client.submitAgentPrompt(prompt)
     expect(bridge.calls).toEqual([
-      { method: 'runtime.owner.identity', params: {}, signal: undefined },
-      { method: 'runtime.invoke', params: { fence, consumerId: expect.any(String), invocation: { method: 'runtimeProjection', args: [] } }, signal: undefined },
+      { method: 'runtime.owner.identity', params: {}, signal: expect.any(AbortSignal) },
+      { method: 'runtime.invoke', params: { fence, consumerId: expect.any(String), invocation: { method: 'runtimeProjection', args: [] } }, signal: expect.any(AbortSignal) },
       { method: 'runtime.invoke', params: { fence, consumerId: expect.any(String), invocation: { method: 'submitAgentPrompt', args: [{ agentSessionId: prompt.agentSessionId,
-        operationId: prompt.operationId, expectedRun: prompt.expectedRun, afterSubmissionId: prompt.afterSubmissionId, prompt: prompt.prompt }] } }, signal: controller.signal }
+        operationId: prompt.operationId, expectedRun: prompt.expectedRun, afterSubmissionId: prompt.afterSubmissionId, prompt: prompt.prompt }] } }, signal: expect.any(AbortSignal) }
     ])
-    expect(f.core.submitAgentPrompt.mock.calls).toEqual([[prompt]])
+    expect(f.core.submitAgentPrompt.mock.calls).toEqual([[{ ...prompt, signal: expect.any(AbortSignal) }]])
     const watches: Array<{ options: unknown; signal: AbortSignal | undefined }> = []
     const subscribe = bridge.port.subscribe
     bridge.port.subscribe = ((method: Parameters<AgentMuxHostedRpcPort['subscribe']>[0], params: Parameters<AgentMuxHostedRpcPort['subscribe']>[1], handlers: Parameters<AgentMuxHostedRpcPort['subscribe']>[2]) => {
@@ -649,8 +754,11 @@ describe('semantic Host observation consumers', () => {
       return subscribe(method, params, handlers)
     }) as AgentMuxHostedRpcPort['subscribe']
     const observer = await client.observeSessionHistory(prompt.agentSessionId, () => {}, { signal: controller.signal })
-    expect(watches).toEqual([{ options: {}, signal: controller.signal }])
-    expect(f.core.observeSessionHistory.mock.calls[0]).toEqual([prompt.agentSessionId, expect.any(Function), { signal: controller.signal }])
+    expect(watches).toEqual([{ options: {}, signal: expect.any(AbortSignal) }])
+    expect(f.core.observeSessionHistory.mock.calls[0]).toEqual([prompt.agentSessionId, expect.any(Function), { signal: expect.any(AbortSignal) }])
+    controller.abort()
+    expect(bridge.calls[2]!.signal!.aborted).toBe(true)
+    expect(watches[0]!.signal!.aborted).toBe(true)
     observer.dispose(); await client.dispose(); await f.service.dispose()
   })
 
@@ -686,7 +794,7 @@ describe('semantic Host observation consumers', () => {
       expect(() => {
         f.output('original-run'); f.output('second-run')
         f.emit({ type: 'terminal-resized', run: { runId: 'second-run' }, cols: 81, rows: 25, throughByte: 1, resizeRevision: 1 })
-        f.emit({ type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: 4 } })
+        f.emit({ type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: reshapeFixtureEpoch(0, 0, 4) } })
       }).not.toThrow()
       await vi.waitFor(() => expect(f.eventsB.map(value => decodeHostedValue(value))).toEqual([
         expect.objectContaining({ data: { event: expect.objectContaining({ type: 'terminal-output', run: { runId: 'original-run' }, dataBytes: Uint8Array.of(120) }) } }),
@@ -721,8 +829,8 @@ describe('semantic Host observation consumers', () => {
     callbacks[1]!({ kind: 'invalidated', agentSessionId: 'b123456789012345', source: { providerId: 'codex', nativeSessionId: 'original-native' } })
     await vi.waitFor(() => expect(releases.map(release => release.mock.calls.length)).toEqual([1, 0]))
     expect(healthy).toEqual([{ type: 'snapshot', data: { observation: { kind: 'invalidated', agentSessionId: 'b123456789012345', source: { providerId: 'codex', nativeSessionId: 'original-native' } } } }])
-    f.emit({ type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: 4 } })
-    expect(f.eventsA).toEqual([{ type: 'snapshot', data: { event: { type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: 4 } } } }])
+    f.emit({ type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: reshapeFixtureEpoch(0, 0, 4) } })
+    expect(f.eventsA).toEqual([{ type: 'snapshot', data: { event: { type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: reshapeFixtureEpoch(0, 0, 4) } } } }])
     await broken.dispose(); await first.dispose()
     expect(releases.map(release => release.mock.calls.length)).toEqual([1, 0])
     callbacks[1]!({ kind: 'invalidated', agentSessionId: 'b123456789012345', source: { providerId: 'codex', nativeSessionId: 'original-native' } })

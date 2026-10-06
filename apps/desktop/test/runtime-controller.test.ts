@@ -310,7 +310,9 @@ vi.mock('../src/main/host-factory.js', () => ({
 }))
 vi.mock('electron', () => ({ app: {}, nativeImage: {} }))
 
-import { RuntimeController } from '../src/main/runtime-controller.js'
+import type { RuntimeController as SourceRuntimeController } from '../src/main/runtime-controller.js'
+const { RuntimeController } = await import(process.env.AGENTMUX_TEST_RUNTIME_ENTRY ?? '../src/main/runtime-controller.js') as { RuntimeController: typeof SourceRuntimeController }
+type RuntimeController = SourceRuntimeController
 import { ProcessResourceSampler, type ResourceSample } from '../src/main/process-resource-sampler.js'
 
 const store: AgentMuxAgentSessionStore = {
@@ -846,6 +848,71 @@ describe('RuntimeController configuration transaction', () => {
     expect(retry.hosts).toEqual([])
     await controller.discard(retry)
     expect(client.dispose).toHaveBeenCalledOnce()
+  })
+
+  it('disposes the GUI consumer before pending create, attachment and terminal input receipts', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+    const renderer = webContentsFixture(), detach = controller.attach(renderer)
+    const control: SessionControl = { kind: 'terminal', hostId: 'local', runId: 'original-run', run: { runId: 'original-run' } }
+    const release = deferred<void>()
+    client.createTerminal.mockImplementationOnce(async () => { await release.promise; throw new AgentMuxError('Original creation reply unknown.', 'CONTROL_CANCELLED') })
+    client.attachTerminal.mockImplementationOnce(async () => { await release.promise; throw new AgentMuxError('Original attachment cancelled.', 'CONTROL_CANCELLED') })
+    client.listRuns.mockResolvedValue([{ runId: 'original-run', acceptedInputBytes: 0 }])
+    client.writeTerminal.mockImplementationOnce(async () => { await release.promise; throw new AgentMuxError('Original input reply unknown.', 'CONTROL_CANCELLED') })
+    const pending = [controller.launchTerminal({ hostId: 'local', workspacePath: _hygiene_fixturePath('repo'), createOperationId: 'original-create' }, localConfig),
+      controller.attachSession(renderer.id, control, 0, localConfig), controller.write(control, 'original bytes', 'user')]
+      .map(value => value.catch(error => error))
+    try {
+      await vi.waitFor(() => {
+        expect(client.createTerminal).toHaveBeenCalledOnce(); expect(client.attachTerminal).toHaveBeenCalledOnce(); expect(client.writeTerminal).toHaveBeenCalledOnce()
+      })
+      const disposing = controller.dispose()
+      await vi.waitFor(() => expect(client.dispose).toHaveBeenCalledOnce())
+      await disposing
+      expect(controller.rpcClients()).toEqual([])
+      expect(client.stopTerminal).not.toHaveBeenCalled(); expect(client.stopAgent).not.toHaveBeenCalled()
+    } finally { release.resolve(); await Promise.all(pending); detach() }
+  })
+
+  it('still waits for original lifecycle receipts before replacing a Host', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!, release = deferred<void>()
+    client.createTerminal.mockImplementationOnce(async () => { await release.promise; throw new Error('Original creation failure') })
+    const pending = controller.launchTerminal({ hostId: 'local', workspacePath: _hygiene_fixturePath('repo'), createOperationId: 'original-create' }, localConfig).catch(error => error)
+    await vi.waitFor(() => expect(client.createTerminal).toHaveBeenCalledOnce())
+    let prepared = false
+    const replacement = controller.prepare({ ...localConfig, hosts: [remoteHost] }).then(value => { prepared = true; return value })
+    try {
+      await Promise.resolve(); await Promise.resolve()
+      expect(prepared).toBe(false); expect(runtimeFixture.FakeClient.instances).toHaveLength(1)
+      release.resolve(); await pending
+      await controller.discard(await replacement)
+      expect(prepared).toBe(true)
+    } finally { release.resolve(); await pending; await replacement.catch(() => {}); await controller.dispose() }
+  })
+
+  it.each(['progress', 'check-in', 'automatic delivery'] as const)('cancels an active %s read without waiting for the original status receipt', async kind => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!, status = deferred<ReturnType<typeof agentStatusFixture>>()
+    client.statusAgent.mockImplementationOnce(async () => await status.promise)
+    const cancellation = new AbortController(), input = vi.fn(async () => false)
+    controller.setContinuousProgressInputObserver(input)
+    const target = { hostId: 'local', agentSessionId: 'agent-1', providerId: 'codex', workspacePath: _hygiene_fixturePath('repo') }
+    let settled = false
+    const pending = (kind === 'progress' ? controller.observeContinuousProgress(target, 'original-tick', 1, cancellation.signal)
+      : kind === 'check-in' ? controller.observeCheckIn(target, 1, cancellation.signal, localConfig)
+      : controller.submitPrompt({ kind: 'agent', hostId: target.hostId, agentSessionId: target.agentSessionId, run: { runId: 'run-1' } },
+        'original automatic input', 'original-tick', { expectedRun: { runId: 'run-1' }, afterSubmissionId: null }, { isCurrent: () => true, signal: cancellation.signal }))
+      .catch(error => error).finally(() => { settled = true })
+    try {
+      await vi.waitFor(() => expect(client.statusAgent).toHaveBeenCalledOnce())
+      const reason = new Error('Original scheduler stopped.')
+      cancellation.abort(reason)
+      await vi.waitFor(() => expect(settled, 'stopping the scheduler releases a pending read before its owner receipt').toBe(true))
+      expect(await pending).toBe(reason)
+      status.resolve(agentStatusFixture()); await Promise.resolve(); await Promise.resolve()
+      expect(input).not.toHaveBeenCalled()
+      expect(client.submitAgentPrompt).not.toHaveBeenCalled()
+      expect(client.stopTerminal).not.toHaveBeenCalled(); expect(client.stopAgent).not.toHaveBeenCalled()
+    } finally { status.resolve(agentStatusFixture()); await pending; await controller.dispose() }
   })
 
   it('maps one Terminal shell command only at the Desktop creation boundary', async () => {
