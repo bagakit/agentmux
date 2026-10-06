@@ -49,22 +49,7 @@
 .recall-note-card strong { color: var(--text); font-size: var(--fs-title); font-weight: 550; line-height: 1.5; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .recall-note-card span { font-size: var(--fs-body); line-height: 1.5; min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .recall-note-card small { margin-top: auto; color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
-.recall-graph { width: 100%; min-width: 0; }
-.recall-graph-legend { display: flex; flex-wrap: wrap; gap: var(--sp-4) var(--sp-6); font-size: var(--fs-meta); color: var(--text-2); }
-.recall-graph-legend span { display: flex; align-items: center; gap: var(--sp-3); }
-.recall-graph-legend i { width: 22px; border-top: 1px solid var(--text-3); }
-.recall-graph-legend i[data-reference] { border-top: 2px dashed var(--blue); }
-.recall-graph-coverage { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.7; max-width: 680px; }
-.recall-graph-scroll { overflow: auto; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
-.recall-graph-canvas { position: relative; min-width: 100%; }
-.recall-graph-canvas > svg { position: absolute; inset: 0; overflow: visible; color: var(--text-3); }
-.recall-graph-canvas path[data-edge-kind] { fill: none; stroke: var(--text-3); stroke-width: 1.2; opacity: .65; }
-.recall-graph-canvas path[data-edge-kind="reference"] { stroke: var(--blue); stroke-width: 1.7; stroke-dasharray: 5 4; opacity: .9; }
-.recall-graph-node { position: absolute; display: grid; grid-template-columns: 16px 1fr; gap: var(--sp-3) var(--sp-4); width: 200px; height: 80px; box-sizing: border-box; align-content: start; overflow: hidden; padding: var(--sp-5); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); color: var(--text-2); text-align: left; cursor: pointer; }
-.recall-graph-node:hover { border-color: var(--blue); }
-.recall-graph-node strong { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-body); font-weight: 550; line-height: 1.5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.recall-graph-node small { grid-column: 2; min-width: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.global-recall-surface :is(.recall-notebook-selector, .recall-directory-home, .recall-note-card, .recall-graph-node):focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+.global-recall-surface :is(.recall-notebook-selector, .recall-directory-home, .recall-note-card):focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
 .recall-preserved-workbench { display: flex; flex: 1; min-width: 0; min-height: 0; }
 .recall-preserved-workbench[hidden] { display: none; }
-.global-recall-surface .survey-notebook-home:has(.recall-graph), .global-recall-surface .survey-notebook-home:has(.recall-note-cards) { max-width: 980px; width: 100%; box-sizing: border-box; }
+.global-recall-surface .survey-notebook-home:has(.recall-note-cards) { max-width: 980px; width: 100%; box-sizing: border-box; }

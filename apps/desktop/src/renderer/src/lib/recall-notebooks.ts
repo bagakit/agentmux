@@ -6,7 +6,7 @@ import { spatialCatalog, zoneContext } from './space-agent-control'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { surveyInitialZoneSelection, surveySelectReference } from './survey-workface'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
-import { readNoteDocument } from '../../../shared/note-document'
+import { readNoteDocument, type NoteBlockTarget } from '../../../shared/note-document'
 import type { WorkbenchProjection, WorkbenchProjectionSelection } from './workbench-projection'
 import { sameWorkbenchProjectionSelection } from './workbench-projection'
 
@@ -24,8 +24,9 @@ export async function prepareNotebookWorkface(notebook: Notebook, workspaceId: s
   return workface
 }
 /** Closing a page never loses this resource. Reopening uses the same file and original workbench. */
-export async function openNotebookPage(page: NotebookPage, onSelectReference?: (reference: WorkbenchProjectionSelection) => void, selectedReference?: WorkbenchProjectionSelection | null): Promise<boolean> {
+export async function openNotebookPage(page: NotebookPage, onSelectReference?: (reference: WorkbenchProjectionSelection) => void, selectedReference?: WorkbenchProjectionSelection | null, target?: NoteBlockTarget): Promise<boolean> {
   const before = useAppStore.getState()
+  if (target && target.noteId !== page.noteId) throw new Error('The requested block belongs to another Note. The original page is kept; choose its exact source.')
   if (!notebookPageResourceMatches(page, before.config)) throw new Error('The Note’s original Host or folder is unavailable. Its page and history are kept; reconnect this resource.')
   const catalog = catalogNow(), zone = catalog.zones.find(z => z.zoneId === page.workface?.zoneId)
   if (!zone) throw new Error('This page’s work surface is unavailable. Its saved Note and history remain in this Notebook.')
@@ -57,7 +58,7 @@ export async function openNotebookPage(page: NotebookPage, onSelectReference?: (
       if (now.mainSurface === 'recall' && now.recallNotebookId === heldBook && now.recallNoteId === heldNote && now.recallZoneSelection === heldSelection)
         { now.setRecallZoneSelection(surveySelectReference(initial, reference)); onSelectReference?.(reference) }
     } }
-  return current.openFile(page.resource.path, groupId, undefined, page.resource.workspaceId, true,
+  return current.openFile(page.resource.path, groupId, target ? { line: 1, noteBlock: target } : undefined, page.resource.workspaceId, true,
     { displayWorkspaceId, ...(reference ? { reference } : {}), space: { zoneId: zone.zoneId, spaceId: zoneContext(current, scratchTopicsForWorkspace(current.scratchTopicSnapshots, current.config?.workspaces.find(w => w.id === SCRATCH_WORKSPACE_ID)) ?? [], zone) },
       resource: { hostId: page.resource.hostId, path: page.resource.workspacePath }, projection })
 }

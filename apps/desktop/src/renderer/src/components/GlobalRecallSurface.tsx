@@ -98,10 +98,10 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
   function chooseNotebook(id: string | null) {
     intent.current += 1; const state = useAppStore.getState(); state.setRecallNotebook(id); state.setRecallZoneSelection(null); setDirectoryOpen(true); setError(null)
   }
-  async function showPage(page: NotebookPage) {
+  async function showPage(page: NotebookPage, blockId?: string) {
     setDirectoryOpen(false)
     intent.current += 1; useAppStore.getState().setRecallNotebook(page.notebookId, page.noteId); setError(null)
-    try { await openNotebookPage(page, onSelectReference, selection?.active) } catch (cause) { setError(presentError(cause)) }
+    try { await openNotebookPage(page, onSelectReference, selection?.active, blockId ? { noteId: page.noteId, blockId } : undefined) } catch (cause) { setError(presentError(cause)) }
   }
   async function removeNotebook() {
     if (!deleteTarget) return
@@ -189,7 +189,7 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
       <div className="recall-preserved-workbench" hidden={directoryOpen || !selection} inert={directoryOpen || !selection}>
       {selection ? projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId} projection={projection} viewOwnership="projection" viewTargets={viewTargets} onCreateTab={() => void createPage()} leadingChrome={isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined} visible={visible && !directoryOpen} /> : <div className="workbench-zone-state" role="status"><h2>The original page is kept</h2><p>Its work surface is still restoring. Reopen this same page from its Notebook.</p><button className="note-text-button" onClick={() => noteId && library?.pages[noteId] ? void showPage(library.pages[noteId]!) : chooseNotebook(notebookId)}>Reopen page</button></div>
         : null}</div>
-      {directoryOpen || !selection ? activeNotebook ? <NotebookHome active={visible} view={directoryView} onViewChange={setDirectoryView} query={query} onQuery={sidebarCollapsed ? setQuery : undefined} navigationVisible={!sidebarCollapsed} archived={archived} onArchivedChange={sidebarCollapsed ? value => { setArchived(value); setQuery('') } : undefined} notebook={activeNotebook} pages={notebookPages} pending={opening} onCreate={() => void createPage()} onOpen={page => void showPage(page)} onTalk={beginTalk} />
+      {directoryOpen || !selection ? activeNotebook ? <NotebookHome active={visible} view={directoryView} onViewChange={setDirectoryView} query={query} onQuery={sidebarCollapsed ? setQuery : undefined} navigationVisible={!sidebarCollapsed} archived={archived} onArchivedChange={sidebarCollapsed ? value => { setArchived(value); setQuery('') } : undefined} notebook={activeNotebook} pages={notebookPages} pending={opening} onCreate={() => void createPage()} onOpen={(page, blockId) => void showPage(page, blockId)} onTalk={beginTalk} />
           : <div className="recall-directory-state" role="status"><ThemeObjectNoteIcon size={24} strokeWidth={1.4} /><h2>{notebookId ? 'Your Notebook selection is kept' : 'Loading your Notebook'}</h2><p>{notebookId ? 'This Notebook is not confirmed in the current directory. Refresh or choose another Notebook above; original pages and work remain available.' : 'Your pages will appear when the directory is confirmed.'}</p><button className="note-text-button" onClick={() => void refreshNotebookLibrary().catch(() => {})}>Refresh notebooks</button></div> : null}
     </div></div>
     <TopicKnowledgeCapture target={capture} onClose={() => setCapture(null)} onSaved={entry => {

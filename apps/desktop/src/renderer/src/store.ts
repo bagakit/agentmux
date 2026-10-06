@@ -1,3 +1,4 @@
+import { defaultNoteCanvasLayout, mergeNoteCanvasLayout, noteCanvasScopeKey, restoreNoteCanvasLayouts, type NoteCanvasLayout, type NoteCanvasScope } from './lib/note-canvas-state'
 import { projectInputReceipt as retainInputReceipt } from '@agentmux/client-ui/input-receipt-projection'
 import { restoredQuestionReplies, type DesktopQuestionReplies, type DesktopQuestionReplyAttempt, type DesktopQuestionDrafts } from './lib/conversation-question-intent'
 import { fileWorkbenchIdentity } from './lib/file-workbench-state'
@@ -657,6 +658,8 @@ type AppState = {
   // persisted — a reveal is a navigation, not document state.
   documentRevealTargets: Record<string, { line: number; column?: number; noteBlock?: NoteBlockTarget } | undefined>
   noteBlockSelections: Record<string, NoteBlockTarget>
+  noteCanvasLayouts: Record<string, NoteCanvasLayout>
+  noteCanvasSaveIssues: Record<string, string>
   setNoteBlockSelection(presentation: NoteBlockPresentation, target: NoteBlockTarget): void
   lastActiveFileByWorkspace: Record<string, string | undefined>
   tabs: Record<string, WorkbenchTab>
@@ -2583,6 +2586,7 @@ type PersistedAppState = {
   surveyCollectedZones?: Record<string, true>
   surveyExplorationNames?: Record<string, string>
   noteBlockSelections?: Record<string, NoteBlockTarget>
+  noteCanvasLayouts?: Record<string, NoteCanvasLayout>
   focusTimelineNameWidth?: number
   surveySidebarCollapsed?: boolean
   surveySidebarWidth?: number
@@ -2624,6 +2628,7 @@ export type RestoredUiState = Pick<
   | 'surveyCollectedZones'
   | 'surveyExplorationNames'
   | 'noteBlockSelections'
+  | 'noteCanvasLayouts'
   | 'surveySidebarCollapsed'
   | 'surveySidebarWidth'
   | 'projectRailOpen'
@@ -2717,6 +2722,7 @@ export function restorePersistedUiState(
     | 'surveyCollectedZones'
     | 'surveyExplorationNames'
     | 'noteBlockSelections'
+  | 'noteCanvasLayouts'
     | 'surveySidebarCollapsed'
     | 'surveySidebarWidth'
     | 'projectRailOpen'
@@ -2754,6 +2760,7 @@ export function restorePersistedUiState(
     surveyCollectedZones: restoredSurveyCollection(persisted.surveyCollectedZones),
     surveyExplorationNames: restoredSurveyExplorationNames(persisted.surveyExplorationNames),
     noteBlockSelections: restoreNoteBlockSelections(persisted.noteBlockSelections),
+    noteCanvasLayouts: restoreNoteCanvasLayouts(persisted.noteCanvasLayouts),
     surveySidebarCollapsed: restoredBoolean(persisted.surveySidebarCollapsed, false),
     surveySidebarWidth: clampSurveySidebarWidth(persisted.surveySidebarWidth ?? SURVEY_SIDEBAR_DEFAULT_WIDTH),
     projectRailOpen: restoredBoolean(persisted.projectRailOpen, true),
@@ -2802,6 +2809,7 @@ function selectPersistedInputs(state: AppState) {
     documents: state.documents,
     retainedDocumentDrafts: state.retainedDocumentDrafts,
     noteBlockSelections: state.noteBlockSelections,
+    noteCanvasLayouts: state.noteCanvasLayouts,
     dirtyDocuments: state.dirtyDocuments,
     tabs: state.tabs,
     layouts: state.layouts,
@@ -3590,6 +3598,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   savingDocuments: {},
   documentRevealTargets: {},
   noteBlockSelections: {},
+  noteCanvasLayouts: {}, noteCanvasSaveIssues: {},
   setNoteBlockSelection(presentation, target) {
     const state = get(), reference = presentation.reference
     const region = state.tabs[reference.tabId]?.regions[reference.regionId]
@@ -10461,7 +10470,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
-    return { ...state, recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState
@@ -10539,4 +10548,25 @@ function openGitReading(workspaceId: string, target:
     tabs: { ...current.tabs, [tabId]: tab }, layouts: { ...current.layouts, [workspaceId]: nextLayout } }))
   state.focusRegion(workspaceId, tabId, regionId, 'navigation', groupId)
   return { tabId, regionId }
+}
+
+/** Flush only the original client presentation owner. Failure retains the current canvas and a retry. */
+export async function saveNoteCanvasPresentation(scope: NoteCanvasScope, patch?: Partial<NoteCanvasLayout>): Promise<void> {
+  const key = noteCanvasScopeKey(scope)
+  let captured: NoteCanvasLayout | undefined
+  try {
+    if (patch) useAppStore.setState(state => ({ noteCanvasLayouts: { ...state.noteCanvasLayouts,
+      [key]: mergeNoteCanvasLayout(state.noteCanvasLayouts[key] ?? defaultNoteCanvasLayout(scope), patch) } }))
+    captured = useAppStore.getState().noteCanvasLayouts[key]
+    await flushMessageWorkbench(false)
+    if (useAppStore.getState().noteCanvasLayouts[key] !== captured) return
+    useAppStore.setState(state => {
+      const { [key]: _issue, ...kept } = state.noteCanvasSaveIssues
+      return { noteCanvasSaveIssues: kept }
+    })
+  } catch (error) {
+    if (captured && useAppStore.getState().noteCanvasLayouts[key] !== captured) return
+    useAppStore.setState(state => ({ noteCanvasSaveIssues: { ...state.noteCanvasSaveIssues,
+      [key]: 'Canvas layout could not be saved. Your current positions are kept. ' + presentError(error) } }))
+  }
 }
