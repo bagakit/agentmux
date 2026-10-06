@@ -2390,6 +2390,11 @@ export class RuntimeController {
       operationId: input.operationId, prompt: '', agentMuxNote: input.agentMuxNote, active: true })
   }
 
+  async inspectGoalStart(input: import('@agentmux/demand').DemandDispatch) {
+    return await this.configuredClient(input.hostId).inspectAgentPromptSubmission({ kind: 'prompt',
+      agentSessionId: input.agentSessionId, expectedRun: { runId: input.runId }, submissionId: input.operationId })
+  }
+
   async inspectGoalAttention(input: { hostId: string; supervisorAgentSessionId: string; supervisorRunId: string; operationId: string }) {
     return await this.configuredClient(input.hostId).inspectAgentPromptSubmission({ kind: 'prompt',
       agentSessionId: input.supervisorAgentSessionId, expectedRun: { runId: input.supervisorRunId }, submissionId: input.operationId })

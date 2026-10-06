@@ -1,3 +1,5 @@
+import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { parseDemandDispatches, type DemandDispatch, type GoalStartObservation } from '@agentmux/demand'
 import { parseFileReadParams, type FileReadParams } from './public-rpc-files.js'
 import { parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, validateDemandDelegationReport } from '@agentmux/demand/delegations'
 import { parseGrounding } from '@agentmux/demand/goals'
@@ -22,7 +24,7 @@ export type GoalDelegationParamsMap = {
   'goal.delegations': { goalId: string }
 }
 export type GoalDelegationObservation = { operationId: string; communication?: DispatchObservation & { hostId: string }; workerRun?: Pick<AgentMuxRun, 'runId' | 'state'>; unknown?: string; recoverableReport?: DemandDelegationReportInput; attention?: { state: 'prepared' | 'confirmed' | 'unknown'; reason: string } }
-export type GoalDelegationResult = { goalId: string; goalUpdatedAt: number; delegations: DemandDelegation[]; grounding?: DemandGrounding; diskDurability: 'confirmed'; observations?: GoalDelegationObservation[] }
+export type GoalDelegationResult = { goalId: string; goalUpdatedAt: number; delegations: DemandDelegation[]; grounding?: DemandGrounding; diskDurability: 'confirmed'; observations?: GoalDelegationObservation[]; dispatches?: DemandDispatch[]; startObservations?: GoalStartObservation[] }
 export type GoalDelegationResultMap = { [M in GoalDelegationMethod]: GoalDelegationResult }
 /** Supplied after transport/Core caller admission, never from an editable business payload. */
 export type GoalDelegationAuthority = { actor: { kind: 'agent' | 'user' | 'device'; id: string }; hostId?: string; runId?: string }
@@ -49,9 +51,11 @@ export function parseGoalDelegationParams<M extends GoalDelegationMethod>(method
     : method === 'goal.collect' ? { operationId: id(p.operationId), collection: parseDemandDelegationCollectionInput(p.collection) } : {}) } as GoalDelegationParamsMap[M]
 }
 export function parseGoalDelegationResult(value: unknown, input: { goalId: string }): GoalDelegationResult {
-  const p = record(value, ['goalId', 'goalUpdatedAt', 'delegations', 'grounding', 'diskDurability', 'observations'])
+  const p = record(value, ['goalId', 'goalUpdatedAt', 'delegations', 'grounding', 'diskDurability', 'observations', 'dispatches', 'startObservations'])
   if (p.goalId !== input.goalId || p.diskDurability !== 'confirmed' || typeof p.goalUpdatedAt !== 'number' || !Number.isSafeInteger(p.goalUpdatedAt) || p.goalUpdatedAt <= 0) throw new AgentMuxError('The Goal delegation read belongs to another object or is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
   const delegations = parseDemandDelegations(p.delegations)
+  const dispatches = p.dispatches === undefined ? undefined : parseDemandDispatches(p.dispatches)
+  const startObservations = p.startObservations === undefined ? undefined : parseGoalStartObservations(p.startObservations, dispatches ?? [], p.grounding)
   const observations = p.observations === undefined ? undefined : (() => {
     if (!Array.isArray(p.observations)) throw new AgentMuxError('Delegation observations must refer to original intents.', 'CONTROL_PROTOCOL_ERROR')
     const seen = new Set<string>()
@@ -87,6 +91,7 @@ export function parseGoalDelegationResult(value: unknown, input: { goalId: strin
     })
   })()
   return { goalId: input.goalId, goalUpdatedAt: p.goalUpdatedAt as number, delegations, diskDurability: 'confirmed',
+    ...(dispatches ? { dispatches } : {}), ...(startObservations ? { startObservations } : {}),
     ...(p.grounding === undefined ? {} : { grounding: parseGrounding(p.grounding) }), ...(observations === undefined ? {} : { observations }) }
 }
 
@@ -121,4 +126,67 @@ export function readGoalDelegationWireReport(goalId: string, saved: DemandDelega
   validateDemandDelegationReport(saved, report)
   assertGoalDelegationReply(saved, report, reply, goalDelegationReportBody(goalId, saved.operationId, report))
   return report
+}
+
+export function parseGoalStartObservations(value: unknown, starts: readonly DemandDispatch[], grounding: unknown): GoalStartObservation[] {
+  if (!Array.isArray(value)) throw new AgentMuxError('Original Start observations must be an array.', 'CONTROL_PROTOCOL_ERROR')
+  const seen = new Set<string>()
+  return value.map(raw => {
+    const item = record(raw, ['operationId', 'input', 'originalRun', 'goalResult', 'responsibility', 'supervisor', 'attention', 'unknown'])
+    const operationId = id(item.operationId), start = starts.find(entry => entry.operationId === operationId)
+    if (!start || start.execution !== 'finite' || seen.has(operationId)) throw new AgentMuxError('An observation does not belong to this original finite Start.', 'CONTROL_PROTOCOL_ERROR')
+    seen.add(operationId)
+    const input = record(item.input, ['state', 'reason', 'retainedReceipt', 'proof'])
+    if (!['confirmed', 'unknown'].includes(String(input.state))) throw new AgentMuxError('Start input state is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    if (input.retainedReceipt !== undefined) {
+      const receipt = record(input.retainedReceipt, ['kind', 'itemId', 'createdAt'])
+      if (!start.receipt || receipt.kind !== start.receipt.kind || receipt.itemId !== start.receipt.itemId || receipt.createdAt !== start.receipt.createdAt)
+        throw new AgentMuxError('The retained receipt does not belong to this original Start.', 'CONTROL_PROTOCOL_ERROR')
+    }
+    const proof = input.proof === undefined ? undefined : (() => {
+      const value = record(input.proof, ['kind', 'agentSessionId', 'runId', 'operationId', 'acknowledged', 'prompt', 'inputKey'])
+      const key = validateAgentPromptInputKey(value.inputKey)
+      if (value.kind !== 'core-prompt' || value.agentSessionId !== start.agentSessionId || value.runId !== start.runId ||
+        value.operationId !== start.operationId || value.acknowledged !== true || value.prompt !== start.prompt || key.kind !== 'prompt' ||
+        key.agentSessionId !== start.agentSessionId || key.expectedRun.runId !== start.runId || key.submissionId !== start.operationId)
+        throw new AgentMuxError('The actual Core input proof is not this original Start.', 'CONTROL_PROTOCOL_ERROR')
+      return { kind: 'core-prompt' as const, agentSessionId: start.agentSessionId, runId: start.runId, operationId: start.operationId,
+        acknowledged: true as const, prompt: start.prompt, inputKey: key }
+    })()
+    if ((input.state === 'confirmed') !== Boolean(proof)) throw new AgentMuxError('Confirmed Start input requires its original Core proof.', 'CONTROL_PROTOCOL_ERROR')
+    const originalRun = item.originalRun === undefined ? undefined : (() => {
+      const run = record(item.originalRun, ['runId', 'state'])
+      if (run.runId !== start.runId || !['running', 'exited', 'interrupted'].includes(String(run.state))) throw new AgentMuxError('The observed Run is not this original Start.', 'CONTROL_PROTOCOL_ERROR')
+      return { runId: start.runId, state: run.state as 'running' | 'exited' | 'interrupted' }
+    })()
+    const goalResult = item.goalResult === undefined ? undefined : (() => {
+      const result = record(item.goalResult, ['grounding', 'association', 'basis', 'changedSinceStart'])
+      const actual = parseGrounding(result.grounding), retained = parseGrounding(grounding)
+      if (result.association !== 'unknown' || result.basis !== (start.resultBasis ? 'captured' : 'unknown') ||
+        result.changedSinceStart !== (start.resultBasis ? retained.submissionId !== start.resultBasis.groundingSubmissionId : null) ||
+        JSON.stringify(actual) !== JSON.stringify(retained)) throw new AgentMuxError('Goal-level results cannot become a worker report or another result.', 'CONTROL_PROTOCOL_ERROR')
+      return { grounding: actual, association: 'unknown' as const, basis: result.basis as 'captured' | 'unknown', changedSinceStart: result.changedSinceStart as boolean | null }
+    })()
+    if (!['working', 'original-worker-continuation', 'goal-result-review', 'observation-unknown'].includes(String(item.responsibility)))
+      throw new AgentMuxError('Original Start responsibility is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    if (item.responsibility === 'working' && (originalRun?.state !== 'running' || input.state !== 'confirmed') ||
+      item.responsibility === 'original-worker-continuation' && originalRun?.state !== 'exited' && originalRun?.state !== 'interrupted' ||
+      item.responsibility === 'goal-result-review' && (!goalResult || goalResult.changedSinceStart !== true))
+      throw new AgentMuxError('Start responsibility contradicts its original facts.', 'CONTROL_PROTOCOL_ERROR')
+    const supervisor = item.supervisor === undefined ? undefined : (() => {
+      const target = record(item.supervisor, ['agentSessionId', 'hostId', 'runId']), attention = start.attention
+      if (!attention || target.agentSessionId !== attention.supervisorAgentSessionId || target.hostId !== start.hostId || target.runId !== attention.supervisorRunId)
+        throw new AgentMuxError('The Start notice belongs to another Supervisor input.', 'CONTROL_PROTOCOL_ERROR')
+      return { agentSessionId: id(target.agentSessionId), hostId: id(target.hostId), runId: id(target.runId) }
+    })()
+    const attention = item.attention === undefined ? undefined : (() => {
+      const notice = record(item.attention, ['state', 'reason'])
+      if (!start.attention || !supervisor || !['prepared', 'confirmed', 'unknown'].includes(String(notice.state))) throw new AgentMuxError('Start notice has no original reference.', 'CONTROL_PROTOCOL_ERROR')
+      return { state: notice.state as 'prepared' | 'confirmed' | 'unknown', reason: id(notice.reason) }
+    })()
+    return { operationId, input: { state: input.state as 'confirmed' | 'unknown', ...(input.reason === undefined ? {} : { reason: id(input.reason) }),
+      ...(input.retainedReceipt === undefined ? {} : { retainedReceipt: start.receipt! }), ...(proof ? { proof } : {}) }, responsibility: item.responsibility as GoalStartObservation['responsibility'],
+      ...(originalRun ? { originalRun } : {}), ...(goalResult ? { goalResult } : {}), ...(supervisor ? { supervisor } : {}), ...(attention ? { attention } : {}),
+      ...(item.unknown === undefined ? {} : { unknown: id(item.unknown) }) }
+  })
 }
