@@ -9,9 +9,11 @@ import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDe
 import { initFollowState, onContentChange, onScroll, shouldShowJumpToLatest } from '@agentmux/client-ui/activity-autoscroll'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
-import type { AgentInputSubmissionReceipt, AgentInputWaitRef, AgentMuxAgentSession, AgentMuxInteractionResponse } from '@agentmux/core'
+import type { AgentInputSubmissionReceipt, AgentInputWaitRef, AgentMuxAgentSession, AgentMuxInteractionResponse, AgentSessionUserMessage } from '@agentmux/core'
+import type { InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
+import { inputHistoryText } from '@agentmux/client-ui/input-history-text'
 import { agentPromptCondition, agentPromptNotApplied, validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import {
@@ -435,6 +437,57 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   }
 
   const session = reading.session
+  // A reader is scoped to its exact Host connection and persistent Agent, not to a replaceable Run.
+  const historyConnection = useRef({ client, generation: 0 })
+  if (historyConnection.current.client !== client) historyConnection.current = { client, generation: historyConnection.current.generation + 1 }
+  const historyScope = JSON.stringify([historyConnection.current.generation, session?.hostId ?? null, agentSessionId])
+  const currentHistory = useRef({ scope: historyScope, client, agentSessionId, visible })
+  currentHistory.current = { scope: historyScope, client, agentSessionId, visible }
+  const readInputHistory = useCallback<InputHistoryRead>(async (input, signal) => {
+    if (!client || !agentSessionId) throw new Error('原 Host 尚未连接，已读取记录和草稿保留。')
+    const page = await client.readAgentSessionHistory({ ...input, hostId: 'local', agentSessionId }, { signal })
+    if (page.agentSessionId !== agentSessionId || page.hostId !== 'local') throw new Error('历史返回了另一处 Agent 的记录；原列表和草稿保留。')
+    return page
+  }, [client, agentSessionId])
+  async function readHistoryMessage(message: AgentSessionUserMessage, signal: AbortSignal) {
+    const original = { scope: historyScope, client, agentSessionId, visible }
+    const unchanged = () => mounted.current && currentHistory.current.scope === original.scope &&
+      currentHistory.current.client === original.client && currentHistory.current.agentSessionId === original.agentSessionId &&
+      currentHistory.current.visible === original.visible
+    signal.throwIfAborted()
+    if (!unchanged() || message.agentSessionId !== original.agentSessionId) throw new Error('已切换 Agent，原记录保留，当前草稿未改变。')
+    const content = await inputHistoryText(message, original.client && original.agentSessionId ? input =>
+      original.client!.sessionHistoryResource(original.agentSessionId!, { ...input, signal }) : undefined, signal)
+    signal.throwIfAborted()
+    if (!unchanged()) throw new Error('已切换 Agent，原记录保留，当前草稿未改变。')
+    return content
+  }
+  function currentHistoryTarget(scope: string) {
+    return mounted.current && currentHistory.current.scope === scope && currentHistory.current.client === client &&
+      currentHistory.current.agentSessionId === agentSessionId && currentHistory.current.visible
+  }
+  async function fillHistoryMessage(message: AgentSessionUserMessage, signal: AbortSignal) {
+    const originalScope = historyScope, originalEditor = insertion.current
+    const before = drafts.current.get(draftKey) ?? ''
+    const content = await readHistoryMessage(message, signal)
+    signal.throwIfAborted()
+    if (!currentHistoryTarget(originalScope) || insertion.current !== originalEditor) throw new Error('原编辑器或 Agent 已切换，原记录保留，当前草稿未改变。')
+    if ((drafts.current.get(draftKey) ?? '') !== before) throw new Error('读取期间草稿已更新，保留新稿；可重新选择这条记录。')
+    if (!originalEditor) throw new Error('原编辑器已关闭，记录和草稿保留。')
+    originalEditor.replace(content.text)
+    return content.attachments ? '已填入正文，尚未发送；附件仍在原记录' : undefined
+  }
+  async function copyHistoryMessage(message: AgentSessionUserMessage, signal: AbortSignal) {
+    const originalScope = historyScope
+    const content = await readHistoryMessage(message, signal)
+    signal.throwIfAborted()
+    if (!currentHistoryTarget(originalScope)) throw new Error('已切换 Agent，原记录保留，本次没有复制。')
+    let cause: unknown
+    const copied = await platform.copyText(content.text, error => { cause = error })
+    signal.throwIfAborted()
+    if (!copied && cause) throw cause
+    return copied
+  }
   const pending = session?.pendingInteraction
   const request = agentInteractionActiveRequest(pending)
   const responseUnavailableReason = pending && agentInteractionResponseUnavailableReason(pending)
@@ -479,6 +532,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   }), [client, session, agentSessionId, displayName])
   const captured = useMemo(() => agentSessionId && reading.timeline
     ? projectSessionUserMessages({ agentSessionId, timeline: reading.timeline }) : [], [agentSessionId, reading.timeline])
+  const mailboxMessages = useMemo(() => agentSessionId ? projectSessionUserMessages({ agentSessionId,
+    ...(reading.page ? { historyPage: reading.page } : {}), ...(reading.timeline ? { timeline: reading.timeline } : {}) }) : [],
+  [agentSessionId, reading.page, reading.timeline])
   const capturedById = useMemo(() => new Map(captured.map(message => [message.id, message])), [captured])
   const appendQuote = (quote: string) => setDraft(`${drafts.current.get(draftKey) ?? ''}${drafts.current.get(draftKey) ? '\n\n' : ''}${quote}`)
   const readingProps = {
@@ -488,6 +544,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     onSelectAnnotation: ({ messageId, quote }: Parameters<NonNullable<ConversationMessageProps['onSelectAnnotation']>>[0]) =>
       appendQuote(`引用会话 ${JSON.stringify(agentSessionId)}，消息 ${JSON.stringify(messageId)}：\n${quote.split('\n').map(line => `> ${line}`).join('\n')}`)
   }
+  // Recent device intents remain editable memory; they are never promoted to native history or a delivery receipt.
+  const historyLocalEntries = promptAttemptsForSession(attempts.current, agentSessionId)
+    .filter(([, original]) => original.draft && session?.hostId && original.originalHostId === session.hostId)
+    .map(([key, original]) => ({ id: key + ':' + original.operationId, text: original.draft }))
   const retainedAttempts = promptAttemptsForSession(attempts.current, agentSessionId).filter(([key, original]) => key !== draftKey && original.phase !== 'confirmed')
   const renderPromptAttempt = ([key, original]: [string, PromptAttempt]) => {
     const waiting = original.inputReceipt?.control.waiting
@@ -625,8 +685,17 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
               return appendNamedFileReference('', path, original.identity.name)
             }, { separate: true })
           }} />}
-          tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal} />} mailbox={<MobileMailbox session={session} connected={connection.state === 'connected'} messages={captured} platform={platform} describeSpeaker={describeSpeaker}
-          refresh={() => { void reading.refresh() }} {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />} value={draft} disabled={false} placeholder={available ? '发消息' : '离线草稿'}
+          tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal} />} mailbox={<MobileMailbox session={session} connected={connection.state === 'connected'} messages={mailboxMessages} platform={platform} describeSpeaker={describeSpeaker}
+          refresh={() => { void reading.refresh() }} historyScope={historyScope} readHistory={readInputHistory} visible={visible}
+          onHistoryFill={fillHistoryMessage} onHistoryCopy={copyHistoryMessage} localEntries={historyLocalEntries}
+          onHistoryFillLocal={entry => {
+            if (currentHistory.current.scope !== historyScope || current.current.client !== client || current.current.agentSessionId !== agentSessionId)
+              throw new Error('已切换 Agent，原正文和当前草稿保留。')
+            if (!insertion.current) throw new Error('原编辑器已关闭，正文和草稿保留。')
+            insertion.current.replace(entry.text)
+          }}
+          reading={{ ...readingProps, ...(client && agentSessionId ? { readHistoryResource: (input: Parameters<AgentMuxHostedClient['sessionHistoryResource']>[1]) => client.sessionHistoryResource(agentSessionId, input) } : {}) }}
+          {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />} value={draft} disabled={false} placeholder={available ? '发消息' : '离线草稿'}
           onChange={setDraft} {...(attempt?.phase !== 'sending' ? { onSubmit: () => void submit(), onQueue: () => void submit(false) } : {})}
           onAttach={onAttach ?? (() => { void attachmentControls.current?.choose() })} {...(readPastedImage ? { readPastedImage } : {})}
           />

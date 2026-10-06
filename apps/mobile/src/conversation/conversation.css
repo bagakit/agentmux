@@ -127,3 +127,13 @@
 .mobile-attachment-spin { animation: mobile-attachment-spin 1s linear infinite; }
 @keyframes mobile-attachment-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .mobile-attachment-spin { animation: none; } }
+.mobile-message-tools { display: flex; flex-direction: column; overflow: hidden; }
+.mobile-message-tools__records { flex: 1; max-height: 60dvh; }
+.mobile-message-tools .input-history p { margin: 0; }
+.mobile-message-tools .input-history__excerpt { color: var(--text-2); font-size: 13px; margin-bottom: 6px; }
+.mobile-message-tools .input-history :is(button, summary) { min-height: 44px; }
+.mobile-message-tools .input-history button { min-width: 44px; }
+.mobile-message-tools .input-history summary { display: flex; align-items: center; }
+.mobile-message-tools .input-history__search input { min-height: 44px; font-size: 16px; }
+.mobile-message-tools .input-history__actions { gap: 8px; }
+.mobile-message-tools .input-history :is(button, input, summary):focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
