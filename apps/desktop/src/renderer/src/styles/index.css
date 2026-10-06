@@ -67,6 +67,7 @@
 @import './agent-region-header.css';
 @import './session-connecting.css';
 @import '@agentmux/client-ui/styles/composer.css';
+@import '@agentmux/client-ui/styles/input-history.css';
 @import '@agentmux/client-ui/styles/message-delivery-failure.css';
 @import './launcher.css';
 @import './session-takeover.css';

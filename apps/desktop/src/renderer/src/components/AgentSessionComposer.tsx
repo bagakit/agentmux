@@ -30,6 +30,7 @@ import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { useRunService } from '../lib/run-service-projection'
 import { SessionMailbox } from './SessionMailbox'
+import { useComposerInputHistory } from '../lib/use-composer-input-history'
 import { confirmedSteerDelivery } from '../lib/steer-queue-delivery'
 import type { ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
@@ -114,6 +115,9 @@ export function AgentSessionComposer({
   const setViewMode = useAppStore.getState().setViewMode
   const userName = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentNames?.[sessionId])
   const timeline = useObservedAppStore('composer', visible, consumerScope, (state) => state.timelines?.[sessionId])
+  const inputHistory = useComposerInputHistory({ sessionId,
+    control: session?.kind === 'agent' ? session.control : undefined, visible, readOnly: readOnly || disabled,
+    insertion: insertionRef, ...(timeline ? { timeline } : {}) })
   const firstPromptSelector = useMemo(() => createFirstPromptSelector(sessionId), [sessionId])
   const firstPrompt = useObservedAppStore('composer', visible, consumerScope, firstPromptSelector)
   const displayName = session?.kind === 'agent' ? agentDisplayName({
@@ -218,7 +222,7 @@ export function AgentSessionComposer({
     const browsing = navigation?.entries && navigation.cursor < navigation.entries.length
     if (!browsing && direction === 'older' && !caretAtFirstLine(draft, caret)) return null
     if (!browsing && direction === 'newer' && !caretAtLastLine(draft, caret)) return null
-    return state.recallAgentComposerHistory(sessionId, direction, draft)
+    return state.recallAgentComposerHistory(sessionId, direction, draft, inputHistory.entries)
   }
 
 
@@ -276,7 +280,7 @@ export function AgentSessionComposer({
   const inbox = useServiceNotices(sessionId, notices, session?.kind === 'agent')
 
   return (
-    <SessionMailbox key={sessionId} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
+    <SessionMailbox key={sessionId} inputHistory={inputHistory.render} historyResourceReader={inputHistory.resourceReader} userMessages={inputHistory.messages} onHistoryVisible={inputHistory.setMailboxOpen} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
         noticePresentation={feedback.failure ? { id: 'tool', content: <ComposerFeedback compact failure={feedback.failure} onDismiss={feedback.dismiss} /> } : undefined}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}
@@ -324,6 +328,8 @@ export function AgentSessionComposer({
         onCopyQueued={async (text) => { feedback.dismiss(); return copyTextToClipboard(text, feedback.report) }}
     >
     {(mailbox, pending) => (
+    <div style={{ display: 'contents' }} onFocusCapture={() => inputHistory.setFocused(true)}
+      onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) inputHistory.setFocused(false) }}>
     <AgentComposer key={sessionId} aboveInput={pending} mailbox={mailbox}
       readPastedImage={api.ui.readPastedImage}
       insertionRef={insertionRef}
@@ -409,6 +415,7 @@ export function AgentSessionComposer({
         onQueue: () => queue()
       } : {})}
     />
+    </div>
     )}
     </SessionMailbox>
   )
