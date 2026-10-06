@@ -251,6 +251,10 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
     } else setRenderAttempt(value => value + 1)
   }
   const selected = catalog?.series.find(value => seriesKey(value) === selectedSeries)
+  // Built-in 2D presets reuse Make a face. Keep original saved/request drafts
+  // editable; user collections remain complete, including mixed face/image sets.
+  const entries = selected?.entries.filter(entry => selected.origin !== 'builtin' || entry.definition.kind !== 'face2d' ||
+    [initialChoice?.source, prepared?.source].some(source => source && locatorKey(source) === locatorKey({ ...selected, entryId: entry.entryId }))) ?? []
   const controlsDisabled = disabled
   const partial = Boolean(catalog?.issues.length || prepared?.issues.length || catalog?.roots.some(root => root.state === 'unavailable'))
   return <section className="mote-series" hidden={!visible} aria-label="Avatar series" data-series-target={targetKey}>
@@ -262,7 +266,7 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
       </select></label>
       <button type="button" className="small-button mote-series__refresh" aria-label="Refresh avatar series" disabled={disabled || catalogLoading} onClick={() => void loadCatalog()}><ThemeActionRefreshIcon size={12} />Refresh</button>
       {catalogLoading ? <p className="mote-series__status" role="status">Loading series…</p> : null}
-      {selected ? <div className="mote-series__entries" role="group" aria-label="Series appearances">{selected.entries.map(entry => {
+      {selected ? <div className="mote-series__entries" role="group" aria-label="Series appearances">{entries.map(entry => {
         const source = { origin: selected.origin, seriesId: selected.seriesId, entryId: entry.entryId }
         const active = Boolean(prepared && locatorKey(source) === locatorKey(prepared.source))
         return <button type="button" className="mote-series__entry" key={entry.entryId} aria-pressed={active}
