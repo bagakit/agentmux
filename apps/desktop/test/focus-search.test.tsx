@@ -4,7 +4,7 @@ import { act, createElement } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { formatAmuxObjectLink } from '@agentmux/core/sharing'
-import { searchFocus } from '../src/renderer/src/lib/focus-search'
+import { searchFocus, focusSearchContextKey } from '../src/renderer/src/lib/focus-search'
 import { deriveFocusProjectLanes } from '../src/renderer/src/lib/focus-project-lanes'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { workbenchSelectionCatalog } from '../src/renderer/src/lib/desktop-focus-navigation'
@@ -102,4 +102,14 @@ it('does not infer Zone membership from a shared resource Workspace', () => {
  const other = { ...first, zoneId: 'OtherZone' }
  const result = searchFocus('amux://zone/OtherZone', { rows, lanes: [], catalog: { ...catalog, zones: [...catalog.zones, other], bindings: [...catalog.bindings, { zoneId: other.zoneId, spaceId: space.spaceId }] }, sources: [], history: [], retained: [] })
  expect([...result.contextKeys]).toEqual([]); expect(result.locations).toEqual([]); expect(result.unplaced).toMatchObject([{ id: 'OtherZone' }])
+})
+
+it('keeps the Core Agent/Terminal discriminator through the real Focus card filter key', () => {
+ const state = useAppStore.getState(), rows = createFocusProjectionSelector()(state).contexts
+ const original = rows.find(row => row.id === 'ExactSession')!
+ expect(original).toBeTruthy()
+ const contexts = [original, { ...original, kind: 'terminal' as const }]
+ const result = searchFocus('amux://agent/ExactSession', { rows: contexts, lanes: [], catalog: workbenchSelectionCatalog(state), sources: [], history: [], retained: [] })
+ expect(contexts.filter(row => result.contextKeys.has(focusSearchContextKey(row.hostId, row.id, row.kind))).map(row => row.kind)).toEqual(['agent'])
+ expect(searchFocus('ExactSession', { rows: contexts, lanes: [], catalog: workbenchSelectionCatalog(state), sources: [], history: [], retained: [] }).contextKeys.size).toBe(2)
 })
