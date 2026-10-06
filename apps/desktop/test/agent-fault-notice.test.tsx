@@ -36,7 +36,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
   webFrame: { getZoomFactor: () => 1 },
   ipcMain: {
     handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => fixture.handlers.set(channel, handler),
-    removeHandler: (channel: string) => fixture.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn()
+    removeHandler: (channel: string) => fixture.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn()
   },
   ipcRenderer: {
     async invoke(channel: string, ...values: unknown[]) {
@@ -163,11 +163,15 @@ beforeEach(async () => {
   expect(fixture.handlers.has('sessions:submitPrompt')).toBe(true)
 })
 afterEach(async () => {
-  if (mounted) { await act(async () => mounted!.root.unmount()); mounted.element.remove(); mounted = undefined }
-  await dispose?.(); dispose = undefined
-  useAppStore.setState(initial, true); vi.restoreAllMocks()
-  Object.defineProperty(process, 'platform', originalPlatform)
-  vi.unstubAllEnvs(); await rm(fixture.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
+  try {
+    if (mounted) { await act(async () => mounted!.root.unmount()); mounted.element.remove(); mounted = undefined }
+    await dispose?.()
+  } finally {
+    dispose = undefined
+    useAppStore.setState(initial, true); vi.restoreAllMocks()
+    Object.defineProperty(process, 'platform', originalPlatform)
+    vi.unstubAllEnvs(); await rm(fixture.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
+  }
 })
 
 it('delivers the actual current crash through preload/Store/App as assertive without blocking another healthy Agent', async () => {
