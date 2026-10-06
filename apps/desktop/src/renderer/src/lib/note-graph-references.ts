@@ -7,6 +7,9 @@ export function noteGraphReferenceKey(reference: NoteGraphReference): string {
   return JSON.stringify([resource.hostId, resource.workspaceId, resource.workspacePath, resource.path, source.noteId, source.blockId,
     occurrence.kind === 'stored' ? ['stored', occurrence.referenceId] : ['text', occurrence.revision, occurrence.from, occurrence.to]])
 }
+export function noteGraphReferenceSelectionKey(reference: NoteGraphReference): string {
+  return JSON.stringify([noteGraphReferenceKey(reference), reference.mode, reference.target])
+}
 export function noteGraphReferenceLabel(reference: NoteGraphReference): string {
   return reference.mode === 'embed' ? 'Embed' : reference.mode === 'reference' ? 'Block reference'
     : reference.target.kind === 'page' ? 'Page link' : reference.target.kind === 'block' ? 'Block link' : 'Unbound link'

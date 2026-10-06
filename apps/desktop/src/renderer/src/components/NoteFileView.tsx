@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import type { FileDocument } from '../../../shared/contracts'
 import type { NoteBlockTarget } from '../../../shared/note-document'
 import { parseNoteFile, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
@@ -16,6 +16,14 @@ import { useNoteLinkNavigation } from '../lib/use-note-link-navigation'
 import { NoteLinksPanel } from './NoteLinksPanel'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 
+/** Only an in-flight explicit reveal observes its original editor and ancestor visibility. */
+function observeRevealDOM(handle: NoteEditorHandle, attempt: () => boolean): () => void {
+  const observer = new MutationObserver(() => { if (attempt()) observer.disconnect() })
+  observer.observe(handle.editor.view.dom, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'inert', 'aria-hidden'] })
+  for (let ancestor = handle.editor.view.dom.parentElement; ancestor; ancestor = ancestor.parentElement) observer.observe(ancestor, { attributes: true, attributeFilter: ['class', 'style', 'hidden', 'inert', 'aria-hidden'] })
+  return () => observer.disconnect()
+}
+
 /** Presentation of the original FileDocument. Invalid source remains available through Source. */
 export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, revealBlock, onRevealed, focusRequest, canFocus, onFocused, restoredBlock, onSelectedBlock, resource, onOpenPage, dirty }: {
   resource?: NoteResource; document: FileDocument; knowledge: NoteKnowledge; onChange: (raw: string) => void; onSave: () => void
@@ -28,7 +36,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   const catalog = useNotebookLibrary(state => state.state)
   const presentation = useWorkbenchBrowserPresentation()
   const [canvasOpen, setCanvasOpen] = useState(false)
-  const [canvasBlock, setCanvasBlock] = useState<NoteBlockTarget | null>(null)
+  const [canvasBlock, setCanvasBlock] = useState<(NoteBlockTarget & { sourceIdentity: string }) | null>(null)
   const read = useMemo(() => parseNoteFile(document), [document])
   const sourceIdentity = JSON.stringify([resource?.hostId, resource?.workspaceId, resource?.workspacePath, document.path, read.status === 'valid' ? read.note.noteId : null])
   const [issue, setIssue] = useState<string | null>(null)
@@ -49,13 +57,23 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     }
     setRestoreIssue(null)
   }, [read, restoredBlock, handle])
-  useEffect(() => {
-    if (!revealBlock || read.status !== 'valid' || read.note.noteId !== revealBlock.noteId) return
+  useLayoutEffect(() => {
+    if (!revealBlock) return
+    setCanvasBlock(null)
     setCanvasOpen(false)
-    if (!handle || handle.editor.isDestroyed) return
-    if (handle.focusBlock(revealBlock.blockId, false)) { setIssue(null); onRevealed?.() }
-    else setIssue('The requested block is not available in the original Note. Its exact target is retained.')
-  }, [read, revealBlock, onRevealed, handle])
+  }, [revealBlock])
+  useLayoutEffect(() => {
+    if (!revealBlock || read.status !== 'valid' || read.note.noteId !== revealBlock.noteId || canvasOpen) return
+    if (!presentation.active || !handle || handle.editor.isDestroyed) return
+    const attempt = () => {
+      if (handle.editor.isDestroyed) return false
+      if (handle.focusBlock(revealBlock.blockId, false, true)) { setIssue(null); onRevealed?.(); return true }
+      setIssue('The requested original block has not been revealed yet. Its exact target is retained; keep this Note visible or check its current draft.')
+      return false
+    }
+    if (attempt()) return
+    return observeRevealDOM(handle, attempt)
+  }, [read, revealBlock, onRevealed, handle, canvasOpen, presentation.active])
   useEffect(() => {
     if (!handle || focusRequest === undefined) return
     const editor = handle.editor
@@ -71,16 +89,26 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     observer.observe(window.document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert', 'hidden', 'aria-hidden'] })
     return () => observer.disconnect()
   }, [handle, focusRequest, canFocus, onFocused, read, restoredBlock, revealBlock])
-  useEffect(() => {
-    if (canvasOpen || !canvasBlock || !handle) return
-    if (handle.focusBlock(canvasBlock.blockId, false)) setIssue(null)
-    else setIssue(`Block ${canvasBlock.blockId} is not available in the current draft. Its original target is retained; check the saved source.`)
-    setCanvasBlock(null)
-  }, [canvasOpen, canvasBlock, handle])
+  useLayoutEffect(() => {
+    if (canvasOpen || !presentation.active || !canvasBlock || !handle || revealBlock) return
+    if (read.status !== 'valid' || read.note.noteId !== canvasBlock.noteId || sourceIdentity !== canvasBlock.sourceIdentity) {
+      setIssue('The selected original block belongs to a different Note or file location. Its exact target is retained; return to that Note or choose another target.')
+      return
+    }
+    const attempt = () => {
+      if (handle.editor.isDestroyed) return false
+      if (handle.focusBlock(canvasBlock.blockId, false, true)) { setIssue(null); setCanvasBlock(null); return true }
+      setIssue('The selected original block has not been revealed yet. Its exact target is retained; keep this Note visible or check its current draft.')
+      return false
+    }
+    if (attempt()) return
+    return observeRevealDOM(handle, attempt)
+  }, [canvasOpen, canvasBlock, handle, presentation.active, read, sourceIdentity, revealBlock])
   async function openCanvasPage(page: NotebookPage, blockId?: string) {
+    setCanvasBlock(null)
     if (read.status === 'valid' && page.noteId === read.note.noteId && resource && sameNoteResource(page.resource, resource)) {
       setCanvasOpen(false)
-      if (blockId) setCanvasBlock({ noteId: page.noteId, blockId })
+      if (blockId) setCanvasBlock({ noteId: page.noteId, blockId, sourceIdentity })
       else setIssue(null)
       return
     }

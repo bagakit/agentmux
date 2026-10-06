@@ -17,7 +17,7 @@ export function useNoteCanvasContent(snapshot: NotebookGraphSnapshot | null, act
   const current = useRef({ results, snapshot }); current.current = { results, snapshot }
   const request = useCallback((noteId: string, full = true) => {
     const { results, snapshot } = current.current, held = results[noteId]
-    if (jobs.current.has(noteId) || held?.snapshot === snapshot && held.value?.status === 'read' && snapshot && noteContentMatchesGraph(snapshot, held.value)) return
+    if (jobs.current.get(noteId)?.request.full || held?.snapshot === snapshot && held.value?.status === 'read' && snapshot && noteContentMatchesGraph(snapshot, held.value)) return
     setExplicit(values => ({ ...values, [noteId]: { full, attempt: (values[noteId]?.attempt ?? 0) + 1 } }))
   }, [])
   useEffect(() => {
@@ -38,6 +38,10 @@ export function useNoteCanvasContent(snapshot: NotebookGraphSnapshot | null, act
       if (jobs.current.size >= CONCURRENCY) break
       if (jobs.current.has(id) || !snapshot.catalog.pages[id]) continue
       const intent = explicit[id] ?? { full: false, attempt: 0 }, held = results[id]
+      if (explicit[id] && held?.snapshot === snapshot && held.value?.status === 'read' && noteContentMatchesGraph(snapshot, held.value)) {
+        setExplicit(values => Object.fromEntries(Object.entries(values).filter(([key]) => key !== id)))
+        continue
+      }
       if (held?.snapshot === snapshot && !held.pending && !explicit[id]) continue
       if (held?.snapshot === snapshot && held.pending) continue
       const controller = new AbortController(), job = { controller, snapshot, request: intent }

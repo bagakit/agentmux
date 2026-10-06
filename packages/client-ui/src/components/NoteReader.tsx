@@ -5,6 +5,7 @@ import { Node as TiptapNode, type JSONContent } from '@tiptap/core'
 import { noteContentExtensions, NoteBlockReferenceNode, NoteInlineLinkNode, noteIdentityExtensions } from '../note/note-content-schema.js'
 import { NoteInlineLink, type NoteLinkOpenRequest } from './NoteInlineLink.js'
 import { noteWikiLiteralExtension } from '../note/note-wiki-view.js'
+import { noteReadingSelectionExtension } from '../note/note-reading-selection.js'
 import { noteWikiInputExtension } from '../note/note-wiki-input.js'
 import type { NoteInlineLinkAttributes } from '@agentmux/core/note-links'
 import { readNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../note/note-document.js'
@@ -35,7 +36,8 @@ function Reference({ node }: NodeViewProps) {
 }
 
 // Presentation-only wrapper, never part of a Note file or its identity index.
-function BlockExcerpt() {
+function BlockExcerpt({ node }: NodeViewProps) {
+  const selected: readonly string[] = node.attrs.selectedBlockIds ?? EMPTY_IDS
   const clip = useRef<HTMLDivElement>(null), [long, setLong] = useState(false), [expanded, expand] = useState(false)
   useLayoutEffect(() => {
     const element = clip.current
@@ -46,24 +48,48 @@ function BlockExcerpt() {
     measure()
     return () => observer.disconnect()
   }, [])
+  useLayoutEffect(() => {
+    if (!selected.length) return
+    const frame = requestAnimationFrame(() => {
+      const element = clip.current
+      if (!element) return
+      const rows = [...element.querySelectorAll<HTMLElement>('[data-block-id]')].filter(row => selected.includes(row.dataset.blockId!) && row.closest('.mobile-note-body') === element.closest('.mobile-note-body'))
+      const row = rows.find(row => !rows.some(other => other !== row && row.contains(other)))
+      if (!row) return
+      const viewport = element.getBoundingClientRect(), box = row.getBoundingClientRect()
+      if (box.top < viewport.top || box.bottom > viewport.bottom) { const scale = viewport.width / element.offsetWidth; if (Number.isFinite(scale) && scale > 0) element.scrollTop += (box.top - viewport.top) / scale }
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [JSON.stringify(selected)])
   return <NodeViewWrapper className="note-reader-excerpt" data-excerpt-expanded={expanded}>
-    <div ref={clip} className="note-reader-excerpt-clip" style={{ maxHeight: expanded ? undefined : 112, overflow: expanded ? undefined : 'hidden' }}><NodeViewContent /></div>
+    <div ref={clip} className="note-reader-excerpt-clip" style={{ maxHeight: expanded ? undefined : 112, overflow: expanded ? undefined : selected.length ? 'auto' : 'hidden' }}><NodeViewContent /></div>
     {long && <button type="button" contentEditable={false} className="note-reader-excerpt-continue" onClick={() => expand(value => !value)}>{expanded ? 'Show shorter block' : 'Continue block'}</button>}
   </NodeViewWrapper>
 }
 const ExcerptNode = TiptapNode.create({ name: 'noteReadingExcerpt', group: 'block', content: 'block+', atom: false,
+  addAttributes: () => ({ selectedBlockIds: { default: [] } }),
   parseHTML: () => [], renderHTML: () => ['div', { class: 'note-reader-excerpt' }, 0],
   addNodeView() { return ReactNodeViewRenderer(BlockExcerpt) },
 })
 
-function RichContent({ content, onChange }: { content: JSONContent; onChange?: ((value: JSONContent) => void) | undefined }) {
+
+function readingExcerpt(content: JSONContent, selected: readonly string[]): JSONContent {
+  const ids: string[] = []
+  const collect = (node: JSONContent) => { const id: unknown = node.attrs?.blockId; if (typeof id === 'string' && selected.includes(id)) ids.push(id); node.content?.forEach(collect) }
+  collect(content)
+  return { type: 'noteReadingExcerpt', attrs: { selectedBlockIds: ids }, content: [content] }
+}
+
+function RichContent({ content, onChange, highlightBlockIds = EMPTY_IDS }: { content: JSONContent; highlightBlockIds?: readonly string[] | undefined; onChange?: ((value: JSONContent) => void) | undefined }) {
+  const selected = useRef(highlightBlockIds); selected.current = highlightBlockIds
   const scope = useContext(Scope), open = useRef(scope?.onOpenLink); open.current = scope?.onOpenLink
   const extensions = useMemo(() => noteContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name
     ? NoteBlockReferenceNode.extend({ addNodeView() { return ReactNodeViewRenderer(Reference) } }) : extension.name === NoteInlineLinkNode.name
-    ? NoteInlineLinkNode.extend({ addNodeView() { return ReactNodeViewRenderer(InlineLink) } }) : extension).concat(onChange ? [...noteIdentityExtensions(), noteWikiInputExtension()] : []).concat([noteWikiLiteralExtension(link => open.current?.(link)), ...onChange ? [] : [ExcerptNode]]), [Boolean(onChange)])
+    ? NoteInlineLinkNode.extend({ addNodeView() { return ReactNodeViewRenderer(InlineLink) } }) : extension).concat(onChange ? [...noteIdentityExtensions(), noteWikiInputExtension()] : []).concat([noteWikiLiteralExtension(link => open.current?.(link)), ...onChange ? [] : [ExcerptNode, noteReadingSelectionExtension(() => selected.current)]]), [Boolean(onChange)])
   const update = useRef(onChange); update.current = onChange
   const editor = useEditor({ extensions, content, editable: Boolean(onChange), onUpdate: ({ editor }) => update.current?.(editor.getJSON()), editorProps: { attributes: { class: 'mobile-note-body', 'aria-label': '原 Note 正文' } } }, [])
   useEffect(() => { if (editor) editor.commands.setContent(content, { emitUpdate: false }) }, [editor, content])
+  useEffect(() => { if (editor && !onChange) editor.view.dispatch(editor.state.tr.setMeta('noteReadingSelection', true)) }, [editor, highlightBlockIds])
   const state = useEditorState({ editor, selector: ({ editor }) => ({ bold: editor.isActive('bold'), italic: editor.isActive('italic'), heading: editor.isActive('heading'), list: editor.isActive('bulletList'), code: editor.isActive('codeBlock') }) })
   return <>{onChange && editor && <div role="toolbar" aria-label="笔记格式">
     <button type="button" aria-pressed={state?.bold} onClick={() => editor.chain().focus().toggleBold().run()}>粗体</button>
@@ -89,12 +115,15 @@ export type NoteReaderProps = { content: string; path: string; workspaceId: stri
   readReference?: ((target: NoteBlockTarget) => void) | undefined
   /** Only the reading projection changes; content remains the complete original Note. */
   blockIds?: readonly string[] | undefined
+  highlightBlockIds?: readonly string[] | undefined
+  clipBlocks?: boolean | undefined
   editing?: NoteEditing | undefined
   target?: NoteBlockTarget | undefined
   onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined
 }
+const EMPTY_IDS: readonly string[] = []
 const EMPTY_DOCUMENTS: NonNullable<NoteReaderProps['documents']> = []
-export function NoteReader({ content, path, workspaceId, revision, documents = EMPTY_DOCUMENTS, blockIds, readReference, editing, target, onOpenLink }: NoteReaderProps) {
+export function NoteReader({ content, path, workspaceId, revision, documents = EMPTY_DOCUMENTS, blockIds, highlightBlockIds = EMPTY_IDS, clipBlocks = true, readReference, editing, target, onOpenLink }: NoteReaderProps) {
   const parsed = useMemo(() => readNoteDocument(content), [content])
   const body = useRef<HTMLDivElement>(null)
   const [working, setWorking] = useState<{ noteId: string; content: string } | null>(null)
@@ -103,8 +132,8 @@ export function NoteReader({ content, path, workspaceId, revision, documents = E
   const knowledge = useMemo(() => noteKnowledge([{ location: { workspaceId, path }, document: { path, content: workingContent, revision: revision ?? '' } }, ...documents]), [workingContent, path, workspaceId, revision, documents])
   const excerpt = useMemo(() => {
     const source = knowledge.sources.find(source => source.location.workspaceId === workspaceId && source.location.path === path)
-    return blockIds && source ? projectNoteBlocks(source, blockIds) : null
-  }, [knowledge, blockIds, workspaceId, path])
+    return blockIds && source ? projectNoteBlocks(source, blockIds, highlightBlockIds) : null
+  }, [knowledge, blockIds, highlightBlockIds, workspaceId, path])
   const block = target ? resolveNoteBlock(knowledge, target) : null
   useEffect(() => {
     if (!target || block?.status !== 'resolved') return
@@ -115,7 +144,7 @@ export function NoteReader({ content, path, workspaceId, revision, documents = E
     {target && <section aria-label="原块定位" data-block-target-status={block?.status}>
       {block?.status === 'resolved' ? <><strong>引用的原块</strong><p>{block.block.text}</p></> : <p role="status">原块未确认：{block?.message} 原引用保留，仍可阅读完整笔记。</p>}
     </section>}
-    {editing && revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={content} revision={revision} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent content={excerpt ? { type: 'doc', content: excerpt.content.content?.map(node => ({ type: 'noteReadingExcerpt', content: [node] })) ?? [] } : parsed.note.content} />}
+    {editing && revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={content} revision={revision} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent highlightBlockIds={highlightBlockIds} content={excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : parsed.note.content} />}
   </div></Scope.Provider> : <><p role="status">原笔记读取问题：{parsed.message}</p><pre>{content}</pre></>
 }
 function EditableNote({ note, content, revision, editing }: { note: NoteDocument; content: string; revision: string; editing: NoteEditing }) {
