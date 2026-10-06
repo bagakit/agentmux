@@ -1,5 +1,9 @@
 import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { join } from 'node:path'
+import type { Socket } from 'node:net'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { ChildProcess } from 'node:child_process'
+import { lstat } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { AgentInputSubmissionReceipt, AgentMuxAgentPromptInput, AgentMuxClientEvent, AgentNativePromptInputPlan } from '../src/index.js'
@@ -13,9 +17,10 @@ import { AgentMuxClient as SourceClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore as SourceStore } from '../src/agent-session-store.js'
 import { AgentMuxHostedRuntimeService as SourceHostedService } from '../src/hosted-runtime-service.js'
 import { connectHostedAgentMux as SourceConnectHosted } from '../src/hosted-client.js'
-import type { AgentMuxHostedRpcPort, AgentMuxHostedOutputRpcPort, AgentMuxHostedRuntimeMethod,
+import type { AgentMuxHostedRpcPort, AgentMuxHostedOutputRpcPort, AgentMuxHostedRuntimeMethod, AgentMuxHostedInvocation,
   AgentMuxHostedStreamMethod, AgentMuxHostedRuntimeParameterMap } from '../src/hosted-client-contract.js'
-import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
+import { hostedTestOwner, hostedTestFence } from './helpers/hosted-runtime-port.js'
+import { encodeHostedValue as SourceEncode, decodeHostedValue as SourceDecode } from '../src/hosted-value.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 
 const entry = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
@@ -28,6 +33,8 @@ const AgentMuxClient: typeof SourceClient = compiled?.AgentMuxClient ?? SourceCl
 const AgentMuxFileAgentSessionStore: typeof SourceStore = compiled?.AgentMuxFileAgentSessionStore ?? SourceStore
 const AgentMuxHostedRuntimeService: typeof SourceHostedService = compiled ? (await import(new URL('./hosted-runtime-service.js', pathToFileURL(entry!)).href)).AgentMuxHostedRuntimeService : SourceHostedService
 const connectHostedAgentMux: typeof SourceConnectHosted = compiled ? (await import(new URL('./hosted-client.js', pathToFileURL(entry!)).href)).connectHostedAgentMux : SourceConnectHosted
+const encodeHostedValue: typeof SourceEncode = compiled ? (await import(new URL('./hosted-value.js', pathToFileURL(entry!)).href)).encodeHostedValue : SourceEncode
+const decodeHostedValue: typeof SourceDecode = compiled ? (await import(new URL('./hosted-value.js', pathToFileURL(entry!)).href)).decodeHostedValue : SourceDecode
 afterEach(() => vi.unstubAllEnvs())
 
 const plan: AgentNativePromptInputPlan = { kind: 'native-rpc', operation: 'start-or-steer', protocolId: 'controlled-contract',
@@ -273,9 +280,12 @@ it('caller Abort releases only its original observer before gate and requires ex
   h.prepare.mockImplementationOnce(async context => { entered.release(); await proceed.pending; context.signal.throwIfAborted(); throw new Error('unreachable') })
   try {
     const pending = h.client.submitAgentPrompt({ ...h.input('caller-abort'), signal: controller.signal })
-    await entered.pending; controller.abort(new Error('Original caller stopped observing')); proceed.release()
-    await pending
-    const receipt = await observedWaiting(() => h.read('caller-abort'), 'observer')
+    await entered.pending
+    const observer = Reflect.get(h.client, 'inputWaitingRecipients').get('recipient')?.pending as Promise<void> | undefined
+    expect(observer).toBeDefined()
+    controller.abort(new Error('Original caller stopped observing')); proceed.release()
+    await pending; await observer
+    const receipt = await h.read('caller-abort')
     expect(receipt).toMatchObject({ status: 'waiting', observation: 'rejoin-needed', control: { state: 'enabled',
       waiting: { phase: 'observer', reason: 'observer-stopped', wake: 'explicit-rejoin' } }, admission: null })
     expect(h.dispatches).toEqual([])
@@ -555,3 +565,92 @@ it('the current original managed author can inspect and stop an old recipient Ru
     expect((await h.queue.readByOperationId('old-author-control'))?.envelope).toMatchObject({ body: text, recipientRunId: old.run.runId, senderRunId: 'run-caller' })
   } finally { await rpc.dispose(); await server.stop(); await h.close() }
 })
+
+
+it.each(['unix', 'http'] as const)('normal %s firstsave reply preserves the original native-peer observer through real unary completion', async transport => {
+  const h = await fixture(), entered = barrier(), continuePreparation = barrier(), completed = barrier(), handled = barrier()
+  const namespace = await lstat(h.root, { bigint: true }), cleanup: unknown[] = []
+  let signal: AbortSignal | undefined, primary: unknown, completionError: boolean | undefined
+  let originalChild: ChildProcess | undefined
+  let rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
+  const service = new AgentMuxHostedRuntimeService(h.client, h.store.path, () => hostedTestOwner(h.client))
+  const originalCall = service.call.bind(service)
+  // Preserve the actual firstsave result; only fix the legal native-peer/reply ordering.
+  const call = vi.spyOn(service, 'call').mockImplementation(async (method, params, context) => {
+    const result = await originalCall(method, params, context)
+    if (method === 'runtime.invoke') await entered.pending
+    return result
+  })
+  const token = 'private-normal-reply-' + transport
+  const server = new AgentMuxControlServer({ socketPath: join(h.root, 'normal-reply.sock'),
+    coreClients: h.coreClients, hostedRuntime: () => service,
+    ...(transport === 'http' ? { http: { host: '127.0.0.1', port: 0, token } } : {}) })
+  const prepare = h.prepare.getMockImplementation()!
+  h.prepare.mockImplementation(async context => {
+    signal = context.signal; context.onPreparationPhase?.('native-peer'); entered.release()
+    await continuePreparation.pending; context.signal.throwIfAborted()
+    return await prepare(context)
+  })
+  try {
+    h.restore(); await server.start()
+    originalChild = Reflect.get(Reflect.get(server, 'publication'), 'current').child as ChildProcess
+    if (transport === 'unix') {
+      const accept = Reflect.get(server, 'accept') as (socket: Socket) => void
+      Reflect.set(server, 'accept', function (this: InstanceType<typeof AgentMuxControlServer>, socket: Socket) {
+        socket.once('close', hadError => { completionError = hadError; completed.release() })
+        return accept.call(this, socket)
+      })
+    } else {
+      const accept = Reflect.get(server, 'acceptHttp') as (request: IncomingMessage, response: ServerResponse) => Promise<void>
+      Reflect.set(server, 'acceptHttp', async function (this: InstanceType<typeof AgentMuxControlServer>, request: IncomingMessage, response: ServerResponse) {
+        response.once('finish', () => { completionError = !response.writableFinished; completed.release() })
+        try { await accept.call(this, request, response) } finally { handled.release() }
+      })
+    }
+    rpc = await connectAgentMuxRpc({ endpoint: transport === 'unix'
+      ? { transport, path: server.path }
+      : { transport, url: 'http://127.0.0.1:' + server.httpAddress!.port + '/', token } })
+    const id = 'normal-reply-' + transport
+    const invocation: AgentMuxHostedInvocation = { method: 'submitAgentPrompt', args: [h.input(id)] }
+    const response = await rpc.call('runtime.invoke', { consumerId: id, fence: hostedTestFence,
+      invocation: encodeHostedValue(invocation) as AgentMuxHostedInvocation })
+    const saved = decodeHostedValue(response.value) as AgentInputSubmissionReceipt
+    expect(saved).toMatchObject({ status: 'waiting', persistence: 'confirmed', key: h.key(id), ref: { waitGeneration: 1 } })
+    // This is the original Socket.close or ServerResponse.finish, before any explicit disposal.
+    await completed.pending
+    if (transport === 'http') await handled.pending
+    const abortedByNormalReply = signal!.aborted
+    const observer = Reflect.get(h.client, 'inputWaitingRecipients').get('recipient')?.pending as Promise<void> | undefined
+    continuePreparation.release(); await observer
+    const admitted = await h.read(id)
+    expect(completionError).toBe(false)
+    expect(abortedByNormalReply, 'Normal successful unary reader completion must not cancel the original Core native-peer observer').toBe(false)
+    expect(admitted).toMatchObject({ status: 'admitted', persistence: 'confirmed', ref: saved.ref })
+    expect(admitted.admission?.admission?.inputDispatch?.ref).toEqual(saved.ref)
+    expect(h.dispatches).toEqual([id]); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+    expect((await h.queue.readJournal()).find(record => record.kind === 'input-intent')).toMatchObject({ intent: {
+      key: saved.key, source: { prompt: text, agentMuxNote: note, authorHuman: true, sourceChannel: 'message-tool' } } })
+  } catch (error) { primary = error }
+  finally {
+    continuePreparation.release()
+    const close = async (owner: string, release: () => unknown | Promise<unknown>) => {
+      try { await release() } catch (cause) { cleanup.push(new Error('Original ' + owner + ' cleanup is unconfirmed', { cause })) }
+    }
+    if (rpc) await close('RpcClient', () => rpc!.dispose())
+    await close('ControlServer', () => server.stop())
+    await close('HostedRuntimeService', () => service.dispose())
+    call.mockRestore()
+    if (originalChild && ((originalChild.exitCode === null && originalChild.signalCode === null) || originalChild.connected)) {
+      cleanup.push(new Error('The original listener ChildProcess exit or IPC release is unconfirmed'))
+    }
+    if (cleanup.length === 0) await close('fixture Core/store/namespace', async () => {
+      const current = await lstat(h.root, { bigint: true })
+      if (current.dev !== namespace.dev || current.ino !== namespace.ino) throw new Error('The original private namespace identity changed; it was retained')
+      await h.close()
+    })
+    else await close('Core while private namespace is retained', () => h.client.dispose())
+  }
+  if (cleanup.length) throw new AggregateError([...(primary === undefined ? [] : [primary]), ...cleanup],
+    'Original input observation and cleanup failures', { cause: primary })
+  if (primary !== undefined) throw primary
+}, 15_000)

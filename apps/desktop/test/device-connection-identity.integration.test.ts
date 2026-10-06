@@ -387,3 +387,31 @@ it('the actual CLI help and skill discover recorded identification and keep the 
     expect(output.stdout).toContain('device revoke --device ID')
   }
 })
+
+it('current input authority rechecks the original device key after its request Reader is released', async () => {
+  const f = await ownerFixture(), reader = f.owner.observe(f.device)
+  const original = { deviceId: f.device.deviceId, createdAt: f.device.createdAt }
+  reader.dispose()
+  expect(reader.signal.aborted).toBe(false)
+  await expect(f.owner.assertCurrentKey(original, f.key)).resolves.toBeUndefined()
+  const count = f.owner.devices().length
+  await expect(f.owner.assertCurrentKey(original, exportPublicKey(generateKeyPair().publicKey))).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(f.owner.assertCurrentKey({ ...original, createdAt: original.createdAt + 1 }, f.key)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(f.owner.assertCurrentKey({ ...original, deviceId: 'different-original-device' }, f.key)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  expect(f.owner.devices()).toHaveLength(count)
+  await f.owner.revoke(original.deviceId)
+  await expect(f.owner.assertCurrentKey(original, f.key)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  expect(f.owner.devices()).toHaveLength(count)
+})
+
+it('current input authority keeps an unconfirmed original revocation unknown until its exact file can be reconciled', async () => {
+  const f = await ownerFixture(), original = { deviceId: f.device.deviceId, createdAt: f.device.createdAt }
+  await f.owner.flush()
+  storage.afterReplace = true; storage.hideAfterReplace = true
+  try {
+    await expect(f.owner.revoke(original.deviceId)).rejects.toMatchObject({ code: 'EIO' })
+    await expect(f.owner.assertCurrentKey(original, f.key)).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+    expect(f.owner.devices()).toHaveLength(1)
+  } finally { await rename(f.path + '.kept', f.path) }
+  await expect(f.owner.assertCurrentKey(original, f.key)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+})
