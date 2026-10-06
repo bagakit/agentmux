@@ -190,6 +190,80 @@ async function copyInput(opened: HTMLElement) {
 }
 
 describe('original Browser screenshot workface', () => {
+  it.each(['Enter', 'Escape'] as const)('%s finishes the actual text field, returns focus to its Canvas, and lets the next Escape exit', async key => {
+    await mount(); const opened = await openScreenshot(), pointer = pointerInput(opened)
+    await act(async () => button(opened, 'Text').click())
+    await act(async () => { pointer('pointerdown', 85, 90); pointer('pointerup', 85, 90) })
+    await flushFrames()
+    const canvas = opened.querySelector('canvas')!
+    const field = opened.querySelector<HTMLInputElement>('[aria-label="Screenshot text"]')!
+    expect(field).not.toBeNull()
+    await act(async () => {
+      field.focus()
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'Markup text')
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(document.activeElement).toBe(field)
+    const finish = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+    await act(async () => field.dispatchEvent(finish))
+    await flushFrames()
+    expect(finish.defaultPrevented).toBe(true)
+    expect(opened.querySelector('[aria-label="Screenshot text"]')).toBeNull()
+    expect(editor()).toBe(opened)
+    expect(fixture.committed.mock.lastCall![1]).toEqual(key === 'Enter'
+      ? [expect.objectContaining({ kind: 'text', text: 'Markup text', at: { x: 85, y: 90 } })] : [])
+
+    const focused = document.activeElement
+    const exit = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    await act(async () => window.dispatchEvent(exit))
+    await flushFrames()
+    expect({ canvasFocused: focused === canvas, exitConsumed: exit.defaultPrevented,
+      editorClosed: !container.querySelector('[aria-label="Screenshot editor"]') },
+    `Text completion left focus on ${focused?.tagName} ${focused?.getAttribute('aria-label') ?? ''}`)
+      .toEqual({ canvasFocused: true, exitConsumed: true, editorClosed: true })
+    expect(bounds).toHaveBeenLastCalledWith(page.browserId, pageBounds)
+    expect(clipboard).not.toHaveBeenCalled(); expect(clipboardText).not.toHaveBeenCalled()
+    originalPageKept()
+  })
+
+  it('commits pending text exactly once on blur to an external textarea, preserving that field and its Escape input', async () => {
+    await mount(); const opened = await openScreenshot(), pointer = pointerInput(opened)
+    await act(async () => button(opened, 'Text').click())
+    await act(async () => { pointer('pointerdown', 85, 90); pointer('pointerup', 85, 90) })
+    await flushFrames()
+    const field = opened.querySelector<HTMLInputElement>('[aria-label="Screenshot text"]')!
+    expect(field).not.toBeNull()
+    await act(async () => {
+      field.focus()
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'Text committed on blur')
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(document.activeElement).toBe(field)
+    const external = document.createElement('textarea'), draft = 'External editor draft'
+    external.value = draft; document.body.append(external)
+    try {
+      await act(async () => { external.focus(); external.setSelectionRange(2, 8) })
+      await flushFrames()
+      expect(opened.querySelector('[aria-label="Screenshot text"]')).toBeNull()
+      expect(fixture.committed.mock.lastCall![1]).toEqual([
+        expect.objectContaining({ kind: 'text', text: 'Text committed on blur', at: { x: 85, y: 90 } })
+      ])
+      expect(document.activeElement).toBe(external)
+      expect(external.value).toBe(draft)
+      expect(external.selectionStart).toBe(2); expect(external.selectionEnd).toBe(8)
+      const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      await act(async () => external.dispatchEvent(event))
+      await flushFrames()
+      expect(event.defaultPrevented).toBe(false)
+      expect(document.activeElement).toBe(external)
+      expect(external.value).toBe(draft)
+      expect(external.selectionStart).toBe(2); expect(external.selectionEnd).toBe(8)
+      expect(fixture.committed.mock.lastCall![1]).toHaveLength(1)
+      expect(editor()).toBe(opened)
+      await cancel('Cancel'); originalPageKept()
+    } finally { external.remove() }
+  })
+
   it('keeps the same numbered object and unblurred note draft while its Pane is hidden, then copies context and cancels after showing it', async () => {
     await mount(); const opened = await openScreenshot(), pointer = pointerInput(opened)
     await act(async () => {
