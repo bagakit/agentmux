@@ -327,7 +327,7 @@ it('a later not-applied retry cannot clear the original unknown reply or grant a
 })
 it('the existing durable Workbench writer restores the complete original reply independently of the edited answer draft', async () => {
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockResolvedValue({ catalog: [], warnings: [] })
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   const sessions = useAppStore.getState().sessions
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions, timelines: {}, recoveryCandidates: [] })

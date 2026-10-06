@@ -174,7 +174,7 @@ describe('native asynchronous question facts and normal user replies', () => {
   })
   it('keeps the exact predecessor fence for an explicit active question reply', async () => {
     const h = await activeFixture()
-    await expect(h.client.replySessionQuestion({ ...h.input, afterSubmissionId: null })).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+    await expect(h.client.replySessionQuestion({ ...h.input, afterSubmissionId: null })).rejects.toMatchObject({ code: 'AGENT_PROMPT_CONDITION_CHANGED' })
     expect(h.writes).toHaveLength(2)
   })
   it('reconciles an explicit retry with the same applied question payload instead of sending it twice', async () => {
@@ -345,7 +345,7 @@ describe('native asynchronous question facts and normal user replies', () => {
       : mode === 'run' ? 'STALE_AGENT_SESSION' : mode === 'record' ? 'UNKNOWN_AGENT_QUESTION' : 'INVALID_AGENT_QUESTION_REPLY')
     expect(h.writes).toEqual([])
     await h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession('question-session')), agentSessionId: 'question-session', operationId: 'ordinary-still-usable', prompt: 'Manual remains available' })
-    expect(h.writes.map(write => write.data)).toEqual(['Manual remains available', '\r'])
+    expect(h.writes.map(write => write.data)).toEqual([buildPromptInputPayload('Manual remains available'), '\r'])
   })
   it('rejects source replacement after Provider lookup before any input', async () => {
     const h = await fixture(), provider = h.client.providers.get('codex'), original = provider.prepareSessionQuestionReply!.bind(provider)
@@ -379,7 +379,7 @@ describe('native asynchronous question facts and normal user replies', () => {
     vi.restoreAllMocks()
     vi.spyOn(h.inner.screenEvidence, 'wait').mockResolvedValue(1)
     await h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession('question-session')), agentSessionId: 'question-session', operationId: 'after-source-change', prompt: 'Manual input remains available' })
-    expect(h.writes.map(write => write.data)).toEqual(['Manual input remains available', '\r'])
+    expect(h.writes.map(write => write.data)).toEqual([buildPromptInputPayload('Manual input remains available'), '\r'])
   })
   it('freezes exact caller identity and answer text before the delayed public native reader', async () => {
     const h = await fixture('delayed')
