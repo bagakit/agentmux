@@ -22,14 +22,14 @@ function Controls() {
 }
 describe('themed shared production controls', () => {
   it('changes retained sprite geometry without replacing controls or changing action/state meanings', async () => {
-    updateIconSprite(document, GRAPHITE_THEME)
+    updateIconSprite(document, GRAPHITE_THEME, GRAPHITE_THEME.variants.dark.colors.text)
     host = document.createElement('div'); document.body.append(host); root = createRoot(host)
     await act(async () => root!.render(<Controls />))
     const button = host.querySelector('button')!, mote = host.querySelector('[data-semantic-icon="object.mote"]')!
     expect(mote, 'The original Mote consumer must be present before testing theme projection.').not.toBeNull()
     const original = document.getElementById(semanticIconHref('object.mote').slice(1))!.innerHTML
     const icons = { ...GRAPHITE_THEME.icons, 'object.mote': { kind: 'paths' as const, paths: [{ d: 'M3 3 L21 3 L12 21 Z' }] } }
-    updateIconSprite(document, { ...GRAPHITE_THEME, icons })
+    updateIconSprite(document, { ...GRAPHITE_THEME, icons }, GRAPHITE_THEME.variants.dark.colors.text)
     expect(host.querySelector('button')).toBe(button)
     expect(host.querySelector('[data-semantic-icon="object.mote"]')).toBe(mote)
     expect(document.getElementById(semanticIconHref('object.mote').slice(1))!.innerHTML).not.toBe(original)
