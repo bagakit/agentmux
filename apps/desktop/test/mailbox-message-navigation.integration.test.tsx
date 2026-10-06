@@ -46,7 +46,7 @@ async function navigate(key: string, detail = false) {
   const row = [...panel().querySelectorAll<HTMLButtonElement>('.composer-mailbox__row')].find(node => node.dataset.recordKey === key)
   expect(row).toBeDefined()
   if (detail) { await act(async () => { row!.focus(); row!.click() }); expect(panel().querySelectorAll('.log-turn__body')).toHaveLength(1) }
-  const action = detail ? panel().querySelector<HTMLButtonElement>('.log-turn__actions .composer-mailbox__reveal') : row!.parentElement!.querySelector<HTMLButtonElement>('.composer-mailbox__reveal')
+  const action = detail ? panel().querySelector<HTMLButtonElement>('.composer-mailbox__detail .composer-mailbox__record-actions .composer-mailbox__reveal') : row!.parentElement!.querySelector<HTMLButtonElement>('.composer-mailbox__reveal')
   expect(action).not.toBeNull(); expect(action!.closest('button button')).toBeNull()
   await act(async () => { action!.focus(); action!.click() }); await flush()
 }
