@@ -84,3 +84,16 @@ describe('compact actual launch options', () => {
     expect(document.querySelector<HTMLInputElement>('[aria-label="Agent name"]')!.value).toBe('Keep this name')
   })
 })
+
+it('keeps field guidance available without changing values or duplicating it in every row', async () => {
+  await mount(describeLaunchOptions(CLAUDE_LAUNCH_OPTIONS)); await click('[aria-label="Launch options"]')
+  const help = document.querySelector<HTMLDetailsElement>('.launch-refine__help')!
+  expect(help.open).toBe(false)
+  expect(document.querySelector('.launch-refine__row small')).toBeNull()
+  const fields = [...document.querySelectorAll<HTMLElement>('.launch-refine__row .selection-field')].map(node => node.dataset.value)
+  await act(async () => { help.open = true; help.dispatchEvent(new Event('toggle')) })
+  expect(help.textContent).toContain('Which Claude model this session runs on.')
+  expect(help.textContent).toContain('Model support and configured limits can cap the level.')
+  expect([...document.querySelectorAll<HTMLElement>('.launch-refine__row .selection-field')].map(node => node.dataset.value)).toEqual(fields)
+  expect(selected).not.toHaveBeenCalled(); expect(resetRequested).not.toHaveBeenCalled()
+})
