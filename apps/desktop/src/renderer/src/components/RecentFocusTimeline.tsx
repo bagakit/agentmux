@@ -1,6 +1,7 @@
 import { FOCUS_READING_NATIVE_RECORDS as MAX_NATIVE_RECORDS, FOCUS_READING_CAPTURED_RECORDS as MAX_CAPTURED_RECORDS, FOCUS_READING_BYTES as MAX_WINDOW_BYTES } from '../lib/focus-reading-budget'
 import { TextInput } from '@agentmux/client-ui/input'
 import { TIMELINE_MARKER_HEIGHT, TIMELINE_MARKER_SIZE } from '../lib/timeline-marker-layout'
+import { conversationItemRef } from '@agentmux/core/conversation'
 import { focusMessageMarkers } from '../lib/focus-message-markers'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
@@ -30,6 +31,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { createFocusTimelineOrder, extendFocusTimelineOrder, focusTimelineOrderCandidates, focusTimelineTrackKey, groupFocusTimeline, observeFocusInputTracks, orderFocusTimelineProjects, resolveFocusInputTrack, type FocusTimelineProject, type FocusTimelineTrack } from '../lib/focus-history-timeline'
 import { FocusMessagePreview } from './FocusMessagePreview'
+import type { RevealConversationItem } from '../lib/mailbox-message-navigation'
 import { FocusTimelineEventPreview } from './FocusTimelineEventPreview'
 import { focusVisitFacts, focusWorkingFacts, focusLiveFacts, focusGapFacts, type FocusTimelineEventFacts } from '../lib/focus-timeline-event-facts'
 import { FocusTimelineRulerSettings, type FocusDateChoice } from './FocusTimelineRulerSettings'
@@ -473,7 +475,7 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
         const speaker = message.speaker!
         const described = describeMessageSpeaker(speaker)
         const anchorOffset = (anchorFraction - fraction) * scaleWidth
-        return <button key={message.id} type="button" className={`recent-focus__message${multiple ? ' recent-focus__message--group' : ''}`} data-message-id={message.id} data-message-ids={JSON.stringify(records.map(record => record.id))} data-message-raw-ids={JSON.stringify(records.map(record => record.rawId))} data-record-count={records.length} data-message-raw-id={message.rawId} data-message-source={message.source.kind} data-message-at={startAt} data-message-through={endAt} data-message-author={multiple ? undefined : speaker.role} data-record-kind={recordKind} data-input-message-id={message.input?.id}
+        return <button key={message.id} type="button" className={`recent-focus__message${multiple ? ' recent-focus__message--group' : ''}`} data-message-id={message.id} data-message-ids={JSON.stringify(records.map(record => record.id))} data-message-raw-ids={JSON.stringify(records.map(record => record.rawId))} data-conversation-item-refs={JSON.stringify(records.map(conversationItemRef))} data-record-count={records.length} data-message-raw-id={message.rawId} data-message-source={message.source.kind} data-message-at={startAt} data-message-through={endAt} data-message-author={multiple ? undefined : speaker.role} data-record-kind={recordKind} data-input-message-id={message.input?.id}
           style={{ left: `${fraction * 100}%` }} data-anchor-fraction={anchorFraction} data-display-fraction={fraction} aria-label={multiple ? `${records.length} conversation records in ${name} ${recordedRange}, including ${recordCounts}. Open recorded messages.` : speaker.role === 'system' ? `System message in ${name} at ${clock(message.recordedAt!)}, from ${speaker.id}` : speaker.role === 'agent' ? `${message.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} in ${name} at ${clock(message.recordedAt!)}, sender ${speaker.id}` : speaker.role === 'human' ? `Your message in ${name} at ${clock(message.recordedAt!)}` : `Prompt in ${name} at ${clock(message.recordedAt!)}, sender not recorded`}
 
           onMouseEnter={event => { if (!multiple) onPreview(message, event.currentTarget, false) }} onMouseLeave={() => onDismiss(message.id)}
@@ -596,11 +598,12 @@ function FocusWorkingObservation({ segment, track, anchor, time, onClose }: {
   </Dialog.Portal></Dialog.Root>
 }
 
-export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, currentContext = null, contexts, lanes, hierarchy, onSelect, historyWindowRequest, catalogue: sharedCatalogue, visible = true }: {
+export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, currentContext = null, contexts, lanes, hierarchy, onSelect, onReveal, historyWindowRequest, catalogue: sharedCatalogue, visible = true }: {
   entries: readonly AgentFocusHistoryEntry[]; currentSessionId: string | null; contexts: readonly FocusContext[]
   /** Pure main-Region presentation input; the Reader continues using currentSessionId. */
   currentContext?: Pick<FocusContext, 'id' | 'hostId'> | null | undefined
   lanes?: readonly FocusProjectLane[]; hierarchy?: FocusHierarchyFacts; onSelect(sessionId: string): void
+  onReveal?: RevealConversationItem | undefined
   historyWindowRequest?: { at: number; sequence: number } | undefined
   catalogue?: FocusHistoryCatalogue
   visible?: boolean
@@ -1081,7 +1084,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     {workObservation ? <FocusWorkingObservation {...workObservation} time={time} onClose={() => setWorkObservation(null)} /> : null}
     {observation ? <FocusHistoryObservation segment={observation.segment} anchor={observation.anchor} time={time} onClose={() => setObservation(null)} /> : null}
     {preview?.event ? <FocusTimelineEventPreview facts={preview.event} anchor={preview.anchor} onClose={closePreview}
-      onMouseEnter={cancelPreviewIntent} onMouseLeave={() => { if (preview.eventKey) dismissMessage(preview.eventKey) }} /> : preview ? <FocusMessagePreview describeSpeaker={describePreviewSpeaker} timeFormatters={time} message={preview.message} recipient={previewContext} recipientName={previewSource?.name} workspaceRoot={previewSource?.workspacePath} sender={sender} lane={senderLane} hierarchy={hierarchy} interactive={preview.interactive} anchor={preview.anchor} onSelect={onSelect} onClose={closePreview} onMouseEnter={cancelPreviewIntent} onMouseLeave={() => { if (preview.message) dismissMessage(preview.message.id) }}
+      onMouseEnter={cancelPreviewIntent} onMouseLeave={() => { if (preview.eventKey) dismissMessage(preview.eventKey) }} /> : preview ? <FocusMessagePreview describeSpeaker={describePreviewSpeaker} timeFormatters={time} message={preview.message} recipient={previewContext} recipientName={previewSource?.name} workspaceRoot={previewSource?.workspacePath} sender={sender} lane={senderLane} hierarchy={hierarchy} interactive={preview.interactive} anchor={preview.anchor} onSelect={onSelect} onReveal={onReveal} onClose={closePreview} onMouseEnter={cancelPreviewIntent} onMouseLeave={() => { if (preview.message) dismissMessage(preview.message.id) }}
       {...(preview.records ? { reader: {
         selectionOnly: true, messages: preview.records, loading: false,
         coverage: `${preview.records.length} records ${previewRecordStart === previewRecordEnd ? `at ${time.detailed(previewRecordStart!)}` : `from ${time.detailed(previewRecordStart!)} through ${time.detailed(previewRecordEnd!)}`}. Original source order; select a record to read it.`, error: null,

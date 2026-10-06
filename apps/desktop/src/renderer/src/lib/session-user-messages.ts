@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
 import type { AgentSessionHistoryPage, AgentSessionUserMessage, AgentSessionHistoryObservationHandle, AgentSessionHistorySource } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
+import type { AgentConversationRecordSource } from '@agentmux/core/conversation'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from './api'
 import type { SessionHistoryReference } from '../../../shared/contracts'
@@ -371,7 +372,7 @@ export function useSessionUserMessages(
   loadEarlier: () => Promise<void>
   refresh: () => Promise<void>
   /** Join an existing read or read one page; navigation never queues a refresh or scans history. */
-  readForReveal: (source: AgentSessionUserMessage['source']) => Promise<{ page: AgentSessionHistoryPage | null; error: Error | null; windowFrozen: boolean; sourceChanged: boolean }>
+  readForReveal: (source: AgentConversationRecordSource) => Promise<{ page: AgentSessionHistoryPage | null; error: Error | null; windowFrozen: boolean; sourceChanged: boolean }>
 } {
   const enabled = options?.enabled ?? true
   const isAgent = control?.kind === 'agent'
@@ -464,12 +465,12 @@ export function useSessionUserMessages(
     await fetchSessionHistoryPage(control, entry, 'earlier')
   }, [active, sessionKey])
 
-  const readForReveal = useCallback(async (source: AgentSessionUserMessage['source']) => {
+  const readForReveal = useCallback(async (source: AgentConversationRecordSource) => {
     const entry = sessionKey ? sessionRegistry.get(sessionKey) : undefined
     if (!entry || !control || source.kind !== 'native') return { page: null, error: null, windowFrozen: false, sourceChanged: false }
     const currentPage = messageFactPage(entry)
     const matchesSource = currentPage && sameSource(currentPage.source, source)
-    const loaded = matchesSource && currentPage.items.some(item => item.kind === 'user-message' && item.id === source.recordId)
+    const loaded = matchesSource && currentPage.items.some(item => item.id === source.recordId)
     if (entry.inFlight) await entry.inFlight
     else if (!loaded && !entry.windowFrozen && !sourceChanged(entry) && (!currentPage || matchesSource)) {
       // Unlike refresh(), this does not queue behind an in-flight read. The existing bounded

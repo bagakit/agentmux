@@ -1,4 +1,4 @@
-import { useCallback, useId, useLayoutEffect, useRef } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentSessionHistoryResourceRequest } from '@agentmux/core'
 import { autoUpdate, computePosition, offset, shift, size, type VirtualElement } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -12,6 +12,8 @@ import type { FocusDescribeSpeaker } from '../lib/conversation-sender-details'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 import { api } from '../lib/api'
 import { createFocusTimeFormatters, type FocusTimeFormatters } from '../lib/focus-timeline-ruler'
+import { conversationItemRef } from '@agentmux/core/conversation'
+import type { RevealConversationItem } from '../lib/mailbox-message-navigation'
 
 const ThemeConversationOutgoingIcon = semanticIconComponent('conversation.outgoing')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
@@ -34,11 +36,12 @@ export type FocusMessageReader = {
 const readPastedImage = (path: string) => api.ui.readPastedImage(path)
 
 /** One inspected recorded message. Current Context facts never become its historical author or Run. */
-export function FocusMessagePreview({ message, sender, recipient, recipientName, workspaceRoot, lane, hierarchy, interactive, anchor, reader, describeSpeaker, timeFormatters, onSelect, onClose, onMouseEnter, onMouseLeave }: {
+export function FocusMessagePreview({ message, sender, recipient, recipientName, workspaceRoot, lane, hierarchy, interactive, anchor, reader, describeSpeaker, timeFormatters, onSelect, onReveal, onClose, onMouseEnter, onMouseLeave }: {
   describeSpeaker: FocusDescribeSpeaker
   message: ConversationRecord | undefined; sender: FocusContext | undefined; recipient: FocusContext | undefined
   lane: FocusProjectLane | undefined; hierarchy: FocusHierarchyFacts | undefined
   interactive: boolean; anchor: HTMLElement; reader?: FocusMessageReader; onSelect(id: string): void; onClose(): void
+  onReveal?: RevealConversationItem | undefined
   recipientName?: string | undefined; workspaceRoot?: string | undefined
   onMouseEnter?(): void; onMouseLeave?(): void
   timeFormatters?: FocusTimeFormatters
@@ -47,6 +50,12 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
   const element = useRef<HTMLDivElement>(null)
   const previewId = useId()
   const returnFocus = useRef(true)
+  const [navigationFeedback, setNavigationFeedback] = useState<{ kind: 'pending' | 'unavailable'; message: string } | null>(null)
+  const revealGeneration = useRef(0)
+  const inspectedMessage = useRef(message?.id)
+  inspectedMessage.current = message?.id
+  useEffect(() => () => { ++revealGeneration.current }, [])
+  useEffect(() => { setNavigationFeedback(null) }, [message?.id])
   const insidePointer = useRef<PointerEvent | null>(null)
   const speaker = message?.speaker
   const reply = message?.kind === 'assistant-message'
@@ -127,6 +136,19 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
     onSelect(context.id)
     onClose()
   }
+  const reveal = async () => {
+    if (!message) return
+    const generation = ++revealGeneration.current, messageId = message.id
+    const itemRef = conversationItemRef(message)
+    if (!itemRef) { setNavigationFeedback({ kind: 'unavailable', message: 'Original Host is unknown. The recorded content remains readable.' }); return }
+    if (!onReveal) { navigate(recipient); return }
+    returnFocus.current = false
+    setNavigationFeedback({ kind: 'pending', message: 'Locating original record…' })
+    const result = await onReveal(itemRef)
+    if (generation !== revealGeneration.current || inspectedMessage.current !== messageId) return
+    if (result.kind === 'located') onClose()
+    else setNavigationFeedback(result.kind === 'unavailable' ? { kind: 'unavailable', message: result.message } : null)
+  }
   return <WindowOverlayPortal layer={interactive ? 'popover' : 'tooltip'}><div ref={element} id={previewId} tabIndex={interactive ? -1 : undefined} className="recent-focus__message-preview" data-interactive={interactive} data-state="open"
     data-preview-message-id={message?.id} data-message-author={speaker?.role}
     onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onPointerDownCapture={event => { insidePointer.current = event.nativeEvent }} role={interactive ? 'dialog' : 'tooltip'} aria-label="Message">
@@ -149,7 +171,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
         const itemIdentity = describeSpeaker(itemSpeaker)
         const authorLabel = itemSpeaker.role === 'system' ? `System message from ${itemSpeaker.id}` : itemSpeaker.role === 'human' ? 'Human message' : itemSpeaker.role === 'agent' ? `${item.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} from ${itemIdentity.name} · Sender ${itemSpeaker.id}` : 'Input, sender not recorded'
         const excerpt = item.content || (item.kind === 'system-message' ? 'System message with resources' : 'Input with resources')
-        return <button type="button" key={item.id} data-input-message-id={item.input?.id} data-input-source={item.input?.source.kind} data-conversation-record-id={item.id} data-record-kind={item.kind} data-record-source={item.source.kind} data-record-raw-id={item.rawId} data-message-author={itemSpeaker.role} aria-label={`${authorLabel}: ${excerpt}`} aria-pressed={message?.id === item.id} onClick={() => reader.onMessage(item)}>
+        return <button type="button" key={item.id} data-input-message-id={item.input?.id} data-input-source={item.input?.source.kind} data-conversation-record-id={item.id} data-record-kind={item.kind} data-record-source={item.source.kind} data-record-raw-id={item.rawId} data-conversation-item-ref={conversationItemRef(item) ? JSON.stringify(conversationItemRef(item)) : undefined} data-message-author={itemSpeaker.role} aria-label={`${authorLabel}: ${excerpt}`} aria-pressed={message?.id === item.id} onClick={() => reader.onMessage(item)}>
           <ConversationSpeakerAvatar speaker={itemSpeaker} name={itemIdentity.name} mote={itemIdentity.mote} {...(itemIdentity.providerId ? { providerId: itemIdentity.providerId } : {})} size={12} /><span>{excerpt}</span><small title={describeConversationRecordSource(item).title}>{describeConversationRecordSource(item).caption} · {item.recordedAt === undefined || !Number.isFinite(item.recordedAt) ? 'Time unknown' : time.dateClock(item.recordedAt)}</small>
         </button>
       })}</div>
@@ -171,6 +193,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
     <div className="recent-focus__message-body" data-input-preview-id={message.input?.id} data-input-source={message.input?.source.kind} data-record-preview-id={message.id} data-record-source={message.source.kind}><ConversationMessage messageId={message.input?.id ?? message.id}
       speaker={speaker!} recordedIdentity
       describeSpeaker={describeSpeaker} {...(message.input ? { inputSource: message.input.source } : {})} conversationSessionId={message.agentSessionId}
+      {...(conversationItemRef(message) ? { itemRef: conversationItemRef(message)! } : {})}
       {...(message.original.kind === 'native' && message.source.kind === 'native' ? {
         nativeResourceRecord: { source: { providerId: message.source.providerId, nativeSessionId: message.source.nativeSessionId },
           recordId: message.rawId, ...(message.original.item.turnId === undefined ? {} : { turnId: message.original.item.turnId }) },
@@ -187,6 +210,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
       {...(message.recordedAt === undefined || !Number.isFinite(message.recordedAt) ? {} : { createdAt: message.recordedAt })}
       workspaceRoot={recipient?.workspacePath ?? workspaceRoot ?? ''} readPastedImage={readPastedImage} /></div>
     {agent ? <button type="button" className="recent-focus__sender-link" disabled={!sender} onClick={() => navigate(sender)}>View sender<ThemeActionOpenExternalIcon size={12} aria-hidden="true" /></button> : null}
-    <button type="button" disabled={!recipient} onClick={() => navigate(recipient)}>Return to Context</button></> : null}
+    <button type="button" disabled={!recipient && !onReveal} onClick={() => { void reveal() }}>Return to Context</button>
+    {navigationFeedback ? <p className={navigationFeedback.kind === 'pending' ? 'recent-focus__input-coverage' : 'recent-focus__input-error'} role="status">{navigationFeedback.message}</p> : null}</> : null}
   </div></WindowOverlayPortal>
 }

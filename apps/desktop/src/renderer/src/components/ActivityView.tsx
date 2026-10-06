@@ -1027,6 +1027,9 @@ export function ActivityView({
           messageId={entry.message.id}
           conversationSessionId={sessionId}
           {...(executionHostId ? { executionHostId } : {})}
+          {...(executionHostId ? { itemRef: { hostId: executionHostId, agentSessionId: entry.message.agentSessionId,
+            source: entry.message.source.kind === 'native' ? entry.message.source : { kind: 'captured' as const, recordId: entry.message.source.submissionId }
+          } } : {})}
           inputSource={entry.message.source}
           located={locatedMessageKey === conversationMessageSourceKey(sessionId, entry.message.source)}
           {...(describeSpeaker ? { describeSpeaker } : {})}
@@ -1061,7 +1064,7 @@ export function ActivityView({
           conversationSessionId={sessionId}
           {...(executionHostId ? { executionHostId } : {})}
           {...(entry.item.kind === 'user_message' || speaker.role === 'system' || entry.item.sourceDevice || entry.item.sourceChannel ? { inputSource: { kind: 'captured' as const, submissionId: entry.item.id, ...(entry.item.sourceChannel ? { channel: entry.item.sourceChannel } : {}), ...(entry.item.sourceDevice ? { device: entry.item.sourceDevice } : {}) } } : {})}
-          located={entry.item.kind === 'user_message' && locatedMessageKey === conversationMessageSourceKey(sessionId, { kind: 'captured', submissionId: entry.item.id })}
+          located={locatedMessageKey === conversationMessageSourceKey(sessionId, { kind: 'captured', recordId: entry.item.id })}
           {...(describeSpeaker ? { describeSpeaker } : {})}
           {...(speaker.role === 'system' ? { recordTitle: entry.item.title } : {})}
           origin={origin}
