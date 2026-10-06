@@ -132,7 +132,7 @@ export function QueuedDeliveryFailure({ entry, copy }: { entry: ComposerQueuedMe
     update()
     return messageDeliveryDiagnostics.subscribe(update)
   }, [logId])
-  return <MessageDeliveryFailure compact error={original ? { ...original, inputRef: entry.inputReceipt!.ref, waitingObservation: entry.inputReceipt!.control.waiting } : entry.error ?? '投递没有确认完成。'} errorCode={original?.code ?? entry.errorCode}
+  return <MessageDeliveryFailure compact error={original ?? entry.error ?? '投递没有确认完成。'} errorCode={original?.code ?? entry.errorCode}
     logId={logId} log={log?.record.logId === logId ? log : undefined} inputUnconfirmed={entry.unconfirmed}
     inputReceipt={entry.inputReceipt} inputStopReceipt={entry.inputStopReceipt}
     preparationReason={entry.preparationWait?.reason} copyText={copy ?? (async () => false)} />
