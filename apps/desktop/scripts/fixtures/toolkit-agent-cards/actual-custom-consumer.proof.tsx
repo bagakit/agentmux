@@ -31,7 +31,8 @@ it('actual ordinary script confirmed by the Toolkit owner and public CLI reaches
   if (snapshot.kind !== 'script') throw Error('Expected the ordinary Custom owner snapshot')
   expect(snapshot.state).toBe('succeeded'); expect(snapshot.admission).toBeNull()
   expect(snapshot.latestConfirmed?.state).toBe('succeeded'); expect(snapshot.latestConfirmed?.exitCode).toBe(0)
-  const document = parseToolkitResultDocument(JSON.parse(snapshot.latestConfirmed!.text.trim()))
+  expect(snapshot.latestConfirmed!.document, 'A fresh authenticated machine receipt is required; historical terminal text stays text').toBeTruthy()
+  const document = parseToolkitResultDocument(snapshot.latestConfirmed!.document)
   const reference = document.agentCards!.items[0]!.reference
   expect(reference.kind).toBe('session')
   if (reference.kind !== 'session') throw Error('Expected an exact public Session card reference')
