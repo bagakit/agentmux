@@ -7,3 +7,4 @@ export * from './publication-wire.js'
 export * from './core-conversation-port.js'
 
 export * from './durable-ingress.js'
+export * from './connection-receivers.js'
