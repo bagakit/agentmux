@@ -2,16 +2,33 @@ const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => awa
 const { fixturePath: _hygiene_fixturePath, fixturePsBirth: _hygiene_fixturePsBirth } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { afterEach, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
+import { fstatSync, readSync } from 'node:fs'
 import { copyFile, link, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const hooks = vi.hoisted(() => ({ exec: vi.fn(), live: vi.fn() }))
+const hooks = vi.hoisted(() => ({ exec: vi.fn(), spawn: vi.fn(), live: vi.fn(), closeFailure: undefined as Error | undefined,
+  openDrift: false }))
 vi.mock('node:child_process', () => {
   const execFile = Object.assign(() => {}, { [Symbol.for('nodejs.util.promisify.custom')]: hooks.exec })
-  return { execFile }
+  return { execFile, spawn: hooks.spawn }
 })
 vi.mock('../../../packages/core/src/socket-liveness.ts', () => ({ probeSocketLiveness: hooks.live }))
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
+    if (hooks.openDrift) { hooks.openDrift = false; await actual.writeFile(args[0] as string, 'changed after manifest read before original open') }
+    const original = await actual.open(...args)
+    if (!hooks.closeFailure) return original
+    return new Proxy(original, { get(target, key) {
+      if (key === 'close') return async () => { await target.close(); throw hooks.closeFailure }
+      const value = Reflect.get(target, key)
+      return typeof value === 'function' ? value.bind(target) : value
+    } })
+  } }
+})
 const helper = process.env.AGENTMUX_UPGRADE_OWNER_PATH ?? resolve(import.meta.dirname, '../scripts/package-runtime-upgrade.mjs')
 const installer = await import(pathToFileURL(helper).href)
 const roots: string[] = []
@@ -21,7 +38,9 @@ afterEach(async () => {
   vi.restoreAllMocks()
   for (const plan of plans.splice(0)) await installer.closeRuntimeUpgrade(plan)
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
-  hooks.exec.mockReset(); hooks.live.mockReset()
+  hooks.exec.mockReset(); hooks.spawn.mockReset(); hooks.live.mockReset()
+  hooks.closeFailure = undefined
+  hooks.openDrift = false
 })
 
 async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
@@ -62,6 +81,9 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
   let outgoingVersion = version
   let versionError: Error | undefined, versionChange: 'inode' | 'bytes' | undefined
   let versionCalls = 0
+  let display = true, staticDrift: 'inode' | 'bytes' | 'restore-bytes' | undefined
+  let staticArchitecture: string | undefined, staticExit = true, staticPrimary = false, staticCleanup = false
+  const readerReceipts: any[] = []
   const fields = async (fd: string, path: string) => {
     const metadata = await lstat(path, { bigint: true })
     return `f${fd}\ntREG\nD0x${metadata.dev.toString(16)}\ni${wrongInode && fd === 'txt' && mappingReads > 1 ? metadata.ino + 1n : metadata.ino}\nn${path}\n`
@@ -79,7 +101,7 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
       if (versionChange === 'inode') { const next = `${binaries[1]}.next`; await copyFile(binaries[1]!, next); await rename(next, binaries[1]!) }
       return { stdout: version }
     }
-    if (executable === '/usr/bin/codesign') return { stdout: '', stderr: `CDHash=${sha(await readFile(args.at(-1)!)).slice(0, 40)}\n` }
+    if (executable === '/usr/bin/codesign') return { stdout: '', stderr: display ? `CDHash=${sha(await readFile(args.at(-1)!)).slice(0, 40)}\n` : 'Changed human-readable signature display\n' }
     if (executable === '/usr/bin/python3') return { stdout: JSON.stringify({ valid: true, cdHash: sha(await readFile(mapped)).slice(0, 40),
       pid, uid: kernelUid, startSeconds, startMicroseconds: missingBirth ? undefined : startMicroseconds + (insideBirthDrift && kernelReads++ > 0 ? 1 : 0) }) }
     if (executable === '/usr/bin/tar') return { stdout: '' }
@@ -97,6 +119,57 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
       return { stdout: JSON.stringify({ protocol: 18, runtime, running: [run] }) }
     }
     throw new Error(`Unexpected owning fixture command: ${executable}`)
+  })
+  // This is a controlled native reader port, not a claim that these unsigned
+  // fixture files have signatures. Its only file source is the inherited FD.
+  hooks.spawn.mockImplementation((command: string, args: string[], options: any) => {
+    expect(command).toBe('/usr/bin/python3'); expect(args.slice(0, 2)).toEqual(['-I', '-c'])
+    const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(),
+      kill: vi.fn(() => true), unref: vi.fn() })
+    queueMicrotask(async () => {
+      const fd = options.stdio[3]
+      if (!Number.isInteger(fd)) {
+        child.stdout.end(JSON.stringify({ primary: { message: 'original file FD unavailable' }, cleanup: [] }))
+        child.emit('exit', 0, null); child.emit('close', 0, null); return
+      }
+      const bytes = Buffer.alloc(fstatSync(fd).size)
+      readSync(fd, bytes, 0, bytes.length, 0)
+      // The CF reader can change the shared FD offset. Explicit-position hash
+      // reads in the actual wrapper must still cover the entire original file.
+      readSync(fd, Buffer.alloc(bytes.length), 0, bytes.length, null)
+      const observation = { result: { kind: 'security-static-code', architecture: staticArchitecture ?? args[3],
+        dictionaryKey: 'kSecCodeInfoUnique', dataType: 'CFData', byteLength: 20, cdHash: sha(bytes).slice(0, 40), valid: true },
+        primary: staticPrimary ? { name: 'RuntimeError', message: 'original CF observation failed' } : null,
+        calls: ['SecStaticCodeCreateWithPathAndAttributes', 'SecStaticCodeCheckValidity', 'SecCodeCopySigningInformation'].map(api => ({ api, status: 0 })),
+        cleanup: ['signing-information', 'static-code', 'architecture-attributes', 'architecture-string', 'file-url'].map(owner =>
+          ({ owner, released: !(staticCleanup && owner === 'static-code'), ...(staticCleanup && owner === 'static-code' ? { error: { message: 'independent CF release failed' } } : {}) })) }
+      if (staticDrift) {
+        // Select the file by the originally supplied FD's identity, only for this
+        // explicit race stimulus. No production process/resource is controlled.
+        const metadata = fstatSync(fd, { bigint: true })
+        const path = (await Promise.all(binaries.map(async path => ({ path, stat: await lstat(path, { bigint: true }) }))))
+          .find(value => value.stat.dev === metadata.dev && value.stat.ino === metadata.ino)!.path
+        if (staticDrift === 'restore-bytes') {
+          await writeFile(path, 'different image queried on the original inode')
+          observation.result.cdHash = '77'.repeat(20)
+          await writeFile(path, bytes)
+        }
+        else if (staticDrift === 'bytes') await writeFile(path, 'artifact changed during static query')
+        else {
+          // Move the parent directory rather than unlinking the held file: its
+          // original ctime/mtime remain stable, so named dev/ino is independent.
+          const parent = dirname(path), moved = `${parent}.original`
+          await rename(parent, moved); await mkdir(parent)
+          await copyFile(join(moved, 'ctxmuxd'), path)
+          expect(fstatSync(fd, { bigint: true }).ctimeNs).toBe(metadata.ctimeNs)
+        }
+      }
+      child.stdout.end(JSON.stringify(observation)); child.stderr.end()
+      if (staticExit) { child.emit('exit', 0, null); child.emit('close', 0, null) }
+      else child.emit('error', new Error('reader exit unavailable'))
+      readerReceipts.push({ observation, exitConfirmed: staticExit, fd, signals: child.kill.mock.calls })
+    })
+    return child
   })
   const signal = vi.spyOn(process, 'kill').mockImplementation((target, name) => {
     expect(target).toBe(pid); expect(name).toBe('SIGHUP'); signalled = true; mapped = binaries[1]!; return true
@@ -121,8 +194,72 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
     }, versionResponse(value: string) { version = value }, versionFailure(error: Error) { versionError = error },
     outgoingVersionResponse(value: string) { outgoingVersion = value },
     driftDuringVersion(kind: 'inode' | 'bytes') { versionChange = kind },
-    versionCalls: () => versionCalls, wasSignalled: () => signalled }
+    versionCalls: () => versionCalls, wasSignalled: () => signalled,
+    omitSignatureDisplay() { display = false }, staticFileDrift(kind: 'inode' | 'bytes' | 'restore-bytes') { staticDrift = kind },
+    driftBeforeOriginalOpen() { hooks.openDrift = true },
+    wrongStaticArchitecture() { staticArchitecture = 'another-architecture' },
+    unknownReaderExit() { staticExit = false }, failStaticOwners() { staticPrimary = true; staticCleanup = true },
+    failFileClose(error = new Error('original file close failed')) { hooks.closeFailure = error }, readerReceipts }
 }
+
+it('qualifies the original wrapper from machine signing facts when signature display changes', async () => {
+  const f = await fixture(); f.omitSignatureDisplay()
+  const result = await f.prepare().then(plan => ({ plan }), error => ({ error }))
+  expect(result).toHaveProperty('plan.owner.imageIdentity.cdHash', sha(await readFile(f.binaries[0]!)).slice(0, 40))
+  expect(hooks.exec.mock.calls.filter(([command]) => command === '/usr/bin/codesign')).toHaveLength(0)
+  expect(f.readerReceipts).toHaveLength(2); expect(f.signal).not.toHaveBeenCalled()
+})
+it.each(['inode', 'bytes'] as const)('refuses original artifact %s drift during the static reader', async kind => {
+  const f = await fixture(); f.staticFileDrift(kind)
+  const result = await f.prepare().then(plan => ({ plan }), error => ({ error }))
+  expect(result).toHaveProperty('error.message', 'The Runtime artifact changed while its code identity was being read.')
+  expect(f.signal).not.toHaveBeenCalled()
+})
+it('refuses same-inode image replacement restored to original bytes before static observation ends', async () => {
+  const f = await fixture(); f.staticFileDrift('restore-bytes')
+  const result = await f.prepare().then(plan => ({ plan }), error => ({ error }))
+  expect(result).toHaveProperty('error.message', 'The Runtime artifact changed while its code identity was being read.')
+  expect(f.signal).not.toHaveBeenCalled()
+})
+it('binds full expected bytes even when they drift before the original open and then stay stable', async () => {
+  const f = await fixture(); f.driftBeforeOriginalOpen()
+  const result = await f.prepare().then(plan => ({ plan }), error => ({ error }))
+  expect(result).toHaveProperty('error.message', 'The Runtime artifact changed while its code identity was being read.')
+  expect(hooks.spawn).not.toHaveBeenCalled(); expect(f.signal).not.toHaveBeenCalled()
+})
+it.each(['architecture', 'exit'] as const)('does not accept a static reader with unconfirmed %s', async kind => {
+  const f = await fixture()
+  if (kind === 'architecture') f.wrongStaticArchitecture(); else f.unknownReaderExit()
+  const result = await f.prepare().then(plan => ({ plan }), error => ({ error }))
+  expect(result).toHaveProperty('error')
+  expect(result).not.toHaveProperty('plan'); expect(f.signal).not.toHaveBeenCalled()
+})
+it('preserves both the original static observation and independent release failure', async () => {
+  const f = await fixture(); f.failStaticOwners()
+  const result = await f.prepare().then(plan => ({ plan }), error => ({ error }))
+  expect(result).toHaveProperty('error.cause.message', 'original CF observation failed')
+  expect('error' in result && result.error.errors.map((error: Error) => error.message))
+    .toEqual(['original CF observation failed', 'independent CF release failed'])
+  expect(f.signal).not.toHaveBeenCalled()
+})
+it('preserves original CF, independent CF release and original file close failures together', async () => {
+  const f = await fixture(); f.failStaticOwners(); f.failFileClose()
+  const result = await f.prepare().then(plan => ({ plan }), error => ({ error }))
+  expect(result).toHaveProperty('error.cause.message', 'original CF observation failed')
+  expect('error' in result && result.error.errors.map((error: Error) => ({ message: error.message, owner: (error as any).owner })))
+    .toEqual([{ message: 'original CF observation failed', owner: undefined },
+      { message: 'independent CF release failed', owner: 'static-code' }, { message: 'original file close failed', owner: 'artifact-file' }])
+  expect(f.signal).not.toHaveBeenCalled()
+})
+it('does not mutate a frozen original file-close error or replace the CF primary', async () => {
+  const f = await fixture(), original = Object.freeze(new Error('frozen original file close failed'))
+  f.failStaticOwners(); f.failFileClose(original)
+  const result = await f.prepare().then(plan => ({ plan }), error => ({ error }))
+  expect(result).toHaveProperty('error.cause.message', 'original CF observation failed')
+  expect('error' in result && result.error.errors.at(-1)).toMatchObject({ owner: 'artifact-file', cause: original })
+  expect(original).not.toHaveProperty('owner'); expect(Object.isFrozen(original)).toBe(true)
+  expect(f.signal).not.toHaveBeenCalled()
+})
 
 it.each(['stale', 'missing', 'invalid'] as const)('qualifies actual authority despite a %s ledger and a different configured default', async ledger => {
   const f = await fixture(ledger), outcomes = await Promise.allSettled([f.prepare()])

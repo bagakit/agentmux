@@ -1,14 +1,33 @@
-import { fixturePath as _reshape_fixturePath } from "../scripts/lib/fixture-values.mjs"
+const { fixturePath: _reshape_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, mkdir, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, mkdir, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
+import { writeFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ts from 'typescript'
 import { CtxmuxClient } from '../../../packages/core/node_modules/@ctxmux/sdk/dist/index.js'
 import { createPrivateRuntimeScope } from '../scripts/package-runtime-upgrade.mjs'
+
+const readers = vi.hoisted(() => [] as any[])
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return { ...actual, spawn: ((command: string, args: string[], options: any) => {
+    const child = actual.spawn(command, args, options)
+    if (command === '/usr/bin/python3' && args[0] === '-I') {
+      const record: any = { command, architecture: args[3], inheritedFD: options.stdio[3], source: args[2],
+        pid: child.pid, exitConfirmed: false, code: null, signal: null, stdout: '', stderr: '', errors: [] }
+      readers.push(record)
+      child.stdout!.on('data', bytes => { record.stdout += bytes })
+      child.stderr!.on('data', bytes => { record.stderr += bytes })
+      child.once('error', error => { record.errors.push({ name: error.name, message: error.message }) })
+      child.once('exit', (code, signal) => { record.exitConfirmed = true; record.code = code; record.signal = signal })
+    }
+    return child
+  }) as typeof actual.spawn }
+})
 
 const core = resolve(import.meta.dirname, '../../../packages/core')
 const roots: string[] = [], children: ChildProcess[] = [], records: unknown[] = []
@@ -41,21 +60,94 @@ afterEach(async () => {
     await mkdir(process.env.T008_EVIDENCE_DIRECTORY, { recursive: true })
     await writeFile(join(process.env.T008_EVIDENCE_DIRECTORY, 'actual-native.json'), JSON.stringify(records, null, 2) + '\n')
   }
+  if (process.env.T015_EVIDENCE_DIRECTORY) {
+    await mkdir(process.env.T015_EVIDENCE_DIRECTORY, { recursive: true })
+    await writeFile(join(process.env.T015_EVIDENCE_DIRECTORY, 'actual-private-wrapper.json'), JSON.stringify({ records, readers }, null, 2) + '\n')
+  }
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
 
 describe.runIf(process.platform === 'darwin')('private cleanup consumes the qualified native owner', () => {
   it('binds native birth to libproc starttime independently of display locale and timezone', async () => {
-    const own = await scope(), { child } = await daemon(own)
+    const original = await scope().then(scope => ({ scope }), error => ({ error }))
+    expect(original).toHaveProperty('scope')
+    if (!('scope' in original)) throw original.error
+    const own = original.scope, directoryIdentity = await lstat(own.directory, { bigint: true }), { child } = await daemon(own)
+    expect(readers).toHaveLength(1)
+    const reader = readers[0], observation = JSON.parse(reader.stdout)
+    expect(reader).toMatchObject({ architecture: process.arch === 'x64' ? 'x86_64' : process.arch,
+      exitConfirmed: true, code: 0, signal: null, errors: [] })
+    expect(observation).toMatchObject({ primary: null, result: { kind: 'security-static-code', byteLength: 20, valid: true } })
+    expect(observation.cleanup).toHaveLength(5)
+    expect(observation.cleanup.every((owner: any) => owner.released === true)).toBe(true)
     const before = await own.observeOwner()
+    expect(before.imageIdentity.cdHash).toBe(observation.result.cdHash)
     expect(before.birth).toMatch(/^[1-9][0-9]*:[0-9]{1,6}$/)
     vi.stubEnv('TZ', 'Pacific/Kiritimati'); vi.stubEnv('LC_ALL', 'zh_CN.UTF-8')
     const after = await own.observeOwner()
     expect(after.birth).toBe(before.birth); expect(after.pid).toBe(child.pid)
     const exit = once(child, 'exit'), receipt = await own.cleanup(); await exit
     expect(receipt.birth).toBe(before.birth); expect(alive(child.pid!)).toBe(false)
+    const finalDirectory = await lstat(own.directory, { bigint: true })
+    expect(finalDirectory.isDirectory()).toBe(true)
+    expect([finalDirectory.dev, finalDirectory.ino]).toEqual([directoryIdentity.dev, directoryIdentity.ino])
+    await rm(own.directory, { recursive: true })
+    const namespaceRemoved = await lstat(own.directory).then(() => false, error => error.code === 'ENOENT')
+    expect(namespaceRemoved).toBe(true)
     records.push({ test: 'kernel-birth-display-independent', before, after, receipt,
+      artifactSha256: createHash('sha256').update(await readFile(own.daemonPath)).digest('hex'),
+      staticCdHash: observation.result.cdHash, directory: own.directory,
+      namespace: { dev: String(directoryIdentity.dev), ino: String(directoryIdentity.ino), removed: namespaceRemoved },
       nativeExit: { code: child.exitCode, signal: child.signalCode } })
+  }, 30_000)
+  it('refuses a real signed alternate image restored in place before the original static wrapper returns', async () => {
+    const root = await mkdtemp(_reshape_fixturePath("tmp/amx-static-inplace-")); roots.push(root)
+    const namespace = await lstat(root, { bigint: true })
+    const originalBytes = await readFile(join(core, `vendor/ctxmux/${process.platform}-${process.arch}/bin/ctxmuxd`))
+    const alternateBytes = await readFile(join(core, `vendor/ctxmux/${process.platform}-${process.arch}/bin/ctxmux`))
+    const image = join(root, 'original-image'), alternate = join(root, 'alternate-image')
+    await writeFile(image, originalBytes); await writeFile(alternate, alternateBytes)
+    const before = await lstat(image, { bigint: true }), start = readers.length
+    const source = await readFile(new URL('../scripts/package-runtime-upgrade.mjs', import.meta.url), 'utf8')
+    const ast = ts.createSourceFile('actual-static-wrapper.mjs', source, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS)
+    const declaration = ast.statements.filter(ts.isVariableStatement).flatMap(node => [...node.declarationList.declarations])
+      .find(node => ts.isIdentifier(node.name) && node.name.text === 'STATIC_CODE_IDENTITY_SOURCE')!
+    const bridge = (declaration.initializer as ts.TaggedTemplateExpression).template as ts.NoSubstitutionTemplateLiteral
+    const functions = ['staticCodeRead', 'artifactCodeIdentity'].map(name => ast.statements.filter(ts.isFunctionDeclaration)
+      .find(node => node.name?.text === name)!.getText(ast)).join('\n')
+    const { open } = await import('node:fs/promises')
+    const wrapper = (childSpawn: typeof spawn) => new Function('spawn', 'STATIC_CODE_IDENTITY_SOURCE', 'open', 'lstat', 'createHash', 'process', 'fail',
+      functions + ';return artifactCodeIdentity;')(childSpawn, bridge.text, open, lstat, createHash, process,
+        (ok: boolean, message: string) => { if (!ok) throw new Error(message) })
+    const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
+    const originalIdentity = await wrapper(spawn)(image, sha(originalBytes))
+    const alternateIdentity = await wrapper(spawn)(alternate, sha(alternateBytes))
+    expect(alternateIdentity).not.toBe(originalIdentity)
+    const controlledSpawn = ((command: string, args: string[], options: any) => {
+      // Only the test's original private inode is edited. Both CF readers and
+      // all signing facts are real; neither Mach-O file is executed.
+      writeFileSync(image, alternateBytes)
+      const child = spawn(command, args, options), originalOnce = child.once
+      child.once = ((event: string, handler: (...args: any[]) => void) => {
+        const listener = event === 'close' ? (...values: any[]) => { writeFileSync(image, originalBytes); handler(...values) } : handler
+        return Reflect.apply(originalOnce, child, [event, listener])
+      }) as typeof child.once
+      return child
+    }) as typeof spawn
+    const result = await wrapper(controlledSpawn)(image, sha(originalBytes)).then((value: string) => ({ value }), (error: Error) => ({ error }))
+    const after = await lstat(image, { bigint: true }), actualReaders = readers.slice(start)
+    expect(result).toHaveProperty('error.message', 'The Runtime artifact changed while its code identity was being read.')
+    expect([after.dev, after.ino]).toEqual([before.dev, before.ino])
+    expect(await readFile(image)).toEqual(originalBytes); expect(after.ctimeNs).not.toBe(before.ctimeNs)
+    expect(actualReaders).toHaveLength(3)
+    for (const reader of actualReaders) expect(reader).toMatchObject({ exitConfirmed: true, code: 0, signal: null, errors: [] })
+    expect(JSON.parse(actualReaders[2].stdout).result.cdHash).toBe(alternateIdentity)
+    const current = await lstat(root, { bigint: true })
+    expect([current.dev, current.ino]).toEqual([namespace.dev, namespace.ino])
+    await rm(root, { recursive: true }); roots.splice(roots.indexOf(root), 1)
+    records.push({ test: 'actual-signed-image-inplace-restoration-refused', originalIdentity, alternateIdentity,
+      sameDevIno: true, originalBytesRestored: true, ctimeChanged: true, refused: 'error' in result,
+      namespace: { dev: String(namespace.dev), ino: String(namespace.ino), removed: await lstat(root).then(() => false, error => error.code === 'ENOENT') } })
   }, 30_000)
   it('confirms only its original daemon exit, preserving a peer daemon and an argv lookalike', async () => {
     const own = await scope(), peer = await scope(), a = await daemon(own), b = await daemon(peer)
