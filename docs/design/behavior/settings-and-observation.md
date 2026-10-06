@@ -41,6 +41,14 @@ Agent 工作状态与待处理状态消费同一 Core 语义事实，不能从 r
 
 用户要求「快捷键设置也应该放进设置」。快捷键在同一 Settings 导航、搜索与 Overview 可发现；原快捷键入口与公开 `help.shortcuts` 指向同一实际 registry，命令、平台和弦与作用域不另维护一份列表。作用域、IME 与 Terminal 原生键消费仍沿既有快捷键合同。当前只读手册与可编辑配置必须清楚区分；未接入真实分发和唯一持久 owner 前，不能提供仅修改显示的录键或保存。后续可配置绑定须同时供实际分发、编辑器提示和 CLI 消费，冲突与保存不得另建假配置。
 
+### Message Tool 设置分组
+
+Message Tool 在 Settings 中有专门分组，收拢输入形态、发送与编辑快捷键、Prompts 及真实存在的 Mailbox 偏好。导航、搜索、Overview 和窄窗分类沿同一设置目录；初始一行／两行偏好从 General 归入本组，保留原配置键、默认、生效范围和单字段保存。Mailbox 沿准确 Agent 的 Inbox、Outbox、历史与投递事实；尚无可编辑偏好时用紧凑说明解释入口，不伪造全局开关或新增空页。全局 Agent 通知仍归 Notifications。
+
+Message Tool 内的快捷键说明与全局 Keyboard shortcuts 消费实际共享输入声明，包含常规发送、立即 steer、换行、历史与候选操作及各自适用条件。按键只在原输入作用域处理；IME、编辑器默认行为、草稿和原可用组合保持，说明收拢不成为新门禁。发送、排队与 steer 的含义唯一沿[输入合同](conversation-input.md#composer-静息形态与主操作)，不把当前只读手册当成可自定义键位。
+
+Prompts 保持原库身份、编辑器实例、保存与公共资源接口。Goals 常用操作、快捷回复、状态动作等消费者继续引用同一条 Prompt，导航归组不复制正文、收窄作用范围或新增配置 owner。
+
 ## Activity 工作线展开信息密度
 
 - `Activity by work line` 折叠态保留工作线摘要和“选择一行打开”；展开箭头只在确实有额外可操作或诊断信息时出现。
@@ -197,7 +205,7 @@ Prompt 的当前对象、未提交修改与只读使用示意应在同一编辑�
 
 ### 分区、资源与配置生效
 
-- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、Browser、General），资源配置随后（Agents、Prompts、Workspaces），环境连接与手机设备接入独立归入 Connections；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，Workspaces 从资源导航进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
+- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、Browser、General），Message Tool 独立归组（输入与 Mailbox、Prompts），资源配置随后（Agents、Workspaces），环境连接与手机设备接入独立归入 Connections；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，Workspaces 从资源导航进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
 
 - 用户要求「继续，直到设置界面质量彻底满意」。设置作为辅助界面，第一眼必须是当前对象和动作；Workspace 与 Executor 可按名字、路径或身份检索，大量资源不靠逐条扫读。Executor 常用身份与外观优先，高级启动配置按需进入；已有 Provider 与 Executor ID 保持不可修改，新 Executor 创建后直接进入编辑。改变分组或检查结果不能丢失展开、输入或焦点。
 - 设置保存仍经既有公开 API，启动配置的说明应明确针对后续启动，不能冒充已改变健康 Run。高级权限动作保持显式选择，不自动批准；所有分区保留原功能、草稿、错误反馈和 status bar。
