@@ -272,6 +272,24 @@ export class AgentMuxRpcService {
     if (owners.length !== 1) throw new AgentMuxError(`Agent Session ${JSON.stringify(agentSessionId)} has multiple authoritative route Hosts: ${owners.map(owner => JSON.stringify(owner.hostId)).join(', ')}. Select the original service endpoint explicitly; no owner was chosen.`, 'AMBIGUOUS_AGENT_SESSION')
     return { ...owners[0]!, unavailable: issues }
   }
+  private async originalInputOwner(agentSessionId: string, caller?: AgentMuxRpcCoreClient): Promise<AgentMuxRpcCoreClient> {
+    // An exact semantic endpoint (or authenticated participant scope) already
+    // fixes the owner. The original input journal proves the key/ref; an active
+    // Session catalogue cannot add authority or be required to recover it.
+    const scopes = caller ? [caller] : await this.clients()
+    if (scopes.length === 1) {
+      const scope = scopes[0]!
+      if (this.endpointUnverified(scope.client)) throw new AgentMuxError(
+        'The original semantic endpoint is unconfirmed. No input was rerouted.', 'RUNTIME_UNAVAILABLE')
+      return { hostId: scope.hostId, client: scope.client }
+    }
+    // Aggregate endpoints still require an authoritative route. Never choose a
+    // first Host or search unrelated input journals to guess an original owner.
+    const scope = await this.owner(agentSessionId)
+    if (scope.agentSessionId !== agentSessionId) throw new AgentMuxError(
+      'Input control requires the exact original Session.', 'INVALID_AGENT_INPUT_CONTROL')
+    return scope
+  }
   private async authenticated(context: AgentMuxRpcCallContext) {
     if (!context.caller) return undefined
     const caller = rpcRecord(context.caller, ['agentSessionId', 'capability'])
@@ -1112,20 +1130,19 @@ export class AgentMuxRpcService {
         }
         rpcRecord(p, ['key'])
         const key = validateAgentPromptInputKey(p.key)
-        const client = await (async () => {
-          try {
-            const owner = await this.owner(key.agentSessionId)
-            if (owner.agentSessionId !== key.agentSessionId) throw new AgentMuxError('Input inspection requires the original exact Session ID.', 'INVALID_CONTROL_REQUEST')
-            return owner.client
-          } catch (error) {
+        const { client } = await (async () => {
+          try { return await this.originalInputOwner(key.agentSessionId, caller) }
+          catch (error) {
             if (!(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION') throw error
-            // The existing original history descriptor locates a retired owner;
-            // reading a claim never recreates its Session or discovers a writer.
-            const retained = (await Promise.all((await this.clients()).map(async scope => ({ client: scope.client,
+            // Preserve the original aggregate read route for a retired Session.
+            // Its unique durable history descriptor locates the owner; reading
+            // an input journal never supplies ownership or dispatch authority.
+            const retained = (await Promise.all((await this.clients()).map(async scope => ({ ...scope,
               retained: (await scope.client.sessionHistorySources()).some(source => source.agentSessionId === key.agentSessionId) }))))
               .filter(scope => scope.retained)
-            if (retained.length !== 1) throw new AgentMuxError('The original input owner is unknown or ambiguous.', retained.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_AGENT_SESSION')
-            return retained[0]!.client
+            if (retained.length !== 1) throw new AgentMuxError('The original input owner is unknown or ambiguous.',
+              retained.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_AGENT_SESSION')
+            return retained[0]!
           }
         })()
         if (caller && caller.client !== client) throw new AgentMuxError('Input inspection cannot cross semantic owners.', 'CONTROL_PERMISSION_DENIED')
@@ -1136,8 +1153,10 @@ export class AgentMuxRpcService {
         result = { record: original, ...(input ? { input } : {}) }; break
       }
       case 'agent.input.stop': case 'agent.input.rejoin': {
-        const ref = validateAgentInputWaitRef(p.ref), scope = await this.owner(ref.key.agentSessionId)
-        if (scope.agentSessionId !== ref.key.agentSessionId) throw new AgentMuxError('Input control requires the exact original Session.', 'INVALID_AGENT_INPUT_CONTROL')
+        const ref = validateAgentInputWaitRef(p.ref)
+        const scope = method === 'agent.input.stop' ? await this.originalInputOwner(ref.key.agentSessionId, caller)
+          : await this.owner(ref.key.agentSessionId)
+        if ('agentSessionId' in scope && scope.agentSessionId !== ref.key.agentSessionId) throw new AgentMuxError('Input control requires the exact original Session.', 'INVALID_AGENT_INPUT_CONTROL')
         if (caller && caller.client !== scope.client) throw new AgentMuxError('Input control cannot cross semantic owners.', 'CONTROL_PERMISSION_DENIED')
         if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError(
           'Stopping or rejoining input requires a transport-approved user/device or its authenticated Agent author.', 'CONTROL_PERMISSION_DENIED')
