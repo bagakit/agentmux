@@ -1027,7 +1027,10 @@ export async function registerIpc(args: {
   })
   const moteAvatarSources = new MoteAvatarSeriesOwner({ userRoot: join(homedir(), '.agentmux', 'avatars'), builtinRoot: join(app.getAppPath(), 'resources', 'avatar-series') })
   const moteAvatarWriter = createMoteAvatarWriter(configOwner,moteAvatarSources,args.scratchTopics,args.configStore)
-  const moteAvatars = new MoteAvatarControl(moteAvatarSources, moteAvatarWriter)
+  const moteAvatars = new MoteAvatarControl(moteAvatarSources, moteAvatarWriter, async path => {
+    const error = await shell.openPath(path)
+    if (error) throw Object.assign(new Error('The avatar folder could not be opened. Its created files are retained. ' + error), { code: 'AVATAR_SERIES_REVEAL_FAILED' })
+  })
   handleWithEvent('moteAvatars:list', async event => {
     requireTrustedSender('moteAvatars:list', event)
     return moteAvatars.call('space.mote.avatar.list', {})
@@ -1039,6 +1042,14 @@ export async function registerIpc(args: {
   handleWithEvent('moteAvatars:read', async (event, params: MoteAvatarWriteParameterMap['space.mote.avatar.read']) => {
     requireTrustedSender('moteAvatars:read', event)
     return moteAvatars.call('space.mote.avatar.read', params)
+  })
+  handleWithEvent('moteAvatars:createSeries', async (event, params: MoteAvatarSeriesParameterMap['space.mote.avatar.series.create']) => {
+    requireTrustedSender('moteAvatars:createSeries', event)
+    return moteAvatars.call('space.mote.avatar.series.create', params)
+  })
+  handleWithEvent('moteAvatars:revealSeries', async (event, params: MoteAvatarSeriesParameterMap['space.mote.avatar.series.reveal']) => {
+    requireTrustedSender('moteAvatars:revealSeries', event)
+    return moteAvatars.call('space.mote.avatar.series.reveal', params)
   })
   handleWithEvent('moteAvatars:save', async (event, params: MoteAvatarWriteParameterMap['space.mote.avatar.save']) => {
     requireTrustedSender('moteAvatars:save', event)

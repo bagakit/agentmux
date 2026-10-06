@@ -364,6 +364,8 @@ const mockApi: AgentMuxDesktopApi = {
   moteAvatars: {
     list: async () => { throw new Error('Open Desktop to read this Host’s avatar series.') },
     preview: async () => { throw new Error('Open Desktop to prepare this original avatar source.') },
+    createSeries: async () => { throw new Error('Open Desktop to create a collection in this Host’s avatar folder. Your current draft is retained.') },
+    revealSeries: async () => { throw new Error('Open Desktop to request opening this Host’s avatar folder. Created files are retained.') },
     read: async () => { throw new Error('Open Desktop to read the original saved avatar.') },
     save: async () => { throw new Error('Open Desktop to save through its original avatar owner. Your draft is retained.') }
   },

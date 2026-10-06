@@ -1642,6 +1642,8 @@ export type AgentMuxDesktopApi = {
   moteAvatars: {
     list(): Promise<import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesCatalog>
     preview(params: import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesPreviewParams): Promise<import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesPrepared>
+    createSeries(params: import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesCreateParams): Promise<import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesCreateResult>
+    revealSeries(params: import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesRevealParams): Promise<import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesRevealResult>
     read(params: import('@agentmux/core/mote-avatar-write').MoteAvatarWriteParameterMap['space.mote.avatar.read']): Promise<import('@agentmux/core/mote-avatar-write').MoteAvatarRead>
     save(params: import('@agentmux/core/mote-avatar-write').MoteAvatarSave): Promise<import('@agentmux/core/mote-avatar-write').MoteAvatarSaveResult>
   }
