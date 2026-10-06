@@ -1,0 +1,8 @@
+html, body, #root { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+body { background: var(--bg); color: var(--text); font: 13px -apple-system, BlinkMacSystemFont, sans-serif; }
+.viewport-fixture { padding: 18px 20px; height: 100%; box-sizing: border-box; }
+.viewport-fixture > header { display: flex; gap: 16px; height: 26px; align-items: center; margin-bottom: 14px; }
+.viewport-fixture > header span, .viewport-fixture > aside { color: var(--text-dim); }
+#original { width: 800px; height: 650px; }
+#original > * { height: 100%; }
+.viewport-fixture > aside { position: absolute; left: 930px; top: 48px; }
