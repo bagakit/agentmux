@@ -29,12 +29,16 @@ export class ConnectionHost implements ConnectionPort {
   private readonly adapters: Map<string, ConnectionAdapter>
   private readonly observations = new Map<string, { revision: number; value: ConnectionObservation }>()
   constructor(private readonly options: ConnectionHostOptions) {
+    let ownedDatabase: DatabaseSync | undefined
     try {
       if (!options.database && !options.databasePath) throw new Error('Missing original connection database.')
       if (!options.database && options.databasePath !== ':memory:') mkdirSync(dirname(options.databasePath!), { recursive: true, mode: 0o700 })
-      this.database = options.database ?? new DatabaseSync(options.databasePath!)
+      this.database = options.database ?? (ownedDatabase = new DatabaseSync(options.databasePath!))
       this.database.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS connection_configuration (connection_id TEXT PRIMARY KEY, config_json TEXT NOT NULL, revision INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS connection_configuration_operation (operation_id TEXT PRIMARY KEY, input_json TEXT NOT NULL, result_json TEXT NOT NULL);')
-    } catch { throw new AgentMuxError('Connection configuration storage is unavailable. Existing Agents are retained.', 'CONNECTION_STORAGE_UNAVAILABLE') }
+    } catch {
+      try { ownedDatabase?.close() } catch { /* Preserve the original initialization failure without exposing storage details. */ }
+      throw new AgentMuxError('Connection configuration storage is unavailable. Existing Agents are retained.', 'CONNECTION_STORAGE_UNAVAILABLE')
+    }
     this.adapters = new Map((options.adapters ?? []).map(adapter => [adapter.adapterId, adapter]))
     if (this.adapters.size !== (options.adapters?.length ?? 0)) { if (!options.database) this.database.close(); throw new AgentMuxError('Connection adapter IDs must be unique.', 'INVALID_CONNECTION_DATA') }
   }
