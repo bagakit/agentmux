@@ -66,10 +66,41 @@ ${reference('message.inbox.ack')}
 ${reference('message.dispatch.inspect')}
 ${reference('goal.assign')}
 ${reference('goal.handoff')}
+${reference('goal.delegate')}
+${reference('goal.delegations')}
+${reference('goal.report')}
+${reference('goal.collect')}
 
 Assign an owner with concrete input and acceptance evidence. Hand off communication
 without silently completing an external Task. Keep message/thread/reply identities.
 Role registration is a separate explicit authorized action, never a step this manual runs.
+
+For authorized execution, inspect the original Goal's Supervisor, assignees and current
+criteria. Freeze the actual delegation and selected inputs with its original message
+identity. Follow questions and blockers through the original reply, retain responsibility
+for unreported work, and check each report's evidence, gaps and unknowns before collecting
+it into the same Goal. Submit the resulting criterion checks for human acceptance. Exit,
+idle, delivery, acknowledgement and worker_done are not business completion. A discussion
+or inspection request does not itself authorize implementation or human acceptance.
+
+## Name the actual working Sessions
+
+${reference('agent.inspect')}
+${reference('agent.rename')}
+${reference('space.state')}
+${reference('space.rename')}
+${reference('name.history')}
+${reference('name.confirm')}
+
+Give your discussion and the unnamed Sessions explicitly entrusted to this work concise
+topic-and-responsibility names. Inspect displayName.source and nameRevision on the exact
+Session; inspect the original Tab label in space state. Use --derived for autonomous
+suggestions so the original owner preserves manual names, manual clears, launch names and
+retained intent. Refine a temporary derived name when the topic becomes clear. An explicit
+edit without --derived keeps its original semantics; neither mode authenticates a human.
+Read back the exact operation and current name after an unknown reply, without replaying
+the edit. Applied display names, disk acknowledgement and native Provider synchronization
+are separate results. A failed naming step never stops healthy work or replaces a Session.
 
 ## Observe and adjust the display
 
