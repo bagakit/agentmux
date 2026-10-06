@@ -1,6 +1,8 @@
 import type { JSONContent } from '@tiptap/core'
 import { NOTE_BLOCK_TYPES, noteContentSchema } from './note-content-schema.js'
 import { NOTE_SCHEMA } from './note-format.js'
+import { readNoteBlockProvenance } from './note-provenance.js'
+export type { NoteBlockAuthorship, NoteBlockProvenance } from './note-provenance.js'
 export { NOTE_BLOCK_TYPES } from './note-content-schema.js'
 export { NOTE_SCHEMA, NOTE_FILE_EXTENSION } from './note-format.js'
 
@@ -37,6 +39,7 @@ export function readNoteDocument(raw: string): NoteDocumentRead {
       if (NOTE_BLOCK_TYPES.some(type => type === node.type)) {
         if (!record(node.attrs) || !identity(node.attrs.blockId) || blocks.has(node.attrs.blockId)) throw new Error('A semantic block identity is missing or duplicated.')
         blocks.add(node.attrs.blockId)
+        readNoteBlockProvenance(node.attrs.provenance)
       }
       if (node.type === 'blockReference') {
         const attrs = node.attrs

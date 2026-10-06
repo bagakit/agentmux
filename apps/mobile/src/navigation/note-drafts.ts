@@ -1,5 +1,5 @@
 import type { FileWriteReceipt } from '@agentmux/core/files'
-import type { NoteEditState } from '@agentmux/client-ui/components/NoteReader'
+import { acknowledgeNoteWrite, type NoteEditState } from '@agentmux/client-ui/note/note-edit-state'
 import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
 
 const observers = new Map<string, Set<(raw: string, durable?: boolean) => void>>()
@@ -56,8 +56,8 @@ export function noteDrafts(identity: readonly string[]) {
         try { raw = localStorage.getItem(key) } catch { raw = latest.get(key) ?? observed; durable = false }
         const value = raw === null ? undefined : parse(raw)
         if (value?.attempt?.content === content && value.attempt.expectedRevision === expectedRevision) {
-          const next = { ...value, attempt: result.status === 'unknown' ? { ...value.attempt, phase: 'unknown' as const } : undefined,
-            ...(result.status === 'written' ? { expectedRevision: result.revision } : {}) }
+          const next = result.status === 'written' ? acknowledgeNoteWrite(value, content, expectedRevision, result)
+            : { ...value, attempt: result.status === 'unknown' ? { ...value.attempt, phase: 'unknown' as const } : undefined }
           const written = JSON.stringify(next)
           if (durable) { try { localStorage.setItem(key, written); observed = written; latest.set(key, written) } catch { durable = false } }
           for (const observer of observers.get(key) ?? []) observer(durable ? written : JSON.stringify({ ...value, attempt: { ...value.attempt, phase: 'unknown' } }), durable)

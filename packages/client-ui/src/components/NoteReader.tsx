@@ -5,6 +5,9 @@ import type { JSONContent } from '@tiptap/core'
 import { noteContentExtensions, NoteBlockReferenceNode, noteIdentityExtensions } from '../note/note-content-schema.js'
 import { readNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../note/note-document.js'
 import { noteKnowledge, resolveNoteBlock, type NoteKnowledge } from '../note/note-knowledge.js'
+import { acknowledgeNoteWrite, type NoteEditState } from '../note/note-edit-state.js'
+import { noteProvenanceAttributes } from '../note/note-provenance.js'
+export type { NoteEditState } from '../note/note-edit-state.js'
 
 const Scope = createContext<{ knowledge: NoteKnowledge; trail: string[]; readReference?: ((target: NoteBlockTarget) => void) | undefined } | null>(null)
 function Reference({ node }: NodeViewProps) {
@@ -13,7 +16,7 @@ function Reference({ node }: NodeViewProps) {
   if (!scope) return <NodeViewWrapper>引用内容尚未确认。</NodeViewWrapper>
   const result = resolveNoteBlock(scope.knowledge, reference.target)
   const key = JSON.stringify(reference.target)
-  return <NodeViewWrapper className="mobile-note-reference">
+  return <NodeViewWrapper className="mobile-note-reference" {...noteProvenanceAttributes(node.attrs.provenance)}>
     <strong>{reference.mode === 'embed' ? '引用原块' : '块引用'}</strong>
     {scope.trail.includes(key) ? <p role="status">循环引用，原引用保留。</p>
       : result.status === 'resolved' ? reference.mode === 'embed'
@@ -39,12 +42,6 @@ function RichContent({ content, onChange }: { content: JSONContent; onChange?: (
     <button type="button" onClick={() => editor.chain().focus().undo().run()}>撤销</button>
     <button type="button" onClick={() => editor.chain().focus().redo().run()}>重做</button>
   </div>}<EditorContent editor={editor} /></>
-}
-export type NoteEditState = {
-  noteId: string; draft: string; expectedRevision: string
-  attempt?: { content: string; expectedRevision: string; phase: 'sending' | 'unknown' } | undefined
-  unconfirmed?: { content: string; expectedRevision: string }[]
-  alternates?: { draft: string; expectedRevision: string }[]
 }
 export type NoteEditing = {
   initial?: NoteEditState | undefined
@@ -123,7 +120,13 @@ function EditableNote({ note, content, revision, editing }: { note: NoteDocument
     try { result = await editing.save(attempt.content, attempt.expectedRevision) }
     catch (error) { result = { status: 'unknown', code: 'NOTE_SAVE_UNKNOWN', message: error instanceof Error ? error.message : String(error) } }
     if (!alive.current) return
-    if (result.status === 'written') { persist({ ...current.current, attempt: undefined, expectedRevision: result.revision }); setNotice('原文件保存已确认。') }
+    if (result.status === 'written') {
+      const accepted = acknowledgeNoteWrite(current.current, attempt.content, attempt.expectedRevision, result)
+      if (persist(accepted)) {
+        if (accepted.draft === result.content) setExternalDraft(accepted.draft)
+        setNotice(result.noteAttribution?.status === 'unconfirmed' ? `原文件保存已确认；块作者未确认：${result.noteAttribution.reason}` : '原文件保存已确认。')
+      }
+    }
     else if (result.status === 'unknown') { persist({ ...current.current, attempt: { ...attempt, phase: 'unknown' } }); setNotice(`保存回执未知：${result.message}。草稿保留，请核对原文件；不会重复写入。`) }
     else { const { attempt: pending, ...kept } = current.current; persist(kept); setNotice(result.status === 'conflict' ? '原文件已改变，草稿保留；请核对当前原文后明确处理冲突。' : `保存失败：${result.message}。草稿保留。`) }
   }

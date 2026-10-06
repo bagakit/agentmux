@@ -519,7 +519,7 @@ export class AgentMuxRpcService {
         const input = parseFileCreateParams(params)
         context.signal?.throwIfAborted()
         if (!this.ports.files && !this.ports.forwardControl) throw new AgentMuxError('The original Host file owner is unavailable. Original files and Agents are retained.', 'CONTROL_UNAVAILABLE')
-        const result = this.ports.files ? await this.ports.files.create(input) : await this.ports.forwardControl!('file.create', input, context)
+        const result = this.ports.files ? await this.ports.files.create(input, { actor: caller ? { kind: 'agent', id: caller.agentSessionId } : context.principal }) : await this.ports.forwardControl!('file.create', input, context)
         return parseFileCreateResult(result, input) as AgentMuxRpcResult<M>
       }
 
@@ -527,7 +527,7 @@ export class AgentMuxRpcService {
         const input = parseFileWriteParams(params)
         context.signal?.throwIfAborted()
         if (!this.ports.files && !this.ports.forwardControl) throw new AgentMuxError('The original Host file owner is unavailable. Original files and Agents are retained.', 'CONTROL_UNAVAILABLE')
-        const result = this.ports.files ? await this.ports.files.write(input) : await this.ports.forwardControl!('file.write', input, context)
+        const result = this.ports.files ? await this.ports.files.write(input, { actor: caller ? { kind: 'agent', id: caller.agentSessionId } : context.principal }) : await this.ports.forwardControl!('file.write', input, context)
         return parseFileWriteResult(result, input) as AgentMuxRpcResult<M>
       }
 

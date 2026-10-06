@@ -24,6 +24,7 @@
 .note-block-content, .note-embedded-content { outline: none; font-size: var(--note-font-size, var(--fs-prose)); line-height: 1.85; overflow-wrap: anywhere; }
 .note-block-content { min-height: 240px; padding-bottom: var(--sp-8); }
 .note-block-content p, .note-embedded-content p { margin: 0 0 var(--sp-4); }
+.note-block-content [data-note-agent-author]::after, .note-embedded-content [data-note-agent-author]::after { content: attr(data-note-agent-author); display: inline-block; max-width: 100%; margin-inline-start: 8px; vertical-align: baseline; color: var(--text-3); font: 10px/1.5 var(--font-ui, sans-serif); overflow-wrap: anywhere; letter-spacing: 0; font-weight: 400; user-select: none; }
 .note-block-content ul, .note-block-content ol, .note-embedded-content ul, .note-embedded-content ol { padding-left: 24px; margin: 8px 0; }
 .note-block-content li p, .note-embedded-content li p { margin: 0; }
 .note-block-content h1, .note-block-content h2, .note-block-content h3 { line-height: 1.3; margin: 22px 0 10px; }

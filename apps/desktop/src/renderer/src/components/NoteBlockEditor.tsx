@@ -5,6 +5,7 @@ import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEd
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { NOTE_BLOCK_TYPES, NoteBlockReferenceNode, noteContentExtensions, noteIdentityExtensions } from '../../../shared/note-content-schema'
 import { readNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
+import { noteProvenanceAttributes } from '@agentmux/client-ui/note/note-provenance'
 import { noteBacklinks, resolveNoteBlock, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
 
 const ThemeObjectLinkIcon = semanticIconComponent('object.link')
@@ -53,7 +54,7 @@ function NoteReferenceView({ node }: NodeViewProps) {
   </p></NodeViewWrapper>
   const resolution = resolveNoteBlock(context.knowledge, reference.target), key = targetKey(reference.target)
   const cycle = context.trail.includes(key)
-  return <NodeViewWrapper className={`note-reference note-reference--${reference.mode}`} contentEditable={false}>
+  return <NodeViewWrapper className={`note-reference note-reference--${reference.mode}`} contentEditable={false} {...noteProvenanceAttributes(node.attrs.provenance)}>
     <div className="note-reference__source"><ThemeObjectLinkIcon size={13} /><span>{reference.mode === 'embed' ? 'Embedded block' : 'Block reference'}</span>
       {resolution.status === 'resolved' ? <button type="button" className="note-text-button" title={`${resolution.source.location.workspaceId} · ${resolution.source.location.path} · ${reference.target.blockId}`} aria-label={`Open original block in ${resolution.source.location.workspaceId} · ${resolution.source.location.path} · ${reference.target.blockId}`}
         onClick={() => context.onOpen(resolution.source, reference.target.blockId)}>{resolution.source.location.path}<ThemeActionReplyIcon size={12} /></button> : null}

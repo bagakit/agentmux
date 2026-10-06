@@ -206,6 +206,7 @@ export function EditorPane({
         </div>
       </header>
       <div className="editor-file-notices">
+        {document.noteWriteAttribution?.status === 'unconfirmed' ? <div className="editor-file-notice" role="status">The Note was saved. Block authorship is unconfirmed: {document.noteWriteAttribution.reason} Your Note remains editable; a later save with a confirmed author records its changed blocks.</div> : null}
         {formatResult?.message ? <div className="editor-file-notice" role={formatResult.status === 'failed' ? 'alert' : 'status'}>{formatResult.message}</div> : null}
         <RetainedDocumentDraftNotice tabId={tabId} surface={surface} />
         {issue ? (

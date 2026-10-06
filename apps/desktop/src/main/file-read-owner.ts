@@ -1,4 +1,4 @@
-import { AgentMuxError, parseFileReadParams, parseFileCreateParams, type FileCreateParams, type FileCreateResult, parseFileWriteParams, type FileWriteParams, type FileWriteResult, parseFileListParams, type AgentMuxRpcFilesOwner, type FileReadParams, type FileReadResource, type FileReadResult, type FileListParams, type FileListResult } from '@agentmux/core'
+import { AgentMuxError, parseFileReadParams, parseFileCreateParams, type FileCreateParams, type FileCreateResult, parseFileWriteParams, type FileWriteParams, type FileWriteResult, type FileWriteContext, parseFileListParams, type AgentMuxRpcFilesOwner, type FileReadParams, type FileReadResource, type FileReadResult, type FileListParams, type FileListResult } from '@agentmux/core'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkspaceRecord } from '../shared/contracts'
 import { SCRATCH_WORKSPACE_ID, type ScratchDirectoryFact } from '../shared/scratch-topics'
@@ -12,7 +12,7 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
     catalog(): Promise<AgentMuxSpaceCatalog | null>
     topicForDirectory?(workspace: WorkspaceRecord, directory: string): Promise<ScratchDirectoryFact | null>
     workspace(id: string): WorkspaceRecord | undefined
-    files: Pick<WorkspaceFiles, 'read' | 'listFiles' | 'write'>
+    files: Pick<WorkspaceFiles, 'read' | 'listFiles'> & { write(workspace: WorkspaceRecord, input: Parameters<WorkspaceFiles['write']>[1], context?: FileWriteContext): ReturnType<WorkspaceFiles['write']> }
   }) {}
   async read(input: FileReadParams, budget?: WorkspaceFileReadBudget): Promise<FileReadResult> {
     budget?.signal?.throwIfAborted()
@@ -36,22 +36,22 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
       return { resource, result }
     } catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_LIST_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
   }
-  async write(input: FileWriteParams): Promise<FileWriteResult> {
+  async write(input: FileWriteParams, context?: FileWriteContext): Promise<FileWriteResult> {
     const params = parseFileWriteParams(input), resolved = await this.resolve(params)
     if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_WRITE_UNCONFIRMED', message: resolved.message } }
     const { resource, workspace } = resolved
     if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => resource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) throw new AgentMuxError('The original File mapping changed. Read that exact file before deciding another save.', 'FILE_RESOURCE_MISMATCH')
     try {
-      return { resource, result: await this.ports.files.write(workspace, { path: resource.path, content: params.content, expectedRevision: params.expectedRevision }) }
+      return { resource, result: await this.ports.files.write(workspace, { path: resource.path, content: params.content, expectedRevision: params.expectedRevision }, context) }
     } catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_WRITE_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
   }
-  async create(input: FileCreateParams): Promise<FileCreateResult> {
+  async create(input: FileCreateParams, context?: FileWriteContext): Promise<FileCreateResult> {
     const params = parseFileCreateParams(input), resolved = await this.resolve(params)
     if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_CREATE_UNCONFIRMED', message: resolved.message } }
     const { resource, workspace } = resolved
     if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => resource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) throw new AgentMuxError('The original File mapping changed. Read that exact target before deciding another create.', 'FILE_RESOURCE_MISMATCH')
     try {
-      return { resource, result: await this.ports.files.write(workspace, { path: resource.path, content: params.content, expectedRevision: null }) }
+      return { resource, result: await this.ports.files.write(workspace, { path: resource.path, content: params.content, expectedRevision: null }, context) }
     } catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_CREATE_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
   }
   private async resolve(params: FileReadParams): Promise<{ resource: FileReadResource; workspace: WorkspaceRecord } | { message: string }> {
