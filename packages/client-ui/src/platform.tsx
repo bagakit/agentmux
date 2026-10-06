@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import type { AgentProviderId } from '@agentmux/core'
 import type { AmuxObjectLinkTarget } from '@agentmux/core/sharing'
 import type { ConversationSenderDetails, ConversationSpeaker } from './lib/conversation-speaker.js'
@@ -38,6 +38,12 @@ export function useObjectLinkRenderer(): ClientUiPlatform['renderObjectLink'] {
 
 export function useMarkdownDiagramRenderer(): ClientUiPlatform['renderMarkdownDiagram'] {
   return useContext(PlatformContext)?.renderMarkdownDiagram
+}
+
+/** Standalone Markdown has no implicit clipboard IO; preserve the adapter's receiver. */
+export function useMarkdownCopyText(): ClientUiPlatform['copyText'] | undefined {
+  const platform = useContext(PlatformContext)
+  return useMemo(() => platform?.copyText ? platform.copyText.bind(platform) : undefined, [platform, platform?.copyText])
 }
 
 /** Each application supplies one explicit adapter; there is no Desktop or browser IO default. */

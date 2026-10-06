@@ -150,7 +150,7 @@ function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
       {context.inputMode && node.sourceMarker ? `${node.sourceMarker}${node.children.length ? ' ' : ''}` : null}
       <Inline nodes={node.children} context={context} /></Heading>
   }
-  if (node.kind === 'code') return <MarkdownCodeBlock code={node.text} language={node.language} visible={context.visible && !context.readOnly} />
+  if (node.kind === 'code') return <MarkdownCodeBlock code={node.text} language={node.language} visible={context.visible && !context.readOnly} readOnly={context.readOnly} />
   if (node.kind === 'math') return <MarkdownMath expression={node.text} source={node.source} display visible={context.visible && !context.readOnly} />
   if (node.kind === 'list') {
     const Tag = node.ordered ? 'ol' : 'ul'
