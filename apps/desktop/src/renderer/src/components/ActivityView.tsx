@@ -2,7 +2,6 @@ import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from 
 import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { WorkflowStatusGlyph } from '@agentmux/client-ui/components/WorkflowObservation'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type ComponentProps, type KeyboardEvent, type WheelEvent } from 'react'
 import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
@@ -496,12 +495,12 @@ export function ActivityView({
     if (conversationReading?.enabled && feedEl) markProgrammaticReadingScroll(feedEl)
   }, [nativeHistoryPage, feedEl, conversationReading?.enabled])
   useLayoutEffect(() => {
-    // A failed page retains its body; the new notice can still move its known reading anchor.
+    // Error and transient newer notices can move a retained body before a page commits.
     if (conversationReading?.enabled && feedEl && anchorRef.current) {
       restoreConversationAnchor(feedEl, anchorRef.current)
       markProgrammaticReadingScroll(feedEl)
     }
-  }, [readingWindow.error, feedEl, conversationReading?.enabled])
+  }, [readingWindow.error, readingWindow.newerOutside, feedEl, conversationReading?.enabled])
   useLayoutEffect(() => {
     if (!conversationReading?.enabled || !(readingWindow.historical || showJump) || !feedEl) return
     const content = feedEl.querySelector('.conversation-native-thread')
@@ -913,7 +912,7 @@ export function ActivityView({
         {readingWindow.hasMore ? (
           <button type="button" className="activity-feed__reading-action" disabled={readingWindow.loading && !readingWindow.coverageLoading || !conversationReading.enabled}
             aria-busy={readingWindow.loadingEarlier || undefined} onClick={readingWindow.readEarlier}>
-            {readingWindow.loadingEarlier ? <WorkflowStatusGlyph status="running" /> : <ThemeNavigationUpIcon size={12} aria-hidden="true" />}
+            {readingWindow.loadingEarlier ? <SemanticIcon name="status.loading" size={12} className="spin" /> : <ThemeNavigationUpIcon size={12} aria-hidden="true" />}
             <span {...(readingWindow.loadingEarlier ? { role: 'status', 'aria-live': 'polite' as const } : {})}>{readingWindow.loadingEarlier ? 'Loading earlier…' : 'Earlier'}</span>
           </button>
         ) : null}
@@ -950,7 +949,7 @@ export function ActivityView({
     {content}
     {conversationReading?.enabled !== false && (readingWindow.loading && !readingWindow.loadingEarlier || userMessageRead?.loading) ? <div className="activity-feed__loading-layer">
       <span role="status" aria-live="polite" className="activity-feed__reading-status">
-        <WorkflowStatusGlyph status="running" />Reading records…
+        <SemanticIcon name="status.loading" size={12} className="spin" />Reading records…
       </span>
     </div> : null}
   </div>
