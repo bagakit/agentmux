@@ -6,6 +6,7 @@ import { resolveOverlayContainer } from './WindowOverlayHost'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import type { LaunchOption, LaunchOptionSelection } from '@agentmux/core'
 import type { LauncherNames } from '../lib/launcher-name-draft'
+import { SelectionField } from './SelectionField'
 
 const ThemeStatusNamedIcon = semanticIconComponent('status.named')
 const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
@@ -13,7 +14,7 @@ const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 
-/** Provider DESCRIBE choices only. Native selects keep even large declarations compact and keyboard usable. */
+/** Provider DESCRIBE choices only; the original draft owns explicit startup values. */
 export function LaunchRefine({ options, selection, expanded, active, onToggle, onSelect, onReset, disabled, names, onNameChange }: {
   options: LaunchOption[]
   selection: LaunchOptionSelection
@@ -77,16 +78,15 @@ export function LaunchRefine({ options, selection, expanded, active, onToggle, o
       <div className="launch-refine__fields">
         {options.map(option => {
           const choice = option.choices.find(item => item.id === selection[option.id])
-          return <label key={option.id} className="launch-refine__row">
+          return <div key={option.id} className="launch-refine__row" data-tier={choice?.tier ?? 'safe'}>
             <span><strong>{option.label}</strong>{option.description ? <small>{option.description}</small> : null}</span>
-            <select aria-label={option.label} value={selection[option.id] ?? ''} disabled={disabled} data-tier={choice?.tier ?? 'safe'}
-              onChange={event => onSelect(option.id, event.target.value || null)}>
-              <option value="">Agent default</option>
-              {selection[option.id] && !choice ? <option value={selection[option.id]} disabled>Saved choice: {selection[option.id]}</option> : null}
-              {option.choices.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
-            </select>
-            {choice?.description ? <small className="launch-refine__choice-description">{choice.description}</small> : null}
-          </label>
+            <SelectionField label={option.label} value={selection[option.id] ?? ''} disabled={Boolean(disabled)} menuClassName="launch-refine__choice-menu"
+              menuBoundary={trigger.current?.closest<HTMLElement>('[data-workbench-region-id]') ?? null}
+              onValueChange={value => onSelect(option.id, value || null)} options={[
+                { value: '', label: 'Agent default', description: 'Do not set this option at launch.' },
+                ...option.choices.map(item => ({ value: item.id, label: item.label, ...(item.description ? { description: item.description } : {}) }))
+              ]} />
+          </div>
         })}
         {names && onNameChange ? <fieldset className="launch-refine__names"><legend>Optional names</legend>
           <label>Agent<TextInput aria-label="Agent name" placeholder="Automatic" value={names.agentName} disabled={disabled} onChange={event => onNameChange('agentName', event.target.value)} /></label>
