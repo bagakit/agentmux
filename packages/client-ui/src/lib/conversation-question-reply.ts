@@ -1,8 +1,8 @@
-import type { AgentMuxSessionQuestionReplyInput, AgentSessionHistoryPage, AgentSessionQuestionReplyReceipt } from '@agentmux/core'
+import type { ConversationQuestionInput } from '@agentmux/core/conversation'
+export type { ConversationQuestionInput, ConversationQuestionTarget } from '@agentmux/core/conversation'
+export { questionReplyKey, questionReplyReceiptMatches, recordedQuestionAnswers, createQuestionReplyMatcher } from '@agentmux/core/conversation'
 import { validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
 
-export type ConversationQuestionTarget = Pick<AgentMuxSessionQuestionReplyInput, 'source' | 'turnId' | 'recordId'>
-export type ConversationQuestionInput = ConversationQuestionTarget & Pick<AgentMuxSessionQuestionReplyInput, 'answers'>
 export type QuestionReplyIntent = ConversationQuestionInput & {
   operationId: string
   expectedRun: { runId: string }
@@ -12,10 +12,6 @@ export type QuestionReplyPhase = 'sending' | 'unknown' | 'submitted' | 'rejected
 export type QuestionReplyState = { phase: QuestionReplyPhase; answers: QuestionReplyIntent['answers']; diagnostic?: { code: string; message: string } | undefined }
 export type QuestionReplyAttempt = Omit<QuestionReplyState, 'answers'> & { input: QuestionReplyIntent }
 
-/** A native question is addressed within one Session and exact Provider source. */
-export function questionReplyKey(sessionId: string, target: ConversationQuestionTarget): string {
-  return JSON.stringify([sessionId, target.source.providerId, target.source.nativeSessionId, target.turnId, target.recordId])
-}
 export function questionReplyState(attempt: QuestionReplyAttempt): QuestionReplyState {
   return { phase: attempt.phase, answers: attempt.input.answers, ...(attempt.diagnostic ? { diagnostic: attempt.diagnostic } : {}) }
 }
@@ -29,31 +25,6 @@ export function parseQuestionReplyAttempt(value: unknown): QuestionReplyAttempt 
   validateAgentPromptCondition(input)
   if (attempt.diagnostic && (!id(attempt.diagnostic.code) || typeof attempt.diagnostic.message !== 'string')) throw new Error('The original question reply diagnostic is unreadable.')
   return structuredClone(attempt)
-}
-export function questionReplyReceiptMatches(sessionId: string, input: QuestionReplyIntent, receipt: AgentSessionQuestionReplyReceipt): boolean {
-  return receipt?.outcome === 'submitted' && receipt.agentSessionId === sessionId && receipt.operationId === input.operationId
-    && receipt.recordId === input.recordId && receipt.source?.providerId === input.source.providerId && receipt.source.nativeSessionId === input.source.nativeSessionId
-    && Array.isArray(receipt.questionIds) && receipt.questionIds.length === input.answers.length
-    && input.answers.every(answer => receipt.questionIds.includes(answer.questionId))
-}
-/** These are the same accepted native facts the Conversation renders, never ACKs or body guesses. */
-export function recordedQuestionAnswers(page: AgentSessionHistoryPage, context?: AgentSessionHistoryPage | null): Map<string, string> {
-  const answers = new Map<string, string>()
-  const collect = (value: AgentSessionHistoryPage) => {
-    for (const item of value.items) if (item.kind === 'user-message') for (const answer of item.questionAnswers ?? []) answers.set(answer.questionId, answer.answer)
-  }
-  if (context?.agentSessionId === page.agentSessionId && context.source.providerId === page.source.providerId && context.source.nativeSessionId === page.source.nativeSessionId) collect(context)
-  collect(page)
-  return answers
-}
-/** One native page/context index per observation, shared by all related original intents. */
-export function createQuestionReplyMatcher(sessionId: string, page: AgentSessionHistoryPage, context?: AgentSessionHistoryPage | null): (attempt: QuestionReplyAttempt) => boolean {
-  let answers: ReadonlyMap<string, string> | undefined
-  return attempt => {
-    if (page.agentSessionId !== sessionId || page.source.providerId !== attempt.input.source.providerId || page.source.nativeSessionId !== attempt.input.source.nativeSessionId) return false
-    answers ??= recordedQuestionAnswers(page, context)
-    return attempt.input.answers.every(answer => answers!.has(answer.questionId))
-  }
 }
 /** A dispatched command failure describes its phase, never the whole original input. */
 export function questionReplyFailurePhase(previous: QuestionReplyPhase | undefined, dispatched: boolean): 'unknown' | 'rejected' {
