@@ -1,7 +1,8 @@
+import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../../../test/fixture-values.mjs"
 import { fixturePath } from '../../../../../test/fixture-values.mjs'
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
-import type { AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxRpcResult, AgentMuxRpcGoal } from '@agentmux/core'
+import type { AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxRpcResult, AgentMuxRpcGoal, AgentSessionHistoryReadInput, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { MobileApp } from '../../../src/MobileApp'
 import { createBrowserPlatform } from '../../../src/platform/browser'
@@ -61,6 +62,25 @@ const client = {
   sessionHistoryPage: async (id: string) => { record('sdk.sessionHistoryPage', { id }); return { agentSessionId: id, source: { providerId: 'codex', nativeSessionId: `native-${id}` }, nextCursor: null,
     items: [{ id: `${id}-user-original`, kind: 'user-message', contentParts: [{ kind: 'text', text: '这两个想法，先从哪一个做成小实验比较好？请保留原来的依据。' }] },
       { id: `${id}-answer-original`, kind: 'assistant-message', contentParts: [{ kind: 'text', text: id === result.agentSessionId ? '我建议先试方案 A。它的范围更清晰，一天就能取得第一批反馈。\n\n1. 保留现有资料和两种方案。\n2. 选三个最关键的问题。\n3. 先观察真实反馈，再决定是否继续。\n\n方案 B 仍有价值，原依据已经保留。' : '可以。我们先确认你想解决的问题，再比较这两种想法。\n\n我会保留原材料、已经确认的进展和还需要你决定的地方；不会把未知回执当作完成。' }] }] } },
+  readAgentSessionHistory: async (input: AgentSessionHistoryReadInput) => {
+    record('sdk.readAgentSessionHistory', input)
+    if (input.hostId !== 'local' || !sessions.some(session => session.agentSessionId === input.agentSessionId)) throw Error('Wrong exact original history target')
+    const text = input.cursor ? '更早的实验依据：先比较三份样本，再决定是否继续。' : input.source === 'native'
+      ? '这两个想法，先从哪一个做成小实验比较好？请保留原来的依据。' : '把测试步骤写成三点，保留原始资料和判断依据。'
+    const id = input.cursor ? 'older-input' : input.source === 'native' ? input.agentSessionId + '-user-original' : 'captured-input'
+    const message: AgentSessionUserMessage = { id: input.source === 'native' ? 'native:codex:native-' + input.agentSessionId + ':' + id : 'captured:' + id,
+      rawId: id, agentSessionId: input.agentSessionId,
+      source: input.source === 'native' ? { kind: 'native', providerId: 'codex', nativeSessionId: 'native-' + input.agentSessionId, recordId: id }
+        : { kind: 'captured', submissionId: id, channel: 'message-tool', device: { hostId: 'sender-original', deviceId: 'phone-original', name: '我的手机' } },
+      author: input.source === 'native' ? { kind: 'unknown' } : { kind: 'human' }, content: text, contentParts: [{ kind: 'text', text }],
+      ...(input.source === 'captured' ? { recordedAt: _tailRefreshFixtureEpoch(0, 1), deliveryStatus: 'complete' } : {}) }
+    const messages = input.query && !text.includes(input.query) ? [] : [message]
+    const nextCursor = input.source === 'native' && input.query === '实验依据' && !input.cursor ? 'original-native-older' : null
+    return { hostId: input.hostId, agentSessionId: input.agentSessionId, source: input.source, revision: 'a'.repeat(64), availability: messages.length ? 'available' : 'empty',
+      order: 'newest-first', items: [], nextCursor, budgetBytes: input.maxBytes ?? 128 * 1024,
+      kind: 'user-message', userMessages: messages, scan: { examined: input.cursor ? 32 : 200, complete: nextCursor === null },
+      ...(input.source === 'native' ? { nativeSource: { providerId: 'codex', nativeSessionId: 'native-' + input.agentSessionId } } : {}) }
+  },
   sessionTimeline: async (id: string) => { record('sdk.sessionTimeline', { id }); return { agentSessionId: id, revision: 1, items: [] } },
   observeSessionHistory: async (id: string) => { record('sdk.observeSessionHistory', { id }); return { source: { providerId: 'codex', nativeSessionId: `native-${id}` }, dispose() { record('sdk.releaseHistory', { id }) } } },
   submitAgentPrompt: async (params: unknown) => { record('sdk.submitAgentPrompt', params); if (unknownNext) { unknownNext = false; throw Error('原 Host 已受理输入，但确认回执在返回途中断开。当前结果未知；保留原 operation、Session、Run 和正文，显式核对原请求后再决定是否重试。此处不会自动重发，后来补充的草稿也保留。') } },

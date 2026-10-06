@@ -54,8 +54,11 @@ app.whenReady().then(async () => {
     await until('!![...document.querySelectorAll(".mobile-spatial-panel button")].find(n=>n.textContent.includes("我的 Mote"))')
     await button('我的 Mote', '.mobile-spatial-panel')
     if (!await visible('.mobile-conversation-panel')) {
-      gap('Mote did not open the configured original main conversation; only a directory appeared.')
-      await capture('mote-directory-baseline')
+      if (mode !== 'input-history') {
+        gap('Mote did not open the configured original main conversation; only a directory appeared.')
+        await capture('mote-directory-baseline')
+      }
+      // Folder disclosure is not Session navigation. This scoped history journey enters the original Tab explicitly.
       await button('日常协作', '.mobile-spatial-panel')
     }
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
@@ -74,6 +77,45 @@ app.whenReady().then(async () => {
   await tap('.mobile-conversation-panel [contenteditable=true]', 'Original shared Composer')
   win.webContents.insertText('先比较两种方案，保留原来的依据。')
   await capture('mote-conversation-phone')
+  if (mode === 'input-history') {
+    const before = await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.submitAgentPrompt").length')
+    await tap('.mobile-conversation-panel .mobile-message-tools__trigger', 'Current Agent input history')
+    await until('document.querySelector(".input-history__records")?.textContent.includes("Message Tool")')
+    assert.ok(await read('document.querySelector("[role=dialog]").innerText.includes("入口未记录")'))
+    await capture('input-history-phone')
+    await resize(320, 760); await capture('input-history-narrow')
+    await tap('.input-history input[type=search]', 'Search only this Agent')
+    win.webContents.insertText('实验依据')
+    await button('查询', '[role=dialog]')
+    await until('document.querySelector(".input-history__empty")?.textContent.includes("可继续查找")')
+    await capture('input-history-partial-narrow')
+    await button('继续查找原生记录', '[role=dialog]')
+    await until('document.querySelector(".input-history__records")?.textContent.includes("三份样本")')
+    await capture('input-history-result-narrow')
+    await tap('.input-history__records > li details > summary', 'Read the original input record')
+    await until('!!document.querySelector(".input-history__records [data-message-id]")')
+    await capture('input-history-original-narrow')
+    const originalGeometry = await read(`(()=>{const sheet=document.querySelector('[role=dialog]'),record=document.querySelector('.input-history__records [data-message-id]');return {sheet:{width:sheet.clientWidth,scrollWidth:sheet.scrollWidth},record:{width:record.clientWidth,scrollWidth:record.scrollWidth},buttons:[...sheet.querySelectorAll('.input-history button')].map(n=>({label:n.getAttribute('aria-label')||n.textContent,rect:n.getBoundingClientRect().toJSON()}))}})()`)
+    assert.ok(originalGeometry.sheet.scrollWidth <= originalGeometry.sheet.width, 'Original-record sheet remains readable at 320px')
+    assert.ok(originalGeometry.record.scrollWidth <= originalGeometry.record.width, 'Original record does not create horizontal scrolling')
+    assert.ok(originalGeometry.buttons.length >= 5, 'Original history actions were actually inspected')
+    for (const target of originalGeometry.buttons) assert.ok(target.rect.width >= 44 && target.rect.height >= 44, `${target.label} keeps a 44px touch target`)
+    result.operations.push({action:'original-record-geometry',...originalGeometry})
+    await tap('.input-history__records > li details > summary', 'Close the original record reading')
+    await button('填入草稿', '[role=dialog]')
+    await until('document.querySelector(".input-history__notice")?.textContent.includes("尚未发送")')
+    await button('关闭通信记录', '[role=dialog]')
+    assert.equal(await read('document.querySelector("[contenteditable=true]").textContent'), '更早的实验依据：先比较三份样本，再决定是否继续。')
+    await tap('.mobile-conversation-panel [contenteditable=true]', 'Undo original draft fill')
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Z', modifiers: ['meta'] })
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Z', modifiers: ['meta'] })
+    await until('document.querySelector("[contenteditable=true]").textContent==="先比较两种方案，保留原来的依据。"')
+    await capture('input-history-undo-narrow')
+    assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.submitAgentPrompt").length'), before)
+    assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.respondAgentInteraction").length'), 0)
+    result.passed = true
+    return
+  }
   if (mode === 'navigation' || mode === 'source-recovery') {
     const back = async () => { await read('history.back()'); await pause(150) }
     await tap('.mobile-mote-heading', 'Original Profile'); await resize(320, 760)
