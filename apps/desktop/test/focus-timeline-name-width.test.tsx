@@ -42,7 +42,7 @@ const entries: AgentFocusHistoryEntry[] = ['one', 'two', 'three'].map((id, i) =>
 async function fixture(global = true, emptyCatalogue = true) {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.spyOn(Date, 'now').mockReturnValue(NOW)
   if (emptyCatalogue) vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
-  useAppStore.setState({ focusTimelineNameWidth: 112, focusTimelineHeight: 168, sessions: [agent('one', _hygiene_fixturePath("first")), agent('two', _hygiene_fixturePath("first")), agent('three', _hygiene_fixturePath("second"))],
+  useAppStore.setState({ mainSurface: 'agents', focusTimelineNameWidth: 112, focusTimelineHeight: 168, sessions: [agent('one', _hygiene_fixturePath("first")), agent('two', _hygiene_fixturePath("first")), agent('three', _hygiene_fixturePath("second"))],
     config: null, timelines: {}, tabs: {}, layouts: {}, agentComposerDrafts: { one: 'Original unsent draft' },
     agentFocus: { execution: { sessionId: null, history: entries }, pmo: { sessionId: null } } })
   const host = document.createElement('div'); document.body.append(host); hosts.push(host)
@@ -139,12 +139,12 @@ it('200 draft/keyboard width updates preserve actual native/captured records, bo
   const project = vi.spyOn(UserMessages, 'projectSessionUserMessages'), group = vi.spyOn(Grouping, 'groupFocusTimeline')
   const h = await fixture(true, false)
   const wait = async (check: () => void) => { for (let i = 0; i < 100; i++) { await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) }); try { check(); return } catch (error) { if (i === 99) throw error } } }
-  await act(async () => h.host.querySelector<HTMLButtonElement>('[aria-label="View input records"]')!.click())
-  await wait(() => expect(document.querySelector('[aria-label="Input records Context"] option[value="archived-width"]')).not.toBeNull())
-  await act(async () => { const select = document.querySelector<HTMLSelectElement>('[aria-label="Input records Context"]')!; select.value = session.agentSessionId; select.dispatchEvent(new Event('change', { bubbles: true })) })
-  await wait(() => expect(document.querySelectorAll('[data-input-message-id]')).toHaveLength(91))
+  await act(async () => h.host.querySelector<HTMLButtonElement>('[aria-label="View conversation records"]')!.click())
+  await wait(() => expect(document.querySelector('[aria-label="Conversation records Context"] option[value="archived-width"]')).not.toBeNull())
+  await act(async () => { const select = document.querySelector<HTMLSelectElement>('[aria-label="Conversation records Context"]')!; select.value = session.agentSessionId; select.dispatchEvent(new Event('change', { bubbles: true })) })
+  await wait(() => expect(document.querySelectorAll('.recent-focus__input-list [data-input-message-id]')).toHaveLength(91))
   expect(page.mock.calls.map(call => call[1]?.limit)).toEqual([30, 30, 30])
-  const records = [...document.querySelectorAll<HTMLElement>('[data-input-message-id]')]; expect(records.some(node => node.textContent?.includes('Original captured width task'))).toBe(true)
+  const records = [...document.querySelectorAll<HTMLElement>('.recent-focus__input-list [data-input-message-id]')]; expect(records.some(node => node.textContent?.includes('Original captured width task'))).toBe(true)
   await act(async () => records[0]!.click())
   const body = document.querySelector('[data-input-preview-id]')!; expect(body.textContent).toContain('Original native width task')
   const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT); let text: Node | null
@@ -153,13 +153,16 @@ it('200 draft/keyboard width updates preserve actual native/captured records, bo
   const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range); const selected = selection.toString(); expect(selected.length).toBeGreaterThan(0)
   const viewport = h.host.querySelector<HTMLElement>('.recent-focus__viewport')!; viewport.scrollTop = 48; viewport.scrollLeft = 12
   const before = [catalog.mock.calls.length, page.mock.calls.length, timeline.mock.calls.length, project.mock.calls.length, group.mock.calls.length]
-  expect(before.slice(0, 3)).toEqual([1, 3, 1]); expect(before[3]).toBeGreaterThan(0); expect(before[4]).toBeGreaterThan(0)
+  // The visible Global observes the three current Contexts as well as the selected archived one.
+  expect(before.slice(0, 3)).toEqual([1, 3, 4])
+  expect(timeline.mock.calls.map(([reference]) => reference.agentSessionId).sort()).toEqual(['archived-width', 'one', 'three', 'two'])
+  expect(before[3]).toBeGreaterThan(0); expect(before[4]).toBeGreaterThan(0)
   const original = useAppStore.getState(); await h.down(112)
   for (let i = 0; i < 100; i++) await h.move(i % 2 ? 144 : 128)
   await h.up()
   for (let i = 0; i < 100; i++) await h.key(i % 2 ? 'ArrowRight' : 'ArrowLeft')
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, latestOutputBytes: 30, status: { ...session.status, observedAt: 2 } })) })))
   expect([catalog.mock.calls.length, page.mock.calls.length, timeline.mock.calls.length, project.mock.calls.length, group.mock.calls.length]).toEqual(before)
-  expect(document.querySelectorAll('[data-input-message-id]')).toHaveLength(91); expect(document.querySelector('[data-input-preview-id]')).toBe(body); expect(selection.toString()).toBe(selected)
+  expect(document.querySelectorAll('.recent-focus__input-list [data-input-message-id]')).toHaveLength(91); expect(document.querySelector('[data-input-preview-id]')).toBe(body); expect(selection.toString()).toBe(selected)
   expect([viewport.scrollTop, viewport.scrollLeft]).toEqual([48, 12]); expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts); expect(useAppStore.getState().agentFocus).toBe(original.agentFocus); expect(connect.mock.calls).toEqual([])
 })
