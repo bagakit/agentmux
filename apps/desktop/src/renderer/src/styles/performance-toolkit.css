@@ -17,9 +17,9 @@
 .performance-icon-button:hover { background:var(--wash-3); color:var(--text); }
 .performance-observation { display:flex; justify-content:space-between; align-items:center; gap:var(--sp-4); margin:0 var(--sp-6) var(--sp-5); color:var(--text-3); font-size:var(--fs-meta); font-variant-numeric:tabular-nums; }
 .performance-status { display:flex; align-items:center; gap:var(--sp-3); }
-.performance-status > i { width:5px; height:5px; border-radius:50%; background:var(--text-3); }
-.performance-status[data-state=observing] > i { background:var(--green); }
-.performance-status[data-state=failed] > i,.performance-status[data-state=unknown] > i { background:var(--amber-text); }
+.performance-status > svg { width:5px; height:5px; flex:none; color:var(--text-3); }
+.performance-status[data-state=observing] > svg { color:var(--green); }
+.performance-status[data-state=failed] > svg,.performance-status[data-state=unknown] > svg { color:var(--amber-text); }
 .performance-scopes { position:relative; display:grid; grid-template-columns:repeat(3,1fr); gap:var(--sp-2); padding:var(--sp-2); margin:0 var(--sp-5) var(--sp-2); border:1px solid var(--line-soft); border-radius:var(--radius); background:var(--surface-1); }
 .performance-scopes > button { position:relative; z-index:1; border:0; border-radius:var(--radius-sm); color:var(--text-3); background:transparent; padding:var(--sp-3) var(--sp-2); font-size:var(--fs-meta); font-weight:550; cursor:pointer; }
 .performance-scopes > button[aria-pressed=true] { color:var(--text); }
