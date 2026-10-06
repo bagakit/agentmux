@@ -424,6 +424,11 @@ const mockApi: AgentMuxDesktopApi = {
     upgrade: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') },
     upgradeInspect: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') }
   },
+  connections: {
+    call: async () => { throw new Error('External connection administration requires the executing Desktop Host.') },
+    storeCredential: async () => { throw new Error('Secure credential storage requires the executing Desktop Host.') },
+    inspectCredential: async () => { throw new Error('Credential operation observation requires the executing Desktop Host.') }
+  },
   deviceManagement: {
     link: async () => { throw new Error('Connection links require the original desktop Host.') },
     ls: async () => { throw new Error('Device state requires the original desktop Host. This preview cannot read authorization.') },
