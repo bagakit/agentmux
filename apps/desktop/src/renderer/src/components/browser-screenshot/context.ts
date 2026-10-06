@@ -1,10 +1,10 @@
 import type { BrowserPng, BrowserScreenshotCapture } from '../../../../shared/contracts'
 import { screenshotCropGeometry } from './compose'
-import { intersectRect, shapeBounds, screenshotOutputShapes } from './drawing-model'
-import type { ScreenshotCompleteInput } from './ScreenshotEditor'
+import { intersectRect, shapeBounds, screenshotOutputShapes } from '../image-annotation/drawing-model'
+import type { ImageAnnotationInput } from '../image-annotation/types'
 
 /** A description of this processed image, never a fresh read of the current tab. */
-export function formatScreenshotContext(capture: BrowserScreenshotCapture, input: ScreenshotCompleteInput, output: BrowserPng): string {
+export function formatScreenshotContext(capture: BrowserScreenshotCapture, input: ImageAnnotationInput, output: BrowserPng): string {
   const geometry = screenshotCropGeometry(input.displayWidth, input.displayHeight, 1, input.crop)
   const scaleX = output.width / geometry.cropWidth, scaleY = output.height / geometry.cropHeight
   const annotations = screenshotOutputShapes(input.shapes, input.crop).flatMap(shape => {

@@ -7,15 +7,13 @@ import {
   BROWSER_PNG_MAX_PIXELS,
   type BrowserPng
 } from '../../../../shared/contracts'
-import { intersectRect, scaleShape, screenshotOutputShapes, type NormalizedRect, type ScreenshotShape } from './drawing-model'
-import { drawScreenshotShapes } from './drawing-renderer'
+import { intersectRect, scaleShape, screenshotOutputShapes, type NormalizedRect, type ScreenshotShape } from '../image-annotation/drawing-model'
+import { drawScreenshotShapes } from '../image-annotation/drawing-renderer'
 
 export const SCREENSHOT_DOWNSCALE_STEPS = [1, 0.85, 0.7, 0.55, 0.4, 0.3] as const
 
-export function clampScreenshotScale(scale: number): number {
-  if (!Number.isFinite(scale) || scale <= 0) return 1
-  return Math.min(Math.max(scale, 1), 4)
-}
+export { clampScreenshotScale } from '../image-annotation/geometry'
+import { clampScreenshotScale } from '../image-annotation/geometry'
 
 export function screenshotCanvasSize(
   displayWidth: number,
