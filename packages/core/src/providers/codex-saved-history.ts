@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises'
 import { AgentMuxError } from '../errors.js'
 import { NativeJsonlHistoryReader } from '../native-jsonl-history-reader.js'
 import { isNativeText, nativeJsonStringify, type NativeHistoryContentPart, type NativeHistoryItem } from '../native-history-value.js'
@@ -53,8 +54,20 @@ async function open(context: AgentProviderSessionHistoryContext): Promise<Native
   const reader = await NativeJsonlHistoryReader.open(context)
   try {
     const metadata = await reader.readFirst(), payload = object(metadata?.payload)
-    if (metadata?.type !== 'session_meta' || payload.id !== context.source.nativeSessionId || payload.cwd !== context.workspacePath) {
+    if (metadata?.type !== 'session_meta' || payload.id !== context.source.nativeSessionId || typeof payload.cwd !== 'string') {
       throw new AgentMuxError('The saved Codex transcript belongs to another native conversation or directory.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+    }
+    if (payload.cwd !== context.workspacePath) {
+      // Compare the original Host's physical directory identity. Provider and
+      // Core may retain different aliases; neither saved path is rewritten.
+      let sameDirectory: boolean
+      try {
+        const [native, original] = await Promise.all([stat(payload.cwd, { bigint: true }), stat(context.workspacePath, { bigint: true })])
+        sameDirectory = native.isDirectory() && original.isDirectory() && native.dev === original.dev && native.ino === original.ino
+      } catch {
+        throw new AgentMuxError('The original execution directory identity is unconfirmed. The saved source and Agent are retained.', 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
+      }
+      if (!sameDirectory) throw new AgentMuxError('The saved Codex transcript belongs to another native conversation or directory.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
     }
     return reader
   } catch (error) { await reader.close(); throw error }
