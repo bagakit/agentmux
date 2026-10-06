@@ -2,7 +2,10 @@ import { runProcess } from './process-runner.js'
 import { AgentMuxError } from './errors.js'
 import { normalizeNativeTranscriptPath } from './agent-native-locator.js'
 import { constants } from 'node:fs'
-import { open, type FileHandle } from 'node:fs/promises'
+import { open, mkdtemp, rm, type FileHandle } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 export type NativeProcessFile = {
   processId: number
@@ -19,7 +22,7 @@ function unavailable(message: string): AgentMuxError {
 }
 
 /** OS metadata only. Providers interpret file names and their native records. */
-export async function nativeProcessFiles(processId: number, signal: AbortSignal): Promise<NativeProcessFile[]> {
+export async function nativeProcessFiles(processId: number, signal: AbortSignal, scope: 'run-group' | 'process' = 'run-group'): Promise<NativeProcessFile[]> {
   signal.throwIfAborted()
   if (!['darwin', 'linux'].includes(process.platform) || !Number.isSafeInteger(processId) || processId <= 0) {
     throw unavailable('Read-only native process discovery is unavailable on this Host.')
@@ -31,11 +34,13 @@ export async function nativeProcessFiles(processId: number, signal: AbortSignal)
       throw unavailable(`Read-only ${command} observation is unavailable. Refresh can retry; the Run is kept.`)
     }
   }
-  const group = await observe('ps', ['-p', String(processId), '-o', 'pgid='])
-  if (group.exitCode !== 0 || group.stderr || group.stdout.trim() !== String(processId)) {
-    throw unavailable('The original Run process group could not be confirmed. Its input remains available.')
+  if (scope === 'run-group') {
+    const group = await observe('ps', ['-p', String(processId), '-o', 'pgid='])
+    if (group.exitCode !== 0 || group.stderr || group.stdout.trim() !== String(processId)) {
+      throw unavailable('The original Run process group could not be confirmed. Its input remains available.')
+    }
   }
-  const output = await observe('lsof', ['-nP', '-a', '-g', String(processId), '-F0pgftnDia'])
+  const output = await observe('lsof', ['-nP', '-a', scope === 'run-group' ? '-g' : '-p', String(processId), '-F0pgftnDia'])
   if (output.exitCode !== 0 || output.stderr || !output.stdout.endsWith('\0\n')) {
     throw unavailable('Open native records could not be fully observed. Refresh can retry; the Run is kept.')
   }
@@ -47,7 +52,8 @@ export async function nativeProcessFiles(processId: number, signal: AbortSignal)
     if (file.t === 'REG' && /^\d+$/u.test(file.f ?? '')) {
       const path = normalizeNativeTranscriptPath(file.n)
       if (!path || !/^\d+$/u.test(file.i ?? '') || !/^(?:0x)?[0-9a-f]+$/iu.test(file.D ?? '') ||
-        !Number.isSafeInteger(pid) || pid <= 0 || pgid !== processId) {
+        !Number.isSafeInteger(pid) || pid <= 0 || !Number.isSafeInteger(pgid) || pgid <= 0 ||
+        (scope === 'run-group' ? pgid !== processId : pid !== processId)) {
         throw unavailable('Open-file observation was incomplete; no native identity was inferred.')
       }
       files.push({ processId: pid, processGroup: pgid, descriptor: file.f!, path,
@@ -84,6 +90,53 @@ export type NativeProcessImage = {
   file: FileHandle
   identity: string
   assertCurrent(signal?: AbortSignal): Promise<void>
+}
+
+/** Execute only --version from a private, byte-identical copy of the exact mapped image.
+ * Darwin does not allow exec of /dev/fd; neither argv nor a PATH replacement can
+ * stand in for the actual image. The copy is never used as a conversation writer. */
+export async function readNativeProcessVersion(processId: number, signal: AbortSignal): Promise<string> {
+  const image = await openNativeProcessImage(processId, signal)
+  let directory: string | undefined
+  try {
+    await image.assertCurrent(signal)
+    directory = await mkdtemp(join(tmpdir(), 'agentmux-native-version-'))
+    const path = join(directory, 'image'), target = await open(path, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o700)
+    try {
+      const sourceHash = createHash('sha256'), copyHash = createHash('sha256'), bytes = Buffer.alloc(1024 * 1024)
+      const size = Number((await image.file.stat({ bigint: true })).size)
+      if (!Number.isSafeInteger(size) || size <= 0) throw unavailable('The mapped image size is unconfirmed.')
+      for (let position = 0; position < size;) {
+        signal.throwIfAborted()
+        const read = await image.file.read(bytes, 0, Math.min(bytes.length, size - position), position)
+        if (read.bytesRead === 0) throw unavailable('The mapped image ended during version qualification.')
+        sourceHash.update(bytes.subarray(0, read.bytesRead))
+        for (let written = 0; written < read.bytesRead;) {
+          const result = await target.write(bytes, written, read.bytesRead - written, position + written)
+          if (!result.bytesWritten) throw unavailable('The private image copy is incomplete.')
+          written += result.bytesWritten
+        }
+        position += read.bytesRead
+      }
+      await target.chmod(0o500)
+      for (let position = 0; position < size;) {
+        signal.throwIfAborted()
+        const read = await target.read(bytes, 0, Math.min(bytes.length, size - position), position)
+        if (!read.bytesRead) throw unavailable('The private image copy is incomplete.')
+        copyHash.update(bytes.subarray(0, read.bytesRead)); position += read.bytesRead
+      }
+      if (sourceHash.digest('hex') !== copyHash.digest('hex') || Number((await target.stat()).size) !== size) throw unavailable('The private mapped-image copy differs.')
+      // Release the writable descriptor before exec: Darwin code-signature
+      // validation can wait for that writer even though the copy is complete.
+      await target.close()
+      await image.assertCurrent(signal)
+      const probe = await runProcess(path, ['--version'], { signal, timeoutMs: 15_000, maxOutputBytes: 4096,
+        env: { HOME: directory, CODEX_HOME: directory, LC_ALL: 'C' } })
+      signal.throwIfAborted(); await image.assertCurrent(signal)
+      if (probe.exitCode !== 0 || probe.stderr) throw unavailable('The mapped native image version is unconfirmed.')
+      return probe.stdout
+    } finally { await target.close() }
+  } finally { await image.file.close(); if (directory) await rm(directory, { recursive: true, force: true }) }
 }
 
 /** Open the exact OS-mapped entry image, not an argv/PATH or launcher guess. */

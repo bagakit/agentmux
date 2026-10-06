@@ -111,6 +111,17 @@ export type AgentProviderPreparedPromptTransport = Readonly<{
   verifyCurrentTransport(context: AgentProviderPromptExecutionContext): Promise<boolean>
 }>
 
+export type AgentProviderNativePromptInput = Readonly<{
+  plan: import('./types.js').AgentNativePromptInputPlan
+  assertCurrent(signal: AbortSignal): Promise<void>
+  /** Exactly one dispatch. Losing a reply does not authorize another dispatch. */
+  /** signal abandons only reply waiting; it never recalls a Native input. */
+  dispatch(prompt: string, operationId: string, signal?: AbortSignal): Promise<
+    { outcome: 'admitted'; turnId: string } | { outcome: 'not-applied'; errorCode: number } | { outcome: 'unknown'; errorCode?: number }>
+  close(): Promise<void>
+}>
+export type AgentNativeInputPreparationPhase = 'native-target' | 'native-peer' | 'native-protocol' | 'native-initialize' | 'native-source' | 'native-thread' | 'native-turn'
+
 /** Ephemeral qualification from the existing screen owner, never a second input journal. */
 export type AgentInteractionTargetFrame = Readonly<{
   run: Readonly<AgentMuxRunRef>
@@ -181,6 +192,9 @@ export type AgentProvider = {
   buildForkLaunch?(context: AgentProviderForkContext): AgentLaunchPlan
   resolveLaunchArgv(selections: LaunchOptionSelection): string[]
   planPromptInput(prompt: string, context?: { execution?: AgentPromptExecution; intent?: 'question-reply'; terminalScreen?: AgentTerminalScreenSnapshot }): AgentPromptInputPlan
+  /** High-level machine qualification for declared Native immediate messages; default/launch contracts remain separate. No TTY fallback. */
+  prepareNativePromptInput?(context: AgentProviderPromptExecutionContext & { signal: AbortSignal;
+    onPreparationPhase?(phase: AgentNativeInputPreparationPhase): void }): Promise<AgentProviderNativePromptInput>
   /** Provider owns native terminal decoding; unavailable refuses only this immediate operation. */
   inspectPromptExecution?(screen: AgentTerminalScreenSnapshot, strategy?: NonNullable<AgentCatalogEntry['capabilities']['promptExecution']>['immediate']): AgentPromptExecutionContext
   /** Complete current composer reason only; this observation never authorizes input. */
@@ -236,6 +250,7 @@ export type AgentProviderDefinition = {
     args: readonly string[]
   ) => string[]
   planPromptInput?: (prompt: string, context?: { execution?: AgentPromptExecution; intent?: 'question-reply'; terminalScreen?: AgentTerminalScreenSnapshot }) => AgentPromptInputPlan
+  prepareNativePromptInput?: AgentProvider['prepareNativePromptInput']
   inspectPromptExecution?: (screen: AgentTerminalScreenSnapshot, strategy?: NonNullable<AgentCatalogEntry['capabilities']['promptExecution']>['immediate']) => AgentPromptExecutionContext
   inspectPromptPreparationWait?: AgentProvider['inspectPromptPreparationWait']
   verifyPromptExecutionTransport?: (context: AgentProviderPromptExecutionContext) => Promise<boolean>
@@ -366,12 +381,14 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     if (immediateStrategy !== 'interrupt-before-input' && immediateStrategy !== 'native-steer') {
       throw new AgentMuxError('Provider immediate strategy is invalid.', 'INVALID_AGENT_PROVIDER')
     }
-    for (const probe of ['probe', 'probe\nsecond-line']) {
+    if (immediateStrategy === 'native-steer' && !definition.prepareNativePromptInput) {
+      throw new AgentMuxError('Native steering requires a machine input environment and Native admission contribution.', 'INVALID_AGENT_PROVIDER')
+    }
+    for (const probe of immediateStrategy === 'interrupt-before-input' ? ['probe', 'probe\nsecond-line'] : []) {
       const plan = definition.planPromptInput?.(probe, { execution: 'immediate' })
       if (plan?.kind !== 'render-then-submit' ||
           Boolean(plan.prepare) !== (immediateStrategy === 'interrupt-before-input') ||
-          !definition.inspectPromptExecution ||
-          immediateStrategy === 'native-steer' && (!definition.readPromptExecutionEvidence || !definition.verifyPromptExecutionTransport)) {
+          !definition.inspectPromptExecution) {
         throw new AgentMuxError('Provider immediate strategy and its native input contribution are inconsistent.', 'INVALID_AGENT_PROVIDER')
       }
     }
@@ -395,6 +412,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.terminalHandshake ? { terminalHandshake: { ...definition.terminalHandshake } } : {}),
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
     ...(definition.inspectPromptExecution ? { inspectPromptExecution: definition.inspectPromptExecution } : {}),
+    ...(definition.prepareNativePromptInput ? { prepareNativePromptInput: definition.prepareNativePromptInput } : {}),
     ...(definition.inspectPromptPreparationWait ? { inspectPromptPreparationWait: definition.inspectPromptPreparationWait } : {}),
     ...(definition.verifyPromptExecutionTransport ? { verifyPromptExecutionTransport: definition.verifyPromptExecutionTransport } : {}),
     ...(definition.preparePromptExecutionTransport ? { preparePromptExecutionTransport: definition.preparePromptExecutionTransport } : {}),
@@ -506,6 +524,9 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
       return resolveLaunchOptionArgv(catalog.id, launchOptionDeclarations, selections)
     },
     planPromptInput(prompt, context) {
+      if (context?.execution === 'immediate' && catalog.capabilities.promptExecution?.immediate === 'native-steer') {
+        throw new AgentMuxError('Native messages require the original machine input environment and Native admission; a terminal plan cannot represent steering.', 'AGENT_NATIVE_INPUT_WAITING')
+      }
       const plan = definition.planPromptInput?.(prompt, context) ?? { kind: 'single-phase' as const, data: `${prompt}\r` }
       const strategy = catalog.capabilities.promptExecution?.immediate
       if (context?.execution === 'immediate' &&

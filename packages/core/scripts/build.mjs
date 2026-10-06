@@ -107,6 +107,13 @@ try {
     join(artifactRoot, 'manifest.json'),
     join(packageRoot, 'dist/ctxmux-artifact-manifest.json')
   )
+  if (process.platform === 'darwin') {
+    await execFileAsync('cc', [
+      '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2',
+      join(packageRoot, 'native/native-socket-peer.c'),
+      '-o', join(packageRoot, 'dist/native-socket-peer-darwin')
+    ], { cwd: packageRoot, maxBuffer: 1024 * 1024 })
+  }
 } finally {
   await rm(buildRoot, { recursive: true, force: true })
 }

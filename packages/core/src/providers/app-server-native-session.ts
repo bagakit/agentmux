@@ -9,9 +9,15 @@ function unavailable(message: string): AgentMuxError {
   return new AgentMuxError(message, 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
 }
 
-async function locate(context: AgentProviderNativeSessionDiscoveryContext): Promise<{ file: NativeProcessFile; id: string; childSessionIds: string[] } | null> {
-  const files = (await nativeProcessFiles(context.processId, context.signal))
-    .filter(file => /^rollout-.*\.jsonl$/u.test(basename(file.path)))
+type MainRecordRole = (payload: Readonly<Record<string, unknown>>) => boolean
+
+/** Same exact record/role locator; process scope is only for an already OS-bound peer. */
+export async function locateAppServerNativeSession(context: Pick<AgentProviderNativeSessionDiscoveryContext, 'processId' | 'signal'>, mainRole?: MainRecordRole,
+  scope: 'run-group' | 'process' = 'run-group'): Promise<{ file: NativeProcessFile; id: string; childSessionIds: string[] } | null> {
+  const records = (await nativeProcessFiles(context.processId, context.signal, scope))
+    .filter(file => /^rollout-.*\.jsonl$/u.test(basename(file.path)) && (!mainRole || file.access === 'w' || file.access === 'u'))
+  // The candidate budget counts record objects, not aliases of one writer FD.
+  const files = [...new Map(records.map(file => [JSON.stringify([file.processId, file.path, String(file.device), String(file.inode)]), file])).values()]
   if (files.length > 16) throw unavailable('Native record discovery exceeded its bounded candidate count.')
   const main: Array<{ file: NativeProcessFile; id: string }> = []
   const children: Array<{ id: string; parent: string }> = []
@@ -36,7 +42,7 @@ async function locate(context: AgentProviderNativeSessionDiscoveryContext): Prom
         ? record.payload as Record<string, unknown> : undefined
       const id = normalizeNativeSessionId(payload?.id)
       if (record.type !== 'session_meta' || !id) throw unavailable('Native session metadata has no exact identity.')
-      if (payload!.source === 'cli') main.push({ file, id })
+      if (mainRole ? mainRole(payload!) : payload!.source === 'cli') main.push({ file, id })
       else {
         const source = payload!.source && typeof payload!.source === 'object' ? payload!.source as Record<string, unknown> : undefined
         const subagent = source?.subagent && typeof source.subagent === 'object' ? source.subagent as Record<string, unknown> : undefined
@@ -49,6 +55,10 @@ async function locate(context: AgentProviderNativeSessionDiscoveryContext): Prom
       }
       const after = await input.stat({ bigint: true })
       if (after.dev !== before.dev || after.ino !== before.ino) throw unavailable('Native session record identity changed.')
+      const header = Buffer.alloc(newline + 1)
+      if ((await input.read(header, 0, header.length, 0)).bytesRead !== header.length || !header.equals(bytes.subarray(0, header.length))) {
+        throw unavailable('Native session role metadata changed during observation.')
+      }
     } finally { await input.close() }
   }
   // One process can hold the same main record under several descriptors.
@@ -63,14 +73,14 @@ async function locate(context: AgentProviderNativeSessionDiscoveryContext): Prom
   return { ...original, childSessionIds: [...family].filter(id => id !== original.id).sort() }
 }
 
-export async function discoverAppServerNativeSession(context: AgentProviderNativeSessionDiscoveryContext, providerId: AgentProviderId): Promise<AgentProviderNativeSessionDiscovery | null> {
-  const original = await locate(context)
+export async function discoverAppServerNativeSession(context: AgentProviderNativeSessionDiscoveryContext, providerId: AgentProviderId, mainRole?: MainRecordRole): Promise<AgentProviderNativeSessionDiscovery | null> {
+  const original = await locateAppServerNativeSession(context, mainRole)
   if (!original) return null
   return {
     childSessionIds: original.childSessionIds,
     handle: { kind: 'provider', providerId, sessionId: original.id, transcriptPath: original.file.path },
     async assertCurrent() {
-      const current = await locate(context)
+      const current = await locateAppServerNativeSession(context, mainRole)
       if (!current || current.id !== original.id || current.file.path !== original.file.path ||
         current.file.processId !== original.file.processId || current.file.processGroup !== original.file.processGroup ||
         current.file.descriptor !== original.file.descriptor || current.file.device !== original.file.device || current.file.inode !== original.file.inode) {

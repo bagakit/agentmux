@@ -42,6 +42,10 @@ export function agentPromptNotApplied(
   if (!admission?.submissionId || !admission.notApplied || admission.acknowledged ||
       admission.intent?.run.runId !== session.run.runId || admission.frameRefresh?.notApplied) return undefined
   const submission = session.terminalPromptSubmission
+  if (admission.transport === 'native') {
+    return admission.native?.outcome === 'not-applied' && admission.intent.plan.kind === 'native-rpc' && !submission
+      ? { submissionId: admission.submissionId, run: { ...session.run } } : undefined
+  }
   if (admission.intent.plan.kind === 'single-phase') {
     if (submission) return undefined
   } else {

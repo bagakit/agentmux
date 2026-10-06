@@ -5110,6 +5110,53 @@ export class AgentMuxClient {
       throw new AgentMuxError('Agent Session changed before prompt submission.', 'STALE_AGENT_SESSION')
     }
     const provider = this.providers.get(session.providerId)
+    if (input.execution === 'immediate' && provider.catalog.capabilities.promptExecution?.immediate === 'native-steer' && provider.prepareNativePromptInput && !questionReply) {
+      // Native message admission uses the same Core claim, producer and condition.
+      // This early branch deliberately never creates a terminal prompt plan.
+      if (input.expectedCompletionId !== undefined || input.expectedFutureIntent !== undefined || input.preparationRetry !== undefined) {
+        throw new AgentMuxError('Automatic Native input is awaiting its original machine admission contract. The intent and terminal remain available.', 'AGENT_NATIVE_INPUT_WAITING', JSON.stringify({ phase: 'native-intent', reason: 'automatic-admission-unavailable', cancellable: true }))
+      }
+      let prepared: import('./agent-provider.js').AgentProviderNativePromptInput | undefined
+      try {
+        const previous = session.promptCompletionAdmission
+        if (previous?.submissionId !== operationId) {
+          stage('native-input-environment')
+          const run = await this.requireCurrentAgentRun(session)
+          const preparationSignal = input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(40_000)]) : AbortSignal.timeout(40_000)
+          const observation: { phase: import('./agent-provider.js').AgentNativeInputPreparationPhase; phaseEnteredAt: number } = { phase: 'native-peer', phaseEnteredAt: Date.now() }
+          try {
+            prepared = await provider.prepareNativePromptInput({ args: run.args, workspacePath: session.workspacePath, signal: preparationSignal,
+              onPreparationPhase: phase => { observation.phase = phase; observation.phaseEnteredAt = Date.now() },
+              ...(session.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
+              ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}) })
+          } catch (error) {
+            const reported = new AgentMuxError('The original Native input environment is unconfirmed. The message is retained; waiting can be cancelled and the original terminal remains available.',
+              'AGENT_NATIVE_INPUT_WAITING', JSON.stringify({ preclaimObservation: observation, reason: preparationSignal.aborted ? 'observation-cancelled' : 'original-environment-unconfirmed', cancellable: true,
+                cause: error instanceof AgentMuxError ? { code: error.code, detail: error.detail } : {
+                  name: error instanceof Error ? error.name : 'unknown',
+                  ...(error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' && /^[A-Z0-9_]{1,64}$/u.test(error.code) ? { code: error.code } : {})
+                } }), { disposition: 'not_applied', confirmedInputBytes: 0 })
+            Object.defineProperty(reported, 'cause', { value: error }); throw reported
+          }
+        }
+        stage('input-coordination')
+        // Native uses its atomic expected-turn guard and the same durable prompt
+        // claim. It neither writes PTY bytes nor holds the Raw input lane while a
+        // Native reply is pending; Raw remains available after a lost Native ACK.
+        const currentRun = await this.requireCurrentAgentRun(session)
+        const delivered = await this.promptSubmission.submitNativeInputPlan(session, currentRun,
+          operationId, outbound, condition, message, input.execution ?? 'default', prepared, input.signal, assertSession)
+        stage('receipt')
+        await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered)
+      } finally {
+        if (prepared) try { await prepared.close() } catch (error) {
+          // Cleanup cannot revoke an admitted Native message or close the healthy Agent.
+          this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId, code: 'AGENT_NATIVE_INPUT_CLEANUP_UNCONFIRMED',
+            message: error instanceof Error ? error.message : String(error), evidence: { source: 'user', observedAt: Date.now(), run: session.run } })
+        }
+      }
+      return
+    }
     const ordinaryPlan = provider.planPromptInput(outbound, input.execution === undefined ? undefined : { execution: input.execution })
     const protocolInput: AgentPromptProtocolInputBoundary = { invalid: false }
     let releasePreparationObservation: ((next?: AbortController) => void) | undefined
@@ -5118,9 +5165,9 @@ export class AgentMuxClient {
     try {
       stage('transport-preparation')
       const strategy = provider.catalog.capabilities.promptExecution?.immediate
-      const preparationMs = strategy === 'native-steer' ? 8_000 : 40_000
+      const preparationMs = 40_000
       const deadline = Date.now() + preparationMs
-      transportQualification = input.execution === 'immediate' && (strategy === 'interrupt-before-input' || strategy === 'native-steer')
+      transportQualification = input.execution === 'immediate' && strategy === 'interrupt-before-input'
         ? await this.observeAgentInputPreparation(session, preparationMs, async signal => {
         const run = await this.requireCurrentAgentRun(session)
         return await this.promptSubmission.qualifyInputTransport(session, run, operationId, outbound, signal,
@@ -5250,6 +5297,7 @@ export class AgentMuxClient {
     const originalCondition = await this.messageQueue.preparePrompt(envelope.messageId, async () => condition)
     await this.submitPromptInternal({ ...originalCondition, agentSessionId: input.agentSessionId,
       operationId: envelope.messageId, prompt: renderAgentMuxMessageEnvelope(envelope), allowUncertainTurn: true,
+      ...(envelope.sender.kind === 'human' ? { authorHuman: true } : {}),
       ...(queued.sourceChannel ? { sourceChannel: queued.sourceChannel } : {}), ...(queued.sourceDevice ? { sourceDevice: queued.sourceDevice } : {}), ...(input.execution === undefined ? {} : { execution: input.execution }) }, authorAgentSessionId)
     await this.messageQueue.recordDelivery(envelope.messageId, 'delivered')
   }
@@ -7275,21 +7323,7 @@ export class AgentMuxClient {
           }
           catch { delete preclaim.wait }
         }
-        const completed = preclaim.completedPaneTimeout
-        let completedCurrent = Boolean(completed && !protocolInput?.invalid && !protocolInput?.cancelled &&
-          !completed?.signal?.aborted && !renderObservation?.signal.aborted &&
-          pane?.evidenceGeneration === this.screenEvidence.generation(agentSessionId))
-        if (completedCurrent) {
-          try {
-            const current = this.requireAgentSession(agentSessionId)
-            completedCurrent = current.run.runId === completed!.runId &&
-              this.screenEvidence.currentCompleteFrame(current)?.evidenceGeneration === pane?.evidenceGeneration
-          }
-          catch { completedCurrent = false }
-        }
-        const error = completedCurrent ? completed!.error
-          : completed?.signal?.aborted ? completed.signal.reason
-            : new AgentMuxError('Original input preparation timed out; the terminal remains available.', 'AGENT_INPUT_PREPARATION_UNCONFIRMED', promptPreparationObservationDetail(protocolInput))
+        const error = new AgentMuxError('Original input preparation timed out; the terminal remains available.', 'AGENT_INPUT_PREPARATION_UNCONFIRMED', promptPreparationObservationDetail(protocolInput))
         protocolInput!.cancelled ??= error
         renderObservation?.abort(protocolInput!.cancelled)
         reject(promptPreparationFailure(protocolInput!.cancelled))
