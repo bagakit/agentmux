@@ -9,6 +9,14 @@ import {
   normalizeRect,
   redoShape,
   scaleShape,
+  setCrop,
+  replaceShape,
+  removeShapes,
+  moveShape,
+  hitTestShape,
+  shapeBounds,
+  intersectRect,
+  screenshotOutputShapes,
   undoShape,
   type ScreenshotShape
 } from '../src/renderer/src/components/browser-screenshot/drawing-model.js'
@@ -51,6 +59,46 @@ function drawingContext() {
 }
 
 describe('Browser screenshot drawing model', () => {
+  it('selects actual ink in reverse paint order and moves exactly that object with undo', () => {
+    const line: ScreenshotShape = { id: 'line', kind: 'pen', color: '#f00', width: 2, points: [{ x: 10, y: 10 }, { x: 50, y: 50 }] }
+    const box: ScreenshotShape = { id: 'box', kind: 'rect', color: '#f00', width: 2, from: { x: 5, y: 5 }, to: { x: 55, y: 55 } }
+    expect(hitTestShape([line, box], { x: 30, y: 30 }, 1)?.id).toBe('line')
+    expect(hitTestShape([line, box], { x: 30, y: 5 }, 1)?.id).toBe('box')
+    expect(hitTestShape([line, box], { x: 10, y: 40 }, 1)).toBeNull()
+    const doc = commitShape(commitShape(createScreenshotDocument(), line), box)
+    const moved = replaceShape(doc, moveShape(line, 8, 12))
+    expect(moved.shapes[0]).toMatchObject({ id: 'line', points: [{ x: 18, y: 22 }, { x: 58, y: 62 }] })
+    expect(moved.shapes[1]).toBe(box)
+    expect(undoShape(moved).shapes).toEqual(doc.shapes)
+    const erased = removeShapes(moved, new Set(['line']))
+    expect(erased.shapes).toEqual([box])
+    expect(undoShape(erased).shapes).toEqual(moved.shapes)
+    expect(removeShapes(doc, new Set(['missing']))).toBe(doc)
+  })
+
+  it('keeps crop and editable image annotations together in the same reversible snapshot', () => {
+    const first = commitShape(createScreenshotDocument(), shape('first'))
+    const cropped = setCrop(first, { x: 3, y: 4, width: 80, height: 60 })
+    const edited = replaceShape(cropped, moveShape(shape('first'), 20, 10))
+    expect(undoShape(edited)).toMatchObject({ shapes: cropped.shapes, crop: cropped.crop, past: cropped.past })
+    expect(undoShape(cropped)).toMatchObject({ shapes: first.shapes, crop: first.crop, past: first.past })
+    expect(redoShape(undoShape(cropped))).toEqual(cropped)
+    expect(clearShapes(edited)).toMatchObject({ shapes: [], crop: null })
+    expect(undoShape(clearShapes(edited))).toMatchObject({ shapes: edited.shapes, crop: edited.crop, past: edited.past })
+    expect(intersectRect({ x: -3, y: 4, width: 8, height: 7 }, { x: 0, y: 0, width: 10, height: 10 })).toEqual({ x: 0, y: 4, width: 5, height: 6 })
+  })
+
+  it('scales numbered regions and pixel blocks consistently without mutating their identities or notes', () => {
+    const note: ScreenshotShape = { id: 'note', kind: 'note', number: 2, note: '检查此处', radius: 12, width: 2, color: '#f00', from: { x: 20, y: 20 }, to: { x: 70, y: 60 } }
+    expect(scaleShape(note, 0.5)).toMatchObject({ id: 'note', number: 2, note: '检查此处', radius: 6, from: { x: 10, y: 10 }, to: { x: 35, y: 30 } })
+    expect(hitTestShape([note], { x: 20, y: 20 }, 1)?.id).toBe('note')
+    expect(shapeBounds(note)).toEqual({ x: 8, y: 8, width: 62, height: 52 })
+    expect(scaleShape({ id: 'pixels', kind: 'pixelate', color: '#000', from: { x: 1, y: 2 }, to: { x: 9, y: 10 }, blockSize: 8 }, 2)).toMatchObject({ id: 'pixels', from: { x: 2, y: 4 }, to: { x: 18, y: 20 }, blockSize: 16 })
+    const mask: ScreenshotShape = { id: 'mask', kind: 'pixelate', color: '#000', blockSize: 8, from: { x: 15, y: 15 }, to: { x: 25, y: 25 } }
+    expect(screenshotOutputShapes([mask, note])).toEqual([mask])
+    expect(screenshotOutputShapes([note], { x: 30, y: 10, width: 50, height: 70 })).toEqual([])
+    expect(screenshotOutputShapes([note], { x: 10, y: 10, width: 80, height: 70 })).toEqual([note])
+  })
   it('keeps undo, redo, clear, and divergent edits deterministic', () => {
     const first = commitShape(createScreenshotDocument(), shape('first'))
     const second = commitShape(first, shape('second'))
