@@ -50,7 +50,11 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
       const selection = handle.editor.state.selection
       let selected = handle.editor.state.doc.nodeAt(selection.from)?.attrs.blockId
       for (let depth = selection.$from.depth; depth > 0 && !selected; depth--) selected = selection.$from.node(depth).attrs.blockId
-      if (selected === restoredBlock.blockId) { setRestoreIssue(null); return }
+      let originalTargetPresent = false
+      handle.editor.state.doc.descendants(node => { if (node.attrs.blockId === restoredBlock.blockId) originalTargetPresent = true })
+      // The focused view owns its current selection, including a new block
+      // without a durable ID. A canonical echo must not replay an older ID.
+      if (selected === restoredBlock.blockId || originalTargetPresent && handle.editor.state.doc.eq(handle.editor.schema.nodeFromJSON(read.note.content))) { setRestoreIssue(null); return }
     }
     if (read.status !== 'valid' || read.note.noteId !== restoredBlock.noteId || !handle.focusBlock(restoredBlock.blockId, false)) {
       setRestoreIssue('The saved block selection is not confirmed in this Note. Its exact target is retained. Select another block to recover.'); return
