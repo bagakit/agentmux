@@ -212,3 +212,45 @@ it('one Escape closes only the original communication menu, preserving Mailbox a
   await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
   expect(hide).toHaveBeenCalledOnce()
 })
+const evidenceButton = () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Copy collaboration evidence"]')!
+function capturedEvidenceAction() {
+  const button = evidenceButton(), key = Object.keys(button).find(key => key.startsWith('__reactProps$'))!
+  return (button as unknown as Record<string, { onClick(): void }>)[key]!.onClick
+}
+it('explicit evidence copying preserves complete original messages, identities, delivery and unknown diagnostics without extra reads', async () => {
+  const original = observation(); original.source.envelope.body = 'Exact original content\n'.repeat(8000) + 'UNTRUNCATED-END'
+  vi.mocked(api.sessions.dispatch).mockResolvedValueOnce(original); const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await start(); await select(); expect(copy).not.toHaveBeenCalled(); const before = vi.mocked(api.sessions.dispatches).mock.calls.length
+  await dom.click('[aria-label="Copy collaboration evidence"]')
+  const payload = JSON.parse(copy.mock.calls[0]![0]); expect(payload.record).toEqual(original)
+  expect(payload.record.source.envelope.body).toBe(original.source.envelope.body); expect(payload.readObservation).toEqual({ state: 'confirmed', issue: null })
+  expect(payload.interpretation).toContain('do not establish execution or Goal acceptance'); expect(evidenceButton().textContent).toContain('Copied')
+  expect(api.sessions.dispatch).toHaveBeenCalledOnce(); expect(api.sessions.dispatches).toHaveBeenCalledTimes(before); expect(dom.draft()).toBe('Keep my draft')
+})
+it('retained evidence includes loading and exact failed-read uncertainty, and clipboard failure stays retryable', async () => {
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValueOnce(new Error('Clipboard refused')).mockResolvedValue(undefined)
+  await start(); await select(); await dom.click('[aria-label="Copy collaboration evidence"]'); expect(evidenceButton().textContent).toContain('Retry copy')
+  let reject!: (error: Error) => void
+  vi.mocked(api.sessions.dispatch).mockImplementationOnce(() => new Promise((_done, fail) => { reject = fail })); await clickText('Refresh records')
+  await dom.click('[aria-label="Copy collaboration evidence"]'); expect(JSON.parse(copy.mock.calls.at(-1)![0]).readObservation.state).toBe('reading-unconfirmed')
+  await act(async () => reject(new Error('Original source read not confirmed'))); await dom.click('[aria-label="Copy collaboration evidence"]')
+  expect(JSON.parse(copy.mock.calls.at(-1)![0]).readObservation).toEqual({ state: 'read-unconfirmed', issue: 'Original source read not confirmed' })
+  expect(JSON.parse(copy.mock.calls.at(-1)![0]).record.source.envelope.messageId).toBe('source-one')
+  await dom.click('[aria-label="Retry original record"]'); expect(evidenceButton().textContent).not.toContain('Copied')
+})
+it('same-source refresh expires pending copy receipts even when exact evidence bytes are unchanged', async () => {
+  let resolve!: () => void; const copy = vi.spyOn(api.ui, 'writeClipboardText').mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  await start(); await select(); await dom.click('[aria-label="Copy collaboration evidence"]'); const first = copy.mock.calls[0]![0]
+  expect(evidenceButton().textContent).toContain('Copying'); await clickText('Refresh records')
+  await act(async () => resolve()); expect(evidenceButton().textContent).not.toContain('Copied')
+  copy.mockResolvedValueOnce(undefined); await dom.click('[aria-label="Copy collaboration evidence"]'); expect(copy.mock.calls.at(-1)![0]).toBe(first); expect(evidenceButton().textContent).toContain('Copied')
+})
+it('old evidence actions and receipts cannot write across selection or hidden episodes', async () => {
+  let resolve!: () => void; const copy = vi.spyOn(api.ui, 'writeClipboardText').mockImplementationOnce(() => new Promise(done => { resolve = done })).mockResolvedValue(undefined)
+  await start(); await select(); const old = capturedEvidenceAction(); await dom.click('[aria-label="Copy collaboration evidence"]')
+  await render(false); await act(async () => old()); expect(copy).toHaveBeenCalledOnce(); await act(async () => resolve())
+  expect(evidenceButton().textContent).not.toContain('Copied'); await render(true); await act(async () => old()); expect(copy).toHaveBeenCalledOnce()
+  await clickText('Back to collaboration'); await select('source-two'); await act(async () => old()); expect(copy).toHaveBeenCalledOnce()
+  await dom.click('[aria-label="Copy collaboration evidence"]'); expect(JSON.parse(copy.mock.calls.at(-1)![0]).record.dispatch.sourceMessageId).toBe('source-two')
+  await clickText('Back to collaboration'); await select(); await act(async () => old()); expect(copy).toHaveBeenCalledTimes(2)
+})

@@ -7,6 +7,10 @@ import original from './vitest.mailbox-collaboration.config.mts'
 import { radixOverlayAliases } from '../scripts/radix-overlay-aliases'
 const root = resolve(import.meta.dirname, '../../..')
 const changes = {
+ evidenceScope: ["record: original", "record: { ...original, replies: [] }"],
+ evidenceIssue: ["issue: detailIssue", "issue: null"],
+ evidenceLoading: ["loadingDetail ? 'reading-unconfirmed'", "false ? 'reading-unconfirmed'"],
+ evidenceVisibility: ["[original, detail, selectionOwner]", "[original, detail, selected]"],
  query: ["searchable.includes(query.trim().toLocaleLowerCase())", "true"],
  status: ["status === 'all' || (status === 'waiting' ? item.originAwaits : !item.originAwaits)", "true"],
  names: ["names.get(item.ownerAgentSessionId), names.get(item.workerAgentSessionId)", "'', ''"],
@@ -18,6 +22,12 @@ export default defineConfig({ ...original, resolve: { ...original.resolve, dedup
  plugins: [...(original.plugins ?? []), { name:'collaboration-record-tools-mutations', enforce:'pre', transform(source,id) {
   const mutation=process.env.COLLABORATION_TOOLS_MUTATION as keyof typeof changes | undefined
   if (!mutation) return
+  if (mutation === 'evidenceVersion' as string) {
+   if(relative(root,id)!=='packages/client-ui/src/components/ContentCopyButton.tsx') return
+   const needle='[text, identity, copyText]'; assert.equal(source.split(needle).length-1,1)
+   if(process.env.COLLABORATION_TOOLS_HITS)appendFileSync(process.env.COLLABORATION_TOOLS_HITS,mutation+'\n')
+   return {code:source.replace(needle,'[copyText]'),map:null}
+  }
   if (mutation === 'parentEscape' as string) {
    if(relative(root,id)!=='apps/desktop/src/renderer/src/components/SessionMailbox.tsx') return
    const needle="event.key !== 'Escape' || event.defaultPrevented || isImeOwnedKeyboardEvent(event)"; assert.equal(source.split(needle).length-1,1)
