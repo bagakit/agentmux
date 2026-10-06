@@ -236,6 +236,50 @@ describe('Browser bar contract', () => {
     expect(renderToStaticMarkup(<BrowserPane tab={tab} visible />)).not.toContain('Agent control active')
   })
 
+  it.each(['back', 'forward', 'reload', 'openDevTools'] as const)('More executes %s on the original Browser', async method => {
+    const action = vi.spyOn(api.browser, method).mockResolvedValue({ ...tab })
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<BrowserPane tab={tab} visible />))
+      const trigger = container.querySelector<HTMLButtonElement>('[aria-label="More browser tools"]')!
+      await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+      const label = { back: 'Back', forward: 'Forward', reload: 'Reload page', openDevTools: 'Open DevTools' }[method]
+      const item = [...document.querySelectorAll<HTMLElement>('.browser-menu [role="menuitem"]')].find(node => node.textContent?.trim() === label)
+      expect(item, 'the actual More menu must offer this action').toBeDefined()
+      await act(async () => {
+        item!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
+        item!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' }))
+        item!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }))
+      })
+      expect(action).toHaveBeenCalledExactlyOnceWith(tab.browserId)
+      expect(document.querySelector('.browser-menu')).toBeNull()
+    } finally { await act(async () => root.unmount()); container.remove(); action.mockRestore() }
+  })
+
+  it('More viewport selection updates the original Browser and closes its menu', async () => {
+    const action = vi.spyOn(api.browser, 'setViewport').mockResolvedValue({ ...tab, viewport: 'mobile' })
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(<BrowserPane tab={tab} visible />))
+      const trigger = container.querySelector<HTMLButtonElement>('[aria-label="More browser tools"]')!
+      await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+      const item = [...document.querySelectorAll<HTMLElement>('.browser-menu [role="menuitemradio"]')].find(node => node.textContent?.includes('Mobile'))
+      expect(item, 'the actual More menu must offer the Mobile viewport').toBeDefined()
+      await act(async () => {
+        item!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
+        item!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' }))
+        item!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }))
+      })
+      expect(action).toHaveBeenCalledExactlyOnceWith(tab.browserId, 'mobile')
+      expect(fixture.state.applyBrowserEvent).toHaveBeenCalledWith({ type: 'updated', browser: { ...tab, viewport: 'mobile' } })
+      expect(document.querySelector('.browser-menu')).toBeNull()
+    } finally { await act(async () => root.unmount()); container.remove(); action.mockRestore() }
+  })
+
   /**
    * 停止走**协议**，不走 `api.browser.stopOperation`（T-008 收口）。
    *
