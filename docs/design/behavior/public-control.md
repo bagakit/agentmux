@@ -12,6 +12,7 @@
 - [自举：在 AgentMux 里开一个 Agent 优化 AgentMux](#自举在-agentmux-里开一个-agent-优化-agentmux)
 - [Browser 通用能力协议与 CLI/Skill 接入](#browser-通用能力协议与-cliskill-接入)
 - [对象优先 CLI 与统一公共业务服务](#对象优先-cli-与统一公共业务服务)
+- [统一全局搜索](#统一全局搜索)
 - [Topics 知识库的公共接入](#topics-知识库的公共接入)
 - [Agent-first 的 Space 工作入口](#agent-first-的-space-工作入口)
 - [手机版 Relay 连接](#手机版-relay-连接)
@@ -151,7 +152,7 @@ Work、Survey、Recall 与左下 Mote 面板的导航范围，以及明确跨上
 | `browser` | `open`、`run`、`history`、`inspect`、`stop`、`follow`、`replay` |
 | `goal` | `ls`、`inspect`、`create`、`update`、`delete`、`assign`、`start`、`handoff`、`focus`、`link-session`、`link-project`、`decisions`、`activity` |
 | `message` | `inbox check/ack`；`dispatch open/report/inspect` |
-| `app` | `inspect`、`snapshot`、`focus` |
+| `app` | `inspect`、`snapshot`、`search`、`focus` |
 | `mote` | `playbook pmo` |
 | `settings` | `inspect`、`set`；`executors ls/inspect/create/update/delete/refresh`；`prompts ls/inspect/create/update/delete`；`hosts ls/test`；`workspaces register`；`browser-links ls/forget` |
 | `system` | `doctor`、`endpoint`；`crash-log inspect/reveal`；`metrics get/watch` |
@@ -197,6 +198,19 @@ HTTP 显式启用且同权，SSH stdio 只转发远端原 Unix 服务，不意�
 完整命令树、原业务保留和第一方指引须一起落地，Toolkit 原 add／remove 能力改为 create／delete，update／action 保留；具体过滤与载体实现仍受上述真实来源和 typed 合同约束。
 
 少量独立端到端切片可并行推进，最终验收消费同一候选的公共 RPC、完整对象 CLI 与 Project／Space PMO 工作流，不以纯文档或 helper 通过交付。
+
+## 统一全局搜索
+
+全局搜索由无 UI 依赖的同一 Core 公共能力提供，公开为 `app.search`／`amux app search`，Focus 与其他 Client 消费同一查询语义、结果身份、续读与覆盖回执。Core 提供浏览器可复用的纯 metadata 查询与原事实构建合同，以及组合原只读来源的统一 reader；不能只共用类型或函数名，却由 GUI、CLI 各自匹配、拼接来源、调度历史及判定完整性。本节定义已确认目标，不代签当前源码、安装或验收。
+
+- **两种模式，明确范围。** metadata 查询原对象身份及已确认的名称、活动、已加载摘录、状态、Provider、资源路径、项目／分支／Topic 等资料；普通文字不区分大小写，原 ID 按准确大小写连续匹配，支持完整、前缀和中间片段。完整 `amux://agent/region/tab/space/zone` 链接只沿[原严格 parser 合同](#对象地址分享与方向)按原种类和完整身份匹配，无效链接不降为名称查询。history 查询已保留会话中输入、回复及可读 reasoning／工具调用与结果等区分大小写的连续原文字，复用原 `agent.history kind:text` reader、文字资源与 Provider 语义，保原记录；缺省 user-message 查询的输入历史含义不变。两模式共用 typed request／result、cursor 与 coverage 合同，模式和实际范围明确，不将 metadata、标题、预览或已读窗口冒成历史全文。全局指所声明的原对象与已保留会话来源，不承诺任意项目文件、未发现的外部会话、知识库全文或图片 OCR。
+- **对象与关联保真。** 支持已保留的 AgentSession、Run、Provider 原生会话、Tab、Region、Workspace、Group、Project、Space、Zone 与 Topic ID，以及上述五类完整链接。沿[概念词典](spaces-and-layout.md#统一概念与空间寻址)区分对象种类、执行身份、资源和展示位置；Workspace 不冒 Project。原 Session 身份不因查询、改名、位置变化或恢复观察缺口改变；Run 不以当前执行回填未记录的旧引用。跨 Host 的相同 SID、不同 Provider 的原生 ID、同名对象及同正文的不同记录不合并。原生句柄的已确认、已观察与此前保留阶段可辨，不将命中提升为当前绑定、恢复或输入资格。资源 Host 与 execution Host 分开，未知 execution Host 不从 Zone、显示 Workspace、cwd 或名称补猜。Session 的多个展示、Zone 的多 Space 绑定及准确展示位置全部保留；普通 Terminal 仍按原 Run／Region 和原上下文可查，不因名称或同字段 ID 获得 AgentSession 身份或命中 `amux://agent/`。没有位置只表达未确认，不冒对象已终局。
+- **原 owner 供事实，Core 统一查询。** Session／Run 引用、空间图及全部绑定、Project／Workspace 资源、Topic 内容和原历史继续各由既有 owner 持有；统一能力通过原 typed 只读端口取得事实，不另建 registry、持久镜像、全文索引或历史 Store。Client 可提供沿准确原对象引用的已加载名字、recap、访问观察与呈现补充，明确其来源与范围，不将补充资料冒作权威 membership、活动或授权。无 Desktop 端口时仍可查询 Core 自身可用的原身份、空间及历史，缺少的 Host／Client 来源明确不可用或未确认，不能要求 UI 选中或挂载后才成立。精确来源、路由和续用范围沿[Endpoint、Host 路由与源身份](#endpointhost-路由与源身份)，不能以一个 endpoint 内的 Host ID 冒跨服务全局身份。
+- **覆盖与成本有界。** 来源发现、原记录扫描、匹配返回和字节各有明确的有限批次；metadata 不隐式读取全部正文，history 不由输入变化、无关输出或时间窗口变化触发全来源后台扫描。回执分开说明已查范围、尚未查完及 continuation、来源目录尚未确认、不可用／不支持／未记录和已确认无匹配；来源发现不完整时，已知来源全部查完仍不冒全局完成。结果保准确 Host／Session、原 Source、记录种类与 ID、原生来源及可继续寻址的对象和位置，未知作者、时间和归属不补造；不能按名字、正文或最近位置去重。原资源只经准确 reader 查询与读取，不把预览当完整文字；redacted、未知资源种类或不能完整查询的来源如实表达覆盖缺口。
+- **续读与取消属于本次读取。** cursor 绑定原查询模式、文字、范围、endpoint 内路由及准确来源／版本；换模式、换目标、失效、过期或源变化均明确拒绝该次续读并给原范围重查方式，不静默换源、跳页或从头重读后冒续读。原 reader 的预算回执可驱动对同一位置的准确只读重试，不截断完整原记录或伪造完成。取消信号从公共 API、RPC／CLI 与 Client 到达相关原 reader，取消或断线只释放这次消费，不停止健康 Run；Client 丢弃已过期查询的迟到结果，不覆盖后来的输入、焦点或工作面。
+- **查找不授予控制。** 查询、复制与只读查看不创建、恢复、停止、发送、移动或自动选择对象。明确选择结果才沿原准确导航或阅读 owner，身份与关联未知不能猜第一候选；历史无原位置时仍可只读，不以命中恢复 Run。来源失败保已读结果、原 Session、草稿和健康能力。Core API、公共授权与严格回执、实际 CLI 及 Focus 同源消费须形成完整交付，不能以 GUI 已接通或 help 已生成代签其他入口。
+
+Focus 的显式发起、即时筛选与原阅读窗只见[Focus 搜索交互](focus-context.md#搜索上下文对象身份与历史正文)，结果层级与紧凑覆盖只见[Focus 搜索呈现](../presentation/focus-context.md#搜索范围与结果)；两者不再持一套通用匹配规则或跨来源调度。精确参数、错误类型与命令发现由实际 Core 公共类型、严格 parser 和 CLI 注册唯一持有，具体实现来源沿[公共能力来源导航](../../specs/public-capabilities.md#cli-与服务的当前来源)。
 
 ## Topics 知识库的公共接入
 
