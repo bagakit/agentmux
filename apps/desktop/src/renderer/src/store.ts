@@ -20,6 +20,8 @@ import { recordMessageDeliveryFailure } from './lib/message-delivery-diagnostics
 import { recordHistory, navigateHistory, restoreComposerHistory, type HistoryState } from './lib/composer-history'
 import { rendererPerformance } from './lib/renderer-performance'
 import { runServiceProjection } from './lib/run-service-projection'
+import type { ConversationItemRef } from '@agentmux/core/conversation'
+import type { ConversationRevealIntent, MailboxMessageNavigationResult } from './lib/mailbox-message-navigation'
 
 
 
@@ -779,6 +781,8 @@ type AppState = {
   focusTimelineRuler: FocusRulerPreferences
   setFocusTimelineRuler(preferences: FocusRulerPreferences): void
   focusExecutionSession(id: string | null, reference?: WorkbenchProjectionSelection, options?: { navigate: boolean }): boolean
+  conversationRevealIntent: ConversationRevealIntent | null
+  revealConversationItem(itemRef: ConversationItemRef): Promise<MailboxMessageNavigationResult>
   selectMainRegion(reference: WorkbenchProjectionSelection, expected?: AgentMuxDesktopSpaceSelection | null): boolean
   focusPmoSession(id: string | null): void
   selectedDemandId: string | null
@@ -3736,6 +3740,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   demands: {},
   demandPmoTabIds: {},
   agentFocus: EMPTY_AGENT_FOCUS,
+  conversationRevealIntent: null,
   focusTimelineNameWidth: FOCUS_TIMELINE_NAME_WIDTH_DEFAULT,
   setFocusTimelineNameWidth(width) {
     const next = clampFocusTimelineNameWidth(width)
@@ -6381,6 +6386,43 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     state.reportError(new Error(result.issue ?? 'The selected Agent occurrence is unconfirmed. Its workface is kept; choose an exact original location.'), { kind: 'indeterminate' })
     return false
+  },
+  revealConversationItem(itemRef) {
+    get().conversationRevealIntent?.complete({ kind: 'cancelled' })
+    const state = get(), reference = state.agentFocus.execution.reference
+    const session = sessionPresentationById(state.sessions).get(itemRef.agentSessionId)
+    if (!reference || session?.kind !== 'agent' || session.control.hostId !== itemRef.hostId ||
+      !confirmedFocusReference(state, itemRef.agentSessionId, reference) ||
+      !sameWorkbenchProjectionSelection(mainRegionReference(state.workbenchSpaceSelection), reference)) {
+      return Promise.resolve({ kind: 'unavailable', itemRef: { ...itemRef, source: { ...itemRef.source } }, message: 'Original location is unconfirmed. Choose its confirmed existing location; the recorded content and workface are kept.' })
+    }
+    // This stores no record body, reader or lifecycle. Later focus cannot retarget it.
+    const frozenRef = { ...itemRef, source: { ...itemRef.source } }, frozenLocation = { ...reference }
+    return new Promise(resolve => {
+      let finished = false
+      let unsubscribe = () => {}
+      const changedIntent = () => intent.complete({ kind: 'cancelled' })
+      const intent: ConversationRevealIntent = {
+        itemRef: frozenRef, reference: frozenLocation, claimed: false,
+        isCurrent: () => {
+          const current = get(), live = sessionPresentationById(current.sessions).get(frozenRef.agentSessionId)
+          return !finished && current.conversationRevealIntent === intent && current.mainSurface === state.mainSurface &&
+            live?.kind === 'agent' && live.control.hostId === frozenRef.hostId &&
+            sameWorkbenchProjectionSelection(mainRegionReference(current.workbenchSpaceSelection), frozenLocation)
+        },
+        complete: result => {
+          if (finished) return
+          finished = true
+          unsubscribe()
+          for (const event of ['pointerdown', 'keydown', 'wheel', 'touchmove']) document.removeEventListener(event, changedIntent, true)
+          if (get().conversationRevealIntent === intent) set({ conversationRevealIntent: null })
+          resolve(result.kind === 'unavailable' ? { ...result, itemRef: frozenRef } : result)
+        }
+      }
+      for (const event of ['pointerdown', 'keydown', 'wheel', 'touchmove']) document.addEventListener(event, changedIntent, true)
+      set({ conversationRevealIntent: intent })
+      unsubscribe = useAppStore.subscribe(() => { if (!intent.isCurrent()) intent.complete({ kind: 'cancelled' }) })
+    })
   },
   focusPmoSession(id) {
     set((state) => {

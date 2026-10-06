@@ -1,7 +1,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
 import { createFocusProjectionSelector, focusNeutralGroupSummary, FOCUS_BUCKETS, groupFocusContexts, type FocusBucket } from '../lib/focus-context'
@@ -27,6 +27,7 @@ import { focusSearchContextKey, searchFocus } from '../lib/focus-search'
 import { FocusSourceStatus } from './FocusSourceStatus'
 import * as FilterMenu from './HoverDropdownMenu'
 import { RecentFocusTimeline } from './RecentFocusTimeline'
+import type { RevealConversationItem } from '../lib/mailbox-message-navigation'
 import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
 import { isMacPlatform } from '../lib/host-platform'
 import { executionFocusSessionId } from '../lib/agent-focus'
@@ -128,6 +129,21 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
   const storedFocusExecutionSession = useAppStore((state) => state.focusExecutionSession)
   const focusExecutionSession = onSelectContext ?? storedFocusExecutionSession
+  const revealFocusRecord = useCallback<RevealConversationItem>(async itemRef => {
+    const original = sessionPresentationById(useAppStore.getState().sessions).get(itemRef.agentSessionId)
+    if (original?.kind !== 'agent' || original.control.hostId !== itemRef.hostId) {
+      return { kind: 'unavailable', itemRef, message: 'Original Session is unconfirmed. The recorded content remains readable; choose its original Context to inspect the source.' }
+    }
+    // Keep App's original Focus presentation callback, then hand off only a reading intent.
+    focusExecutionSession(itemRef.agentSessionId)
+    const result = await useAppStore.getState().revealConversationItem(itemRef)
+    if (result.kind === 'unavailable') useAppStore.getState().reportError(new Error(result.message), { kind: 'indeterminate' })
+    return result
+  }, [focusExecutionSession])
+  useEffect(() => {
+    if (!visible) useAppStore.getState().conversationRevealIntent?.complete({ kind: 'cancelled' })
+  }, [visible])
+  useEffect(() => () => { useAppStore.getState().conversationRevealIntent?.complete({ kind: 'cancelled' }) }, [])
   const [query, setQuery] = useState('')
   const historySearch = useFocusHistorySearch(query, visible)
   const [project, setProject] = useState('all')
@@ -407,7 +423,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
           </div> : <><AgentTopologySummary sessionIds={selectedSessionIds} sessions={sessions} tabs={tabs} config={config} /><SessionObservationRegions sessionIds={selectedSessionIds} contextId={`agent:${selectedId}`} /></>}
     </aside></> : null}
     </div>
-    <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} currentContext={currentContext} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} historyWindowRequest={historyWindowRequest} catalogue={catalogue} visible={visible} />
+    <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} currentContext={currentContext} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} onReveal={revealFocusRecord} historyWindowRequest={historyWindowRequest} catalogue={catalogue} visible={visible} />
     {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onReturnFocus={() => {
       if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus()
     }} onSessionChange={focusExecutionSession} /> : null}

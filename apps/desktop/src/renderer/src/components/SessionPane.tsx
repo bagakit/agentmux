@@ -60,7 +60,8 @@ import { agentDisplayName } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { moteConversationIdentity, useMoteConversationOwner } from '../lib/mote-conversation-identity'
 import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from '../lib/idle-agent-restore-policy'
-import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
+import { projectConversationRecords, type ConversationItemRef } from '@agentmux/core/conversation'
+import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import type { ConversationRevealRequest, MailboxMessageNavigationResult } from '../lib/mailbox-message-navigation'
 
@@ -298,9 +299,13 @@ export function SessionPane({
   }) : undefined
   const inlineHistory = pendingAgentRestore && startupDecision?.kind === 'pending' &&
     startupDecision.reason === 'idle-over-day'
+  const incomingReveal = useAppStore(state => {
+    const intent = state.conversationRevealIntent
+    return intent?.itemRef.agentSessionId === sessionId && intent.itemRef.hostId === executionHostId ? intent : null
+  })
   // One fact/observation owner, with demand from every actually visible reading stage.
   const activityDemand = !pendingAgentRestore &&
-    (visible && (viewMode !== 'terminal' || historyOpen) || viewMode !== 'terminal' && presentations.some(target => target.visible !== false))
+    (visible && (viewMode !== 'terminal' || historyOpen) || viewMode !== 'terminal' && presentations.some(target => target.visible !== false) || !!incomingReveal && observationVisible)
   const {
     messages: userMessages,
     nativeHistoryPage,
@@ -320,15 +325,15 @@ export function SessionPane({
   )
   const nativeRevealSource = useRef({ page: nativeHistoryPage, changed: userMessagesSourceChanged })
   nativeRevealSource.current = { page: nativeHistoryPage, changed: userMessagesSourceChanged }
-  const revealMailboxMessage = useCallback((message: AgentSessionUserMessage, presentation?: WorkbenchViewTarget): Promise<MailboxMessageNavigationResult> => {
+  const revealConversationItem = useCallback((itemRef: ConversationItemRef, presentation?: WorkbenchViewTarget, mailboxInputId?: string, isIntentCurrent?: () => boolean): Promise<MailboxMessageNavigationResult> => {
     navigation.current.cancel?.()
     const generation = ++navigation.current.generation
     const control = session?.kind === 'agent' ? session.control : undefined
-    const sourceKey = conversationMessageSourceKey(control?.agentSessionId, message.source)
+    const sourceKey = conversationMessageSourceKey(control?.agentSessionId, itemRef.source)
     const unavailable = (detail: string): MailboxMessageNavigationResult => ({ kind: 'unavailable', message: `${detail} 原文仍可阅读和复制。` })
-    if (!control || message.agentSessionId !== control.agentSessionId || !sourceKey) return Promise.resolve(unavailable('记录关系未确认，无法定位。'))
+    if (!control || itemRef.hostId !== control.hostId || itemRef.agentSessionId !== control.agentSessionId || !sourceKey) return Promise.resolve(unavailable('记录关系未确认，无法定位。'))
     if (pendingAgentRestore) return Promise.resolve(unavailable('当前对话位置尚不可用，Session 已保留。'))
-    if (message.source.kind === 'native' && session?.providerId !== message.source.providerId) {
+    if (itemRef.source.kind === 'native' && session?.providerId !== itemRef.source.providerId) {
       return Promise.resolve(unavailable('原生来源已变化，当前阅读窗口保留；请刷新来源后再定位。'))
     }
     const displayId = presentation && linkOrigin.regionId ? workbenchSessionStageHostId(presentation, linkOrigin.regionId) : null
@@ -336,9 +341,10 @@ export function SessionPane({
     const initialMode = effectiveSessionViewMode(useAppStore.getState(), sessionId)
     let switched = false
     const current = () => {
+      if (isIntentCurrent && !isIntentCurrent()) return false
       const live = sessionPresentationById(useAppStore.getState().sessions).get(sessionId)
       if (live?.kind !== 'agent' || JSON.stringify([live.control.hostId, live.id, live.control.run.runId]) !== activitySourceKey) return false
-      if (message.source.kind === 'native' && live.providerId !== message.source.providerId) {
+      if (itemRef.source.kind === 'native' && live.providerId !== itemRef.source.providerId) {
         finish(unavailable('原生来源已变化，当前阅读窗口保留；请刷新来源后再定位。'))
         return false
       }
@@ -355,8 +361,8 @@ export function SessionPane({
         return false
       }
       const page = nativeRevealSource.current.page
-      if (switched && message.source.kind === 'native' && (nativeRevealSource.current.changed || page &&
-        (page.source.providerId !== message.source.providerId || page.source.nativeSessionId !== message.source.nativeSessionId))) {
+      if (switched && itemRef.source.kind === 'native' && (nativeRevealSource.current.changed || page &&
+        (page.source.providerId !== itemRef.source.providerId || page.source.nativeSessionId !== itemRef.source.nativeSessionId))) {
         finish(unavailable('原生来源已变化，当前阅读窗口保留；请刷新来源后再定位。'))
         return false
       }
@@ -387,20 +393,20 @@ export function SessionPane({
     for (const event of ['pointerdown', 'keydown', 'wheel', 'touchmove', 'focusin']) document.addEventListener(event, changedIntent, true)
     void (async () => {
     let present = false
-    if (message.source.kind === 'captured') {
-      present = projectSessionUserMessages({ agentSessionId: control.agentSessionId, timeline: useAppStore.getState().timelines[sessionId] })
-        .some(record => record.id === message.id && conversationMessageSourceKey(record.agentSessionId, record.source) === sourceKey)
+    if (itemRef.source.kind === 'captured') {
+      present = projectConversationRecords({ agentSessionId: control.agentSessionId, executionHostId: control.hostId, timeline: useAppStore.getState().timelines[sessionId] })
+        .some(record => (!mailboxInputId || record.input?.id === mailboxInputId) && conversationMessageSourceKey(record.agentSessionId, record.source) === sourceKey)
     } else {
-      const read = await readForReveal(message.source)
+      const read = await readForReveal(itemRef.source)
       if (!current()) { finish({ kind: 'cancelled' }); return result }
-      if (read.sourceChanged || read.page && (read.page.source.providerId !== message.source.providerId ||
-        read.page.source.nativeSessionId !== message.source.nativeSessionId)) {
+      if (read.sourceChanged || read.page && (read.page.source.providerId !== itemRef.source.providerId ||
+        read.page.source.nativeSessionId !== itemRef.source.nativeSessionId)) {
         finish(unavailable('原生来源已变化，当前阅读窗口保留；请刷新来源后再定位。')); return result
       }
       if (read.error) { finish(unavailable(`读取对话失败：${read.error.message}`)); return result }
       if (read.windowFrozen) { finish(unavailable('当前阅读窗口已达边界，无法确认位置。')); return result }
-      present = projectSessionUserMessages({ agentSessionId: control.agentSessionId, historyPage: read.page ?? undefined })
-        .some(record => record.id === message.id && conversationMessageSourceKey(record.agentSessionId, record.source) === sourceKey)
+      present = projectConversationRecords({ agentSessionId: control.agentSessionId, executionHostId: control.hostId, historyPage: read.page ?? undefined })
+        .some(record => (!mailboxInputId || record.input?.id === mailboxInputId) && conversationMessageSourceKey(record.agentSessionId, record.source) === sourceKey)
     }
     if (!current()) { finish({ kind: 'cancelled' }); return result }
     if (!present) { finish(unavailable('当前有界对话窗口中没有这条记录，无法确认位置。')); return result }
@@ -416,6 +422,24 @@ export function SessionPane({
     })
     return result
   }, [activitySourceKey, sessionId, session, pendingAgentRestore, readForReveal, linkOrigin.regionId])
+  // Mailbox keeps its original user-input identity contract; Focus may reveal genuine replies.
+  const revealMailboxMessage = useCallback((message: AgentSessionUserMessage, presentation?: WorkbenchViewTarget) => {
+    if (session?.kind !== 'agent') return Promise.resolve<MailboxMessageNavigationResult>({ kind: 'unavailable', message: 'Original Session is unconfirmed. Recorded text remains readable.' })
+    return revealConversationItem({ hostId: session.control.hostId, agentSessionId: message.agentSessionId,
+      source: message.source.kind === 'native' ? { ...message.source } : { kind: 'captured', recordId: message.source.submissionId }
+    }, presentation, message.id)
+  }, [session, revealConversationItem])
+  useEffect(() => {
+    if (!incomingReveal || incomingReveal.claimed || !incomingReveal.isCurrent() || readOnly) return
+    const reference = incomingReveal.reference
+    if (linkOrigin.regionId !== reference.regionId) return
+    const target = presentations.find(target => target.visible !== false && target.reference &&
+      sameWorkbenchProjectionSelection({ ...target.reference, regionId: linkOrigin.regionId! }, reference))
+    const primary = visible && mailboxOrigin.workspaceId === reference.displayWorkspaceId && mailboxOrigin.tabGroupId === reference.groupId && mailboxOrigin.tabId === reference.tabId
+    if (!target && !primary) return
+    incomingReveal.claimed = true
+    void revealConversationItem(incomingReveal.itemRef, target, undefined, incomingReveal.isCurrent).then(incomingReveal.complete)
+  }, [incomingReveal, revealConversationItem, readOnly, visible, presentations, mailboxOrigin.workspaceId, mailboxOrigin.tabGroupId, mailboxOrigin.tabId, linkOrigin.regionId])
   const agentInputIdentity = session?.kind === 'agent'
     ? agentDisplayName({
         userName,
