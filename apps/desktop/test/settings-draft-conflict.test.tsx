@@ -159,8 +159,8 @@ describe('Settings drafts across external commits', () => {
     expect(saveButton().disabled).toBe(false)
     await dom.click('[data-settings-save-bar] button')
     expect(onSave.mock.calls[1]).toEqual([
-      { copyPathsAsAbsolute: false, messageToolInitialLayout: 'one-line' },
-      { copyPathsAsAbsolute: true, messageToolInitialLayout: 'one-line' }
+      { copyPathsAsAbsolute: false },
+      { copyPathsAsAbsolute: true }
     ])
     await act(async () => finish())
   })
@@ -173,8 +173,8 @@ describe('Settings drafts across external commits', () => {
     expect(saveButton().disabled).toBe(false)
     await dom.click('[data-settings-save-bar] button')
     expect(onSave).toHaveBeenCalledWith(
-      { copyPathsAsAbsolute: true, messageToolInitialLayout: 'one-line' },
-      { copyPathsAsAbsolute: false, messageToolInitialLayout: 'one-line' }
+      { copyPathsAsAbsolute: true },
+      { copyPathsAsAbsolute: false }
     )
     expect(saveButton().disabled).toBe(true)
   })
@@ -189,8 +189,8 @@ describe('Settings drafts across external commits', () => {
     expect(saveButton().disabled).toBe(false)
     await dom.click('[data-settings-save-bar] button')
     expect(onSave.mock.calls).toEqual(Array.from({ length: 2 }, () => [
-      { copyPathsAsAbsolute: true, messageToolInitialLayout: 'one-line' },
-      { copyPathsAsAbsolute: false, messageToolInitialLayout: 'one-line' }
+      { copyPathsAsAbsolute: true },
+      { copyPathsAsAbsolute: false }
     ]))
     expect(saveButton().disabled).toBe(true)
   })
@@ -219,7 +219,7 @@ describe('Settings drafts across external commits', () => {
     vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
     const read = vi.spyOn(api.config, 'get').mockImplementation(() => new Promise((resolve) => { finish = resolve }))
     vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
-    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    vi.spyOn(api.providers, 'list').mockResolvedValue({ catalog: [], warnings: [] })
     vi.spyOn(api.demands, 'list').mockResolvedValue([])
     const startup = useAppStore.getState().initialize()
     await vi.waitFor(() => expect(read).toHaveBeenCalledOnce())
