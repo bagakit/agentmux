@@ -17,6 +17,7 @@ import { startDeliveryAttempt, type DeliveryAttemptSeed } from '@agentmux/client
 import { recordMessageDeliveryFailure } from './lib/message-delivery-diagnostics'
 import { recordHistory, navigateHistory, restoreComposerHistory, type HistoryState } from './lib/composer-history'
 import { rendererPerformance } from './lib/renderer-performance'
+import { runServiceProjection } from './lib/run-service-projection'
 
 
 
@@ -267,6 +268,7 @@ import {
 import {
   ownsSessionLaunch,
   pendingAgentLaunchEventId,
+  bufferPendingAgentEvent,
   discardPendingAgentLaunch,
   projectRuntimeEvent,
   runtimeDiagnosticNotice,
@@ -2287,6 +2289,7 @@ function startSessionMembershipResync(
           return { ...next, ...resolvedNativeIdentityNotice({ ...state, ...next }) }
         })
         for (const pending of events) {
+          if (pending.event.event.type === 'run-service') runServiceProjection.apply(pending.event)
           if (pending.nativeIdentityNotice && resolvedNativeIdentityNotice({ sessions: useAppStore.getState().sessions,
             errorNoticeContext: pending.nativeIdentityNotice }).errorNoticeContext === null) continue
           const diagnostic = runtimeDiagnosticNotice(useAppStore.getState(), pending.event)
@@ -3692,6 +3695,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw new Error('AgentMux Control API is unavailable')
     }
     const disposeMoteStartupRecovery = beginMoteStartupRecovery()
+    const disposeRunServiceProjection = initializeRunServiceProjection()
     const pendingSessionEvents = sessionMembershipEventBuffer()
     const pendingBrowserEvents: BrowserEvent[] = []
     let booting = true
@@ -3733,6 +3737,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       runtimeSubscriptionCount -= 4
       cancelSessionMembershipResync()
       disposeMoteStartupRecovery()
+      disposeRunServiceProjection()
       disposeSessions()
       disposeBrowsers()
       disposeControl()
@@ -10218,6 +10223,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const diagnostic = runtimeDiagnosticNotice(get(), event)
     if (diagnostic) get().reportError(diagnostic.message, { kind: 'indeterminate', summary: diagnostic.summary,
       ...(diagnostic.subject ? { subject: diagnostic.subject } : {}), ...(diagnostic.cause ? { cause: diagnostic.cause } : {}) })
+    if (core.type === 'run-service') {
+      if (!runServiceProjection.apply(event) && core.agentSessionId) {
+        if (get().pendingAgentLaunches[core.agentSessionId]) {
+          const agentSessionId = core.agentSessionId
+          set(state => bufferPendingAgentEvent(state, event, agentSessionId))
+        } else if (!sessionMembershipResync && !agentSessionPresentationIndex(get().sessions).has(core.agentSessionId)) {
+          startSessionMembershipResync(event)
+          return
+        }
+      }
+      if (sessionMembershipResync) enqueueSessionMembershipEvent(sessionMembershipResync, event)
+      return
+    }
     if (sessionMembershipResync) {
       const pendingLaunchAgentSessionId = pendingAgentLaunchEventId(get(), event)
       if (pendingLaunchAgentSessionId) {
@@ -10413,6 +10431,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   partialize: partializeAppState
 }))
+
+/** The same membership lifecycle is used by initialize and isolated real-consumer fixtures. */
+export function initializeRunServiceProjection(): () => void {
+  runServiceProjection.reconcile(useAppStore.getState().sessions)
+  const dispose = useAppStore.subscribe((state, previous) => {
+    if (state.sessions === previous.sessions) return
+    runServiceProjection.reconcile(state.sessions)
+    // A launch receipt admits the exact Run before its existing pre-receipt events are read.
+    for (const pending of Object.values(previous.pendingAgentLaunches)) {
+      for (const event of pending.events) if (event.event.type === 'run-service') runServiceProjection.apply(event)
+    }
+  })
+  return () => { dispose(); runServiceProjection.clear() }
+}
 
 /** Flush admitted draft/layout changes, then await their existing Chromium owner's request. */
 export async function prepareRendererUpdate(intent: 'reload' | 'quit' = 'reload'): Promise<void> {

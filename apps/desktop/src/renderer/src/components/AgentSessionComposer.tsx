@@ -28,6 +28,7 @@ import { agentProviderLabel } from './AgentProviderIcon'
 import { agentDisplayName } from '../lib/workbench-tabs'
 import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 import { sessionServiceNotices } from '../lib/session-service-notices'
+import { useRunService } from '../lib/run-service-projection'
 import { SessionMailbox } from './SessionMailbox'
 import { confirmedSteerDelivery } from '../lib/steer-queue-delivery'
 import type { ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
@@ -102,6 +103,7 @@ export function AgentSessionComposer({
   const queuedEntries = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
   const executors = useObservedAppStore('composer', visible, consumerScope, (state) => state.config?.executors)
   const session = useObservedAppStore('composer', visible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
+  const nativeService = useRunService(session)
   const lifecycleFailure = useObservedAppStore('composer', visible, consumerScope, state => state.errorNoticeContext?.lifecycle)
   const lifecycleMessage = useObservedAppStore('composer', visible, consumerScope, state => state.error ?? state.lastError)
   const viewModeSelector = useMemo(() => createSessionViewModeSelector(sessionId), [sessionId])
@@ -259,7 +261,7 @@ export function AgentSessionComposer({
   }
 
   const notices: ServiceNoticeItem[] = sessionServiceNotices(session, queuedEntries, sendingId,
-    { message: lifecycleMessage, failure: lifecycleFailure }).map(notice => notice.id === 'timeline-observation'
+    { message: lifecycleMessage, failure: lifecycleFailure }, nativeService).map(notice => notice.id === 'timeline-observation'
       ? { ...notice, action: { label: 'Retry work history', run: () => { void useAppStore.getState().resyncTimeline(sessionId, { observationOnly: true }) } } }
       : notice.id === 'interaction-receipt' && onOpenTerminal
         ? { ...notice, action: { label: 'Open terminal', run: onOpenTerminal } }

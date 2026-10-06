@@ -323,7 +323,7 @@ export function ownsPendingAgentLaunchEvent(
   return pendingAgentLaunchEventId(state, event) !== null
 }
 
-function bufferPendingAgentEvent(
+export function bufferPendingAgentEvent(
   state: SessionProjectionState,
   event: RuntimeEvent,
   agentSessionId: string
@@ -614,7 +614,7 @@ export function projectRuntimeEvent(
   event: RuntimeEvent
 ): RuntimeEventReduction {
   const core = event.event
-  if (core.type === 'terminal-output') return { state }
+  if (core.type === 'terminal-output' || core.type === 'run-service') return { state }
   if (core.type === 'connection-state') {
     // 单 daemon 语义：这台 Host 的实时连接是所有 Agent 共享的，断了就是全体失联。这里正是那 8 处
     // `disconnected` UX 唯一的触发源——没有它，掉线时用户只会看到一屏冻住的 Agent，毫无交代。
@@ -654,12 +654,6 @@ export function projectRuntimeEvent(
   }
   if (pendingAgentSessionId && !existingEventSession) {
     return { state, sessionMembershipGap: true }
-  }
-  if (core.type === 'run-service') {
-    return { state: { ...state, sessions: state.sessions.map(item =>
-      item.hostId === event.hostId && (core.agentSessionId === undefined || item === existingEventSession) && ownsRunEvent(item, core.agentSessionId, core.run) &&
-      (item.nativeService == null || core.nativeService.revision > item.nativeService.revision)
-        ? { ...item, nativeService: core.nativeService } : item) } }
   }
   if (core.type === 'process-state') {
     // 「进程事实 → 界面那一行状态」走 Core 的共享投影，与主进程快照路径（runtime-controller 的

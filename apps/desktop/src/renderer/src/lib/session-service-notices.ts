@@ -8,13 +8,13 @@ import { agentLifecycleFailureNotice, lifecycleFailureBelongsTo, type AgentLifec
 
 /** Both inboxes project the same current owners; reading a notice never settles its cause. */
 export function sessionServiceNotices(session: SessionSnapshot | undefined, queue: readonly AgentSteerQueueEntry[] = [], sendingId?: string,
-  lifecycleError?: { message: string | null; failure: AgentLifecycleFailure | undefined }): ServiceNoticeItem[] {
+  lifecycleError?: { message: string | null; failure: AgentLifecycleFailure | undefined }, nativeService = session?.nativeService): ServiceNoticeItem[] {
   const notices: ServiceNoticeItem[] = []
   if (session) {
-    const notice = serviceNoticeToRender(classifyServiceNotice(nativeSessionServiceOutcome(session)))
+    const notice = serviceNoticeToRender(classifyServiceNotice(nativeSessionServiceOutcome(session, nativeService)))
     if (notice) notices.push({ id: 'native-service',
       occurrence: JSON.stringify([session.hostId, session.id, session.control.run.runId]),
-      cause: nativeSessionServiceCause(session), notice })
+      cause: nativeSessionServiceCause(session, nativeService), notice })
   }
   if (session?.kind !== 'agent') return notices
   const hookNotice = serviceNoticeToRender(classifyServiceNotice(hookIngressServiceOutcome(session)))

@@ -977,7 +977,9 @@ type SessionSnapshotBase = {
   interruptionReason?: string
   status: SessionStatus
   latestOutputBytes: number
-  /** Core's coherent Run-local service facts; absence is unobserved, never child exit. */
+  /** Core's coherent Run-local service facts; absence is unobserved, never child exit.
+   * Renderer ordinary Sessions retain this membership seed; live revisions belong to runServiceProjection.
+   * Main/Core snapshots still carry their current coherent observation. */
   nativeService?: AgentMuxNativeService | null
 }
 
