@@ -1338,6 +1338,13 @@ export type BrowserScreenshotCapture = {
   browserId: string
   navigationId: string
   image: BrowserPng
+  source: {
+    url: string | null
+    title: string | null
+    /** CSS viewport observed around this capture; image pixels remain independent. */
+    viewport: { width: number; height: number; deviceScaleFactor: number | null } | null
+    viewportWarning: string | null
+  }
 }
 
 /**

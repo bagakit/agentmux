@@ -1,4 +1,5 @@
 import { browserPageCapabilityNames } from '@agentmux/core'
+import { readScreenshotObservation, readScreenshotViewport, screenshotSource } from './browser-screenshot-source.js'
 import type { BrowserPng, BrowserScriptRunReport, BrowserPageSnapshot, BrowserScreenshotCapture } from '../shared/contracts.js'
 import type { BrowserResultReadOptions, BrowserResultArtifactChunk } from '../shared/browser-result-artifact.js'
 import type { BrowserStructuredOutputReceipt } from '../shared/browser-structured-output.js'
@@ -112,10 +113,7 @@ export class ExternalBrowserOwner {
       await this.stores.journal.setPhase(operation.id, 'running', { summary: operation.summary })
       let revision = 0
       let world: { navigationId: string; contextId: number } | null = null
-      const ownedFeedback = feedback = showBrowserOperationFeedback({ operationId: operation.id, operatorName: operator.name,
-        navigationId: () => binding.navigationId, nextRevision: () => ++revision,
-        isCurrent: () => this.active.get(id) === active && binding.status === 'ready' && binding.connection?.id === connectionId && !active.stopped,
-        contents: { isDestroyed: () => attached.endedReason !== null,
+      const contents: Parameters<typeof showBrowserOperationFeedback>[0]['contents'] = { isDestroyed: () => attached.endedReason !== null,
           executeJavaScriptInIsolatedWorld: async (_worldId, scripts) => {
             requireCurrent()
             if (!world || world.navigationId !== binding.navigationId) {
@@ -130,7 +128,10 @@ export class ExternalBrowserOwner {
             const observed = result.result?.value?.revision
             if (typeof observed === 'number' && Number.isSafeInteger(observed) && observed >= 0) revision = Math.max(revision, observed)
             return result.result?.value?.value
-          } },
+          } }
+      const ownedFeedback = feedback = showBrowserOperationFeedback({ operationId: operation.id, operatorName: operator.name,
+        navigationId: () => binding.navigationId, nextRevision: () => ++revision,
+        isCurrent: () => this.active.get(id) === active && binding.status === 'ready' && binding.connection?.id === connectionId && !active.stopped, contents,
         warn: () => { operation.warning ??= 'Action feedback is unavailable. The shared page and Agent remain usable; inspect the operation history.' } })
       const dispatch = createBrowserPageDispatch({ session: attached,
         beforeAction: requireCurrent,
@@ -138,9 +139,19 @@ export class ExternalBrowserOwner {
         gotoUrl: async (url: string) => { requireCurrent(); await this.navigate(binding, attached, url, active.controller.signal); requireCurrent() },
         captureScreenshot: async () => {
           requireCurrent(); const navigationId = binding.navigationId
+          const observed = await readScreenshotObservation(() => contents.executeJavaScriptInIsolatedWorld(0, [{ code: '({url:location.href,title:document.title})' }]))
+          const info = observed && typeof observed === 'object' ? observed as Record<string, unknown> : {}
+          const url = typeof info.url === 'string' ? info.url : null, title = typeof info.title === 'string' ? info.title : null
+          const readViewport = () => readScreenshotViewport(async () => {
+            const metrics = await attached.sendCommand('Page.getLayoutMetrics') as { cssLayoutViewport?: { clientWidth: number; clientHeight: number } }
+            return { width: metrics.cssLayoutViewport?.clientWidth, height: metrics.cssLayoutViewport?.clientHeight }
+          })
+          const before = await readViewport()
+          requireCurrent()
           const result = await attached.sendCommand('Page.captureScreenshot', { format: 'png' }) as { data: string }
+          const after = await readViewport()
           requireCurrent(); if (binding.navigationId !== navigationId) throw new ExternalBrowserRequestFailure('The original document changed during screenshot capture.', true)
-          return { browserId: id, navigationId, image: this.stores.decodeScreenshot(result.data) }
+          return { browserId: id, navigationId, source: screenshotSource(url, title, before, after), image: this.stores.decodeScreenshot(result.data) }
         },
         uploads: { store: this.stores.uploads, context: () => { requireCurrent(); return {
           workspaceId: binding.workspaceId, browserId: id, operationId: operation.id, navigationId: binding.navigationId, documentSurvivesClient: true,
