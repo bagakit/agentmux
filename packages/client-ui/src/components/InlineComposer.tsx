@@ -1,7 +1,7 @@
 import { insertComposerContent, replaceComposerRange, type ComposerInsertionHandle, type ComposerPasteImage } from '../lib/composer-insertion.js'
-import { createContext, useContext, useEffect, useImperativeHandle, useMemo, useRef, type Ref } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useImperativeHandle, useMemo, useRef, type Ref } from 'react'
 import { Decoration, Extension, Node, type Editor, type JSONContent } from '@tiptap/core'
-import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor } from '@tiptap/react'
+import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type NodeViewProps } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { ConversationImage, type ReadPastedImage } from './ConversationImage.js'
 import { splitPastedImageReferences } from '../lib/pasted-image-reference.js'
@@ -11,12 +11,30 @@ import { createSemanticIconElement } from '../theme/icon-sprite.js'
 import { useClientUiPlatform } from '../platform.js'
 import { ConversationImageCollection } from './ConversationImageCollection.js'
 import { uniqueImageReferences, type ConversationImageReference } from '../lib/conversation-image-references.js'
+import { SemanticIcon } from '../theme/icons.js'
 
 const ComposerImageReader = createContext<ReadPastedImage | undefined>(undefined)
+const ComposerImageEditable = createContext<boolean | undefined>(undefined)
 
-function ComposerImage({ path, text, readImage }: { path: string; text: string; readImage: ReadPastedImage }) {
+function ComposerImage({ node, editor, getPos, readImage }: Pick<NodeViewProps, 'node' | 'editor' | 'getPos'> & { readImage: ReadPastedImage }) {
   const sourceReader = useContext(ComposerImageReader)
-  return <ConversationImage path={path} text={text} readImage={sourceReader ?? readImage} />
+  const editable = useContext(ComposerImageEditable) ?? editor.isEditable
+  const current = useRef({ node, editable }); current.current = { node, editable }
+  const alive = useRef(true)
+  useLayoutEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
+  function remove() {
+    if (!alive.current || !current.current.editable || !editor.isEditable || editor.isDestroyed || current.current.node !== node) return
+    const position = getPos()
+    if (typeof position !== 'number' || editor.state.doc.nodeAt(position) !== node) return
+    editor.chain().deleteRange({ from: position, to: position + node.nodeSize }).setTextSelection(position).run()
+    editor.view.focus()
+  }
+  return <>
+    <span className="composer-image__preview"><ConversationImage path={node.attrs.path} text={node.attrs.text} readImage={sourceReader ?? readImage} /></span>
+    {editable ? <button type="button" className="composer-image__remove" aria-label="Remove image from draft" title="Remove image from draft" onClick={remove}>
+      <SemanticIcon name="action.close" size={12} aria-hidden="true" />
+    </button> : null}
+  </>
 }
 
 export function draftDocument(value: string): JSONContent {
@@ -114,8 +132,8 @@ export function composerExtensions(
     renderHTML({ node }) { return ['span', { 'data-pasted-image': node.attrs.path }, node.attrs.text] },
     renderText({ node }) { return node.attrs.text },
     addNodeView() {
-      return ReactNodeViewRenderer(({ node }) => <NodeViewWrapper as="span" className="composer-image" contentEditable={false}>
-        <ComposerImage text={node.attrs.text} path={node.attrs.path} readImage={readPastedImage} />
+      return ReactNodeViewRenderer(({ node, editor, getPos }) => <NodeViewWrapper as="span" className="composer-image" contentEditable={false}>
+        <ComposerImage node={node} editor={editor} getPos={getPos} readImage={readPastedImage} />
       </NodeViewWrapper>)
     }
   }), keywordUnderlineExtension(keywords)]
@@ -238,9 +256,9 @@ export function InlineComposer(props: InlineComposerProps) {
     editor.commands.updateDecorations()
   }, [editor, keywordKey])
   return <div className="composer__editor" data-placeholder={props.placeholder} data-disabled={props.disabled} data-empty={props.value.length === 0 ? 'true' : 'false'}>
-    <ComposerImageReader.Provider value={props.readPastedImage}><ConversationImageCollection references={imageReferences} readImage={props.readPastedImage}>
+    <ComposerImageEditable.Provider value={!props.disabled}><ComposerImageReader.Provider value={props.readPastedImage}><ConversationImageCollection references={imageReferences} readImage={props.readPastedImage}>
       <EditorContent editor={editor} />
-    </ConversationImageCollection></ComposerImageReader.Provider>
+    </ConversationImageCollection></ComposerImageReader.Provider></ComposerImageEditable.Provider>
     {!editor && props.value ? <span className="composer__editor-fallback">{props.value}</span> : null}
   </div>
 }
