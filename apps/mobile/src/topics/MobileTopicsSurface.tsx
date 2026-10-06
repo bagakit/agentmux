@@ -125,7 +125,7 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
     <header className="mobile-topics-actions mobile-page-header">{leadingAction}
       {inTopic ? <button aria-label={topicBackLabel ?? '返回分类目录'} onClick={backToCategory}>{topicBackLabel ?? '返回'}</button>
         : categoryId && <button aria-label="返回所有分类" onClick={backToAllCategories}>返回</button>}
-      <div className="mobile-topics-heading"><small>{inTopic ? category?.title ?? 'Topics' : category?.title ?? '知识与讨论'}</small><h1>{inTopic ? currentTopic?.title ?? '原 Topic 尚未确认' : 'Topics'}</h1></div>
+      <div className="mobile-topics-heading">{inTopic && <small>{category?.title ?? 'Topics'}</small>}<h1>{inTopic ? currentTopic?.title ?? '原 Topic 尚未确认' : 'Topics'}</h1></div>
     </header>
     <MobileTopicOrganization rpc={rpc} categories={categories} category={category} topic={currentTopic} visible={visible} onBackChange={reportOrganizationBack} onRefresh={() => setRefresh(value => value + 1)} onChanged={() => setRefresh(value => value + 1)} />
     {[categoryIssue, openIssue].filter(Boolean).map((value, index) => <p key={index} className="mobile-topics-issue" role="status">{value}</p>)}

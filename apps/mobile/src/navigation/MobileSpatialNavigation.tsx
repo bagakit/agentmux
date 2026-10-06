@@ -152,7 +152,6 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
     const ownerZones = new Set(catalog?.bindings.filter(binding => binding.spaceId === owner.spaceId).map(binding => binding.zoneId))
     const ownerTabs = catalog?.tabs.filter(tab => tab.zoneId !== null && ownerZones.has(tab.zoneId)) ?? []
     return <>
-      {owner.kind === 'mote' && openProfile && <button type="button" className="mobile-tree-profile" onClick={() => openProfile(spaceIdentity(owner))}>Mote 资料</button>}
       {[...ownerZones].map(zoneId => <section className="mobile-spatial-zone" key={zoneId} data-zone-id={zoneId}>
         {catalog?.zones.find(zone => zone.zoneId === zoneId)?.kind === 'worktree' && <h3 className="mobile-spatial-zone-name">{catalog.zones.find(zone => zone.zoneId === zoneId)?.branch ?? 'Worktree'}</h3>}
         {ownerTabs.filter(tab => tab.zoneId === zoneId).map(tab => <section className="mobile-spatial-tab" key={tab.tabId}>{(tab.regionIds.length !== 1 || !catalog?.regions.some(region => region.tabId === tab.tabId && region.agentSessionId)) && <h3>{tab.name || '未命名 Tab'}</h3>}
@@ -167,6 +166,7 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
               : <div className="mobile-spatial-resource"><SemanticIcon name="object.spaces" size={18} /><span>{region.kind === 'launcher' ? 'Launcher' : region.kind}<small>{region.agentSessionId ? '会话状态尚未核实' : '此内容在 Mac 上查看'}</small></span></div>}</li>
         })}</ul></section>)}</section>)}
       {!ownerTabs.length && <p className="mobile-spatial-empty">此空间暂无已绑定 Tab。原空间和资料仍保留。</p>}
+      {owner.kind === 'mote' && openProfile && <button type="button" className="mobile-tree-profile" onClick={() => openProfile(spaceIdentity(owner))}>Mote 资料</button>}
     </>
   }
   const filteredSessions = (values: AgentMuxAgentSession[]) => values.filter(session => matching(name(session) + ' ' + identity(session).project + ' ' + session.providerId))

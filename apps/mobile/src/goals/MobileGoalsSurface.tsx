@@ -164,6 +164,13 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
     <div hidden={selected !== null || !!discussionTab}>
       <div className="mobile-goals-filters"><TextInput aria-label="搜索目标" placeholder="搜索目标或项目" value={query} onChange={event => setQuery(event.target.value)} />
         <select aria-label="筛选工作状态" value={status} onChange={event => setStatus(event.target.value)}><option value="">全部状态</option>{AGENTMUX_DEMAND_STATUSES.map(value => <option key={value} value={value}>{statuses[value]}</option>)}</select></div>
+      {goals === null ? <p>目标列表尚未确认。</p> : <>
+        <ul className="mobile-goals-list">{(visibleGoals ?? []).map(goal => <li key={goal.id}>
+          <button onClick={() => choose(goal)}><strong>{goal.title || '待定义目标'}</strong><span>{goal.projectName ?? goal.projectId ?? '未分配项目'} · {statuses[goal.status]}</span><small>{goal.description}</small></button>
+        </li>)}</ul>
+        {!goals.length && <p>暂无目标。</p>}
+        {!!goals.length && !visibleGoals?.length && <p>已读列表中没有匹配的目标。可清除搜索或筛选。</p>}
+      </>}
       <details><summary>按 Goal ID 打开</summary><form onSubmit={event => {
         event.preventDefault()
         if (!client?.forwardRpc) { setLookupIssue('读取未发送：目标公共端口暂不可用。'); return }
@@ -174,13 +181,6 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
           else setLookupIssue('未找到这个准确 Goal ID；原列表与输入保留。')
         }).catch(error => { if (sequence === lookupRead.current && epoch === (factEpoch.current.goals[goalId] ?? 0)) setLookupIssue(`读取目标失败：${message(error)}。原列表与输入保留，可重试。`) })
       }}><label>Goal ID<TextInput aria-label="打开 Goal ID" value={lookup} onChange={event => setLookup(event.target.value)} required /></label><button>打开指定目标</button></form>{lookupIssue && <p role="status">{lookupIssue}</p>}</details>
-      {goals === null ? <p>目标列表尚未确认。</p> : <>
-        <ul className="mobile-goals-list">{(visibleGoals ?? []).map(goal => <li key={goal.id}>
-          <button onClick={() => choose(goal)}><strong>{goal.title || '待定义目标'}</strong><span>{goal.projectName ?? goal.projectId ?? '未分配项目'} · {statuses[goal.status]}</span><small>{goal.description}</small></button>
-        </li>)}</ul>
-        {!goals.length && <p>暂无目标。</p>}
-        {!!goals.length && !visibleGoals?.length && <p>已读列表中没有匹配的目标。可清除搜索或筛选。</p>}
-      </>}
     </div>
     {[...new Set([...Object.keys(details), ...(selected ? [selected] : [])])].map(id => { const detail = details[id]; return <div key={id} hidden={selected !== id || !!discussionTab}><button onClick={backToList}>返回目标列表</button>{selected === id && [detailIssue, decisionIssue].filter(Boolean).map((value, index) => <p key={index} role="status">{value}</p>)}
       <GoalDetail key={id} goalId={id} goal={detail ?? null} factScope={detailScopes[id] ?? null} visible={visible && selected === id && !discussionTab} editing={context.mode === 'edit' && selected === id} edit={editing => setContext(value => ({ ...value, mode: editing ? 'edit' : 'detail' }))} decisions={decisions[id] ?? null} client={client} connected={connected} updated={updated} refresh={() => refresh(value => value + 1)} copyText={copyText}>
