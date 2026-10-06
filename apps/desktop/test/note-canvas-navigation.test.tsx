@@ -22,7 +22,9 @@ const dom = composerDOM(), scope = { kind: 'note', noteId: 'original-note' } as 
 const workspace = { id: 'canvas-original', hostId: 'local', path: join(tmpdir(), 'agentmux-canvas-navigation'), name: 'Original notes', kind: 'folder' as const }
 const path = 'original.note.json', docKey = documentKey(workspace.id, path)
 const spaceId = directoryIdentity(workspace.hostId, workspace.path), zoneId = homeZoneId(spaceId)
-const saved = { path, revision: 'saved-original', content: JSON.stringify(newNoteDocument('Saved original body', scope.noteId, 'exact-original-block')) }
+const savedNote = newNoteDocument('Saved original body', scope.noteId, 'exact-original-block')
+savedNote.content.content![0]!.content!.push({ type: 'noteLink', attrs: { referenceId: 'self-heading-link', text: 'Original Note #Exact original', target: { noteId: scope.noteId, blockId: 'exact-original-block' } } })
+const saved = { path, revision: 'saved-original', content: JSON.stringify(savedNote) }
 const draft = { ...saved, content: saved.content.replace('Saved original body', 'Preserved unsaved draft') }
 const notebook = { notebookId: 'canvas-book', name: 'Original notebook', createdAt: _tailRefreshFixtureEpoch(0, 0, 1) }
 const page: NotebookPage = { noteId: scope.noteId, notebookId: notebook.notebookId, parentNoteId: null, title: 'Original Note', createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1), sources: [], topics: [],
@@ -60,6 +62,20 @@ it('forwards a selected saved block through the real Global Recall, NotebookHome
   expect(useAppStore.getState().documents[docKey]).toEqual(draft)
   expect(useAppStore.getState().dirtyDocuments[docKey]).toBe(true)
   expect(Object.keys(useAppStore.getState().tabs)).toEqual(['original-tab'])
+})
+
+it('opens a saved inline target through the original Recall/File navigation while keeping its existing dirty Tab and Region', async () => {
+  await dom.render(<GlobalRecallSurface catalog={null} projection={null} selection={null} />)
+  await dom.click('[aria-label="Graph view"]')
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-note-id="original-note"].note-canvas-title')).not.toBeNull())
+  await dom.click('[aria-label="Read saved body: Original Note"]')
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader [data-note-inline-link]')).not.toBeNull())
+  await dom.click('.note-canvas-reader [data-note-inline-link]')
+  await vi.waitFor(() => expect(useAppStore.getState().documentRevealTargets[docKey]).toMatchObject({ noteBlock: { noteId: page.noteId, blockId: 'exact-original-block' } }))
+  expect(useAppStore.getState().documents[docKey]).toEqual(draft)
+  expect(useAppStore.getState().dirtyDocuments[docKey]).toBe(true)
+  expect(Object.keys(useAppStore.getState().tabs)).toEqual(['original-tab'])
+  expect(Object.keys(useAppStore.getState().tabs['original-tab']!.regions)).toContain('original-region')
 })
 
 it('discards a delayed Arrange reply after a later real React Flow keyboard gesture and keeps the completed position', async () => {

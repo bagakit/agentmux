@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixtureEpoch as _liveTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
@@ -22,6 +23,17 @@ import * as noteDocumentModule from '@agentmux/client-ui/note/note-document'
 import * as noteDirectoryModule from '../src/renderer/src/lib/note-directory-sources'
 import { noteBlockSelectionKey } from '../src/renderer/src/lib/note-block-selection'
 import { attributeNoteBlocks } from '@agentmux/client-ui/note/note-provenance'
+import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
+import { emptyNotebookState, type NotebookPage } from '@agentmux/core/notebook-catalog'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { WorkspaceFiles } from '../src/main/workspace-files'
+import { NoteFileWriter } from '../src/main/note-file-writer'
+import { NotebookObservationOwner } from '../src/main/notebook-observation-owner'
+import { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
+import { AgentMuxControlServer, type ExecutionHost } from '@agentmux/core'
+import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 const dom = composerDOM(), birth = directoryIdentity('local', _hygiene_fixturePath("repo")), zoneId = homeZoneId(birth)
 const original = { ...createWorkbenchTab('mixed-original', { kind: 'launcher', workspaceId: 'workspace', regionId: 'mixed-launcher' }), space: { spaceId: birth, zoneId } }
 const sourceRegion: FileWorkbenchSurface = { kind: 'file', regionId: 'mixed-file', workspaceId: 'workspace', path: 'source.note.json' }
@@ -32,6 +44,7 @@ const source = newNoteDocument('Original finding', 'source-note', 'source-block'
 const reference = { schema: NOTE_SCHEMA, noteId: 'referring-note', content: { type: 'doc', content: [{ type: 'blockReference', attrs: { blockId: 'referring-block', referenceId: 'referring-reference', target: { noteId: 'source-note', blockId: 'source-block' }, mode: 'reference' } }] } }
 const sourceKey = documentKey('workspace', sourceRegion.path), referenceKey = documentKey('workspace', referring.path)
 beforeEach(() => {
+  useNotebookLibrary.setState({ state: null, issue: null })
   useAppStore.setState({ config: composerConfig, activeWorkspaceId: 'workspace', mainSurface: 'survey', sessions: [composerSession()], tabs: { [mixed.id]: mixed, [referringTab.id]: referringTab },
     layouts: { workspace: createWorkspaceLayout('original-group', [mixed.id, referringTab.id]) },
     documents: { [sourceKey]: { path: sourceRegion.path, content: JSON.stringify(source), revision: 'source-revision' }, [referenceKey]: { path: referring.path, content: JSON.stringify(reference), revision: 'referring-revision' } },
@@ -43,6 +56,69 @@ beforeEach(() => {
   vi.spyOn(api.files, 'write').mockResolvedValue({ status: 'written', revision: 'saved-revision' })
   vi.spyOn(api.files, 'readDirectory').mockRejectedValue(new Error('Render must not discover directories'))
 })
+
+it('uses the original File navigation for an inline exact block while preserving the dirty Survey source and existing mixed Tab', async () => {
+  const inline = newNoteDocument('Keep my draft ', reference.noteId, 'referring-block')
+  inline.content.content![0]!.content!.push({ type: 'noteLink', attrs: { referenceId: 'inline-original', text: 'An old page title', target: { noteId: source.noteId, blockId: 'source-block' } } })
+  useAppStore.setState(state => ({ documents: { ...state.documents, [referenceKey]: { ...state.documents[referenceKey]!, content: JSON.stringify(inline) } } }))
+  const book = emptyNotebookState(), resource = composerConfig.workspaces.find(workspace => workspace.id === 'workspace')!
+  const page: NotebookPage = { noteId: source.noteId, title: 'Renamed original', notebookId: 'quick-notes', parentNoteId: null, resource: { hostId: resource.hostId, workspaceId: resource.id, workspacePath: resource.path, path: sourceRegion.path }, workface: { zoneId, workspaceId: 'workspace' }, sources: [], topics: [], createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1) }
+  book.pages[source.noteId] = page; useNotebookLibrary.setState({ state: book })
+  vi.mocked(api.files.read).mockResolvedValue({ status: 'read', document: { path: sourceRegion.path, content: JSON.stringify(source), revision: 'source-revision' } })
+  await mount(referring, referringTab.id)
+  await act(async () => editor().commands.insertContentAt(1, 'Unsaved '))
+  const before = useAppStore.getState(), document = before.documents[referenceKey], tabs = before.tabs
+  const inlineButton = dom.container.querySelector<HTMLButtonElement>('[data-note-inline-link]')!
+  await act(async () => inlineButton.dispatchEvent(new MouseEvent('click', { ctrlKey: true, bubbles: true, cancelable: true })))
+  await vi.waitFor(() => expect(useAppStore.getState().documentRevealTargets[sourceKey]?.noteBlock).toEqual({ noteId: source.noteId, blockId: 'source-block' }))
+  const after = useAppStore.getState()
+  expect(after.mainSurface).toBe('survey'); expect(after.surveyZoneSelection?.zoneId).toBe(zoneId)
+  expect(after.documents[referenceKey]).toBe(document); expect(after.dirtyDocuments[referenceKey]).toBe(true)
+  expect(Object.keys(after.tabs)).toEqual(Object.keys(tabs)); expect(after.tabs[mixed.id]).toBe(mixed)
+  expect(api.files.write).not.toHaveBeenCalled()
+})
+
+it('saves real mounted wiki input through the original File store/writer and reads the canonical same file through actual CLI', async () => {
+  const rootPath = await realpath(await mkdtemp(join(tmpdir(), 'amx-wiki-editor-')))
+  const workspace = { id: 'workspace', hostId: 'local', path: rootPath, name: 'Notes', kind: 'folder' as const }
+  const files = new WorkspaceFiles(() => ({ id: 'local', kind: 'local' } as ExecutionHost)), store = new AgentMuxNotebookStore(join(rootPath, 'catalog.json'))
+  const owner = new NotebookObservationOwner({ workspace: () => workspace, files }), writer = new NoteFileWriter(files, { state: () => store.read(), owner })
+  const server = new AgentMuxControlServer({ socketPath: join(rootPath, 'control.sock'), coreClients: () => [], notebookStore: store, notebookObservation: owner })
+  try {
+    const target = newNoteDocument('Target original', 'target-id', 'target-block')
+    for (const [note, title, path] of [[source, 'Source', sourceRegion.path], [target, 'Shared knowledge', 'target.note.json'], [newNoteDocument('Another same-title page', 'other-id', 'other-block'), 'Shared knowledge', 'other.note.json']] as const) {
+      await writeFile(join(rootPath, path), JSON.stringify(note))
+      await store.apply({ operationId: 'register:' + note.noteId, expectedRevision: (await store.read()).revision, change: { kind: 'register', noteId: note.noteId, title, resource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: rootPath, path } } }, { kind: 'user', id: 'test-human' })
+    }
+    const originalRead = await files.read(workspace, sourceRegion.path); if (originalRead.status !== 'read') throw Error('Original source must read')
+    useAppStore.setState(state => ({ config: { ...composerConfig, workspaces: composerConfig.workspaces.map(item => item.id === workspace.id ? workspace : item) }, documents: { ...state.documents, [sourceKey]: originalRead.document } }))
+    vi.spyOn(api.notebooks, 'resolve').mockImplementation(async (params, options) => owner.resolve(await store.read(), params, options))
+    vi.spyOn(api.notebooks, 'read').mockImplementation(() => store.read())
+    vi.mocked(api.files.write).mockImplementation(async (_workspaceId, input) => writer.write(workspace, input, { actor: { kind: 'user', id: 'test-human' } }))
+    await mount(); const originalEditor = editor()
+    const transfer = new DataTransfer(); transfer.setData('text/plain', ' [[Shared knowledge]]')
+    await act(async () => { originalEditor.view.focus(); originalEditor.commands.setTextSelection(originalEditor.state.doc.content.size - 1); originalEditor.view.dom.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true })) })
+    await vi.waitFor(() => expect(dom.container.querySelector('[data-note-inline-link]')).not.toBeNull())
+    await act(async () => dom.container.querySelector('[data-note-inline-link]')!.dispatchEvent(new MouseEvent('click', { ctrlKey: true, bubbles: true, cancelable: true })))
+    await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-link-lookup .note-link-option')).toHaveLength(2))
+    await act(async () => (dom.container.querySelector('.note-link-lookup .note-link-option') as HTMLButtonElement).click())
+    await vi.waitFor(() => { const content = useAppStore.getState().documents[sourceKey]!.content; expect(content).toContain('"noteId": "target-id"') })
+    await click('Save')
+    await vi.waitFor(() => expect(useAppStore.getState().dirtyDocuments[sourceKey]).toBe(false))
+    const canonical = await readFile(join(rootPath, sourceRegion.path), 'utf8'), stored = useAppStore.getState().documents[sourceKey]!
+    expect(stored.content).toBe(canonical); expect(editor()).toBe(originalEditor)
+    await server.start()
+    vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', join(process.cwd(), 'packages/core/bin/amux'))
+    const result = await runCompiledObjectCli(['notebook', 'inspect', '--note', source.noteId, '--content'], objectCliEnvironment(rootPath, { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path }))
+    expect(result.code, result.stderr).toBe(0)
+    const inspected = JSON.parse(result.stdout).result.content
+    expect(inspected.content).toBe(canonical); expect(inspected.revision).toBe(stored.revision)
+    expect(readNoteDocument(inspected.content).status).toBe('valid')
+    expect(canonical).toContain('target-id'); expect(canonical).toContain('test-human')
+    const graph = await owner.graph(await store.read(), { noteId: 'target-id' })
+    expect(graph.references).toEqual([expect.objectContaining({ mode: 'link', target: { kind: 'page', noteId: 'target-id' }, resolution: 'resolved' })])
+  } finally { vi.unstubAllEnvs(); await server.stop(); await files.dispose(); await rm(rootPath, { recursive: true, force: true }) }
+}, 45_000)
 function display(surface = sourceRegion, tabId = mixed.id) {
   return { tabHostId: 'survey-note-test', reference: { displayWorkspaceId: 'workspace', groupId: 'original-group', tabId, regionId: surface.regionId } }
 }

@@ -33,7 +33,7 @@ describe('durable Note body and graph public consumer',()=>{
     const body=JSON.parse(inspected.stdout).result.content;expect(body).toMatchObject({status:'read',noteId:'target',resource:f.resource('target.note.json'),blockIds:['target-block']});expect(body.content).toBe(await readFile(join(f.root,'target.note.json'),'utf8'))
     const graphed=await run(['notebook','graph','--note','target'],env);expect(graphed.code,graphed.stderr).toBe(0)
     const graph=JSON.parse(graphed.stdout).result;expect(graph.completeness).toBe('complete');expect(graph.observations).toHaveLength(2);expect(graph.observations[0].revision).toBe(body.revision)
-    expect(graph.references).toEqual([{source:{noteId:'source',blockId:'ref-block'},sourceResource:f.resource('source.note.json'),target:{noteId:'target',blockId:'target-block'},referenceId:'ref-one',mode:'embed',resolution:'resolved'}]);expect(graph.hierarchy).toEqual([{parentNoteId:'target',noteId:'source'}])
+    expect(graph.references).toEqual([{source:{noteId:'source',blockId:'ref-block'},sourceResource:f.resource('source.note.json'),target:{kind:'block',noteId:'target',blockId:'target-block'},occurrence:{kind:'stored',referenceId:'ref-one'},mode:'embed',resolution:'resolved'}]);expect(graph.hierarchy).toEqual([{parentNoteId:'target',noteId:'source'}])
     expect(graph.observations.every((o:any)=>!('content' in o))).toBe(true)
     const all=await run(['notebook','graph','--all'],env);expect(all.code,all.stderr).toBe(0)
     const help=await run(['--skill'],env);expect(help.code,help.stderr).toBe(0);for(const word of ['agentmux.note.v1','notebook graph','file write','canonical content','follow','blockId'])expect(help.stdout).toContain(word)
@@ -52,10 +52,10 @@ describe('durable Note body and graph public consumer',()=>{
     const f=await fixture()
     await f.add('external-source',text('external-source','outside-block',[{type:'blockReference',attrs:{blockId:'outside-ref',referenceId:'outside',mode:'reference',target:{noteId:'outside-catalog',blockId:'unread-block'}}}]))
     let graph=await f.owner.graph(await f.store.read(),{})
-    expect(graph.completeness).toBe('partial');expect(graph.references.find(r=>r.referenceId==='outside')!.resolution).toBe('unknown')
+    expect(graph.completeness).toBe('partial');expect(graph.references.find(r=>r.occurrence.kind==='stored'&&r.occurrence.referenceId==='outside')!.resolution).toBe('unknown')
     expect(()=>parseNotebookGraph({...graph,completeness:'complete'},{})).toThrow(expect.objectContaining({code:'CONTROL_PROTOCOL_ERROR'}))
     await rm(join(f.root,'target.note.json'));graph=await f.owner.graph(await f.store.read(),{noteId:'target'})
-    expect(graph.references.find(r=>r.referenceId==='ref-one')!.resolution).toBe('missing')
+    expect(graph.references.find(r=>r.occurrence.kind==='stored'&&r.occurrence.referenceId==='ref-one')!.resolution).toBe('missing')
   })
   it('never uses a catalog-mismatched body as a source or as a replacement for an unread exact target',async()=>{
     const f=await fixture()
@@ -85,7 +85,7 @@ describe('durable Note body and graph public consumer',()=>{
   })
   it('directory-only inspect never reads a body; missing Host reader does not remove directory capability',async()=>{
     const f=await fixture();let reads=0
-    const service=new AgentMuxRpcService({notebookStore:f.store,coreClients:()=>[],notebookObservation:{content:async(...args)=>{reads++;return f.owner.content(...args)},graph:(...args)=>f.owner.graph(...args)}})
+    const service=new AgentMuxRpcService({notebookStore:f.store,coreClients:()=>[],notebookObservation:{resolve:(...args)=>f.owner.resolve(...args),content:async(...args)=>{reads++;return f.owner.content(...args)},graph:(...args)=>f.owner.graph(...args)}})
     await service.call('notebook.inspect',{noteId:'target'});expect(reads).toBe(0)
     await service.call('notebook.inspect',{noteId:'target',content:true});expect(reads).toBe(1)
     const headless=new AgentMuxRpcService({notebookStore:f.store,coreClients:()=>[]});await expect(headless.call('notebook.graph',{})).rejects.toMatchObject({code:'CONTROL_UNAVAILABLE'});expect((await headless.call('notebook.ls',{})).state.pages.target).toBeDefined()
