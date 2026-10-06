@@ -24,7 +24,7 @@ const encryption: CredentialEncryption = {
   decryptString: value => { const decipher = createDecipheriv('aes-256-gcm', key, value.subarray(0, 12)); decipher.setAuthTag(value.subarray(-16)); return Buffer.concat([decipher.update(value.subarray(12, -16)), decipher.final()]).toString('utf8') }
 }
 let directory: string, database: DatabaseSync, owner: ConnectionHost, secrets: DesktopConnectorSecrets, server: AgentMuxControlServer
-let completedLists = 0
+let completedLists = 0, completedChecks = 0
 let handlers: Map<string, (...args: any[]) => Promise<any>>, trusted: ReturnType<typeof vi.fn>, originalCall: typeof api.connections.call
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'connector-settings-'))
@@ -32,8 +32,8 @@ beforeEach(async () => {
   owner = new ConnectionHost({ database, secrets }); server = new AgentMuxControlServer({ socketPath: join(directory, 'public.sock'), connections: owner, coreClients: () => [] }); await server.start()
   handlers = new Map(); trusted = vi.fn()
   registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: trusted, socketPath: join(directory, 'public.sock'), secrets })
-  completedLists = 0
-  originalCall = async (method, params) => { const result = await handlers.get('connections:call')!({}, method, params); if (method === 'connection.ls') completedLists++; return result }
+  completedLists = 0; completedChecks = 0
+  originalCall = async (method, params) => { const result = await handlers.get('connections:call')!({}, method, params); if (method === 'connection.ls') completedLists++; if (method === 'connection.test') completedChecks++; return result }
   vi.spyOn(api.connections, 'call').mockImplementation(originalCall)
   vi.spyOn(api.connections, 'storeCredential').mockImplementation(async input => handlers.get('connections:storeCredential')!({}, input))
   vi.spyOn(api.connections, 'inspectCredential').mockImplementation(async operationId => handlers.get('connections:inspectCredential')!({}, operationId))
@@ -62,6 +62,16 @@ describe('Settings uses the original connection owner through public service', (
     database.exec('PRAGMA wal_checkpoint(FULL)')
     expect((await readFile(join(directory, 'connections.sqlite'))).includes(Buffer.from(secret))).toBe(false)
     expect(trusted.mock.calls.map(call => call[0])).toContain('connections:storeCredential')
+    const editor = dom.container.querySelector<HTMLElement>('[data-connection-editor]')!
+    expect(editor.querySelector('[aria-label="Saved application identity"]')?.textContent).toContain('app-a')
+    expect(editor.querySelector('[aria-label="Connection platform"]')).toBeNull()
+    expect(editor.querySelector('[aria-label="Connection app ID"]')).toBeNull()
+    expect(editor.querySelector('.primary-button')?.textContent).toBe('Check connection')
+    expect(editor.querySelector('[data-connection-save]')?.classList.contains('primary-button')).toBe(false)
+    await fill('Connection name', 'Updated team')
+    expect(editor.querySelector('[data-connection-save]')?.classList.contains('primary-button')).toBe(true)
+    expect(editor.textContent).toContain('Check saved connection')
+
   })
   it('reconciles a lost save response with the original operation without resending or creating a new connection', async () => {
     let configured = 0, operationId = ''
@@ -78,6 +88,22 @@ describe('Settings uses the original connection owner through public service', (
     await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(2)) })
     expect(configured).toBe(1); expect((await owner.list()).connections).toHaveLength(1)
     expect(dom.container.textContent).toContain('Connection saved')
+  })
+  it('keeps check outcomes with the exact connection and reports each unconfirmed service fact', async () => {
+    const application = { adapterId: 'sample', application: { domain: 'chat.example', appId: 'app-a' }, enabled: true, credentialRef: 'credential-a' }
+    await owner.configure({ operationId: 'seed-a', expectedRevision: null, connection: { ...application, connectionId: 'connection-a', label: 'Application A' } })
+    await owner.configure({ operationId: 'seed-b', expectedRevision: null, connection: { ...application, connectionId: 'connection-b', label: 'Application B' } })
+    await open()
+    await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(1)) })
+    await dom.click('[data-connection="connection-b"] button:last-child')
+    await act(async () => { await vi.waitFor(() => expect(completedChecks).toBe(1)) })
+    const first = dom.container.querySelector('[data-connection="connection-a"]')!, checked = dom.container.querySelector('[data-connection="connection-b"]')!
+    expect(first.querySelector('[role="status"]')).toBeNull()
+    expect(checked.querySelector('[role="status"]')?.textContent).toContain('Not confirmed: authentication, durable receiving, group delivery')
+    expect(checked.querySelector('[role="status"]')?.textContent).toContain('Unavailable: connection')
+    expect(checked.querySelector('.connector-stage-list')?.textContent).toContain('Durable receiving')
+    expect(dom.container.querySelector('[data-connector-settings] > [role="status"]')).toBeNull()
+    expect(dom.container.textContent).not.toContain('reported separately below')
   })
   it('rejects foreign IPC methods and untrusted credential entry before contacting the owner', async () => {
     await expect(handlers.get('connections:call')!({}, 'agent.send', {})).rejects.toThrow('Unsupported connection operation')
