@@ -1,0 +1,12 @@
+import {defineConfig,mergeConfig} from 'vite'
+import base from '../../../vite.web.config'
+import {createHash} from 'node:crypto'
+import {resolve} from 'node:path'
+const inputs:Record<string,{source:string,transformed:string}>={};const mutant=process.env.MOBILE_PALETTE_MUTANT??''
+export default mergeConfig(base,defineConfig({root:import.meta.dirname,worker:{format:'es'},plugins:[{name:'mobile-classic-source-binding',enforce:'pre',transform(code,id){const original=code
+ if(mutant==='1'&&id.endsWith('/terminal/MobileTerminalViewer.tsx')){const target='terminal.current.options.theme = terminalPalette';if(code.split(target).length!==2)throw Error('Expected one native palette edge');code=code.replace(target,'terminal.current.options.theme = undefined')}
+ if(mutant==='neutral'&&id.endsWith('/theme/terminal-palette.ts')){const targets=[["black: theme.mode === 'light' ? c.text : c.textSubtle,","black: theme.mode === 'light' ? c.text : c.surface1,"],['white: c.textMuted,',"white: theme.mode === 'light' ? c.surface3 : c.textMuted,"],['brightWhite: c.text,',"brightWhite: theme.mode === 'light' ? c.surface1 : c.text,"]];for(const [target,replacement]of targets){if(code.split(target).length!==2)throw Error('Expected single Workspace neutral edge');code=code.replace(target,replacement)}}
+ if(mutant==='drawer'&&id.endsWith('/MobileApp.tsx')){const target="inputActive={exposed} visible={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'}";if(code.split(target).length!==2)throw Error('Expected original mobile drawer visibility edge');code=code.replace(target,"inputActive={exposed} visible={exposed && workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'}")}
+ if(mutant==='input'&&id.endsWith('/MobileApp.tsx')){const target='inputActive={exposed}';if(code.split(target).length!==2)throw Error('Expected original mobile input-active edge');code=code.replace(target,'inputActive={true}')}
+ if(!id.includes('node_modules')&&!id.startsWith('\0'))inputs[id]={source:createHash('sha256').update(original).digest('hex'),transformed:createHash('sha256').update(code).digest('hex')};return{code,map:null}
+},generateBundle(){this.emitFile({type:'asset',fileName:'candidate-inputs.json',source:JSON.stringify({mutant,inputs},null,2)})}}],build:{target:'esnext',minify:false,outDir:resolve(process.env.NATIVE_COLOR_PROOF_DIR!,mutant?`mobile-${mutant}-mutant`:'mobile-classics-site'),emptyOutDir:true}}))

@@ -1,0 +1,18 @@
+import { installAppearanceReader, renderControlVisualFixture, seedPaletteReadingProof, mobilePaletteFacts, proveCoveredNativeInputIsPassive } from '../../../../mobile/test/terminal-browser-fixture'
+import type { AgentMuxHostedSubscribeRpc } from '@agentmux/core/hosted'
+let openingCount=0,eventCount=0
+// Test-only bridge forwards original Core RPC client's decoded callbacks unchanged.
+// It carries no theme catalog, palette computation or second config owner.
+const subscribe: AgentMuxHostedSubscribeRpc = async (method,params,handlers) => {
+ const controller=new AbortController();const abort=()=>controller.abort();handlers.signal?.addEventListener('abort',abort,{once:true});if(handlers.signal?.aborted)abort();
+ const response=await fetch('/qa-watch',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method,params}),signal:controller.signal});
+ if(!response.ok||!response.body)throw new Error('Private original Core read bridge unavailable');
+ const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',initial=false;
+ let resolveOpening!:(value:{subscriptionId:string,dispose():Promise<void>})=>void,rejectOpening!:(error:Error)=>void;
+ const opening=new Promise<{subscriptionId:string,dispose():Promise<void>}>((yes,no)=>{resolveOpening=yes;rejectOpening=no});
+ const dispose=async()=>{controller.abort();handlers.signal?.removeEventListener('abort',abort);await reader.cancel().catch(()=>{})};
+ void(async()=>{try{while(!controller.signal.aborted){const part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});let end;while((end=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,end);buffer=buffer.slice(end+1);if(!line)continue;const frame=JSON.parse(line);if(frame.kind==='initial'&&!initial){initial=true;openingCount++;handlers.onInitial(frame.data);resolveOpening({subscriptionId:frame.subscriptionId,dispose})}else if(frame.kind==='event'&&initial){eventCount++;handlers.onEvent(frame.data)}else if(frame.kind==='end'){throw new Error(frame.message??'Private original RPC reader ended')}else throw new Error('Unexpected private QA bridge ordering')}}if(!controller.signal.aborted)handlers.onEnd?.()}catch(cause){if(!controller.signal.aborted){const error=cause instanceof Error?cause:new Error(String(cause));if(initial)handlers.onEnd?.(error);else rejectOpening(error)}}finally{handlers.signal?.removeEventListener('abort',abort)}})();
+ return opening
+}
+installAppearanceReader(subscribe)
+Object.assign(window,{ mobileClassicProof:{proveCoveredNativeInputIsPassive,async run(){await renderControlVisualFixture('size');const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!;for(const [label,value]of [['PTY 列数','32'],['PTY 行数','18']]){const input=document.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;setter.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}))}await new Promise(r=>setTimeout(r,0));document.querySelector('form.mobile-terminal-size')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await new Promise(r=>setTimeout(r,100));return seedPaletteReadingProof()},facts(){return {...mobilePaletteFacts(),openingCount,eventCount,theme:document.documentElement.dataset.theme,mode:document.documentElement.dataset.appearance,issues:[...document.querySelectorAll('.mobile-service-notice')].map(n=>n.textContent)}},async set(key:string,value:string){const response=await fetch('/qa-set',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key,value})});if(!response.ok)throw new Error(await response.text());return response.json()}} })
