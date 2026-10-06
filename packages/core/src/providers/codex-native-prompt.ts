@@ -10,8 +10,8 @@ import { codexMainNativeRecord } from './codex-native-record-role.js'
 import { locateAppServerNativeSession } from './app-server-native-session.js'
 
 function waiting(phase: string, reason: string): AgentMuxError {
-  return new AgentMuxError('The original native input channel is unavailable. The message is retained; waiting can be cancelled and the original terminal remains available.',
-    'AGENT_NATIVE_INPUT_WAITING', JSON.stringify({ phase, reason, cancellable: true }))
+  return new AgentMuxError('The original native input channel is unconfirmed. This read-only preparation observation has ended before dispatch; the original terminal remains available. Keep the original caller input.',
+    'AGENT_NATIVE_INPUT_WAITING', JSON.stringify({ phase, reason }))
 }
 function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
@@ -58,7 +58,7 @@ export async function prepareCodexNativePromptInput(context: Parameters<NonNulla
   const channel = await openNativeSocketChannel(context.processId, endpoint, signal).catch(error => {
     const reported = waiting('native-peer', 'original-channel-unconfirmed')
     Object.defineProperty(reported, 'cause', { value: error });
-    throw new AgentMuxError(reported.message, reported.code, JSON.stringify({ phase: 'native-peer', reason: 'original-channel-unconfirmed', cancellable: true,
+    throw new AgentMuxError(reported.message, reported.code, JSON.stringify({ phase: 'native-peer', reason: 'original-channel-unconfirmed',
       observation: error instanceof AgentMuxError ? { code: error.code, detail: error.detail } : { name: error instanceof Error ? error.name : 'unknown' } }))
   })
   try {
