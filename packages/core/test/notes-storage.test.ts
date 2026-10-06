@@ -168,7 +168,11 @@ describe('one durable Notes directory operation', () => {
     const f = await fixture(); const legacy = join(f.root, 'legacy', 'notebooks.json'); await mkdir(join(f.root, 'legacy')); await writeFile(legacy, JSON.stringify({ ...f.before, pages: { ...f.before.pages, 'original-note': { ...f.before.pages['original-note'], resource: { ...f.before.pages['original-note']!.resource, workspaceId: '__scratch__' } } } }))
     await writeFile(join(f.original, 'unrelated.txt'), 'keep this'); const storage = new AgentMuxNotesStorage(join(f.root, 'otherstate', 'notes-location.json'), f.target)
     await storage.bootstrap({ catalogPath: legacy, workspace: { id: '__scratch__', hostId: 'local', path: f.original }, destinationWorkspaceId: '__notes__' })
-    expect((await storage.inspect('adopt-original-notes-directory')).operation?.resourceChanges[0]?.to.workspaceId).toBe('__notes__')
+    const locator = JSON.parse(await readFile(storage.locatorPath, 'utf8'))
+    const adoptionId = Object.keys(locator.operations).find(id => id.startsWith('adopt-original-notes-directory:'))!
+    expect((await storage.inspect(adoptionId)).operation?.resourceChanges[0]?.to.workspaceId).toBe('__notes__')
+    await storage.bootstrap({ catalogPath: legacy, workspace: { id: '__scratch__', hostId: 'local', path: f.original }, destinationWorkspaceId: '__notes__' })
+    expect(Object.keys(JSON.parse(await readFile(storage.locatorPath, 'utf8')).operations)).toEqual([adoptionId])
     expect(await readFile(join(f.original, 'unrelated.txt'), 'utf8')).toBe('keep this')
     expect(await readFile(join(f.target, 'one.note.md'), 'utf8')).toBe(f.bytes)
   })
