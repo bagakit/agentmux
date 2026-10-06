@@ -13,7 +13,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type IBuffer, type IMarker } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { SemanticIcon, semanticIconComponent, type SemanticIconId } from '@agentmux/client-ui/icons'
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -236,6 +236,7 @@ export function TerminalView({
   const webglVisibilityRef = useRef<((visible: boolean) => void) | null>(null)
   const viewportRef = useRef<TerminalViewportSynchronizer | null>(null)
   const viewportMemoryRef = useRef<TerminalViewportMemory>({ kind: 'latest' })
+  const viewportMemoryMarkerRef = useRef<{ terminal: Terminal; buffer: IBuffer; marker: IMarker } | null>(null)
   const terminalGenerationRef = useRef(0)
   const nextLinkRequestIdRef = useRef(0)
   const linkRequestRef = useRef<TerminalLinkRequest | null>(null)
@@ -386,7 +387,20 @@ export function TerminalView({
   activeWorkspaceRootRef.current = activeWorkspaceRoot
   const isMac = isMacPlatform()
 
+  function releaseViewportMemoryMarker(terminal?: Terminal): void {
+    const retained = viewportMemoryMarkerRef.current
+    if (!retained || (terminal && retained.terminal !== terminal)) return
+    retained.marker.dispose()
+    viewportMemoryMarkerRef.current = null
+  }
+
   function restoreRememberedViewport(terminal: Terminal): void {
+    const retained = viewportMemoryMarkerRef.current
+    if (retained?.terminal === terminal && retained.buffer === terminal.buffer.active) {
+      // Public markers follow full-buffer trimming while this Region is covered.
+      // If that retained line was evicted, resume at the first available line.
+      viewportMemoryRef.current = { kind: 'line', line: Math.max(0, retained.marker.line) }
+    }
     const target = restoreTerminalViewport(
       viewportMemoryRef.current,
       terminal.buffer.active.baseY
@@ -482,8 +496,14 @@ export function TerminalView({
     const terminal = terminalRef.current
     if (!visible) clearLinkPreview()
     if (!visible && terminal) {
+      releaseViewportMemoryMarker()
       const buffer = terminal.buffer.active
-      viewportMemoryRef.current = rememberTerminalViewport(buffer.viewportY, buffer.baseY)
+      const remembered = rememberTerminalViewport(buffer.viewportY, buffer.baseY)
+      viewportMemoryRef.current = remembered
+      if (buffer.type === 'normal' && remembered.kind === 'line') {
+        const marker = terminal.registerMarker(remembered.line - buffer.baseY - buffer.cursorY)
+        if (marker) viewportMemoryMarkerRef.current = { terminal, buffer, marker }
+      }
     }
     webglVisibilityRef.current?.(visible)
     viewportRef.current?.setVisible(visible)
@@ -496,7 +516,10 @@ export function TerminalView({
       terminal.refresh(0, terminal.rows - 1)
     }
     restore()
-    const frame = requestAnimationFrame(restore)
+    const frame = requestAnimationFrame(() => {
+      restore()
+      releaseViewportMemoryMarker(terminal)
+    })
     return () => cancelAnimationFrame(frame)
   }, [visible])
 
@@ -1608,6 +1631,7 @@ export function TerminalView({
         })
       }
       if (pasteTargetRef.current === pasteInput) pasteTargetRef.current = null
+      releaseViewportMemoryMarker(terminal)
       terminal.dispose()
       releasePerformance()
       resourceOwners.release()
