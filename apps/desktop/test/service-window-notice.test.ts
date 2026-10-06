@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
@@ -38,8 +39,8 @@ function agentSession(overrides: {
     hostId: 'local',
     workspacePath: _hygiene_fixturePath("w"),
     label: 'a',
-    createdAt: 0,
-    updatedAt: 0,
+    createdAt: _reshape_fixtureEpoch(0, 0, 0),
+    updatedAt: _reshape_fixtureEpoch(0, 0, 0),
     processState: overrides.processState ?? 'running',
     kind: overrides.kind ?? 'agent',
     providerId: 'claude',
@@ -50,7 +51,7 @@ function agentSession(overrides: {
     status: {
       state: overrides.state ?? 'working',
       source: 'run-process',
-      observedAt: 0,
+      observedAt: _reshape_fixtureEpoch(0, 0, 0),
       ...(overrides.detail ? { detail: overrides.detail } : {})
     },
     latestOutputBytes: 0,
@@ -65,7 +66,7 @@ const handshakeDegraded = agentSession({
     mode: 'degraded',
     reason: 'handshake-timeout',
     run: { runId: 'r' },
-    observedAt: 10
+    observedAt: _reshape_fixtureEpoch(0, 0, 10)
   }
 })
 
@@ -92,14 +93,14 @@ describe('把一处失败分成四类', () => {
 
   it('Agent 活着但我们的流程坏了——放行，且绝不静默', () => {
     // 这是原则的样板。第 2 类必须能被看见：拿到一条带三段文案的 notice，而不是 null。
-    const classification = classifyServiceNotice(agentSessionServiceOutcome(aliveButDisconnected))
+    const classification = classifyServiceNotice(agentSessionServiceOutcome(handshakeDegraded))
     expect(classification.kind).toBe('process-degraded')
     const rendered = serviceNoticeToRender(classification)
     // 边界一：第 2 类绝不静默放行。这条断言在「alive 也返回 null / healthy」时变红。
     expect(rendered).not.toBeNull()
-    expect(rendered!.notice.step).toContain('Reconnecting to this Agent')
-    expect(rendered!.notice.mode).toContain('still running')
-    expect(rendered!.notice.restore).toContain('Resume')
+    expect(rendered!.notice.step).toContain('Checking terminal capabilities')
+    expect(rendered!.notice.mode).toContain('prompts remain available')
+    expect(rendered!.notice.restore).toContain('next one probes again')
   })
 
   it('分不清是哪一类——如实说分不清，不猜一个再照着做', () => {
@@ -109,7 +110,7 @@ describe('把一处失败分成四类', () => {
     const rendered = serviceNoticeToRender(classification)
     expect(rendered).not.toBeNull()
     // 现在按什么状态在跑要如实说「分不清、但你没被阻断」，不冒充「一切正常」。
-    expect(rendered!.notice.mode).toContain('can’t confirm')
+    expect(rendered!.notice.mode).toContain('availability is unconfirmed')
     // 未知与完全好的必须分得开——这正是原则「不许把未知当成好的」。
     expect(classification.kind).not.toBe('healthy')
   })
@@ -125,7 +126,7 @@ describe('把一处失败分成四类', () => {
   })
 
   it('第 2 类与分不清的「当前状态」措辞不同——不拿降级文案冒充分不清', () => {
-    const degraded = serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(aliveButDisconnected)))!
+    const degraded = serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(handshakeDegraded)))!
     const unknown = serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(indeterminate)))!
     // 分不清不能宣称「进程还在跑」——那正是它分不清的那件事。
     expect(unknown.notice.mode).not.toBe(degraded.notice.mode)
@@ -177,12 +178,12 @@ describe('把一个 Agent Session 映成步骤结局：看进程，不看我们�
     expect(agentSessionServiceOutcome(agentSession({ state: 'working' }))).toEqual({ completed: true })
   })
 
-  it('连接断了但进程在跑 = 第 2 类：我们的流程坏了，Agent 没坏', () => {
+  it('连接断了保留最后 running 事实，当前存活与输入投递仍未知', () => {
     // 判据是「Agent 还能干活吗」（进程在跑），不是「我们的连接过了吗」（连接断了）。
     const outcome = agentSessionServiceOutcome(aliveButDisconnected)
-    expect(outcome).toMatchObject({ completed: false, agentViability: 'alive' })
+    expect(outcome).toMatchObject({ completed: false, agentViability: 'unknown' })
     // 端到端：一个断连但存活的 Agent 落成一条会渲染的服务窗，而不是被静默或被阻断。
-    expect(serviceNoticeToRender(classifyServiceNotice(outcome))?.kind).toBe('process-degraded')
+    expect(serviceNoticeToRender(classifyServiceNotice(outcome))?.kind).toBe('indeterminate')
   })
 
   it('连接断了且进程退了 = 第 1 类：Agent 真的坏了', () => {
@@ -217,7 +218,7 @@ const outputChannelSevered = agentSession({
     mode: 'degraded',
     reason: 'reattach-failed',
     run: { runId: 'r' },
-    observedAt: 20
+    observedAt: _reshape_fixtureEpoch(0, 0, 20)
   }
 })
 
@@ -273,7 +274,7 @@ describe('输出通道断了、进程没死：放行必须配告知', () => {
         mode: 'degraded',
         reason: 'reattach-failed',
         run: { runId: 'r' },
-        observedAt: 20
+        observedAt: _reshape_fixtureEpoch(0, 0, 20)
       }
     })
     expect(classifyServiceNotice(agentSessionServiceOutcome(exited)).kind).toBe('agent-broken')
@@ -331,7 +332,7 @@ describe('失联的两类文案（Activity 视图下唯一的失联出口）', (
       classifyServiceNotice(agentSessionServiceOutcome(retryingAndAlive))
     )!
     expect(rendered.notice.step).toContain('Reconnecting')
-    expect(rendered.notice.mode).toContain('still running')
+    expect(rendered.notice.mode).toContain('last observed running')
   })
 
   it('终局不许带上「重连中」那句话的安慰词——措辞近似就等于没分类', () => {
@@ -360,11 +361,11 @@ describe('失联的两类文案（Activity 视图下唯一的失联出口）', (
     expect(gaveUp.notice.mode).not.toBe(retrying.notice.mode)
   })
 
-  it('放弃之后仍是第 2 类（放行 + 提醒），不是阻断', () => {
+  it('自动恢复暂停后保留unknown服务窗与原能力', () => {
     // 放弃的是**我们的连接**，不是 Agent：进程还在跑，所以照旧不阻断。若这里退化成 agent-broken，
     // 服务窗会整条消失（agent-broken 不渲染），而 Activity 视图没有横幅接手 —— 用户回到彻底静默。
     const classification = classifyServiceNotice(agentSessionServiceOutcome(gaveUpButAlive))
-    expect(classification.kind).toBe('process-degraded')
+    expect(classification.kind).toBe('indeterminate')
     expect(serviceNoticeToRender(classification)).not.toBeNull()
   })
 
@@ -415,7 +416,7 @@ describe('失联的两类文案（Activity 视图下唯一的失联出口）', (
 describe('通报音量随存活判定分档', () => {
   it('第 2 类（alive，我们的流程坏了）用克制的 polite 说——降级不该喊狼来了', () => {
     // 端到端：一个断连但存活的 Agent，其分类音量必须是 polite。改成 assertive 时这条变红。
-    const kind = classifyServiceNotice(agentSessionServiceOutcome(aliveButDisconnected)).kind
+    const kind = classifyServiceNotice(agentSessionServiceOutcome(handshakeDegraded)).kind
     expect(kind).toBe('process-degraded')
     expect(serviceNoticeAriaLive(kind)).toBe('polite')
   })
@@ -446,7 +447,7 @@ describe('通报音量随存活判定分档', () => {
 it('shows interrupted prompt screen confirmation honestly without claiming a terminal refresh', () => {
   const session = { ...agentSession({ state: 'working' }), terminalPromptDelivery: {
     state: 'unverified' as const, mode: 'degraded' as const, reason: 'screen-evidence-replaced' as const,
-    submissionId: 'raw-preempted-prompt', run: { runId: 'r' }, observedAt: 30
+    submissionId: 'raw-preempted-prompt', run: { runId: 'r' }, observedAt: _reshape_fixtureEpoch(0, 0, 30)
   } } as SessionSnapshot
   const notice = serviceNoticeToRender(classifyServiceNotice(agentPromptDeliveryServiceOutcome(session)))
   expect(notice?.kind).toBe('process-degraded')
@@ -457,7 +458,7 @@ it('shows interrupted prompt screen confirmation honestly without claiming a ter
 it('keeps an unknown prompt beside a healthy terminal without claiming delivery succeeded', () => {
   const session = { ...agentSession({ state: 'working', processState: 'running' }), terminalPromptDelivery: {
     state: 'unverified' as const, mode: 'degraded' as const, reason: 'input-unconfirmed' as const,
-    submissionId: 'original-input', run: { runId: 'r' }, observedAt: 30
+    submissionId: 'original-input', run: { runId: 'r' }, observedAt: _reshape_fixtureEpoch(0, 0, 30)
   } } as SessionSnapshot
   const notice = serviceNoticeToRender(classifyServiceNotice(agentPromptDeliveryServiceOutcome(session)))
   expect(notice?.kind).toBe('process-degraded')

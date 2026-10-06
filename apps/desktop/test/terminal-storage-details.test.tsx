@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,7 +13,7 @@ const original: SessionControl = { kind: 'terminal', hostId: 'local', runId: 'or
 const MiB = 1024 * 1024
 const observed = (): AgentMuxRunStorageObservation => ({ run: original.run, runtime: {
   hostId: 'local', instanceId: 'native-owner', buildIdentity: 'fixture', protocolVersion: 22, processId: 1
-}, observedAt: 1000, status: 'observed', storage: {
+}, observedAt: _reshape_fixtureEpoch(0, 0, 1000), status: 'observed', storage: {
   memory: { firstAvailableByte: 5 * MiB, latestOutputByte: 8 * MiB },
   persistence: { firstFailure: 'append_commit: SQLITE_FULL original error', actorStopped: true,
     queuedAppendCommands: 1, offeredByte: 8 * MiB, confirmedByte: 3 * MiB },
@@ -36,6 +37,17 @@ const text = () => container.querySelector('.terminal-storage-details')?.textCon
 async function check() { const button = container.querySelector<HTMLButtonElement>('.terminal-storage-details button'); expect(button, 'real service-window storage action must be mounted').not.toBeNull(); await act(async () => button!.click()) }
 
 describe('real Terminal service-window storage consumer', () => {
+  it('reports responsive writer facts without treating absent failure or stop as operation progress', async () => {
+    const value = observed()
+    value.storage!.persistence!.firstFailure = null
+    value.storage!.persistence!.actorStopped = false
+    const read = vi.spyOn(api.sessions, 'observeStorage').mockResolvedValue(value)
+    await render(); await check()
+    expect(read).toHaveBeenCalledExactlyOnceWith(original)
+    expect(text()).toContain('No stop reported · progress unconfirmed')
+    expect(text()).toContain('does not settle an outstanding operation')
+    expect(text()).not.toContain('Storage persistence failure')
+  })
   it('reads only on deliberate checks and shows original owner values without confusing lag, queue or disk floor', async () => {
     const read = vi.spyOn(api.sessions, 'observeStorage').mockResolvedValue(observed())
     const write = vi.spyOn(api.sessions, 'write'), paste = vi.spyOn(api.sessions, 'paste'), attach = vi.spyOn(api.sessions, 'attach')

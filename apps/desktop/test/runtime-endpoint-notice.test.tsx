@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { beforeEach, expect, it, vi } from 'vitest'
 import { act } from 'react'
@@ -41,6 +42,25 @@ it('keeps an unknown handshake distinct from a version update and retains its or
   expect(notice.querySelector('.service-window__mode')!.textContent).toContain('unconfirmed')
   expect(notice.querySelector('.service-window__mode')!.textContent).not.toContain('older')
   expect(notice.querySelector('details')!.textContent).toContain('Arbitrary malformed result')
+})
+
+it('consumes typed Native and semantic connection observations in the real global inbox without classifying old running markers as alive', async () => {
+  const native = { hostId: 'local', scope: 'observation' as const, step: 'Core to ctxmux connection', code: 'RUNTIME_UNAVAILABLE',
+    message: 'Original Native connection is lost', recovery: 'Refresh original observation', availability: 'unverified' as const,
+    observationOrigin: { kind: 'runtime-connection' as const, boundary: 'core-ctxmux' as const }, evidence: { source: 'run-process' as const, observedAt: _reshape_fixtureEpoch(0, 0, 123) } }
+  const original = composerSession()
+  useAppStore.setState({ runtimeEndpointWarnings: [native, { ...native, step: 'Core control connection',
+    observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' }, evidence: { source: 'agentmux', observedAt: _reshape_fixtureEpoch(0, 0, 124) } }],
+    sessions: [{ ...original, hostId: 'local', control: { ...original.control, hostId: 'local' },
+      terminalCapability: { state: 'unknown', reason: 'handshake-timeout', run: original.control.run, observedAt: _reshape_fixtureEpoch(0, 0, 1), mode: 'degraded' } }] })
+  await mount()
+  const rows = dom.container.querySelectorAll('.global-system-notices__item')
+  expect(rows).toHaveLength(3)
+  expect(dom.container.textContent).toContain('Original Native connection is lost')
+  expect(dom.container.textContent).toContain('by run-process')
+  expect(dom.container.textContent).toContain('Core control connection')
+  expect(rows[2]!.querySelector('.service-window')?.getAttribute('data-kind')).toBe('indeterminate')
+  expect(rows[2]!.textContent).not.toContain('Agent is still usable')
 })
 
 const mountVisible = () => dom.render(<SettingsNavigation.Provider value={{ open: vi.fn(), openToolkit: vi.fn(), openHost }}><RemoteCoreUpgradeNotices /></SettingsNavigation.Provider>)
@@ -126,7 +146,7 @@ it('keeps distinct current Session lanes while acknowledgement changes only unre
   const a = composerSession('prompt-a'), b = composerSession('delivery-b')
   const request = { ...a, creation: { createOperationId: 'create-a', initialPrompt: 'unconfirmed' as const } }
   // Each original Session has a real service lane; no fake error counter is introduced.
-  const disconnected = { ...b, status: { state: 'disconnected' as const, source: b.status.source, observedAt: 1 } }
+  const disconnected = { ...b, status: { state: 'disconnected' as const, source: b.status.source, observedAt: _reshape_fixtureEpoch(0, 0, 1) } }
   await act(async () => useAppStore.setState({ sessions: [request, disconnected] }))
   await mountAll()
   expect(automaticRows()).toHaveLength(1)

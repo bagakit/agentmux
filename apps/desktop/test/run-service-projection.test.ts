@@ -75,7 +75,7 @@ it('preserves ordered pressure, fault, reason and recovery facts in existing ser
   const terminal = serviceNoticeToRender(classifyServiceNotice(nativeSessionServiceOutcome(original, pressured)))
   expect(terminal?.kind).toBe('process-degraded')
   expect(terminal?.notice.mode).toContain('resource pressure')
-  expect(terminal?.notice.mode).toContain('input is open')
+  expect(terminal?.notice.mode).toContain('input was last observed open')
   expect(terminal?.notice.restore).toContain('do not resend unconfirmed input')
   const faultNotice = sessionServiceNotices(original, [], undefined, undefined, movedFault)[0]!
   expect(faultNotice.notice.notice.mode).toContain('terminal view export at byte 15')
@@ -149,6 +149,24 @@ it('keeps unknown viability explicit and historical service closure quiet', () =
   const historical = { ...current, nativeService: { ...current.nativeService,
     owner: { type: 'stopped' as const, reason: 'historical' as const } } }
   expect(classifyServiceNotice(nativeSessionServiceOutcome(historical)).kind).toBe('healthy')
+})
+
+it('retains actual service evidence separately from a later connection loss without inventing Native revisions or health wakeups', () => {
+  const owner = createRunServiceProjection(), original = session()
+  owner.reconcile([original])
+  expect(owner.evidence(original)).toBeNull()
+  const receive = vi.fn(), stop = owner.subscribe(original, receive)
+  const seen = event(service(2))
+  owner.apply(seen)
+  expect(owner.evidence(original)).toBe(seen.event.evidence)
+  expect(receive).not.toHaveBeenCalled()
+  owner.apply({ type: 'core', hostId: 'local', event: { type: 'connection-state', state: 'lost',
+    observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' }, evidence: { source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 100) } } })
+  owner.reconcile([{ ...original, nativeService: null }])
+  expect(owner.read(original)).toBe(seen.event.nativeService)
+  expect(owner.evidence(original)).toBe(seen.event.evidence)
+  expect(receive).not.toHaveBeenCalled()
+  stop()
 })
 
 it('uses the actual Store ingress and seed lifecycle, including pre-receipt launch events and disposal', () => {

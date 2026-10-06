@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
@@ -10,7 +11,7 @@ import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresse
 import type { AgentTimelineItem, AgentTimelineSnapshot, AgentSessionHistoryDescriptor } from '@agentmux/core'
 import type { RuntimeEvent, RuntimeSnapshot, SessionHistorySourcesObservation, RuntimeEndpointWarning } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
-import { useAppStore } from '../src/renderer/src/store'
+const { useAppStore } = await import(process.env.AGENTMUX_TEST_STORE_ENTRY ?? '../src/renderer/src/store') as typeof import('../src/renderer/src/store')
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { hydratePersistedTab } from '../src/renderer/src/lib/workbench-persistence'
@@ -27,7 +28,7 @@ const status = (id: string, observedAt: number, state: 'working' | 'done' = 'wor
     evidence: { source: 'native-hook', observedAt } }
 })
 const reconnect = (): RuntimeEvent => ({ type: 'core', hostId: 'local', event: {
-  type: 'connection-state', state: 'restored', evidence: { source: 'run-process', observedAt: 2 }
+  type: 'connection-state', state: 'restored', evidence: { source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 2) }
 } })
 const item = (id: string, revision: number): AgentTimelineItem => ({ id: `fact-${revision}`, agentSessionId: id,
   kind: 'assistant_message', status: 'complete', source: 'native-hook', createdAt: revision, updatedAt: revision,
@@ -73,7 +74,7 @@ beforeEach(async () => {
   const spaceId = directoryIdentity('local', _hygiene_fixturePath("repo"))
   for (const tab of Object.values(tabs)) tab.space = { spaceId, zoneId: workspaceZoneId(spaceId, 'workspace') }
   original = { tabs, layouts: { workspace: createWorkspaceLayout('original-group', Object.keys(tabs)) },
-    agentFocus: { execution: { sessionId: ids[0]!, history: [{ sessionId: ids[0]!, focusedAt: 1 }] }, pmo: { sessionId: null } },
+    agentFocus: { execution: { sessionId: ids[0]!, history: [{ sessionId: ids[0]!, focusedAt: _reshape_fixtureEpoch(0, 0, 1) }] }, pmo: { sessionId: null } },
     agentComposerDrafts: { 'quiet-a': '原来的未发送草稿', 'busy-b': 'Original neighbor draft' } }
   useAppStore.setState({ restoredWorkbench: { tabs, layouts: original.layouts }, loading: true,
     agentFocus: original.agentFocus, agentComposerDrafts: original.agentComposerDrafts, activeWorkspaceId: 'workspace' })
@@ -112,12 +113,34 @@ const publicationStep = 'Publishing control endpoint'
 const publicationWarning: RuntimeEndpointWarning = { hostId: 'local', step: publicationStep, scope: 'observation', availability: 'connected', code: 'CONTROL_ENDPOINT_PUBLICATION_UNAVAILABLE', message: 'Original publication failure', recovery: 'The original owner retries automatically.' }
 const metadataWarning: RuntimeEndpointWarning = { ...publicationWarning, step: 'Reading Provider catalog', code: 'CATALOG_OBSERVATION_FAILED' }
 function publicationEvent(warning: RuntimeEndpointWarning | null): RuntimeEvent {
-  const evidence = { source: 'agentmux' as const, observedAt: 10 }
+  const evidence = { source: 'agentmux' as const, observedAt: _reshape_fixtureEpoch(0, 0, 10) }
   return { type: 'core', hostId: 'local', event: warning
     ? { type: 'control-endpoint-state', state: 'unavailable', diagnostic: { code: warning.code, message: warning.message }, evidence }
     : { type: 'control-endpoint-state', state: 'available', evidence },
     endpointObservation: { step: publicationStep, warning } }
 }
+
+it('keeps the exact connection observation origin protocol receipt through normal ingress and buffered overflow without clearing the other boundary', async () => {
+  const unknown: RuntimeEndpointWarning = { ...publicationWarning, step: 'Connection observation source unconfirmed',
+    observationOrigin: null, availability: 'unverified', code: 'CONTROL_PROTOCOL_ERROR' }
+  const native: RuntimeEndpointWarning = { ...unknown, step: 'Core to ctxmux connection',
+    observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' } }
+  const semantic: RuntimeEndpointWarning = { ...native, step: 'Core control connection',
+    observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' } }
+  const clear: RuntimeEvent = { type: 'core', hostId: 'local', event: { type: 'connection-state', state: 'restored',
+    observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' }, evidence: { source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 10) } },
+    endpointObservation: { step: native.step, warning: null, resolvedSteps: ['Connection observation source unconfirmed'] } }
+  await boot({ ...complete(), runtimeEndpointWarnings: [unknown, native, semantic] })
+  const read = deferred<RuntimeSnapshot>(), later = deferred<RuntimeSnapshot>()
+  releases.push(() => read.resolve(complete()), () => later.resolve(complete()))
+  vi.spyOn(api.sessions, 'snapshot').mockReturnValueOnce(read.promise).mockReturnValue(later.promise)
+  listener(clear)
+  expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([semantic])
+  await ticks(); listener(clear); storm()
+  read.resolve({ ...complete(), runtimeEndpointWarnings: [unknown, native, semantic] }); await ticks()
+  expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([semantic])
+  retained()
+})
 
 it('keeps a publication clear through startup overflow without clearing the older metadata warning', async () => {
   const first = deferred<RuntimeSnapshot>(), second = deferred<RuntimeSnapshot>(), background = deferred<RuntimeSnapshot>()

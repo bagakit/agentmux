@@ -449,6 +449,80 @@ describe('RuntimeController configuration transaction', () => {
     } finally { await controller.dispose() }
   })
 
+  it('retains each connection observation origin and clears only that boundary through the real Main event consumer', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+    const renderer = webContentsFixture(), release = controller.attach(renderer)
+    const send = (boundary: 'core-ctxmux' | 'consumer-core', state: 'lost' | 'restored', observedAt: number, diagnostic?: { code: string; message: string }) =>
+      client.eventListener?.({ type: 'connection-state', state, observationOrigin: { kind: 'runtime-connection', boundary },
+        evidence: { source: boundary === 'consumer-core' ? 'agentmux' : 'run-process', observedAt }, ...(diagnostic ? { diagnostic } : {}) })
+    try {
+      send('core-ctxmux', 'lost', _reshape_fixtureEpoch(0, 0, 100))
+      send('consumer-core', 'lost', _reshape_fixtureEpoch(0, 0, 101))
+      expect(controller.endpointWarningSnapshot().map(w => [w.observationOrigin?.boundary, w.evidence?.observedAt])).toEqual([
+        ['core-ctxmux', 100], ['consumer-core', 101]
+      ])
+      const frames = renderer.send.mock.calls.map(call => call[1])
+      expect(frames).toHaveLength(2)
+      expect(frames[0].endpointObservation.warning).toMatchObject({ hostId: 'local', scope: 'observation', availability: 'unverified',
+        observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' }, evidence: { source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 100) } })
+      send('consumer-core', 'restored', _reshape_fixtureEpoch(0, 0, 102))
+      expect(controller.endpointWarningSnapshot()).toHaveLength(1)
+      expect(controller.endpointWarningSnapshot()[0]!.observationOrigin?.boundary).toBe('core-ctxmux')
+      send('core-ctxmux', 'restored', _reshape_fixtureEpoch(0, 0, 103), { code: 'CTXMUX_CONNECTION_OBSERVATION_PENDING', message: 'Session observation is pending' })
+      expect(controller.endpointWarningSnapshot()).toContainEqual(expect.objectContaining({ availability: 'connected', code: 'CTXMUX_CONNECTION_OBSERVATION_PENDING' }))
+      send('consumer-core', 'restored', _reshape_fixtureEpoch(0, 0, 104))
+      expect(controller.endpointWarningSnapshot()).toHaveLength(1)
+      send('core-ctxmux', 'restored', _reshape_fixtureEpoch(0, 0, 105))
+      expect(controller.endpointWarningSnapshot()).toEqual([])
+      expect(client.stopAgent).not.toHaveBeenCalled(); expect(client.stopTerminal).not.toHaveBeenCalled()
+    } finally { release(); await controller.dispose() }
+  })
+
+  it('retains a missing or malformed connection observation origin from actual Unix wire without clearing either known boundary', async () => {
+    const { AgentMuxControlServer } = await import('../../../packages/core/dist/public-rpc-server.js')
+    const { connectAgentMuxRpc } = await import('../../../packages/core/dist/public-rpc-client.js')
+    const { AgentMuxHostedRuntimeService } = await import('../../../packages/core/dist/hosted-runtime-service.js')
+    const { connectHostedAgentMux } = await import('../../../packages/core/dist/hosted-client.js')
+    const { rpcOwnerFixture } = await import('../../../packages/core/test/helpers/public-rpc-owner.js')
+    const f = await rpcOwnerFixture([])
+    f.inner.kernel.list = vi.fn(async () => [])
+    vi.spyOn(f.client, 'runtimeIdentity').mockReturnValue({ hostId: 'local', instanceId: 'original-native', buildIdentity: 'fixture',
+      protocolVersion: 22, processId: 42, ownership: 'unverified' })
+    const owner = () => ({ runtimeId: 'original-core', ownerInstanceId: 'core-epoch', protocolVersion: 1 as const,
+      processId: process.pid, ctxmux: f.client.runtimeIdentity(), availability: 'connected' as const })
+    const service = new AgentMuxHostedRuntimeService(f.client, join(f.root, 'sessions.json'), owner)
+    const server = new AgentMuxControlServer({ socketPath: join(f.root, 'connection.sock'), hostedRuntime: () => service })
+    await server.start()
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    const consumer = await connectHostedAgentMux({ rpc })
+    const controller = new RuntimeController(store, async () => consumer)
+    controller.commit(await controller.prepare(localConfig))
+    const renderer = webContentsFixture(), release = controller.attach(renderer)
+    const publisher = (f.client as unknown as { publisher: { publish(event: AgentMuxClientEvent): void } }).publisher
+    const wireEvent = (observationOrigin: unknown, observedAt: number, state = 'lost') => publisher.publish({ type: 'connection-state', state,
+      ...(observationOrigin === undefined ? {} : { observationOrigin }), evidence: { source: 'run-process', observedAt } } as AgentMuxClientEvent)
+    try {
+      wireEvent({ kind: 'runtime-connection', boundary: 'core-ctxmux' }, _reshape_fixtureEpoch(0, 0, 1))
+      wireEvent({ kind: 'runtime-connection', boundary: 'consumer-core' }, _reshape_fixtureEpoch(0, 0, 2))
+      await vi.waitFor(() => expect(controller.endpointWarningSnapshot()).toHaveLength(2))
+      wireEvent(undefined, _reshape_fixtureEpoch(0, 0, 3), 'restored')
+      await vi.waitFor(() => expect(controller.endpointWarningSnapshot()).toHaveLength(3))
+      wireEvent({ kind: 'runtime-connection', boundary: 'unrecognized' }, _reshape_fixtureEpoch(0, 0, 4), 'restored')
+      await vi.waitFor(() => expect(controller.endpointWarningSnapshot()).toContainEqual(expect.objectContaining({
+        observationOrigin: null, code: 'CONTROL_PROTOCOL_ERROR', availability: 'unverified', evidence: { source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 4) } })))
+      expect(controller.endpointWarningSnapshot().map(warning => warning.observationOrigin?.boundary ?? null)).toEqual(['core-ctxmux', 'consumer-core', null])
+      expect(renderer.send.mock.calls).toHaveLength(4)
+      wireEvent({ kind: 'runtime-connection', boundary: 'consumer-core' }, _reshape_fixtureEpoch(0, 0, 5), 'restored')
+      await vi.waitFor(() => expect(controller.endpointWarningSnapshot()).toHaveLength(2))
+      expect(controller.endpointWarningSnapshot()).toContainEqual(expect.objectContaining({ observationOrigin: null }))
+      wireEvent({ kind: 'runtime-connection', boundary: 'core-ctxmux' }, _reshape_fixtureEpoch(0, 0, 6), 'restored')
+      await vi.waitFor(() => expect(controller.endpointWarningSnapshot()).toEqual([]))
+      expect(renderer.send.mock.calls.at(-1)![1].endpointObservation).toEqual({ step: 'Core to ctxmux connection', warning: null,
+        resolvedSteps: ['Connection observation source unconfirmed'] })
+      expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+    } finally { release(); await controller.dispose(); await rpc.dispose(); await server.stop(); await service.dispose(); await f.close() }
+  })
+
   it('keeps exact terminal input, paste and control available with a persistent pending observation window', async () => {
     const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
     const control: SessionControl = { kind: 'agent', hostId: 'local', agentSessionId: 'original-agent', run: { runId: 'original-run' } }
