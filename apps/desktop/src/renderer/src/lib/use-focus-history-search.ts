@@ -32,16 +32,22 @@ export function useFocusHistorySearch(query: string, visible: boolean) {
   return trimmed
  }
  const generation = useRef(0), active = useRef<AbortController | null>(null), latest = useRef({ query, visible })
+ const retainedLocalQuery = useRef<string | null>(null)
+ const retainForLocalQuery = useCallback((nextQuery: string) => { retainedLocalQuery.current = nextQuery }, [])
  latest.current = { query, visible }
  const cancel = useCallback(() => { generation.current++; active.current?.abort(); active.current = null; setResult(current => current && { ...current, loading: false }) }, [])
- useEffect(() => { cancel(); pinned.current = null; setExpandedKey(null); setResult(null); return () => { generation.current++; active.current?.abort() } }, [query, cancel])
+ useEffect(() => {
+  if (retainedLocalQuery.current === query) return
+  retainedLocalQuery.current = null
+  cancel(); pinned.current = null; setExpandedKey(null); setResult(null)
+ }, [query, cancel])
  useEffect(() => { if (!visible) cancel(); return () => { generation.current++; active.current?.abort() } }, [visible, cancel])
  const read = useCallback(async (initial: Search) => {
   active.current?.abort(); const controller = new AbortController(), epoch = ++generation.current, originalQuery = latest.current.query
   active.current = controller
   const next = { ...initial, hits: [...initial.hits], issues: [...initial.issues], loading: true }
   setResult(next)
-  const current = () => epoch === generation.current && !controller.signal.aborted && latest.current.visible && latest.current.query === originalQuery
+  const current = () => epoch === generation.current && !controller.signal.aborted && latest.current.visible && (latest.current.query === originalQuery || retainedLocalQuery.current === latest.current.query)
   try {
    const page = await api.search.query({ ...next.input, ...(next.nextCursor ? { cursor: next.nextCursor } : {}) }, { signal: controller.signal })
    if (!current()) return
@@ -69,5 +75,5 @@ export function useFocusHistorySearch(query: string, visible: boolean) {
    input, nextCursor: null, remaining: 0, total: 0, completed: 0, examined: 0, hits: [], issues: [], loading: false })
  }, [query, read])
  const more = useCallback(() => { if (result && !result.loading) void read(result) }, [result, read])
- return { result, start, more, cancel, expandedKey, expand }
+ return { result, start, more, cancel, expandedKey, expand, retainForLocalQuery }
 }
