@@ -36,7 +36,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
   const released = useRef<Promise<void>>(Promise.resolve())
   const visibleRef = useRef(visible); visibleRef.current = visible
   const [reading, setReading] = useState<MobileTerminalReading>({ phase: 'unavailable', message: '终端输出尚未核实。请选择原会话并恢复 Mac 连接。', historyBoundary: null, notice: null })
-  const [copyNotice, setCopyNotice] = useState<string | null>(null)
+  const [copyFeedback, setCopyFeedback] = useState<{ message: string; issue: boolean } | null>(null)
   const gestures = useRef<ReturnType<typeof bindMobileTerminalGestures> | null>(null)
   const [fontSize, setFontSize] = useState(MOBILE_TERMINAL_FONT_DEFAULT)
   const [renderIssue, setRenderIssue] = useState<string | null>(null)
@@ -146,13 +146,19 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
     if (canvas.textarea) { canvas.textarea.readOnly = false; canvas.textarea.inputMode = 'text'; canvas.textarea.tabIndex = 0 }
     canvas.focus()
   }
+  const copyText = async (text: string, successMessage: string) => {
+    const failure = { message: '复制未完成；原文字仍保留，可重新复制。', issue: true }
+    try {
+      const copied = await platform.copyText(text, () => setCopyFeedback(failure))
+      setCopyFeedback(copied ? { message: successMessage, issue: false } : failure)
+    } catch { setCopyFeedback(failure) }
+  }
   const copy = async () => {
     const selection = terminal.current?.getSelection()
-    if (!selection) { setCopyNotice('请先选中需要复制的终端文字。'); return }
-    try { setCopyNotice(await platform.copyText(selection, () => setCopyNotice('复制未完成；选中文字仍保留，可重新复制。')) ? '选中文字已复制。' : '复制未完成；选中文字仍保留，可重新复制。') }
-    catch { setCopyNotice('复制未完成；选中文字仍保留，可重新复制。') }
+    if (!selection) { setCopyFeedback({ message: '请先选中需要复制的终端文字。', issue: false }); return }
+    await copyText(selection, '选中文字已复制。')
   }
-  const serviceMessage = renderIssue ?? (connection.state !== 'connected' ? connection.message : null) ?? inputState.notice ?? reading.notice ?? inputState.storageIssue ?? (inputState.queuedBytes > 0 ? `${inputState.queuedBytes} 字节未发送` : copyNotice)
+  const serviceMessage = renderIssue ?? (connection.state !== 'connected' ? connection.message : null) ?? inputState.notice ?? reading.notice ?? inputState.storageIssue ?? (inputState.queuedBytes > 0 ? `${inputState.queuedBytes} 字节未发送` : copyFeedback?.issue ? copyFeedback.message : null)
   const originalPending = control.current === controls.current.get(agentSessionId ?? '') ? control.current?.facts().pending : null
   return <section className="mobile-terminal" data-control={inputState.mode} data-agent-session-id={agentSessionId ?? undefined} data-reading={client && agentSessionId ? reading.phase : 'unavailable'}>
     <div className="mobile-terminal-toolbar"><span><SemanticIcon name="object.terminal" size={16} />{inputState.mode === 'control' ? '控制终端' : '观看终端'}</span>
@@ -192,9 +198,9 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
           {inputState.storageIssue && <p>{inputState.storageIssue}</p>}
           {inputState.phase === 'unknown' && <button onClick={() => { control.current?.continueAfterReview() }}>已在原会话核对，继续新输入</button>}
           {inputState.queuedBytes > 0 && <div className="mobile-terminal-unsent"><p>{inputState.queuedBytes} 字节尚未提交，仅在当前页面保留。</p><div className="mobile-terminal-unsent__actions"><button onClick={() => {
-            const text = control.current?.queuedText(); if (text) void platform.copyText(text, () => setCopyNotice('复制未完成，未发送输入仍保留。'))
+            const text = control.current?.queuedText(); if (text) void copyText(text, '未发送输入已复制。')
           }}>复制未发送输入</button><button onClick={() => control.current?.discardUnsent()}>放弃未发送输入</button></div></div>}
-          {copyNotice && <p role="status">{copyNotice}</p>}
+          {copyFeedback && <p role="status">{copyFeedback.message}</p>}
           {originalPending && <dl><dt>原 Run</dt><dd>{originalPending.runId}</dd><dt>本机操作记录</dt><dd>{originalPending.intentId}</dd></dl>}
         </div>
       </Dialog.Content></Dialog.Portal>
