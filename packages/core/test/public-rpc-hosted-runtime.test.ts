@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -38,7 +39,7 @@ async function hostedFixture(ids = ['source-agent', 'recipient-agent']) {
   core.inner.kernel.attach = vi.fn(async (runId: string) => ({ run: core.run(runId), gap: null, replay: [] }))
   core.inner.kernel.replay = vi.fn(async (runId: string) => ({ run: core.run(runId), gap: null, replay: [] }))
   const owner: AgentMuxRuntimeOwnerIdentity = { runtimeId: 'private-hosted-runtime', ownerInstanceId: 'private-hosted-epoch',
-    protocolVersion: 1, processId: process.pid, ctxmux: core.client.runtimeIdentity(), availability: 'connected' }
+    protocolVersion: 2, processId: process.pid, ctxmux: core.client.runtimeIdentity(), availability: 'connected' }
   const fence = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
   const hosted = new AgentMuxHostedRuntimeService(core.client, join(core.root, 'sessions.json'), () => owner)
   cleanups.push(() => hosted.dispose())
@@ -62,7 +63,7 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
       await f.client.refreshAgentSession(previous.agentSessionId, previous.run)
     }
     const original = f.client.agentSessions()
-    expect(Buffer.byteLength(JSON.stringify(f.hosted.bootstrap()))).toBeGreaterThan(256 * 1024)
+    expect(Buffer.byteLength(JSON.stringify(await f.hosted.bootstrap()))).toBeGreaterThan(256 * 1024)
     const h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted })
     const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: h.path } })
     cleanups.push(() => rpc.dispose())
@@ -249,7 +250,7 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
     // mixed event batch before opening so snapshot-label coalescing is exposed.
     const opening = channel.afterResponse[0]!()
     await arrived
-    const evidence = { source: 'terminal-output' as const, observedAt: 1, run: { runId: 'run-recipient-agent' } }
+    const evidence = { source: 'terminal-output' as const, observedAt: reshapeFixtureEpoch(0, 0, 1), run: { runId: 'run-recipient-agent' } }
     f.publish({ type: 'terminal-output', agentSessionId: 'recipient-agent', run: evidence.run,
       data: 'a', dataBytes: Uint8Array.from([97]), evidence: { ...evidence, outputByteRange: { startByte: 0, endByte: 1 } } })
     f.publish({ type: 'terminal-resized', run: evidence.run, cols: 90, rows: 30, throughByte: 1, resizeRevision: 7 })

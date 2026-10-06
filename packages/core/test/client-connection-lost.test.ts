@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
@@ -49,7 +50,7 @@ function fakeKernel(overrides: Partial<Record<string, unknown>> = {}) {
   const attempt = overrides.connect as (() => Promise<void>) | undefined
   return {
     list: vi.fn(async () => []),
-    onEvent: () => () => {}, onError: () => () => {}, onConnectionLost: () => () => {},
+    onEvent: () => () => {}, onError: () => () => {}, onConnectionLost: () => () => {}, onConnectionAvailable: () => () => {},
     ...overrides,
     isConnected: overrides.isConnected ?? (() => connected),
     connect: vi.fn(async () => { await attempt?.(); connected = true }),
@@ -366,8 +367,8 @@ describe('#628 掉线让屏幕证据与 readiness 观察一起失效', () => {
         run: { runId: 'readiness-run' },
         outputCursorBytes: 0
       },
-      createdAt: 100,
-      updatedAt: 100
+      createdAt: reshapeFixtureEpoch(0, 0, 100),
+      updatedAt: reshapeFixtureEpoch(0, 0, 100)
     }
   }
 
@@ -739,7 +740,8 @@ describe('connection observation failures preserve healthy capabilities', () => 
     await expect(client.writeTerminal({ runId: 'healthy-original' }, { ownerInstanceId: 'owner', operationId: 'input-1', expectedByte: 0, data: 'x' }))
       .resolves.toMatchObject({ acceptedThroughByte: 1 })
     expect(events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'CTXMUX_CONNECTION_OBSERVATION_FAILED' }))
-    expect(events.some(event => event.type === 'connection-state' && event.state === 'retrying')).toBe(false)
+    expect(events.filter(event => event.type === 'connection-state' && event.state === 'retrying').map(event => event.diagnostic?.code))
+      .toEqual(['CTXMUX_CONNECTION_OBSERVATION_PENDING'])
     await client.connect()
     expect(load).toHaveBeenCalledTimes(2)
     expect(events.at(-1)).toMatchObject({ state: 'restored' })

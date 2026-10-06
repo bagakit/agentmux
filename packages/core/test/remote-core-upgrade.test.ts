@@ -17,7 +17,7 @@ async function fixture() {
   const archivePath = join(root, 'archive.tar.gz'); await writeFile(archivePath, 'offline-candidate')
   const effects: string[] = []
   const native = { hostId: 'local', instanceId: 'native-original', processId: 202, buildIdentity: 'original', protocolVersion: 22 }
-  let owner = { runtimeId: 'runtime', ownerInstanceId: 'original', protocolVersion: 1 as const, processId: 101, ctxmux: native, availability: 'connected' as const }
+  let owner = { runtimeId: 'runtime', ownerInstanceId: 'original', protocolVersion: 2 as const, processId: 101, ctxmux: native, availability: 'connected' as const }
   let launch = { node: fixturePath("original/bin/node"), cli: fixturePath("original/core/dist/headless-runtime-cli.js"), cwd: fixturePath("original/work"), startTicks: '1234',
     env: { HOME: fixturePath("scope/home"), PATH: fixturePath("original/bin:/usr/bin"), AGENTMUX_STATE_DIRECTORY: fixturePath("scope/state"), AGENTMUX_RUNTIME_DIRECTORY: fixturePath("scope/runtime"), AGENTMUX_AGENT_SESSION_STORE: fixturePath("scope/state/sessions.json") },
     stateDirectory: fixturePath("scope/state"), runtimeDirectory: fixturePath("scope/runtime"), storePath: fixturePath("scope/state/sessions.json"), nativeSha256: nativeDigest, nativeProcessId: 202, nativeStartTicks: '4321', platform: 'linux-x64', deploymentDigest: null as string | null }
@@ -31,7 +31,7 @@ async function fixture() {
       runId: 'original-run', pid: 404, state: 'running', latestOutputBytes: owner.processId === 101 ? 100 : 120, acceptedInputBytes: 3
     } } }
     expect(params.fence).toEqual({ runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId })
-    if (method === 'runtime.bootstrap') return { owner, identity: native, storePath: launch.storePath, hostProcessId: owner.processId, catalog: [], sessions, messageQueuePath: fixturePath("scope/state/global-messages.ndjson") }
+    if (method === 'runtime.bootstrap') return { owner, connection: null, storePath: launch.storePath, hostProcessId: owner.processId, catalog: [], sessions, messageQueuePath: fixturePath("scope/state/global-messages.ndjson") }
     if (method === 'runtime.owner.shutdown') { effects.push('stop-original-core'); if (shutdownUnknown) throw new Error('shutdown response lost'); return { owner, accepted: true } }
     throw new Error('Unexpected maintenance method ' + method)
   })
@@ -80,6 +80,22 @@ it('performs one fenced Core update and preserves the original namespace, Sessio
   const again = await f.manager.upgrade(host, check.expected!, 'once')
   expect(again).toEqual(receipt); expect(f.effects).toHaveLength(3)
   expect((await f.manager.inspect({ ...host, remoteCommand: receipt.remoteCommand! }, 'once'))?.status).toBe('completed')
+})
+
+it.each(['old-producer', 'native-pending'])('refuses only this unqualified remote update (%s) without stopping its owner or Runs', async shape => {
+  const f = await fixture(), read = f.maintenance.getMockImplementation()!
+  f.maintenance.mockImplementation(async (...args) => {
+    const value = await read(...args)
+    if (args[1] !== 'runtime.owner.identity') return value
+    return { owner: { ...value.owner, ...(shape === 'old-producer' ? { protocolVersion: 1 } : { ctxmux: null }) } }
+  })
+  const check = await f.manager.check(host)
+  expect(check).toMatchObject({ eligible: false, reason: 'unverified' })
+  expect(check.expected).toBeUndefined()
+  expect(f.effects).toEqual([])
+  expect(f.run).not.toHaveBeenCalled()
+  expect(f.maintenance.mock.calls.map(([, method]) => method)).toEqual(['runtime.owner.identity'])
+  expect(f.sessions).toMatchObject([{ agentSessionId: 'original-session', run: { runId: 'original-run' } }])
 })
 
 it('rejects a staging command outside the exact new launcher before stopping the owner', async () => {

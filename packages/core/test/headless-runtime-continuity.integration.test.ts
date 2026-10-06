@@ -25,7 +25,7 @@ describe('Headless semantic owner ordinary process continuity', () => {
       await scope.restartNativeDaemon()
       const current = await until(async () => {
         try { return (await rpc.call('runtime.owner.identity', {})).owner } catch { return null }
-      }, owner => Boolean(owner && owner.ctxmux.instanceId !== original.ctxmux.instanceId), 'original semantic owner observes the new private native identity')
+      }, owner => Boolean(owner?.ctxmux && owner.ctxmux.instanceId !== original.ctxmux.instanceId), 'original semantic owner observes the new private native identity')
       await until(() => events, values => values.some(event => event.type === 'connection-state' && event.state === 'restored'), 'actual Core native connection restored event')
       expect(current).toMatchObject({ runtimeId: original.runtimeId, ownerInstanceId: original.ownerInstanceId })
       expect(client.runtimeOwnerIdentity()).toMatchObject({ runtimeId: original.runtimeId, ownerInstanceId: original.ownerInstanceId, availability: 'connected' })
@@ -68,6 +68,7 @@ describe('Headless semantic owner ordinary process continuity', () => {
     const restarted = await scope.restart()
     expect(restarted.owner.runtimeId).toBe(owner.runtimeId)
     expect(restarted.owner.ownerInstanceId).not.toBe(owner.ownerInstanceId)
+    await until(() => client.runtimeOwnerIdentity(), value => value?.ownerInstanceId === restarted.owner.ownerInstanceId, 'the exact replacement semantic owner fence')
     await until(() => events, values => values.some(value => value.type === 'connection-state' && value.state === 'restored'), 'remote service recovery')
     const restored = await client.statusAgent(session.agentSessionId)
     expect(restored.session.agentSessionId).toBe(session.agentSessionId)

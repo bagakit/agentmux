@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { connectHostedAgentMux as SourceConnectHosted } from '../src/hosted-client.js'
@@ -13,15 +14,15 @@ const connectHostedAgentMux: typeof SourceConnectHosted = process.env.AGENTMUX_T
 function fixture(fence = 0, gap: AgentMuxRpcOutputInitial['gap'] = null) {
   const session: AgentMuxRpcOutputInitial['session'] = { kind: 'agent', agentSessionId: 'a123456789012345',
     providerId: 'codex', executorId: 'private-executor', hostId: 'local', workspacePath: fixturePath("private-workspace"),
-    run: { runId: 'original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }
+    run: { runId: 'original-run' }, retiredRuns: [], createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
   const original: AgentMuxRpcOutputInitial = { session, run: { nativeService: null, runId: session.run.runId, kind: 'agent',
     agentSessionId: session.agentSessionId, providerId: session.providerId, executorId: session.executorId,
     workspacePath: session.workspacePath, pid: 421, state: 'running', cols: 100, rows: 30,
-    observedAt: 1, latestOutputBytes: fence, acceptedInputBytes: 0 }, gap,
+    observedAt: reshapeFixtureEpoch(0, 0, 1), latestOutputBytes: fence, acceptedInputBytes: 0 }, gap,
     terminal: { type: 'not-requested' }, resizeRevision: 7 }
-  const identity: AgentMuxHostedBootstrap['identity'] = { instanceId: 'private-original-daemon', ownership: 'owned',
+  const identity: NonNullable<AgentMuxHostedBootstrap['owner']['ctxmux']> = { instanceId: 'private-original-daemon', ownership: 'owned',
     hostId: 'local', buildIdentity: 'private-fixture', protocolVersion: 1, processId: 123 }
-  const bootstrap: AgentMuxHostedBootstrap = { identity, owner: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', protocolVersion: 1, processId: 123, availability: 'connected', ctxmux: identity },
+  const bootstrap: AgentMuxHostedBootstrap = { connection: null, owner: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', protocolVersion: 2, processId: 123, availability: 'connected', ctxmux: identity },
     storePath: fixturePath("private-store/sessions.json"), messageQueuePath: fixturePath("private-store/messages.ndjson"),
     hostProcessId: 123, catalog: [], sessions: [session] }
   const calls: Array<{ method: string; params: unknown }> = []

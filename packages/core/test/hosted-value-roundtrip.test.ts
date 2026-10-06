@@ -10,9 +10,9 @@ const connectHostedAgentMux: typeof SourceConnectHosted = process.env.AGENTMUX_T
 
 describe('Hosted ordinary record identity', () => {
   it('preserves marker-shaped env dictionaries in the actual typed createAgent invocation at its rejecting receiver', async () => {
-    const identity: AgentMuxHostedBootstrap['identity'] = { hostId: 'local', instanceId: 'private-daemon', processId: 123,
+    const identity: NonNullable<AgentMuxHostedBootstrap['owner']['ctxmux']> = { hostId: 'local', instanceId: 'private-daemon', processId: 123,
       buildIdentity: 'private-fixture', protocolVersion: 1, ownership: 'owned' }
-    const initial: AgentMuxHostedBootstrap = { identity, owner: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', protocolVersion: 1, processId: 123, availability: 'connected', ctxmux: identity }, storePath: fixturePath("private-store/sessions.json"),
+    const initial: AgentMuxHostedBootstrap = { connection: null, owner: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', protocolVersion: 2, processId: 123, availability: 'connected', ctxmux: identity }, storePath: fixturePath("private-store/sessions.json"),
       hostProcessId: 123, catalog: [], sessions: [], messageQueuePath: fixturePath("private-store/messages.ndjson") }
         const received: Array<Parameters<AgentMuxHostedClient['createAgent']>[0]> = []
     const rejectCreate = (input: Parameters<AgentMuxHostedClient['createAgent']>[0]): never => {

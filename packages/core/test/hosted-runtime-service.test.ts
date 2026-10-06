@@ -32,6 +32,8 @@ function fixture() {
     onEvent: vi.fn((listener: (event: AgentMuxClientEvent) => void) => { eventListener = listener; return () => {} }),
     runtimeIdentity: () => ({ hostId: 'local', instanceId: 'original-daemon', buildIdentity: 'private-fixture', protocolVersion: 1, processId: 123, ownership: 'owned' as const }),
     catalog: () => [], agentSessions: () => [], agentMessageQueuePath: () => fixturePath("original-store/messages.ndjson"),
+    async readAgentSessions() { return this.agentSessions() },
+    metadata: { pendingIds: () => [], read: async () => {}, retainObservation: () => null },
     refreshRunAttachment: vi.fn(async () => attachment), readRunReplay: vi.fn(async () => attachment),
     runtimeProjection: vi.fn(async () => ({ hostId: 'local', subjects: [{ kind: 'terminal', run: attachment.run }] })),
     observeSessionHistory: vi.fn(async (_id: string, _listener: (value: AgentSessionHistoryObservation) => void) => ({ source: { providerId: 'codex', nativeSessionId: 'original-native' }, dispose: vi.fn() })),
@@ -228,9 +230,9 @@ describe('semantic Host observation consumers', () => {
     const bridge = rpcPort(f.service), client = await connectHostedAgentMux({ rpc: bridge.port })
     try {
       const first: AgentMuxClientEvent[] = [], late: AgentMuxClientEvent[] = []
-      client.onEvent(event => first.push(event))
+      client.onEvent(event => { if (event.type === 'control-endpoint-state') first.push(event) })
       await vi.waitFor(() => expect(first).toMatchObject([{ ...state, type: 'control-endpoint-state' }]))
-      client.onEvent(event => late.push(event))
+      client.onEvent(event => { if (event.type === 'control-endpoint-state') late.push(event) })
       expect(first).toHaveLength(1)
       await vi.waitFor(() => expect(late).toMatchObject([{ ...state, type: 'control-endpoint-state' }]))
       f.service.publishControlEndpointState({ state: 'available' })
@@ -260,12 +262,12 @@ describe('semantic Host observation consumers', () => {
     try {
       const observation: AgentMuxClientEvent = { type: 'process-state', run: { runId: 'original-run' }, state: 'running', pid: 421, evidence: { source: 'run-process', observedAt: reshapeFixtureEpoch(0, 0, 2) } }
       f.emit(observation)
-      await vi.waitFor(() => expect(events.filter(event => event.type === 'process-state')).toHaveLength(1))
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'process-state' && event.evidence.observedAt >= 2)).toHaveLength(1))
       f.emit({ ...observation, evidence: { ...observation.evidence, observedAt: reshapeFixtureEpoch(0, 0, 3) } })
-      await vi.waitFor(() => expect(events.filter(event => event.type === 'process-state')).toHaveLength(2))
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'process-state' && event.evidence.observedAt >= 2)).toHaveLength(2))
       expect(invalid).toHaveBeenCalledOnce()
       expect(diagnostic).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code: 'CLIENT_EVENT_LISTENER_ASYNC' }))
-      expect(events.filter(event => event.type === 'process-state')).toHaveLength(2)
+      expect(events.filter(event => event.type === 'process-state' && event.evidence.observedAt >= 2)).toHaveLength(2)
       expect(events.filter(event => event.type === 'agent-error' && event.code === 'CLIENT_EVENT_LISTENER_ASYNC')).toHaveLength(1)
       expect(client.runtimeOwnerIdentity()?.availability).toBe('connected')
       expect(f.core.stopTerminal).not.toHaveBeenCalled()
@@ -285,6 +287,7 @@ describe('semantic Host observation consumers', () => {
       identity: () => ({ buildIdentity: 'private-ctxmux', protocolVersion: 1, daemonInstanceId: 'original-daemon' }),
       list: vi.fn(async () => [run]), onEvent: () => () => {}, onError: () => () => {},
       onConnectionLost: (listener: () => void) => { connectionLost = listener; return () => {} },
+      onConnectionAvailable: () => () => {},
       stop: vi.fn(async () => {})
     }
     // The Core connect/open/reconnect/requireConnected code stays real; only its Runtime collaborator is controlled.
@@ -296,7 +299,7 @@ describe('semantic Host observation consumers', () => {
       await core.connect()
       unavailable = true; connected = false; connectionLost()
       await vi.waitFor(() => expect(facts).toContainEqual(expect.objectContaining({ data: { event: expect.objectContaining({ type: 'connection-state', state: 'retrying' }) } })))
-      expect(kernel.connect).toHaveBeenCalledTimes(1 + RECONNECT_MAX_ATTEMPTS)
+      await vi.waitFor(() => expect(kernel.connect).toHaveBeenCalledTimes(1 + RECONNECT_MAX_ATTEMPTS))
       await expect(core.listRuns()).rejects.toMatchObject({ code: 'CTXMUX_DISCONNECTED' })
       unavailable = false
       const result = await service.call('runtime.invoke', { fence, consumerId: 'consumer-a', invocation: { method: 'listRuns', args: [] } })
@@ -555,7 +558,7 @@ describe('semantic Host observation consumers', () => {
     expect(events, 'endpoint failure cannot append or overwrite a real Agent error').toContainEqual(expect.objectContaining({ type: 'agent-error',
       agentSessionId: 'a123456789012345', code: 'RUNTIME_UNAVAILABLE', message }))
     expect(events.filter(event => event.type === 'agent-error')).toHaveLength(1)
-    expect(events).toContainEqual(expect.objectContaining({ type: 'connection-state', state: 'restored' }))
+    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'connection-state', state: 'restored' })))
     expect(f.core.stopTerminal).not.toHaveBeenCalled()
     await client.dispose(); await f.service.dispose()
   })
@@ -567,7 +570,7 @@ describe('semantic Host observation consumers', () => {
     client.onEvent(event => events.push(event)); reject(new AgentMuxError('Original initial endpoint is unconfirmed', 'RUNTIME_UNAVAILABLE'))
     await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'connection-state', state: 'lost', diagnostic: expect.objectContaining({ code: 'RUNTIME_UNAVAILABLE' }) })))
     await client.connect()
-    expect(events.filter(event => event.type === 'connection-state').map(event => event.state), 'first confirmation settles its original endpoint service window').toEqual(['lost', 'restored'])
+    await vi.waitFor(() => expect(events.filter(event => event.type === 'connection-state').map(event => event.state), 'first confirmation settles its original endpoint service window').toEqual(['lost', 'restored']))
     expect(events.filter(event => event.type === 'agent-error')).toEqual([])
     expect(f.core.stopTerminal).not.toHaveBeenCalled(); expect(f.core.submitAgentPrompt).not.toHaveBeenCalled()
     await client.dispose(); await f.service.dispose()
@@ -626,8 +629,8 @@ describe('semantic Host observation consumers', () => {
     f.core.runtimeProjection.mockRejectedValueOnce(new Error('Private process-projection handshake timeout'))
     await client.connect()
     expect(events.filter(value => value.type === 'process-state')).toEqual([])
-    expect(events.filter(value => value.type === 'agent-error')).toContainEqual(expect.objectContaining({ code: 'CONTROL_UNAVAILABLE',
-      message: expect.stringContaining('current process projection is unconfirmed') }))
+    await vi.waitFor(() => expect(events.filter(value => value.type === 'agent-error')).toContainEqual(expect.objectContaining({ code: 'CONTROL_UNAVAILABLE',
+      message: expect.stringContaining('current process projection is unconfirmed') })))
     expect(f.core.submitAgentPrompt).toHaveBeenCalledTimes(1)
     await client.dispose()
     expect(await f.service.call('runtime.release-consumer', { fence, consumerId: 'consumer-a' })).toEqual({ released: false })

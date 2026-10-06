@@ -40,7 +40,7 @@ it('actual CLI and RPC bind execution to one original durable message and Core P
 it('Hosted RPC preserves the declared strategy and rejects an unknown wire strategy', async () => {
  const h=await rpcOwnerFixture(),path=join(h.root,'hosted-control.sock')
  h.inner.kernel.identity=()=>({buildIdentity:'private-sdk',protocolVersion:1,daemonInstanceId:'private-sdk-owner'})
- const owner={runtimeId:'private-runtime',ownerInstanceId:'private-owner',protocolVersion:1 as const,processId:process.pid,ctxmux:h.client.runtimeIdentity(),availability:'connected' as const}
+ const owner={runtimeId:'private-runtime',ownerInstanceId:'private-owner',protocolVersion:2 as const,processId:process.pid,ctxmux:h.client.runtimeIdentity(),availability:'connected' as const}
  const hosted=new AgentMuxHostedRuntimeService(h.client,join(h.root,'sessions.json'),()=>owner)
  const server=new AgentMuxControlServer({socketPath:path,coreClients:h.coreClients,hostedRuntime:()=>hosted})
  await server.start();const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path}})
@@ -48,7 +48,7 @@ it('Hosted RPC preserves the declared strategy and rejects an unknown wire strat
  try {
   reader=await connectHostedAgentMux({rpc})
   expect(reader.catalog().find(entry=>entry.id==='codex')!.capabilities.promptExecution).toEqual({immediate:'native-steer'})
-  const wire=structuredClone(hosted.bootstrap())
+  const wire=structuredClone(await hosted.bootstrap())
   const native=wire.catalog.find(entry=>entry.id==='codex')!
   native.capabilities.promptExecution={immediate:'unknown' as never}
   expect(()=>parseRpcHostedBootstrap(wire)).toThrow(/malformed/)
