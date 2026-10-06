@@ -1,3 +1,4 @@
+import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { decodeBase64, encodeBase64 } from './hosted-value.js'
@@ -157,11 +158,12 @@ export function parseUserMessageHistoryPage(value: unknown, input: AgentSessionH
       !Array.isArray(message.contentParts) || message.recordedAt !== undefined && (!Number.isSafeInteger(message.recordedAt) || (message.recordedAt as number) < 0) ||
       message.deliveryStatus !== undefined && !['complete', 'failed', 'unverified'].includes(String(message.deliveryStatus))) return bad()
     const source = rpcRecord(message.source, input.source === 'native' ? ['kind', 'providerId', 'nativeSessionId', 'recordId'] : ['kind', 'submissionId', 'channel', 'device'], 'CONTROL_PROTOCOL_ERROR')
-    const author = rpcRecord(message.author, ['kind', 'agentSessionId'], 'CONTROL_PROTOCOL_ERROR')
+    const author = rpcRecord(message.author, undefined, 'CONTROL_PROTOCOL_ERROR')
+    try { if (author.kind === 'external') parseAgentExternalMessageAuthor(author); else rpcRecord(author, ['kind', 'agentSessionId'], 'CONTROL_PROTOCOL_ERROR') } catch { return bad() }
     if (input.source === 'native') {
       if (source.kind !== 'native' || source.providerId !== nativeSource!.providerId || source.nativeSessionId !== nativeSource!.nativeSessionId || source.recordId !== message.rawId || author.kind !== 'unknown' || author.agentSessionId !== undefined || message.deliveryStatus !== undefined) return bad()
     } else {
-      if (source.kind !== 'captured' || source.submissionId !== message.rawId || !['human', 'agent', 'unknown'].includes(String(author.kind)) ||
+      if (source.kind !== 'captured' || source.submissionId !== message.rawId || !['human', 'agent', 'external', 'unknown'].includes(String(author.kind)) ||
         (author.kind === 'agent' ? typeof author.agentSessionId !== 'string' || !author.agentSessionId : author.agentSessionId !== undefined)) return bad()
       try {
         if (source.channel !== undefined) normalizeMessageChannel(source.channel)

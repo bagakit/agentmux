@@ -1056,6 +1056,7 @@ export type AgentSessionUserMessageSource =
   | { kind: 'captured'; submissionId: string; channel?: AgentMessageChannel; device?: AgentOperationDevice }
 
 export type AgentSessionUserMessageAuthor =
+  | import('./external-author.js').AgentExternalMessageAuthor
   | { kind: 'human' }
   | { kind: 'agent'; agentSessionId: string }
   | { kind: 'unknown' }
@@ -1211,6 +1212,7 @@ export type AgentPromptMessageContent = {
   systemContext?: string
   authorAgentSessionId?: string
   authorHuman?: true
+  authorExternal?: import('./external-author.js').AgentExternalMessageAuthor
   sourceDevice?: AgentOperationDevice
   sourceChannel?: AgentMessageChannel
 }
@@ -1835,6 +1837,7 @@ export type AgentTimelineItem = {
   authorAgentSessionId?: string
   /** Explicit manual origin attributed by trusted host. */
   authorHuman?: boolean
+  authorExternal?: import('./external-author.js').AgentExternalMessageAuthor
   sourceDevice?: AgentOperationDevice
   sourceChannel?: AgentMessageChannel
   content?: string

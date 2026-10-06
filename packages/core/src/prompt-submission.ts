@@ -145,7 +145,7 @@ export async function observePromptInput<T>(signal: AbortSignal, read: () => Pro
 
 function promptMessageIdentity(message: AgentPromptMessageContent | undefined): string {
   return JSON.stringify(message === undefined ? null : [message.userContent, message.systemContext,
-    message.authorAgentSessionId, message.authorHuman === true, message.sourceDevice, message.sourceChannel])
+    message.authorAgentSessionId, message.authorHuman === true, message.sourceDevice, message.sourceChannel, message.authorExternal])
 }
 
 /**
@@ -206,6 +206,8 @@ type PromptSubmissionDeps = {
 export type AgentPromptInputAuthority = Readonly<{
   /** Only Core-authenticated Agent authors contribute the atomic metadata binding. */
   binding?: Readonly<AgentCapabilityBinding>
+  /** Structured attribution from the trusted Host context; never supplied by prompt text. */
+  externalAuthor?: import('./external-author.js').AgentExternalMessageAuthor
   assertCurrent(): Promise<void>
 }>
 

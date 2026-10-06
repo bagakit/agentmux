@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { parseAgentExternalMessageAuthor, type AgentExternalMessageAuthor } from './external-author.js'
 import { isDeepStrictEqual } from 'node:util'
 import { mintObjectId } from './object-id.js'
 import { chmod, mkdir } from 'node:fs/promises'
@@ -24,6 +25,7 @@ import { agentInputJournalKey, validateAgentInputControlId, validateAgentInputWa
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
 
 export type AgentMuxMessageIdentity =
+  | AgentExternalMessageAuthor
   | { readonly kind: 'agent-session'; readonly agentSessionId: string }
   /** Unattributed local ingress. The established wire kind does not authenticate a human;
    * principal records the transport and must never be displayed as participant identity. */
@@ -180,6 +182,7 @@ function finiteTimestamp(value: number, label: string): number {
 function identity(value: AgentMuxMessageIdentity, label: string): AgentMuxMessageIdentity {
   if (value.kind === 'agent-session') return { kind: value.kind, agentSessionId: nonEmpty(value.agentSessionId, label) }
   if (value.kind === 'human' && value.principal === 'local-cli') return value
+  if (value.kind === 'external') return parseAgentExternalMessageAuthor(value)
   throw new AgentMuxError(`${label} is invalid.`, 'MESSAGE_ENVELOPE_INVALID')
 }
 
