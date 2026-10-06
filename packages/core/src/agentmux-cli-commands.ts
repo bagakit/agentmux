@@ -268,6 +268,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   { ...command('agent.conversation.watch', '--host ID --session ID', 'Follow relevant source invalidations; resume durable changes to recover notification gaps.',
     { '--host': 'data', '--session': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true) }),
     'Notifications only wake an authoritative changes read. Ctrl-C releases this reader, never the original Session or Run. Source replacement ends this observation; inspect and authorize the new source cut before publishing.'), stream: true },
+  command('agent.interaction.respond', '--input FILE|-', 'Answer the exact original typed request with a stable operation identity.',
+    { '--input': 'data' }, async f => await readControlJsonInput(value(f, '--input', true)!, 'Interaction response') as Record<string, unknown>,
+    'JSON requires agentSessionId, expectedRun, operationId, expectedRequest and response. expectedRequest is the original typed request from agent.inspect, including its content and evidence. Keep the operationId and answer unchanged after a lost receipt; inspect the original operation before any further action. Transport acceptance does not prove Native adoption or task completion. Requires a transport-approved user or device.'),
+  command('agent.interaction.inspect', '--session ID --operation-id ID', 'Read the original durable response receipt without dispatching input.',
+    { '--session': 'data', ...OP }, f => ({ agentSessionId: id(f, '--session', true), operationId: id(f, '--operation-id', true) }),
+    'Available after the original question settles or its Run changes. A missing receipt is not proof that another operation did not answer; an unknown receipt must not be replayed with new identities. Reading never starts or stops a Run.'),
   command('agent.conversation.inspect', '--host ID --session ID --source captured|native [--limit N] [--cursor CURSOR] [--max-bytes N]',
     'Read the original bounded conversation with source-qualified records and retained byte fragments.',
     { '--host': 'data', '--session': 'data', '--source': 'value', '--limit': 'value', '--cursor': 'data', '--max-bytes': 'value' }, f => {
