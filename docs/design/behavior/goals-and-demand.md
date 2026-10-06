@@ -90,6 +90,8 @@ Grill/Grounding 的领域事实属于独立 Demand 文件系统包，同一份�
 
 选中 Goal 只更新该目标的同屏详情；没有详情时保持清单全宽，不留空右栏或用方向性重排冒充分屏。关联执行上下文、文件、Diff、Activity、决策、评论和对话在同一目标下可达，明确“进入原工作面”才导航。切换、键盘返回和重启保原选择及阅读位置；先恢复 durable Tab／Group／Region／布局和焦点，Session 恢复时机引用[冷启动合同](session-recovery.md#冷启动按需恢复p0-末位)。探测、握手或快照未知保原目标与关联，不以新实体代替恢复。
 
+Activity 中的决策按原 DemandDecision 身份保留问题、决定、理由与记录作者，详情按需展开；普通活动不伪装决策，缺少理由或作者明确未知，不从正文、当前执行者或继续原会话的合理动机补造。相同 Goal 的新增活动和原记录更新保持已有展开、节点与选区，换 Goal 不继承另一目标的阅读状态；公开 Goal 读取与独立文件工具消费同一原对象，不为呈现复制决策 Store。
+
 ## Demand 文件事实与独立包
 
 Goal 是长期产品目标，沿底层 Demand 身份持久化；它不属于 Core Runtime，也不是 Desktop Store 的临时 UI 状态。[Demand 包](../../../packages/demand/package.json)与 Core 平行，提供宿主无关 TypeScript API 和文件系统 CLI，唯一持有领域文件、索引、锁、原子写入与损坏恢复。Mote、GUI 与公共业务服务消费同一事实，不在 Mote 目录或 Renderer 另存任务账本。
