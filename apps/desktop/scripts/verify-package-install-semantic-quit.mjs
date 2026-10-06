@@ -5,6 +5,8 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 const root = path.resolve(import.meta.dirname, '../../..')
+assert.ok(process.argv.slice(2).every(argument => argument === '--ui-only-reload'), 'Unknown verification scope')
+const uiOnlyReload = process.argv.includes('--ui-only-reload')
 const test = 'apps/desktop/test/package-install-semantic-quit.test.ts'
 const products = ['apps/desktop/scripts/package-macos.mjs', 'apps/desktop/scripts/package-semantic-host.mjs']
 const classifier = 'apps/desktop/scripts/package-process-scope.mjs'
@@ -22,9 +24,13 @@ const directory = path.join(root, '.tmp/package-install-semantic-quit', ("run-" 
 await fs.mkdir(directory, { recursive: true, mode: 0o700 })
 const write = (file, value) => fs.writeFile(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 })
 const receipt = { schema: 'agentmux.package-install-semantic-quit-causal.v1', passed: false, sourceRoot: root,
+  scope: uiOnlyReload ? 'ui-only-reload' : 'semantic-gui-quit',
   runRoot: directory, sharedSourceModified: false, sharedDistModified: false, actualAppOrNativeLifecycleRequested: false,
   boundary: 'Actual default installer/quit/semantic fence with controlled private OS and filesystem, not installed App or Native qualification', checks: [], errors: [] }
 const successCase = 'the default full installer completes GUI quit while only its fenced semantic owner survives'
+const uiSuccessCase = 'the default ui-only installer completes GUI quit while only its fenced semantic owner survives'
+const lateHostCase = 'the ui-only installer prepares a Host that first appears after normal GUI quit'
+const unconfirmedUiCase = 'the ui-only installer retains an unconfirmed original semantic owner'
 const sameSourceCases = ['GUI-child', 'detached', 'endpoint-worker'].map(shape =>
   `the same-Source full installer reloads its exact ${shape} semantic namespace`)
 const sameSourceChildCases = ['GUI-child', 'endpoint-worker'].map(shape =>
@@ -34,6 +40,9 @@ const pureCaseNames = ['healthy', 'UID', 'birth', 'parent', 'executable', 'mode'
   `semantic family requires a complete bound Node chain (${change})`).sort()
 const changedCases = ['birth', 'Store', 'PID', 'UID', 'argv', 'mode', 'Source'].map(name =>
   `the default full installer rejects changed ${name} facts before excluding or stopping an owner`)
+const uiChangedCases = changedCases.map(name => name.replace('full installer', 'ui-only installer'))
+const uiSameSourceCases = sameSourceCases.map(name => name.replace('full installer', 'ui-only installer'))
+const uiSameSourceChildCases = sameSourceChildCases.map(name => name.replace('full installer', 'ui-only installer'))
 let caseNames
 try {
   receipt.headBefore = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
@@ -56,14 +65,27 @@ try {
 `
   const sourceQualification = '  const originalSource = await ops.source(currentApp), candidateSource = await ops.source(candidateApp)'
   assert.equal(source[products[1]].split(sourceQualification).length - 1, 1)
-  const phases = [
+  const prepareGuard = 'if (previouslyInstalled) {\n      semanticHost = await prepareSemanticHostReload(currentPath, next)'
+  const lateGuard = 'if (!semanticHost && previouslyInstalled) {\n        semanticHost = await prepareSemanticHostReload(currentPath, next)'
+  assert.equal(source[products[0]].split(prepareGuard).length - 1, 1)
+  assert.equal(source[products[0]].split(lateGuard).length - 1, 1)
+  const uiPrepareFailures = [uiSuccessCase, unconfirmedUiCase, ...uiChangedCases, ...uiSameSourceChildCases]
+  const phases = uiOnlyReload ? [
+    { name: 'ui-only-baseline-original', product: products[0], before: prepareGuard, after: prepareGuard, failures: [] },
+    { name: 'restore-first-full-only-assertion-red', product: products[0], before: prepareGuard,
+      after: prepareGuard.replace('previouslyInstalled)', "previouslyInstalled && intent === 'full')"), failures: uiPrepareFailures },
+    { name: 'first-common-prepare-original-restored-green', product: products[0], before: prepareGuard, after: prepareGuard, failures: [] },
+    { name: 'restore-late-full-only-assertion-red', product: products[0], before: lateGuard,
+      after: lateGuard.replace('previouslyInstalled)', "previouslyInstalled && intent === 'full')"), failures: [lateHostCase] },
+    { name: 'late-common-prepare-original-restored-green', product: products[0], before: lateGuard, after: lateGuard, failures: [] }
+  ] : [
     { name: 'baseline-original', product: products[0], before: handoff, after: handoff, failures: [] },
-    { name: 'withdraw-prepared-plan-assertion-red', product: products[0], before: handoff, after: handoff.replace(', semanticHost)', ', null)'), failures: [successCase, ...changedCases, endpointWorkerCase, ...sameSourceChildCases] },
+    { name: 'withdraw-prepared-plan-assertion-red', product: products[0], before: handoff, after: handoff.replace(', semanticHost)', ', null)'), failures: [successCase, ...changedCases, endpointWorkerCase, ...sameSourceChildCases, uiSuccessCase, ...uiChangedCases, ...uiSameSourceChildCases] },
     { name: 'prepared-plan-original-restored-green', product: products[0], before: handoff, after: handoff, failures: [] },
-    { name: 'relax-exact-semantic-fence-assertion-red', product: products[1], before: fence, after: weakFence, failures: changedCases },
+    { name: 'relax-exact-semantic-fence-assertion-red', product: products[1], before: fence, after: weakFence, failures: [...changedCases, ...uiChangedCases] },
     { name: 'exact-semantic-fence-original-restored-green', product: products[1], before: fence, after: fence, failures: [] },
     { name: 'same-source-owner-withdrawal-assertion-red', product: products[1], before: sourceQualification,
-      after: sourceQualification + '\n  if (originalSource === candidateSource) return null', failures: sameSourceCases },
+      after: sourceQualification + '\n  if (originalSource === candidateSource) return null', failures: [...sameSourceCases, ...uiSameSourceCases] },
     { name: 'same-source-owner-original-restored-green', product: products[1], before: sourceQualification, after: sourceQualification, failures: [] }
   ]
   for (const phase of phases) {

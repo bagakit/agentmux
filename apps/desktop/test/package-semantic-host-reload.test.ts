@@ -177,6 +177,6 @@ describe('the original Semantic Host follows a full Source installation', () => 
     let ancestor: ts.Node = prepares[1]!
     while (ancestor.parent && !ts.isIfStatement(ancestor)) ancestor = ancestor.parent
     expect(ts.isIfStatement(ancestor)).toBe(true)
-    expect((ancestor as ts.IfStatement).expression.getText(parsed)).toBe("!semanticHost && previouslyInstalled && intent === 'full'")
+    expect((ancestor as ts.IfStatement).expression.getText(parsed)).toBe('!semanticHost && previouslyInstalled')
   })
 })
