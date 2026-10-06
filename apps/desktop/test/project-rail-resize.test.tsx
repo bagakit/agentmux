@@ -28,7 +28,7 @@ it('drags the product rail immediately, commits on release, and restores the sam
   expect(useAppStore.getState().toolDockWidth).toBe(300)
   const persisted = useAppStore.persist.getOptions().partialize!(useAppStore.getState())
   expect(persisted.projectRailWidth).toBe(300)
-  expect(restorePersistedUiState({ workspaces: [] } as never, persisted).projectRailWidth).toBe(300)
+  expect(restorePersistedUiState({ workspaces: [], appearance: {} } as never, persisted).projectRailWidth).toBe(300)
   await act(async () => root.render(null))
   await act(async () => root.render(<ProjectRail />))
   expect((container.firstElementChild as HTMLElement).style.width).toBe('300px')
@@ -43,4 +43,19 @@ it('supports keyboard width changes and clamps at each boundary without changing
     expect(handle.getAttribute('aria-valuenow')).toBe(String(width))
   }
   expect(useAppStore.getState().toolDockWidth).toBe(350)
+})
+
+it('the product separator cancels on Escape and restores its own default with double click or Enter', async () => {
+  useAppStore.setState({ projectRailWidth: 280, toolDockWidth: 350 })
+  await act(async () => root.render(<ProjectRail />)); const handle = container.querySelector('[role="separator"]')!
+  await act(async () => handle.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 280 })))
+  await act(async () => { window.dispatchEvent(new MouseEvent('mousemove', { clientX: 360 })); await new Promise(requestAnimationFrame) })
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, bubbles: true })))
+  await act(async () => window.dispatchEvent(new MouseEvent('mouseup')))
+  expect(useAppStore.getState().projectRailWidth).toBe(280)
+  await act(async () => handle.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })))
+  expect(useAppStore.getState().projectRailWidth).toBe(210)
+  await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })))
+  await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+  expect(useAppStore.getState().projectRailWidth).toBe(210); expect(useAppStore.getState().toolDockWidth).toBe(350)
 })
