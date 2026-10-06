@@ -8,3 +8,4 @@ export * from './core-conversation-port.js'
 
 export * from './durable-ingress.js'
 export * from './connection-receivers.js'
+export * from './core-ingress-port.js'

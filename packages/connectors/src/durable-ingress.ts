@@ -16,13 +16,13 @@ export interface IngressAuthenticator {
   /** Own signature/token verification and issuer checks. Never expose this port over RPC. */
   verify(config: ConnectionConfig, raw: string, transportProof?: unknown): Promise<VerifiedIngressEvent>
 }
-type Core = Pick<AgentMuxClient, 'metadata' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'>
+export type DurableIngressCore = Pick<AgentMuxClient, 'readAgentSessions' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'>
 export type DurableIngressOptions = {
   connections: ConnectionHost
   bindings: RoomBindingReadPort
   authenticators: readonly IngressAuthenticator[]
   /** Return the original executing Host's client; Region occupants and focus are not routes. */
-  core(hostId: string): Core | undefined
+  core(hostId: string): DurableIngressCore | undefined
 }
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 function fail(code: string): never { throw new AgentMuxError('This external intake cannot use the original target or authority. Existing Agents and inputs are retained.', code) }
@@ -145,9 +145,9 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     }
     const client = this.options.core(original.binding.executionHostId)
     if (!client) fail('INGRESS_CORE_UNAVAILABLE')
-    let expectedRun: { runId: string } | undefined
-    await client.metadata.read(original.binding.agentSessionId, session => { if (session) expectedRun = { ...session.run } })
-    if (!expectedRun) fail('INGRESS_TARGET_UNCONFIRMED')
+    const exact = (await client.readAgentSessions()).filter(session => session.agentSessionId === original.binding.agentSessionId)
+    if (exact.length !== 1) fail('INGRESS_TARGET_UNCONFIRMED')
+    const expectedRun = { ...exact[0]!.run }
     const claimed = this.transaction(() => {
       const current = this.read(ingressId)!
       if (current.state !== 'received') return { record: current, own: false }
