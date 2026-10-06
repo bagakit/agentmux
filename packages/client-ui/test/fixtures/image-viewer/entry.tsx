@@ -33,14 +33,19 @@ async function sample(title: string, accent: string) {
 }
 const images = await Promise.all([sample('A readable working surface', '#39745c'), sample('A second point of view', '#536c90')])
 const calls: string[] = []
-const readImage = async (path: string) => { calls.push(path); return images[paths.indexOf(path)] ?? null }
+let failNext = false
+const readImage = async (path: string) => {
+  calls.push(path)
+  if (failNext && path === paths[1]) { failNext = false; return null }
+  return images[paths.indexOf(path)] ?? null
+}
 const nativeRead = async (input: AgentSessionHistoryResourceRequest): Promise<AgentSessionHistoryResourceReadResult> => ({
   agentSessionId: 'fixture-session', source: input.source, recordId: input.recordId, turnId: input.turnId, partIndex: input.partIndex,
   reference: input.expectedReference, result: { status: 'read', mimeType: 'image/png', dataBase64: images[0]!.dataUrl.split(',')[1]!, byteLength: atob(images[0]!.dataUrl.split(',')[1]!).length }
 })
 const platform: ClientUiPlatform = { copyText: async () => true, overlayContainer: () => document.body, bindComposerFocus: () => () => {},
   renderMessageAvatar: () => null, renderProjectIcon: () => null, renderProjectLabel: () => null, renderIcon: () => null }
-Object.assign(window, { imageViewerFixture: { calls, paths } })
+Object.assign(window, { imageViewerFixture: { calls, paths, armFailure: () => { failNext = true } } })
 function Scene() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const [draft, setDraft] = useState(`Compare @${paths[0]} with @${paths[1]}`)
