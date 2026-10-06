@@ -54,6 +54,13 @@ describe('finite original delivery DTO', () => {
     expect(() => parseConnectionDeliveryParams('connection.delivery.ls', { ...scope, bindingRevision: 0 })).toThrow()
     expect(() => parseConnectionDeliveryParams('connection.delivery.retry', { operationId: first.operationId, actor: { kind: 'user', id: 'forged' } })).toThrow()
   })
+  it('reports a finite current worker observation even when no delivery exists, without claiming an effect receipt', () => {
+    const value = { deliveries: [], next: null, observation: { state: 'unknown', reason: 'source-gap' } }
+    expect(parseConnectionDeliveryResult('connection.delivery.ls', value, scope)).toEqual(value)
+    for (const state of ['unknown', 'ready', 'unavailable', 'disabled']) expect(parseConnectionDeliveryResult('connection.delivery.ls', { ...value, observation: { state } }, scope)).toEqual({ ...value, observation: { state } })
+    for (const observation of [{ state: 'confirmed' }, { state: 'unknown', reason: 'raw-adapter-error' }, { state: 'ready', receipt: { state: 'confirmed' } }, null]) expect(() => parseConnectionDeliveryResult('connection.delivery.ls', { ...value, observation }, scope)).toThrow()
+    expect(() => parseConnectionDelivery({ ...deliveryFact(), state: new String('pending') })).toThrow()
+  })
   it('correlates inspections and retries with the original operation without manufacturing missing facts', () => {
     const original = deliveryFact()
     expect(parseConnectionDeliveryResult('connection.delivery.inspect', { delivery: null }, { operationId: original.operationId })).toEqual({ delivery: null })
