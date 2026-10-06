@@ -49,7 +49,9 @@ async function runOriginalElectron(command, args, options) {
 }
 
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
-const fixture = join(desktop, 'scripts/fixtures/message-control-receipt'), require = createRequire(import.meta.url)
+const fixtureName = process.argv[2] ?? 'message-control-receipt'
+assert.ok(['message-control-receipt', 'durable-input-wait'].includes(fixtureName), 'An explicit original fixture scope is required')
+const fixture = join(desktop, 'scripts/fixtures', fixtureName), require = createRequire(import.meta.url)
 const { build: esbuild } = require(require.resolve('esbuild', { paths: [join(root, 'packages/core')] }))
 const privateRoot = await mkdtemp(join(tmpdir(), 'amx-message-receipt-'))
 const evidence = join(root, '.tmp/message-control-receipt', 'attempt-' + randomUUID()), compiled = join(evidence, 'compiled')
