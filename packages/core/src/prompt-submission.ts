@@ -641,8 +641,18 @@ export class AgentPromptSubmissionCoordinator {
     control?: { authority?: AgentPromptInputAuthority; authorizeDispatch?: () => Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> }
   ): Promise<void> {
     const provider = this.deps.providers.get(session.providerId)
-    const currentTerminal = execution === 'immediate' && provider.catalog.capabilities.promptExecution?.immediate === 'terminal-submit'
     const manual = admissionIntent?.kind === 'manual-actor'
+    const frozen = session.promptCompletionAdmission
+    const rejoiningFrozenPlan = frozen?.submissionId === submissionId && frozen.intent !== undefined &&
+      sameRun(frozen.intent.run, session.run) && frozen.intent.prompt === prompt &&
+      (frozen.intent.execution ?? 'default') === execution &&
+      promptMessageIdentity(frozen.intent.message) === promptMessageIdentity(message) &&
+      JSON.stringify(frozen.intent.plan) === JSON.stringify(plan)
+    // A new manual intent grants ordinary terminal input, regardless of catalog.
+    // A saved exact plan retains its original authorization and frozen progress.
+    const frozenPreparation = rejoiningFrozenPlan && plan.kind === 'render-then-submit' && plan.prepare !== undefined
+    const currentTerminal = manual || execution === 'immediate' &&
+      provider.catalog.capabilities.promptExecution?.immediate === 'terminal-submit' && !frozenPreparation
     if (currentTerminal && plan.kind === 'render-then-submit' && plan.prepare) throw new AgentMuxError(
       'Current-terminal input cannot prepare, interrupt or refresh the original TUI.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     let inputDispatch = session.promptCompletionAdmission?.submissionId === submissionId ? session.promptCompletionAdmission.inputDispatch : undefined
@@ -962,12 +972,6 @@ export class AgentPromptSubmissionCoordinator {
     }
 
     const immediateStrategy = provider.catalog.capabilities.promptExecution?.immediate
-    const frozen = session.promptCompletionAdmission
-    const rejoiningFrozenPlan = frozen?.submissionId === submissionId && frozen.intent !== undefined &&
-      sameRun(frozen.intent.run, session.run) && frozen.intent.prompt === prompt &&
-      (frozen.intent.execution ?? 'default') === execution &&
-      promptMessageIdentity(frozen.intent.message) === promptMessageIdentity(message) &&
-      JSON.stringify(frozen.intent.plan) === JSON.stringify(plan)
     if (currentTerminal ? Boolean(plan.prepare) : execution === 'default' ? Boolean(plan.prepare) :
         !(plan.prepare && (immediateStrategy === 'interrupt-before-input' || rejoiningFrozenPlan))) {
       throw new AgentMuxError('Provider preparation does not match this single prompt execution authorization.', 'AGENT_PROMPT_OPERATION_CONFLICT')
