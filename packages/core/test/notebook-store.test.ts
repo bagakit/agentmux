@@ -1,12 +1,14 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { createServer } from 'node:net'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
-import { inspectNotebook, notebookPageArchiveRoot } from '../src/notebook-catalog.js'
+import { inspectNotebook, notebookPageArchiveRoot, parseNotebookState } from '../src/notebook-catalog.js'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { build } from 'esbuild'
 import { createHash } from 'node:crypto'
 import { AgentMuxNotebookStore, DEFAULT_NOTEBOOK_ID, type NotebookChange, type NoteTrailEvent } from '../src/notebook-store.js'
@@ -26,7 +28,9 @@ beforeAll(async()=>{
   const bundles=[]
   const relay = JSON.parse(await readFile(resolve('packages/relay/package.json'), 'utf8')) as { exports: Record<string, { import: string }> }
   const alias = Object.fromEntries(Object.entries(relay.exports).map(([key, value]) => [key === '.' ? '@agentmux/relay' : '@agentmux/relay/' + key.slice(2), resolve('packages/relay', value.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))]))
-  bundles.push(await build({entryPoints:['packages/core/src/agentmux.ts'],outfile:cli,bundle:true,platform:'node',format:'esm',packages:'external',alias,metafile:true,logLevel:'silent'}))
+  const relayRequire = createRequire(resolve('packages/relay/package.json'))
+  for (const dependency of ['tweetnacl', 'base64-js', 'ws']) alias[dependency] = relayRequire.resolve(dependency)
+  bundles.push(await build({entryPoints:['packages/core/src/agentmux.ts'],outfile:cli,bundle:true,platform:'node',format:'esm',packages:'external',alias,banner:{js:"import { createRequire as notebookTestRequire } from 'node:module'; const require = notebookTestRequire(import.meta.url);"},metafile:true,logLevel:'silent'}))
   bundles.push(await build({stdin:{contents:`import {AgentMuxNotebookStore} from './packages/core/src/notebook-store.ts';const store=new AgentMuxNotebookStore(process.argv[2]);try{const state=process.argv[3]==='write'?await store.apply(JSON.parse(process.argv[4]),{kind:'user',id:'test-user'}):await store.read();console.log(JSON.stringify({pid:process.pid,state}));}catch(e){console.log(JSON.stringify({pid:process.pid,code:e.code,message:e.message}));process.exitCode=2}`,resolveDir:process.cwd()},outfile:worker,bundle:true,platform:'node',format:'esm',packages:'external',alias,metafile:true,logLevel:'silent'}))
   const hashes:Record<string,string>={};for(const b of bundles)for(const file of Object.keys(b.metafile!.inputs)){if(file==='<stdin>')continue;hashes[file]=createHash('sha256').update(await readFile(file)).digest('hex')}
   await writeFile(join(output,'compiled-inputs.json'),JSON.stringify(hashes,null,2)+'\n')
@@ -262,4 +266,74 @@ it('deletes only a Notebook container through the shipping CLI, keeps every orig
     expect(refused.code).not.toBe(0); expect(await store.read()).toEqual(deleted)
   }
   await writeFile(resolve('.tmp/survey-notebook/delete-cli-receipt.json'), JSON.stringify({ before, deleted, fresh: fresh.result, listed: listed.result, inspected: inspected.result }, null, 2) + '\n')
+})
+
+it('follows only the authenticated CLI caller, reconciles the same operation, and keeps followers across fresh processes', async () => {
+  const { dir, store } = await fixture(), agents = await rpcOwnerFixture(['following-agent', 'other-agent'])
+  const server = new AgentMuxControlServer({ socketPath: join(dir, 'follow.sock'), notebookStore: store, coreClients: agents.coreClients })
+  servers.push(server)
+  try {
+    await apply(store, 'original', { kind: 'register', noteId: 'original', title: 'Reading', resource, source })
+    await apply(store, 'unrelated', { kind: 'register', noteId: 'unrelated', title: 'Kept', resource: { ...resource, path: 'kept.note.json' } })
+    const before = await store.read()
+    expect(Object.hasOwn(before.pages.original!, 'followers')).toBe(false)
+    await server.start()
+    const humanEnv = { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path }
+    const agentEnv = { ...humanEnv, AGENTMUX_AGENT_SESSION_ID: agents.credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: agents.capability }
+    async function change(operationId: string, revision: number, value: unknown, env: NodeJS.ProcessEnv = agentEnv) {
+      return run(cli, ['notebook', 'apply', '--revision', String(revision), '--operation-id', operationId, '--change-json', JSON.stringify(value)], env)
+    }
+    const input = { kind: 'follow', noteId: 'original' }
+    const first = await change('agent-follow', before.revision, input)
+    expect(first.code, first.stderr).toBe(0)
+    const followed = first.result.result.state
+    expect(followed.pages.original.followers).toEqual([{ actor: { kind: 'agent', id: 'following-agent' }, followedAt: expect.any(Number) }])
+    expect(followed.pages.unrelated).toEqual(before.pages.unrelated)
+    expect((await change('agent-follow', before.revision, input)).result.result.state).toEqual(followed)
+    const same = await change('same-relationship', followed.revision, input)
+    expect(same.code, same.stderr).toBe(0)
+    expect(same.result.result.state.pages.original).toEqual(followed.pages.original)
+    expect(same.result.result.state.trail).toEqual(followed.trail)
+    const stale = await change('stale-follow', before.revision, input)
+    expect(stale.code).not.toBe(0); expect(stale.result.error.code).toBe('NOTEBOOK_CONFLICT')
+    const forged = await change('forged-follow', same.result.result.state.revision, { ...input, actor: { kind: 'agent', id: 'other-agent' } })
+    expect(forged.code).not.toBe(0); expect(forged.result.error.code).toBe('NOTEBOOK_INPUT_INVALID')
+    const human = await change('human-follow', same.result.result.state.revision, input, humanEnv)
+    expect(human.code, human.stderr).toBe(0)
+    expect(human.result.result.state.pages.original.followers.map((f: any) => f.actor)).toEqual([
+      { kind: 'agent', id: 'following-agent' }, { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }
+    ])
+    const humanUnfollow = await change('human-unfollow', human.result.result.state.revision, { kind: 'unfollow', noteId: 'original' }, humanEnv)
+    expect(humanUnfollow.code, humanUnfollow.stderr).toBe(0)
+    expect(humanUnfollow.result.result.state.pages.original.followers).toEqual(followed.pages.original.followers)
+    const otherUnfollow = await change('other-unfollow', humanUnfollow.result.result.state.revision, { kind: 'unfollow', noteId: 'original' }, { ...agentEnv, AGENTMUX_AGENT_SESSION_ID: 'other-agent' })
+    expect(otherUnfollow.code, otherUnfollow.stderr).toBe(0)
+    expect(otherUnfollow.result.result.state.pages.original.followers).toEqual(followed.pages.original.followers)
+    const unconfirmedIdentity = await change('agent-follow', before.revision, input, humanEnv)
+    expect(unconfirmedIdentity.code).not.toBe(0)
+    const inspected = await run(cli, ['notebook', 'inspect', '--note', 'original'], humanEnv)
+    expect(inspected.code, inspected.stderr).toBe(0)
+    expect(inspected.result.result.pages[0].followers).toEqual(followed.pages.original.followers)
+    const firstProcess = await run(worker, [store.path, 'read']), secondProcess = await run(worker, [store.path, 'read'])
+    expect(firstProcess.code, firstProcess.stderr).toBe(0); expect(secondProcess.code, secondProcess.stderr).toBe(0)
+    expect(firstProcess.result.pid).not.toBe(secondProcess.result.pid)
+    expect(secondProcess.result.state).toEqual(otherUnfollow.result.result.state)
+    expect(firstProcess.result.state).toEqual(secondProcess.result.state)
+    expect(secondProcess.result.state.pages.original).toMatchObject({ resource, sources: [source], followers: followed.pages.original.followers })
+    await writeFile(resolve('.tmp/survey-notebook/following-cli-receipt.json'), JSON.stringify({ followed, inspected: inspected.result, first: firstProcess.result, second: secondProcess.result, humanUnfollow: humanUnfollow.result.result.state }, null, 2) + '\n')
+  } finally { await server.stop(); await agents.close() }
+})
+
+it('strictly validates persisted follower identities without rewriting old pages or accepting forged subscription fields', async () => {
+  const { store } = await fixture()
+  await apply(store, 'original', { kind: 'register', noteId: 'original', title: 'Reading', resource })
+  const before = await store.read()
+  expect(parseNotebookState(before)).toEqual(before)
+  for (const followers of [[{ actor, followedAt: -1 }], [{ actor: { kind: 'agent', id: '' }, followedAt: 1 }], [{ actor, followedAt: 1, online: true }], [{ actor, followedAt: 1 }, { actor, followedAt: 2 }]]) {
+    expect(() => parseNotebookState({ ...before, pages: { ...before.pages, original: { ...before.pages.original, followers } } })).toThrow()
+  }
+  for (const change of [{ kind: 'follow', noteId: 'original', followers: [] }, { kind: 'unfollow', noteId: 'original', actor }]) {
+    await expect(apply(store, 'forged', change as NotebookChange)).rejects.toMatchObject({ code: 'NOTEBOOK_INPUT_INVALID' })
+    expect(await store.read()).toEqual(before)
+  }
 })
