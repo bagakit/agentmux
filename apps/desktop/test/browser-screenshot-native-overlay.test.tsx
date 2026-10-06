@@ -5,6 +5,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ScreenshotEditor } from '../src/renderer/src/components/browser-screenshot/ScreenshotEditor'
+import type { BrowserScreenshotCapture } from '../src/shared/contracts'
 import { observeNativeOverlayRegions } from '../src/renderer/src/lib/native-overlay-regions'
 
 const geometry = vi.hoisted(() => ({ update: undefined as undefined | (() => void), stop: vi.fn() }))
@@ -22,6 +23,9 @@ const imageAnnotationCss = readFileSync(join(import.meta.dirname, '../src/render
 const agentCss = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/agent.css'), 'utf8')
 let root: Root | undefined
 let overlays: ReturnType<typeof observeNativeOverlayRegions> | undefined
+const capture: BrowserScreenshotCapture = { browserId: 'original-browser', navigationId: 'original-navigation',
+  image: { mimeType: 'image/png', dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 },
+  source: { url: 'https://example.invalid/original', title: 'Original source', viewport: { width: 400, height: 300, deviceScaleFactor: 1 }, viewportWarning: null } }
 afterEach(async () => {
   overlays?.dispose(); overlays = undefined
   if (root) await act(async () => root!.unmount())
@@ -56,7 +60,7 @@ it('the screenshot editor uses its original stage DOM without native bitmap proj
   const cancel = vi.fn(), complete = vi.fn()
   const mount = document.createElement('div'); container.append(mount)
   root = createRoot(mount)
-  await act(async () => root!.render(<ScreenshotEditor image={{ mimeType: 'image/png', dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 }} busy={false} onCancel={cancel} onComplete={complete} />))
+  await act(async () => root!.render(<ScreenshotEditor capture={capture} workspaceId="original-workspace" busy={false} onCancel={cancel} onComplete={complete} />))
   const editor = container.querySelector<HTMLElement>('.image-annotation-editor')
   expect(editor).not.toBeNull()
   expect(anchor.isConnected).toBe(true)
@@ -103,7 +107,7 @@ async function mountGestureEditor() {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => rect(0, 0, 400, 300))
   const complete = vi.fn(), cancel = vi.fn()
   const mount = document.createElement('div'); container.append(mount); root = createRoot(mount)
-  await act(async () => root!.render(<ScreenshotEditor image={{ mimeType: 'image/png', dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 }} busy={false} onCancel={cancel} onComplete={complete} />))
+  await act(async () => root!.render(<ScreenshotEditor capture={capture} workspaceId="original-workspace" busy={false} onCancel={cancel} onComplete={complete} />))
   const editor = container.querySelector<HTMLElement>('.image-annotation-editor')!
   expect(editor).not.toBeNull()
   await act(async () => editor.querySelector('img')!.dispatchEvent(new Event('load')))
@@ -122,7 +126,7 @@ async function mountGestureEditor() {
   return { complete, copy, pointer, button }
 }
 
-it('commits all continuous moves before pointer up renders, including shape endpoints and pointer cancel', async () => {
+it('commits all continuous moves before pointer up renders, including the final shape endpoints', async () => {
   const { complete, copy, pointer, button } = await mountGestureEditor()
   for (const [label, kind] of [['Pen', 'pen'], ['Highlighter', 'highlight'], ['Arrow', 'arrow'], ['Rectangle', 'rect'], ['Ellipse', 'ellipse']] as const) {
     await act(async () => button(label).click())
@@ -131,7 +135,7 @@ it('commits all continuous moves before pointer up renders, including shape endp
       pointer('pointermove', 60, 35)
       pointer('pointermove', 100, 40)
       pointer('pointermove', 150, 45)
-      pointer(kind === 'highlight' ? 'pointercancel' : 'pointerup', 150, 45)
+      pointer('pointerup', 150, 45)
     }) // No render is inserted between the continuous movement and its ending event.
     await act(async () => copy.click())
     const expected = kind === 'pen' || kind === 'highlight'
@@ -152,6 +156,21 @@ it('commits all continuous moves before pointer up renders, including shape endp
     expect(complete.mock.lastCall![0].shapes).toEqual([expect.objectContaining(expected)])
     await act(async () => button('Clear all').click())
   }
+})
+
+it('discards a cancelled pointer gesture without committing it or changing existing history', async () => {
+  const { complete, copy, pointer, button } = await mountGestureEditor()
+  await act(async () => { pointer('pointerdown', 25, 30); pointer('pointerup', 100, 40) })
+  await act(async () => copy.click())
+  const original = complete.mock.lastCall![0].shapes
+  expect(original).toHaveLength(1)
+  await act(async () => button('Highlighter').click())
+  await act(async () => { pointer('pointerdown', 50, 60); pointer('pointermove', 180, 90); pointer('pointercancel', 180, 90); pointer('pointerup', 180, 90) })
+  await act(async () => copy.click())
+  expect(complete.mock.lastCall![0].shapes).toEqual(original)
+  await act(async () => button('Undo').click())
+  await act(async () => copy.click())
+  expect(complete.mock.lastCall![0].shapes).toEqual([])
 })
 
 it('retains a gesture whose down, moves and up all precede the next render', async () => {
