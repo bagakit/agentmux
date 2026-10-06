@@ -278,6 +278,12 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('scratch:resetWiki', workspaceId, topicId)
   },
   demands: {
+    delegation: (method, input) => ipcRenderer.invoke('demands:delegation', method, input),
+    onChanged(listener) {
+      const wrapped = (_event: Electron.IpcRendererEvent, goalIds: string[]) => listener(goalIds)
+      ipcRenderer.on('demands:changed', wrapped)
+      return () => { ipcRenderer.removeListener('demands:changed', wrapped) }
+    },
     prepareGoalStart: (goalId, intent, controlRequestId) => ipcRenderer.invoke('demands:prepareGoalStart', goalId, intent, controlRequestId),
     inspectDispatch: (reference) => ipcRenderer.invoke('demands:inspectDispatch', reference),
     reconcileDispatch: (reference) => ipcRenderer.invoke('demands:reconcileDispatch', reference),
@@ -414,6 +420,7 @@ const api: AgentMuxPreloadApi = {
     creation: (hostId: string, agentSessionId: string) => ipcRenderer.invoke('sessions:creation', hostId, agentSessionId),
     resolveCreationSessionId: (hostId, createOperationId) => ipcRenderer.invoke('sessions:resolveCreationSessionId', hostId, createOperationId),
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),
+    notifyInputOccupation: control => ipcRenderer.invoke('sessions:inputOccupation', control),
     nativeSessions: input => ipcRenderer.invoke('sessions:nativeSessions', input),
     nativeHistoryPage: input => ipcRenderer.invoke('sessions:nativeHistoryPage', input),
     nativeHistoryResource: input => ipcRenderer.invoke('sessions:nativeHistoryResource', input),

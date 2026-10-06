@@ -422,6 +422,8 @@ const mockApi: AgentMuxDesktopApi = {
     revoke: async () => { throw new Error('Revoking a device requires confirmation on the original desktop.') }
   },
   demands: {
+    delegation: async () => { throw new Error('Original delegation facts and collection require the Desktop Goal and Core owners.') },
+    onChanged: () => () => {},
     prepareGoalStart: async () => { throw new Error('Goal Start provenance requires the original Desktop and Core owners.') },
     inspectDispatch: async () => { throw new Error('Original Goal Start inspection requires the Desktop owner.') },
     reconcileDispatch: async () => { throw new Error('Original Goal input reconciliation requires the Desktop and Core owners.') },
@@ -890,6 +892,7 @@ const mockApi: AgentMuxDesktopApi = {
     cancel: async () => { throw new Error('Cancelling an arrangement requires the connected desktop Host. Its state is unconfirmed.') }
   },
   sessions: {
+    notifyInputOccupation: async () => { throw new Error('User input observation requires the connected desktop Host. The original Agent and draft remain available.') },
     nativeSessions: async input => ({ hostId: input.hostId, executorId: input.executorId,
       providerId: mockConfig.executors[input.executorId]?.providerId ?? 'codex',
       availability: 'unsupported', capabilities: mockStructuredCapabilities, sessions: [], issues: [] }),

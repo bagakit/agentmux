@@ -53,6 +53,8 @@ import {
   type AgentMuxRuntimeSubjectTarget,
   type ExecutionHost
 } from '@agentmux/core'
+import { callOriginalDesktopHost } from './desktop-host.js'
+import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
 import type { DesktopRuntimeClient as AgentMuxClient, DesktopRuntimeConnector } from './desktop-host.js'
 // 进程事实的投影走那个 node-free 子路径，与 renderer 侧的实时路径**同一个**实现。走子路径而不是包根，
 // 是为了让两侧 import 的是同一个模块——包根那条链拖 node:crypto，renderer 引不动。
@@ -2331,6 +2333,68 @@ export class RuntimeController {
     return host.client
   }
 
+  async callOriginalCore<M extends AgentMuxRpcMethod>(hostId: string, method: M, params: AgentMuxRpcParams<M>,
+    context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> {
+    const client = this.configuredClient(hostId)
+    const originalParams = (method === 'message.read' || method === 'message.dispatch.read') && 'forwardRpc' in client
+      ? { ...params, hostId: 'local' } as AgentMuxRpcParams<M> : params
+    const result = await callOriginalDesktopHost(client, method, originalParams, context)
+    return (method === 'message.read' || method === 'message.dispatch.read') ? { ...result, hostId } as AgentMuxRpcResult<M> : result
+  }
+
+  async readOriginalDispatch(hostId: string, sourceMessageId: string) {
+    return { ...await this.configuredClient(hostId).readDispatch({ sourceMessageId }), hostId }
+  }
+
+  async observeOriginalRun(hostId: string, runId: string): Promise<Pick<AgentMuxRun, 'runId' | 'state'>> {
+    const subject = await (await this.connectedClient(hostId, 'runtime')).runtimeSubject({ kind: 'terminal-run', runId })
+    return { runId: subject.run.runId, state: subject.run.state }
+  }
+
+  private readonly inputOccupationObservers = new Set<(control: AgentSessionControl) => void>()
+
+  observeInputOccupation(listener: (control: AgentSessionControl) => void): () => void {
+    this.inputOccupationObservers.add(listener)
+    return () => { this.inputOccupationObservers.delete(listener) }
+  }
+
+  notifyInputOccupation(control: AgentSessionControl): void {
+    if (control?.kind !== 'agent' || typeof control.hostId !== 'string' || !control.hostId ||
+      typeof control.agentSessionId !== 'string' || !control.agentSessionId ||
+      typeof control.run?.runId !== 'string' || !control.run.runId)
+      throw new AgentMuxError('Input occupation requires its original Agent control.', 'INVALID_CONTROL_REQUEST')
+    // Cancel-only signal from the existing GUI input owner. It grants no native
+    // eligibility and never stores draft text or changes an Agent/Run capability.
+    for (const listener of this.inputOccupationObservers) listener(control)
+  }
+
+  observeCoreEvents(types: readonly AgentMuxClientEvent['type'][],
+    listener: (hostId: string, event: AgentMuxClientEvent) => void): () => void {
+    for (const type of types) {
+      let listeners = this.coreEventObservers.get(type)
+      if (!listeners) { listeners = new Set(); this.coreEventObservers.set(type, listeners) }
+      listeners.add(listener)
+    }
+    return () => { for (const type of types) {
+      const listeners = this.coreEventObservers.get(type); listeners?.delete(listener)
+      if (!listeners?.size) this.coreEventObservers.delete(type)
+    } }
+  }
+
+  async saveGoalAttention(input: { hostId: string; supervisorAgentSessionId: string; supervisorRunId: string;
+    intentId: string; operationId: string; agentMuxNote: string }): Promise<void> {
+    const client = await this.connectedClient(input.hostId)
+    const session = await client.inspectAgentCreation(input.supervisorAgentSessionId)
+    if (session.run.runId !== input.supervisorRunId) throw new AgentMuxError('The original reminder target Run changed. Keep its Goal responsibility and inspect the original reminder.', 'STALE_AGENT_SESSION')
+    await client.saveAgentFuturePromptIntent({ agentSessionId: input.supervisorAgentSessionId, intentId: input.intentId,
+      operationId: input.operationId, prompt: '', agentMuxNote: input.agentMuxNote, active: true })
+  }
+
+  async inspectGoalAttention(input: { hostId: string; supervisorAgentSessionId: string; supervisorRunId: string; operationId: string }) {
+    return await this.configuredClient(input.hostId).inspectAgentPromptSubmission({ kind: 'prompt',
+      agentSessionId: input.supervisorAgentSessionId, expectedRun: { runId: input.supervisorRunId }, submissionId: input.operationId })
+  }
+
   rpcClients(): readonly { hostId: string; client: AgentMuxClient }[] {
     return [...this.hosts].map(([hostId, host]) => ({ hostId, client: host.client }))
   }
@@ -2528,7 +2592,10 @@ export class RuntimeController {
     this.sessionAttachmentOwners.delete(key)
   }
 
+  private readonly coreEventObservers = new Map<AgentMuxClientEvent['type'], Set<(hostId: string, event: AgentMuxClientEvent) => void>>()
+
   private publish(hostId: string, event: AgentMuxClientEvent, connectionWarning?: RuntimeEndpointWarning): void {
+    for (const observer of this.coreEventObservers.get(event.type) ?? []) observer(hostId, event)
     const ref = 'run' in event ? event.run : ('evidence' in event ? event.evidence?.run : undefined)
     const toolkit = ref ? this.toolkitRuns.get(terminalInputKey(hostId, ref.runId)) : undefined
     if (toolkit && (event.type === 'terminal-output' || event.type === 'terminal-snapshot')) { toolkit(event); return }
