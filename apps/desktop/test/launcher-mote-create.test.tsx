@@ -1,7 +1,9 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { GRAPHITE_THEME, mountThemeRuntime, previewTheme } from '@agentmux/client-ui/theme'
+import { semanticIconHref } from '@agentmux/client-ui/icons'
 import { LauncherMoteAction } from '../src/renderer/src/components/LauncherMoteAction'
 import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
@@ -15,6 +17,9 @@ import { DEFAULT_MOTE_FACE } from '../src/shared/mote-avatars'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 const dom = composerDOM(), sourcePrompt = 'Implement the task\nKeep this exact second line', oldMoteDraft = 'Unsent Mote thought'
+let disposeIconTheme:()=>void
+beforeEach(()=>{disposeIconTheme=mountThemeRuntime(window)})
+afterEach(()=>disposeIconTheme())
 const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'No Project', hostId: 'local', path: _hygiene_fixturePath("scratch"), kind: 'folder' as const }
 beforeEach(async () => { await act(async () => { requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: 'mote' }); requestPmoTeamsTopicFloatingClose(); useLauncherState.setState({ sections: {}, drafts: {}, executors: {}, moteTopicId: null, persistenceIssue: null }) }) })
 async function mount(kind: 'agent' | 'launcher' = 'agent', prompt = sourcePrompt) {
@@ -43,7 +48,7 @@ async function choose(name: string) {
 describe('explicit selected Mote creation request', () => {
   it('queues one complete request through the actual send owner and preserves both independent drafts', async () => {
     await mount(); expect(createButton().textContent).toBe('Create with Mote'); expect(dom.container.querySelector('.launcher-mote__target')?.textContent).toBe('Mote')
-    await act(async () => { createButton().click(); createButton().click() })
+    const originalButton=createButton(),themed=structuredClone(GRAPHITE_THEME);themed.id='custom.mote-accepted';themed.name='Accepted request icon';themed.icons={'status.accepted':{kind:'paths',paths:[{d:'M4 4H20V20H4Z'}]}};await act(async()=>{expect(previewTheme(themed).applied).toBe(true)});await act(async () => { createButton().click(); createButton().click() });expect(createButton()).toBe(originalButton);expect(createButton().querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('status.accepted'));expect(document.getElementById(semanticIconHref('status.accepted').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')
     const queue = useAppStore.getState().agentSteerQueues['selected-mote']
     expect(queue).toHaveLength(1); expect(queue![0]!.text).toContain('Help me create an Agent'); expect(queue![0]!.text).toContain(("Project: Project\nHost: local\nWorking directory: " + _hygiene_fixturePath("repo") + "\n\n")+sourcePrompt)
     expect(queue![0]!.runId).toBe('run-selected-mote'); expect(queue![0]!.origin).toBe('manual'); expectDrafts(); expect(createButton().textContent).toBe('Request queued'); expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true, targetTabId: 'mote' })
@@ -84,7 +89,7 @@ describe('explicit selected Mote creation request', () => {
   })
   it('does not retarget a pending request after the selected Mote changes', async () => {
     await mount(); let release!: () => void; vi.mocked(api.scratch.ensureMote).mockImplementation(async () => { await new Promise<void>(r => { release = r }); return {} as never })
-    await act(async () => createButton().click()); await act(async () => { useLauncherState.getState().selectMote('another-mote') }); await act(async () => release())
+    await act(async () => createButton().click());expect(createButton().querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('status.loading')); await act(async () => { useLauncherState.getState().selectMote('another-mote') }); await act(async () => release())
     expect(useAppStore.getState().agentSteerQueues).toEqual({}); expectDrafts(); expect(useAppStore.getState().openScratchTopic).not.toHaveBeenCalled()
   })
   it('preserves both drafts and gives a persistent, honest failure without claiming creation', async () => {
