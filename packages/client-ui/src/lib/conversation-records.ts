@@ -45,7 +45,8 @@ export function projectConversationRecords({ agentSessionId, executionHostId, hi
     if (seen.has(id)) continue
     seen.add(id)
     const input = item.kind === 'user-message' ? nativeInputs.get(item.id) : undefined
-    const speaker = input ? speakerOfUserMessage(input) : item.kind === 'assistant-message' ? { role: 'agent' as const, id: agentSessionId } : undefined
+    const speaker = input ? speakerOfUserMessage(input) : item.kind === 'assistant-message' ? { role: 'agent' as const, id: agentSessionId }
+      : item.kind === 'system-message' ? { role: 'system' as const, id: historyPage.source.providerId } : undefined
     records.push({ id, rawId: item.id, agentSessionId, ...(executionHostId ? { executionHostId } : {}), kind: item.kind, source,
       content: input?.content ?? item.contentParts.filter(part => part.kind === 'text').map(part => part.text).join('\n'),
       contentParts: item.contentParts,

@@ -847,7 +847,8 @@ export type AgentSessionHistoryQuestionAnswer = {
 export type AgentSessionHistoryItem = {
   id: string
   turnId?: string
-  kind: 'user-message' | 'assistant-message' | 'activity'
+  /** System messages describe read-only native history; they grant no input, identity or permission authority. */
+  kind: 'user-message' | 'assistant-message' | 'system-message' | 'activity'
   messagePhase?: AgentSessionHistoryMessagePhase
   questionRequest?: AgentSessionHistoryQuestionRequest
   questionAnswers?: AgentSessionHistoryQuestionAnswer[]

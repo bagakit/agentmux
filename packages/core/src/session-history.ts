@@ -123,7 +123,7 @@ export function normalizeSessionHistoryPage(
     const id = nonempty(item.id)
     if (ids.has(id)) return invalid()
     ids.add(id)
-    if (item.kind !== 'user-message' && item.kind !== 'assistant-message' && item.kind !== 'activity') return invalid()
+    if (item.kind !== 'user-message' && item.kind !== 'assistant-message' && item.kind !== 'system-message' && item.kind !== 'activity') return invalid()
     if (!Array.isArray(item.contentParts)) return invalid()
     const contentParts: AgentSessionHistoryContentPart[] = item.contentParts.map((value: unknown) => {
       const part = object(value)

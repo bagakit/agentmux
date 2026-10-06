@@ -90,7 +90,7 @@ export function createSpeakerResolver(options?: {
   return (recordedSpeaker: ConversationSpeaker) => {
     const speaker = speakerForDisplay(recordedSpeaker)
     if (speaker.role === 'human') return { name: 'You' }
-    if (speaker.role === 'system') return { name: 'AgentMux' }
+    if (speaker.role === 'system') return { name: speaker.id === AGENTMUX_SYSTEM_SPEAKER_ID ? 'AgentMux' : speaker.id }
     if (options?.lookupAgent) {
       const found = options.lookupAgent(speaker.id)
       if (found) {
