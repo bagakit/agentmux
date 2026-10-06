@@ -1929,7 +1929,13 @@ export async function registerIpc(args: {
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(args.window.webContents)
   const rpcHttp = agentMuxRpcHttpOptions()
-  const connectorServices = await createDesktopConnections({ directory: join(homedir(), '.agentmux', 'connectors'), encryption: safeStorage })
+  const connectorServices = await createDesktopConnections({ directory: join(homedir(), '.agentmux', 'connectors'), encryption: safeStorage,
+    bindings: { spatial: spatialState, checkpoint: async reference => {
+      const original = args.runtime.rpcClients().filter(entry => entry.hostId === reference.hostId)
+      if (original.length !== 1) throw new AgentMuxError('The exact execution Host is unavailable. No binding was rerouted.', 'CONTROL_UNAVAILABLE')
+      return { ...reference, checkpoint: await original[0]!.client.conversationCheckpoint(reference.agentSessionId) }
+    } }
+  })
   registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), secrets: connectorServices.secrets })
   const control = new AgentMuxControlServer({
     connections: connectorServices.connections,
