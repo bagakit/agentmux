@@ -1,7 +1,8 @@
 import { themeIdSchema, themeValueSchema, serializeThemeFile, BUILTIN_THEME_IDS, themeValue, type ThemeDocument, type ThemeValue, type ThemeMode, type AppAppearanceId } from './schema.js'
 
 import { FALLOUT_THEME } from './builtin-fallout.js'
-export { FALLOUT_THEME }
+import { RETRO_THEME } from './builtin-retro.js'
+export { FALLOUT_THEME, RETRO_THEME }
 
 export const DEFAULT_THEME_ID = 'graphite' as const
 export const GRAPHITE_THEME: ThemeDocument = {
@@ -28,7 +29,8 @@ function freezeBuiltin(value: object): void {
 }
 freezeBuiltin(GRAPHITE_THEME)
 freezeBuiltin(FALLOUT_THEME)
-export const BUILTIN_THEMES: readonly ThemeDocument[] = Object.freeze([GRAPHITE_THEME, FALLOUT_THEME])
+freezeBuiltin(RETRO_THEME)
+export const BUILTIN_THEMES: readonly ThemeDocument[] = Object.freeze([GRAPHITE_THEME, FALLOUT_THEME, RETRO_THEME])
 export type ThemeCatalogItem = { id: string; value: ThemeValue; readonly: boolean }
 export type ThemeIssue = { id: string; message: string }
 export function isBuiltinThemeId(id: string): boolean { return (BUILTIN_THEME_IDS as readonly string[]).includes(id) }
