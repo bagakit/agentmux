@@ -12,22 +12,27 @@ import { useWorkbenchBrowserPresentation, WorkbenchPresentationContext } from '.
 import { openNotebookPage } from '../lib/recall-notebooks'
 import { useAppStore } from '../store'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { useNoteLinkNavigation } from '../lib/use-note-link-navigation'
+import { NoteLinksPanel } from './NoteLinksPanel'
 
 /** Presentation of the original FileDocument. Invalid source remains available through Source. */
-export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, revealBlock, onRevealed, focusRequest, canFocus, onFocused, restoredBlock, onSelectedBlock, resource }: {
+export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, revealBlock, onRevealed, focusRequest, canFocus, onFocused, restoredBlock, onSelectedBlock, resource, onOpenPage }: {
   resource?: NoteResource; document: FileDocument; knowledge: NoteKnowledge; onChange: (raw: string) => void; onSave: () => void
   onOpen: (source: NoteSource, blockId: string) => void; revealBlock?: NoteBlockTarget; onRevealed?: () => void
   focusRequest?: number; canFocus?: () => boolean; onFocused?: (nonce: number) => void
   restoredBlock?: NoteBlockTarget; onSelectedBlock?: (target: NoteBlockTarget) => void
+  onOpenPage?: (page: NotebookPage, blockId?: string) => Promise<void> | void
 }) {
   const catalog = useNotebookLibrary(state => state.state)
   const presentation = useWorkbenchBrowserPresentation()
   const [canvasOpen, setCanvasOpen] = useState(false)
   const [canvasBlock, setCanvasBlock] = useState<NoteBlockTarget | null>(null)
   const read = useMemo(() => parseNoteFile(document), [document])
+  const sourceIdentity = JSON.stringify([resource?.hostId, resource?.workspaceId, resource?.workspacePath, document.path, read.status === 'valid' ? read.note.noteId : null])
   const [issue, setIssue] = useState<string | null>(null)
   const [restoreIssue, setRestoreIssue] = useState<string | null>(null)
   const [handle, setHandle] = useState<NoteEditorHandle | null>(null)
+  const registered = read.status === 'valid' && resource && catalog?.pages[read.note.noteId] && sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource)
   const attachHandle = useCallback((value: NoteEditorHandle | null) => { setHandle(value) }, [])
   useEffect(() => {
     if (!restoredBlock || !handle || handle.editor.isDestroyed) { setRestoreIssue(null); return }
@@ -85,6 +90,14 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
         blockId ? { noteId: page.noteId, blockId } : undefined)
     } catch (error) { setIssue(presentError(error)); useAppStore.getState().reportError(error) }
   }
+  const openLinkedPage = async (page: NotebookPage, blockId?: string) => {
+    if (read.status === 'valid' && page.noteId === read.note.noteId && resource && sameNoteResource(page.resource, resource)) { await openCanvasPage(page, blockId); return }
+    if (onOpenPage) await onOpenPage(page, blockId)
+    else await openCanvasPage(page, blockId)
+  }
+  const links = useNoteLinkNavigation(openLinkedPage, catalog, presentation.active && !canvasOpen,
+    (link, target) => link.referenceId ? handle?.bindLink(link, target) ?? false : true,
+    sourceIdentity)
   if (read.status === 'invalid') return <div className="note-invalid" role="status"><strong>Note source needs attention</strong>
     <p>{read.message}</p><p>The original source is preserved. Use Source to inspect it; no block identities have been repaired.</p></div>
   return <div className="note-file-view">
@@ -97,7 +110,9 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     {canvasOpen ? <div className="note-association-canvas"><NoteCanvas scope={{ kind: 'note', noteId: read.note.noteId }} active={presentation.active} onOpen={openCanvasPage} /></div> : null}
     <div hidden={canvasOpen} inert={canvasOpen} className="note-original-editor">
     <WorkbenchPresentationContext.Provider value={canvasOpen ? { ...presentation, active: false } : presentation}>
-    <NoteBlockEditor note={read.note} knowledge={knowledge} onChange={onChange} onSave={onSave} onOpen={onOpen} onIssue={setIssue} handleRef={attachHandle} {...(onSelectedBlock ? { onSelectedBlock } : {})} />
+    <NoteBlockEditor note={read.note} knowledge={knowledge} onChange={onChange} onSave={onSave} onOpen={onOpen} onIssue={setIssue} handleRef={attachHandle} onOpenLink={links.openLink} active={presentation.active && !canvasOpen} showBacklinks={!registered} sourceIdentity={sourceIdentity} {...(onSelectedBlock ? { onSelectedBlock } : {})} />
     </WorkbenchPresentationContext.Provider></div>
+    {links.dialog}
+    {registered ? <NoteLinksPanel noteId={read.note.noteId} active={presentation.active && !canvasOpen} onOpen={openLinkedPage} selectedBlockId={restoredBlock?.blockId} /> : null}
   </div>
 }

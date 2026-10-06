@@ -16,6 +16,8 @@ import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { NoteFileView } from './NoteFileView'
 import { noteReadingStyle } from '../lib/note-reading-style'
+import { openNotebookPage } from '../lib/recall-notebooks'
+import type { NotebookPage } from '@agentmux/core/notebook-catalog'
 
 type SourceChoice = { source: NoteSource; blockId: string; location: AgentMuxSpaceLocation; displayName: string; tabName: string; position: string }
 
@@ -120,6 +122,13 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
     void openAt(exact[0]!)
   }
   const originalResource = config?.workspaces.find(item => item.id === surface.workspaceId)
+  async function openPage(page: NotebookPage, blockId?: string) {
+    const state = useAppStore.getState(), reference = blockPresentation?.reference, tab = state.tabs[tabId]
+    if (!reference || !tab?.space) throw new Error('The original display position is unconfirmed. The Note link and current draft are kept; restore this position and retry.')
+    const opened = await openNotebookPage(page, undefined, reference, blockId ? { noteId: page.noteId, blockId } : undefined,
+      { reference, space: tab.space, ...(presentation.projection ? { projection: presentation.projection } : {}) })
+    if (!opened) throw new Error('Later navigation was kept. The original link is retained; choose it again when ready.')
+  }
   if (!document) return null
   return <div className="note-surface" style={noteReadingStyle(config?.notes)}>
 
@@ -132,7 +141,7 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
       key={JSON.stringify([choice.location.displayWorkspaceId, choice.location.groupId, choice.location.tabId, choice.location.regionId])} onClick={() => void openAt(choice)}>
       <span title={`${choice.location.displayWorkspaceId} · ${choice.location.groupId} · ${choice.location.tabId} · ${choice.location.regionId}`}>{choice.displayName} · {choice.tabName}</span><small>{choice.source.location.path} · {choice.position}</small>
     </button>)}</div> : null}
-    <NoteFileView {...(originalResource ? { resource: { hostId: originalResource.hostId, workspaceId: originalResource.id, workspacePath: originalResource.path, path: surface.path } } : {})} document={document} knowledge={knowledge} onChange={raw => update(tabId, raw, surface.regionId)} onSave={onSave} onOpen={onOpen}
+    <NoteFileView {...(originalResource ? { resource: { hostId: originalResource.hostId, workspaceId: originalResource.id, workspacePath: originalResource.path, path: surface.path } } : {})} document={document} knowledge={knowledge} onChange={raw => update(tabId, raw, surface.regionId)} onSave={onSave} onOpen={onOpen} onOpenPage={openPage}
       {...(blockPresentation ? { onSelectedBlock } : {})} {...(restoredBlock ? { restoredBlock } : {})}
       {...(focusRequest !== undefined ? { focusRequest, canFocus, onFocused } : {})}
       {...(reveal?.noteBlock && presentation.active ? { revealBlock: reveal.noteBlock, onRevealed } : {})} />

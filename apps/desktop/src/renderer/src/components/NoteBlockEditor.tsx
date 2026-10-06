@@ -3,7 +3,13 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { Decoration, Extension, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEditorState, type NodeViewProps } from '@tiptap/react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { NOTE_BLOCK_TYPES, NoteBlockReferenceNode, noteContentExtensions, noteIdentityExtensions } from '../../../shared/note-content-schema'
+import { NOTE_BLOCK_TYPES, NoteBlockReferenceNode, NoteInlineLinkNode, noteContentExtensions, noteIdentityExtensions } from '../../../shared/note-content-schema'
+import { NoteInlineLink, type NoteLinkOpenRequest } from '@agentmux/client-ui/components/NoteInlineLink'
+import { noteWikiInputExtension } from '@agentmux/client-ui/note/note-wiki-input'
+import { noteWikiLiteralExtension } from '@agentmux/client-ui/note/note-wiki-view'
+import type { NoteInlineLinkAttributes, NoteLinkTarget } from '@agentmux/core/note-links'
+import { bindNoteWikiLink, noteWikiTextTokens } from '@agentmux/client-ui/note/note-wikilinks'
+import { useNoteWikiCompletion } from './NoteWikiCompletion'
 import { readNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
 import { noteProvenanceAttributes } from '@agentmux/client-ui/note/note-provenance'
 import { noteBacklinks, resolveNoteBlock, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
@@ -18,18 +24,23 @@ const ThemeActionOutdentIcon = semanticIconComponent('action.outdent')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 
 
-type ReferenceContextValue = { knowledge: NoteKnowledge; trail: readonly string[]; onOpen: (source: NoteSource, blockId: string) => void }
+type ReferenceContextValue = { knowledge: NoteKnowledge; trail: readonly string[]; onOpen: (source: NoteSource, blockId: string) => void; onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined }
 const ReferenceContext = createContext<ReferenceContextValue | null>(null)
 const targetKey = (target: NoteBlockTarget) => JSON.stringify([target.noteId, target.blockId])
 
 function referenceExtension() {
   return NoteBlockReferenceNode.extend({ addNodeView() { return ReactNodeViewRenderer(NoteReferenceView) } })
 }
+function inlineLinkExtension() { return NoteInlineLinkNode.extend({ addNodeView() { return ReactNodeViewRenderer(InlineLinkView) } }) }
+function InlineLinkView({ node, editor }: NodeViewProps) {
+  const context = useContext(ReferenceContext)
+  return <NodeViewWrapper as="span" className="note-inline-link-node" contentEditable={false}><NoteInlineLink link={node.attrs as NoteInlineLinkAttributes} editable={editor.isEditable} onOpen={context?.onOpenLink} /></NodeViewWrapper>
+}
 
 /** The canonical content schema plus two maintained identity allocators; read-only views use neither. */
 export function noteEditorExtensions(folded: () => ReadonlySet<string> = () => new Set()) {
   return [
-    ...noteContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension),
+    ...noteContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension.name === NoteInlineLinkNode.name ? inlineLinkExtension() : extension),
     ...noteIdentityExtensions(),
     Extension.create({
       name: 'noteBlockFold',
@@ -70,27 +81,31 @@ function NoteReferenceView({ node }: NodeViewProps) {
 function ReadOnlyBlock({ content }: { content: JSONContent }) {
   // A list item requires its schema container even when its subtree is the requested projection.
   const doc = useMemo(() => ({ type: 'doc', content: [content.type === 'listItem' ? { type: 'bulletList', content: [content] } : content] }), [content])
-  const editor = useEditor({ extensions: noteContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension), content: doc, editable: false,
+  const context = useContext(ReferenceContext), openLink = useRef(context?.onOpenLink); openLink.current = context?.onOpenLink
+  const editor = useEditor({ extensions: [...noteContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension.name === NoteInlineLinkNode.name ? inlineLinkExtension() : extension), noteWikiLiteralExtension(link => openLink.current?.(link))], content: doc, editable: false,
     editorProps: { attributes: { class: 'note-embedded-content', 'aria-label': 'Original block, read only' } } }, [])
   useEffect(() => { if (editor && JSON.stringify(editor.getJSON()) !== JSON.stringify(doc)) editor.commands.setContent(doc, { emitUpdate: false }) }, [editor, doc])
   return <EditorContent editor={editor} />
 }
 
-export type NoteEditorHandle = { editor: Editor; focusBlock: (blockId: string, focus?: boolean) => boolean }
-export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onIssue, handleRef, onSelectedBlock }: {
+export type NoteEditorHandle = { editor: Editor; focusBlock: (blockId: string, focus?: boolean) => boolean; bindLink: (link: NoteLinkOpenRequest, target: NoteLinkTarget) => boolean }
+export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onIssue, handleRef, onSelectedBlock, onOpenLink, active = true, showBacklinks = true, sourceIdentity = note.noteId }: {
   note: NoteDocument; knowledge: NoteKnowledge; onChange: (raw: string) => void; onOpen: (source: NoteSource, blockId: string) => void
   onSave: () => void; onIssue: (message: string | null) => void; handleRef?: Ref<NoteEditorHandle | null>; onSelectedBlock?: (target: NoteBlockTarget) => void
+  onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined; active?: boolean; showBacklinks?: boolean; sourceIdentity?: string
 }) {
   const props = useRef({ note, onChange, onSave, onIssue, onSelectedBlock })
   props.current = { note, onChange, onSave, onIssue, onSelectedBlock }
   const [selected, setSelected] = useState<string | null>(null), [picker, setPicker] = useState(false), [query, setQuery] = useState('')
   const [, setFoldRevision] = useState(0)
   const folded = useRef(new Set<string>())
-  const extensions = useMemo(() => noteEditorExtensions(() => folded.current), [])
+  const wikiHandlers = useRef<{ created(link: NoteInlineLinkAttributes): void; keyDown(event: KeyboardEvent): boolean; open(link: NoteLinkOpenRequest): void }>({ created() {}, keyDown: () => false, open() {} })
+  const extensions = useMemo(() => [...noteEditorExtensions(() => folded.current), noteWikiInputExtension(link => wikiHandlers.current.created(link)), noteWikiLiteralExtension(link => wikiHandlers.current.open(link))], [])
   const editor = useEditor({ extensions, content: note.content, editorProps: {
     attributes: { class: 'note-block-content', role: 'textbox', 'aria-label': 'Note blocks', 'aria-multiline': 'true' },
     handleKeyDown(view, event) {
       if (event.isComposing || view.composing) return false
+      if (wikiHandlers.current.keyDown(event)) return true
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); props.current.onSave(); return true }
       return false
     }
@@ -112,6 +127,21 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
       if (typeof blockId === 'string') current.onSelectedBlock?.({ noteId: current.note.noteId, blockId })
     }
   } }, [note.noteId])
+  const wiki = useNoteWikiCompletion(editor, active, sourceIdentity)
+  wikiHandlers.current = { created: wiki.created, keyDown: wiki.keyDown, open: link => {
+    if (!editor || editor.isDestroyed || !active) return
+    if (!link.referenceId && link.rawRange) {
+      const { from, to } = link.rawRange
+      if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to > editor.state.doc.content.size || from >= to) return
+      const at = editor.state.doc.resolve(from), block = at.parent
+      const token = block.type.name !== 'codeBlock' && noteWikiTextTokens(block.toJSON().content ?? []).find(token => at.start() + token.from === from && at.start() + token.to === to && token.text === link.text)
+      if (!token) { props.current.onIssue('The original link text changed. Your draft is kept; choose the current link again.'); return }
+      const stored = { referenceId: crypto.randomUUID(), text: link.text, target: null }
+      editor.view.dispatch(editor.state.tr.replaceWith(from, to, editor.schema.nodes.noteLink!.create(stored, null, at.marks())))
+      onOpenLink?.(stored); return
+    }
+    onOpenLink?.(link)
+  } }
 
   useEffect(() => {
     if (!editor) return
@@ -138,7 +168,17 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
       // An Editor identity may survive without its view. Re-publish on every
       // real mount so retained restore/reveal/focus requests can resume.
       if (editor.isDestroyed) { detach(); return }
-      publish({ editor, focusBlock(blockId, focus = true) {
+      publish({ editor, bindLink(link, target) {
+        if (editor.isDestroyed || !link.referenceId) return false
+        const original = { ...props.current.note, content: editor.getJSON() }
+        const bound = bindNoteWikiLink(original, { referenceId: link.referenceId, text: link.text, target })
+        if (bound === original) return false
+        let position: number | null = null
+        editor.state.doc.descendants((node, pos) => { if (node.type.name === 'noteLink' && node.attrs.referenceId === link.referenceId) { position = pos; return false } })
+        if (position === null) return false
+        editor.view.dispatch(editor.state.tr.setNodeMarkup(position, undefined, { referenceId: link.referenceId, text: link.text, target }).setMeta('addToHistory', false))
+        return true
+      }, focusBlock(blockId, focus = true) {
         if (editor.isDestroyed) return false
         let position: number | null = null, textblock = false
         editor.state.doc.descendants((node, pos) => { if (node.attrs.blockId === blockId) { position = node.isTextblock ? pos + 1 : pos; textblock = node.isTextblock; return false } })
@@ -183,7 +223,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     editor.chain().focus().insertContent({ type: 'blockReference', attrs: { target, mode } }).run()
     setPicker(false); setQuery('')
   }
-  return <ReferenceContext.Provider value={{ knowledge, trail: [], onOpen }}><div className="note-editor" data-note-empty={note.content.content?.length === 1 && note.content.content[0]?.type === 'paragraph' && !note.content.content[0].content?.length}>
+  return <ReferenceContext.Provider value={{ knowledge, trail: [], onOpen, onOpenLink }}><div className="note-editor" data-note-empty={note.content.content?.length === 1 && note.content.content[0]?.type === 'paragraph' && !note.content.content[0].content?.length}>
     <div className="note-editor__tools" role="toolbar" aria-label="Note block tools">
       <div className="note-editor__tool-group" role="group" aria-label="Block style">
         <button type="button" className="note-tool" title="Heading" aria-label="Heading" aria-pressed={formatting?.heading ?? false} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}><ThemeObjectHeadingIcon size={15} /></button>
@@ -211,13 +251,14 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
       </div>)}{!candidates.length ? <p className="note-scope">No matching block is confirmed in this scope.</p> : null}</div>
     </section> : null}
     <div className="note-editor__body"><EditorContent editor={editor} /></div>
-    <details className="note-backlinks"><summary>Backlinks{selected && backlinks.length ? ` · ${backlinks.length}` : ''}<span>{knowledge.scope === 'complete' ? 'Confirmed scope' : 'Partial scope'}</span></summary>
-      {selected ? backlinks.length ? backlinks.map(link => <button type="button" className="note-backlink" key={JSON.stringify([link.source.location.workspaceId, link.source.location.path, link.referenceId])}
+    {wiki.popup}
+    {showBacklinks ? <details className="note-backlinks"><summary>Backlinks{selected && backlinks.length ? ` · ${backlinks.length}` : ''}<span>{knowledge.scope === 'complete' ? 'Confirmed scope' : 'Partial scope'}</span></summary>
+      {selected ? backlinks.length ? backlinks.map(link => <button type="button" className="note-backlink" key={JSON.stringify([link.source.location.workspaceId, link.source.location.path, link.occurrence])}
         title={`${link.source.location.workspaceId} · ${link.source.location.path} · ${link.blockId}`} aria-label={`Open ${link.source.location.workspaceId} · ${link.source.location.path} · ${link.blockId}`}
         onClick={() => onOpen(link.source, link.blockId)}><span>{link.source.location.path}</span><small>{link.mode === 'embed' ? 'Embedded block' : 'Block reference'}</small></button>)
         : <p className="note-scope">{knowledge.scope === 'complete' ? 'No references in the confirmed scope.' : 'No references found among loaded Notes. Unread sources are not counted.'}</p>
         : <p className="note-scope">Select a block to see its exact incoming references.</p>}
       {knowledge.invalid.length ? <p className="note-knowledge-notice" role="status">{knowledge.invalid.length} Note file could not be indexed. Its original source is preserved.</p> : null}
-    </details>
+    </details> : null}
   </div></ReferenceContext.Provider>
 }

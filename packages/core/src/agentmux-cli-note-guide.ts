@@ -18,9 +18,22 @@ Every semantic block needs a unique persistent blockId. Preserve noteId, existin
 referenceIds, marks, provenance and unrelated structure when editing; editing or reordering
 is not copying. A block reference uses type "blockReference" with attrs {blockId,
 referenceId,mode:"reference"|"embed",target:{noteId,blockId}}. Keep exact target IDs,
-never infer a target from a title, path or quoted source. New blocks/references need new IDs.
+never guess a target from a display title, path or quoted source. New blocks/references need new IDs.
 The original file owner records trusted creation/latest-edit attribution at save time.
 Do not self-report an Agent identity in provenance; unknown old authors stay unknown.
+
+Inline wiki syntax [[Page]] and [[Page #heading-or-block]] is accepted in ordinary Note text
+on the same original file.create/write path. Code, escaped syntax and unfinished tokens stay text.
+The writer uses the original catalog and actual target file: only a unique confirmed target binds.
+Repeated titles/headings require explicit selection; unavailable or missing queries remain savable.
+The canonical node is {"type":"noteLink","attrs":{"referenceId":"stable-occurrence-id",
+"text":"Page #Heading","target":{"noteId":"stable-note-id","blockId":"stable-block-id"}}}.
+A page target contains only noteId. An unbound query has target:null. Preserve existing referenceIds
+and targets: renaming a page or heading does not authorize looking up the label and changing IDs.
+Use amux notebook resolve --query TEXT for catalog candidates without reading bodies, then
+amux notebook resolve --link '[[Page #Heading]]' [--note NOTE_ID] [--block BLOCK_ID] to read
+only the selected original. #^BLOCK_ID selects an exact block; bare #text checks headings and IDs
+without choosing the first match. A resolve is read-only: save a chosen stable target through CAS.
 
 To save: discover the Note workface and exact Zone mapping with notebook inspect and
 space inspect. Run amux file read --zone ZONE --path ZONE_RELATIVE_PATH --host HOST
@@ -38,8 +51,12 @@ Use amux notebook graph --note NOTE_ID for incoming/outgoing block references an
 --notebook NOTEBOOK_ID for relationships touching that Notebook, or --all for the catalog.
 Each call explicitly scans the durable catalog to find incoming sources, including closed pages;
 it does not infer a complete graph from currently open files. Results include catalogRevision,
-per-file revisions/statuses, hierarchy, exact source block/resource, target block/referenceId,
+per-file revisions/statuses, hierarchy, exact source block/resource and tagged page/block/unbound targets,
 resolution and duplicateNoteIds. Per-file revisions are not a cross-file atomic snapshot.
+Occurrences are stored {kind:"stored",referenceId} or derived {kind:"text",revision,from,to}.
+Old saved plain [[...]] text is unbound evidence until explicit saving allocates a persistent ID;
+reading or graph inspection never rewrites that source or silently binds it. Text positions use
+the source block's inline PM offsets (UTF16 text, inline atoms count one), valid only at its revision.
 completeness partial/unknown and missing/ambiguous targets must remain visible; an empty
 edge list with unread sources does not prove no links. No second body or relationship store exists.
 

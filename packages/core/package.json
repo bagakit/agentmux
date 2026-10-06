@@ -154,6 +154,10 @@
       "types": "./dist/notebook-observation.d.ts",
       "import": "./dist/notebook-observation.js"
     },
+    "./note-links": {
+      "types": "./dist/note-links.d.ts",
+      "import": "./dist/note-links.js"
+    },
     "./notebook-catalog": {
       "types": "./dist/notebook-catalog.d.ts",
       "import": "./dist/notebook-catalog.js"

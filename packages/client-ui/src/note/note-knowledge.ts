@@ -1,11 +1,14 @@
 import type { JSONContent } from '@tiptap/core'
 import { NOTE_FILE_EXTENSION, readNoteDocument, type NoteBlockTarget, type NoteDocument, type NoteDocumentRead } from './note-document.js'
 import { noteContentSchema } from './note-content-schema.js'
+import { indexNoteReferences, noteSemanticText } from './note-wikilinks.js'
+import type { NoteGraphOccurrence, NoteGraphTarget } from '@agentmux/core/notebook-observation'
+import type { NoteLinkTarget } from '@agentmux/core/note-links'
 export type NoteFileDocument = { path: string; content: string; revision: string }
 export type NoteLocation = { workspaceId: string; path: string }
 export type NoteBlock = { blockId: string; content: JSONContent; text: string }
-export type NoteSource = { location: NoteLocation; note: NoteDocument; blocks: ReadonlyMap<string, NoteBlock> }
-export type NoteBacklink = { source: NoteSource; blockId: string; referenceId: string; mode: 'reference' | 'embed'; target: NoteBlockTarget }
+export type NoteSource = { location: NoteLocation; note: NoteDocument; revision: string; blocks: ReadonlyMap<string, NoteBlock> }
+export type NoteBacklink = { source: NoteSource; blockId: string; occurrence: NoteGraphOccurrence; mode: 'reference' | 'embed' | 'link'; target: NoteGraphTarget }
 export type NoteKnowledge = {
   scope: 'partial' | 'complete' | 'unknown'
   sources: readonly NoteSource[]
@@ -45,13 +48,13 @@ export function noteKnowledge(documents: readonly { location: NoteLocation; docu
       const tree = noteContentSchema.nodeFromJSON(read.note.content)
       tree.descendants(node => {
         const blockId: unknown = node.attrs.blockId
-        if (typeof blockId === 'string') blocks.set(blockId, { blockId, content: node.toJSON(), text: node.textContent })
-        if (node.type.name === 'blockReference') forward.push({ blockId: node.attrs.blockId, referenceId: node.attrs.referenceId, mode: node.attrs.mode, target: node.attrs.target })
+        if (typeof blockId === 'string') blocks.set(blockId, { blockId, content: node.toJSON(), text: noteSemanticText(node) })
       })
+      forward.push(...indexNoteReferences(tree).map(reference => ({ ...reference, occurrence: reference.occurrence.kind === 'text' ? { ...reference.occurrence, revision: document.revision } : reference.occurrence })))
       indexed = { blocks, references: forward }
       indexedDocuments.set(document, indexed)
     }
-    const source: NoteSource = { location, note: read.note, blocks: indexed.blocks }
+    const source: NoteSource = { location, note: read.note, revision: document.revision, blocks: indexed.blocks }
     sources.push(source)
     references.push(...indexed.references.map(reference => ({ ...reference, source })))
   }
@@ -71,6 +74,7 @@ export function resolveNoteBlock(knowledge: NoteKnowledge, target: NoteBlockTarg
 }
 
 /** Exact forward occurrences, not transitive embed expansion or the number of visible surfaces. */
-export function noteBacklinks(knowledge: NoteKnowledge, target: NoteBlockTarget): readonly NoteBacklink[] {
-  return knowledge.references.filter(reference => reference.target.noteId === target.noteId && reference.target.blockId === target.blockId)
+export function noteBacklinks(knowledge: NoteKnowledge, target: NoteLinkTarget): readonly NoteBacklink[] {
+  return knowledge.references.filter(reference => reference.target.kind !== 'unbound' && reference.target.noteId === target.noteId &&
+    (target.blockId === undefined || reference.target.kind === 'block' && reference.target.blockId === target.blockId))
 }

@@ -65,6 +65,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'notebook:actor': 'notebook actor',
   'notebook:read': 'notebook directory',
   'notebook:graph': 'original Note graph observation',
+  'notebook:resolve': 'original Note link resolution',
   'notebook:content': 'original Note content observation',
   'notebook:cancelObservation': 'Note observation cancellation',
   'notebook:apply': 'notebook changes',

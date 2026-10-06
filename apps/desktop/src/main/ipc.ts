@@ -774,7 +774,9 @@ export async function registerIpc(args: {
   handle('files:list', async (workspaceId: string, path?: string, limit?: number) =>
     await files.listFiles(workspace(config, workspaceId), path, limit)
   )
-  const noteFileWriter = new NoteFileWriter(files)
+  const notebookStore = new AgentMuxNotebookStore(undefined, notesStorageOwner.storage)
+  const notebookObservation = createNotebookObservationServices(notebookStore, { files, workspace: id => config.workspaces.find(item => item.id === id) }, () => notesStorageReady)
+  const noteFileWriter = new NoteFileWriter(files, { state: async () => { await notesStorageReady; return notebookStore.read() }, owner: notebookObservation.owner })
   const publicFiles = new FileReadOwner({ files: { read: files.read.bind(files), listFiles: files.listFiles.bind(files), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
   handleWithEvent('files:createPublic', async (event, input: import('@agentmux/core').FileCreateParams) => { requireTrustedSender('files:createPublic', event); return publicFiles.create(input, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }) })
@@ -1061,14 +1063,16 @@ export async function registerIpc(args: {
     return handler(event, ...values)
   }))
 
-  const notebookStore = new AgentMuxNotebookStore(undefined, notesStorageOwner.storage)
-  const notebookObservation = createNotebookObservationServices(notebookStore, { files, workspace: id => config.workspaces.find(item => item.id === id) }, () => notesStorageReady)
   handleWithEvent('notesStorage:inspect', async (event, operationId?: string) => { requireTrustedSender('notesStorage:inspect', event); await notesStorageReady; return notesStorageOwner.inspect(operationId) })
   handleWithEvent('notesStorage:change', async (event, input: import('@agentmux/core/notebook-store').NotesStorageChange) => { requireTrustedSender('notesStorage:change', event); return notesStorageOwner.change(input) })
   const disposeNotebook = notebookStore.subscribe(observation => {
     if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('notebook:changed', observation)
   })
   const notebookActor = { kind: 'user' as const, id: 'local-user:' + (process.getuid?.() ?? 'current') }
+  handleWithEvent('notebook:resolve', async (event, input: import('../shared/notebook-observation').NotebookResolveRequest) => {
+    requireTrustedSender('notebook:resolve', event)
+    return notebookObservation.requests.resolve(event.sender, input)
+  })
   handleWithEvent('notebook:graph', async (event, input: import('../shared/notebook-observation').NotebookGraphRequest) => {
     requireTrustedSender('notebook:graph', event)
     return notebookObservation.requests.graph(event.sender, input)

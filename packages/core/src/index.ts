@@ -108,3 +108,4 @@ export * from './mote-avatar-series.js'
 export * from './mote-avatar-write.js'
 
 export * from './notebook-observation.js'
+export * from './note-links.js'

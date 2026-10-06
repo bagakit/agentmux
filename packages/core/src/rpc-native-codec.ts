@@ -22,6 +22,7 @@ import { parseConnectionOffer } from '@agentmux/relay/offer'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { parseNotebookGraph, parseNoteContentObservation, parseNotebookObservationParams } from './notebook-observation.js'
+import { parseNotebookResolveParams, parseNotebookResolveResult } from './note-links.js'
 import { inspectNotebook, notebookFingerprint, parseNotebookState } from './notebook-catalog.js'
 import { isTopicMethod, parseTopicParams, parseTopicResult } from './public-rpc-topics.js'
 import { isFileMethod, parseFileCreateParams, parseFileCreateResult, parseFileWriteParams, parseFileWriteResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult } from './public-rpc-files.js'
@@ -563,6 +564,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       }
 
       case 'notebook.graph': { parseNotebookGraph(p, parseNotebookObservationParams(input)); break }
+      case 'notebook.resolve': { parseNotebookResolveResult(p, parseNotebookResolveParams(input)); break }
 
       case 'space.state':
       case 'name.confirm':

@@ -1,16 +1,20 @@
 import { AgentMuxError, parseNotebookGraph, type NotebookGraph, type NotebookGraphParams, type NoteContentObservation } from '@agentmux/core/notebook-observation'
 import { parseNotebookState, type NotebookState } from '@agentmux/core/notebook-catalog'
+import type { NotebookResolveParams, NotebookResolveResult } from '@agentmux/core/note-links'
 
 /** One observed directory and its derived saved-file graph. No mutable content owner lives here. */
 export type NotebookGraphSnapshot = { catalog: NotebookState; graph: NotebookGraph }
 export type NotebookObservationApi = {
+  resolve(params: NotebookResolveParams, options?: { signal?: AbortSignal }): Promise<NotebookResolveResult>
   graph(params: NotebookGraphParams, options?: { signal?: AbortSignal }): Promise<NotebookGraphSnapshot>
   content(noteId: string, options?: { signal?: AbortSignal; maxBytes?: number }): Promise<NoteContentObservation>
 }
 export type NotebookGraphRequest = { requestId: string; params: NotebookGraphParams }
+export type NotebookResolveRequest = { requestId: string; params: NotebookResolveParams }
 export type NotebookContentRequest = { requestId: string; noteId: string; maxBytes?: number }
 /** AbortSignal stays in Renderer; only exact request identities cross contextBridge/IPC. */
 export type NotebookObservationPreloadApi = {
+  resolve(input: NotebookResolveRequest): Promise<NotebookResolveResult>
   graph(input: NotebookGraphRequest): Promise<NotebookGraphSnapshot>
   content(input: NotebookContentRequest): Promise<NoteContentObservation>
   cancelObservation(requestId: string): Promise<void>

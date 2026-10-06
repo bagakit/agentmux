@@ -4,10 +4,15 @@ import { attributeNoteBlocks } from '@agentmux/client-ui/note/note-provenance'
 import { noteContentSchema } from '../shared/note-content-schema.js'
 import type { WorkspaceFileWriteInput, WorkspaceFileWriteResult, WorkspaceRecord } from '../shared/contracts.js'
 import type { WorkspaceFiles } from './workspace-files.js'
+import { randomUUID } from 'node:crypto'
+import { prepareNoteWikiLinks, bindNoteWikiLink } from '@agentmux/client-ui/note/note-wikilinks'
+import type { NotebookState } from '@agentmux/core/notebook-catalog'
+import type { NotebookObservationOwner } from './notebook-observation-owner.js'
 
 /** The original Files writer, enriched with Note metadata; neither a content store nor a new save lane. */
 export class NoteFileWriter {
-  constructor(private readonly files: Pick<WorkspaceFiles, 'read' | 'write'>) {}
+  constructor(private readonly files: Pick<WorkspaceFiles, 'read' | 'write'>,
+    private readonly links?: { state(): Promise<NotebookState>; owner: NotebookObservationOwner }) {}
   async write(workspace: WorkspaceRecord, input: WorkspaceFileWriteInput, context?: FileWriteContext): Promise<WorkspaceFileWriteResult> {
     if (!input.path.endsWith(NOTE_FILE_EXTENSION)) return this.files.write(workspace, input)
     const candidate = readNoteDocument(input.content)
@@ -29,7 +34,18 @@ export class NoteFileWriter {
       if (before && before.noteId !== candidate.note.noteId) reason = 'The original Note identity changed; block attribution is unconfirmed.'
       // Compare the original schema's canonical nodes so editor-added default attributes are not edits.
       const normalized = (note: typeof candidate.note) => ({ ...note, content: noteContentSchema.nodeFromJSON(note.content).toJSON() })
-      const next = attributeNoteBlocks(before ? normalized(before) : null, normalized(candidate.note), confirmedBaseline ? context?.actor : undefined, Date.now())
+      const prepared = prepareNoteWikiLinks(normalized(candidate.note), randomUUID)
+      let linked = prepared.note
+      if (prepared.pending.length && this.links) {
+        try {
+          const targets = await this.links.owner.resolvePending(await this.links.state(), prepared.pending, {
+            resource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path: input.path },
+            document: { path: input.path, content: JSON.stringify(prepared.note), revision: input.expectedRevision ?? 'pending-create' }
+          })
+          for (const link of prepared.pending) { const target = targets.get(link.referenceId); if (target) linked = bindNoteWikiLink(linked, { referenceId: link.referenceId, text: link.text, target }) }
+        } catch { /* Name observation cannot take away saving; structured unbound queries are retained. */ }
+      }
+      const next = attributeNoteBlocks(before ? normalized(before) : null, linked, confirmedBaseline ? context?.actor : undefined, Date.now())
       if (JSON.stringify(next) !== JSON.stringify(candidate.note)) content = JSON.stringify(next, null, 2) + '\n'
       if (!context?.actor) reason = 'The original write actor is unknown; changed block attribution is unconfirmed.'
     }

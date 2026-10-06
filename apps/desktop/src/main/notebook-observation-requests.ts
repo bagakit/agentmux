@@ -4,6 +4,7 @@ import type { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 import type { WebContentsDidStartNavigationEventParams } from 'electron'
 import { parseNotebookGraphSnapshot, type NotebookGraphSnapshot } from '../shared/notebook-observation.js'
 import { NotebookObservationOwner } from './notebook-observation-owner.js'
+import { parseNotebookResolveParams, parseNotebookResolveResult, type NotebookResolveResult } from '@agentmux/core/note-links'
 
 export type NotebookObservationSender = {
   isDestroyed(): boolean
@@ -28,6 +29,18 @@ export class NotebookObservationRequests {
   private readonly senders = new Map<NotebookObservationSender, SenderJobs>()
   constructor(private readonly store: Pick<AgentMuxNotebookStore, 'read'>, private readonly owner: NotebookObservationPort,
     private readonly ready: () => Promise<unknown> = async () => {}) {}
+  resolve(sender: NotebookObservationSender, input: unknown): Promise<NotebookResolveResult> {
+    const original = request(input, ['requestId', 'params']), params = parseNotebookResolveParams(original.params)
+    return this.read(sender, requestId(original.requestId), async signal => {
+      const catalog = await this.store.read(); signal.throwIfAborted()
+      const result = parseNotebookResolveResult(await this.owner.resolve(catalog, params, { signal }), params)
+      if (result.catalogRevision !== catalog.revision || result.candidates.some(candidate => {
+        const page = catalog.pages[candidate.noteId]
+        return !page || candidate.title !== page.title || candidate.notebookId !== page.notebookId || notebookFingerprint(candidate.resource) !== notebookFingerprint(page.resource)
+      })) throw new AgentMuxError('The original resolver returned another directory snapshot.', 'CONTROL_PROTOCOL_ERROR')
+      return result
+    })
+  }
 
   graph(sender: NotebookObservationSender, input: unknown): Promise<NotebookGraphSnapshot> {
     const original = request(input, ['requestId', 'params']), params = parseNotebookObservationParams(original.params)
