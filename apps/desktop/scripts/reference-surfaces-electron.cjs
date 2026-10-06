@@ -87,6 +87,8 @@ app.whenReady().then(async () => {
       assert.equal(await read(() => window.referenceExample === document.querySelector('.wf-gallery__examples')),true)
       await read(() => document.querySelector('.observation-gallery').scrollIntoView({block:'start'}));await frame(`${slice}-observation-390.png`)
       result.operations.push({nativeBoundaryKeyboard:true,nativeResetKeyboard:true,resetKeepsOriginalExamples:true})
+    } else if (slice === 'a2a-message-lineage') {
+      await require(path.join(__dirname, 'fixtures', slice, 'scenario.cjs'))({ win, read, settle, until, press, frame, result })
     } else throw new Error('Unknown original surface scene')
     assert.deepEqual(result.errors, []); result.passed = true
   } catch (error) {
