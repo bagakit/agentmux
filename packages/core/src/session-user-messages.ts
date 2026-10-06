@@ -101,6 +101,8 @@ export function projectSessionUserMessages(params: {
 
       const author: AgentSessionUserMessageAuthor = item.authorAgentSessionId !== undefined
         ? { kind: 'agent', agentSessionId: item.authorAgentSessionId }
+        : item.authorExternal !== undefined
+          ? item.authorExternal
         : item.authorHuman === true
           ? { kind: 'human' }
           : { kind: 'unknown' }

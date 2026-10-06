@@ -351,7 +351,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           const timeline = record(p.captured, ['agentSessionId', 'revision', 'items'])
           if (timeline.agentSessionId !== expected.agentSessionId) fail(); count(timeline.revision)
           array(timeline.items, value => {
-            const item = record(value, ['id', 'agentSessionId', 'kind', 'status', 'source', 'createdAt', 'updatedAt', 'title', 'authorAgentSessionId', 'authorHuman', 'sourceDevice', 'sourceChannel', 'content', 'toolName', 'toolInput', 'toolOutput', 'eventName', 'activityState'])
+            const item = record(value, ['id', 'agentSessionId', 'kind', 'status', 'source', 'createdAt', 'updatedAt', 'title', 'authorAgentSessionId', 'authorHuman', 'authorExternal', 'sourceDevice', 'sourceChannel', 'content', 'toolName', 'toolInput', 'toolOutput', 'eventName', 'activityState'])
             if (item.agentSessionId !== expected.agentSessionId) fail()
             const mutation = normalizeAgentTimelineMutation({ type: 'append', agentSessionId: expected.agentSessionId, item })
             if (mutation.type !== 'append' || !isDeepStrictEqual(mutation.item, item)) fail()

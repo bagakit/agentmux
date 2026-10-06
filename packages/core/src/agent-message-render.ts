@@ -16,7 +16,9 @@ import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 export function renderAgentMuxMessageEnvelope(envelope: AgentMuxMessageEnvelope): string {
   const source = envelope.sender.kind === 'agent-session' && envelope.senderSessionId !== null
     ? `Agent ${envelope.senderSessionId}`
-    : 'unverified local process'
+    : envelope.sender.kind === 'external'
+      ? `External ${[envelope.sender.actor.application.domain, envelope.sender.actor.application.appId, envelope.sender.actor.idType, envelope.sender.actor.userId, envelope.sender.externalConversationId].map(encodeURIComponent).join('/')}`
+      : 'unverified local process'
   return `[Message from ${source}]\n${envelope.body}`
 }
 

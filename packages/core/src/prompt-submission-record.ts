@@ -1,3 +1,4 @@
+import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { AgentMuxError } from './errors.js'
 import { validateAgentInputControlId, validateAgentInputWaitRef } from './agent-input-wait.js'
 import { validateAgentPromptAdmissionIntent, validateAgentPromptInputKey } from './agent-prompt-condition.js'
@@ -258,6 +259,7 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
         ...(message.systemContext === undefined ? {} : { systemContext: bytes(message.systemContext) }),
         ...(message.authorAgentSessionId === undefined ? {} : { authorAgentSessionId: string(message.authorAgentSessionId, 'prompt message author') }),
         ...(message.authorHuman === true ? { authorHuman: true as const } : {}),
+        ...(message.authorExternal === undefined ? {} : { authorExternal: parseAgentExternalMessageAuthor(message.authorExternal) }),
         ...(message.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(message.sourceDevice) }),
         ...(message.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(message.sourceChannel) })
       }

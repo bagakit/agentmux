@@ -1,3 +1,4 @@
+import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { parseConversationCheckpoint, parseConversationChangesPage, type ConversationCheckpoint, type ConversationChangesPage } from './conversation-changes.js'
 import type { AgentConversationReadPage } from './conversation.js'
 import { SessionHistoryObservationPool } from './session-history-observation-pool.js'
@@ -5281,6 +5282,10 @@ export class AgentMuxClient {
       if (caller) throw new AgentMuxError('An Agent cannot acquire the local original input author.', 'MESSAGE_SENDER_MISMATCH')
       return
     }
+    if (sender.kind === 'external') {
+      if (caller) throw new AgentMuxError('An Agent cannot acquire an external input author.', 'MESSAGE_SENDER_MISMATCH')
+      return
+    }
     if (!caller) throw new AgentMuxError('The original Agent author needs its current capability.', 'AGENT_CAPABILITY_INVALID')
     const authorized = await this.authorizeAgentCaller(caller.capability, caller.agentSessionId)
     if (authorized.agentSessionId !== sender.agentSessionId || original.envelope.senderSessionId !== authorized.agentSessionId) {
@@ -5318,9 +5323,9 @@ export class AgentMuxClient {
     await this.assertInputWaitingAuthor(saved.intent, input.caller)
     const prior = await this.inspectAgentPromptSubmission(ref.key)
     if (prior || saved.control.state === 'dispatch-authorized') return (await this.inspectAgentInput({ key: ref.key }))!
+    const prompt = await this.inputWaitingPrompt(saved.intent, input.caller, context)
     const active = this.inputWaitingContexts.get(agentInputJournalKey(ref.key))
     if (active?.active && isDeepStrictEqual(active.ref, ref)) return (await this.inspectAgentInput({ key: ref.key }))!
-    const prompt = await this.inputWaitingPrompt(saved.intent, input.caller)
     const next = await this.messageQueue.reenableInputWaiting(ref)
     const previous = this.inputWaitingContexts.get(agentInputJournalKey(ref.key))
     if (previous) { previous.controller.abort(); this.inputWaitingContexts.delete(agentInputJournalKey(ref.key)) }
@@ -5328,7 +5333,7 @@ export class AgentMuxClient {
       prompt.authorAgentSessionId, this.inputCallAuthority(prompt.authority, context), context?.requestSignal)
   }
 
-  private async inputWaitingPrompt(intent: AgentInputJournalIntent, caller?: { agentSessionId: string; capability: string }): Promise<{
+  private async inputWaitingPrompt(intent: AgentInputJournalIntent, caller?: { agentSessionId: string; capability: string }, context?: AgentInputCallContext): Promise<{
     input: AgentMuxAgentPromptInput; authorAgentSessionId?: string; authority?: import('./prompt-submission.js').AgentPromptInputAuthority
   }> {
     const source = intent.source
@@ -5352,6 +5357,7 @@ export class AgentMuxClient {
         if (run.state.type !== 'running') throw new AgentMuxError('The original author Run is not running.', 'AGENT_CAPABILITY_STALE_RUN')
       } }
     }
+    if (envelope.sender.kind === 'external') authority = await this.externalMessageAuthority(envelope, context)
     return { input: { agentSessionId: intent.key.agentSessionId, expectedRun: intent.key.expectedRun, operationId: agentPromptInputId(intent.key),
       prompt: renderAgentMuxMessageEnvelope(envelope), admissionIntent: { kind: 'manual-actor' }, execution: 'immediate',
       ...(envelope.sender.kind === 'human' ? { authorHuman: true } : {}),
@@ -5359,11 +5365,22 @@ export class AgentMuxClient {
       ...(envelope.sender.kind === 'agent-session' ? { authorAgentSessionId: envelope.sender.agentSessionId } : {}), ...(authority ? { authority } : {}) }
   }
 
+  /** Only an executing Host's current author owner can admit external input. Persisted attribution is not a grant. */
+  private async externalMessageAuthority(envelope: AgentMuxMessageEnvelope, context?: AgentInputCallContext): Promise<import('./prompt-submission.js').AgentPromptInputAuthority> {
+    const host = context?.externalAuthor, sender = envelope.sender
+    if (sender.kind !== 'external' || !envelope.recipientSessionId || !envelope.recipientRunId || !host || typeof host.assertCurrent !== 'function' || !isDeepStrictEqual(parseAgentExternalMessageAuthor(host.identity), sender)) throw new AgentMuxError('External input requires its exact current Host author owner.', 'EXTERNAL_AUTHOR_REQUIRED')
+    const identity = structuredClone(sender), check = host.assertCurrent.bind(host)
+    const intent = { agentSessionId: envelope.recipientSessionId!, expectedRun: { runId: envelope.recipientRunId! }, operationId: envelope.operationId, messageId: envelope.messageId, body: envelope.body }
+    const assertCurrent = async () => { await check(structuredClone(intent)) }
+    await assertCurrent()
+    return { externalAuthor: identity, assertCurrent }
+  }
+
   private inputCallAuthority(authority?: import('./prompt-submission.js').AgentPromptInputAuthority,
     context?: AgentInputCallContext): import('./prompt-submission.js').AgentPromptInputAuthority | undefined {
     const assertCurrent = context?.assertCurrent
     if (!assertCurrent) return authority
-    return { ...(authority?.binding ? { binding: authority.binding } : {}), assertCurrent: async () => {
+    return { ...authority, assertCurrent: async () => {
       await authority?.assertCurrent()
       await assertCurrent()
     } }
@@ -5727,7 +5744,7 @@ export class AgentMuxClient {
     const message: AgentPromptMessageContent = {
       ...(content.trim() ? { userContent: content } : {}),
       ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
-      ...(authorAgentSessionId ? { authorAgentSessionId } : input.authorHuman === true ? { authorHuman: true } : {}),
+      ...(authorAgentSessionId ? { authorAgentSessionId } : authority?.externalAuthor ? { authorExternal: structuredClone(authority.externalAuthor) } : input.authorHuman === true ? { authorHuman: true } : {}),
       ...(input.sourceDevice ? { sourceDevice: normalizeOperationDevice(input.sourceDevice) } : {}),
       sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api')
     }
@@ -5895,6 +5912,7 @@ export class AgentMuxClient {
     } else if (input.caller || envelope.senderSessionId !== null || envelope.senderRunId !== null) {
       throw new AgentMuxError('Local ingress cannot claim an Agent author.', 'MESSAGE_SENDER_MISMATCH')
     }
+    if (envelope.sender.kind === 'external') authority = await this.externalMessageAuthority(envelope, context)
     authority = this.inputCallAuthority(authority, context)
     const recipient = await this.currentStoredAgentSession(input.agentSessionId)
     if (!sameRun(recipient.run, expectedRun)) throw new AgentMuxError('The original message Run changed before saving.', 'STALE_AGENT_SESSION')
@@ -5911,7 +5929,7 @@ export class AgentMuxClient {
       'The caller condition conflicts with the original saved message condition.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     if (queued.input) {
       if (admissionIntent.kind !== 'manual-actor') throw new AgentMuxError('The caller condition cannot replace the original controlled manual input.', 'AGENT_PROMPT_OPERATION_CONFLICT')
-      const original = await this.inputWaitingPrompt(queued.input.intent, input.caller)
+      const original = await this.inputWaitingPrompt(queued.input.intent, input.caller, context)
       return await this.acceptInputWaiting(queued.input.control.ref, original.input, 'message', original.authorAgentSessionId,
         this.inputCallAuthority(original.authority, context), context?.requestSignal)
     }
@@ -7295,6 +7313,7 @@ export class AgentMuxClient {
       title, message.userContent, now, 'user', { status,
         ...(message.authorAgentSessionId ? { authorAgentSessionId: message.authorAgentSessionId } : {}),
         ...(message.authorHuman ? { authorHuman: true } : {}),
+        ...(message.authorExternal ? { authorExternal: message.authorExternal } : {}),
         ...(message.sourceDevice ? { sourceDevice: message.sourceDevice } : {}),
         ...(message.sourceChannel ? { sourceChannel: message.sourceChannel } : {}) })
   }
@@ -7315,7 +7334,7 @@ export class AgentMuxClient {
     content: string,
     observedAt: number,
     source: 'user' | 'agentmux',
-    delivery: { sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; status?: 'complete' | 'failed' } = {}
+    delivery: { sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; authorExternal?: import('./external-author.js').AgentExternalMessageAuthor; status?: 'complete' | 'failed' } = {}
   ): Promise<void> {
     const mutation: AgentTimelineMutation = {
       type: 'append',
@@ -7332,6 +7351,7 @@ export class AgentMuxClient {
         content,
         ...(delivery.sourceDevice ? { sourceDevice: delivery.sourceDevice } : {}),
         ...(delivery.sourceChannel ? { sourceChannel: delivery.sourceChannel } : {}),
+        ...(source === 'user' && delivery.authorExternal ? { authorExternal: delivery.authorExternal } : {}),
         ...(source === 'user' && delivery.authorAgentSessionId
           ? { authorAgentSessionId: delivery.authorAgentSessionId }
           : source === 'user' && delivery.authorAgentSessionId === undefined && delivery.authorHuman === true
