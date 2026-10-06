@@ -53,12 +53,12 @@ export function workspaceTerminalPalette(theme: Pick<ResolvedTheme, 'mode' | 'va
   return {
     background: c.surface0, foreground: c.text, cursor: c.action, cursorAccent: c.surface0,
     selectionBackground: c.surface3, selectionForeground: c.text,
-    black: theme.mode === 'light' ? c.text : c.surface1,
+    black: theme.mode === 'light' ? c.text : c.textSubtle,
     red: c.danger, green: c.success, yellow: c.warning, blue: c.info, magenta: c.special, cyan: c.action,
-    white: theme.mode === 'light' ? c.surface3 : c.textMuted,
+    white: c.textMuted,
     brightBlack: c.textSubtle, brightRed: c.danger, brightGreen: c.actionHover, brightYellow: c.warning,
     brightBlue: c.info, brightMagenta: c.special, brightCyan: c.action,
-    brightWhite: theme.mode === 'light' ? c.surface1 : c.text,
+    brightWhite: c.text,
     extendedAnsi: TERMINAL_EXTENDED_ANSI
   }
 }
