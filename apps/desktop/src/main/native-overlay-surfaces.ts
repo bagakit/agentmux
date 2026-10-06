@@ -124,8 +124,13 @@ export class NativeOverlaySurfaces {
         view.webContents.on('input-event', (_event, input) => this.forward(owner, input))
       }
       projection.region = region
-      projection.interactive = false
       try {
+        const paintedBounds = projection.interactive ? projection.view.getBounds() : region.bounds
+        // Repainting the same mounted float does not revoke its confirmed input route.
+        // A new or moved frame still waits for paint; compare the actual native rectangle,
+        // not a requested rectangle that may itself be waiting for an earlier paint.
+        projection.interactive = projection.interactive && paintedBounds.x === region.bounds.x &&
+          paintedBounds.y === region.bounds.y && paintedBounds.width === region.bounds.width && paintedBounds.height === region.bounds.height
         projection.paintStage = 'Chrome geometry'
         // CSS pixels scaled by UI zoom can be fractional; the native View takes integer pixels.
         projection.view.setBorderRadius(Math.round(region.radius))
