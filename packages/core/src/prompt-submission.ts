@@ -13,7 +13,7 @@ import {
   type CtxmuxAdapterRun
 } from './ctxmux-run-adapter.js'
 import { AgentMuxError, agentMuxCancellationError } from './errors.js'
-import { agentPromptNotApplied, type AgentPromptAdmissionIntent, type AgentPromptInputKey, type AgentPromptCondition } from './agent-prompt-condition.js'
+import { agentPromptInputId, agentPromptNotApplied, validateAgentPromptInputKey, type AgentPromptAdmissionIntent, type AgentPromptInputKey, type AgentPromptCondition } from './agent-prompt-condition.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
 import type {
@@ -464,15 +464,23 @@ export class AgentPromptSubmissionCoordinator {
     execution: AgentPromptExecution = 'default',
     expectedFutureIntent?: AgentFuturePromptOccurrence,
     assertSession?: (session: AgentMuxAgentSession) => void,
-    transportQualification?: AgentPromptTransportQualification
+    transportQualification?: AgentPromptTransportQualification,
+    inputKey?: AgentPromptInputKey
   ): Promise<AgentPromptMessageContent | undefined> {
+    // The explicit producer supplies message identity; this public coordinator's
+    // omitted key means its original prompt API, never a guess from input text.
+    const originalInputKey = validateAgentPromptInputKey(inputKey ?? { kind: 'prompt',
+      agentSessionId: session.agentSessionId, expectedRun: condition.expectedRun, submissionId })
+    if (originalInputKey.agentSessionId !== session.agentSessionId || !sameRun(originalInputKey.expectedRun, session.run) ||
+        originalInputKey.expectedRun.runId !== run.runId || !sameRun(originalInputKey.expectedRun, condition.expectedRun) ||
+        agentPromptInputId(originalInputKey) !== submissionId) throw new AgentMuxError(
+      'This input key does not belong to the original producer, Session, Run or operation. The Agent remains available.', 'INVALID_AGENT_PROMPT')
     try {
       const boundary = transportQualification?.protocolInput
       beginPromptPreparationPhase(boundary, 'submission-store')
       return await this.deps.store.withPromptSubmission(session.agentSessionId, async () => {
         try {
-          await this.deps.assertUncontrolledInput?.({ kind: 'prompt', agentSessionId: session.agentSessionId,
-            expectedRun: condition.expectedRun, submissionId })
+          await this.deps.assertUncontrolledInput?.(originalInputKey)
           completePromptPreparationPhase(boundary)
           beginPromptPreparationPhase(boundary, 'session-refresh')
           let current = await this.deps.registry.refresh(session.agentSessionId, session.run)
@@ -502,6 +510,10 @@ export class AgentPromptSubmissionCoordinator {
               if (!previous?.intent || !previous.submissionId || !sameRun(previous.intent.run, current.run)) {
                 throw new AgentMuxError('The original prompt Input request cannot be confirmed. Its message and Run are kept; use the terminal while delivery is reviewed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
               }
+              if (!previous.inputKey) throw new AgentMuxError(
+                'The original input producer key is unconfirmed. Its payload, receipt and healthy Agent are kept; no source was inferred or replayed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+              if (previous.submissionId === submissionId && !isDeepStrictEqual(previous.inputKey, originalInputKey)) throw new AgentMuxError(
+                'The original input producer key conflicts with this request. Keep its frozen identity and payload.', 'AGENT_PROMPT_OPERATION_CONFLICT')
               if (previous.submissionId === submissionId && previous.intent.message === undefined && message !== undefined) {
                 throw new AgentMuxError('Original message source facts are unconfirmed. The original Input and healthy Agent are kept; use the terminal while its source is reviewed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
               }
@@ -524,7 +536,7 @@ export class AgentPromptSubmissionCoordinator {
               try {
                 if (transportQualification?.protocolInput?.preclaim) transportQualification.protocolInput.preclaim.claimStarted = true
                 await this.submitOwnedInputPlan(current, currentRun, previous.submissionId,
-                  previous.intent.prompt, previous.intent.plan, undefined, signal, true, renderSignal, undefined, previous.intent.message, previous.intent.execution, undefined, assertSession)
+                  previous.intent.prompt, previous.intent.plan, previous.inputKey, undefined, signal, true, renderSignal, undefined, previous.intent.message, previous.intent.execution, undefined, assertSession)
               } catch (error) {
                 const settled = await this.deps.registry.refresh(session.agentSessionId, session.run)
                 const refreshOnlySettled = settled.promptCompletionAdmission?.submissionId === previous.submissionId &&
@@ -543,7 +555,7 @@ export class AgentPromptSubmissionCoordinator {
               this.deps.assertAgentRun(current, currentRun)
             }
             await this.submitOwnedInputPlan(current, currentRun, submissionId, prompt, plan,
-              expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message, execution, expectedFutureIntent, assertSession, transportQualification)
+              originalInputKey, expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message, execution, expectedFutureIntent, assertSession, transportQualification)
             return structuredClone(message)
           } catch (error) {
             if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_INPUT_UNCONFIRMED' &&
@@ -579,6 +591,7 @@ export class AgentPromptSubmissionCoordinator {
     submissionId: string,
     prompt: string,
     plan: AgentPromptInputPlan,
+    inputKey: AgentPromptInputKey,
     expectedCompletionId?: string,
     signal?: AbortSignal,
     allowUncertainTurn = false,
@@ -594,7 +607,7 @@ export class AgentPromptSubmissionCoordinator {
     const updateSession: PromptSubmissionDeps['updateExactAgentSession'] = (id, expectedRun, update) => {
       const claim = () => this.deps.updateExactAgentSession(id, expectedRun, update, expectedFutureIntent?.intentId)
       return this.deps.withUncontrolledInputClaim
-        ? this.deps.withUncontrolledInputClaim({ kind: 'prompt', agentSessionId: id, expectedRun, submissionId }, claim) : claim()
+        ? this.deps.withUncontrolledInputClaim(inputKey, claim) : claim()
     }
     const refreshSession = (id: string, expectedRun: AgentMuxRunRef): Promise<AgentMuxStoredAgentSession> =>
       this.deps.registry.refresh(id, expectedRun, expectedFutureIntent?.intentId)
@@ -731,7 +744,7 @@ export class AgentPromptSubmissionCoordinator {
       const ended = agentTurnEndBoundary(current) !== undefined
       const observedAt = Date.now()
       const next: AgentMuxStoredAgentSession = { ...invalidateAgentIdleEvidence(current), updatedAt: Math.max(current.updatedAt, observedAt), promptCompletionAdmission: {
-        submissionId, ...(completionId ? { completionId } : {}), ...(expectedFutureIntent ? { futureIntent: { ...expectedFutureIntent } } : {}), operationId, startByte, endByte, outputCursorBytes: run.latestOutputBytes,
+        submissionId, inputKey: structuredClone(inputKey), ...(completionId ? { completionId } : {}), ...(expectedFutureIntent ? { futureIntent: { ...expectedFutureIntent } } : {}), operationId, startByte, endByte, outputCursorBytes: run.latestOutputBytes,
         intent: { run: { ...current.run }, ownerInstanceId: this.deps.kernel.identity().daemonInstanceId, prompt, plan: structuredClone(plan), execution,
           ...(message === undefined ? {} : { message: structuredClone(message) }) },
         acknowledged: false,
