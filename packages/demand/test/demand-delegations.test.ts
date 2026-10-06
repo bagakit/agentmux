@@ -154,7 +154,7 @@ describe('Goal delegation responsibility, source and result collection', () => {
     expect(JSON.parse(stdout)).toEqual(expected)
   })
 
-  it.each(['prepare', 'report', 'collect'] as const)('reconciles the original %s after snapshot replacement but before a durable receipt, without duplicate work', async phase => {
+  it.each(['prepare', 'report', 'recover', 'collect'] as const)('reconciles the original %s after snapshot replacement but before a durable receipt, without duplicate work', async phase => {
     const a = intent('worker-a', ['AC-01', 'AC-02']), first = report(a)
     if (phase !== 'prepare') { await store.prepareDelegation('goal', a, 'owner'); await store.linkDelegation('goal', a.operationId, a.sourceMessageId, 'owner') }
     if (phase === 'collect') await store.submitDelegationReport('goal', a.operationId, first, 'worker-a')
@@ -167,6 +167,7 @@ describe('Goal delegation responsibility, source and result collection', () => {
       return handle
     })
     const perform = () => phase === 'prepare' ? store.prepareDelegation('goal', a, 'owner') : phase === 'report' ? store.submitDelegationReport('goal', a.operationId, first, 'worker-a') :
+      phase === 'recover' ? store.recoverDelegationReport('goal', a.operationId, first, collector) :
       store.collectDelegationReport('goal', a.operationId, { operationId: 'collect-a', replyMessageId: first.replyMessageId }, collector)
     await expect(perform()).rejects.toMatchObject({ code: 'WRITE_FAILED', phase: 'write', replacementApplied: true })
     expect(injected).toBe(1); fault.mockRestore()
@@ -190,6 +191,46 @@ describe('Goal delegation responsibility, source and result collection', () => {
     await expect(store.submitDelegationReport('goal', intent().operationId, { ...report(intent()), acceptedAt: _reshape_fixtureEpoch(0, 0, 1) } as any, 'worker-a')).rejects.toThrow(/unsupported/u)
     await expect(store.collectDelegationReport('goal', intent().operationId, { operationId: 'collect', replyMessageId: 'reply', groundingSubmissionId: 'forged' } as any, collector)).rejects.toThrow(/unsupported/u)
     expect(await store.snapshot()).toEqual(before)
+  })
+
+  it('recovers Main-verified original worker evidence with the actual collector after the worker can no longer report', async () => {
+    const a = intent('worker-a', ['AC-01', 'AC-02']), first = report(a)
+    await store.prepareDelegation('goal', a, 'owner'); await store.linkDelegation('goal', a.operationId, a.sourceMessageId, 'owner')
+    const before = await store.snapshot()
+    await expect(store.recoverDelegationReport('goal', a.operationId, first, { kind: 'agent', id: 'worker-b' })).rejects.toThrow(/recover the verified/u)
+    await expect(store.recoverDelegationReport('goal', a.operationId, first, { kind: 'agent', id: 'worker-a' })).rejects.toThrow(/recover the verified/u)
+    await expect(store.recoverDelegationReport('goal', a.operationId, { ...first, authorAgentSessionId: 'owner' }, collector)).rejects.toThrow(/original worker/u)
+    expect(await store.snapshot()).toEqual(before)
+    const recovered = await store.recoverDelegationReport('goal', a.operationId, first, collector)
+    const restored = recovered.demand.delegations![0]!.report!
+    expect(restored).toMatchObject({ ...first, recovery: { collector } })
+    expect(restored.recovery!.recoveredAt).toBeGreaterThan(0)
+    expect(restored.authorAgentSessionId).toBe('worker-a')
+    expect(recovered.demand.grounding).toBeUndefined()
+    const saved = await store.snapshot()
+    expect((await store.recoverDelegationReport('goal', a.operationId, first, { kind: 'user', id: 'person' })).replayed).toBe(true)
+    expect((await store.submitDelegationReport('goal', a.operationId, first, 'worker-a')).replayed).toBe(true)
+    expect(await store.snapshot()).toEqual(saved)
+    await expect(store.recoverDelegationReport('goal', a.operationId, { ...first, grounding: { ...first.grounding, summary: 'Different claim' } }, collector)).rejects.toThrow(/frozen/u)
+    expect(await store.snapshot()).toEqual(saved)
+    const collected = await store.collectDelegationReport('goal', a.operationId, { operationId: 'collect-recovered', replyMessageId: first.replyMessageId }, collector)
+    expect(collected.demand.grounding!.checks).toEqual(first.grounding.checks)
+    expect(collected.demand.grounding!.acceptedAt).toBeNull()
+    expect(collected.demand.delegations![0]!.report).toEqual(restored)
+    expect(collected.demand.status).toBe('in_progress')
+  })
+
+  it('admits the explicitly handed-off current Supervisor to recover old-version evidence without changing the original author or acceptance', async () => {
+    const a = intent(), first = report(a)
+    await store.prepareDelegation('goal', a, 'owner'); await store.linkDelegation('goal', a.operationId, a.sourceMessageId, 'owner')
+    await store.update('goal', { supervisorSessionId: 'worker-b' })
+    await store.proposeAlignment('goal', { summary: 'Changed target', criteria, openQuestions: [] })
+    const recovered = await store.recoverDelegationReport('goal', a.operationId, first, { kind: 'agent', id: 'worker-b' })
+    expect(recovered.demand.delegations![0]!.report).toMatchObject({ authorAgentSessionId: 'worker-a', grounding: { alignmentRevision: 1 }, recovery: { collector: { kind: 'agent', id: 'worker-b' } } })
+    const collected = await store.collectDelegationReport('goal', a.operationId, { operationId: 'handoff-collect', replyMessageId: first.replyMessageId }, { kind: 'agent', id: 'worker-b' })
+    expect(collected.demand.supervisorSessionId).toBe('worker-b')
+    expect(collected.demand.grounding).toBeUndefined()
+    expect(collected.demand.alignment!.confirmedAt).toBeNull()
   })
 
   it('does not let an original source or reply identity be reassigned to another Goal or delegation', async () => {
