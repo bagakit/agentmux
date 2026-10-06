@@ -3,9 +3,11 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { MobileTerminalReading } from '../src/terminal/reader'
 import { MobileTerminalViewer } from '../src/terminal/MobileTerminalViewer'
 
 const canvases = vi.hoisted(() => [] as Array<{ options: Record<string, unknown>; textarea: HTMLTextAreaElement }>)
+const readings = vi.hoisted(() => [] as Array<(reading: MobileTerminalReading) => void>)
 
 // This mounted check isolates initial control ownership. Output parsing and
 // actual xterm/Host transport retain their separate production-chain evidence.
@@ -19,20 +21,22 @@ vi.mock('@xterm/xterm', () => ({ Terminal: class {
   constructor(options: Record<string, unknown>) { this.options = options; canvases.push(this) }
   open(container: HTMLElement) { this.element = container; container.appendChild(this.textarea) }
   scrollToLine() {}
+  focus() {}
   onUserInput() { return { dispose() {} } }
   onData() { return { dispose() {} } }
   onBinary() { return { dispose() {} } }
   dispose() { this.textarea.remove() }
 } }))
-vi.mock('../src/terminal/reader', () => ({ createMobileTerminalReader: () => ({
-  setVisible() {}, dispose: async () => {}, retry: async () => {}
-}) }))
+vi.mock('../src/terminal/reader', () => ({ createMobileTerminalReader: ({ report }: { report: (reading: MobileTerminalReading) => void }) => {
+  readings.push(report)
+  return { setVisible() {}, dispose: async () => {}, retry: async () => {} }
+} }))
 const key = 'agentmux-mobile-terminal-intent-v1:initial-original-session'
 const connection = { state: 'connected' as const, message: '原连接' }
 const platform = { copyText: async () => true } as Parameters<typeof MobileTerminalViewer>[0]['platform']
 const roots: ReturnType<typeof createRoot>[] = []
 beforeEach(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true })
-afterEach(async () => { for (const root of roots.splice(0)) await act(async () => root.unmount()); document.body.innerHTML = ''; localStorage.clear(); canvases.length = 0 })
+afterEach(async () => { for (const root of roots.splice(0)) await act(async () => root.unmount()); document.body.innerHTML = ''; localStorage.clear(); canvases.length = 0; readings.length = 0 })
 
 function port() {
   const write = vi.fn(), resize = vi.fn()
@@ -68,6 +72,41 @@ it('mounted first binding retains the exact durable unknown intent and original 
   expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).not.toContain('连接已变化')
   expect(view.node.querySelector('.mobile-terminal-details')?.textContent).toContain('original-intent')
   expect(localStorage.getItem(key)).toBe(original)
+  expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
+  expect([...view.node.querySelectorAll('.mobile-terminal-notice > p')].map(node => node.textContent)).toContain('终端操作回执未确认；原操作不会重发。')
+  expect(view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')?.disabled).toBe(true)
+})
+
+it('keeps one toolbar mode switch and exposes PTY size and keys only during explicit control', async () => {
+  const p = port(), view = await mount(p.client)
+  expect(view.node.querySelector('.mobile-terminal-toolbar .mobile-terminal-mode')?.textContent).toBe('控制终端')
+  expect(view.node.querySelector('.mobile-terminal-actions')).toBeNull()
+  expect(view.node.querySelector('.mobile-terminal-keys')).toBeNull()
+  await act(async () => view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')!.click())
+  const size = view.node.querySelector<HTMLButtonElement>('.mobile-terminal-keys > button')!
+  expect(size.textContent).toBe('PTY 尺寸'); expect(size.disabled).toBe(false)
+  expect(view.node.querySelector('[aria-label="终端 Esc"]')).not.toBeNull()
+  await act(async () => size.click())
+  expect(view.node.querySelector('.mobile-terminal-size')).not.toBeNull()
+  await act(async () => view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')!.click())
+  expect(view.node.querySelector('.mobile-terminal-size')).toBeNull()
+  expect(view.node.querySelector('.mobile-terminal-keys')).toBeNull()
+  expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
+})
+
+it('keeps reading, boundary and idle input diagnostics directly visible after toolbar compression', async () => {
+  const p = port(), view = await mount(p.client)
+  const report = readings.at(-1)!, message = '同一显示文案；具体事实由原 owner 给出。'
+  await act(async () => report({ phase: 'reading', message, historyBoundary: null }))
+  expect([...view.node.querySelectorAll('.mobile-terminal-notice > p')].map(node => node.textContent)).toEqual(['同一显示文案', '观看不发送输入'])
+  expect(view.node.querySelector('.mobile-terminal-details')?.textContent).toContain(message)
+  expect(view.node.querySelector<HTMLDetailsElement>('.mobile-terminal-details')?.open).toBe(false)
+  await act(async () => report({ phase: 'reading', message, historyBoundary: '原历史边界' }))
+  expect([...view.node.querySelectorAll('.mobile-terminal-notice > p')].map(node => node.textContent)).toEqual(['同一显示文案', '观看不发送输入', '原历史边界'])
+  vi.spyOn(p.client, 'runtimeIdentity').mockImplementation(() => { throw new Error('原 owner 身份仍未知') })
+  await act(async () => view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')!.click())
+  expect(view.node.querySelector('.mobile-terminal')?.getAttribute('data-control')).toBe('watch')
+  expect([...view.node.querySelectorAll('.mobile-terminal-notice > p')].map(node => node.textContent)).toContain('原会话身份尚未核实，可在 Mac 继续操作')
   expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
 })
 
