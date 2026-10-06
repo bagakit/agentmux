@@ -84,27 +84,20 @@ describe('private probe cleanup identity', () => {
     expect(kill.mock.calls).toEqual([[41002, 'SIGTERM']])
   })
 
-  it('ends watchdog observation when cleanup fails even if the child never exits, preserving unknown ownership', async () => {
-    const child = Object.assign(new EventEmitter(), { pid: 41001, stderr: new PassThrough() })
+  it('bounds original child exit observation without borrowing the legacy process inventory', async () => {
+    const child = Object.assign(new EventEmitter(), { pid: 41001, stderr: new PassThrough(), exitCode: null, signalCode: null,
+      kill: vi.fn(() => true), unref: vi.fn() })
     spawnProbe.mockReturnValue(child)
-    readPs.mockRejectedValue(Object.assign(new Error('ps permission denied'), { code: 'EPERM' }))
+    readPs.mockRejectedValue(Object.assign(new Error('Legacy inventory must not be used'), { code: 'EPERM' }))
     vi.useFakeTimers()
-    let settled = false
     const outcome = runProbeProcess('private-probe', [], { temporaryRoot: root, timeoutMs: 20, graceMs: 0 })
-      .then(() => { settled = true; return null }, error => { settled = true; return error })
-    try {
-      await vi.advanceTimersByTimeAsync(25)
-      expect(settled).toBe(true)
-    } finally {
-      // A failed implementation must produce an AssertionError, not hang this test.
-      child.emit('exit', 0, null)
-      vi.useRealTimers()
-    }
+      .catch((error: any) => error)
+    try { await vi.advanceTimersByTimeAsync(2025) }
+    finally { vi.useRealTimers() }
     const error = await outcome
-    expect(error).toMatchObject({ code: 'EPERM', probe: { leaderPid: 41001, temporaryRoot: root, cleanup: 'unknown' },
-      cause: { message: 'ps permission denied', code: 'EPERM' } })
-    expect(error.message).toContain('remaining owners are unknown')
-    expect(kill.mock.calls).toEqual([])
+    expect(error.probe).toMatchObject({ originalPid: 41001, exitConfirmed: false, cleanup: 'unknown', timedOut: true })
+    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']])
+    expect(readPs).not.toHaveBeenCalled(); expect(kill).not.toHaveBeenCalled()
     expect(child.stderr.destroyed).toBe(true)
   })
 
