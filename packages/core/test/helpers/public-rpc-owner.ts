@@ -18,10 +18,11 @@ import type { CtxmuxAdapterObservationEvent, CtxmuxAdapterRun } from '../../src/
 /** Real Core registry, authorization and journal; Runtime byte I/O is a deterministic port. */
 export async function rpcOwnerFixture(ids = ['caller', 'recipient'], ownerModule?: {
   AgentMuxClient: typeof SourceClient; AgentMuxFileAgentSessionStore: typeof SourceStore
-}) {
+}, sessionFacts?: (root: string) => Partial<Pick<AgentMuxStoredAgentSession, 'providerId' | 'executorId' | 'nativeHandle'>>) {
   const Client = ownerModule?.AgentMuxClient ?? AgentMuxClient
   const Store = ownerModule?.AgentMuxFileAgentSessionStore ?? AgentMuxFileAgentSessionStore
   const root = await mkdtemp(fixturePath("tmp/amx-rpc-owner-")), store = new Store(join(root, 'sessions.json'))
+  const facts = sessionFacts?.(root) ?? {}
   const capability = issueAgentCapability()
   for (const [key] of Object.entries(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', root); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
@@ -29,7 +30,7 @@ export async function rpcOwnerFixture(ids = ['caller', 'recipient'], ownerModule
   for (const agentSessionId of ids) {
     const record: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex',
       hostId: 'local', workspacePath: root, run: { runId: 'run-' + agentSessionId }, retiredRuns: [],
-      hookBindingId: 'fixture-hook', hookToken: 'fixture-token', capabilityHash: hashAgentCapability(capability), createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
+      ...facts, hookBindingId: 'fixture-hook', hookToken: 'fixture-token', capabilityHash: hashAgentCapability(capability), createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
     await store.compareAndSwap(null, record)
   }
   const client = new Client({ store })
@@ -37,7 +38,7 @@ export async function rpcOwnerFixture(ids = ['caller', 'recipient'], ownerModule
   await inner.registry.load('local'); inner.connected = true; inner.kernel.isConnected = () => true
   const cursors = new Map<string, number>()
   const writes = new Map<string, { data: string; startByte: number; endByte: number }>()
-  const run = (runId: string): CtxmuxAdapterRun => ({ runId, lifecycleOperationId: null, program: 'codex', args: [], workspacePath: root,
+  const run = (runId: string): CtxmuxAdapterRun => ({ runId, lifecycleOperationId: null, program: facts.executorId ?? 'codex', args: [], workspacePath: root,
     pid: null, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 3, firstAvailableByte: 0, acceptedInputBytes: cursors.get(runId) ?? 0, nativeService: null })
   inner.kernel.status = vi.fn(async (id: string) => run(id))
   inner.kernel.identity = () => ({ daemonInstanceId: 'fixture-runtime', protocolVersion: 1, buildIdentity: 'fixture' })
