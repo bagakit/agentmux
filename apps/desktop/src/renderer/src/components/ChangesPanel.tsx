@@ -23,7 +23,7 @@ const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeGitStageIcon = semanticIconComponent('git.stage')
 const ThemeActionCreateIcon = semanticIconComponent('action.create')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
-const ThemeActionCollapseIcon = semanticIconComponent('action.collapse')
+const ThemeGitUnstageIcon = semanticIconComponent('git.unstage')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
 const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
@@ -364,7 +364,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               disabled={busyPath !== null}
               onClick={() => void unstageFile(change)}
             >
-              {busyPath === change.path ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionCollapseIcon size={12} />}
+              {busyPath === change.path ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeGitUnstageIcon size={12} />}
             </button>
           )}
         </span>

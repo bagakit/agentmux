@@ -13,7 +13,7 @@ const ThemeNavigationPreviousIcon = semanticIconComponent('navigation.previous')
 const ThemeNavigationNextIcon = semanticIconComponent('navigation.next')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeObjectTreeIcon = semanticIconComponent('object.tree')
-const ThemeActionCollapseIcon = semanticIconComponent('action.collapse')
+const ThemeActionZoomOutIcon = semanticIconComponent('action.zoom-out')
 const ThemeActionZoomInIcon = semanticIconComponent('action.zoom-in')
 
 
@@ -277,7 +277,7 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
       <div className="file-preview__controls" role="group" aria-label="PDF zoom">
         <button className="small-button" aria-pressed={readable && current!.mode === 'page-width'} disabled={!readable} onClick={() => scale('page-width')}>Fit width</button>
         <button className="small-button" aria-pressed={readable && current!.mode === 'page-fit'} disabled={!readable} onClick={() => scale('page-fit')}>Fit page</button>
-        <button className="icon-button" aria-label="Zoom PDF out" title="Zoom out (-)" disabled={!readable || current!.scale <= MIN_SCALE} onClick={() => scale(current!.scale / 1.25)}><ThemeActionCollapseIcon size={13} /></button>
+        <button className="icon-button" aria-label="Zoom PDF out" title="Zoom out (-)" disabled={!readable || current!.scale <= MIN_SCALE} onClick={() => scale(current!.scale / 1.25)}><ThemeActionZoomOutIcon size={13} /></button>
         <button className="pdf-content__percent small-button" aria-label="PDF original size" title="Original size" disabled={!readable} onClick={() => scale(1)}>{readable ? `${Math.round(current!.scale * 100)}%` : '—'}</button>
         <button className="icon-button" aria-label="Zoom PDF in" title="Zoom in (+)" disabled={!readable || current!.scale >= MAX_SCALE} onClick={() => scale(current!.scale * 1.25)}><ThemeActionZoomInIcon size={13} /></button>
       </div>
