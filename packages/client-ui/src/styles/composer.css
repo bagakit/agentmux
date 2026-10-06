@@ -66,6 +66,7 @@
 .composer__suggestions button:hover, .composer__suggestions button:focus { background: var(--surface-3); }
 .composer__suggestions small { color: var(--text-3); }
 .composer-semantic-token { display: inline-flex; align-items: center; gap: var(--sp-1); padding: 1px var(--sp-1); border: 0; border-bottom: 1px solid currentColor; color: var(--blue); background: transparent; font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.composer-semantic-token > .semantic-icon { flex: none; vertical-align: text-bottom; }
 .composer-semantic-token--component { color: var(--purple); }
 .composer-semantic-token--subcommand { color: var(--green); }
 .composer-semantic-token:hover { background: var(--surface-2); }
