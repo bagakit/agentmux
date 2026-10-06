@@ -1568,8 +1568,11 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
         string(id, 'future intent id')
         const intent = record(value, 'future prompt intent'), message = record(intent.message, 'future prompt source')
         if (typeof intent.active !== 'boolean' || message.authorHuman !== undefined) throw new AgentMuxError('Future prompt origin or active state is invalid.', 'INVALID_AGENT_SESSION_STORE')
+        const userContent = message.userContent === undefined ? undefined : text(message.userContent, 'future prompt content', MAX_STORED_TEXT_BYTES)
+        const systemContext = message.systemContext === undefined ? undefined : text(message.systemContext, 'future prompt context', MAX_STORED_TEXT_BYTES)
+        if (userContent === undefined && systemContext === undefined) throw new AgentMuxError('Future prompt source is empty.', 'INVALID_AGENT_SESSION_STORE')
         return [id, { operationId: string(intent.operationId, 'future intent operation'), prompt: text(intent.prompt, 'future prompt', MAX_STORED_TEXT_BYTES), active: intent.active,
-          message: { userContent: text(message.userContent, 'future prompt content', MAX_STORED_TEXT_BYTES), ...(message.systemContext === undefined ? {} : { systemContext: text(message.systemContext, 'future prompt context', MAX_STORED_TEXT_BYTES) }),
+          message: { ...(userContent === undefined ? {} : { userContent }), ...(systemContext === undefined ? {} : { systemContext }),
             ...(message.authorAgentSessionId === undefined ? {} : { authorAgentSessionId: string(message.authorAgentSessionId, 'future prompt author') }),
             ...(message.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(message.sourceDevice) }) },
           ...(intent.lastOccurrenceAt === undefined ? {} : { lastOccurrenceAt: timestamp(intent.lastOccurrenceAt, 'last future occurrence') }),

@@ -5459,8 +5459,10 @@ export class AgentMuxClient {
     if ('authorHuman' in input || 'authorAgentSessionId' in input) throw new AgentMuxError('Future-message authors come from the original authenticated owner.', 'MESSAGE_SENDER_MISMATCH')
     const intentId = safeId(input.intentId, 'Future message intent id')
     const operationId = safeId(input.operationId, 'Future message operation id')
-    if (typeof input.active !== 'boolean' || !input.prompt.trim()) throw new AgentMuxError('A future message needs exact content and an explicit active state.', 'INVALID_AGENT_PROMPT')
+    if (typeof input.active !== 'boolean' || typeof input.prompt !== 'string' ||
+      input.agentMuxNote !== undefined && typeof input.agentMuxNote !== 'string') throw new AgentMuxError('A future message needs exact content and an explicit active state.', 'INVALID_AGENT_PROMPT')
     const composed = composeAgentPrompt(input.prompt, input.agentMuxNote)
+    if (!composed.text.trim()) throw new AgentMuxError('A future message needs nonempty original content or AgentMux context.', 'INVALID_AGENT_PROMPT')
     assertAgentPromptSize(composed.text)
     const session = this.requireAgentSession(input.agentSessionId)
     await this.store.withPromptSubmission(session.agentSessionId, async () => {
@@ -5476,7 +5478,7 @@ export class AgentMuxClient {
       const intents = { ...current.futurePromptIntents }, previous = intents[intentId]
       if (previous && (previous.operationId !== operationId || previous.prompt !== composed.text)) throw new AgentMuxError('Future intent identity was reused with different content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       intents[intentId] = { ...previous, operationId, prompt: composed.text, active: input.active,
-        message: previous?.message ?? { userContent: input.prompt, ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
+        message: previous?.message ?? { ...(input.prompt.trim() ? { userContent: input.prompt } : {}), ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
           ...(authorAgentSessionId ? { authorAgentSessionId } : {}), ...(input.sourceDevice ? { sourceDevice: structuredClone(input.sourceDevice) } : {}) } }
       return { ...current, futurePromptIntents: intents, updatedAt: Date.now() }
       }, intentId)
