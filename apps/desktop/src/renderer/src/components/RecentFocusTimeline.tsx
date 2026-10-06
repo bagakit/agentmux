@@ -1,3 +1,4 @@
+import { FOCUS_READING_NATIVE_RECORDS as MAX_NATIVE_RECORDS, FOCUS_READING_CAPTURED_RECORDS as MAX_CAPTURED_RECORDS, FOCUS_READING_BYTES as MAX_WINDOW_BYTES } from '../lib/focus-reading-budget'
 import { TextInput } from '@agentmux/client-ui/input'
 import { TIMELINE_MARKER_HEIGHT, TIMELINE_MARKER_SIZE } from '../lib/timeline-marker-layout'
 import { focusMessageMarkers } from '../lib/focus-message-markers'
@@ -107,7 +108,6 @@ function useFocusSpeakerResolver(messages: readonly ConversationRecord[]): Focus
   }, [ids, facts])
 }
 
-const MAX_NATIVE_RECORDS = 90
 const MAX_BATCH_PAGES = 3
 type LatestInputs = { messages: readonly ConversationRecord[]; loading: boolean; error: Error | null; observationError: Error | null; windowFrozen: boolean; windowIncomplete: boolean; refresh(): Promise<void> }
 const EMPTY_LATEST_INPUTS: LatestInputs = { messages: [], loading: false, error: null, observationError: null, windowFrozen: false, windowIncomplete: false, refresh: async () => {} }
@@ -140,8 +140,6 @@ type NativeWindow = {
   loading: boolean; error: string | null; capturedError: string | null; rotated: boolean; read: boolean
 }
 const EMPTY_NATIVE_WINDOW: NativeWindow = { scope: '', reference: undefined, page: null, timeline: undefined, messages: [], work: null, loading: false, error: null, capturedError: null, rotated: false, read: false }
-const MAX_CAPTURED_RECORDS = 200
-const MAX_WINDOW_BYTES = 12 * 1024 * 1024
 const EMPTY_READING_PARTITIONS: ReadonlyMap<string, NativeWindow> = new Map()
 type ReadingWindow = { partitions: ReadonlyMap<string, NativeWindow>; trimmed: boolean; nativeCount: number; capturedCount: number; workCount: number; sourceCount: number; bytes: number }
 const EMPTY_READING_WINDOW: ReadingWindow = { partitions: EMPTY_READING_PARTITIONS, trimmed: false, nativeCount: 0, capturedCount: 0, workCount: 0, sourceCount: 0, bytes: 0 }
