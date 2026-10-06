@@ -113,6 +113,7 @@ const api: AgentMuxPreloadApi = {
     onChange: listener => { const receive = (_event: unknown, snapshot: import('@agentmux/core/notebook-store').NotesStorageSnapshot) => listener(snapshot); ipcRenderer.on('notesStorage:changed', receive); return () => ipcRenderer.removeListener('notesStorage:changed', receive) }
   },
   notebooks: {
+    actor: () => ipcRenderer.invoke('notebook:actor'),
     read: () => ipcRenderer.invoke('notebook:read'),
     apply: input => ipcRenderer.invoke('notebook:apply', input),
     onChange: listener => {

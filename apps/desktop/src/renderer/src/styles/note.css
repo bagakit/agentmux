@@ -83,6 +83,15 @@
 .notebook-page-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; color: var(--text-3); }
 .notebook-page-actions .note-text-button { font-size: 11px; padding: 2px 0; color: var(--text-3); }
 .notebook-page-actions .note-text-button:hover, .notebook-page-actions .note-text-button[aria-expanded="true"] { color: var(--text); background: transparent; }
+.notebook-page-actions .notebook-follow-action[aria-pressed="true"] { color: var(--text-2); }
+.notebook-follow-action[aria-pressed="true"] svg { fill: currentColor; fill-opacity: .12; }
+.notebook-followers ul { display: grid; gap: 13px; list-style: none; margin: 0; padding: 0; }
+.notebook-followers li { display: flex; align-items: baseline; gap: 16px; min-width: 0; }
+.notebook-followers li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.notebook-followers strong { font-size: 12px; font-weight: 500; }
+.notebook-followers small { display: block; margin-top: 4px; font-size: 10px; color: var(--text-3); }
+.notebook-followers time { flex: none; font-size: 10px; color: var(--text-3); }
+.notebook-follow-recovery { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 5px; }
 .notebook-page-heading + .note-editor { padding-top: 23px; min-height: calc(100% - 150px); }
 .notebook-page-panel { margin-top: 17px; border-top: 1px solid var(--line-soft); padding-top: 14px; color: var(--text-2); font-size: 12px; }
 .notebook-page-panel p { font-size: 11px; color: var(--text-3); line-height: 1.7; overflow-wrap: anywhere; margin: 7px 0 0; }
