@@ -1,6 +1,7 @@
 import { describeError } from './error-presentation.js'
 import type { ClientDeliveryLog } from './delivery-diagnostics.js'
 import { readAgentPromptPreparationWait } from '@agentmux/core/prompt-preparation'
+import type { AgentInputSubmissionReceipt, AgentInputWaitStopReceipt } from '@agentmux/core'
 
 export type MessageDeliveryDiagnostic = {
   error: unknown
@@ -10,6 +11,9 @@ export type MessageDeliveryDiagnostic = {
   preparationReason?: 'context-compaction' | 'native-busy' | undefined
   /** Facts about the original operation take precedence over this attempt's zero-byte refusal. */
   inputUnconfirmed?: boolean | undefined
+  /** Original Core receipts; an error or a waiting phase cannot stand in for these facts. */
+  inputReceipt?: AgentInputSubmissionReceipt | undefined
+  inputStopReceipt?: AgentInputWaitStopReceipt | undefined
   context?: 'delivery' | 'tool' | undefined
 }
 
@@ -23,8 +27,15 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
   const failure = input.log?.record.error ?? fields(input.error)
   const code = input.errorCode ?? (typeof failure?.code === 'string' ? failure.code : presented.code)
   const control = fields(failure?.controlFailure)
+  const receipt = input.inputReceipt
+  // A terminal original-owner receipt resolves prior uncertainty. The old error remains in the report.
+  if (receipt?.status === 'admitted') return { kind: 'admitted', title: '输入已确认',
+    state: '原消息已由 Native 接纳；这不是 Agent 完成任务的回执。', action: '可在原对话查看 Agent 回复。' }
+  if (receipt?.status === 'not-applied') return { kind: 'not-applied', title: '原输入未接纳',
+    state: 'Core 已确认这条原输入未被接纳，原消息与回执保留。', action: '需要替换时，创建一条明确的新消息。' }
   const unknown = input.inputUnconfirmed || control?.disposition === 'unknown' ||
-    typeof control?.confirmedInputBytes === 'number' && control.confirmedInputBytes > 0
+    typeof control?.confirmedInputBytes === 'number' && control.confirmedInputBytes > 0 ||
+    receipt?.status === 'unknown' || receipt && (receipt.admission !== null || receipt.control.state === 'dispatch-authorized')
   const noInput = !unknown && control?.disposition === 'not_applied' && control.confirmedInputBytes === 0
   const reason = input.preparationReason ?? readAgentPromptPreparationWait(failure)?.reason
   if (code === 'AGENT_PROMPT_CONDITION_CHANGED') return { kind: 'condition-changed', title: '发送条件已变化',
@@ -33,6 +44,25 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
   if (unknown) return { kind: 'unknown', title: '发送结果待核实',
     state: '这条消息此前是否已输入仍待核实，原消息和操作会保留。',
     action: '先查看原对话与投递记录，避免重复发送。' }
+  if (receipt) {
+    const stop = input.inputStopReceipt
+    const key = receipt.ref.key, stoppedKey = stop?.ref.key
+    const stopped = stop?.outcome === 'stopped-before-dispatch' && stop.ref.waitGeneration === receipt.ref.waitGeneration &&
+      stoppedKey?.kind === key.kind && stoppedKey.agentSessionId === key.agentSessionId && stoppedKey.expectedRun.runId === key.expectedRun.runId &&
+      (key.kind === 'prompt' ? stoppedKey.kind === 'prompt' && stoppedKey.submissionId === key.submissionId
+        : stoppedKey.kind === 'message' && stoppedKey.messageId === key.messageId)
+    if (receipt.status === 'stopped' || stopped) return { kind: 'stopped', title: '已停止等待',
+      state: 'Core 已确认停止这一代等待，原消息保留。', action: '再次发送会重新确认这条原消息。' }
+    if (receipt.status === 'waiting' && receipt.control.state === 'enabled' && receipt.admission === null) {
+      const wait = receipt.control.waiting
+      return { kind: 'saved-waiting', title: wait?.phase === 'runtime' ? '已保存 · 等待连接' : '已保存 · 等待确认',
+        state: wait?.phase === 'observer' ? '本次观察已结束，原消息仍由 Core 保存。'
+          : wait?.phase === 'authorization' ? '原消息已保存；需要原作者的当前授权才能继续确认。'
+          : wait?.phase === 'runtime' ? '原消息已保存；原 Runtime 连接恢复后继续确认这条消息。'
+          : '原消息已保存，输入环境尚未确认。完整原因保留在详情中。',
+        action: wait?.wake === 'runtime-restored' ? '可停止这一代等待。' : '可继续确认原环境，或停止这一代等待。' }
+    }
+  }
   if (reason && noInput) return { kind: 'waiting',
     title: reason === 'context-compaction' ? '正在整理上下文' : 'Agent 暂时忙碌',
     state: '本次尝试尚未写入输入，原消息已保留。', action: '稍后重试这条原消息。' }
@@ -48,12 +78,17 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
 }
 
 function diagnosticJSON(value: unknown): string {
-  const seen = new WeakSet<object>()
-  return JSON.stringify(value, (_key, item: unknown) => {
+  const ancestors: object[] = [], errors = new WeakMap<Error, Record<string, unknown>>()
+  return JSON.stringify(value, function (_key, item: unknown) {
     if (typeof item !== 'object' || item === null) return typeof item === 'bigint' ? String(item) : item
-    if (seen.has(item)) return '[circular reference]'
-    seen.add(item)
-    if (item instanceof Error) return Object.fromEntries(Object.getOwnPropertyNames(item).map(key => [key, (item as unknown as Record<string, unknown>)[key]]))
+    if (item instanceof Error) {
+      let view = errors.get(item)
+      if (!view) { view = Object.fromEntries(Object.getOwnPropertyNames(item).map(key => [key, (item as unknown as Record<string, unknown>)[key]])); errors.set(item, view) }
+      item = view
+    }
+    while (ancestors.length && ancestors.at(-1) !== this) ancestors.pop()
+    if (ancestors.includes(item as object)) return '[circular reference]'
+    ancestors.push(item as object)
     return item
   }, 2) ?? String(value)
 }
@@ -69,5 +104,9 @@ export function messageDeliveryDiagnosticReport(input: MessageDeliveryDiagnostic
     ...(presented.detail ? ['', '原始 detail（完整）', presented.detail] : []),
     ...(typeof input.error === 'object' && input.error !== null ? ['', '原始结构化错误', diagnosticJSON(input.error)] : []),
     ...(input.log ? ['', '原投递诊断记录', diagnosticJSON(input.log)] : []),
-    ...(input.inputUnconfirmed ? ['', '原操作输入结果：仍待核实；本次拒绝不能代签此前没有输入。'] : [])].join('\n')
+    ...(input.inputReceipt ? ['', '原输入回执（Core）', diagnosticJSON(input.inputReceipt)] : []),
+    ...(input.inputStopReceipt ? ['', '停止等待回执（Core）', diagnosticJSON(input.inputStopReceipt)] : []),
+    ...(input.inputUnconfirmed ? ['', input.inputReceipt?.status === 'admitted' || input.inputReceipt?.status === 'not-applied'
+      ? '此前客户端曾记录输入结果待核实；当前结果见原输入回执（Core）。'
+      : '原操作输入结果：仍待核实；本次拒绝不能代签此前没有输入。'] : [])].join('\n')
 }
