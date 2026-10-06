@@ -45,6 +45,34 @@ afterEach(async () => {
 })
 
 describe('actual phone primary workfaces', () => {
+  it('keeps the original settings and refresh actions reachable from one heading across all five workfaces', async () => {
+    const f = originalClient()
+    const owner = getDeviceWorkface(), record = owner.recordIdentity()
+    const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
+    for (const label of order) {
+      await click(button(nav(view.element), label))
+      const headings = [...view.element.querySelectorAll<HTMLElement>('.mobile-page-header')].filter(value => !value.closest('[hidden]'))
+      expect(headings).toHaveLength(1)
+      expect(headings[0]!.querySelector('h1')?.textContent).toBe(label)
+      expect(view.element.querySelector('.mobile-header')).toBeNull()
+      const menu = headings[0]!.querySelector('[aria-label="手机设置与连接"]')
+      expect(menu).not.toBeNull()
+      await click(menu!)
+      expect(document.querySelector('.mobile-drawer')?.textContent).toContain('连接与设备')
+      await click(document.querySelector('[aria-label="关闭面板"]')!)
+      expect(current(view.element)).toBe(label)
+      const refresh = headings[0]!.querySelector('[aria-label^="刷新"]')
+      if (refresh) {
+        const method = label === 'Goals' ? 'goal.ls' : 'space.ls'
+        const before = f.client.forwardRpc!.mock.calls.filter(([name]: [string]) => name === method).length
+        await click(refresh)
+        expect(f.client.forwardRpc!.mock.calls.filter(([name]: [string]) => name === method)).toHaveLength(before + 1)
+      }
+    }
+    expect(owner.recordIdentity()).toBe(record)
+    expect(f.submit).not.toHaveBeenCalled()
+  })
+
   it('cold restores original Goal edit refs/body/unknown without reseeding and keeps the same editor through all five workfaces', async () => {
     const f = originalClient()
     const owner = getDeviceWorkface()
