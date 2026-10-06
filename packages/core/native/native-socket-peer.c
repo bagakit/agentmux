@@ -15,8 +15,33 @@
 #include <limits.h>
 
 static void failure(const char *phase) {
-  fprintf(stderr,"{\"code\":\"NATIVE_SOCKET_PEER_UNCONFIRMED\",\"phase\":\"%s\",\"errno\":%d}\n",phase,errno);
+  fprintf(stderr,"{\"code\":\"NATIVE_SOCKET_PEER_UNCONFIRMED\",\"phase\":\"%s\",\"errno\":null}\n",phase);
   exit(1);
+}
+static void syscall_failure(const char *phase) {
+  int observed_errno=errno;
+  fprintf(stderr,"{\"code\":\"NATIVE_SOCKET_PEER_UNCONFIRMED\",\"phase\":\"%s\",\"errno\":%d}\n",phase,observed_errno);
+  exit(1);
+}
+struct endpoint_observation { struct stat value; const char *reason; int syscall_errno; };
+/* Necessary candidate facts, never Native actor authority. Read once so a
+ * successful predicate cannot borrow errno left by an unrelated observation. */
+static struct endpoint_observation observe_endpoint(const char *path) {
+  struct endpoint_observation result={0};
+  if(lstat(path,&result.value)) { result.reason="stat-failed";result.syscall_errno=errno; }
+  else if(!S_ISSOCK(result.value.st_mode)) result.reason="not-socket";
+  else if(result.value.st_uid!=getuid()) result.reason="uid-mismatch";
+  else if((result.value.st_mode&077)!=0) result.reason="permissions-mismatch";
+  return result;
+}
+static void endpoint_failure(const char *phase,struct endpoint_observation observation) {
+  fprintf(stderr,"{\"code\":\"NATIVE_SOCKET_PEER_UNCONFIRMED\",\"phase\":\"%s\",\"reason\":\"%s\",\"errno\":",phase,observation.reason);
+  if(observation.syscall_errno) fprintf(stderr,"%d",observation.syscall_errno);
+  else fputs("null",stderr);
+  fprintf(stderr,",\"expectedUid\":%u",getuid());
+  if(!observation.syscall_errno) fprintf(stderr,",\"stat\":{\"type\":%u,\"uid\":%u,\"mode\":%u}",
+    observation.value.st_mode&S_IFMT,observation.value.st_uid,observation.value.st_mode&07777);
+  fputs("}\n",stderr);exit(1);
 }
 static void quoted(const char *value) {
   putchar('"'); for (const unsigned char *at=(const unsigned char *)value; *at; at++) {
@@ -82,6 +107,13 @@ static struct original_connection original_connection(pid_t root,const char *end
       if(value.psi.soi_family!=AF_UNIX||value.psi.soi_kind!=SOCKINFO_UN||value.psi.soi_type!=SOCK_STREAM||!(value.psi.soi_state&SOI_S_ISCONNECTED))continue;
       const struct sockaddr_un *peer=&value.psi.soi_proto.pri_un.unsi_caddr.ua_sun;
       if(peer->sun_family!=AF_UNIX||!memchr(peer->sun_path,0,sizeof(peer->sun_path))||peer->sun_path[0]!='/'||(endpoint[0]&&strcmp(peer->sun_path,endpoint)))continue;
+      if(!endpoint[0]) {
+        struct endpoint_observation candidate=observe_endpoint(peer->sun_path);
+        if(candidate.reason) {
+          if(candidate.syscall_errno && candidate.syscall_errno!=ENOENT) endpoint_failure("endpoint-observation",candidate);
+          continue;
+        }
+      }
       if(!value.psi.soi_so||!value.psi.soi_proto.pri_un.unsi_conn_so)failure("opaque-peer-unavailable");
       if(tui) {
         if(tui!=pids[n]||original.psi.soi_so!=value.psi.soi_so||
@@ -104,6 +136,8 @@ int main(int argc,char **argv) {
     return 0;
   }
   if(argc==14 && !strcmp(argv[1],"--verify")) {
+    struct endpoint_observation endpoint=observe_endpoint(argv[12]);
+    if(endpoint.reason) endpoint_failure("endpoint-changed",endpoint);
     pid_t root=(pid_t)strtol(argv[2],NULL,10),tui=(pid_t)strtol(argv[3],NULL,10),peer=(pid_t)strtol(argv[4],NULL,10);
     struct proc_bsdinfo r=process(root),t=process(tui),p=process(peer);
     char birth[80];snprintf(birth,sizeof(birth),"%llu:%llu",r.pbi_start_tvsec,r.pbi_start_tvusec);if(strcmp(birth,argv[9]))failure("run-birth-changed");
@@ -117,7 +151,8 @@ int main(int argc,char **argv) {
       b=socket_info(peer,object_descriptor(peer,peer_socket,tui_socket,"original-peer-fd"));
     if(getpgid(root)!=root||getpgid(tui)!=root||a.psi.soi_so!=strtoull(argv[7],NULL,10)||b.psi.soi_so!=strtoull(argv[8],NULL,10)||
        a.psi.soi_proto.pri_un.unsi_conn_so!=b.psi.soi_so||b.psi.soi_proto.pri_un.unsi_conn_so!=a.psi.soi_so)failure("original-association-changed");
-    struct stat path;if(lstat(argv[12],&path)||!S_ISSOCK(path.st_mode)||path.st_uid!=getuid()||(path.st_mode&077)!=0)failure("endpoint-changed");
+    endpoint=observe_endpoint(argv[12]);if(endpoint.reason)endpoint_failure("endpoint-changed",endpoint);
+    struct stat path=endpoint.value;
     char identity[80];snprintf(identity,sizeof(identity),"%llu:%llu",(unsigned long long)path.st_dev,(unsigned long long)path.st_ino);if(strcmp(identity,argv[13]))failure("endpoint-changed");
     puts("{\"type\":\"native-socket-current\",\"schema\":1}");return 0;
   }
@@ -128,35 +163,42 @@ int main(int argc,char **argv) {
   struct proc_bsdinfo root_before=process(root);
   if(argv[2][0] && argv[2][0]!='/')failure("endpoint");
   const char *endpoint=argv[2];struct stat path_before;
+  if(endpoint[0]) { struct endpoint_observation requested=observe_endpoint(endpoint);
+    if(requested.reason)endpoint_failure("endpoint-owner",requested); }
   struct original_connection connected=original_connection(root,endpoint);
   pid_t tui=connected.pid;int tui_fd=connected.descriptor;struct socket_fdinfo original=connected.value;endpoint=connected.endpoint;
   if(!original.psi.soi_so||!original.psi.soi_proto.pri_un.unsi_conn_so)failure("opaque-peer-unavailable");
-  if(lstat(endpoint,&path_before)||!S_ISSOCK(path_before.st_mode)||path_before.st_uid!=getuid()||(path_before.st_mode&077)!=0)failure("endpoint-owner");
+  struct endpoint_observation selected_endpoint=observe_endpoint(endpoint);
+  if(selected_endpoint.reason)endpoint_failure("endpoint-owner",selected_endpoint);
+  path_before=selected_endpoint.value;
   struct proc_bsdinfo tui_before=process(tui);
-  int fd=socket(AF_UNIX,SOCK_STREAM,0);if(fd<0)failure("connect-socket");
+  int fd=socket(AF_UNIX,SOCK_STREAM,0);if(fd<0)syscall_failure("connect-socket");
   struct sockaddr_un address={0};address.sun_family=AF_UNIX;
   if(strlen(endpoint)>=sizeof(address.sun_path))failure("endpoint-length");
   strcpy(address.sun_path,endpoint);address.sun_len=sizeof(address);
-  if(connect(fd,(struct sockaddr *)&address,sizeof(address)))failure("connect-original-peer");
+  if(connect(fd,(struct sockaddr *)&address,sizeof(address)))syscall_failure("connect-original-peer");
   pid_t peer=0;socklen_t length=sizeof(peer);
-  if(getsockopt(fd,SOL_LOCAL,LOCAL_PEERPID,&peer,&length)||length!=sizeof(peer)||peer<=0)failure("connected-peer-pid");
-  uid_t uid;gid_t gid;if(getpeereid(fd,&uid,&gid)||uid!=getuid())failure("connected-peer-uid");
+  if(getsockopt(fd,SOL_LOCAL,LOCAL_PEERPID,&peer,&length))syscall_failure("connected-peer-pid");
+  if(length!=sizeof(peer)||peer<=0)failure("connected-peer-pid");
+  uid_t uid;gid_t gid;if(getpeereid(fd,&uid,&gid))syscall_failure("connected-peer-uid");
+  if(uid!=getuid())failure("connected-peer-uid");
   struct proc_bsdinfo peer_before=process(peer);
   tui_fd=object_descriptor(tui,original.psi.soi_so,original.psi.soi_proto.pri_un.unsi_conn_so,"original-tui-fd");
   int peer_fd=object_descriptor(peer,original.psi.soi_proto.pri_un.unsi_conn_so,original.psi.soi_so,"original-peer-fd");
   struct socket_fdinfo again=socket_info(tui,tui_fd),other=socket_info(peer,peer_fd);
   struct proc_bsdinfo root_after=process(root),tui_after=process(tui),peer_after=process(peer);
-  struct stat path_after;if(lstat(endpoint,&path_after))failure("endpoint-recheck");
+  selected_endpoint=observe_endpoint(endpoint);if(selected_endpoint.reason)endpoint_failure("endpoint-recheck",selected_endpoint);
+  struct stat path_after=selected_endpoint.value;
   if(root_before.pbi_start_tvsec!=root_after.pbi_start_tvsec||root_before.pbi_start_tvusec!=root_after.pbi_start_tvusec||
      tui_before.pbi_start_tvsec!=tui_after.pbi_start_tvsec||tui_before.pbi_start_tvusec!=tui_after.pbi_start_tvusec||
      peer_before.pbi_start_tvsec!=peer_after.pbi_start_tvsec||peer_before.pbi_start_tvusec!=peer_after.pbi_start_tvusec||
      getpgid(root)!=root||getpgid(tui)!=root||path_before.st_dev!=path_after.st_dev||path_before.st_ino!=path_after.st_ino||
      again.psi.soi_so!=original.psi.soi_so||again.psi.soi_proto.pri_un.unsi_conn_so!=original.psi.soi_proto.pri_un.unsi_conn_so||
      other.psi.soi_so!=again.psi.soi_proto.pri_un.unsi_conn_so||other.psi.soi_proto.pri_un.unsi_conn_so!=again.psi.soi_so)failure("binding-changed");
-  if(fcntl(fd,F_SETFD,0))failure("inherit-connection");
+  if(fcntl(fd,F_SETFD,0))syscall_failure("inherit-connection");
   printf("{\"type\":\"native-socket-binding\",\"schema\":1,\"fd\":%d,\"runPid\":%d,\"tuiPid\":%d,\"peerPid\":%d,\"uid\":%u,\"tuiFd\":%d,\"peerFd\":%d,\"tuiSocket\":\"%llu\",\"peerSocket\":\"%llu\",\"runBirth\":\"%llu:%llu\",\"tuiBirth\":\"%llu:%llu\",\"peerBirth\":\"%llu:%llu\",\"device\":\"%llu\",\"inode\":\"%llu\",\"endpoint\":",fd,root,tui,peer,uid,tui_fd,peer_fd,
     original.psi.soi_so,original.psi.soi_proto.pri_un.unsi_conn_so,root_before.pbi_start_tvsec,root_before.pbi_start_tvusec,tui_before.pbi_start_tvsec,tui_before.pbi_start_tvusec,peer_before.pbi_start_tvsec,peer_before.pbi_start_tvusec,(unsigned long long)path_before.st_dev,(unsigned long long)path_before.st_ino);
   quoted(endpoint);puts("}");fflush(stdout);
   char descriptor[32];snprintf(descriptor,sizeof(descriptor),"%d",fd);setenv("AGENTMUX_NATIVE_SOCKET_FD",descriptor,1);setenv("ELECTRON_RUN_AS_NODE","1",1);
-  char *args[]={argv[3],argv[4],NULL};execv(argv[3],args);failure("transport-exec");
+  char *args[]={argv[3],argv[4],NULL};execv(argv[3],args);syscall_failure("transport-exec");
 }
