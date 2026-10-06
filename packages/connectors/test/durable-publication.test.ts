@@ -352,3 +352,26 @@ it('preparation and claim persistence fail before any effect, keeping the origin
   expect(owner.inspect(original.operationId)).toEqual(original)
 })
 
+it('correlates late receipts to their original durable attempt without changing the retried operation or its frozen request key', () => {
+  const owner = store()
+  owner.commitPage(boundary, checkpoint(), page([speech('reply-a')]), () => true)
+  const first = owner.claimNext(boundary, () => true, adapter)!
+  owner.settle(first.operationId, first.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
+  owner.settle(first.operationId, first.attempt!, { state: 'not-applied', reason: 'platform-rejected' })
+  owner.retry(first.operationId, () => true)
+  const second = owner.claimNext(boundary, () => true, adapter)!
+  expect(second.operationId).toBe(first.operationId)
+  expect(second.prepared).toEqual(first.prepared)
+  expect(second.attempt).toBe(first.attempt! + 1)
+  owner.settle(second.operationId, second.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
+  const current = owner.inspect(second.operationId)
+  for (const late of [{ state: 'not-applied', reason: 'platform-rejected' }, { state: 'unknown', reason: 'effect-unconfirmed' }] as const) {
+    expect(owner.settle(first.operationId, first.attempt!, late)).toEqual(current)
+    expect(owner.inspect(first.operationId)).toEqual(current)
+  }
+  expect(owner.attempts(first.operationId)).toEqual([
+    { attempt: first.attempt, receipt: { state: 'not-applied', reason: 'platform-rejected' } },
+    { attempt: second.attempt, receipt: { state: 'unknown', reason: 'effect-unconfirmed' } }
+  ])
+  expect(() => owner.retry(second.operationId, () => true)).toThrowError(/not confirmed non-application/)
+})
