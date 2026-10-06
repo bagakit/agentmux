@@ -1,4 +1,6 @@
 import { parseDemandDispatchIntent, parseDemandDispatches, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent } from './dispatch.js'
+import { parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
+  type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type DemandDelegationCollectionInput, type DemandDelegationCollector } from './delegations.js'
 import { parseDemandParticipations, parseDemandCreationOrigin, parseDemandParticipationSource, type DemandParticipationSource } from './collaboration.js'
 import { appendDemandContentReferences, parseDemandContentReferences } from './content-references.js'
 import { randomUUID } from 'node:crypto'
@@ -158,13 +160,14 @@ function parseDemand(value: unknown, label: string): Demand {
     'creationOrigin',
     'contentRefs',
     'dispatches',
+    'delegations',
     'activities',
     'decisions',
     'alignment',
     'grounding',
     'createdAt',
     'updatedAt',
-  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'dispatches'])
+  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'dispatches', 'delegations'])
   if (!isDemandStatus(record.status)) throw new Error(`${label}.status is invalid`)
   if (!isDemandPriority(record.priority)) throw new Error(`${label}.priority is invalid`)
   if (!Array.isArray(record.activities)) throw new Error(`${label}.activities must be an array`)
@@ -200,6 +203,7 @@ function parseDemand(value: unknown, label: string): Demand {
     ...(creationOrigin === undefined ? {} : { creationOrigin }),
     ...(record.contentRefs === undefined ? {} : { contentRefs: parseDemandContentReferences(record.contentRefs) }),
     dispatches: parseDemandDispatches(record.dispatches ?? []),
+    ...(record.delegations === undefined ? {} : { delegations: parseDemandDelegations(record.delegations) }),
     activities,
     decisions: record.decisions.map((entry, index) => parseDecision(entry, `${label}.decisions[${index}]`)),
     ...(record.alignment === undefined ? {} : { alignment: parseAlignment(record.alignment) }),
@@ -422,6 +426,127 @@ export class DemandStore {
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     }, undefined, operationId)
+  }
+
+  /** The host admits the caller and original Session/Run identities before preparing. */
+  async prepareDelegation(id: string, input: DemandDelegationIntent, actorSessionId: string): Promise<DemandReceipt> {
+    const intent = parseDemandDelegationIntent(input)
+    return this.mutate('delegation.prepare', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath)
+      const owner = snapshot.demands.find(item => item.delegations?.some(entry => entry.operationId === intent.operationId || entry.sourceMessageId === intent.sourceMessageId))
+      const original = owner?.delegations?.find(entry => entry.operationId === intent.operationId || entry.sourceMessageId === intent.sourceMessageId)
+      if (actorSessionId !== intent.ownerAgentSessionId) this.rejectDelegation('Only the original authenticated owner can prepare this delegation.')
+      if (original) {
+        if (owner!.id !== id || !sameDemandDelegationIntent(original, intent)) this.rejectDelegation('The original delegation identity belongs to a different Goal, worker, Run or frozen input. Inspect it without resending.')
+        return { unchanged: demand }
+      }
+      if (demand.supervisorSessionId !== actorSessionId || !demand.assigneeSessionIds.includes(intent.workerAgentSessionId) || !demand.sessionIds.includes(intent.workerAgentSessionId) || intent.workerAgentSessionId === actorSessionId)
+        this.rejectDelegation('A new delegation requires the current Supervisor and a distinct accurate assigned worker Session.')
+      const alignment = demand.alignment
+      if (!alignment || alignment.revision !== intent.alignmentRevision || intent.criterionIds.some(criterionId => !alignment.criteria.some(criterion => criterion.id === criterionId)))
+        this.rejectDelegation('A new delegation must reference the current proposal and its original success criteria.')
+      demand.delegations = [...(demand.delegations ?? []), { ...intent, preparedAt: Date.now(), capturedCriteria: clone(alignment.criteria.filter(criterion => intent.criterionIds.includes(criterion.id))) }]
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      validateNewDemand(demand, this.storePath)
+      return demand
+    }, undefined, intent.operationId)
+  }
+
+  async inspectDelegation(id: string, operationId: string): Promise<DemandDelegation | null> {
+    nonEmptyString(operationId, 'delegation.operationId')
+    return enqueue(this.root, async () => {
+      const release = await this.acquireLock()
+      try {
+        const snapshot = await this.readSnapshot(), demand = findDemand(snapshot, id, this.storePath)
+        await this.confirmSnapshot()
+        return clone(demand.delegations?.find(entry => entry.operationId === operationId) ?? null)
+      } finally { await release() }
+    })
+  }
+
+  /** Call only after Main has verified this exact source envelope through Core. */
+  async linkDelegation(id: string, operationId: string, sourceMessageId: string, actorSessionId: string): Promise<DemandReceipt> {
+    return this.mutate('delegation.link', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath), entry = this.findDelegation(demand, operationId)
+      if (entry.sourceMessageId !== sourceMessageId || actorSessionId !== entry.ownerAgentSessionId && actorSessionId !== demand.supervisorSessionId)
+        this.rejectDelegation('The original source message and authenticated owner must match this delegation.')
+      if (entry.linkedAt !== undefined) return { unchanged: demand }
+      entry.linkedAt = Date.now()
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      return demand
+    }, undefined, operationId)
+  }
+
+  /** Core verifies replyTo/thread/author; Demand verifies the frozen business scope. */
+  async submitDelegationReport(id: string, delegationOperationId: string, input: DemandDelegationReportInput, actorSessionId: string): Promise<DemandReceipt> {
+    const report = parseDemandDelegationReportInput(input)
+    return this.mutate('delegation.report', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath), entry = this.findDelegation(demand, delegationOperationId)
+      if (actorSessionId !== entry.workerAgentSessionId || actorSessionId !== report.authorAgentSessionId) this.rejectDelegation('Only the original authenticated worker can report this delegation.')
+      try { validateDemandDelegationReport(entry, report) } catch (error) { this.rejectDelegation(error instanceof Error ? error.message : String(error)) }
+      const previous = snapshot.demands.flatMap(item => (item.delegations ?? []).map(delegation => ({ goalId: item.id, delegation })))
+        .find(item => item.delegation.report?.operationId === report.operationId || item.delegation.report?.replyMessageId === report.replyMessageId)
+      if (previous && (previous.goalId !== id || previous.delegation.operationId !== delegationOperationId)) this.rejectDelegation('The original report identity belongs to another delegation. Inspect its original source.')
+      if (entry.report) {
+        const { submittedAt: _time, ...original } = entry.report
+        if (JSON.stringify(original) !== JSON.stringify(report)) this.rejectDelegation('The original worker report is frozen. A duplicate or late report cannot replace its evidence or collection.')
+        return { unchanged: demand }
+      }
+      if (entry.linkedAt === undefined) this.rejectDelegation('The original Core dispatch association is not confirmed. Inspect it before recording its reply.')
+      entry.report = { ...report, submittedAt: Date.now() }
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      validateNewDemand(demand, this.storePath)
+      return demand
+    }, undefined, report.operationId)
+  }
+
+  /** Explicit collection proposes results; it never supplies human acceptance. */
+  async collectDelegationReport(id: string, delegationOperationId: string, input: DemandDelegationCollectionInput, admittedCollector: DemandDelegationCollector): Promise<DemandReceipt> {
+    const request = parseDemandDelegationCollectionInput(input), collector = parseDemandDelegationCollector(admittedCollector)
+    return this.mutate('delegation.collect', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath), entry = this.findDelegation(demand, delegationOperationId)
+      if (collector.kind === 'agent' && collector.id !== entry.ownerAgentSessionId && collector.id !== demand.supervisorSessionId)
+        this.rejectDelegation('Only the original owner, current Supervisor or an admitted person/device can collect this report.')
+      if (!entry.report || request.replyMessageId !== entry.report.replyMessageId) this.rejectDelegation('Collection must reference the exact original submitted report.')
+      const previous = snapshot.demands.flatMap(item => (item.delegations ?? []).map(delegation => ({ goalId: item.id, delegation })))
+        .find(item => item.delegation.collection?.operationId === request.operationId)
+      if (previous && (previous.goalId !== id || previous.delegation.operationId !== delegationOperationId)) this.rejectDelegation('The original collection operation belongs to another delegation.')
+      if (entry.collection) {
+        if (entry.collection.operationId !== request.operationId || entry.collection.replyMessageId !== request.replyMessageId || JSON.stringify(entry.collection.collector) !== JSON.stringify(collector))
+          this.rejectDelegation('The report was already collected by its original operation and actor. Inspect that receipt.')
+        return { unchanged: demand }
+      }
+      entry.collection = { ...request, collector, collectedAt: Date.now() }
+      const alignment = demand.alignment
+      if (alignment?.revision === entry.alignmentRevision && !(demand.grounding?.alignmentRevision === alignment.revision && demand.grounding.acceptedAt !== null)) {
+        const reports = (demand.delegations ?? []).filter(delegation => delegation.collection && delegation.report && delegation.alignmentRevision === alignment.revision)
+        const proposal: DemandGroundingProposal = { alignmentRevision: alignment.revision, summary: reports.map(delegation => `${delegation.sourceMessageId}: ${delegation.report!.grounding.summary}`).join('\n'),
+          checks: alignment.criteria.map(criterion => {
+            const sources = reports.flatMap(delegation => delegation.report!.grounding.checks.filter(check => check.criterionId === criterion.id).map(check => ({ check, replyMessageId: delegation.report!.replyMessageId })))
+            if (sources.length === 0) return { criterionId: criterion.id, outcome: 'unknown' as const, evidence: [], note: 'No collected report for this current success criterion.' }
+            const distinct = new Set(sources.map(source => JSON.stringify(source.check)))
+            if (distinct.size > 1) return { criterionId: criterion.id, outcome: 'unknown' as const, evidence: [...new Set(sources.flatMap(source => source.check.evidence))], note: `Conflicting reports: ${sources.map(source => source.replyMessageId).join(', ')}. Review the original reports.` }
+            return clone(sources[0]!.check)
+          }) }
+        const current = demand.grounding
+        if (!current || JSON.stringify({ alignmentRevision: current.alignmentRevision, summary: current.summary, checks: current.checks }) !== JSON.stringify(proposal))
+          demand.grounding = { ...proposal, submissionId: mintObjectId(), acceptedAt: null }
+        entry.collection.groundingSubmissionId = demand.grounding!.submissionId
+      }
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      validateNewDemand(demand, this.storePath)
+      return demand
+    }, undefined, request.operationId)
+  }
+
+  private rejectDelegation(message: string): never {
+    throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, message)
+  }
+
+  private findDelegation(demand: Demand, operationId: string): DemandDelegation {
+    const entry = demand.delegations?.find(delegation => delegation.operationId === operationId)
+    if (!entry) this.rejectDelegation('The original delegation is not prepared. Preserve the Goal and inspect the exact operation.')
+    return entry
   }
 
   async update(id: string, patch: UpdateDemandInput, options: DemandTitleMutationOptions = {}): Promise<DemandReceipt> {
@@ -902,6 +1027,7 @@ async function enqueue<T>(root: string, fn: () => Promise<T>): Promise<T> {
 }
 
 function rejectProvenanceInput(value: object): void {
+  if (Object.hasOwn(value, 'delegations')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Only the actual delegation owner can prepare, link, report or collect original business work.')
   if (['participations', 'creationOrigin', 'requesterParticipationId', 'requesterAsSupervisor', 'supervisorDefaultPending', 'assigneeExecutorId'].some(key => Object.hasOwn(value, key)))
     throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Original Goal provenance is authored only by the trusted host; assign accurate Sessions.')
   if (Object.hasOwn(value, 'executorId')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Executor is creation configuration, not a Goal assignee. Assign accurate Sessions.')

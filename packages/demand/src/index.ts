@@ -9,3 +9,4 @@ export * from './content-references.js'
 export * from './collaboration.js'
 
 export * from './dispatch.js'
+export * from './delegations.js'

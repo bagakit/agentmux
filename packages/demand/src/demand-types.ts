@@ -1,4 +1,5 @@
 import type { DemandDispatch } from './dispatch.js'
+import type { DemandDelegation } from './delegations.js'
 import type { DemandCreationOrigin, DemandParticipation, DemandParticipationSource } from './collaboration.js'
 import type { DemandContentReference } from './content-references.js'
 import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from './goals.js'
@@ -101,6 +102,8 @@ export type Demand = {
   contentRefs?: DemandContentReference[]
   /** Explicit Start provenance. Historical relations and activity never author this fact. */
   dispatches?: DemandDispatch[]
+  /** Frozen work responsibility and report references; communication stays with Core. */
+  delegations?: DemandDelegation[]
   activities: DemandActivity[]
   decisions: DemandDecision[]
   alignment?: DemandAlignment

@@ -34,6 +34,10 @@
     "./goals": {
       "types": "./dist/src/goals.d.ts",
       "import": "./dist/src/goals.js"
+    },
+    "./delegations": {
+      "types": "./dist/src/delegations.d.ts",
+      "import": "./dist/src/delegations.js"
     }
   },
   "bin": {
