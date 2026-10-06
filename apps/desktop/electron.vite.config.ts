@@ -7,7 +7,11 @@ import { fileDiagramAssets } from './scripts/file-diagram-assets'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: ['@agentmux/client-ui'] })],
+    // The shared Note schema runs in Main too. Keep its existing dependencies
+    // and required peers in the bundle rather than relying on workspace modules.
+    plugins: [externalizeDepsPlugin({ exclude: [
+      '@agentmux/client-ui', '@tiptap/core', '@tiptap/extension-unique-id', '@tiptap/starter-kit'
+    ] })],
     resolve: {
       // Main consumes this pure module from the same source as Renderer, without a UI runtime dependency.
       alias: {
