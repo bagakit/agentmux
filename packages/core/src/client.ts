@@ -5781,7 +5781,9 @@ export class AgentMuxClient {
               ...(savedMessage?.sourceDevice ? { sourceDevice: savedMessage.sourceDevice } : {})
             } : message
             return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
-              input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertSession, transportQualification)
+              input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertSession, transportQualification,
+              producer === 'prompt' ? { kind: producer, agentSessionId: current.agentSessionId, expectedRun, submissionId: operationId }
+                : { kind: producer, agentSessionId: current.agentSessionId, expectedRun, messageId: operationId })
           }, { kind: 'semantic', bytes: null }, renderObservation, transportQualification ? protocolInput : undefined, releasePreparationObservation, release => { releasePreparationObservation = release }, transportQualification?.deadline)
           break
         } catch (error) {
