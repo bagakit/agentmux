@@ -84,11 +84,12 @@
 .agent-interaction__grant-text { min-width: 0; display: grid; gap:var(--sp-1); }
 .agent-interaction__grant-text small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
 .agent-interaction button.is-primary .agent-interaction__grant-text small { color: var(--scrim-3); }
-/* Risk state, encoded as a restrained 6px dot — the only accent, and never a rail or a border. */
-.agent-interaction__tier { flex: 0 0 auto; width: 6px; height: 6px; margin-top:var(--sp-2); border-radius: 50%; background: var(--text-3); }
-.agent-interaction__tier--safe { background: var(--green); }
-.agent-interaction__tier--caution { background: var(--amber); }
-.agent-interaction__tier--danger { background: var(--red); }
+/* The original declared tier selects its drawing; absence stays unclassified. */
+.agent-interaction__tier { flex: 0 0 auto; width: 6px; height: 6px; margin-top:var(--sp-2); background: var(--text-3); mask: var(--native-permission-unknown-mask) center / contain no-repeat; }
+.agent-interaction__tier--safe { background: var(--success); mask-image: var(--native-permission-safe-mask); }
+.agent-interaction button.is-primary .agent-interaction__tier--safe { background: currentColor; }
+.agent-interaction__tier--caution { background: var(--amber); mask-image: var(--native-permission-caution-mask); }
+.agent-interaction__tier--danger { background: var(--red); mask-image: var(--native-permission-danger-mask); }
 
 /* Native questions stay in the original conversation flow; feedback earns emphasis through content. */
 .agent-interaction--async { box-sizing: border-box; width: min(calc(100% - var(--sp-4)), 760px); margin: var(--sp-2) var(--sp-2) var(--sp-3); padding: 10px 12px; box-shadow: var(--hl); background: var(--surface-1); }

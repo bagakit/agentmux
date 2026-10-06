@@ -438,6 +438,10 @@ export const SEMANTIC_ICON_CATALOG = {
   'status.warning': { label: 'Warning', glyph: 'triangle-alert' },
   'status.info': { label: 'Information', glyph: 'info' },
   'status.permission': { label: 'Permission required', glyph: 'shield-alert' },
+  'status.permission-safe': { label: 'Declared safe permission option', glyph: 'shield-check' },
+  'status.permission-caution': { label: 'Declared cautious permission option', glyph: 'triangle-alert' },
+  'status.permission-danger': { label: 'Declared dangerous permission option', glyph: 'circle-x' },
+  'status.permission-unknown': { label: 'Unclassified permission option', glyph: 'circle-help' },
   'status.selected': { label: 'Selected', glyph: 'check' }
 } as const satisfies Record<string, { label: string; glyph: IconGlyphId }>
 export type SemanticIconId = keyof typeof SEMANTIC_ICON_CATALOG

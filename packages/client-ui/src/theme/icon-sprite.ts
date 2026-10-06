@@ -20,7 +20,11 @@ const NATIVE_ICON_PROJECTIONS = {
   '--native-presence-error-mask': 'status.presence-error',
   '--native-presence-exited-mask': 'status.presence-exited',
   '--native-presence-done-mask': 'status.presence-done',
-  '--native-presence-disconnected-mask': 'status.presence-disconnected'
+  '--native-presence-disconnected-mask': 'status.presence-disconnected',
+  '--native-permission-safe-mask': 'status.permission-safe',
+  '--native-permission-caution-mask': 'status.permission-caution',
+  '--native-permission-danger-mask': 'status.permission-danger',
+  '--native-permission-unknown-mask': 'status.permission-unknown'
 } as const satisfies Record<string, SemanticIconId>
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
