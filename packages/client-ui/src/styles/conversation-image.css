@@ -63,3 +63,8 @@
 .md-conversation-image__retry { display: inline-flex; align-items: center; vertical-align: middle; padding: 3px; margin-left: 4px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
 .md-conversation-image__retry:hover { color: var(--ink-1); background: var(--surface-3); }
 .md-conversation-image__retry:focus-visible { outline: 1px solid var(--ink-3); outline-offset: 2px; }
+
+.md-conversation-image__navigation { display: flex; align-items: center; gap: var(--sp-1); }
+.md-conversation-image__position { min-width: 40px; text-align: center; color: var(--text-3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
+.md-conversation-image__state { display: grid; justify-items: center; gap: var(--sp-4); max-width: min(100%, 560px); padding: var(--sp-5); color: var(--text-2); font-size: var(--fs-body); text-align: center; }
+.md-conversation-image__state .md-conversation-image__reference { color: var(--text-3); }

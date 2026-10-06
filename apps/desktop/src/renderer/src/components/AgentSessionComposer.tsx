@@ -321,7 +321,7 @@ export function AgentSessionComposer({
     >
     {(mailbox, pending) => (
     <AgentComposer key={sessionId} aboveInput={pending} mailbox={mailbox}
-      readPastedImage={(path) => api.ui.readPastedImage(path)}
+      readPastedImage={api.ui.readPastedImage}
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
         executorLabel={executors?.[session.executorId]?.label ?? session.executorId}

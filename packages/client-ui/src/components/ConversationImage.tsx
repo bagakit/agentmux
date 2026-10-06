@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { PastedImage } from '../lib/pasted-images.js'
 import { useClientUiPlatform } from '../platform.js'
-import { ConversationImageViewport } from './ConversationImageViewport.js'
+import { ConversationImageGallery } from './ConversationImageGallery.js'
+import { useConversationImageCollection } from './ConversationImageCollection.js'
+import type { ConversationImageReference } from '../lib/conversation-image-references.js'
 
 /** App-pasted references retain their confined byte reader; native references use Core's exact-record reader. */
 export type ReadPastedImage = (path: string) => Promise<PastedImage | null>
@@ -24,11 +26,15 @@ export function ConversationImage({
   readImage: ReadPastedImage
 }) {
   const platform = useClientUiPlatform()
+  const scope = useConversationImageCollection()
+  const related = scope?.readImage === readImage ? scope.references : undefined
+  const references = useMemo(() => related?.some(reference => reference.path === path) ? related : [{ path, text, ...(label === undefined ? {} : { label }) }], [related, path, text, label])
+  const currentReferences = useRef(references); currentReferences.current = references
   const [attempt, setAttempt] = useState(0)
   const [loaded, setLoaded] = useState<LoadedImage | null>(null)
   const [failed, setFailed] = useState<LoadedImage | null>(null)
   const [readFailure, setReadFailure] = useState<{ path: string; reader: ReadPastedImage; message: string } | null>(null)
-  const [open, setOpen] = useState<LoadedImage | null>(null)
+  const [open, setOpen] = useState<{ image: LoadedImage; references: readonly ConversationImageReference[] } | null>(null)
   const currentImage = useRef<LoadedImage | null>(null)
 
   useEffect(() => {
@@ -50,6 +56,7 @@ export function ConversationImage({
       alive = false
     }
   }, [path, readImage, attempt])
+  useEffect(() => { setOpen(null) }, [references])
 
   // Bind both the bytes and decode/open state to this exact read. A changed source cannot render
   // the previous image during the commit before effect cleanup, or inherit a late decode error.
@@ -62,8 +69,8 @@ export function ConversationImage({
   const decodeFailed = () => { if (currentImage.current === loaded) setFailed(loaded) }
 
   return (
-    <Dialog.Root open={open === loaded} onOpenChange={next => {
-      if (currentImage.current === loaded) setOpen(next ? loaded : null)
+    <Dialog.Root open={open?.image === loaded && open.references === references} onOpenChange={next => {
+      if (currentImage.current === loaded && currentReferences.current === references) setOpen(next && loaded ? { image: loaded, references } : null)
     }}>
       <Dialog.Trigger asChild>
         <button type="button" className="md-conversation-image" title={label ?? path}>
@@ -73,7 +80,7 @@ export function ConversationImage({
       <Dialog.Portal container={platform.overlayContainer() as HTMLElement}>
         <Dialog.Overlay className="md-conversation-image__overlay" />
         <Dialog.Content className="md-conversation-image__lightbox" aria-describedby={undefined}>
-          <ConversationImageViewport src={image.dataUrl} alt={label ?? path} name={label ?? path.split(/[\\/]/u).at(-1) ?? 'Image'} onError={decodeFailed} />
+          {loaded ? <ConversationImageGallery references={references} initial={loaded} onInitialError={decodeFailed} /> : null}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
