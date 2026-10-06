@@ -32,16 +32,16 @@
 .focus-project-lanes__row[data-focus-source='topic'] { background: color-mix(in srgb, var(--text-3) 5%, transparent); }
 .focus-project-lanes__row[data-focus-source='mote'] { background: color-mix(in srgb, var(--purple) 5%, transparent); }
 .focus-project-lanes__row[data-focus-source='survey'] { background: color-mix(in srgb, var(--surface-2) 45%, transparent); }
-.focus-project-lanes__source { flex: 0 1 auto; max-width: 35%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); color: var(--text-3); }
+.focus-project-lanes__source { flex: none; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); color: var(--text-3); }
 .focus-project-lanes__title { display: flex; align-items: center; flex-wrap: wrap; min-width: 0; }
 .focus-project-lanes__title > .focus-project-lanes__heading { flex: 1 1 180px; }
 .focus-project-lanes__status-rail { display: flex; align-items: center; flex: none; margin: 0 var(--sp-1) 0 auto; }
 .focus-project-lanes__status-rail > .focus-context-group__header { justify-content: center; width: 24px; padding: 0; color: var(--text-3); }
 .focus-project-lanes__status-rail > [data-visible-state='true'] { width: auto; padding: 0 var(--sp-2); }
-.focus-project-lanes__heading { display: flex; align-items: center; min-height: 26px; min-width: 0; gap: var(--sp-2); padding: 0 var(--sp-2); }
+.focus-project-lanes__heading { display: flex; align-items: center; flex-wrap: wrap; min-height: 26px; min-width: 0; gap: 2px var(--sp-2); padding: 2px var(--sp-2); }
 .focus-project-lanes__row[data-focus-current='true'] .focus-project-lanes__heading { background: color-mix(in srgb, var(--text) 6%, transparent); box-shadow: inset 2px 0 var(--text-2); }
 .focus-project-lanes__row[data-focus-current='true'] .focus-project-lanes__label strong { color: var(--text); font-weight: 600; }
-.focus-project-lanes__axis { display: inline-flex; align-items: center; flex: 0 1 auto; max-width: 75%; gap: 4px; min-width: 0; padding: 2px 0; border: 0; background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
+.focus-project-lanes__axis { display: inline-flex; align-items: center; flex: 0 1 auto; max-width: 100%; gap: 4px; min-width: 0; padding: 2px 0; border: 0; background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
 .focus-project-lanes__label { display: inline-flex; align-items: center; gap: 3px; min-width: 0; }
 .focus-project-lanes__label strong { overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-micro); white-space: nowrap; font-weight: 500; }
 .focus-project-lanes__label:first-child { flex: 0 1 auto; color: var(--text-3); }
@@ -88,8 +88,8 @@
 .focus-context[data-bucket='results'] .focus-context__state { color: var(--status-ink); }
 .focus-context__state small { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .focus-project-lanes__axis .project-rail-row__icon { flex: none; }
-.focus-project-lanes__summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); color: var(--text-3); }
-.focus-project-lanes__activity { flex: 0 1 auto; margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.focus-project-lanes__summary { flex: 1 1 0%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); color: var(--text-3); }
+.focus-project-lanes__activity { flex: none; margin-left: auto; min-width: 0; white-space: nowrap; font-size: var(--fs-micro); color: var(--text-3); font-variant-numeric: tabular-nums; }
 @container (max-width: 560px) {
   .focus-project-lanes__summary, .focus-project-lanes__axis .host-identity { display: none; }
   .focus-project-lanes__axis { flex: 1 1 auto; max-width: none; }
