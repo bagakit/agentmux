@@ -225,6 +225,10 @@
     "./goal-delegation": {
       "types": "./dist/goal-delegation.d.ts",
       "import": "./dist/goal-delegation.js"
+    },
+    "./conversation": {
+      "types": "./dist/conversation.d.ts",
+      "import": "./dist/conversation.js"
     }
   },
   "bin": {
