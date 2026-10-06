@@ -11,3 +11,5 @@
 .mailbox-collaboration__filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
 .mailbox-collaboration__filters > input { flex: 1 1 220px; min-width: 0; width: 100%; }
 .mailbox-collaboration__filters .selection-field { flex: 1 1 160px; min-width: 0; }
+.mailbox-collaboration__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.mailbox-collaboration__evidence { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); }

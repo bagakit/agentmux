@@ -3,6 +3,7 @@ import type { AgentMuxRpcResult, DurableAgentMuxMessage } from '@agentmux/core'
 import { formatSessionAddress } from '@agentmux/core/sharing'
 import { ConversationMessage, type ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
 import { TextInput } from '@agentmux/client-ui/input'
+import { ContentCopyButton } from '@agentmux/client-ui/components/ContentCopyButton'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { MailboxEmpty, MailboxSourceNotice, MailboxTime } from './MailboxReading'
@@ -128,6 +129,12 @@ export function MailboxCollaboration({ control, active, reading, onCopy }: {
   const original = selected && record?.dispatch.sourceMessageId === selected ? record : null
   const detailIssue = detail?.source === selected ? detail.issue : null
   const loadingDetail = detail?.source === selected && detail.loading
+  const evidenceIdentity = useMemo(() => ({}), [original, detail, selectionOwner])
+  const evidenceText = original ? JSON.stringify({
+    interpretation: 'Original recorded communication. Delivery and supervision do not establish execution or Goal acceptance. Missing facts remain unknown.',
+    readObservation: { state: loadingDetail ? 'reading-unconfirmed' : detailIssue ? 'read-unconfirmed' : 'confirmed', issue: detailIssue },
+    record: original
+  }, null, 2) : ''
   const names = useMemo(() => new Map([...new Set((page?.dispatches ?? []).flatMap(item => [item.ownerAgentSessionId, item.workerAgentSessionId]))]
     .map(id => [id, reading?.describeSpeaker?.({ role: 'agent', id }).name ?? id])), [page, reading?.describeSpeaker])
   const matches = (page?.dispatches ?? []).filter(item => {
@@ -139,7 +146,8 @@ export function MailboxCollaboration({ control, active, reading, onCopy }: {
       onClick={refresh}>Refresh records</button></div>
     <p className="mailbox-collaboration__hint">Original supervised messages only. Other Agent messages remain in Inbox and Outbox.</p>
     {listIssue ? <MailboxSourceNotice title="Collaboration list is unconfirmed" message={listIssue.message} action="Retry collaboration list" onAction={() => void loadPage(listIssue.cursor, listIssue.pages, listIssue.extend)} /> : null}
-    {selected ? <><button ref={back} type="button" className="composer-tool" onClick={leave}>Back to collaboration</button>
+    {selected ? <><div className="mailbox-collaboration__actions"><button ref={back} type="button" className="composer-tool" onClick={leave}>Back to collaboration</button>
+      {original ? <span className="mailbox-collaboration__evidence"><span>Original evidence</span><ContentCopyButton label="Copy collaboration evidence" text={evidenceText} identity={evidenceIdentity} /></span> : null}</div>
       {detailIssue ? <MailboxSourceNotice title="Original record read is unconfirmed" message={detailIssue} action="Retry original record" onAction={() => void loadDetail(selected)} /> : null}
       {original ? <article data-dispatch-source={selected}>
         <p>{original.dispatch.originAwaits ? 'Communication is awaiting a worker report.' : 'Worker report recorded; review is separate.'}</p>
