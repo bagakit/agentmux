@@ -7,7 +7,7 @@ const mutation = process.env.CONTENT_ACTION_MUTATION
 const changes = {
   remove: ['packages/client-ui/src/components/InlineComposer.tsx', '.deleteRange({ from: position, to: position + node.nodeSize })', '.deleteRange({ from: position, to: position })'],
   duplicate: ['packages/client-ui/src/components/InlineComposer.tsx', 'const position = getPos()', 'const position = 8'],
-  lifetime: ['packages/client-ui/src/components/InlineComposer.tsx', '!alive.current || ', ''],
+  focus: ['packages/client-ui/src/components/InlineComposer.tsx', 'editor.view.focus()\n  }\n  return <>', 'void editor\n  }\n  return <>'],
   editable: ['packages/client-ui/src/components/InlineComposer.tsx', '!current.current.editable || !editor.isEditable || ', ''],
 } as const
 export default defineConfig({ root, plugins: [{ name: 'actual-content-action-mutation', enforce: 'pre', transform(source, id) {
