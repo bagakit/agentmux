@@ -11,3 +11,8 @@ fixture 仅在 preview API、既有诊断 journal 与 queue store 边界提供�
 ```sh
 node apps/desktop/scripts/capture-message-delivery-diagnostics.mjs
 ```
+
+
+## 诊断摘要与完整资料（density）
+
+同一真实 mounted Outbox 中，原 Core native-environment waiting receipt 带独立旧日志与完整收到的 stack/cause。640px 深色和320px 浅色依次键盘展开详情、默认摘要复制失败及成功、展开完整技术资料、完整复制失败及成功，最后键盘到完整资料尾部。摘要保准确输入引用/代次/原机器原因，不含 stack；完整 JSON 保实际 error 来源引用、Core 回执和独立日志，不重复扩写到 error。复制前后 Session、队列和两侧草稿原值不变。只断言收到的资料，不能代签原 Native 输送或上游未截断。

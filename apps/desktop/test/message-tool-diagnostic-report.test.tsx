@@ -5,7 +5,7 @@ vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ()
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM } from './helpers/composer-dom-fixture'
-import { useLayoutEffect } from 'react'
+import { act, useLayoutEffect } from 'react'
 import { ComposerFeedback } from '../src/renderer/src/components/ComposerFeedback'
 import { messageDeliveryDiagnostics } from '../src/renderer/src/lib/message-delivery-diagnostics'
 import { startDeliveryAttempt } from '@agentmux/client-ui/delivery-diagnostics'
@@ -19,15 +19,15 @@ it('the real Message Tool keeps a complete local failure copy and unchanged draf
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await dom.click('.composer-tool--mode')
   await dom.click('[aria-label="Reference files for the Agent to read"]')
-  expect(dom.container.querySelector('.composer-feedback [role="alert"]')!.textContent).not.toContain('NATIVE_FAILURE')
-  expect(dom.container.querySelector('.composer-feedback details')!.hasAttribute('open')).toBe(false)
-  await dom.click('.composer-feedback [aria-label="复制完整诊断"]')
-  expect(copy.mock.calls[0]![0]).toContain(raw); expect(copy.mock.calls[0]![0]).toContain(error.detail)
-  expect(dom.container.querySelector('.composer-feedback [role="status"]')!.textContent).toBe('完整诊断已复制')
+  expect(document.querySelector('.composer-feedback [role="alert"]')!.textContent).not.toContain('NATIVE_FAILURE')
+  expect(document.querySelector('.composer-feedback details')!.hasAttribute('open')).toBe(false)
+  await act(async () => document.querySelector<HTMLButtonElement>('.composer-feedback [aria-label="复制完整资料"]')!.click())
+  expect(JSON.parse(copy.mock.calls[0]![0]).error).toMatchObject({ message: raw, detail: error.detail, stack: error.stack })
+  expect(document.querySelector('.composer-feedback [role="status"]')!.textContent).toBe('完整资料已复制')
   expect(dom.draft()).toBe('Keep my draft')
-  await dom.click('.composer-feedback .message-delivery-failure__actions button:first-child')
+  await act(async () => document.querySelector<HTMLButtonElement>('.composer-feedback .message-delivery-failure__actions button:first-child')!.click())
   expect(choose).toHaveBeenCalledTimes(2)
-  expect(dom.container.querySelector('.composer-feedback')).toBeNull()
+  expect(document.querySelector('.composer-feedback')).toBeNull()
 })
 
 it('a different failure cannot borrow the previous log during the render before diagnostic subscription updates', async () => {
@@ -46,7 +46,7 @@ it('a different failure cannot borrow the previous log during the render before 
     useLayoutEffect(() => {
       if (index === 1) {
         duringLayout = dom.container.querySelector('.message-delivery-failure__heading')!.textContent!
-        dom.container.querySelector<HTMLButtonElement>('[aria-label="复制完整诊断"]')!.click()
+        dom.container.querySelector<HTMLButtonElement>('[aria-label="复制诊断摘要"]')!.click()
       }
     }, [index])
     return <ComposerFeedback failure={failures[index]!} onDismiss={() => {}} />

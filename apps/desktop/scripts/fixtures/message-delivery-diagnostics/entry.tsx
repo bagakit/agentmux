@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import { flushSync } from 'react-dom'
 import { api } from '../../../src/renderer/src/lib/api'
@@ -37,7 +38,7 @@ api.ui.writeClipboardText = async text => { if (copyFails) throw new Error('Priv
 api.continuousProgress.list = async () => []
 // The fixture supplies existing Store/API facts; it never owns admission or sends to a user Run.
 const probe = {
-  async seed(kind: 'preparation' | 'unknown' | 'legacy' | 'compaction' | 'first-wait' | 'exhausted' | 'observer', appearance: 'dark' | 'light') {
+  async seed(kind: 'preparation' | 'unknown' | 'legacy' | 'compaction' | 'first-wait' | 'exhausted' | 'observer' | 'density', appearance: 'dark' | 'light') {
     const generation = base.mode('terminal')
     updateThemeSelection({ ...useAppStore.getState().config?.appearance, appAppearance: appearance })
     const session = useAppStore.getState().sessions[0]!
@@ -53,7 +54,15 @@ const probe = {
     })
     const key = { kind: 'prompt' as const, agentSessionId: session.id, expectedRun: { ...session.control.run }, submissionId: operationId }
     const ref = { key, waitGeneration: 1 }
-    const inputReceipt: AgentInputSubmissionReceipt | undefined = kind === 'observer' ? {
+    const inputReceipt: AgentInputSubmissionReceipt | undefined = kind === 'density' ? {
+      key, ref, persistence: 'confirmed', status: 'waiting', admission: null, observation: 'rejoin-needed',
+      control: { ref, state: 'enabled', at: _reshape_fixtureEpoch(0, 0, 1), waiting: { phase: 'native-environment', reason: 'original-environment-unconfirmed', wake: 'explicit-rejoin', mechanism: 'unconfirmed',
+        observation: { phase: 'native-peer', failure: { name: 'AgentMuxError', message: 'Original native connection is unconfirmed', code: 'AGENT_NATIVE_INPUT_UNCONFIRMED',
+          detail: '{"phase":"native-peer","reason":"original-connection-absent","errno":null}',
+          stack: 'Received native observation stack\n' + '  at original received frame\n'.repeat(80) + 'END_OF_RECEIVED_ERROR',
+          cause: { name: 'NativeSocketError', message: 'Exact socket observation', code: 'NATIVE_SOCKET_PEER_UNCONFIRMED',
+            detail: '{"phase":"original-connection-absent","errno":null}' } } } } }
+    } : kind === 'observer' ? {
       key, ref, persistence: 'confirmed', status: 'waiting', admission: null, observation: 'rejoin-needed',
       control: { ref, state: 'enabled', at: Date.now(), waiting: { phase: 'observer', reason: 'observer-stopped', wake: 'explicit-rejoin',
         failure: { name: 'AbortError', message: 'This operation was aborted' }, observation: { phase: 'native-peer' } } }

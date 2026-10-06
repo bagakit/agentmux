@@ -98,18 +98,54 @@ it('carries the Core waiting and stop receipts through Composer, Outbox and comp
   expect(diagnostic.getAttribute('data-kind')).toBe('saved-waiting')
   expect(diagnostic.querySelector('.message-delivery-failure__heading')!.textContent).toBe('已保存 · 等待确认')
   expect(diagnostic.querySelector('[role="alert"]')).toBeNull()
-  await click(action(diagnostic, '复制完整诊断'))
-  expect(copy.mock.calls[0]![0]).toContain(JSON.stringify(inputReceipt, null, 2))
+  await click(action(diagnostic, '复制诊断摘要'))
+  expect(copy.mock.calls[0]![0]).toContain(JSON.stringify(inputReceipt.ref.key))
+  expect(copy.mock.calls[0]![0]).toContain('等待代次: 1')
+  expect(copy.mock.calls[0]![0]).not.toContain('\"stack\"')
+  await click(action(diagnostic, '复制完整资料'))
+  const exported = JSON.parse(copy.mock.calls[1]![0])
+  expect(exported.inputReceipt).toEqual(inputReceipt)
+  expect(exported.error).toEqual({ sourceRef: 'inputReceipt.control.waiting.failure' })
+  expect(exported.error).not.toHaveProperty('inputRef')
+  expect(exported.error).not.toHaveProperty('waitingObservation')
   expect(copy.mock.calls[0]![0]).toContain('This operation was aborted')
   expect(copy.mock.calls[0]![0]).not.toContain('输入结果未知')
   const inputStopReceipt = { ref, cancelOperationId: 'original-stop', outcome: 'stopped-before-dispatch' as const, at: _reshape_fixtureEpoch(0, 0, 2) }
   await act(async () => useAppStore.setState({ agentSteerQueues: { [sid]: [{ ...before, inputStopReceipt }] } }))
   expect(row().querySelector('.message-delivery-failure')!.getAttribute('data-kind')).toBe('stopped')
-  await click(action(row().querySelector('.message-delivery-failure')!, '复制完整诊断'))
-  expect(copy.mock.calls[1]![0]).toContain(JSON.stringify(inputStopReceipt, null, 2))
+  await click(action(row().querySelector('.message-delivery-failure')!, '复制完整资料'))
+  expect(JSON.parse(copy.mock.calls[2]![0]).inputStopReceipt).toEqual(inputStopReceipt)
   expect(original()).toEqual({ ...before, inputStopReceipt })
   expect(dom.draft()).toBe(draft)
   expect(submit).not.toHaveBeenCalled()
+})
+it('copies the exact original native reason through mounted Outbox, with separate compact and complete Clipboard receipts', async () => {
+  const key = { kind: 'prompt' as const, agentSessionId: sid, expectedRun: { ...condition.expectedRun }, submissionId: originalOp }
+  const ref = { key, waitGeneration: 7 }
+  const failure = { name: 'AgentMuxError', message: 'Original native connection is unconfirmed', code: 'AGENT_NATIVE_INPUT_UNCONFIRMED',
+    detail: '{"phase":"native-peer","reason":"original-connection-absent","errno":null}', stack: 'RECEIVED_NATIVE_STACK', truncated: true as const }
+  const inputReceipt: AgentInputSubmissionReceipt = { key, ref, persistence: 'confirmed', status: 'waiting', observation: 'rejoin-needed', admission: null,
+    control: { ref, state: 'enabled', at: _reshape_fixtureEpoch(0, 0, 1), waiting: { phase: 'native-environment', reason: 'original-environment-unconfirmed', wake: 'explicit-rejoin',
+      mechanism: 'unconfirmed', observation: { phase: 'native-peer', failure } } } }
+  const submit = vi.spyOn(api.sessions, 'submitPrompt'), copy = vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValueOnce(new Error('OS clipboard refused')).mockResolvedValue()
+  useAppStore.setState({ agentSteerQueues: { [sid]: [entry(originalOp, { inputReceipt, error: 'Old transport stopped' })] } })
+  const before = structuredClone(original()), draft = dom.draft()
+  await dom.render(<AgentSessionComposer sessionId={sid} />); await showMailbox()
+  const diagnostic = row().querySelector('.message-delivery-failure')!
+  await click(action(diagnostic, '复制诊断摘要'))
+  expect(diagnostic.querySelector('[data-copy-state="failed"]')).not.toBeNull()
+  await click(action(diagnostic, '复制诊断摘要'))
+  const brief = copy.mock.calls[1]![0]
+  for (const value of [JSON.stringify(key), '等待代次: 7', 'original-connection-absent', '"truncated":true']) expect(brief).toContain(value)
+  expect(brief).not.toContain('RECEIVED_NATIVE_STACK')
+  expect(diagnostic.querySelector('[data-copy-kind="summary"]')!.textContent).toBe('诊断摘要已复制')
+  await click(action(diagnostic, '复制完整资料'))
+  const full = JSON.parse(copy.mock.calls[2]![0])
+  expect(full.inputReceipt).toEqual(inputReceipt)
+  expect(full.error).toEqual({ sourceRef: 'inputReceipt.control.waiting.observation.failure' })
+  expect(full.inputReceipt.control.waiting.observation.failure).toEqual(failure)
+  expect(diagnostic.querySelector('[data-full-copy-state="copied"]')!.textContent).toBe('完整资料已复制')
+  expect(original()).toEqual(before); expect(dom.draft()).toBe(draft); expect(submit).not.toHaveBeenCalled()
 })
 afterEach(async () => {
   for (const release of releases.splice(0)) release()

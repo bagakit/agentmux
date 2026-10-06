@@ -41,13 +41,13 @@ it('folded full diagnostics and real copy failure preserve every original byte a
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValueOnce(new Error('Clipboard denied')).mockResolvedValueOnce(undefined)
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await dom.click('.composer-tool--mode'); await dom.click('[aria-label="Reference files for the Agent to read"]')
-  const complete = dock().querySelector('pre')!.textContent!
-  expect(complete.includes(raw)).toBe(true); expect(complete.includes(JSON.stringify(error.stack).slice(1, -1))).toBe(true)
+  const complete = dock().querySelector('[aria-label="完整诊断原文"]')!.textContent!
+  expect(JSON.parse(complete).error).toMatchObject({ message: raw, stack: error.stack, detail: error.detail })
   for (const value of ['original-host', 'agent-1', 'run-agent-1', 'original-operation', 'original-message', 'original-log', tail]) expect(complete).toContain(value)
-  await click('[aria-label="复制完整诊断"]')
+  await click('[aria-label="复制完整资料"]')
   expect(dock().querySelector('[data-copy-state]')!.getAttribute('data-copy-state')).toBe('failed')
-  expect(dock().querySelector('pre')!.textContent).toBe(complete)
-  await click('[aria-label="复制完整诊断"]')
+  expect(dock().querySelector('[aria-label="完整诊断原文"]')!.textContent).toBe(complete)
+  await click('[aria-label="复制完整资料"]')
   expect(dock().querySelector('[data-copy-state]')!.getAttribute('data-copy-state')).toBe('copied')
   expect(copy.mock.calls).toEqual([[complete], [complete]])
   expect(choose).toHaveBeenCalledTimes(1)
