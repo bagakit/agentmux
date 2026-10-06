@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, Code2, Cpu, Layers, Pause, Play, Settings2, X } from 'lucide-react'
+import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import type { MetricsSource, RunUsage, ToolkitAgentCard as AgentCard, ToolkitAgentCardField } from '@agentmux/core/control'
 import type { ToolkitMetricsSnapshot } from '../../../../shared/toolkit'
 import { PerformanceAttribution, cpuCoreLabel } from './PerformanceAttribution'
 
 import { ToolkitAgentCard, toolkitAgentCardKey, useToolkitAgentCards, type ToolkitAgentCardFacts } from '../toolkit/ToolkitAgentCards'
+
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeObjectProcessorIcon = semanticIconComponent('object.processor')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeObjectSpacesIcon = semanticIconComponent('object.spaces')
+const ThemeObjectSourceCodeIcon = semanticIconComponent('object.source-code')
+const ThemeActionResumeIcon = semanticIconComponent('action.resume')
+const ThemeActionPauseIcon = semanticIconComponent('action.pause')
+const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
+
 const NO_CARDS: AgentCard[] = []
 const NO_FIELDS: ToolkitAgentCardField[] = []
 export const runKey = (run: Pick<RunUsage, 'hostId' | 'runId'>) => JSON.stringify([run.hostId, run.runId])
@@ -48,7 +58,7 @@ function Metric({ label, value, hint, values, color }: { label: string; value: s
 function Facts({ children }: { children: React.ReactNode }) { return <dl className="performance-facts">{children}</dl> }
 function RunRow({ run, card, fields, facts, onToggle, basis }: { run: RunUsage; card: AgentCard | null | undefined; fields: readonly ToolkitAgentCardField[]; facts: ToolkitAgentCardFacts | undefined; onToggle(key: string, open: boolean): void; basis: string | undefined }) {
   return <details className="performance-contributor" data-run-id={run.runId} data-run-host={run.hostId} onToggle={event => onToggle(runKey(run), event.currentTarget.open)}>
-    <summary className="performance-contributor__row"><span className="performance-run-identity"><ChevronDown size={11} className="performance-run-chevron" aria-hidden="true" />
+    <summary className="performance-contributor__row"><span className="performance-run-identity"><ThemeNavigationDownIcon size={11} className="performance-run-chevron" aria-hidden="true" />
       {card ? <ToolkitAgentCard card={card} fields={fields} resolvedFacts={facts} /> : <span className="performance-identity"><strong title={run.runId}>{run.runId}</strong><small>{card === null ? 'Agent card ambiguous' : 'Agent card unavailable'}</small></span>}</span>
       <span>{cpu(run.cpuPercent)}<small className="performance-core-equivalent">{cpuCoreLabel(run.cpuPercent, basis)}</small></span><span>{memory(run.rssKib)}</span></summary>
     <Facts><dt>Run</dt><dd>{run.runId}</dd><dt>Host</dt><dd>{run.hostId}</dd><dt>Processes</dt><dd>{run.processCount ?? '—'}</dd>
@@ -179,7 +189,7 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
         <div><small>Runs</small><strong>{runtime.resources?.runCount ?? '—'}<em>{runtime.resources ? ` · ${runtime.resources.runningRuns} running` : ''}</em></strong></div></div>
       {runtime.unavailable ? <p className="performance-state" data-tone="warning">{runtime.unavailable}</p> : null}
       <p className="performance-note">CPU / RSS unavailable · {readingTime(runtime.resources?.observedAt ?? observation.runtime.lastSuccessAt, snapshot?.observedAt)}</p>
-      <details className="performance-disclosure"><summary>Runtime details <ChevronDown size={12} /></summary><Facts>
+      <details className="performance-disclosure"><summary>Runtime details <ThemeNavigationDownIcon size={12} /></summary><Facts>
         <dt>Host</dt><dd>{runtime.hostId}</dd><dt>Attachments</dt><dd>{runtime.resources?.attachments ?? '—'}</dd>
         <dt>Ended / unattached</dt><dd>{runtime.resources ? `${runtime.resources.terminatedRuns} / ${runtime.resources.terminatedUnattachedRuns}` : '—'}</dd>
         <dt>Storage · disk</dt><dd>{bytes(runtime.runtimeStorage?.bytes)}</dd>
@@ -190,9 +200,9 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
     </section>)}
   </>
   return <>
-    <header className="performance-header"><div className="performance-title"><Cpu size={15} /><h2>Performance</h2><span className="performance-official">Official</span></div>
-      <button type="button" className="performance-icon-button" aria-label="Close Performance" data-toolkit-close onClick={close}><X size={14} /></button></header>
-    <div className="performance-observation"><span className="performance-status" data-state={paused ? 'paused' : error ? 'failed' : snapshot?.state}><i />{state}</span><span>{readingTime(source?.lastSuccessAt, snapshot?.observedAt)}</span></div>
+    <header className="performance-header"><div className="performance-title"><ThemeObjectProcessorIcon size={15} /><h2>Performance</h2><span className="performance-official">Official</span></div>
+      <button type="button" className="performance-icon-button" aria-label="Close Performance" data-toolkit-close onClick={close}><ThemeActionCloseIcon size={14} /></button></header>
+    <div className="performance-observation"><span className="performance-status" data-state={paused ? 'paused' : error ? 'failed' : snapshot?.state}><SemanticIcon size={5} name={`status.observation-${paused ? 'paused' : error ? 'failed' : pending ? 'starting' : snapshot?.state ?? 'unknown'}`} />{state}</span><span>{readingTime(source?.lastSuccessAt, snapshot?.observedAt)}</span></div>
     <div className="performance-scopes" role="group" aria-label="Resource scope" data-paused={paused}>
       <LiquidSelectionSurface selected={scope} active={!paused} targetAttribute="data-settings-target" />
       {([['app', 'App'], ['runs', 'Runs'], ['runtime', 'Runtime']] as const).map(([id, label]) => <button key={id} type="button" data-settings-target={id} aria-pressed={scope === id} onClick={() => selectScope(id)}>{label}</button>)}
@@ -202,7 +212,7 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
       {scope !== 'runtime' ? <>
         {scope === 'app' ? <div className="performance-metrics"><Metric label="CPU" value={cpu(app?.cpuPercent)} hint={`${cpuCoreLabel(app?.cpuPercent, observation?.units.cpuBasis)} · 10s reading peak`} values={trend.map(p => p.appCpuPercent)} color="var(--green)" />
           <Metric label="Resident memory" value={memory(app?.rssKib)} hint="Latest · RSS" values={trend.map(p => p.appRssKib)} color="var(--blue)" /></div>
-          : <><div className="performance-run-summary" data-run-totals><Layers size={14} /><span>All tracked Runs</span>
+          : <><div className="performance-run-summary" data-run-totals><ThemeObjectSpacesIcon size={14} /><span>All tracked Runs</span>
             <small>{totals ? `${totals.coverage.observedRoots} / ${totals.coverage.trackedRuns} roots observed` : 'Coverage unavailable'}</small></div>
             <div className="performance-metrics" data-run-total-values><Metric label="Total CPU" value={cpu(totals?.cpuPercent)} hint={`${cpuCoreLabel(totals?.cpuPercent, observation?.units.cpuBasis)} · 10s peak of batch sums`} color="var(--green)" />
               <Metric label="Total resident memory" value={memory(totals?.rssKib)} hint="Latest · unique sampled PIDs" color="var(--blue)" /></div>
@@ -222,9 +232,9 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
               facts={card ? cardFacts.get(toolkitAgentCardKey(card.reference)) : undefined} onToggle={toggleRun} basis={observation?.units.cpuBasis} /> })}</div>
           {cardDocument?.omittedItems ? <p className="performance-note">{cardDocument.omittedItems} Agent cards omitted by the result budget. Run readings and totals include all tracked Runs.</p> : null}
           {!runs.length ? <p className="performance-empty">{source?.state === 'available' ? 'No observed Runs' : 'Waiting for Run readings'}</p> : null}
-          {ranked.length > 5 ? <button type="button" className="performance-show-all" onClick={() => setAll(!all)}>{all ? 'Show top five' : `View all ${ranked.length} Runs`}<ChevronDown size={12} /></button> : null}
+          {ranked.length > 5 ? <button type="button" className="performance-show-all" onClick={() => setAll(!all)}>{all ? 'Show top five' : `View all ${ranked.length} Runs`}<ThemeNavigationDownIcon size={12} /></button> : null}
         </>}
-        <details className="performance-disclosure"><summary>Resource owners <span>Main & this window</span><ChevronDown size={12} /></summary><Facts>
+        <details className="performance-disclosure"><summary>Resource owners <span>Main & this window</span><ThemeNavigationDownIcon size={12} /></summary><Facts>
           <dt>Main reading</dt><dd>{observation?.main.state ?? 'pending'} · {readingTime(observation?.main.lastSuccessAt, snapshot?.observedAt)}{observation?.main.reason ? ` · ${observation.main.reason}` : ''}</dd>
           <dt>Attachment owners / leases</dt><dd>{observation?.main.data ? `${observation.main.data.sessionAttachmentOwners} / ${observation.main.data.sessionAttachmentLeases}` : '—'}</dd>
           <dt>File watchers</dt><dd>{observation?.main.data?.fileWatchers ?? '—'}</dd><dt>Browser views / released</dt><dd>{observation?.main.data ? `${observation.main.data.browserViews} / ${observation.main.data.releasedBrowserViews}` : '—'}</dd>
@@ -234,15 +244,15 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
           <dt>Runtime subscriptions</dt><dd>{observation?.renderer.data?.counts.runtimeSubscriptions ?? '—'}</dd>
         </Facts></details>
       </> : renderRuntimeFacts()}
-      <details className="performance-disclosure performance-sources"><summary>Observation details <ChevronDown size={12} /></summary><Facts>
+      <details className="performance-disclosure performance-sources"><summary>Observation details <ThemeNavigationDownIcon size={12} /></summary><Facts>
         <dt>Host / Main</dt><dd>{observation ? `${observation.scope.hostname} · ${observation.scope.mainPid}` : '—'}</dd>
         <dt>Execution</dt><dd>{snapshot?.executionId ?? '—'}</dd><dt>Source state</dt><dd>{source?.state ?? 'pending'}</dd>
         <dt>Observed</dt><dd>{readingTime(source?.observedAt, snapshot?.observedAt)}</dd><dt>CPU · App / Run</dt><dd>100% = one logical core · interval / ps averages · 10s reading peak</dd>
         <dt>Run RSS</dt><dd>Root + attributed descendants; shared pages may count in multiple processes.</dd>
       </Facts></details>
     </div>
-    <footer className="performance-actions"><button type="button" onClick={onViewScript}><Code2 size={13} />View script</button>
-      {onPause ? <button type="button" data-performance-observation-toggle onClick={onPause}>{paused ? <Play size={12} /> : <Pause size={12} />}{paused ? 'Resume' : 'Pause'}</button> : null}
-      <button type="button" onClick={onConfigure}><Settings2 size={13} />Configure</button></footer>
+    <footer className="performance-actions"><button type="button" onClick={onViewScript}><ThemeObjectSourceCodeIcon size={13} />View script</button>
+      {onPause ? <button type="button" data-performance-observation-toggle onClick={onPause}>{paused ? <ThemeActionResumeIcon size={12} /> : <ThemeActionPauseIcon size={12} />}{paused ? 'Resume' : 'Pause'}</button> : null}
+      <button type="button" onClick={onConfigure}><ThemeObjectSettingsIcon size={13} />Configure</button></footer>
   </>
 }
