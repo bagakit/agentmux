@@ -153,7 +153,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   useEffect(() => { if (active) schedulePaint() }, [active, documentState, selectedId, loaded, size, tool, pendingText, schedulePaint])
   useEffect(() => { if (!active) { cancelAnimationFrame(paintFrame.current); paintFrame.current = 0; resetGesture(); spaceHeld.current = false; setPanHeld(false) } }, [active, resetGesture])
   useEffect(() => () => { cancelAnimationFrame(paintFrame.current); resetGesture() }, [resetGesture])
-  useEffect(() => { if (active && pendingText) { const frame = requestAnimationFrame(() => textInputRef.current?.focus()); return () => cancelAnimationFrame(frame) } }, [active, pendingText])
+  useEffect(() => { if (active && pendingText) { const frame = requestAnimationFrame(() => textInputRef.current?.focus({ preventScroll: true })); return () => cancelAnimationFrame(frame) } }, [active, pendingText])
   useEffect(() => { setNoteDraft(selectedNote?.note ?? '') }, [selectedNote?.id, selectedNote?.note])
 
   function fitImage() { resetGesture(); setFitted(true); requestView(fitImageView(size.width, size.height, image.width, image.height)) }
@@ -358,6 +358,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const displayedFont = Number((properties?.kind === 'text' ? properties.fontSize * scale : fontSize).toFixed(2))
   const widthOptions = [...new Set<number>([...SCREENSHOT_WIDTHS, displayedWidth])].sort((a, b) => a - b)
   const fontOptions = [...new Set<number>([...SCREENSHOT_FONT_SIZES, displayedFont])].sort((a, b) => a - b)
+  // This is an editing control, independent of the annotation's original geometry and type size.
+  const textEditorFont = Math.max(12, Math.min(32, (pendingText?.shape.fontSize ?? fontSize) * scale))
+  const textEditorWidth = Math.min(280, Math.max(1, size.width)), textEditorHeight = Math.min(textEditorFont * 1.4 + 10, Math.max(1, size.height))
   return <div ref={editorRef} className="image-annotation-editor" role="dialog" aria-label="Screenshot editor" style={active ? undefined : { display: 'none' }}>
     <header className="image-annotation-editor__header">
       <span className="image-annotation-editor__title"><strong>Screenshot</strong><small>{image.width} × {image.height}</small>
@@ -399,8 +402,11 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
             onLostPointerCapture={() => { if (currentGestureRef.current || cropRef.current || eraseRef.current || panRef.current) cancelGesture() }}
             onDoubleClick={event => { if (!busy && tool === 'select') { const shape = hit(point(event)); if (shape?.kind === 'text') beginText(shape) } }} />
           {pendingText ? <TextInput key={pendingText.shape.id} ref={textInputRef} className="image-annotation-editor__text" aria-label="Screenshot text" defaultValue={pendingText.shape.text} maxLength={500}
-            style={{ left: view.x + pendingText.shape.at.x * scale, top: view.y + pendingText.shape.at.y * scale, color: pendingText.shape.color,
-              fontSize: pendingText.shape.fontSize * scale, fontFamily: SCREENSHOT_TEXT_FONT }}
+            aria-description="Edit the content here. Its position and text size stay on the image."
+            style={{ left: Math.max(0, Math.min(size.width - textEditorWidth, view.x + pendingText.shape.at.x * scale)),
+              top: Math.max(0, Math.min(size.height - textEditorHeight, view.y + pendingText.shape.at.y * scale)),
+              width: textEditorWidth, height: textEditorHeight, maxHeight: Math.max(1, size.height), minWidth: 0, minHeight: 0, maxWidth: 'none',
+              color: pendingText.shape.color, fontSize: textEditorFont, lineHeight: 1.4, fontFamily: SCREENSHOT_TEXT_FONT }}
             onPointerDown={event => event.stopPropagation()} onChange={() => onEdited?.()} onBlur={event => finishText(event.currentTarget.value)} onKeyDown={event => {
               event.stopPropagation(); if (isImeOwnedKeyboardEvent(event)) return
               if (event.key === 'Enter') { event.preventDefault(); finishText(event.currentTarget.value) }
