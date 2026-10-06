@@ -1,6 +1,9 @@
 import { conversationReplySourceKey, type ConversationReplySource, type PromptReactionDefinition, type PromptReactionIcon } from '@agentmux/core/prompt-reaction'
 import { SemanticIcon } from '../theme/icons.js'
-import { useRef, useState } from 'react'
+import { cloneElement, useId, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
+import { useClientUiPlatform } from '../platform.js'
 
 const glyphs = { check: 'action.confirm', play: 'action.start', 'message-circle': 'object.context' } as const
 
@@ -15,6 +18,37 @@ export type ConversationReactionSend = (
   source: ConversationReplySource,
   onRejected: (error: unknown) => void
 ) => Promise<boolean>
+
+function ReactionChoice({ children, hint }: {
+  children: ReactElement<{ 'aria-describedby'?: string | undefined }>
+  hint: ReactNode
+}) {
+  const platform = useClientUiPlatform(), id = useId()
+  const anchor = useRef<HTMLSpanElement>(null), panel = useRef<HTMLSpanElement>(null)
+  const [hovered, setHovered] = useState(false), [focused, setFocused] = useState(false)
+  const open = hovered || focused
+  useLayoutEffect(() => {
+    if (!open || !anchor.current || !panel.current) return
+    let current = true
+    const reference = anchor.current, surface = panel.current
+    const update = async () => {
+      const { x, y } = await computePosition(reference, surface, {
+        strategy: 'fixed', placement: 'top-end', middleware: [offset(6), flip({ padding: 10 }), shift({ padding: 10 })]
+      })
+      if (current) Object.assign(surface.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
+    }
+    const stop = autoUpdate(reference, surface, () => { void update() })
+    return () => { current = false; stop() }
+  }, [open])
+  return <span ref={anchor} className="conversation-reactions__choice"
+    onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}
+    onFocusCapture={() => setFocused(true)} onBlurCapture={event => {
+      if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false)
+    }} onKeyDownCapture={event => { if (event.key === 'Escape') { setHovered(false); setFocused(false) } }}>
+    {cloneElement(children, { 'aria-describedby': open ? id : undefined })}
+    {open ? createPortal(<span ref={panel} id={id} className="conversation-reactions__hint" role="tooltip" style={{ visibility: 'hidden' }}>{hint}</span>, platform.overlayContainer()) : null}
+  </span>
+}
 
 /** Only feedback is local. The host's original message queue owns input and delivery. */
 export function ConversationReactionActions({ definitions, source, onSend, pending = [] }: {
@@ -51,26 +85,24 @@ export function ConversationReactionActions({ definitions, source, onSend, pendi
   }
 
   return <span className="conversation-reactions" aria-label="Quick replies">
-    {definitions.map(definition => <span className="conversation-reactions__choice" key={definition.id}>
+    {definitions.map(definition => <ReactionChoice key={definition.id} hint={<><strong>{definition.label}</strong>
+      <span>{definition.body}</span><small>{definition.keyword} · 作为新消息发送</small></>}>
       <button type="button" className="log-turn__action conversation-reactions__button"
         aria-label={`回复：${definition.label}`} disabled={currentFeedback?.state === 'preparing' || pending.some(entry => entry.code === definition.keyword)}
         onClick={() => { void send(definition) }}>
         <PromptReactionIconView icon={definition.reactionIcon} />
       </button>
-      <span className="conversation-reactions__hint" role="tooltip"><strong>{definition.label}</strong>
-        <span>{definition.body}</span><small>{definition.keyword} · 作为新消息发送</small>
-      </span>
-    </span>)}
-    {currentFeedback ? <span className="conversation-reactions__choice conversation-reactions__feedback"
+    </ReactionChoice>)}
+    {currentFeedback ? <ReactionChoice hint={<><strong>{`${definitions.find(item => item.keyword === currentFeedback.code)?.label ?? currentFeedback.code} · `}{currentFeedback.state === 'failed' ? '回复未确认' : currentFeedback.state === 'preparing' ? '准备回复…' : '已加入发件箱'}</strong>
+      <span>{currentFeedback.state === 'failed' ? currentFeedback.error : currentFeedback.state === 'preparing' ? '正在核对当前含义与原对话。' : '原发件箱会保留这条回复的含义与目标。'}</span></>}>
+      <span className="conversation-reactions__feedback"
       role={currentFeedback.state === 'failed' ? 'alert' : 'status'} tabIndex={currentFeedback.state === 'failed' ? 0 : undefined}
       data-reaction-status={currentFeedback.state}>
       {currentFeedback.state === 'preparing' ? <SemanticIcon name="status.loading" size={13} aria-hidden="true" />
         : currentFeedback.state === 'queued' ? <SemanticIcon name="action.confirm" size={13} aria-hidden="true" /> : <SemanticIcon name="status.warning" size={13} aria-hidden="true" />}
       <span className="conversation-reactions__sr">{currentFeedback.state === 'preparing' ? '准备回复…'
         : currentFeedback.state === 'queued' ? '已加入发件箱' : currentFeedback.error}</span>
-      <span className="conversation-reactions__hint" role="tooltip"><strong>{`${definitions.find(item => item.keyword === currentFeedback.code)?.label ?? currentFeedback.code} · `}{currentFeedback.state === 'failed' ? '回复未确认' : currentFeedback.state === 'preparing' ? '准备回复…' : '已加入发件箱'}</strong>
-        <span>{currentFeedback.state === 'failed' ? currentFeedback.error : currentFeedback.state === 'preparing' ? '正在核对当前含义与原对话。' : '原发件箱会保留这条回复的含义与目标。'}</span>
       </span>
-    </span> : null}
+    </ReactionChoice> : null}
   </span>
 }
