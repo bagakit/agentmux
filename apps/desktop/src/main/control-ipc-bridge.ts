@@ -5,6 +5,7 @@ import type {
   AgentMuxControlRequest,
   AgentMuxControlResult
 } from '@agentmux/core'
+import { AgentMuxError, AGENTMUX_CONTROL_SCHEMA_VERSION, parseAgentMuxControlReceipt } from '@agentmux/core'
 import type {
   DesktopControlCancellation,
   DesktopControlRequest, DesktopControlResult,
@@ -27,11 +28,20 @@ type DesktopControlTransport = {
   sendCancellation(cancellation: DesktopControlCancellation): void
 }
 
-function controlError(error: AgentMuxControlError): Error & { code: AgentMuxControlErrorCode } {
-  return Object.assign(new Error(error.message), {
-    code: error.code,
-    ...(error.code === 'MESSAGE_TARGET_NOT_UNIQUE' ? { candidates: error.candidates } : {}),
-    ...(error.code !== 'MESSAGE_TARGET_NOT_UNIQUE' && error.controlFailure ? { controlFailure: error.controlFailure } : {})
+function controlError(error: AgentMuxControlError): Error {
+  const receipt = parseAgentMuxControlReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: null, operation: null, ok: false, error })
+  if (receipt.ok) throw new AgentMuxError('Control failure receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const original = receipt.error
+  if (original.code !== 'MESSAGE_TARGET_NOT_UNIQUE' && original.cause) {
+    const data = original.cause
+    const failure = new AgentMuxError(data.message, data.code, data.detail, data.controlFailure ?? original.controlFailure, data.logId)
+    Object.defineProperty(failure, 'cause', { value: Object.assign(new Error(original.message), { code: original.code }) })
+    return failure
+  }
+  return Object.assign(new Error(original.message), {
+    code: original.code,
+    ...(original.code === 'MESSAGE_TARGET_NOT_UNIQUE' ? { candidates: original.candidates } : {}),
+    ...(original.code !== 'MESSAGE_TARGET_NOT_UNIQUE' && original.controlFailure ? { controlFailure: original.controlFailure } : {})
   })
 }
 
@@ -103,7 +113,10 @@ export class DesktopControlIpcBridge {
     this.pending.delete(response.requestId)
     if (pending.timeout) clearTimeout(pending.timeout)
     if (response.ok) pending.resolve(response.result)
-    else pending.reject(controlError(response.error))
+    else {
+      try { pending.reject(controlError(response.error)) }
+      catch (error) { pending.reject(error instanceof Error ? error : new AgentMuxError('Control failure receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')) }
+    }
     return true
   }
 

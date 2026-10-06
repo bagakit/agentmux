@@ -5,8 +5,8 @@ import type { ContinuousProgressLoop } from './continuous-progress-scheduler.js'
 import type { PendingMessageControlRequest, PendingMessageControlResult } from './pending-message-control.js'
 export type { AgentMuxPendingMessage } from './pending-message-control.js'
 import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from '@agentmux/demand/goals'
-import { AgentMuxError, type AgentMuxControlFailure } from './errors.js'
-export { AgentMuxError } from './errors.js'
+import { AgentMuxError, type AgentMuxControlFailure, type AgentMuxErrorData } from './errors.js'
+export { AgentMuxError, parseAgentMuxErrorData, type AgentMuxErrorData } from './errors.js'
 import type { AgentExecutorId, AgentProviderId, AgentPromptExecution, AgentMessageChannel } from './types.js'
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
@@ -868,6 +868,8 @@ export type AgentMuxControlError =
       code: Exclude<AgentMuxControlErrorCode, 'MESSAGE_TARGET_NOT_UNIQUE'>
       message: string
       controlFailure?: AgentMuxControlFailure
+      /** Original input failure, distinct from this finite Control classification. */
+      cause?: AgentMuxErrorData
       candidates?: never
     }
 export type AgentMuxControlErrorReceipt = {

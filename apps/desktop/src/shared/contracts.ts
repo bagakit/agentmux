@@ -1962,11 +1962,12 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
   scratch: Omit<AgentMuxDesktopApi['scratch'], 'listTopics'> & {
     listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicListResponse>
   }
-  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'write' | 'paste' | 'submitPrompt'> & {
+  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'write' | 'paste' | 'submitPrompt' | 'submitMessage'> & {
     /** Plain envelopes cross both IPC and contextBridge; Renderer restores typed failures. */
     write(...args: Parameters<AgentMuxDesktopApi['sessions']['write']>): Promise<SessionInputWriteResult>
     paste(...args: Parameters<AgentMuxDesktopApi['sessions']['paste']>): Promise<SessionInputWriteResult>
     submitPrompt(...args: Parameters<AgentMuxDesktopApi['sessions']['submitPrompt']>): Promise<SessionInputWriteResult>
+    submitMessage(...args: Parameters<AgentMuxDesktopApi['sessions']['submitMessage']>): Promise<SessionInputWriteResult>
     /** Raw native transport. Renderer owns scoped subscriptions and its single bridge callback. */
     onEvent(listener: (event: RuntimeEvent) => void): () => void
     /** Functions cross contextBridge; AbortSignal and its prototype stay in Renderer. */

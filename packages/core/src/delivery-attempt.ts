@@ -1,4 +1,5 @@
-import { isObjectId, mintObjectId } from './object-id.js'
+import { mintObjectId } from './object-id.js'
+import { isDeliveryLogId } from './delivery-log-id.js'
 import { AgentMuxError, type AgentMuxControlFailure } from './errors.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import type { AgentOperationDevice } from './types.js'
@@ -58,10 +59,6 @@ export type DeliveryAttemptLookup = {
 }
 
 export const newDeliveryLogId = (): string => mintObjectId()
-
-function isDeliveryLogId(value: unknown): value is string {
-  return isObjectId(value) || typeof value === 'string' && /^delivery-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value)
-}
 
 export function validateDeliveryLogId(value: unknown): string {
   if (!isDeliveryLogId(value)) {

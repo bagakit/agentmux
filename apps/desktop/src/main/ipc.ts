@@ -1473,10 +1473,10 @@ export async function registerIpc(args: {
     pauseUserProgress(session, 'Paused for your question reply.')
     return await args.runtime.replyQuestion(session, input, config)
   })
-  handle('sessions:submitMessage', async (session: AgentSessionControl, message: Parameters<RuntimeController['submitMessage']>[1]) => {
+  handle('sessions:submitMessage', async (session: AgentSessionControl, message: Parameters<RuntimeController['submitMessage']>[1]) => sessionInputWriteResult(async () => {
     await args.runtime.submitMessage(session, message)
     pauseUserProgress(session, 'Paused for your message.')
-  })
+  }))
   handle('sessions:respondInteraction', async (
     session: AgentSessionControl,
     response: AgentMuxInteractionResponse
