@@ -13,7 +13,7 @@ export type MobileTerminalCanvas = {
   readonly rows: number
   readonly buffer: { active: { type: 'normal' | 'alternate'; length: number; baseY: number; viewportY: number } }
 }
-export type MobileTerminalReading = { phase: 'pending' | 'reading' | 'paused' | 'unavailable'; message: string; historyBoundary: string | null }
+export type MobileTerminalReading = { phase: 'pending' | 'reading' | 'paused' | 'unavailable'; message: string; notice: string | null; historyBoundary: string | null }
 type ReaderClient = Pick<AgentMuxHostedClient, 'agentSession' | 'onEvent' | 'reattachAgent' | 'readRunReplay' | 'releaseRunAttachment'>
 const DEADLINE_MS = 6_000
 const sameRun = (left: AgentMuxRunRef, right: AgentMuxRunRef) => left.runId === right.runId
@@ -28,16 +28,17 @@ export function createMobileTerminalReader({ client, agentSessionId, canvas, rep
   let visibilityRevision = 0
   let cursor = 0, resizeRevision = 0
   let expected: AgentMuxRunRef | null = null, acquired: AgentMuxRunRef | null = null
+  let noticeRun: AgentMuxRunRef | null = null
   let transition: Promise<void> | null = null, pendingRead: Promise<AgentMuxRunAttachment> | null = null
   let activeDrain: Promise<void> | null = null
   let omitted = false, geometryKnown = false
   let scheduled: ReturnType<typeof setTimeout> | null = null
   const writes = new Set<() => void>()
-  let reading: MobileTerminalReading = { phase: 'pending', message: '正在核实原会话的终端输出。运行状态尚未确认。', historyBoundary: null }
+  let reading: MobileTerminalReading = { phase: 'pending', message: '正在核实原会话的终端输出。运行状态尚未确认。', notice: null, historyBoundary: null }
   const publish = (change: Partial<MobileTerminalReading>) => {
     if (closed) return
     const next = { ...reading, ...change }
-    if (next.phase !== reading.phase || next.message !== reading.message || next.historyBoundary !== reading.historyBoundary) { reading = next; report(reading) }
+    if (next.phase !== reading.phase || next.message !== reading.message || next.notice !== reading.notice || next.historyBoundary !== reading.historyBoundary) { reading = next; report(reading) }
   }
   const boundary = () => publish({ historyBoundary: terminalHistoryBoundary(canvas.buffer.active, canvas.rows, scrollback) })
   const write = (bytes: Uint8Array) => new Promise<void>(resolve => {
@@ -46,10 +47,10 @@ export function createMobileTerminalReader({ client, agentSessionId, canvas, rep
     writes.add(settled)
     canvas.write(bytes, settled)
   })
-  const problem = (step: string, error: unknown) => publish({
-    phase: ready ? 'reading' : 'unavailable',
-    message: `${step}未完成；原画面和会话引用仍保留，运行状态未据此判为退出。${error instanceof Error ? error.message : String(error)}`
-  })
+  const problem = (step: string, error: unknown) => {
+    const message = `${step}未完成；原画面和会话引用仍保留，运行状态未据此判为退出。${error instanceof Error ? error.message : String(error)}`
+    publish({ phase: ready ? 'reading' : 'unavailable', message, notice: message })
+  }
 
   async function applySnapshot(snapshot: AgentMuxRunAttachment) {
     if (!expected || !sameRun(snapshot.run, expected) || snapshot.run.agentSessionId !== agentSessionId) throw new Error('返回的输出不属于原会话和 Run。')
@@ -84,6 +85,7 @@ export function createMobileTerminalReader({ client, agentSessionId, canvas, rep
         cursor = step.checkpoint.throughByte
         resizeRevision = step.checkpoint.resizeRevision
         geometryKnown = true
+        omitted = false
       } else if (step.type === 'resized') {
         canvas.resize(step.size.cols, step.size.rows)
         resizeRevision = step.resizeRevision
@@ -98,9 +100,13 @@ export function createMobileTerminalReader({ client, agentSessionId, canvas, rep
     if (closed) return
     if (known && distance > 0) canvas.scrollToLine(Math.max(0, canvas.buffer.active.baseY - distance))
     ready = true
-    publish({ phase: 'reading', message: omitted ? '部分原始输出未能恢复。当前画面继续阅读；可重新核实输出，Mac 上的输入与运行不受影响。'
+    const message = omitted ? '部分原始输出未能恢复。当前画面继续阅读；可重新核实输出，Mac 上的输入与运行不受影响。'
       : !geometryKnown ? '正在阅读原始输出；历史终端尺寸尚未核实，画面采用本机阅读网格。Mac 的运行与尺寸保持不变。'
-        : '已核实原会话的终端输出。原 Run 仍由 Mac Host 持有。' })
+        : '已核实原会话的终端输出。原 Run 仍由 Mac Host 持有。'
+    // A valid old-Run snapshot cannot resolve the Core-confirmed replacement Run's notice.
+    const awaitingRun = noticeRun !== null && !sameRun(snapshot.run, noticeRun)
+    if (!awaitingRun) noticeRun = null
+    publish({ phase: 'reading', message, notice: awaitingRun ? reading.notice : omitted || !geometryKnown ? message : null })
     boundary()
   }
 
@@ -174,11 +180,16 @@ export function createMobileTerminalReader({ client, agentSessionId, canvas, rep
   function accept(event: AgentMuxClientEvent) {
     if (closed || !visible || !expected) return
     if (event.type === 'connection-state') {
-      if (event.state !== 'restored') publish({ message: 'Host 输出连接尚未恢复。原画面与会话保留；当前 Run 状态未知，可重新核实输出。' })
+      if (event.state !== 'restored') {
+        const message = 'Host 输出连接尚未恢复。原画面与会话保留；当前 Run 状态未知，可重新核实输出。'
+        publish({ message, notice: message })
+      }
       return
     }
     if (event.type === 'agent-session' && event.session.agentSessionId === agentSessionId && !sameRun(event.session.run, expected)) {
-      publish({ message: 'Core 已确认同一会话换成新的 Run。当前画面来自上一个 Run；请重新核实输出，原运行不因此受控。' })
+      noticeRun = { ...event.session.run }
+      const message = 'Core 已确认同一会话换成新的 Run。当前画面来自上一个 Run；请重新核实输出，原运行不因此受控。'
+      publish({ message, notice: message })
       return
     }
     if (!('run' in event) || !event.run || !sameRun(event.run, expected) || 'agentSessionId' in event && event.agentSessionId && event.agentSessionId !== agentSessionId) return
@@ -213,7 +224,10 @@ export function createMobileTerminalReader({ client, agentSessionId, canvas, rep
       }
       expected = { ...client.agentSession(agentSessionId).run }
       publish({ phase: 'pending', message: '正在核实原会话的终端输出。运行状态尚未确认。' })
-      const timer = setTimeout(() => publish({ message: '终端输出握手仍未返回。原画面与会话引用保留；Mac 的输入与运行不因此停止。' }), DEADLINE_MS)
+      const timer = setTimeout(() => {
+        const message = '终端输出握手仍未返回。原画面与会话引用保留；Mac 的输入与运行不因此停止。'
+        publish({ message, notice: message })
+      }, DEADLINE_MS)
       try {
         const result = await client.reattachAgent(agentSessionId, cursor, 'terminal')
         if (result.session.agentSessionId !== agentSessionId || !sameRun(result.attachment.run, expected)) throw new Error('握手返回了另一会话或 Run。')
