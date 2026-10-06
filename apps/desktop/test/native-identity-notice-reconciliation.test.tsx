@@ -1,3 +1,5 @@
+import { notificationEventRows, notificationTrigger, toggleNotificationCenter } from './helpers/notification-center'
+import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -18,7 +20,6 @@ import type { RuntimeEvent, RuntimeSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
 import { composerSubmitMode } from '../src/renderer/src/lib/composer-submit-mode'
 import { useAppStore } from '../src/renderer/src/store'
-import { TransientErrorNotice } from '../src/renderer/src/components/TransientErrorNotice'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 vi.mock('electron', () => ({ app: {}, nativeImage: {} }))
@@ -42,29 +43,24 @@ function error(code = 'AGENT_NATIVE_IDENTITY_UNCONFIRMED'): RuntimeEvent {
 function sessionEvent(extra: Partial<AgentMuxAgentSession> = {}, hostId = original.hostId): RuntimeEvent {
   return { type: 'core', hostId, event: { type: 'agent-session', session: fact(extra) } }
 }
-function Notice() {
-  const state = useAppStore()
-  return <TransientErrorNotice error={state.error} dismissed={state.errorDismissed} lastError={state.lastError}
-    summary={state.errorNoticeContext?.summary} onDismiss={state.dismissError} onReopen={state.reopenError}
-    kind={state.errorNoticeContext?.kind ?? 'indeterminate'} />
-}
+function Notice() { return <GlobalSystemNotices /> }
 async function showMissing() {
   await dom.render(<Notice />)
   await act(async () => useAppStore.getState().applyEvent(error()))
   expect(useAppStore.getState().errorNoticeContext).toMatchObject({ cause: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', subject: original.control })
-  expect(dom.container.querySelector('.error-notice')).not.toBeNull()
+  expect(dom.container.querySelector('.notification-item[data-notice-id="current"]')).not.toBeNull()
   expect(composerSubmitMode(useAppStore.getState().sessions[0]!)).toMatchObject({ canType: true, canSubmit: true })
   return useAppStore.getState().error
 }
 
 it.each([false, true])('closes the original exact-Run identity notice after confirmation (dismissed: %s)', async dismissed => {
   await showMissing()
-  if (dismissed) await dom.click('[aria-label="Dismiss error"]')
+  if (dismissed) { await toggleNotificationCenter(dom.container, 'open'); await toggleNotificationCenter(dom.container, 'closed') }
   const tabs = useAppStore.getState().tabs, layouts = useAppStore.getState().layouts
   await act(async () => useAppStore.getState().applyEvent(sessionEvent({ nativeHandle: native, nativeHandlePersistence: 'confirmed' })))
   expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
-  expect(dom.container.querySelector('.error-notice')).toBeNull()
-  expect(dom.container.querySelector('.error-notice__reopen')).toBeNull()
+  expect(dom.container.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
+  expect(dom.container.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   expect(useAppStore.getState().sessions[0]).toMatchObject({ id: original.id, control: original.control, nativeHandle: native })
   expect(useAppStore.getState().tabs).toBe(tabs); expect(useAppStore.getState().layouts).toBe(layouts)
   expect(dom.draft()).toBe('Keep my draft')
@@ -88,7 +84,7 @@ it.each(['other-session', 'other-host', 'other-run', 'candidate', 'unknown-sourc
     }
     await act(async () => useAppStore.getState().applyEvent(incoming))
     expect(useAppStore.getState().error).toBe(message)
-    expect(dom.container.querySelector('.error-notice')).not.toBeNull()
+    expect(dom.container.querySelector('.notification-item[data-notice-id="current"]')).not.toBeNull()
     expect(dom.draft()).toBe('Keep my draft')
   })
 
@@ -103,7 +99,8 @@ it.each(['ordinary', 'save-failed', 'save-unconfirmed'] as const)('does not sett
   expect(useAppStore.getState().errorNoticeContext?.cause).toBeUndefined()
   await act(async () => useAppStore.getState().applyEvent(sessionEvent({ nativeHandle: native, nativeHandlePersistence: 'confirmed' })))
   expect(useAppStore.getState().error).toBe(later)
-  expect(dom.container.querySelector('.error-notice')).not.toBeNull()
+  expect(notificationEventRows(dom.container)).toHaveLength(1)
+  expect(notificationEventRows(dom.container)[0]!.textContent).toContain(later)
 })
 
 it('drops a previous persistence acknowledgement when new Session facts omit it', async () => {
@@ -113,7 +110,7 @@ it('drops a previous persistence acknowledgement when new Session facts omit it'
   const message = await showMissing()
   await act(async () => useAppStore.getState().applyEvent(sessionEvent({ nativeHandle: native })))
   expect(useAppStore.getState().error).toBe(message)
-  expect(dom.container.querySelector('.error-notice')).not.toBeNull()
+  expect(dom.container.querySelector('.notification-item[data-notice-id="current"]')).not.toBeNull()
 })
 
 it('does not resurrect a buffered original identity failure after the same membership read confirms it', async () => {
@@ -125,12 +122,12 @@ it('does not resurrect a buffered original identity failure after the same membe
   } }))
   await vi.waitFor(() => expect(snapshot).toHaveBeenCalled())
   await act(async () => useAppStore.getState().applyEvent(error()))
-  expect(dom.container.querySelector('.error-notice')).not.toBeNull()
+  expect(dom.container.querySelector('.notification-item[data-notice-id="current"]')).not.toBeNull()
   await act(async () => release({ sessions: [{ ...original, nativeHandle: native, nativeSessionId: native.sessionId,
     nativeHandlePersistence: 'confirmed', agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 10), updatedAt: _reshape_fixtureEpoch(0, 0, 10) }], recoveryCandidates: [],
     timelines: { [original.id]: { agentSessionId: original.id, revision: 1, items: [] } } }))
   await vi.waitFor(() => expect(useAppStore.getState().error).toBeNull())
-  expect(dom.container.querySelector('.error-notice')).toBeNull()
+  expect(dom.container.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   expect(dom.draft()).toBe('Keep my draft')
 })
 
@@ -188,11 +185,11 @@ it('keeps readable unconfirmed native identity across a missed persistence error
     } })
   })
   expect(useAppStore.getState().error).toBe(message)
-  expect(dom.container.querySelector('.error-notice')).not.toBeNull()
+  expect(dom.container.querySelector('.notification-item[data-notice-id="current"]')).not.toBeNull()
   await act(async () => { await controller.refresh(original.control, composerConfig) })
   await vi.waitFor(() => expect(useAppStore.getState().error).toBeNull())
   expect(useAppStore.getState().sessions[0]).toMatchObject({ control: original.control, nativeHandle: native,
     nativeHandlePersistence: 'confirmed' })
-  expect(dom.container.querySelector('.error-notice')).toBeNull()
+  expect(dom.container.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   expect(dom.draft()).toBe('Keep my draft')
 })
