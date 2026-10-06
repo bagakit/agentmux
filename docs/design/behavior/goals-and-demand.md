@@ -155,6 +155,8 @@ New Goal 与已有 Goal 的讨论关系只定义于[显式新建与专属讨论]
 
 请求携带稳定 Goal／Demand ID、当前标题、原意／描述、真实 Project／Workspace／Host 及路由事实；Mote 只整理、组织与跟进，执行分工和既有授权沿[协调合同](motes-and-coordination.md#pmo-teams-topic-名称与职责)。原目标保存未知先读同一对象，准备或投递未知先核原操作，不重复 create／start／发送。
 
+专属讨论创建时为准确 Agent Session 与 Tab 提供可读的主题／协调名，并沿原名称 owner 保存派生来源；不能只设置 Tab 名而使 Session 无名。尚未明确主题时保临时讨论名，明确后沿原协调消息中的命名责任细化。准备失败时保原 launcher、请求和已确认名称；复用已存在的讨论不强改名称或暗送请求。名称不改变持久 Mote、Goal、Session／Run、cwd 或执行授权。
+
 ### Goal 与原持续推进的连接
 
 确认的 Goal 可以由明确指定的单一 Loop Supervisor 持续推进；该准确 Session 必须属于负责人。未指定 Supervisor 时详情引导选择，Continue 的启动操作在准确 Supervisor 明确后可用；原 loop 的检查和控制不被新的选择状态遮蔽。原 `goal.start` 通过可选 continuation 授权绑定已确认 alignment revision 与同一业务 operationId；未提供 continuation 仍是原有限开始。原 `goal.inspect` 按该 Goal 投影原续跑 Manager 的准确目标、状态与原操作回执，读不创建调度或复制 Goal 账本。原 `goal.continuation-action` 以准确 Goal/loop、预期 revision 与业务 operationId 沿同一 Manager 执行暂停、恢复、停止或检查；普通日历 `schedule.*` 不承载 interval 续跑。RPC/CLI/GUI 与连接设备对同一操作、版本和结果使用一致语义。
