@@ -19,7 +19,7 @@ import type { ReactNode } from 'react'
  * `'agent'` 为已知 Agent，`'unknown'` 为未记录或原生用户输入，`'human'` 仅在确知人类身份时保留。
  * 绝不再从 `source=user` 或原生角色盲目猜测 Human。
  */
-export type SpeakerRole = 'human' | 'agent' | 'unknown' | 'system'
+export type SpeakerRole = 'human' | 'agent' | 'external' | 'unknown' | 'system'
 
 /**
  * 对话体里的一个说话人。
@@ -32,6 +32,7 @@ export type ConversationSpeaker = {
   role: SpeakerRole
   /** 这个说话人的稳定标识。agent 为其 agentSessionId，unknown 为 UNKNOWN_SPEAKER_ID。 */
   id: string
+  external?: Extract<AgentSessionUserMessage['author'], { kind: 'external' }>
 }
 
 /**
@@ -90,6 +91,7 @@ export function createSpeakerResolver(options?: {
   return (recordedSpeaker: ConversationSpeaker) => {
     const speaker = speakerForDisplay(recordedSpeaker)
     if (speaker.role === 'human') return { name: 'You' }
+    if (speaker.role === 'external') return { name: externalSpeakerLabel(speaker) }
     if (speaker.role === 'system') return { name: speaker.id === AGENTMUX_SYSTEM_SPEAKER_ID ? 'AgentMux' : speaker.id }
     if (options?.lookupAgent) {
       const found = options.lookupAgent(speaker.id)
@@ -115,7 +117,16 @@ export function createSpeakerResolver(options?: {
 /**
  * 从 AgentSessionUserMessage 得到规范说话人。
  */
+export function externalSpeakerLabel(speaker: ConversationSpeaker): string {
+  return speaker.external ? `${speaker.external.actor.userId} · ${speaker.external.actor.application.domain}` : speaker.id
+}
+
+export function speakerOfExternalAuthor(author: Extract<AgentSessionUserMessage['author'], { kind: 'external' }>): ConversationSpeaker {
+  return { role: 'external', id: JSON.stringify([author.actor.application.domain, author.actor.application.appId, author.actor.idType, author.actor.userId]), external: author }
+}
+
 export function speakerOfUserMessage(message: AgentSessionUserMessage): ConversationSpeaker {
+  if (message.author.kind === 'external') return speakerOfExternalAuthor(message.author)
   if (message.author.kind === 'human') {
     return { role: 'human', id: HUMAN_SPEAKER_ID }
   }

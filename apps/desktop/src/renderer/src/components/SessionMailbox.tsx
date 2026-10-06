@@ -50,9 +50,9 @@ function useMessageFingerprints(items: readonly MailboxDisplayItem[]) {
   const signature = useMemo(() => JSON.stringify(items.map((item) => {
     const original = item.original
     if (isUserMessage(original)) {
-      return [original.source.kind === 'captured' ? original.source.submissionId : original.id, original.author.kind === 'agent' ? original.author.agentSessionId : undefined, original.content, original.recordedAt, original.deliveryStatus]
+      return [original.source.kind === 'captured' ? original.source.submissionId : original.id, original.author.kind === 'agent' ? original.author.agentSessionId : undefined, original.content, original.recordedAt, original.deliveryStatus, ...(original.author.kind === 'external' ? [original.author] : [])]
     }
-    return [original.id, original.authorAgentSessionId, original.content, original.createdAt, original.status]
+    return [original.id, original.authorAgentSessionId, original.content, original.createdAt, original.status, ...(original.authorExternal ? [original.authorExternal] : [])]
   })), [items])
   const [result, setResult] = useState<{ signature: string; values: Record<string, string> }>()
   useEffect(() => {
@@ -87,6 +87,7 @@ function MessageHistory({ mailboxOrigin, items, incoming, selectedKey, onOpen, o
   const authorLabel = (item: MailboxDisplayItem) => {
     const author = item.message.author.kind === 'agent' ? item.message.author.agentSessionId : undefined
     return author ? reading?.describeSpeaker?.({ role: 'agent', id: author }).name || names?.[author] || sessions.find(s => s.id === author)?.label || `Agent ${author.slice(0, 8)}`
+      : item.message.author.kind === 'external' ? `${item.message.author.actor.userId} · ${item.message.author.actor.application.domain}`
       : item.message.author.kind === 'human' ? 'Human' : 'Author unknown'
   }
   const time = (item: MailboxDisplayItem) => item.message.recordedAt

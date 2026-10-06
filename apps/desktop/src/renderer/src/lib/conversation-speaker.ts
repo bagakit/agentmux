@@ -1,6 +1,6 @@
 import type { AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
-import { speakerOfUserMessage, AGENTMUX_SYSTEM_SPEAKER_ID, HUMAN_SPEAKER_ID, UNKNOWN_SPEAKER_ID, type ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
+import { speakerOfExternalAuthor, speakerOfUserMessage, AGENTMUX_SYSTEM_SPEAKER_ID, HUMAN_SPEAKER_ID, UNKNOWN_SPEAKER_ID, type ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 
 /**
  * 这一条条目或消息的说话人；不是一句话（机器上报）时返回 null。
@@ -15,6 +15,7 @@ export function speakerOf(
   if (item.kind === 'system_message' && item.source === 'agentmux') {
     return { role: 'system', id: AGENTMUX_SYSTEM_SPEAKER_ID }
   }
+  if (item.authorExternal) return speakerOfExternalAuthor(item.authorExternal)
   if (item.authorAgentSessionId) {
     return { role: 'agent', id: item.authorAgentSessionId }
   }
