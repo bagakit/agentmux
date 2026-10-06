@@ -11,6 +11,7 @@ import { MobileZoneWorkface } from './navigation/MobileZoneWorkface'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { MobileConversationSurface, type MobileConnection } from './conversation/MobileConversationSurface'
 import { MobileTerminalViewer } from './terminal/MobileTerminalViewer'
+import { useHostAppearance } from './appearance/useHostAppearance'
 import { bindMobileViewport, bindNativeDevice } from './platform/native/device'
 import { openBrowserHttpLink } from './platform/browser'
 import './mobile.css'
@@ -66,6 +67,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const navigationRecord = useRef<{ recordId: string | null } | null>(null)
   navigationRecord.current ??= { recordId: getDeviceWorkface().recordIdentity() }
   const [hasConnected, setHasConnected] = useState(connection.state === 'connected' || initial.current.workface.selectedSessionId !== null || initial.current.presentation !== undefined)
+  const hostAppearance = useHostAppearance(client, connection.state)
   useEffect(() => { if (connection.state === 'connected') setHasConnected(true) }, [connection.state])
   const [workface, setWorkface] = useState<Workface>(initial.current.workface)
   const [canPersist, setCanPersist] = useState(initial.current.issue === null)
@@ -258,7 +260,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const conversationVisible = workspaceVisible && showSession && !showGoalWork && workface.panel !== 'terminal'
   // The visible conversation owns its connection feedback. Storage and projection
   // failures remain separate facts even when the connection is also unavailable.
-  const serviceNotices = [...new Set([notice, projectionError,
+  const serviceNotices = [...new Set([notice, projectionError, hostAppearance.issue,
     !conversationVisible ? connection.issue ?? (hasConnected && !connected ? connection.message : null) : null
   ].filter((message): message is string => Boolean(message)))]
   return <div className="mobile-app" data-connection={connection.state} data-drawer={sheet === 'settings' ? 'open' : 'closed'} data-mobile-workface={moteConversation ? 'mote' : 'workspace'}>
@@ -314,7 +316,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
           <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={exposed && conversationVisible} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))} openHttpLink={openBrowserHttpLink} />
         </div>
       </section><section className="mobile-terminal-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel !== 'terminal'}>
-        <MobileTerminalViewer client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} inputActive={exposed} visible={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} />
+        <MobileTerminalViewer terminalPalette={hostAppearance.terminalPalette} client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} inputActive={exposed} visible={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} />
       </section>
     </main>
     {(serviceNotices.length > 0 || !canPersist) && <aside className="mobile-service-notice" role="status"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></aside>}
