@@ -224,6 +224,10 @@ it('Focus keeps pending reading progress cancellable and hiding releases that in
   const button = [...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Return to Context')!
   await click(button)
   expect(overlay().textContent).toContain('Locating original record…')
+  const navigation = button.closest('footer')!
+  expect(navigation).not.toBeNull()
+  expect(navigation.querySelector('[role="status"]')?.textContent).toBe('Locating original record…')
+  expect(navigation.contains(overlay().querySelector('.recent-focus__message-body'))).toBe(false)
   expect(overlay().textContent).toContain(BODY)
   expect(useAppStore.getState().conversationRevealIntent?.itemRef).toEqual(native('same'))
   const before = reads.length
@@ -245,6 +249,10 @@ it('a failed return from another Context retains the exact original body and sou
   const original = overlay().querySelector<HTMLElement>('.recent-focus__message-body .log-turn')!
   expect(original.textContent).toContain(BODY); expect(JSON.parse(original.dataset.conversationItemRef!)).toEqual(native('same'))
   expect(overlay().textContent).toContain('原生来源已变化')
+  const navigation = [...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Return to Context')!.closest('footer')!
+  expect(navigation).not.toBeNull()
+  expect(navigation.querySelector('[role="status"]')?.textContent).toContain('原文仍可阅读和复制')
+  expect(navigation.contains(original)).toBe(false)
   expect(useAppStore.getState().viewModes[SESSION]).toBe('terminal'); expect(useAppStore.getState().conversationRevealIntent).toBeNull()
   await act(async () => { expect(useAppStore.getState().focusExecutionSession('decoy')).toBe(true) }); await flush()
   expect(overlay().querySelector('.recent-focus__message-preview')).toBeNull(); noRuntime()
