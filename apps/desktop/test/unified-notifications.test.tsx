@@ -29,7 +29,7 @@ beforeEach(async () => {
   vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig)
   vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.sessions, 'historySources').mockImplementation(historySourcesReader())
-  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [original, healthy], timelines: {}, recoveryCandidates: [] })
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [original, healthy], timelines: Object.fromEntries([original, healthy].map(session => [session.id, { agentSessionId: session.id, revision: 0, items: [] }])), recoveryCandidates: [] })
   useAppStore.setState({ ...initial, loading: true }, true)
   container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
   await act(async () => { root.render(<App />) })
@@ -135,6 +135,37 @@ it('keeps a current Provider observation distinct from an older same-text event 
   expect(currentNotificationRows(container)).toHaveLength(1)
   expect(useAppStore.getState()).toMatchObject({ error: diagnostic, errorDismissed: false,
     errorNoticeContext: { startupProviderCatalog: { warningMessage: diagnostic } } })
+})
+
+it('retains the active startup producer while ordinary events remain independently readable after its real settlement', async () => {
+  const startupMessage = 'Original Provider catalog read did not complete'
+  const startupContext = { kind: 'indeterminate' as const, startupProviderCatalog: { warningMessage: startupMessage } }
+  await act(async () => useAppStore.setState({ error: startupMessage, lastError: startupMessage,
+    errorNoticeContext: startupContext, errorDismissed: true }))
+  await act(async () => useAppStore.getState().reportError(diagnostic))
+  expect(useAppStore.getState().errorNoticeContext).toBe(startupContext)
+  expect(useAppStore.getState()).toMatchObject({ error: startupMessage, lastError: startupMessage, errorDismissed: true })
+  expect(currentNotificationRows(container)).toHaveLength(1)
+  expect(notificationEventRows(container)).toHaveLength(1)
+  expect(notificationEventRows(container)[0]!.textContent).toContain(diagnostic)
+  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  const receipts = useAppStore.getState().noticeReadReceipts
+  await act(async () => useAppStore.getState().reportError(diagnostic))
+  expect(useAppStore.getState().errorNoticeContext).toBe(startupContext)
+  expect(useAppStore.getState()).toMatchObject({ error: startupMessage, lastError: startupMessage, errorDismissed: true })
+  expect(notificationEventRows(container)).toHaveLength(1)
+  expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts)
+  await act(async () => {
+    useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: {
+      type: 'connection-state', state: 'restored', evidence: { source: 'run-process', observedAt: Date.now() }
+    } })
+    await vi.waitFor(() => expect(useAppStore.getState().errorNoticeContext).toBeNull())
+  })
+  expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null })
+  expect(currentNotificationRows(container)).toHaveLength(0)
+  expect(notificationEventRows(container)).toHaveLength(1)
+  expect(notificationEventRows(container)[0]!.textContent).toContain(diagnostic)
+  expect(useAppStore.getState().noticeReadReceipts['global:events']).toEqual(receipts['global:events'])
 })
 
 it('reopens complete diagnostics, copies their original content and navigates the original Session', async () => {
