@@ -1035,6 +1035,8 @@ export type AgentSessionHistoryObservationOptions = Pick<AgentSessionHistoryPage
 
 export type AgentSessionHistoryObservationHandle = {
   source: AgentSessionHistorySource
+  /** Resource termination only; absence is unknown and never implies a lost Session or Run. */
+  closed?: AbortSignal
   dispose(): void
 }
 

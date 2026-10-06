@@ -38,19 +38,22 @@ export async function observeNativeJsonlHistory(
   let checking = false
   let queued = false
   let watcher: FSWatcher | undefined
+  const closed = new AbortController()
   const dispose = (): void => {
     if (disposed) return
     disposed = true
     queued = false
     watcher?.close()
     context.signal.removeEventListener('abort', dispose)
+    closed.abort(new AgentMuxError('Native history observation was released.', 'AGENT_SESSION_HISTORY_CANCELLED'))
   }
   const unavailable = (error: unknown): void => {
     if (disposed) return
-    dispose()
-    context.onChange({ kind: 'unavailable', source: context.source,
-      code: error instanceof AgentMuxError ? error.code : 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE',
-      message: error instanceof Error ? error.message : 'Native source observation failed. Refresh to read its current page.' })
+    try {
+      context.onChange({ kind: 'unavailable', source: context.source,
+        code: error instanceof AgentMuxError ? error.code : 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE',
+        message: error instanceof Error ? error.message : 'Native source observation failed. Refresh to read its current page.' })
+    } finally { dispose() }
   }
   const check = (): void => {
     if (disposed) return
@@ -105,5 +108,5 @@ export async function observeNativeJsonlHistory(
   // Close the stat→watch setup gap. Buffered notifications for an unchanged
   // target do no work; only a confirmed physical version change invalidates.
   check()
-  return { source: context.source, dispose }
+  return { source: context.source, closed: closed.signal, dispose }
 }
