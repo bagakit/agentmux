@@ -140,3 +140,10 @@
 
 .host-creation-trust [role="alert"], .host-creation-trust__conflict { color: var(--red); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
 .host-creation-trust [role="status"] { display: flex; align-items: center; gap: var(--sp-2); }
+
+.connector-stage-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); margin: var(--sp-4) 0; }
+.connector-stage-list > div { min-width: 0; display: grid; gap: var(--sp-1); }
+.connector-stage-list dt { color: var(--text-3); font-size: var(--fs-meta); }
+.connector-stage-list dd { margin: 0; color: var(--text-2); font-size: var(--fs-body); overflow-wrap: anywhere; }
+[data-connection-editor] > .primary-button, [data-connection-editor] > .small-button { justify-self: start; }
+[data-connection-editor] input[type='checkbox'] { width: 16px; height: 16px; padding: 0; accent-color: var(--green); }
