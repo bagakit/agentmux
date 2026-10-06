@@ -135,6 +135,8 @@ Goal 的委派沿 Core 原通信 dispatch 和实际独立 AgentSession，保存�
 
 委派意图、通信提交和报告回收分别沿原 owner 持久化与对账；回执丢失和重启后保持同一 operation／message、冻结正文和原责任。逐标准报告有准确作者、原 reply、证据位置与目标提案版本，重复或迟到回复不制造新工作、不覆盖已回收报告或人的接受。原 Mote 和 Goal 工作入口提供查看来源、回答提问／处理阻塞、回收报告及原 Session 接续的真实动作；不要求用户靠追问发现未收尾。
 
+原执行 Run 的权威退出／中断或原报告待回收可触发一次给准确 Supervisor 的 AgentMux 提示，沿现有有源输入机制并保冻结操作与原目标；不新增周期 Loop。忙、草稿或观察未知保留准备与服务窗，提交回执未知后仅对账原输入，不自动重投。原 Core 已有明确结构化报告而 Goal 尚未记到时，责任 owner 可核对真实作者、原 source／reply、版本和逐标准证据后恢复报告再显式回收，不冒充 worker 再发消息。
+
 ## Goal 详情中的 Session 观察投影
 
 执行拓扑按需表达准确 Project／资源 Workspace、Topic／Branch、已有 Tab、Region 与 AgentSession；多处合法绑定可辨，不以 Session 数量、当前焦点、最近顺序或终端标题猜位置。没有 Tab、Region 或当前 Agent 时诚实说明。共用原空间与 Session 投影组件，不为每张目标常驻完整终端或另建拓扑账本。
