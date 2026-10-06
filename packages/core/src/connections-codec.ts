@@ -1,7 +1,8 @@
+import { ROOM_BINDING_RPC_METHODS, isRoomBindingMethod, parseRoomBindingParams, parseRoomBindingResult } from './room-binding-codec.js'
 import { AgentMuxError } from './errors.js'
 import type { ConnectionConfig, ConnectionMethod, ConnectionObservation, ConnectionOperation, ConnectionParamsMap, ConnectionRecord, ConnectionResultMap } from './connections-contract.js'
 
-export const CONNECTION_RPC_METHODS = { 'connection.ls': 'long', 'connection.inspect': 'long', 'connection.configure': 'long', 'connection.test': 'long' } as const
+export const CONNECTION_RPC_METHODS = { ...ROOM_BINDING_RPC_METHODS, 'connection.ls': 'long', 'connection.inspect': 'long', 'connection.configure': 'long', 'connection.test': 'long' } as const
 export const isConnectionMethod = (value: unknown): value is ConnectionMethod => typeof value === 'string' && Object.hasOwn(CONNECTION_RPC_METHODS, value)
 const fail = (): never => { throw new AgentMuxError('Connection data is malformed or belongs to another original object.', 'INVALID_CONNECTION_DATA') }
 function object(value: unknown, fields: string[]): Record<string, unknown> {
@@ -38,6 +39,7 @@ function operation(value: unknown): ConnectionOperation {
   return { operationId: identity(p.operationId), status: 'configured', connection: parseConnectionRecord(p.connection) }
 }
 export function parseConnectionParams<M extends ConnectionMethod>(method: M, value: unknown): ConnectionParamsMap[M] {
+  if (isRoomBindingMethod(method)) return parseRoomBindingParams(method, value) as ConnectionParamsMap[M]
   if (method === 'connection.ls') { object(value, []); return {} as ConnectionParamsMap[M] }
   if (method === 'connection.configure') {
     const p = object(value, ['operationId', 'expectedRevision', 'connection'])
@@ -49,6 +51,7 @@ export function parseConnectionParams<M extends ConnectionMethod>(method: M, val
   return (p.connectionId === undefined ? { operationId: identity(p.operationId) } : { connectionId: identity(p.connectionId) }) as ConnectionParamsMap[M]
 }
 export function parseConnectionResult<M extends ConnectionMethod>(method: M, value: unknown, input: ConnectionParamsMap[M]): ConnectionResultMap[M] {
+  if (isRoomBindingMethod(method)) return parseRoomBindingResult(method, value, input as never) as ConnectionResultMap[M]
   if (method === 'connection.ls') {
     const p = object(value, ['connections']); if (!Array.isArray(p.connections)) fail()
     const connections = (p.connections as unknown[]).map(parseConnectionRecord)

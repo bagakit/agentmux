@@ -61,3 +61,21 @@ export interface RoomBindingReadPort {
   readGrant(grantId: string, revision?: number): ConnectionGrant | null
   findGrant(input: { connectionId: string; externalConversationId: string; actor: ConnectionGrant['actor'] }): ConnectionGrant | null
 }
+
+export type RoomBindingParamsMap = {
+  'connection.bind': RoomBindingBindInput
+  'connection.binding.inspect': RoomBindingInspectInput
+  'connection.binding.ls': RoomBindingListInput
+  'connection.binding.pause': RoomBindingPauseInput
+  'connection.binding.relink': RoomBindingRelinkInput
+  'connection.grant': RoomBindingGrantInput
+}
+export type RoomBindingResultMap = {
+  'connection.bind': RoomBindingOperation
+  'connection.binding.inspect': RoomBindingInspection
+  'connection.binding.ls': { bindings: RoomBinding[] }
+  'connection.binding.pause': RoomBindingOperation
+  'connection.binding.relink': RoomBindingOperation
+  'connection.grant': RoomBindingOperation
+}
+export type RoomBindingMethod = keyof RoomBindingParamsMap
