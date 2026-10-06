@@ -1,8 +1,9 @@
+import { fixtureEpoch as _newTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ToolkitConfirmedResult, ToolkitScriptSnapshot, ToolkitToolDefinition } from '@agentmux/core/control'
+import type { ToolkitConfirmedResult, ToolkitScriptSnapshot, ToolkitToolDefinition, ToolkitResultDocument } from '@agentmux/core/control'
 import { UserToolkitResult } from '../src/renderer/src/components/toolkit/UserToolkitResult'
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { api } from '../src/renderer/src/lib/api'
@@ -14,12 +15,12 @@ const currentURL = 'http://192.0.2.44:4700/mobile/#offer=current-private-offer'
 const tool: ToolkitToolDefinition = { id: 'connection-example', revision: 'saved-v1', name: 'Connection example',
   icon: 'smartphone', enabled: true, statusBar: 'icon', workspacePath: _hygiene_fixturePath("private/toolkit"), script: 'queryCurrentStatus()', args: [],
   actions: [{ id: 'current-link', label: 'Current link', script: 'readOriginalOwnerLink()', args: [] }] }
-const document = (url: string | null) => JSON.stringify({ schema: 'agentmux.toolkit.result.v1', summary: 'Connection link',
+const document = (url: string | null): ToolkitResultDocument => ({ schema: 'agentmux.toolkit.result.v1', summary: 'Connection link',
   items: [], links: url ? [{ label: 'Connection link', url }] : [], notice: '' })
 function result(invocationId: string, url: string | null = currentURL, state: ToolkitConfirmedResult['state'] = 'succeeded', definition = tool): ToolkitConfirmedResult {
   return { executionId: `execution-${invocationId}`, invocationId, definition, expectedLatestExecutionId: null,
     target: { workspacePath: definition.workspacePath }, run: { hostId: 'local', runId: `run-${invocationId}` },
-    startedAt: 1, endedAt: 2, exitCode: state === 'succeeded' ? 0 : 1, state, reason: null, text: document(url) }
+    startedAt: _newTailFixtureEpoch(0, 0, 1), endedAt: _newTailFixtureEpoch(0, 0, 2), exitCode: state === 'succeeded' ? 0 : 1, state, reason: null, document: document(url), text: 'Native diagnostic\n' + JSON.stringify(document(url)) }
 }
 function fixture() {
   let current: ToolkitScriptSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'script', toolId: tool.id, definition: tool,
