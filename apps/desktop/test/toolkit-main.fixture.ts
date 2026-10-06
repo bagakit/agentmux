@@ -1,13 +1,12 @@
-const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
+import { toolkitRuntime } from './helpers/toolkit-runtime.fixture.js'
 import { EventEmitter } from 'node:events'
 import { createHash } from 'node:crypto'
 import { spawn, execFile, type ChildProcess } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, appendFile, rm, readdir, stat, symlink } from 'node:fs/promises'
+import { mkdir, readFile, appendFile, readdir, stat } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { promisify } from 'node:util'
-import { createConnection } from 'node:net'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, expect, vi } from 'vitest'
 const fixture = vi.hoisted(() => ({ directory: process.env.AGENTMUX_TOOLKIT_EVIDENCE ?? process.cwd(), handlers: new Map<string, (...args: any[]) => unknown>(),
   ipc: new (class { listeners = new Map<string, Set<Function>>() })(),
   packaged:false,appPath:undefined as string|undefined,
@@ -17,7 +16,8 @@ vi.mock('electron', () => ({ app: { get isPackaged(){return fixture.packaged},ge
     removeHandler: (channel: string) => fixture.handlers.delete(channel),
     on: (channel: string, handler: Function) => { const values = fixture.ipc.listeners.get(channel) ?? new Set(); values.add(handler); fixture.ipc.listeners.set(channel, values) },
     removeListener: (channel: string, handler: Function) => fixture.ipc.listeners.get(channel)?.delete(handler) },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {} }))
+  clipboard: {}, dialog: {}, nativeImage: {}, shell: {},
+  nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: false }) }))
 vi.mock('@agentmux/demand', async original => ({ ...await original(), openDemandStore: () => ({}) }))
 vi.mock('../src/main/browser-profile-manager.js', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal.js', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-journal.json',
@@ -34,10 +34,9 @@ import { RuntimeController } from '../src/main/runtime-controller.js'
 import { desktopBusinessSocketPath } from '../src/main/desktop-host.js'
 import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { ProcessResourceSampler } from '../src/main/process-resource-sampler.js'
+import { runOwnerDisposals } from '../src/main/owner-disposal.js'
 import * as assets from '../src/main/toolkit-asset.js'
-import { SESSION_EVENT_CHANNEL } from '../src/shared/contracts.js'
-import * as terminalQueries from '../src/shared/terminal-osc-color-query.js'
-import { CtxmuxClient, PROTOCOL_VERSION } from '../../../packages/core/node_modules/@ctxmux/sdk/dist/index.js'
+import { PROTOCOL_VERSION } from '../../../packages/core/node_modules/@ctxmux/sdk/dist/index.js'
 
 export const children: ChildProcess[] = [], cleanups: (() => Promise<void>)[] = []
 let runnerDigest: Promise<string> | undefined
@@ -65,7 +64,7 @@ export async function oneCli(...args: string[]) {
   expect(c.code, c.stderr).toBe(0);const frames=c.frames();expect(frames).toHaveLength(1);return frames[0]
 }
 export async function nativeMain() {
-  const directory = await mkdtemp(_hygiene_fixturePath("tmp/amx-tk-"))
+  const owned = await toolkitRuntime(), directory = owned.directory
   fixture.directory = directory
   fixture.handlers.clear();fixture.ipc.listeners.clear()
   const names=['AGENTMUX_RUNTIME_DIRECTORY','AGENTMUX_STATE_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','AGENTMUX_AGENT_SESSION_STORE','AGENTMUX_AGENT_SESSION_ID','AGENTMUX_AGENT_CAPABILITY','AGENTMUX_RPC_ENDPOINT'] as const
@@ -87,45 +86,62 @@ export async function nativeMain() {
     send(channel:string,value:any){this.events.push({channel,value})}
   }()
   let sender=makeSender(), detachRenderer=runtime.attach(sender as any)
-  const sdk=new CtxmuxClient({socketPath:join(directory,'ctxmux.sock')})
+  const sdk=owned.activation.client
   let dispose: (()=>Promise<void>) | undefined, rpc: AgentMuxRpcClient | undefined
   await record('fixture-startup',{directory,phase:'before-registerIpc'})
-  cleanups.push(async()=>{
-    await rpc?.dispose()
-    await dispose?.()
+  let closing: Promise<Awaited<ReturnType<typeof owned.cleanup>>> | undefined
+  const close=()=>closing??=(async()=>{
+    try {
+    let failure: unknown, runsRetired = false
+    try { await runOwnerDisposals([
+      { owner: 'fixture-rpc', dispose: async () => { await rpc?.dispose() } },
+      { owner: 'fixture-main', dispose: async () => { await dispose?.() } },
+      { owner: 'fixture-runs', dispose: async () => {
     // Exact private fixture cleanup uses the public SDK, independently of any Source mutant.
     // Its corrective actions are recorded, never counted as the product oracle.
-    const correctiveRuns=await sdk.list().catch(async error=>{await record('fixture-cleanup-error',{directory,phase:'before-list',error:String(error)});return []})
+    const correctiveRuns=await sdk.list().catch(async error=>{await record('fixture-cleanup-error',{directory,phase:'before-list',namespace:'retained',error:String(error)});throw error})
     for(const run of correctiveRuns) {
       if(run.state.type==='running') {
-        // A completed Stop receipt may precede its terminal metadata. Reuse the
-        // observed dead process instead of submitting a conflicting new Stop.
-        if(run.pid!==null && !alive(run.pid)) await until(async()=>expect((await sdk.status(run.id)).state.type).not.toBe('running'))
-        else await sdk.stop(await sdk.prepareStop(run.id))
+        await sdk.stop(await sdk.prepareStop(run.id))
       }
       await sdk.remove(run.id)
       await record('fixture-cleanup',{runId:run.id,corrective:true})
     }
-    await record('fixture-cleanup-summary',{directory,correctiveRunIds:correctiveRuns.map(run=>run.id),remainingRuns:await sdk.list().catch(async error=>{
-      await record('fixture-cleanup-error',{directory,phase:'final-list',error:String(error)});return null}),
-      runtimeIdentity:await sdk.runtimeInfo().catch(()=>null)})
-    detachRenderer();await runtime.dispose();sampler.dispose()
-    const ownDaemons=(await processes()).filter(p=>p.command.includes('ctxmuxd --socket '+join(directory,'ctxmux.sock')))
-    for(const daemon of ownDaemons) {process.kill(daemon.pid,'SIGTERM');await until(()=>expect(alive(daemon.pid)).toBe(false))}
-    await record('fixture-cleanup-summary',{directory,endedOwnDaemonPids:ownDaemons.map(daemon=>daemon.pid),allEnded:ownDaemons.every(daemon=>!alive(daemon.pid))})
-    await rm(directory,{recursive:true,force:true})
-  })
+    const remainingRuns=await sdk.list()
+    expect(remainingRuns).toEqual([])
+    await record('fixture-cleanup-summary',{directory,correctiveRunIds:correctiveRuns.map(run=>run.id),remainingRuns,
+      runtimeIdentity:await sdk.runtimeInfo()})
+    runsRetired = true
+      } },
+      { owner: 'fixture-renderer', dispose: detachRenderer },
+      { owner: 'fixture-core', dispose: async () => { await runtime.dispose() } },
+      { owner: 'fixture-sampler', dispose: () => sampler.dispose() }
+    ], 'Private Toolkit fixture disposal failed') } catch (error) { failure = error }
+    // Unconfirmed Runs retain their Runtime and namespace. A failed client
+    // disposal cannot strand the SDK child after its exact Runs are retired.
+    if (!runsRetired) throw failure
+    const cleanup=await owned.cleanup({ retainNamespace: failure !== undefined })
+    await record('fixture-cleanup-summary',cleanup)
+    if (failure !== undefined) throw failure
+    expect(cleanup.namespace,JSON.stringify(cleanup)).toBe('removed')
+    return cleanup
+    } catch(error) {
+      await record('fixture-cleanup-error',{directory,namespace:'retained-unless-release-confirmed',error:String(error)})
+      throw error
+    }
+  })()
+  cleanups.push(async()=>{await close()})
   dispose=await registerIpc({window:{id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,
     progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{ setNameAudit() {}, async normalizeDirectoryIdentities() {} } as any,workspaceFiles:{dispose:async()=>{}, read() { throw Error('Unrelated file read outside Toolkit fixture') }, listFiles() { throw Error('Unrelated file list outside Toolkit fixture') }} as any})
-  const ownDaemons=(await processes()).filter(p=>p.command.includes('ctxmuxd --socket '+join(directory,'ctxmux.sock')))
-  expect(ownDaemons).toHaveLength(1)
-  const daemon=ownDaemons[0]!, executable=daemon.command.slice(0,daemon.command.indexOf(' --socket '))
+  expect(owned.activation.spawned).toBe(true)
+  expect(await sdk.daemonInstance()).toBe(owned.activation.runtime.daemonInstanceId)
   await record('fixture-startup',{directory,phase:'registered',protocol:PROTOCOL_VERSION,runtimeIdentity:await sdk.runtimeInfo(),
-    daemon:{...daemon,sha256:createHash('sha256').update(await readFile(executable)).digest('hex')},
+    daemon:{pid:owned.activation.childPid,executable:owned.executable,spawned:owned.activation.spawned,
+      sha256:createHash('sha256').update(await readFile(owned.executable)).digest('hex')},
     runner:{path:process.execPath,sha256:await (runnerDigest??=readFile(process.execPath).then(bytes=>createHash('sha256').update(bytes).digest('hex')))}})
   const core=()=>(runtime as any).hosts.get('local').client as AgentMuxClient
   rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:controlPath}})
-  const invoke=(channel:string,...args:any[])=>fixture.handlers.get(channel)!({sender},...args)
+  const invoke=(channel:string,...args:any[])=>fixture.handlers.get(channel)!({sender,senderFrame:sender.mainFrame},...args)
   const restart=async()=>{
     await rpc!.dispose();await dispose!();detachRenderer();await runtime.dispose();sampler.dispose()
     fixture.handlers.clear();fixture.ipc.listeners.clear()
@@ -135,10 +151,11 @@ export async function nativeMain() {
     dispose=await registerIpc({window:{id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,
       progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{ setNameAudit() {}, async normalizeDirectoryIdentities() {} } as any,workspaceFiles:{dispose:async()=>{}, read() { throw Error('Unrelated file read outside Toolkit fixture') }, listFiles() { throw Error('Unrelated file list outside Toolkit fixture') }} as any})
     rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:controlPath}})
+    expect(await sdk.daemonInstance()).toBe(owned.activation.runtime.daemonInstanceId)
     await record('fixture-restart',{directory,phase:'registered',runtimeInstance:await sdk.daemonInstance()})
   }
   return {directory,get runtime(){return runtime},get sampler(){return sampler},get store(){return store},get config(){return config},
-    get sender(){return sender},dispose:()=>dispose!(),get core(){return core()},sdk,controlPath,get rpc(){return rpc!},invoke,restart}
+    get sender(){return sender},dispose:()=>dispose!(),close,get core(){return core()},sdk,activation:owned.activation,controlPath,get rpc(){return rpc!},invoke,restart}
 }
 export async function record(name:string,value:unknown) {
   if(process.env.AGENTMUX_TOOLKIT_EVIDENCE)await appendFile(join(process.env.AGENTMUX_TOOLKIT_EVIDENCE!,name+'.jsonl'),JSON.stringify(value)+'\n')
