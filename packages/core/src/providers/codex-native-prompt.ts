@@ -2,9 +2,10 @@ import { constants } from 'node:fs'
 import { open, realpath } from 'node:fs/promises'
 import type { JSONRPCResponse } from 'json-rpc-2.0'
 import { readNativeProcessVersion, type NativeProcessFile } from '../agent-native-process.js'
-import { openNativeSocketChannel } from '../agent-native-socket.js'
+import { openNativeSocketChannel, nativeInputCleanupFailure } from '../agent-native-socket.js'
 import type { AgentProvider, AgentProviderNativePromptInput } from '../agent-provider.js'
 import { AgentMuxError } from '../errors.js'
+import { deliveryFailure } from '../delivery-attempt.js'
 import { codexNativeSourceId } from './codex-prompt-execution-evidence.js'
 import { codexMainNativeRecord } from './codex-native-record-role.js'
 import { locateAppServerNativeSession } from './app-server-native-session.js'
@@ -57,9 +58,11 @@ export async function prepareCodexNativePromptInput(context: Parameters<NonNulla
   const endpoint = advertised ? await realpath(advertised) : ''
   const channel = await openNativeSocketChannel(context.processId, endpoint, signal).catch(error => {
     const reported = waiting('native-peer', 'original-channel-unconfirmed')
-    Object.defineProperty(reported, 'cause', { value: error });
-    throw new AgentMuxError(reported.message, reported.code, JSON.stringify({ phase: 'native-peer', reason: 'original-channel-unconfirmed',
-      observation: error instanceof AgentMuxError ? { code: error.code, detail: error.detail } : { name: error instanceof Error ? error.name : 'unknown' } }))
+    const observed = deliveryFailure(error)
+    const failure = new AgentMuxError(reported.message, reported.code, JSON.stringify({ phase: 'native-peer', reason: 'original-channel-unconfirmed',
+      observation: { name: observed.name, ...(observed.code === undefined ? {} : { code: observed.code }),
+        ...(observed.detail === undefined ? {} : { detail: observed.detail }) } }))
+    Object.defineProperty(failure, 'cause', { value: error }); throw failure
   })
   try {
     context.onPreparationPhase?.('native-protocol')
@@ -116,5 +119,8 @@ export async function prepareCodexNativePromptInput(context: Parameters<NonNulla
       },
       close: channel.close
     }
-  } catch (error) { await channel.close(); throw error }
+  } catch (error) {
+    try { await channel.close() } catch (cleanup) { throw nativeInputCleanupFailure(error, cleanup) }
+    throw error
+  }
 }
