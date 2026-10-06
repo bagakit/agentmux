@@ -26,7 +26,9 @@ async function fixture(interrupt = '\x1b', endEvent = 'Interrupt', refresh?: str
   await draw()
   let native: AgentPromptExecutionEvidence | null = { sourceId: 'private-native', id: 'started', nativeTurnId: 'turn-1', state: 'working' }
   const template = new AgentProviderRegistry().get('codex')
-  const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'fixture', capabilities: { ...template.catalog.capabilities, promptExecution: { immediate: strategy } }, hookStrategy: { kind: 'native', installation: 'unmanaged' } },
+  const capabilities = { ...template.catalog.capabilities }
+  delete capabilities.providerFork // This execution fixture does not contribute a fork launcher.
+  const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'fixture', capabilities: { ...capabilities, promptExecution: { immediate: strategy } }, hookStrategy: { kind: 'native', installation: 'unmanaged' } },
     buildArgs: (_, args) => [...args], hook: { rules: [] }, terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: '>' },
     planPromptInput: (prompt, context) => ({ kind: 'render-then-submit', payload: prompt, renderedText: prompt, submit: '\r',
       ...(context?.execution === 'immediate' && strategy === 'interrupt-before-input' ? { prepare: { interrupt, endEvent, ...(refresh ? { refresh } : {}) } } : {}) }),
