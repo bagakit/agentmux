@@ -92,7 +92,7 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
   const labels = { created: 'Created', moved: 'Moved', renamed: 'Renamed', 'source-added': 'Source added', organized: 'Added to Topic', relocated: 'File moved', archived: 'Archived', restored: 'Restored', followed: 'Followed', unfollowed: 'Unfollowed' }
   return <header className="notebook-page-heading" aria-label="Page details">
     <button className="notebook-breadcrumb" onClick={() => { const state = useAppStore.getState(); state.setRecallNotebook(page.notebookId); state.setRecallZoneSelection(null); state.setMainSurface('recall') }}>{book?.name ?? page.notebookId}<ThemeNavigationDisclosureIcon size={12} /></button>
-    <TextInput className="notebook-page-title" aria-label="Page title" value={title} placeholder="Untitled note" disabled={operation.busy || Boolean(operation.issue)}
+    <TextInput className="notebook-page-title" aria-label="Page title" title={title} value={title} placeholder="Untitled note" disabled={operation.busy || Boolean(operation.issue)}
       onFocus={() => setEditing(true)} onChange={event => setTitle(event.target.value)} onBlur={() => { setEditing(false); if (cancelTitle.current) { cancelTitle.current = false; return } void rename() }}
       onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } if (event.key === 'Escape') { cancelTitle.current = true; setTitle(page.title); event.currentTarget.blur() } }} />
     <div className="notebook-page-actions">{(['move', 'sources', 'history'] as const).map(kind => {
