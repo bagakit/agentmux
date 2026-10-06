@@ -29,6 +29,9 @@ importers:
       '@agentmux/client-ui':
         specifier: workspace:*
         version: link:../../packages/client-ui
+      '@agentmux/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors
       '@agentmux/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -417,6 +420,19 @@ importers:
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.3)(happy-dom@20.14.0)(yaml@2.9.0)
+
+  packages/connectors:
+    dependencies:
+      '@agentmux/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
 
   packages/core:
     dependencies:

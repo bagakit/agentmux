@@ -80,7 +80,8 @@
     "ws": "8.21.3",
     "yaml": "2.9.0",
     "zod": "^4.0.0",
-    "zustand": "^5.0.0"
+    "zustand": "^5.0.0",
+    "@agentmux/connectors": "workspace:*"
   },
   "devDependencies": {
     "@electron/osx-sign": "2.7.1",
