@@ -15,6 +15,7 @@
 
 .settings-theme-choice .settings-theme-choice__identity { color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 
+.theme-library-actions { display: flex; flex-wrap: wrap; gap: var(--sp-4); margin-top: var(--sp-4); }
 .theme-editor__identity { display: grid; gap: var(--sp-4); }
 .theme-editor label > span:first-child { color: var(--text-2); font-size: var(--fs-meta); }
 .theme-editor__identity label { display: grid; gap: var(--sp-2); }
@@ -42,6 +43,11 @@
 .theme-icon-editor__paths small { color: var(--text-3); line-height: 1.5; }
 @media (max-width: 640px) { .theme-icon-editor__picker { grid-template-columns: 1fr; } }
 
+.theme-library__review { margin-top: var(--sp-5); padding: var(--sp-5); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); }
+.theme-library__review header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.theme-library__review header small { font-family: var(--font-mono); color: var(--text-3); overflow-wrap: anywhere; }
+.theme-library__review p { line-height: 1.5; }
+.theme-library__review .settings-pane-actions { position: static; margin-top: var(--sp-5); }
 .settings-page [data-theme-editing] > .settings-pane-actions { position: static; }
 .theme-editor select { min-width: 0; width: 100%; min-height: 28px; padding: 4px 8px; color: var(--text); background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-sm); font: inherit; }
 .theme-editor select:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
