@@ -1353,11 +1353,10 @@ export class AgentMuxRpcService {
     if (!durable) throw new AgentMuxError('Recipient Session is no longer retained.', 'UNKNOWN_AGENT_SESSION')
     if (expectedRun && !original && durable.run.runId !== expectedRun.runId) throw new AgentMuxError(
       'Expected Run does not match the current retained recipient Run. No new message was saved or submitted.', 'MESSAGE_RECIPIENT_MISMATCH')
-    const nativeManual = p.execution === 'immediate' && recipientOwner.client.catalog().find(entry => entry.id === durable.providerId)
-      ?.capabilities.promptExecution?.immediate === 'native-steer'
+    const terminalManual = p.execution === 'immediate'
     // A new direct producer saves its exact durable target before requiring a
     // Runtime connection. Catalog selects a contract, never Native readiness.
-    const recipient = nativeManual ? durable : await recipientOwner.client.refreshAgentSession(recipientId, durable.run)
+    const recipient = terminalManual ? durable : await recipientOwner.client.refreshAgentSession(recipientId, durable.run)
     const queuePath = (caller?.client ?? recipientOwner.client).agentMessageQueuePath()
     if (original && queuePath !== local[0]!.client.agentMessageQueuePath()) throw new AgentMuxError('The original journal route changed; no input will follow another owner.', 'CONTROL_UNAVAILABLE')
     const envelope = { operationId, createdAt: Date.now(),
@@ -1373,12 +1372,12 @@ export class AgentMuxRpcService {
     // inputs cannot supply sender or Run facts; rechecking a cached registry here
     // would reject a valid capability rotation or a recipient on another Host.
     // This direct producer has no caller after-condition. Only a new explicit
-    // immediate Native message gets manual actor intent before its first save.
+    // immediate current-terminal message gets manual actor intent before its first save.
     // The journal returns an existing record unchanged, including missing tags.
-    const historical = nativeManual ? await recipientOwner.client.inspectAgentPromptSubmission({ kind: 'message', agentSessionId: recipientId,
+    const historical = terminalManual ? await recipientOwner.client.inspectAgentPromptSubmission({ kind: 'message', agentSessionId: recipientId,
       expectedRun: recipient.run, messageId }) : null
-    if (nativeManual && !original && !historical) {
-      // New Native intake is a Core capability, independent of presentation. The
+    if (terminalManual && !original && !historical) {
+      // New manual intake is a Core capability, independent of presentation. The
       // same SDK owner serializes firstsave with Session input admission; a
       // Renderer roundtrip must not append a second producer before that owner.
       const inputReceipt = await recipientOwner.client.submitAgentMessage({ agentSessionId: recipientId,
@@ -1391,7 +1390,7 @@ export class AgentMuxRpcService {
       return { ...saved, ...(currentReceipt ? { inputReceipt: currentReceipt } : {}) }
     }
     const queued = await appendGlobalMessage({ ...envelope, messageId, execution, sourceChannel, ...(sourceDevice ? { sourceDevice } : {}) }, queuePath,
-      { ...(nativeManual ? { admissionIntent: { kind: 'manual-actor', expectedRun: { ...recipient.run } } as const,
+      { ...(terminalManual ? { admissionIntent: { kind: 'manual-actor', expectedRun: { ...recipient.run } } as const,
         } : {}) })
     const { input: _internalInput, ...publicQueued } = queued
     if (original && queued.input) return { ...publicQueued, inputReceipt: (await recipientOwner.client.inspectAgentInput({ key: queued.input.intent.key },
@@ -1424,7 +1423,7 @@ export class AgentMuxRpcService {
         message: queued.envelope, ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) }))
         inputReceipt = sent.operation === 'send' ? sent.inputReceipt : undefined
       }
-      if (inputReceipt && inputReceipt.status !== 'admitted') return { ...publicQueued, agentSessionId: recipientId, inputReceipt }
+      if (inputReceipt && inputReceipt.status !== 'admitted' && inputReceipt.status !== 'terminal-confirmed') return { ...publicQueued, agentSessionId: recipientId, inputReceipt }
       const { input: _control, ...delivered } = await recordGlobalMessageDelivery(queued.messageId, 'delivered', Date.now(), undefined, queuePath)
       return { ...delivered, agentSessionId: recipientId, ...(inputReceipt ? { inputReceipt } : {}) }
     } catch (error) {

@@ -179,7 +179,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
         terminal: true, timeline: 'complete-events', permission: 'respond',
         providerResume: true, replyCorrelation: 'none',
         providerFork: { current: true },
-        promptExecution: { immediate: 'native-steer' },
+        promptExecution: { immediate: 'terminal-submit' },
         usage: { kind: 'native-transcript', transcriptFormat: 'codex-rollout' }
       }
     }),
