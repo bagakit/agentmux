@@ -10,9 +10,9 @@ const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 export interface SelectionOption { value: string; label: string; disabled?: boolean; icon?: ReactNode; description?: string }
 
 /** Controlled presentation only. The caller owns options, saved identity and domain actions. */
-export function SelectionField({ id, label, value, options, onValueChange, disabled = false, className = '' }: {
+export function SelectionField({ id, label, value, options, onValueChange, disabled = false, className = '', menuClassName = '', menuBoundary }: {
   id?: string | undefined; label: string; value: string; options: readonly SelectionOption[]
-  onValueChange(value: string): void; disabled?: boolean; className?: string
+  onValueChange(value: string): void; disabled?: boolean; className?: string; menuClassName?: string; menuBoundary?: HTMLElement | null
 }) {
   const descriptionId = useId(), trigger = useRef<HTMLButtonElement>(null)
   const [layer, setLayer] = useState<'dialog' | 'popover'>('popover')
@@ -27,7 +27,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
       </button>
     </Menu.Trigger>
     <Menu.Portal container={resolveOverlayContainer()}>
-      <div className="window-overlay-host__entry" data-overlay-layer={layer}><Menu.Content className="tab-context-menu selection-field__menu" align="start" sideOffset={4} collisionPadding={8} aria-label={label}>
+      <div className="window-overlay-host__entry" data-overlay-layer={layer}><Menu.Content className={`tab-context-menu selection-field__menu ${menuClassName}`} align="start" sideOffset={4} collisionPadding={8} collisionBoundary={menuBoundary ?? []} aria-label={label}>
         <Menu.RadioGroup value={value} onValueChange={next => {
           if (!disabled && options.some(option => option.value === next && !option.disabled)) onValueChange(next)
         }}>
