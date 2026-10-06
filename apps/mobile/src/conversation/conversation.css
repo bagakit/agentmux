@@ -21,7 +21,8 @@
 .mobile-message-tools__trigger i[data-state='done'] { mask-image: var(--native-presence-done-mask); }
 .mobile-message-tools__trigger i[data-state='exited'] { mask-image: var(--native-presence-exited-mask); }
 .mobile-message-tools__trigger i[data-state='disconnected'] { mask-image: var(--native-presence-disconnected-mask); }
-.mobile-message-tools__trigger i[data-state='working'], .mobile-message-tools__trigger i[data-state='done'] { background: var(--green); }
+.mobile-message-tools__trigger i[data-state='working'] { background: var(--green); }
+.mobile-message-tools__trigger i[data-state='done'] { background: var(--success); }
 .mobile-message-tools__trigger i[data-state='blocked'], .mobile-message-tools__trigger i[data-state='waiting'] { background: var(--amber); }
 .mobile-message-tools__trigger i[data-state='error'] { background: var(--red); }
 .mobile-message-tools__actions { display: flex; gap: 20px; padding-block: 8px; }
