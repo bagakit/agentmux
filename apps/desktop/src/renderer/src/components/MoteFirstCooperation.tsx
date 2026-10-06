@@ -11,6 +11,7 @@ import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { MoteBehaviorAction } from './MoteBehaviorDialog'
 import { isMacPlatform } from '../lib/host-platform'
 
+const ThemeKeyEnterIcon = semanticIconComponent('control.key-enter')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
 
@@ -58,7 +59,7 @@ export function MoteFirstCooperation({ scope, reference }: {
         disabled={pending || !question.trim()} busy={pending}
         onClick={() => void prepare()}>{pending ? <ThemeStatusLoadingIcon size={14} className="spin" /> : <ThemeNavigationForwardIcon size={16} />}</MoteBehaviorAction>
     </InputGroup>
-    <span className="mote-cooperation-entry__shortcut" aria-hidden="true">{isMacPlatform() ? '⌘' : 'Ctrl'} ↵</span>
+    <span className="mote-cooperation-entry__shortcut" aria-hidden="true">{isMacPlatform() ? '⌘' : 'Ctrl'} <ThemeKeyEnterIcon size={11} /></span>
     {pending ? <p className="mote-details__hint" role="status">Reading the saved profile…</p> : null}
     {issue ? <p className="mote-details__issue" role="status">{issue}</p> : null}
     {persistenceIssue ? <p className="mote-details__issue" role="status">{persistenceIssue}</p> : null}

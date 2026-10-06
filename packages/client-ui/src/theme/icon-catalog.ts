@@ -9,6 +9,8 @@ export const SEMANTIC_ICON_CATALOG = {
   'control.radio-checked': { label: 'Selected radio', glyph: 'status-dot' },
   'control.select-open': { label: 'Open selection options', glyph: 'chevron-down' },
   'control.key-up': { label: 'Up arrow key', glyph: 'arrow-up' },
+  'control.key-enter': { label: 'Enter key', glyph: 'corner-down-left' },
+  'navigation.footnote-reference': { label: 'Return to footnote reference', glyph: 'corner-down-left' },
   'control.key-down': { label: 'Down arrow key', glyph: 'arrow-down' },
   'control.key-left': { label: 'Left arrow key', glyph: 'arrow-left' },
   'control.key-right': { label: 'Right arrow key', glyph: 'arrow-right' },

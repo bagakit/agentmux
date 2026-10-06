@@ -1,5 +1,6 @@
 import { Fragment, useMemo, type ReactNode } from 'react'
 import { semanticIconComponent } from '../theme/icons.js'
+const ThemeFootnoteReferenceIcon = semanticIconComponent('navigation.footnote-reference')
 const ImageReferenceIcon = semanticIconComponent('object.image')
 import { looksLikeMarkdown, parseAgentMarkdown, parseAgentMarkdownDocument, type BlockNode, type InlineNode } from '../lib/agent-markdown.js'
 import { classifyMarkdownLinkHref, referenceRevealLocation, splitMarkdownFileReferences, type MarkdownFileReference } from '../lib/markdown-file-reference.js'
@@ -158,7 +159,7 @@ function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
   if (node.kind === 'footnotes') return <section className="md-footnotes" aria-label="Footnotes"><ol className="md-list">{node.items.map(note => <li key={note.identifier}
     data-md-footnote={note.number} tabIndex={context.readOnly ? undefined : -1}>{note.children.map((child, index) => <Block key={index} node={child} context={context} />)}
     {!context.readOnly && <span className="md-footnote-backlinks">{Array.from({ length: note.references }, (_, index) => <button key={index} type="button" className="md-link"
-      aria-label={`Return to footnote ${note.number} reference ${index + 1}`} onClick={event => navigateWithinMarkdown(event.currentTarget, 'data-md-footnote-reference', `${note.number}:${index + 1}`)}>↩{index > 0 ? index + 1 : ''}</button>)}</span>}
+      aria-label={`Return to footnote ${note.number} reference ${index + 1}`} onClick={event => navigateWithinMarkdown(event.currentTarget, 'data-md-footnote-reference', `${note.number}:${index + 1}`)}><ThemeFootnoteReferenceIcon size={12} />{index > 0 ? index + 1 : ''}</button>)}</span>}
   </li>)}</ol></section>
   return <p className="md-paragraph"><Inline nodes={node.children} context={context} /></p>
 }

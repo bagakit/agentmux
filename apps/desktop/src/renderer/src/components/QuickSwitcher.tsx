@@ -23,7 +23,9 @@ const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 const ThemeFileCodeIcon = semanticIconComponent('file.code')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
-const ThemeNavigationReturnIcon = semanticIconComponent('navigation.return')
+const ThemeKeyEnterIcon = semanticIconComponent('control.key-enter')
+const ThemeKeyUpIcon = semanticIconComponent('control.key-up')
+const ThemeKeyDownIcon = semanticIconComponent('control.key-down')
 
 
 // One modal overlay a single keystroke summons to jump anywhere in the window — any agent session or
@@ -175,8 +177,8 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
           </div>
           </>}
           <div className="quick-switch__footer">
-            <span><kbd>↑</kbd><kbd>↓</kbd> to navigate</span>
-            <span><kbd><ThemeNavigationReturnIcon size={11} /></kbd> to open · <kbd>Esc</kbd> to dismiss</span>
+            <span><kbd aria-label="Up arrow"><ThemeKeyUpIcon size={11} /></kbd><kbd aria-label="Down arrow"><ThemeKeyDownIcon size={11} /></kbd> to navigate</span>
+            <span><kbd aria-label="Enter"><ThemeKeyEnterIcon size={11} /></kbd> to open · <kbd>Esc</kbd> to dismiss</span>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
