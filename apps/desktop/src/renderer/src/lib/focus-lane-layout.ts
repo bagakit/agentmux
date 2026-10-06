@@ -27,5 +27,17 @@ export function allocateFocusLaneColumns(counts: FocusLaneCounts, metrics: Focus
   const cardWidth = slots >= nonempty && used
     ? Math.min(320, Math.max(180, (available + nonempty * metrics.cardGap) / used - metrics.cardGap))
     : 180
-  return { columns, widths: columns.map(column => column ? column * cardWidth + (column - 1) * metrics.cardGap : 0), maxRows, slots }
+  const widths = columns.map(column => column ? column * cardWidth + (column - 1) * metrics.cardGap : 0)
+  // Flex wraps whole state groups. Budget each resulting row independently,
+  // rather than leaving every group at the minimum width after wrapping.
+  if (nonempty && slots < nonempty) {
+    const perRow = Math.max(1, slots)
+    const indices = counts.flatMap((count, index) => count ? [index] : [])
+    for (let start = 0; start < indices.length; start += perRow) {
+      const row = indices.slice(start, start + perRow)
+      const width = Math.min(320, Math.max(0, (metrics.width - metrics.padding - (row.length - 1) * metrics.gap) / row.length))
+      for (const index of row) widths[index] = width
+    }
+  }
+  return { columns, widths, maxRows, slots }
 }
