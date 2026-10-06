@@ -2,23 +2,25 @@ import type { BrowserPng, BrowserScreenshotCapture } from '../../../../shared/co
 import { screenshotCropGeometry } from './compose'
 import { intersectRect, shapeBounds, screenshotOutputShapes } from '../image-annotation/drawing-model'
 import type { ImageAnnotationInput } from '../image-annotation/types'
+import type { AnnotationHistoricalSource } from '../image-annotation/document'
 
 /** A description of this processed image, never a fresh read of the current tab. */
-export function formatScreenshotContext(capture: BrowserScreenshotCapture, input: ImageAnnotationInput, output: BrowserPng): string {
+export function formatScreenshotContext(capture: BrowserScreenshotCapture | null, input: ImageAnnotationInput, output: BrowserPng, historicalSource: AnnotationHistoricalSource = null): string {
   const geometry = screenshotCropGeometry(input.displayWidth, input.displayHeight, 1, input.crop)
   const scaleX = output.width / geometry.cropWidth, scaleY = output.height / geometry.cropHeight
   const annotations = screenshotOutputShapes(input.shapes, input.crop).flatMap(shape => {
     const bounds = intersectRect(shapeBounds(shape), geometry.rect)
     if (!bounds) return []
     return [{ id: shape.id, kind: shape.kind,
-      ...(shape.kind === 'note' ? { number: shape.number, note: shape.note } : {}),
+      ...(shape.kind === 'note' ? { number: shape.number, note: shape.note, ...(shape.template ? { template: shape.template } : {}) } : {}),
       originalImagePixels: bounds,
       pngPixels: { x: (bounds.x * geometry.scale - geometry.left) * scaleX, y: (bounds.y * geometry.scale - geometry.top) * scaleY,
         width: bounds.width * geometry.scale * scaleX, height: bounds.height * geometry.scale * scaleY } }]
   })
-  return 'Screenshot context\n\nCoordinates refer to this processed PNG and its original captured image.\n\n' + JSON.stringify({
-    browserId: capture.browserId, navigationId: capture.navigationId, source: capture.source,
-    originalImagePixels: { width: capture.image.width, height: capture.image.height },
+  return 'Screenshot context\n\nCoordinates refer to this processed PNG and its original image.\n\n' + JSON.stringify({
+    browserId: capture?.browserId ?? null, navigationId: capture?.navigationId ?? null, source: capture ? capture.source : historicalSource,
+    ...(capture ? {} : { sourceKind: 'saved-document' }),
+    originalImagePixels: { width: input.displayWidth, height: input.displayHeight },
     outputPng: { width: output.width, height: output.height },
     crop: geometry.rect,
     transform: { sourceScale: geometry.scale, cropOffsetPixels: { x: geometry.left, y: geometry.top }, finalScale: { x: scaleX, y: scaleY } },

@@ -43,7 +43,8 @@ import type { BrowserTaskContent } from '../../../shared/browser-task-assets'
 import { BrowserStepEvidence } from './BrowserStepEvidence'
 import {
   ScreenshotEditor,
-  type ScreenshotCompleteInput
+  type ScreenshotCompleteInput,
+  type ScreenshotEditorHandle
 } from './browser-screenshot/ScreenshotEditor'
 import {
   LatestBrowserBoundsSynchronizer,
@@ -278,10 +279,11 @@ function BrowserPaneContent({
   const rebindBoundsObserverRef = useRef<(() => void) | null>(null)
   const screenshotToken = useRef(0)
   const selectionToken = useRef(0)
+  const [screenshot, setScreenshot] = useState<{ kind: 'capture'; capture: BrowserScreenshotCapture; key: number } | { kind: 'open'; key: number } | null>(null)
   const browserIdentity = useRef<BrowserIdentity>({ id: tab.browserId, navigationId: tab.navigationId })
   if (browserIdentity.current.id !== tab.browserId || browserIdentity.current.navigationId !== tab.navigationId) {
     browserIdentity.current = { id: tab.browserId, navigationId: tab.navigationId }
-    screenshotToken.current += 1
+    if (screenshot?.kind !== 'open') screenshotToken.current += 1
     selectionToken.current += 1
   }
   const [address, setAddress] = useState(addressDraft.current.value)
@@ -328,7 +330,7 @@ function BrowserPaneContent({
     } catch (cause) { setAddressError(`Research could not open: ${presentError(cause)}. The original page and research target are kept; retry here.`) }
     finally { setBusy(false) }
   }
-  const [screenshot, setScreenshot] = useState<BrowserScreenshotCapture | null>(null)
+  const screenshotEditor = useRef<ScreenshotEditorHandle>(null)
   const [screenshotBusy, setScreenshotBusy] = useState(false)
   const [screenshotCopied, setScreenshotCopied] = useState<string | null>(null)
   const screenshotEdited = useCallback(() => setScreenshotCopied(null), [])
@@ -395,8 +397,7 @@ function BrowserPaneContent({
   }, [])
 
   useEffect(() => {
-    setScreenshot(null)
-    setScreenshotBusy(false)
+    if (screenshot?.kind !== 'open') { setScreenshot(null); setScreenshotBusy(false) }
     setElementSelection(null)
     setAnnotationNote('')
     setSelectionBusy(false)
@@ -584,7 +585,7 @@ function BrowserPaneContent({
       if (!browserCaptureMatchesIdentity(captured, browserIdentity.current)) {
         throw new Error('Browser page changed before the screenshot editor opened')
       }
-      setScreenshot(captured)
+      setScreenshot({ kind: 'capture', capture: captured, key: token })
     } catch (error) {
       if (screenshotToken.current === token) reportError(error)
     } finally {
@@ -649,8 +650,7 @@ function BrowserPaneContent({
   }
 
   async function copyScreenshot(input: ScreenshotCompleteInput, kind: 'png' | 'context' = 'png'): Promise<void> {
-    const captured = screenshot
-    if (!captured || screenshotBusy) return
+    if (!screenshot || screenshotBusy) return
     const token = screenshotToken.current
     setScreenshotBusy(true)
     setScreenshotCopied(null)
@@ -665,7 +665,7 @@ function BrowserPaneContent({
       })
       if (screenshotToken.current !== token) return
       if (kind === 'png') await api.ui.writeClipboardImage(image)
-      else if (!await copyTextToClipboard(formatScreenshotContext(captured, input, image), error => { if (screenshotToken.current === token) reportError(error) })) return
+      else if (!await copyTextToClipboard(formatScreenshotContext(input.capture, input, image, input.source), error => { if (screenshotToken.current === token) reportError(error) })) return
       if (screenshotToken.current !== token) return
       setScreenshotCopied(kind === 'png' ? 'PNG copied' : 'Context copied')
     } catch (error) {
@@ -926,17 +926,12 @@ function BrowserPaneContent({
       Boolean((presentation?.target.controlsOpen ?? toolsOpen) && window.innerWidth <= (inSurvey ? 1100 : 900))
     const stageContent = <>
 
-        {connectionUnavailable ? <div className="pane-state" role="status" aria-live="polite">
-          <ThemeObjectBrowserIcon size={23} />
-          <strong>{restoring ? 'Restoring browser' : restoreError ? 'Browser connection needs attention' : 'Browser parked'}</strong>
-          <span>{restoreError ?? (restoring ? 'Waiting for the original page connection. Your page, address and other work are kept.' : 'Switch back to this tab to restore the original page.')}</span>
-          <span>You can edit the address or open it in your external browser while the connection is unavailable.</span>
-          {restoreError ? <button className="small-button" type="button" disabled={released || restoring}
-            onClick={retryConnection}>Retry connection</button> : null}
-        </div> : screenshot ? (
-          !released && !restoring ?
+        {screenshot ? (
           <ScreenshotEditor
-            image={screenshot.image}
+            ref={screenshotEditor}
+            key={screenshot.key}
+            {...(screenshot.kind === 'capture' ? { capture: screenshot.capture } : {})}
+            workspaceId={tab.workspaceId}
             active={visible}
             busy={screenshotBusy}
             copied={screenshotCopied}
@@ -944,9 +939,16 @@ function BrowserPaneContent({
             onComplete={(input) => void copyScreenshot(input)}
             onCopyContext={(input) => void copyScreenshot(input, 'context')}
             onEdited={screenshotEdited}
+            onOriginalOpened={() => setScreenshot(current => current ? { kind: 'open', key: current.key } : null)}
             onError={reportError}
-          /> : null
-        ) : elementSelection ? (
+          /> ) : connectionUnavailable ? <div className="pane-state" role="status" aria-live="polite">
+          <ThemeObjectBrowserIcon size={23} />
+          <strong>{restoring ? 'Restoring browser' : restoreError ? 'Browser connection needs attention' : 'Browser parked'}</strong>
+          <span>{restoreError ?? (restoring ? 'Waiting for the original page connection. Your page, address and other work are kept.' : 'Switch back to this tab to restore the original page.')}</span>
+          <span>You can edit the address or open it in your external browser while the connection is unavailable.</span>
+          {restoreError ? <button className="small-button" type="button" disabled={released || restoring}
+            onClick={retryConnection}>Retry connection</button> : null}
+        </div> : elementSelection ? (
           <section className="browser-selection-result" aria-label="Selected element context">
             <header><ThemeActionInspectIcon size={17} /><span><strong>{elementSelection.accessibleName || `<${elementSelection.tagName}>`}</strong><small>{elementSelection.pageTitle || elementSelection.pageUrl}</small></span></header>
             <dl>
@@ -1177,6 +1179,10 @@ function BrowserPaneContent({
                 </DropdownMenu.Item> : null}
                 {toolbar?.screenshot ? <DropdownMenu.Item className="browser-menu__item" aria-label="Screenshot" disabled={screenshotDisabled} onSelect={() => void beginScreenshot()}>
                   <ThemeActionCaptureIcon size={12} /><span>Screenshot</span>
+                </DropdownMenu.Item> : null}
+                {toolbar?.screenshot ? <DropdownMenu.Item className="browser-menu__item" aria-label="Open annotation original" disabled={screenshotBusy || selectionBusy || elementSelection !== null}
+                  onSelect={() => { if (screenshot) screenshotEditor.current?.openOriginal(); else { const key = ++screenshotToken.current; setScreenshotCopied(null); setScreenshot({ kind: 'open', key }) } }}>
+                  <ThemeActionOpenExternalIcon size={12} /><span>Open annotation original…</span>
                 </DropdownMenu.Item> : null}
                 {toolbar?.devTools ? <DropdownMenu.Item className="browser-menu__item" aria-label="Open DevTools" disabled={pageToolDisabled} onSelect={openDevTools}>
                   <ThemeObjectToolsIcon size={12} /><span>Open DevTools</span>
