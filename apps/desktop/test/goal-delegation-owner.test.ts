@@ -52,7 +52,12 @@ it('runs the actual CLI/RPC/Main prepare owner, retains frozen intent and reject
   const first = await cli('owner', ['goal', 'delegation', 'prepare', '--input', inputPath])
   expect(first.ok).toBe(true)
   expect(first.result.delegations).toHaveLength(1)
-  expect(first.result.delegations[0]).toMatchObject(intent)
+  const frozen = first.result.delegations[0]
+  expect(frozen).toMatchObject({ ...intent, text: expect.stringContaining(intent.text), requestText: intent.text })
+  expect(frozen.text.startsWith(intent.text + '\n\n[AgentMux delegation]\n')).toBe(true)
+  expect(JSON.parse(frozen.text.split('\n[AgentMux delegation]\n')[1])).toMatchObject({ schema: 'agentmux.goal-delegation.v1',
+    goalId: 'goal', operationId: intent.operationId, sourceMessageId: intent.sourceMessageId, threadId: intent.threadId,
+    ownerAgentSessionId: 'owner', workerAgentSessionId: 'worker', hostId: 'local', alignmentRevision: 1, criterionIds: ['AC'] })
   const original = await demands.snapshot()
   const repeated = await cli('owner', ['goal', 'delegation', 'prepare', '--input', inputPath])
   expect(repeated.result).toEqual(first.result)
