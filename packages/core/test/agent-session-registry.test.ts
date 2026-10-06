@@ -1,9 +1,10 @@
 import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
-import { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
-import { AgentMuxMemoryAgentSessionStore, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js'
+import type { AgentMuxAgentSessionStore } from '../src/agent-session-store.js'
+import { metadataTestRuntime } from './helpers/metadata-test-runtime.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
+const { AgentMuxError, AgentMuxAgentSessionRegistry, AgentMuxMemoryAgentSessionStore, AgentMuxSessionDurabilityError } = metadataTestRuntime
 
 function session(run = 'run-1'): AgentMuxStoredAgentSession {
   return {
@@ -24,6 +25,107 @@ function session(run = 'run-1'): AgentMuxStoredAgentSession {
 }
 
 describe('semantic session registry concurrency', () => {
+  it.each(['stop', 'reopen'] as const)('keeps exact accepted %s identity when the original retired snapshot arrives late', async shape => {
+    const store = new AgentMuxMemoryAgentSessionStore(), registry = new AgentMuxAgentSessionRegistry(store)
+    const original = { ...session(), nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'original-native-handle' } }
+    await registry.put(original)
+    const stop = await registry.reserveExisting('stop', original.agentSessionId, original.run, 'original-stop', {
+      daemonInstance: 'original-native-epoch', operationKey: 'original-stop', runId: original.run.runId
+    })
+    if (shape === 'reopen') await registry.commitLifecycle(stop, null)
+    let release!: () => void, entered!: () => void
+    const held = new Promise<void>(resolve => { release = resolve }), reading = new Promise<void>(resolve => { entered = resolve })
+    const read = store.loadMetadata.bind(store)
+    vi.spyOn(store, 'loadMetadata').mockImplementationOnce(async () => { const snapshot = await read(); entered(); await held; return snapshot })
+    const loading = registry.load('local')
+    await reading
+    if (shape === 'stop') await registry.commitLifecycle(stop, null)
+    else {
+      const retirement = registry.retiredAgentSession(original.agentSessionId, original.run)!
+      const reopen = await registry.reserveReopen(original.agentSessionId, retirement.observedAt, 'original-reopen', 'original-caller-reopen')
+      await registry.commitLifecycle(reopen, { ...original, run: { runId: 'reopened-exact-run' }, retiredRuns: [original.run],
+        reopenedFrom: { run: retirement.run, source: retirement.source, observedAt: retirement.observedAt } })
+    }
+    release(); await loading
+    if (shape === 'stop') {
+      expect(registry.retiredAgentSession(original.agentSessionId, original.run), 'the accepted Stop must retain its original native recovery address').toMatchObject({ history: { nativeHandle: original.nativeHandle } })
+      expect(registry.isRetiredRun(original.run), 'the completed retirement is an exact Run fact').toBe(true)
+    } else {
+      expect(registry.get(original.agentSessionId).run).toEqual({ runId: 'reopened-exact-run' })
+      expect(registry.retiredAgentSession(original.agentSessionId, original.run), 'the accepted reopen must cover its prior retired projection').toBeUndefined()
+      // The old prefix stays retired but belongs to this current Session; the
+      // stale unbound set must not reject its next exact metadata operation.
+      await expect(registry.update(original.agentSessionId, { runId: 'reopened-exact-run' }, value => ({ ...value, updatedAt: reshapeFixtureEpoch(0, 0, 101) })))
+        .resolves.toMatchObject({ run: { runId: 'reopened-exact-run' } })
+    }
+  })
+
+  it('adopts only the missing exact metadata binding and keeps known raw access free of catalog/body reads', async () => {
+    const store = new AgentMuxMemoryAgentSessionStore(), registry = new AgentMuxAgentSessionRegistry(store), original = session()
+    await store.compareAndSwap(null, original)
+    const catalog = vi.spyOn(store, 'loadMetadata'), bodies = vi.spyOn(store, 'load'), read = vi.spyOn(store, 'readMetadata')
+    const [first, joined] = await Promise.all([registry.resolveMetadata(original.agentSessionId, 'local', () => {}), registry.resolveMetadata(original.agentSessionId, 'local', () => {})])
+    expect(first).toEqual(original); expect(joined).toEqual(original)
+    await expect(registry.resolveMetadata(original.agentSessionId, 'local', () => {})).resolves.toEqual(original)
+    expect(read).toHaveBeenCalledTimes(1); expect(catalog).not.toHaveBeenCalled(); expect(bodies).not.toHaveBeenCalled()
+    await expect(registry.resolveMetadata(original.agentSessionId, 'foreign-host', () => {})).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_SESSION' })
+    await expect(registry.resolveMetadata('really-absent-session', 'local', () => {})).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_SESSION' })
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['epoch', 'new-binding'] as const)('a late missing-binding read cannot publish after %s takes ownership', async shape => {
+    const store = new AgentMuxMemoryAgentSessionStore(), registry = new AgentMuxAgentSessionRegistry(store), original = session()
+    await store.compareAndSwap(null, original)
+    let release!: () => void, entered!: () => void, current = true
+    const held = new Promise<void>(resolve => { release = resolve }), reading = new Promise<void>(resolve => { entered = resolve })
+    let releaseCatalog!: () => void, catalogEntered!: () => void
+    const catalogHeld = new Promise<void>(resolve => { releaseCatalog = resolve }), catalogReading = new Promise<void>(resolve => { catalogEntered = resolve })
+    const catalog = store.loadMetadata.bind(store)
+    // The original global read starts before the exact queue acquires its turn.
+    // Its drain snapshot is therefore empty; both real readers can finish independently.
+    vi.spyOn(store, 'loadMetadata').mockImplementationOnce(async () => { catalogEntered(); await catalogHeld; return await catalog() })
+    const loading = shape === 'new-binding' ? registry.load('local') : undefined
+    if (loading) await catalogReading
+    const read = store.readMetadata.bind(store)
+    vi.spyOn(store, 'readMetadata').mockImplementationOnce(async id => { const snapshot = await read(id); entered(); await held; return snapshot })
+    const pending = registry.resolveMetadata(original.agentSessionId, 'local', () => { if (!current) throw new AgentMuxError('Original Native observation epoch changed.', 'CTXMUX_DISCONNECTED') })
+    const outcome = pending.then(value => ({ value }), error => ({ error }))
+    await reading
+    if (shape === 'epoch') current = false
+    else {
+      await store.compareAndSwapMetadata(original, { ...original, run: { runId: 'later-current-run' } })
+      releaseCatalog(); await loading
+    }
+    release()
+    if (shape === 'epoch') { expect(await outcome).toMatchObject({ error: { code: 'CTXMUX_DISCONNECTED' } }); expect(registry.has(original.agentSessionId)).toBe(false) }
+    else { expect(await outcome).toMatchObject({ value: { run: { runId: 'later-current-run' } } }); expect(registry.get(original.agentSessionId).run).toEqual({ runId: 'later-current-run' }) }
+  })
+
+  it.each(['binding', 'deleted', 'durability'] as const)('a late full metadata snapshot cannot replace the current exact subject (%s)', async shape => {
+    const store = new AgentMuxMemoryAgentSessionStore(), registry = new AgentMuxAgentSessionRegistry(store)
+    const original = session()
+    await registry.put(original)
+    let release!: () => void, entered!: () => void
+    const held = new Promise<void>(resolve => { release = resolve }), reading = new Promise<void>(resolve => { entered = resolve })
+    const load = store.loadMetadata.bind(store)
+    vi.spyOn(store, 'loadMetadata').mockImplementationOnce(async () => { const snapshot = await load(); entered(); await held; return snapshot })
+    const pending = registry.load('local')
+    await reading
+    const next = { ...original, run: { runId: 'current-exact-run' }, retiredRuns: [original.run], updatedAt: reshapeFixtureEpoch(0, 0, 100) }
+    if (shape === 'deleted') await registry.delete(original.agentSessionId, original.run)
+    else if (shape === 'durability') {
+      vi.spyOn(store, 'compareAndSwapMetadata').mockRejectedValueOnce(new AgentMuxSessionDurabilityError(new Error('Private commit outcome unknown.'), 'unknown'))
+      await expect(registry.put(next, original.run)).rejects.toMatchObject({ code: 'AGENT_SESSION_STORE_DURABILITY_UNCONFIRMED' })
+      expect(registry.isDurabilityUnconfirmed(original.agentSessionId)).toBe(true)
+    } else await registry.put(next, original.run)
+    release(); await pending
+    if (shape === 'deleted') expect(registry.has(original.agentSessionId), 'a completed exact retirement must not be revived by the old read').toBe(false)
+    else {
+      expect(registry.get(original.agentSessionId).run, 'the completed original metadata turn must not be rolled back').toEqual(next.run)
+      if (shape === 'durability') expect(registry.isDurabilityUnconfirmed(original.agentSessionId)).toBe(true)
+    }
+  })
+
   it('confirms original metadata through the real Registry without loading or losing retained future facts', async () => {
     const store = new AgentMuxMemoryAgentSessionStore(), original = { ...session(), futurePromptIntents: {
       retained: { operationId: 'retained-save', prompt: 'original', active: true, message: { userContent: 'original' } }
