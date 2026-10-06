@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry, defineAgentProvider } from '../src/agent-provider.js'
@@ -13,8 +14,8 @@ import type { AgentScreenEvidenceStore } from '../src/screen-evidence.js'
 
 async function fixture(interrupt = '\x1b', endEvent = 'Interrupt', refresh?: string, strategy: 'interrupt-before-input' | 'native-steer' = 'interrupt-before-input') {
   let stored: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'private-immediate', providerId: 'fixture', executorId: 'fixture',
-    hostId: 'local', workspacePath: fixturePath("private/workspace"), run: { runId: 'private-run' }, retiredRuns: [], hookBindingId: 'b', hookToken: 't', createdAt: 1, updatedAt: 1,
-    semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1 } }
+    hostId: 'local', workspacePath: fixturePath("private/workspace"), run: { runId: 'private-run' }, retiredRuns: [], hookBindingId: 'b', hookToken: 't', createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1),
+    semanticStatus: { state: 'working', source: 'native-hook', observedAt: reshapeFixtureEpoch(0, 0, 1) } }
   const store = new AgentMuxMemoryAgentSessionStore(), registry = new AgentMuxAgentSessionRegistry(store)
   await registry.put(stored)
   const screen = new AgentTerminalScreen(100, 30)
@@ -246,39 +247,18 @@ it('a different ordinary intent recovers lost harmless refresh ACK and preserves
 
 
 describe('declared native steering', () => {
- it('accepts two consecutive busy messages without redraw, interrupt or a completed turn', async () => {
-  const f = await fixture('\x1b', 'Interrupt', undefined, 'native-steer')
-  try {
-   await expect(f.submit()).resolves.toBeDefined()
-   const first = structuredClone(f.registry.get('private-immediate'))
-   await expect(f.submit('immediate', 'second-steer', agentPromptCondition(first))).resolves.toBeDefined()
-   expect(f.writes).toEqual(['ONLY_AUTHORIZED_MESSAGE', '\r', 'ONLY_AUTHORIZED_MESSAGE', '\r'])
-   expect(first.terminalPromptSubmission?.prepare).toBeUndefined()
-   expect(first.promptCompletionAdmission?.intent?.execution).toBe('immediate')
-   expect(first.semanticStatus?.state).toBe('working')
-   expect(f.registry.get('private-immediate').terminalPromptSubmission?.submit.acknowledged).toBe(true)
-   expect(f.registry.get('private-immediate').terminalPromptDelivery).toBeUndefined()
-   expect(f.registry.get('private-immediate').semanticStatus).toEqual(first.semanticStatus)
-   const preflight = f.screenEvidence.wait.mock.calls.filter(call => call[4].timeoutMessage.includes('current native composer'))
-   expect(preflight).toHaveLength(2)
-   for (const call of preflight) {
-    expect(call[2]).toBe(false)
-    expect(call[4]).toMatchObject({requireCompleteFrame: true})
-    expect(call[4]).not.toHaveProperty('requireFrameAfterBoundary')
-    expect(call[4]).not.toHaveProperty('checkpointFrameFence')
-   }
-  } finally { f.screen.dispose() }
- })
- it.each(['draft', 'transport', 'native-unknown'])('keeps the original native %s before steering', async kind => {
-  const f = await fixture('\x1b', 'Interrupt', undefined, 'native-steer')
-  try {
-   if (kind === 'draft') await f.draw('UNAUTHORIZED_DRAFT')
-   if (kind === 'transport') f.fault('transport')
-   if (kind === 'native-unknown') f.native(null)
-   await expect(f.submit()).rejects.toMatchObject({code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: {disposition: 'not_applied', confirmedInputBytes: 0}})
-   expect(f.writes).toEqual([])
-   expect(f.registry.get('private-immediate').promptCompletionAdmission).toBeUndefined()
-  } finally { f.screen.dispose() }
+ it('refuses a declaration of Native steer backed only by screen and PTY', () => {
+  // The earlier screen/PTY acceptance and footer/draft predicates belonged to an
+  // abandoned authorization scheme. Their original bytes are retained in process
+  // evidence; actual Native consumption and original draft safety have real tests.
+  const template = new AgentProviderRegistry().get('codex')
+  const { providerFork: _fork, ...capabilities } = template.catalog.capabilities
+  expect(() => defineAgentProvider({ catalog: { ...template.catalog, id: 'no-native-port', capabilities: { ...capabilities, promptExecution: { immediate: 'native-steer' } }, hookStrategy: { kind: 'none' } },
+    hook: { rules: [] }, buildArgs: (_prompt, args) => [...args],
+    terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: '>' },
+    planPromptInput: prompt => ({ kind: 'render-then-submit', payload: prompt, renderedText: prompt, submit: '\r' }),
+    inspectPromptExecution: () => 'idle', readPromptExecutionEvidence: async () => ({ sourceId: 'screen', id: 'screen', state: 'idle' }),
+    verifyPromptExecutionTransport: async () => true })).toThrow(/machine input environment and Native admission contribution/)
  })
  it('rejoins an already frozen interrupt plan after capability changes, without replacing its bytes', async () => {
   const f = await fixture()
