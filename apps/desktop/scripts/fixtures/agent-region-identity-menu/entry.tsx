@@ -102,6 +102,21 @@ const probe = {
     return { identities, raw, text }
   },
   failFeedbackCopy(value: boolean) { failCopy = value },
+  motionOwner(change: 'target' | 'hide' | 'show') {
+    const state = useAppStore.getState()
+    if (change === 'target') {
+      flushSync(() => useAppStore.setState({ sessions: state.sessions.map(session => session.id === first.id && session.kind === 'agent'
+        ? { ...session, control: { ...session.control, run: { ...session.control.run, runId: 'private-motion-target-run' } } } : session) }))
+    } else {
+      const layout = state.layouts[workspaceId]!
+      const group = layout.groups[0]!
+      const alternate = createWorkbenchTab('private-motion-hidden-tab', { regionId: 'private-motion-hidden-region', kind: 'launcher', workspaceId })
+      flushSync(() => useAppStore.setState({ tabs: { ...state.tabs, [alternate.id]: alternate },
+        layouts: { ...state.layouts, [workspaceId]: { ...layout, groups: layout.groups.map(candidate => candidate.id === group.id
+          ? { ...candidate, tabOrder: [...new Set([...candidate.tabOrder, alternate.id])], activeTabId: change === 'hide' ? alternate.id : tabId } : candidate) } } }))
+      flushSync(() => useAppStore.getState().activateTab(workspaceId, group.id, change === 'hide' ? alternate.id : tabId, 'local'))
+    }
+  },
   feedbackWaitCancelCalls() { return [...waitCancelCalls] },
   appearance(mode: 'dark' | 'light') { return updateThemeSelection({ ...useAppStore.getState().config?.appearance, appAppearance: mode }) },
   progress(state: 'inactive' | 'active' | 'paused' | 'unconfirmed' | 'stopped', full = false) {
