@@ -9,7 +9,7 @@ export type ComposerSemanticReference = {
 // The existing durable draft string owns the complete reference. Markdown links keep copied drafts
 // readable, and an explicit scheme distinguishes selected tools from ordinary Markdown the user types.
 export function encodeSemanticReference(item: ComposerSemanticReference): string {
-  return `[${item.label.replace(/[\[\]\\\n]/g, '')}](agentmux-${item.kind}:${encodeURIComponent(item.reference).replace(/\(/g, '%28').replace(/\)/g, '%29')})`
+  return `[${(item.label.replace(/[\[\]\\\n]/g, '') || 'Reference')}](agentmux-${item.kind}:${encodeURIComponent(item.reference).replace(/\(/g, '%28').replace(/\)/g, '%29')})`
 }
 
 export type ComposerDraftPart = { text: string } | { reference: ComposerSemanticReference; raw: string }

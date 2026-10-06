@@ -236,14 +236,14 @@
 .composer-image:has(.md-conversation-image__reference) { align-items: flex-start; padding-inline-end: 20px; }
 .composer-image .md-conversation-image { vertical-align: middle; }
 .composer-image .md-conversation-image__thumb { width: auto; height: auto; max-height: 1lh; max-width: min(10em, 100%); object-fit: contain; }
-.composer-image__remove { position: absolute; top: -2px; right: 4px; display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; padding: 0; border: 1px solid var(--line-soft); border-radius: 50%; color: var(--text-2); background: var(--surface-2); font: inherit; opacity: 1; cursor: pointer; }
-.composer-image__remove > svg { width: 8px; height: 8px; }
-.composer-image__remove::before { content: ''; position: absolute; top: 2px; height: 1lh; inset-inline: 0 -12px; }
-.composer-image__remove:hover { color: var(--text); background: var(--surface-3); }
-.composer-image__remove:focus-visible { color: var(--text); outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.composer-image__remove, .composer-file__remove { position: absolute; top: -2px; right: 4px; display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; padding: 0; border: 1px solid var(--line-soft); border-radius: 50%; color: var(--text-2); background: var(--surface-2); font: inherit; opacity: 1; cursor: pointer; }
+.composer-image__remove > svg, .composer-file__remove > svg { width: 8px; height: 8px; }
+.composer-image__remove::before, .composer-file__remove::before { content: ''; position: absolute; top: 2px; height: 1lh; inset-inline: 0 -12px; }
+.composer-image__remove:hover, .composer-file__remove:hover { color: var(--text); background: var(--surface-3); }
+.composer-image__remove:focus-visible, .composer-file__remove:focus-visible { color: var(--text); outline: 1px solid var(--focus-line); outline-offset: -1px; }
 @media (hover: hover) and (pointer: fine) {
-  .composer-image__remove { opacity: 0; pointer-events: none; }
-  .composer-image:hover .composer-image__remove, .composer-image:focus-within .composer-image__remove { opacity: 1; pointer-events: auto; }
+  .composer-image__remove, .composer-file__remove { opacity: 0; pointer-events: none; }
+  .composer-image:hover .composer-image__remove, .composer-image:focus-within .composer-image__remove, .composer-file:hover .composer-file__remove, .composer-file:focus-within .composer-file__remove { opacity: 1; pointer-events: auto; }
 }
 /* 启动页的 message tool 是 `.launch-surface > *` 那条居中规则的一员，但它同时带 `.composer`，
    而 `.composer` 的侧向 margin（Region 内的 inset）在同一特异度下后加载、把 margin-inline:auto
@@ -424,3 +424,15 @@
 .composer-pending__card:has(.composer-pending__retry) > .composer-pending__preview { grid-column: 1; }
 .composer-pending__card > .composer-pending__retry { grid-column: 2; grid-row: 2; display: flex; align-items: center; margin: 0; }
 .composer-pending__retry > .composer-tool { flex: 0 0 auto; width: auto; min-height: 24px; height: auto; padding: 0 6px; font: inherit; }
+
+.composer-file { position: relative; display: inline-flex; align-items: center; flex-wrap: wrap; max-width: 100%; padding: 0 16px 0 4px; margin-inline-end: 8px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-2); vertical-align: middle; line-height: inherit; }
+.composer-file__name { display: inline-flex; align-items: center; gap: 3px; min-width: 0; max-width: 100%; padding: 0; border: 0; background: transparent; color: var(--text-2); font: inherit; line-height: inherit; cursor: pointer; }
+.composer-file__name > span { min-width: 0; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-file__name > svg { flex: none; }
+.composer-file__name:hover { color: var(--text); }
+.composer-file__name:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
+.composer-file__reference { flex: 1 1 100%; display: flex; align-items: center; gap: var(--sp-1); min-width: 0; max-width: 28em; padding-block: var(--sp-1); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.4; user-select: text; }
+.composer-file__reference code { flex: 1; min-width: 0; font-size: inherit; overflow-wrap: anywhere; white-space: pre-wrap; }
+.composer-file__reference button { flex: none; padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
+.composer-file__reference button:hover { color: var(--text); background: var(--surface-3); }
+.composer-file__reference button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }

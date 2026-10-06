@@ -16,7 +16,7 @@ import { executorDetectionLabel } from '../lib/executor-detection'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useLauncherInputs } from '../lib/launcher-inputs'
 import { EMPTY_LAUNCH_OPTION_SELECTION } from '../lib/launcher-option-draft'
-import { appendFileReferences } from '@agentmux/client-ui/composer-file-reference'
+import { appendFileReferences, appendSelectedFileReferences } from '@agentmux/client-ui/composer-file-reference'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
 import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
@@ -339,7 +339,7 @@ export function NewTabSurface({
   }
 
   function appendReference(path: string): void {
-    void feedback.run(() => insertionRef.current?.insert(() => appendFileReferences('', [path]), { separate: true }))
+    void feedback.run(() => insertionRef.current?.insert(() => appendSelectedFileReferences('', [path]), { separate: true }))
   }
 
   async function captureComposerScreenshot(): Promise<void> {
@@ -355,7 +355,7 @@ export function NewTabSurface({
     await insertionRef.current?.insert(async () => {
       const paths = await api.ui.chooseFiles(workspace?.path ? { defaultPath: workspace.path } : undefined)
       if (!feedback.isCurrent()) return null
-      return paths?.length ? appendFileReferences('', paths, workspace?.path) : null
+      return paths?.length ? appendSelectedFileReferences('', paths, workspace?.path) : null
     }, { separate: true })
   }
 

@@ -1,3 +1,4 @@
+import { splitPastedImageReferences } from './pasted-image-reference.js'
 import { appendSemanticReference } from './composer-semantic-reference.js'
 
 /**
@@ -29,4 +30,16 @@ export function appendFileReferences(
 /** A selected file keeps its exact path in the original draft codec while showing its readable name. */
 export function appendNamedFileReference(draft: string, path: string, name: string): string {
   return appendSemanticReference(draft, { token: '', label: name, kind: 'file', reference: '@' + path })
+}
+
+/** Explicit file selection uses the existing draft codec; pasted images keep their original node. */
+export function appendSelectedFileReferences(draft: string, paths: readonly string[], workspacePath?: string): string {
+  return paths.reduce((value, path) => {
+    const reference = workspaceRelativePath(path, workspacePath)
+    const parts = splitPastedImageReferences('@' + reference)
+    if (parts.length === 1 && parts[0]?.kind === 'image' && parts[0].text === '@' + reference) {
+      return appendFileReferences(value, [path], workspacePath)
+    }
+    return appendNamedFileReference(value, reference, reference.split(/[\\/]/).at(-1) || reference)
+  }, draft)
 }

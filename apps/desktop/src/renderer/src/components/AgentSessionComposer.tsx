@@ -10,7 +10,7 @@ import { AgentComposerTools } from './AgentComposerTools'
 import type { ComposerShortcut, SessionSnapshot } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
-import { appendFileReferences } from '@agentmux/client-ui/composer-file-reference'
+import { appendFileReferences, appendSelectedFileReferences } from '@agentmux/client-ui/composer-file-reference'
 import { appendSemanticReference, encodeSemanticReference, expandSemanticReferences, semanticReferenceKind, semanticReferenceLabel, type ComposerSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
 import { AGENT_COMMAND_GROUP_LABEL, composerShortcutForBareWord, composerShortcutSuggestion, composerShortcutsForProvider, resolveComposerShortcuts } from '../../../shared/composer-shortcut-library'
 import { composerSubmitMode } from '../lib/composer-submit-mode'
@@ -228,7 +228,7 @@ export function AgentSessionComposer({
 
   function addFileReference(): void {
     if (!activeFile || !submitMode.canType) return
-    void feedback.run(() => insertionRef.current?.insert(() => appendFileReferences('', [activeFile]), { separate: true }))
+    void feedback.run(() => insertionRef.current?.insert(() => appendSelectedFileReferences('', [activeFile]), { separate: true }))
   }
 
   async function attachFiles(): Promise<void> {
@@ -236,7 +236,7 @@ export function AgentSessionComposer({
     const workspacePath = session?.kind === 'agent' ? session.workspacePath : undefined
     await insertionRef.current?.insert(async () => {
       const chosen = await api.ui.chooseFiles(workspacePath ? { defaultPath: workspacePath } : undefined)
-      return chosen?.length ? appendFileReferences('', chosen, workspacePath) : null
+      return chosen?.length ? appendSelectedFileReferences('', chosen, workspacePath) : null
     }, { separate: true })
   }
 
@@ -342,19 +342,17 @@ export function AgentSessionComposer({
             ? 'Send to restore this Session.' : 'Send a message to this Session.'}
         onSelect={sendStatusPrompt} resultReview={resultReview} /> : null}
       contextUsage={<AgentContextUsage visible={visible} source={session?.kind === 'agent' ? JSON.stringify([session.hostId, session.id, session.providerId, session.control.run.runId]) : sessionId} usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
-      onActivateSemanticReference={(reference) => {
+      {...(workspace ? { onActivateSemanticReference: (reference: ComposerSemanticReference) => {
         const path = reference.reference.startsWith('@') ? reference.reference.slice(1) : reference.reference
-        if (workspace) {
-          const store = useAppStore.getState()
-          void store.selectWorkspace(workspace.id).catch(reportError)
-          void store.openFile(path, undefined, undefined, workspace.id).catch(reportError)
-        }
-      }}
+        const store = useAppStore.getState()
+        void store.selectWorkspace(workspace.id).catch(reportError)
+        void store.openFile(path, undefined, undefined, workspace.id).catch(reportError)
+      } } : {})}
       commands={commandCandidates}
       promptKeywords={keywordCandidates}
       references={activeFile ? [{ text: `@${activeFile.split('/').at(-1)}`, description: activeFile }] : []}
       onSelectSuggestion={(item, kind) => {
-        if (kind === 'reference' && activeFile) return appendFileReferences('', [activeFile]).trim()
+        if (kind === 'reference' && activeFile) return appendSelectedFileReferences('', [activeFile]).trim()
         // 我自己的 prompt 选中后就地展开成一个 subcommand token（点它再展开成正文）；Provider 原生
         // 命令原样填进草稿交给 Provider。查表用 keyword 去掉 `/` 之后的裸词，与裸词识别同一个键——
         // 两处识别共用一个 keyword 字段，不建第二份注册表。
