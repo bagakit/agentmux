@@ -25,6 +25,7 @@ function unavailable(reason: 'credential-missing' | 'adapter-unavailable' | 'che
 }
 /** Optional original Host owner. Configuration and its operation receipt commit in one SQLite transaction. */
 export class ConnectionHost implements ConnectionPort {
+  bindings?: import('@agentmux/core/connections').RoomBindingsPort
   readonly database: DatabaseSync
   private readonly adapters: Map<string, ConnectionAdapter>
   private readonly observations = new Map<string, { revision: number; value: ConnectionObservation }>()
@@ -48,6 +49,8 @@ export class ConnectionHost implements ConnectionPort {
     const config = parseConnectionConfig(JSON.parse(row.config_json as string)), revision = Number(row.revision), observed = this.observations.get(connectionId)
     return parseConnectionRecord({ config, revision, observation: !config.enabled ? disabled() : observed?.revision === revision ? observed.value : unknown() })
   }
+  /** Synchronous exact configuration read for owners joining this same database transaction. */
+  readConfiguration(connectionId: string): ConnectionRecord | null { return this.safe(() => this.read(connectionId)) }
   private storedOperation(operationId: string): { input: ConnectionConfigureInput; operation: ConnectionOperation } | null {
     const row = this.database.prepare('SELECT input_json, result_json FROM connection_configuration_operation WHERE operation_id = ?').get(operationId)
     if (!row) return null
