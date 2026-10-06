@@ -65,7 +65,8 @@ describe('terminal appearance', () => {
     expect(TERMINAL_THEME_CATALOG.map((item) => item.id)).toEqual([
       'workspace',
       'graphite',
-      'catppuccin-mocha'
+      'catppuccin-mocha',
+      'dracula', 'nord', 'gruvbox-dark', 'solarized-dark', 'solarized-light'
     ])
     for (const { theme } of TERMINAL_THEME_CATALOG) {
       expect(Object.keys(theme)).toHaveLength(23)
