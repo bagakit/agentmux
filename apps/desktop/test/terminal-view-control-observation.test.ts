@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, createElement, type ReactNode } from 'react'
@@ -8,9 +9,9 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxTerminalViewObservation }
 import type { RuntimeEvent, SessionAttachResult, SessionSnapshot } from '../src/shared/contracts'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { api } from '../src/renderer/src/lib/api'
-import { useAppStore } from '../src/renderer/src/store'
+import { initializeRunServiceProjection, useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { TerminalView } from '../src/renderer/src/components/TerminalView'
+const { TerminalView } = await import(process.env.AGENTMUX_TEST_TERMINAL_ENTRY ?? '../src/renderer/src/components/TerminalView') as typeof import('../src/renderer/src/components/TerminalView')
 import { observeTerminalInputGeometry, readTerminalInputOverlapTop, readTerminalViewObservation, registerTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
 import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners'
 
@@ -44,9 +45,9 @@ vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({ TerminalC
 
 const originalState = useAppStore.getState()
 const session: Extract<SessionSnapshot, { kind: 'agent' }> = {
-  id: 'observed-agent', hostId: 'local', workspacePath: _hygiene_fixturePath("synthetic"), label: 'Observed', createdAt: 1, updatedAt: 1,
+  id: 'observed-agent', hostId: 'local', workspacePath: _hygiene_fixturePath("synthetic"), label: 'Observed', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1),
   kind: 'agent', providerId: 'codex', executorId: 'codex', processState: 'running',
-  status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0,
+  status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, latestOutputBytes: 0,
   capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
   control: { kind: 'agent', hostId: 'local', agentSessionId: 'observed-agent', run: { runId: 'observed-run' } }
 }
@@ -89,7 +90,7 @@ async function ready(data: string) {
 }
 const lines = Array.from({ length: 600 }, (_, i) => `private-${i}\r\n`).join('')
 function observed(runId = session.control.run.runId): AgentMuxTerminalViewObservation {
-  return { runId, sampledAt: 1, visible: true, readOnly: false, liveReady: true, acceptsInput: true,
+  return { runId, sampledAt: _reshape_fixtureEpoch(0, 0, 1), visible: true, readOnly: false, liveReady: true, acceptsInput: true,
     viewGrid: { cols: 80, rows: 24 }, buffer: { type: 'normal', baseY: 10, viewportY: 5, length: 34 }, mouseTrackingMode: 'any' }
 }
 
@@ -104,6 +105,7 @@ beforeEach(() => {
   recover = vi.spyOn(api.sessions, 'recover')
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
   surfaceState()
+  useAppStore.setState({ runtimeEndpointWarnings: [] })
   const container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => {
@@ -130,6 +132,65 @@ it('reads current normal+mouse parser and public viewport through actual Termina
   expect(attach).toHaveBeenCalledTimes(1)
 })
 
+it('consumes both connection origins through mounted TerminalView and explicitly reads storage for the same original Run', async () => {
+  const storage = vi.spyOn(api.sessions, 'observeStorage').mockResolvedValue({ status: 'unsupported', run: session.control.run,
+    runtime: { hostId: 'local', instanceId: 'native-original', buildIdentity: 'fixture', protocolVersion: 22, processId: 42 },
+    observedAt: _reshape_fixtureEpoch(0, 0, 50), message: 'Exact Run storage is not advertised' })
+  releases.push(initializeRunServiceProjection())
+  const terminal = await ready('synthetic output\r\n')
+  const nativeService = { revision: 7, owner: { type: 'serving' as const }, output: { type: 'serving' as const },
+    input: { phase: { type: 'open' as const }, unsettledCommands: 0, unsettledRequestBytes: 0, writeBlocked: false,
+      completedInputBytes: 0, activeConfirmedBytes: 0, currentSize: { cols: 80, rows: 24 } }, terminalFault: null }
+  await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: { type: 'run-service',
+    run: session.control.run, agentSessionId: session.id, nativeService, evidence: { source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 9), run: session.control.run } } }))
+  const warning = (boundary: 'core-ctxmux' | 'consumer-core', hostId = 'local') => ({ hostId, scope: 'observation' as const,
+    step: boundary === 'core-ctxmux' ? 'Core to ctxmux connection' : 'Core control connection', availability: 'unverified' as const,
+    observationOrigin: { kind: 'runtime-connection' as const, boundary },
+    evidence: { source: 'agentmux' as const, observedAt: _reshape_fixtureEpoch(0, 0, 20) }, code: 'RUNTIME_UNAVAILABLE', message: 'This connection is lost', recovery: 'Refresh original observation' })
+  const originalDrafts = useAppStore.getState().agentComposerDrafts
+  await act(async () => useAppStore.setState({ runtimeEndpointWarnings: [warning('core-ctxmux'), warning('consumer-core'), warning('core-ctxmux', 'unrelated-host')] }))
+  const container = document.body.querySelector('.terminal-view')!
+  const connectionRows = () => [...container.querySelectorAll('.terminal-service-window .service-window')]
+    .filter(row => row.querySelector('.service-window__step')?.textContent?.includes('connection'))
+  expect(connectionRows()).toHaveLength(2)
+  expect(container.textContent).toContain('Core to ctxmux connection')
+  expect(container.textContent).toContain('Core control connection')
+  expect(container.textContent).toContain('last observed running')
+  expect(container.textContent).toContain('revision 7')
+  expect(container.textContent).toContain('by run-process')
+  expect(container.textContent).not.toContain('unrelated-host')
+  expect(storage).not.toHaveBeenCalled()
+  const check = container.querySelector<HTMLButtonElement>('.terminal-storage-details button')
+  expect(check, 'the actual TerminalView must supply its original storageControl').not.toBeNull()
+  await act(async () => check!.click())
+  expect(storage).toHaveBeenCalledExactlyOnceWith(session.control)
+  expect(container.textContent).toContain('Exact Run storage is not advertised')
+  await act(async () => terminal.input('x', true))
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control, 'x', 'user', expect.objectContaining({ source: 'user', sequence: 1 }))
+  expect(recover).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts).toBe(originalDrafts)
+  expect(fixture.terminals).toEqual([terminal])
+  await act(async () => useAppStore.setState({ runtimeEndpointWarnings: [warning('core-ctxmux')] }))
+  expect(connectionRows()).toHaveLength(1)
+  expect(container.textContent).toContain('Core to ctxmux connection')
+  expect(storage).toHaveBeenCalledOnce()
+  const pressured = { ...nativeService, revision: 8, output: { type: 'backpressured' as const } }
+  await act(async () => {
+    useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: { type: 'run-service', run: session.control.run,
+      agentSessionId: session.id, nativeService: pressured, evidence: { source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 10), run: session.control.run } } })
+    useAppStore.setState({ runtimeEndpointWarnings: [{ ...warning('core-ctxmux'), availability: 'connected',
+      code: 'CTXMUX_CONNECTION_OBSERVATION_PENDING', message: 'Native transport returned; Session recovery is pending' }] })
+  })
+  const nativeRow = [...container.querySelectorAll('.terminal-service-window .service-window')]
+    .find(row => row.querySelector('.service-window__step')?.textContent?.includes('resource pressure'))
+  expect(nativeRow).toBeDefined()
+  expect(nativeRow!.getAttribute('data-kind')).toBe('indeterminate')
+  expect(nativeRow!.textContent).toContain('last observed running')
+  expect(container.textContent).toContain('Session recovery is pending')
+  await act(async () => terminal.input('y', true))
+  expect(write.mock.calls[1]).toEqual([session.control, 'y', 'user', expect.objectContaining({ source: 'user', sequence: 2 })])
+})
+
 it('reads real alternate+vt200/normal transitions and current hidden/readOnly/pending gates from the same instance', async () => {
   const terminal = await ready(lines + '\x1b[?1049h\x1b[?1000h\x1b[?1006h')
   expect((await inspect()).terminalView).toMatchObject({ buffer: { type: 'alternate', baseY: 0, viewportY: 0 }, mouseTrackingMode: 'vt200' })
@@ -142,12 +203,12 @@ it('reads real alternate+vt200/normal transitions and current hidden/readOnly/pe
   await act(async () => {
     fixture.receive!({ type: 'core', hostId: session.hostId, event: { type: 'terminal-output',
       run: { ...session.control.run }, data: hiddenData, dataBytes: hiddenBytes,
-      evidence: { source: 'terminal-output', observedAt: 2, run: { ...session.control.run },
+      evidence: { source: 'terminal-output', observedAt: _reshape_fixtureEpoch(0, 0, 2), run: { ...session.control.run },
         outputByteRange: { startByte: replayLength, endByte: replayLength + hiddenBytes.length } } } })
     await vi.waitFor(() => expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toContain('private-hidden-live-output'))
   })
   const pending: typeof session = { ...session, pendingInteraction: { id: 'private-request', kind: 'permission', agentSessionId: session.id,
-    title: 'Private synthetic permission', options: [], evidence: { source: 'native-hook', observedAt: 1 } } }
+    title: 'Private synthetic permission', options: [], evidence: { source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } } }
   surfaceState(pending); await render(pending)
   expect((await inspect()).terminalView).toMatchObject({ visible: true, readOnly: false, acceptsInput: true })
   await act(async () => await new Promise<void>(resolve => terminal.write('\x1b[?1049l\x1b[?1000l', resolve)))
@@ -169,7 +230,7 @@ it('reports not-live readiness before attach settles and never guesses success',
 it('the mounted terminal handler forwards native input with a permission present and preserves the same view', async () => {
   const terminal = await ready(lines)
   const pending: typeof session = { ...session, pendingInteraction: { id: 'native-pending', kind: 'permission', agentSessionId: session.id,
-    title: 'Private permission', options: [], evidence: { source: 'native-hook', observedAt: 1, run: session.control.run } } }
+    title: 'Private permission', options: [], evidence: { source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1), run: session.control.run } } }
   surfaceState(pending); await render(pending)
   await act(async () => terminal.input('\u001b'))
   expect(write).toHaveBeenCalledExactlyOnceWith(session.control, '\u001b', 'user')
@@ -202,7 +263,7 @@ it('omits an old Run callback against current Session facts until the actual new
 it('keeps only the latest exact callback, preserves it against older cleanup, and isolates getter failures', async () => {
   const identity = { regionId: origin.regionId, sessionId: session.id, runId: session.control.run.runId }
   const old = registerTerminalViewObservation(identity, () => observed())
-  const latest = registerTerminalViewObservation(identity, () => ({ ...observed(), sampledAt: 2 }))
+  const latest = registerTerminalViewObservation(identity, () => ({ ...observed(), sampledAt: _reshape_fixtureEpoch(0, 0, 2) }))
   releases.push(old, latest); old()
   expect((await inspect()).terminalView?.sampledAt).toBe(2)
   expect(readTerminalViewObservation({ ...identity, sessionId: 'foreign-session' })).toBeUndefined()
