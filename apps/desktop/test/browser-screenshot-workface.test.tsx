@@ -272,6 +272,7 @@ describe('original Browser screenshot workface', () => {
     await act(async () => {
       pointer('pointerdown', 40, 50); pointer('pointermove', 130, 120); pointer('pointerup', 130, 120)
     })
+    await flushFrames()
     const note = fixture.committed.mock.lastCall![1][0]
     expect(note).toMatchObject({ kind: 'note', number: 1, note: '' })
     const draft = 'Original note draft before blur'
@@ -555,6 +556,8 @@ describe('original Browser screenshot workface', () => {
     await act(async () => {
       pointer('pointermove', 190, 50); pointer('pointerup', 190, 50); pointer('pointerup', 190, 50)
     })
+    expect(fixture.committed).not.toHaveBeenCalled()
+    await flushFrames()
     expect(fixture.committed).toHaveBeenCalledTimes(1)
     await act(async () => button(opened, 'Copy PNG').click())
     expect(fixture.compose).toHaveBeenCalledTimes(1)
