@@ -30,10 +30,10 @@ import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } f
 import { parseSessionHistoryResourceResult, type AgentSessionHistoryResourceParams } from './session-history-resource.js'
 import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
 import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
-import { normalizeAgentSession } from './agent-session-store.js'
+import { normalizeAgentSession, parsePromptSubmissionRecord } from './agent-session-store.js'
 import { agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
 import { validateAgentMuxMessageEnvelope } from './agent-global-message-queue.js'
-import { validateAgentPromptCondition } from './agent-prompt-condition.js'
+import { agentPromptInputId, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
 import { assertDispatchEventKind } from './agent-handoff.js'
 import { isAgentDeliveryState } from './agent-message.js'
@@ -353,11 +353,26 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.role.register': case 'agent.role.resolve': { record(p, ['binding']); const binding = role(p.binding)
         if (binding.role !== input.role || input.workspacePath !== undefined && binding.workspacePath !== input.workspacePath ||
           method === 'agent.role.register' && credentials && binding.agentSessionId !== credentials.agentSessionId) fail(); break }
+      case 'agent.input.inspect': {
+        record(p, ['record'])
+        const key = validateAgentPromptInputKey(input.key)
+        if (p.record !== null) {
+          const original = parsePromptSubmissionRecord(p.record)
+          if (original.agentSessionId !== key.agentSessionId || original.run.runId !== key.expectedRun.runId ||
+              (original.admission?.submissionId ?? original.terminalPromptSubmission?.submissionId ?? original.admission?.operationId) !== agentPromptInputId(key) ||
+              original.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, key)) fail()
+        }
+        break
+      }
       case 'agent.send': {
-        record(p, ['queueId', 'receiptId', 'messageId', 'sequence', 'envelope', 'delivery', 'promptCondition', 'agentSessionId', 'sourceChannel', 'sourceDevice'])
+        record(p, ['queueId', 'receiptId', 'messageId', 'sequence', 'envelope', 'delivery', 'promptCondition', 'agentSessionId', 'sourceChannel', 'sourceDevice', 'admissionIntent'])
         if (p.sourceChannel !== undefined) normalizeMessageChannel(p.sourceChannel)
         if (p.sourceDevice !== undefined) normalizeOperationDevice(p.sourceDevice)
         const envelope = message(p)
+        if (p.admissionIntent !== undefined) {
+          const intent = validateAgentPromptAdmissionIntent(p.admissionIntent)
+          if (intent.kind !== 'manual-actor' || input.execution !== 'immediate' || intent.expectedRun.runId !== envelope.recipientRunId) fail()
+        }
         for (const key of ['queueId', 'receiptId', 'messageId']) string(p[key])
         if (p.messageId !== envelope.messageId || input.messageId === undefined && envelope.operationId !== input.operationId || envelope.body !== input.text ||
           input.messageId !== undefined && envelope.messageId !== input.messageId) fail()

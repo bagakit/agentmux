@@ -36,7 +36,7 @@ import { resolveAgentSessionId } from './agent-session-id.js'
 import { readAgentRoleBindings, registerAgentRole, resolveAgentRole } from './agent-role-directory.js'
 import { appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDelivery,
   recordGlobalMessageDeliveryIssue } from './agent-global-message-queue.js'
-import { agentPromptCondition, validateAgentPromptCondition } from './agent-prompt-condition.js'
+import { agentPromptCondition, validateAgentPromptCondition, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { diagnoseAgentMux } from './doctor.js'
 import { agentSessionMatches } from './rpc-agent-filter.js'
 import { OrderedSessionOutputFollow, type FollowOutput } from './session-output-follow.js'
@@ -61,7 +61,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
-  'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'startDiscussion' | 'checkDeliveries' |
+  'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
@@ -142,6 +142,7 @@ const NATIVE_FIELDS = {
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
+  'agent.input.inspect': ['key'],
   'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'sourceChannel'],
   'agent.discuss': ['executorId', 'providerId', 'text', 'operationId'],
   'agent.handoff': ['toAgentSessionId', 'taskId'], 'agent.output': ['agentSessionId', 'afterByte', 'follow'],
@@ -1019,6 +1020,30 @@ export class AgentMuxRpcService {
               kind: p.kind as Parameters<AgentMuxClient['recordDispatchEvent']>[0]['kind'] })
         } break
       }
+      case 'agent.input.inspect': {
+        const key = validateAgentPromptInputKey(p.key)
+        const client = await (async () => {
+          try {
+            const owner = await this.owner(key.agentSessionId)
+            if (owner.agentSessionId !== key.agentSessionId) throw new AgentMuxError('Input inspection requires the original exact Session ID.', 'INVALID_CONTROL_REQUEST')
+            return owner.client
+          } catch (error) {
+            if (!(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION') throw error
+            // The existing original history descriptor locates a retired owner;
+            // reading a claim never recreates its Session or discovers a writer.
+            const retained = (await Promise.all((await this.clients()).map(async scope => ({ client: scope.client,
+              retained: (await scope.client.sessionHistorySources()).some(source => source.agentSessionId === key.agentSessionId) }))))
+              .filter(scope => scope.retained)
+            if (retained.length !== 1) throw new AgentMuxError('The original input owner is unknown or ambiguous.', retained.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_AGENT_SESSION')
+            return retained[0]!.client
+          }
+        })()
+        if (caller && caller.client !== client) throw new AgentMuxError('Input inspection cannot cross semantic owners.', 'CONTROL_PERMISSION_DENIED')
+        if (client.forwardRpc) return await client.forwardRpc('agent.input.inspect', { key }, context) as AgentMuxRpcResult<M>
+        const original = await client.inspectAgentPromptSubmission(key)
+        if (caller && caller.agentSessionId !== key.agentSessionId && original?.admission?.intent?.message?.authorAgentSessionId !== caller.agentSessionId) throw new AgentMuxError('Only an original input participant can inspect its claim.', 'CONTROL_PERMISSION_DENIED')
+        result = { record: original }; break
+      }
       case 'agent.send': result = await this.send(p, caller, context); break
       case 'agent.output': throw new AgentMuxError('Agent output is a bounded byte subscription.', 'INVALID_CONTROL_REQUEST')
       case 'goal.activity': {
@@ -1195,12 +1220,17 @@ export class AgentMuxRpcService {
     // Both participant bindings came from their current Core owners. Public
     // inputs cannot supply sender or Run facts; rechecking a cached registry here
     // would reject a valid capability rotation or a recipient on another Host.
-    const queued = await appendGlobalMessage({ ...envelope, messageId, execution, sourceChannel, ...(sourceDevice ? { sourceDevice } : {}) }, queuePath)
+    // This direct producer has no caller after-condition. Only a new explicit
+    // immediate Native message gets manual actor intent before its first save.
+    // The journal returns an existing record unchanged, including missing tags.
+    const nativeManual = p.execution === 'immediate' && recipientOwner.client.catalog().find(entry => entry.id === recipient.providerId)
+      ?.capabilities.promptExecution?.immediate === 'native-steer'
+    const queued = await appendGlobalMessage({ ...envelope, messageId, execution, sourceChannel, ...(sourceDevice ? { sourceDevice } : {}) }, queuePath,
+      { ...(nativeManual ? { admissionIntent: { kind: 'manual-actor', expectedRun: { ...recipient.run } } as const } : {}) })
     if (queued.delivery.state === 'delivered') return queued
-    // A diagnostic reason is not input admission. An explicit retry keeps the
-    // first condition and lets Core reconcile only the original frozen request.
     try {
-      const promptCondition = await prepareGlobalMessagePrompt(queued.messageId, async recorded => {
+      const originalIntent = queued.admissionIntent
+      const promptCondition = originalIntent === undefined ? await prepareGlobalMessagePrompt(queued.messageId, async recorded => {
         if (recorded.recipientRunId !== recipient.run.runId || recorded.recipientSessionId !== recipientId) {
           throw new AgentMuxError('Queued recipient Run changed.', 'MESSAGE_RECIPIENT_MISMATCH')
         }
@@ -1208,14 +1238,16 @@ export class AgentMuxRpcService {
         const active = await this.execute(this.request('list.active-agents', { agentSessionId: recipientId }))
         if (active.operation !== 'list.active-agents') throw new AgentMuxError('Prompt facts are unavailable.', 'CONTROL_PROTOCOL_ERROR')
         return validateAgentPromptCondition(active.agents.find(agent => agent.agentSessionId === recipientId)?.promptCondition)
-      }, queuePath)
-      const exactTarget = target.kind === 'agent-session' || target.kind === 'self'
-        ? { kind: 'agent-session', agentSessionId: recipientId } : target
+      }, queuePath) : undefined
+      if (originalIntent && originalIntent.kind !== 'manual-actor') throw new AgentMuxError('The original direct message intent is unconfirmed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+      const admission = originalIntent ? { admissionIntent: originalIntent } : { condition: promptCondition! }
       if (!this.ports.execute) await recipientOwner.client.submitAgentMessage({
-        agentSessionId: recipientId, envelope: queued.envelope, condition: promptCondition,
+        agentSessionId: recipientId, envelope: queued.envelope, ...admission,
         execution, ...(queued.sourceChannel ? { sourceChannel: queued.sourceChannel } : {}), ...(queued.sourceDevice ? { sourceDevice: queued.sourceDevice } : {}),
-        ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) })
-      else await this.execute(this.request('send', { requestId: operationId, target: exactTarget, text, promptCondition,
+        ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) } as Parameters<AgentMuxClient['submitAgentMessage']>[0])
+      else await this.execute(this.request('send', { requestId: operationId,
+        target: { kind: 'agent-session', agentSessionId: queued.envelope.recipientSessionId! }, text,
+        ...(originalIntent ? { admissionIntent: originalIntent } : { promptCondition }),
         execution, ...(queued.sourceChannel ? { sourceChannel: queued.sourceChannel } : {}),
         message: queued.envelope, ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) }))
       return { ...await recordGlobalMessageDelivery(queued.messageId, 'delivered', Date.now(), undefined, queuePath), agentSessionId: recipientId }

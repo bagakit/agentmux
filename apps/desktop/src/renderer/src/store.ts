@@ -5295,13 +5295,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         request.message.recipientRunId !== null && request.message.recipientRunId !== session.control.run.runId) {
         throw controlFailure('MESSAGE_RECIPIENT_MISMATCH', 'Message recipient is not the resolved Agent Session/Run.')
       }
-      const condition = validateAgentPromptCondition(request.promptCondition)
-      if (condition.expectedRun.runId !== session.control.run.runId) throw controlFailure(
+      const condition = request.admissionIntent === undefined ? validateAgentPromptCondition(request.promptCondition) : undefined
+      const expectedRun = request.admissionIntent?.expectedRun ?? condition!.expectedRun
+      if (expectedRun.runId !== session.control.run.runId) throw controlFailure(
         'STALE_AGENT_SESSION', 'Message intent targets another Run.')
-      await api.sessions.submitMessage(session.control, { envelope: request.message, condition,
+      const message = { envelope: request.message,
         ...(request.sourceChannel === undefined ? {} : { sourceChannel: request.sourceChannel }),
-        ...(request.execution === undefined ? {} : { execution: request.execution }),
-        ...(request.caller ? { caller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })
+        ...(request.caller ? { caller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) }
+      await api.sessions.submitMessage(session.control, request.admissionIntent
+        ? { ...message, admissionIntent: request.admissionIntent, execution: 'immediate' }
+        : { ...message, condition: condition!, ...(request.execution === undefined ? {} : { execution: request.execution }) })
       return { operation: request.operation, agentSessionId: session.id }
     }
     if (request.operation === 'interrupt' || request.operation === 'resume' || request.operation === 'stop') {

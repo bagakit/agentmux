@@ -1,6 +1,7 @@
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
+import { validateAgentPromptAdmissionIntent, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { parseAgentForkSource } from './agent-fork.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import { assertCurrentAgentCapabilityBinding, type AgentCapabilityBinding } from './agent-capability.js'
@@ -11,7 +12,7 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { DatabaseSync } from 'node:sqlite'
-import { openSessionDatabase, readCurrentSessionDatabase, syncSessionDatabase } from './agent-session-database.js'
+import { openSessionDatabase, promptAdmissionSchema, readCurrentSessionDatabase, syncSessionDatabase } from './agent-session-database.js'
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { durableWriteFile, DurableWriteError } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
@@ -40,6 +41,7 @@ import type {
   AgentMuxRunRef,
   AgentMuxStoredAgentSession,
   AgentPromptInputPlan,
+  AgentPromptSubmissionRecord,
   AgentNativeSessionHandle,
   AgentNativeSessionConfirmationReceipt,
   AgentSessionHistoryMetadata,
@@ -130,10 +132,14 @@ export type AgentMuxAgentSessionStore = {
   withPromptSubmission<T>(agentSessionId: string, operation: () => Promise<T>): Promise<T>
   /** Flush the current exact binding; reading bytes alone does not acknowledge persistence. */
   confirmDurability(agentSessionId: string, expectedRun: AgentMuxRunRef, expectedSession: AgentMuxStoredAgentSession): Promise<void>
-  /** Explicit complete business-fact export; ordinary control reads use metadata. */
+  /** Explicit current Session facts; cumulative original input records are read by their exact location. */
   load(): Promise<readonly unknown[]>
   loadMetadata(): Promise<readonly AgentMuxStoredAgentSession[]>
   readMetadata(agentSessionId: string): Promise<AgentMuxStoredAgentSession | null>
+  /** Exact original claim; history is never loaded into ordinary Session metadata. */
+  readPromptAdmission(agentSessionId: string, run: AgentMuxRunRef, submissionId: string): Promise<AgentPromptSubmissionRecord | null>
+  /** Original outcome CAS. A late receipt cannot move the latest projection back. */
+  settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void>
   /** Resolve one original active/retired source and its reopen correlation, without catalog discovery. */
   readHistorySource(agentSessionId: string): Promise<AgentSessionHistoryDescriptor | null>
   readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null>
@@ -197,6 +203,69 @@ export type AgentMuxFuturePromptPage = {
 export function agentSessionMetadata(session: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession {
   const { futurePromptIntents: _future, ...metadata } = session
   return metadata
+}
+
+function promptAdmissionRecords(session: AgentMuxStoredAgentSession | null | undefined): AgentPromptSubmissionRecord[] {
+  if (!session) return []
+  const admission = session.promptCompletionAdmission, terminal = session.terminalPromptSubmission
+  const shared = admission && terminal && admission.submissionId === terminal.submissionId
+  const originals: AgentPromptSubmissionRecord[] = []
+  if (admission) originals.push({ agentSessionId: session.agentSessionId, run: admission.intent?.run ?? session.run, admission,
+    ...(shared ? { terminalPromptSubmission: terminal } : {}) })
+  if (terminal && !shared) originals.push({ agentSessionId: session.agentSessionId, run: terminal.run, terminalPromptSubmission: terminal })
+  return structuredClone(originals)
+}
+function promptAdmissionRecord(session: AgentMuxStoredAgentSession | null | undefined): AgentPromptSubmissionRecord | null {
+  return promptAdmissionRecords(session)[0] ?? null
+}
+
+function promptRecordId(value: AgentPromptSubmissionRecord): string {
+  const id = value.admission?.submissionId ?? value.terminalPromptSubmission?.submissionId
+  // A missing logical identity remains missing. This opaque location only keeps its original JSON.
+  return id === undefined ? JSON.stringify(['original-slot', value.admission?.operationId]) : JSON.stringify(['submission', id])
+}
+
+export function parsePromptSubmissionRecord(value: unknown): AgentPromptSubmissionRecord {
+  const r = record(value, 'original prompt record'), run = runRef(r.run)
+  const parsed: AgentPromptSubmissionRecord = {
+    agentSessionId: string(r.agentSessionId, 'original prompt Session'), run,
+    ...(r.admission === undefined ? {} : { admission: normalizePromptCompletionAdmission(r.admission) }),
+    ...(r.terminalPromptSubmission === undefined ? {} : { terminalPromptSubmission: terminalPromptSubmission(r.terminalPromptSubmission, run) })
+  }
+  if (!parsed.admission && !parsed.terminalPromptSubmission) throw new AgentMuxError('Original prompt record is empty.', 'INVALID_AGENT_SESSION_STORE')
+  if (parsed.admission && parsed.terminalPromptSubmission && parsed.admission.submissionId !== parsed.terminalPromptSubmission.submissionId) throw new AgentMuxError(
+    'Original prompt phases name different logical inputs.', 'INVALID_AGENT_SESSION_STORE')
+  const inputKey = parsed.admission?.inputKey
+  if (parsed.admission?.intent && parsed.admission.intent.run.runId !== run.runId || inputKey &&
+      (inputKey.agentSessionId !== parsed.agentSessionId || inputKey.expectedRun.runId !== run.runId ||
+        (inputKey.kind === 'prompt' ? inputKey.submissionId : inputKey.messageId) !== parsed.admission?.submissionId)) throw new AgentMuxError(
+    'The original input record changed its Session, Run or logical identity.', 'INVALID_AGENT_SESSION_STORE')
+  return parsed
+}
+
+function assertPromptSettlement(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord): void {
+  const { acknowledged: _ack, notApplied: _notApplied, native: _native, ...originalClaim } = expected.admission ?? {}
+  const { acknowledged: _nextAck, notApplied: _nextNotApplied, native: _nextNative, ...nextClaim } = next.admission ?? {}
+  if (expected.agentSessionId !== next.agentSessionId || expected.run.runId !== next.run.runId || promptRecordId(expected) !== promptRecordId(next) ||
+      expected.admission?.transport !== 'native' || next.admission?.transport !== 'native' ||
+      !isDeepStrictEqual(originalClaim, nextClaim) ||
+      !isDeepStrictEqual(expected.admission.native.plan, next.admission.native.plan) ||
+      !isDeepStrictEqual(expected.terminalPromptSubmission, next.terminalPromptSubmission)) {
+    throw new AgentMuxError('Native receipt changed its original claim.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+  }
+  if (expected.admission.native.outcome === 'admitted' || expected.admission.native.outcome === 'not-applied') {
+    if (!isDeepStrictEqual(expected, next)) throw new AgentMuxError('The original Native terminal receipt cannot be changed.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+  }
+  parsePromptSubmissionRecord(next)
+}
+
+/** Routine Session writes cannot rebind or restart an already claimed Native key. */
+function assertPromptRecordWrite(original: AgentPromptSubmissionRecord | undefined, next: AgentPromptSubmissionRecord, receipt = false): void {
+  if (!original || isDeepStrictEqual(original, next)) return
+  if (original.admission?.transport !== 'native' && next.admission?.transport !== 'native') return
+  if (!receipt || next.admission?.native?.outcome === 'claimed') throw new AgentMuxError(
+    'The original Native input record can only be changed by its exact receipt owner.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+  assertPromptSettlement(original, next)
 }
 
 function futurePromptPage(entries: Array<{ intentId: string; intent: AgentFuturePromptIntent }>, limit: number): AgentMuxFuturePromptPage {
@@ -1262,8 +1331,73 @@ function terminalPromptSubmission(
   }
 }
 
+export function normalizePromptCompletionAdmission(value: unknown): NonNullable<AgentMuxStoredAgentSession['promptCompletionAdmission']> {
+  const admission = record(value, 'promptCompletionAdmission')
+  const transport = (() => {
+    if (admission.transport === 'native') {
+      if (admission.startByte !== undefined || admission.endByte !== undefined || admission.frameRefresh !== undefined || admission.uncertainTurn !== undefined) {
+        throw new AgentMuxError('Native admission cannot contain PTY input facts.', 'INVALID_AGENT_SESSION_STORE')
+      }
+      const native = record(admission.native, 'native input admission'), plan = nativePromptPlan(native.plan)
+      const intent = promptInputIntent(admission.intent)
+      if (admission.submissionId === undefined || admission.operationId !== admission.submissionId || intent.message === undefined ||
+          !['claimed', 'admitted', 'not-applied', 'unknown'].includes(String(native.outcome)) || JSON.stringify(intent.plan) !== JSON.stringify(plan) ||
+          (native.outcome === 'admitted' ? admission.acknowledged !== true || typeof native.turnId !== 'string' || !native.turnId ||
+            plan.operation !== 'start-or-steer' && native.turnId !== plan.expectedTurnId : admission.acknowledged === true) ||
+          (native.outcome === 'not-applied') !== (admission.notApplied === true)) throw new AgentMuxError('Invalid native admission outcome.', 'INVALID_AGENT_SESSION_STORE')
+      return { transport: 'native' as const, native: { plan, outcome: native.outcome as 'claimed' | 'admitted' | 'not-applied' | 'unknown',
+        ...(native.turnId === undefined ? {} : { turnId: string(native.turnId, 'native admitted turn') }),
+        ...(native.errorCode === undefined ? {} : { errorCode: (() => { if (!Number.isSafeInteger(native.errorCode)) throw new AgentMuxError('Invalid native error code.', 'INVALID_AGENT_SESSION_STORE'); return Number(native.errorCode) })() }) } }
+    }
+    if (admission.transport !== undefined && admission.transport !== 'pty' || admission.native !== undefined ||
+        admission.intent !== undefined && promptInputIntent(admission.intent).plan.kind === 'native-rpc') throw new AgentMuxError('Invalid prompt transport.', 'INVALID_AGENT_SESSION_STORE')
+    const startByte = timestamp(admission.startByte, 'promptCompletionAdmission.startByte')
+    const endByte = positiveInteger(admission.endByte, 'promptCompletionAdmission.endByte')
+    if (endByte <= startByte) throw new AgentMuxError('Invalid prompt input range.', 'INVALID_AGENT_SESSION_STORE')
+    return { ...(admission.transport === 'pty' ? { transport: 'pty' as const } : {}), startByte, endByte }
+  })()
+  return {
+    ...(admission.inputKey === undefined ? {} : { inputKey: validateAgentPromptInputKey(admission.inputKey) }),
+    ...(admission.submissionId === undefined ? {} : { submissionId: string(admission.submissionId, 'promptCompletionAdmission.submissionId') }),
+    ...(admission.completionId === undefined ? {} : { completionId: string(admission.completionId, 'promptCompletionAdmission.completionId') }),
+    ...(admission.outputCursorBytes === undefined ? {} : { outputCursorBytes: timestamp(admission.outputCursorBytes, 'prompt admission output boundary') }),
+    ...(admission.futureIntent === undefined ? {} : { futureIntent: (() => {
+      const future = record(admission.futureIntent, 'future prompt occurrence')
+      return { intentId: string(future.intentId, 'future intent id'), occurrenceAt: timestamp(future.occurrenceAt, 'future occurrence') }
+    })() }),
+    ...(admission.intent === undefined ? {} : { intent: promptInputIntent(admission.intent) }),
+    ...(admission.frameRefresh === undefined ? {} : { frameRefresh: (() => {
+      const refresh = record(admission.frameRefresh, 'prompt native frame refresh')
+      return { ...terminalInputPhase(refresh, 'prompt native frame refresh'),
+        outputCursorBytes: timestamp(refresh.outputCursorBytes, 'refresh output fence'),
+        resizeRevision: timestamp(refresh.resizeRevision, 'refresh geometry revision'),
+        nativeSourceId: string(refresh.nativeSourceId, 'refresh native source') }
+    })() }),
+    ...(admission.uncertainTurn === undefined ? {} : {
+      uncertainTurn: (() => {
+        if (typeof admission.uncertainTurn !== 'boolean') throw new AgentMuxError('Invalid prompt admission turn risk fact.', 'INVALID_AGENT_SESSION_STORE')
+        return admission.uncertainTurn
+      })()
+    }),
+    ...(admission.acknowledged === undefined ? {} : { acknowledged: (() => {
+      if (typeof admission.acknowledged !== 'boolean') throw new AgentMuxError('Invalid prompt acknowledgement.', 'INVALID_AGENT_SESSION_STORE')
+      return admission.acknowledged
+    })() }),
+    ...(admission.notApplied === undefined ? {} : { notApplied: (() => {
+      if (typeof admission.notApplied !== 'boolean') throw new AgentMuxError('Invalid prompt Input disposition.', 'INVALID_AGENT_SESSION_STORE')
+      return admission.notApplied
+    })() }),
+    operationId: string(admission.operationId, 'promptCompletionAdmission.operationId'), ...transport }
+}
+
 function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStoredAgentSession['promptCompletionAdmission']>['intent']> {
   const source = record(value, 'promptCompletionAdmission.intent')
+  const originalRun = runRef(source.run)
+  const admissionIntent = source.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(source.admissionIntent)
+  if (admissionIntent && (admissionIntent.kind === 'manual-actor' ? admissionIntent.expectedRun.runId
+    : admissionIntent.condition.expectedRun.runId) !== originalRun.runId || admissionIntent?.kind === 'manual-actor' && source.execution !== 'immediate') {
+    throw new AgentMuxError('Frozen admission intent changed its original Run or execution.', 'INVALID_AGENT_SESSION_STORE')
+  }
   const plan = record(source.plan, 'promptCompletionAdmission.intent.plan')
   const bytes = (value: unknown): string => {
     if (typeof value !== 'string' || !value.length || Buffer.byteLength(value) > MAX_STORED_TEXT_BYTES) {
@@ -1283,8 +1417,9 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
   }
   else if (plan.kind === 'native-rpc') input = nativePromptPlan(plan)
   else throw new AgentMuxError('Frozen prompt input plan is invalid.', 'INVALID_AGENT_SESSION_STORE')
-  return { run: runRef(source.run), ownerInstanceId: string(source.ownerInstanceId, 'promptCompletionAdmission.intent.ownerInstanceId'),
+  return { run: originalRun, ownerInstanceId: string(source.ownerInstanceId, 'promptCompletionAdmission.intent.ownerInstanceId'),
     prompt: bytes(source.prompt), plan: input,
+    ...(admissionIntent === undefined ? {} : { admissionIntent }),
     ...(source.execution === undefined ? {} : { execution: (() => {
       if (source.execution !== 'default' && source.execution !== 'immediate') {
         throw new AgentMuxError('Prompt execution intent is invalid.', 'INVALID_AGENT_SESSION_STORE')
@@ -1417,63 +1552,7 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
             currentRun
           )
         }),
-    ...(source.promptCompletionAdmission === undefined ? {} : { promptCompletionAdmission: (() => {
-      const admission = record(source.promptCompletionAdmission, 'promptCompletionAdmission')
-      const transport = (() => {
-        if (admission.transport === 'native') {
-          if (admission.startByte !== undefined || admission.endByte !== undefined || admission.frameRefresh !== undefined || admission.uncertainTurn !== undefined) {
-            throw new AgentMuxError('Native admission cannot contain PTY input facts.', 'INVALID_AGENT_SESSION_STORE')
-          }
-          const native = record(admission.native, 'native input admission'), plan = nativePromptPlan(native.plan)
-          const intent = promptInputIntent(admission.intent)
-          if (admission.submissionId === undefined || admission.operationId !== admission.submissionId || intent.message === undefined ||
-              !['claimed', 'admitted', 'not-applied', 'unknown'].includes(String(native.outcome)) || JSON.stringify(intent.plan) !== JSON.stringify(plan) ||
-              (native.outcome === 'admitted' ? admission.acknowledged !== true || typeof native.turnId !== 'string' || !native.turnId ||
-                plan.operation !== 'start-or-steer' && native.turnId !== plan.expectedTurnId : admission.acknowledged === true) ||
-              (native.outcome === 'not-applied') !== (admission.notApplied === true)) throw new AgentMuxError('Invalid native admission outcome.', 'INVALID_AGENT_SESSION_STORE')
-          return { transport: 'native' as const, native: { plan, outcome: native.outcome as 'claimed' | 'admitted' | 'not-applied' | 'unknown',
-            ...(native.turnId === undefined ? {} : { turnId: string(native.turnId, 'native admitted turn') }),
-            ...(native.errorCode === undefined ? {} : { errorCode: (() => { if (!Number.isSafeInteger(native.errorCode)) throw new AgentMuxError('Invalid native error code.', 'INVALID_AGENT_SESSION_STORE'); return Number(native.errorCode) })() }) } }
-        }
-        if (admission.transport !== undefined && admission.transport !== 'pty' || admission.native !== undefined ||
-            admission.intent !== undefined && promptInputIntent(admission.intent).plan.kind === 'native-rpc') throw new AgentMuxError('Invalid prompt transport.', 'INVALID_AGENT_SESSION_STORE')
-        const startByte = timestamp(admission.startByte, 'promptCompletionAdmission.startByte')
-        const endByte = positiveInteger(admission.endByte, 'promptCompletionAdmission.endByte')
-        if (endByte <= startByte) throw new AgentMuxError('Invalid prompt input range.', 'INVALID_AGENT_SESSION_STORE')
-        return { ...(admission.transport === 'pty' ? { transport: 'pty' as const } : {}), startByte, endByte }
-      })()
-      return {
-        ...(admission.submissionId === undefined ? {} : { submissionId: string(admission.submissionId, 'promptCompletionAdmission.submissionId') }),
-        ...(admission.completionId === undefined ? {} : { completionId: string(admission.completionId, 'promptCompletionAdmission.completionId') }),
-        ...(admission.outputCursorBytes === undefined ? {} : { outputCursorBytes: timestamp(admission.outputCursorBytes, 'prompt admission output boundary') }),
-        ...(admission.futureIntent === undefined ? {} : { futureIntent: (() => {
-          const future = record(admission.futureIntent, 'future prompt occurrence')
-          return { intentId: string(future.intentId, 'future intent id'), occurrenceAt: timestamp(future.occurrenceAt, 'future occurrence') }
-        })() }),
-        ...(admission.intent === undefined ? {} : { intent: promptInputIntent(admission.intent) }),
-        ...(admission.frameRefresh === undefined ? {} : { frameRefresh: (() => {
-          const refresh = record(admission.frameRefresh, 'prompt native frame refresh')
-          return { ...terminalInputPhase(refresh, 'prompt native frame refresh'),
-            outputCursorBytes: timestamp(refresh.outputCursorBytes, 'refresh output fence'),
-            resizeRevision: timestamp(refresh.resizeRevision, 'refresh geometry revision'),
-            nativeSourceId: string(refresh.nativeSourceId, 'refresh native source') }
-        })() }),
-        ...(admission.uncertainTurn === undefined ? {} : {
-          uncertainTurn: (() => {
-            if (typeof admission.uncertainTurn !== 'boolean') throw new AgentMuxError('Invalid prompt admission turn risk fact.', 'INVALID_AGENT_SESSION_STORE')
-            return admission.uncertainTurn
-          })()
-        }),
-        ...(admission.acknowledged === undefined ? {} : { acknowledged: (() => {
-          if (typeof admission.acknowledged !== 'boolean') throw new AgentMuxError('Invalid prompt acknowledgement.', 'INVALID_AGENT_SESSION_STORE')
-          return admission.acknowledged
-        })() }),
-        ...(admission.notApplied === undefined ? {} : { notApplied: (() => {
-          if (typeof admission.notApplied !== 'boolean') throw new AgentMuxError('Invalid prompt Input disposition.', 'INVALID_AGENT_SESSION_STORE')
-          return admission.notApplied
-        })() }),
-        operationId: string(admission.operationId, 'promptCompletionAdmission.operationId'), ...transport }
-    })() }),
+    ...(source.promptCompletionAdmission === undefined ? {} : { promptCompletionAdmission: normalizePromptCompletionAdmission(source.promptCompletionAdmission) }),
     ...(source.futurePromptIntents === undefined ? {} : { futurePromptIntents: (() => {
       const intents = record(source.futurePromptIntents, 'future prompt intents')
       return Object.fromEntries(Object.entries(intents).map(([id, value]) => {
@@ -1537,6 +1616,12 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
     })() }),
     ...(source.hookReceipt === undefined ? {} : { hookReceipt: hookReceipt(source.hookReceipt) }),
     ...(source.turnUsage === undefined ? {} : { turnUsage: turnUsage(source.turnUsage) })
+  }
+  const inputKey = session.promptCompletionAdmission?.inputKey
+  if (inputKey && (inputKey.agentSessionId !== session.agentSessionId ||
+      (inputKey.kind === 'prompt' ? inputKey.submissionId : inputKey.messageId) !== session.promptCompletionAdmission!.submissionId ||
+      inputKey.expectedRun.runId !== session.promptCompletionAdmission!.intent?.run.runId)) {
+    throw new AgentMuxError('Stored input identity changed its original claim.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (session.terminalPromptReadiness?.source === 'native-stop' &&
     session.terminalPromptReadiness.observedAt !== undefined && session.terminalPromptReadiness.observedAt > session.updatedAt) {
@@ -2017,10 +2102,49 @@ function assertLifecycleCommit(
 export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStore {
   private readonly promptSubmissions = new Set<string>()
   private readonly sessions = new Map<string, AgentMuxStoredAgentSession>()
+  private readonly promptAdmissions = new Map<string, AgentPromptSubmissionRecord>()
   private readonly reservations = new Map<string, AgentMuxLifecycleReservation>()
   private retiredRuns: AgentMuxRunRef[] = []
   private retiredAgentSessions: AgentMuxRetiredAgentSession[] = []
   private readonly timelines = new Map<string, AgentTimelineSnapshot>()
+
+  private promptRecordKey(value: AgentPromptSubmissionRecord): string {
+    return JSON.stringify([value.agentSessionId, value.run.runId, promptRecordId(value)])
+  }
+  /** All metadata, complete and lifecycle writes pass here before moving/removing latest. */
+  private setSession(id: string, next: AgentMuxStoredAgentSession | null): void {
+    const originals = [...promptAdmissionRecords(this.sessions.get(id)), ...promptAdmissionRecords(next)]
+    const writes = new Map<string, AgentPromptSubmissionRecord>()
+    for (const value of originals) {
+      const key = this.promptRecordKey(value)
+      assertPromptRecordWrite(writes.get(key) ?? this.promptAdmissions.get(key), value)
+      writes.set(key, value)
+    }
+    for (const [key, value] of writes) this.promptAdmissions.set(key, value)
+    if (next) this.sessions.set(id, next)
+    else this.sessions.delete(id)
+  }
+
+  async readPromptAdmission(agentSessionId: string, run: AgentMuxRunRef, submissionId: string): Promise<AgentPromptSubmissionRecord | null> {
+    const originals = ['submission', 'original-slot'].flatMap(kind => {
+      const value = this.promptAdmissions.get(JSON.stringify([agentSessionId, run.runId, JSON.stringify([kind, submissionId])]))
+      return value ? [value] : []
+    })
+    if (originals.length > 1) throw new AgentMuxError('The original input location is ambiguous.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    return structuredClone(originals[0] ?? null)
+  }
+
+  async settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted(); assertPromptRecordWrite(expected, next, true); assertPromptSettlement(expected, next)
+    const key = this.promptRecordKey(expected), current = this.promptAdmissions.get(key)
+    if (!isDeepStrictEqual(current, expected)) throw new AgentMuxError('The original Native receipt changed.', 'STALE_AGENT_SESSION')
+    const latest = this.sessions.get(expected.agentSessionId), projected = promptAdmissionRecord(latest)
+    this.promptAdmissions.set(key, structuredClone(next))
+    if (latest && projected && this.promptRecordKey(projected) === key) {
+      this.sessions.set(latest.agentSessionId, { ...latest, promptCompletionAdmission: structuredClone(next.admission!),
+        updatedAt: Math.max(latest.updatedAt, Date.now()) })
+    }
+  }
 
   async withPromptSubmission<T>(agentSessionId: string, operation: () => Promise<T>): Promise<T> {
     string(agentSessionId, 'agentSessionId')
@@ -2086,11 +2210,12 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     if (future && !isDeepStrictEqual(current?.futurePromptIntents?.[future.intentId] ?? null, future.expected)) throw new AgentMuxError('The exact future intent changed before admission.', 'AGENT_FUTURE_INTENT_CHANGED')
     const reservation = this.reservations.get(id)
     if (reservation && (!next || !expected || next.run.runId !== expected.run.runId)) throw new AgentMuxError('Agent Session has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
-    if (!next) { this.sessions.delete(id); this.timelines.delete(id); return }
+    if (!next) { this.setSession(id, null); this.timelines.delete(id); return }
     const normalized = normalizeStoredAgentSession(agentSessionMetadata(next))
     const values = [...this.sessions.values()].filter(session => session.agentSessionId !== id).map(agentSessionMetadata)
     const all = normalizeAgentSessions([...values, normalized])
     assertUnboundRetiredRuns(all, this.retiredRuns); assertRetiredAgentSessions(all, this.retiredRuns, this.retiredAgentSessions)
+    for (const original of promptAdmissionRecords(normalized)) assertPromptRecordWrite(this.promptAdmissions.get(this.promptRecordKey(original)), original)
     let intents = current?.futurePromptIntents
     if (future) {
       string(future.intentId, 'future intent id')
@@ -2102,7 +2227,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       if (future.next === null) delete intents[future.intentId]
       else intents[future.intentId] = value!
     }
-    this.sessions.set(id, { ...normalized, ...(intents === undefined ? {} : { futurePromptIntents: intents }) })
+    this.setSession(id, { ...normalized, ...(intents === undefined ? {} : { futurePromptIntents: intents }) })
   }
 
   async loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]> {
@@ -2153,9 +2278,9 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       const sessions = normalizeAgentSessions([...values, normalized])
       assertUnboundRetiredRuns(sessions, this.retiredRuns)
       assertRetiredAgentSessions(sessions, this.retiredRuns, this.retiredAgentSessions)
-      this.sessions.set(agentSessionId, structuredClone(normalized))
+      this.setSession(agentSessionId, structuredClone(normalized))
     } else {
-      this.sessions.delete(agentSessionId)
+      this.setSession(agentSessionId, null)
       this.timelines.delete(agentSessionId)
     }
   }
@@ -2309,9 +2434,9 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     assertRetiredAgentSessions(sessions, retiredRuns, retiredAgentSessions)
     if (normalized) {
       if (reservation.kind === 'create') this.timelines.delete(normalized.agentSessionId)
-      this.sessions.set(normalized.agentSessionId, structuredClone(normalized))
+      this.setSession(normalized.agentSessionId, structuredClone(normalized))
     } else {
-      this.sessions.delete(reservation.agentSessionId)
+      this.setSession(reservation.agentSessionId, null)
     }
     this.retiredRuns = retiredRuns
     this.retiredAgentSessions = retiredAgentSessions
@@ -2577,6 +2702,48 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         const value = document.sessions.find(session => session.agentSessionId === agentSessionId)
         return value ? agentSessionMetadata(value) : null
       })
+  }
+
+  private promptAdmission(db: DatabaseSync, agentSessionId: string, run: AgentMuxRunRef, submissionId: string): AgentPromptSubmissionRecord | null {
+    if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='prompt_admissions'").get()) {
+      const rows = db.prepare('SELECT record_id,json FROM prompt_admissions WHERE session_id=? AND run_id=? AND record_id IN (?, ?)')
+        .all(agentSessionId, run.runId, JSON.stringify(['submission', submissionId]), JSON.stringify(['original-slot', submissionId]))
+      if (rows.length > 1) throw new AgentMuxError('The original input location is ambiguous.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      if (rows[0]) {
+        const original = parsePromptSubmissionRecord(JSON.parse(String(rows[0].json)))
+        if (original.agentSessionId !== agentSessionId || original.run.runId !== run.runId || promptRecordId(original) !== rows[0].record_id) throw new AgentMuxError(
+          'The original input object does not match its stored location.', 'INVALID_AGENT_SESSION_STORE')
+        return original
+      }
+    }
+    // An old database may still have only its original latest slot. Reading that
+    // object does not backfill a producer, input key, generation or receipt.
+    return promptAdmissionRecords(this.sessionMetadata(db, agentSessionId)).find(original => original.run.runId === run.runId &&
+      [JSON.stringify(['submission', submissionId]), JSON.stringify(['original-slot', submissionId])].includes(promptRecordId(original))) ?? null
+  }
+
+  async readPromptAdmission(agentSessionId: string, run: AgentMuxRunRef, submissionId: string): Promise<AgentPromptSubmissionRecord | null> {
+    await this.tail
+    return await this.withReadDatabase(db => this.promptAdmission(db, agentSessionId, run, submissionId), document => {
+      return promptAdmissionRecords(document.sessions.find(s => s.agentSessionId === agentSessionId)).find(original => original.run.runId === run.runId &&
+        [JSON.stringify(['submission', submissionId]), JSON.stringify(['original-slot', submissionId])].includes(promptRecordId(original))) ?? null
+    })
+  }
+
+  async settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void> {
+    assertPromptRecordWrite(expected, next, true); assertPromptSettlement(expected, next)
+    await this.enqueue(async () => {
+      const id = expected.admission!.submissionId!
+      const original = this.promptAdmission(this.db, expected.agentSessionId, expected.run, id)
+      if (!isDeepStrictEqual(original, expected)) throw new AgentMuxError('The original Native receipt changed.', 'STALE_AGENT_SESSION')
+      const latest = this.sessionMetadata(this.db, expected.agentSessionId), projected = promptAdmissionRecord(latest)
+      if (latest && projected && projected.run.runId === expected.run.runId && promptRecordId(projected) === promptRecordId(expected)) {
+        this.saveSession(this.db, { ...latest, promptCompletionAdmission: structuredClone(next.admission!),
+          updatedAt: Math.max(latest.updatedAt, Date.now()) }, false, true)
+      }
+      this.savePromptAdmission(this.db, next, true)
+      this.dirty = true
+    }, signal)
   }
 
   async readHistorySource(agentSessionId: string): Promise<AgentSessionHistoryDescriptor | null> {
@@ -3042,13 +3209,26 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       .run(id, change.intentId, ordinal, JSON.stringify(intent))
     db.prepare('UPDATE sessions SET future_present=1 WHERE id=?').run(id)
   }
+  private savePromptAdmission(db: DatabaseSync, value: AgentPromptSubmissionRecord, receipt = false): void {
+    const row = db.prepare('SELECT json FROM prompt_admissions WHERE session_id=? AND run_id=? AND record_id=?')
+      .get(value.agentSessionId, value.run.runId, promptRecordId(value))
+    assertPromptRecordWrite(row ? JSON.parse(String(row.json)) as AgentPromptSubmissionRecord : undefined, value, receipt)
+    db.prepare('INSERT INTO prompt_admissions VALUES (?, ?, ?, ?) ON CONFLICT(session_id,run_id,record_id) DO UPDATE SET json=excluded.json')
+      .run(value.agentSessionId, value.run.runId, promptRecordId(value), JSON.stringify(value))
+  }
+  private preservePromptAdmission(db: DatabaseSync, id: string): void {
+    const row = db.prepare('SELECT json FROM sessions WHERE id=?').get(id)
+    // Keep original stored fields before any normalization of the replacement.
+    for (const original of row ? promptAdmissionRecords(JSON.parse(String(row.json)) as AgentMuxStoredAgentSession) : []) this.savePromptAdmission(db, original)
+  }
   private deleteSession(db: DatabaseSync, id: string): void {
+    this.preservePromptAdmission(db, id)
     db.prepare('DELETE FROM sessions WHERE id=?').run(id)
     db.prepare('DELETE FROM future_intents WHERE session_id=?').run(id)
     db.prepare('DELETE FROM run_bindings WHERE session_id=?').run(id)
     db.prepare('DELETE FROM native_bindings WHERE session_id=?').run(id)
   }
-  private saveSession(db: DatabaseSync, session: AgentMuxStoredAgentSession, replaceFuture: boolean): void {
+  private saveSession(db: DatabaseSync, session: AgentMuxStoredAgentSession, replaceFuture: boolean, receipt = false): void {
     const id = session.agentSessionId, metadata = agentSessionMetadata(session)
     const retired = db.prepare('SELECT 1 FROM retired_sessions WHERE id=?').get(id)
     if (retired) throw new AgentMuxError('Retired Agent Session conflicts with current identity.', 'INVALID_AGENT_SESSION_STORE')
@@ -3063,6 +3243,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     }
     const present = replaceFuture || session.futurePromptIntents !== undefined ? Number(session.futurePromptIntents !== undefined)
       : Number(db.prepare('SELECT future_present FROM sessions WHERE id=?').get(id)?.future_present ?? 0)
+    this.preservePromptAdmission(db, id)
+    for (const original of promptAdmissionRecords(session)) this.savePromptAdmission(db, original, receipt)
     db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET json=excluded.json,future_present=excluded.future_present,creation_operation=excluded.creation_operation')
       .run(id, JSON.stringify(metadata), present, session.creation?.createOperationId ?? null)
     db.prepare('DELETE FROM run_bindings WHERE session_id=?').run(id)
@@ -3445,6 +3627,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         this.database = await openSessionDatabase(this.path, (db, raw) => this.writeDocument(db, this.strictOriginalDocument(raw)))
         this.dirty = false
         stage = 'begin'; this.db.exec('BEGIN IMMEDIATE')
+        // Existing validated databases acquire the same owner's internal table
+        // in this transaction; absence never means an old input was unapplied.
+        if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='prompt_admissions'").get()) {
+          this.db.exec(promptAdmissionSchema); this.dirty = true
+        }
         stage = 'mutation'
         await operation()
         signal?.throwIfAborted()

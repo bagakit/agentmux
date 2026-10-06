@@ -13,8 +13,9 @@ import {
   type CtxmuxAdapterRun
 } from './ctxmux-run-adapter.js'
 import { AgentMuxError, agentMuxCancellationError } from './errors.js'
-import { agentPromptNotApplied, type AgentPromptCondition } from './agent-prompt-condition.js'
+import { agentPromptNotApplied, type AgentPromptAdmissionIntent, type AgentPromptInputKey, type AgentPromptCondition } from './agent-prompt-condition.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
+import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
 import type {
   AgentMuxAgentSession,
   AgentMuxRunRef,
@@ -275,48 +276,91 @@ export class AgentPromptSubmissionCoordinator {
   }
 
   async submitNativeInputPlan(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, submissionId: string, prompt: string,
-    condition: AgentPromptCondition, message: AgentPromptMessageContent, execution: AgentPromptExecution,
+    admissionIntent: AgentPromptAdmissionIntent, message: AgentPromptMessageContent, execution: AgentPromptExecution,
     prepared: AgentProviderNativePromptInput | undefined, signal?: AbortSignal,
-    assertSession?: (session: AgentMuxAgentSession) => void, authority?: AgentPromptInputAuthority): Promise<AgentPromptMessageContent> {
+    assertSession?: (session: AgentMuxAgentSession) => void, authority?: AgentPromptInputAuthority, inputKey?: AgentPromptInputKey): Promise<AgentPromptMessageContent> {
     return await this.deps.store.withPromptSubmission(session.agentSessionId, async () => {
+      const expectedRun = admissionIntent.kind === 'exact-condition' ? admissionIntent.condition.expectedRun : admissionIntent.expectedRun
       const current = await this.deps.registry.refresh(session.agentSessionId, session.run)
       const currentRun = await this.deps.kernel.status(run.runId)
       this.deps.assertAgentRun(current, currentRun)
       assertSession?.(current)
-      if (!sameRun(current.run, condition.expectedRun)) throw new AgentMuxError('The original Native Run changed.', 'STALE_AGENT_SESSION')
+      if (!sameRun(current.run, expectedRun)) throw new AgentMuxError('The original Native Run changed.', 'STALE_AGENT_SESSION')
       if (currentRun.state.type !== 'running') throw new AgentMuxError('The original Agent Run is not running.', 'AGENT_RUN_NOT_RUNNING')
-      const previous = current.promptCompletionAdmission
-      if (previous?.submissionId === submissionId) {
-        if (previous.intent?.prompt !== prompt || !sameRun(previous.intent.run, current.run) ||
-            promptMessageIdentity(previous.intent.message) !== promptMessageIdentity(message) || (previous.intent.execution ?? 'default') !== execution) {
+      const original = await this.deps.store.readPromptAdmission(current.agentSessionId, expectedRun, submissionId)
+      if (original) {
+        const admission = original.admission
+        if (!admission?.intent || !admission.submissionId || !admission.intent.admissionIntent && admissionIntent.kind === 'manual-actor') throw new AgentMuxError('The original input identity or admission intent is unconfirmed. Its fields are preserved and it will not be replayed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+        if (admission.intent.prompt !== prompt || !sameRun(admission.intent.run, expectedRun) ||
+            promptMessageIdentity(admission.intent.message) !== promptMessageIdentity(message) || (admission.intent.execution ?? 'default') !== execution ||
+            admission.inputKey && !isDeepStrictEqual(admission.inputKey, inputKey) ||
+            admission.intent.admissionIntent && !isDeepStrictEqual(admission.intent.admissionIntent, admissionIntent)) {
           throw new AgentMuxError('Native prompt operation conflicts with its original intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
         }
-        if (previous.transport === 'native' && previous.native?.outcome === 'admitted' && previous.acknowledged) return structuredClone(previous.intent.message!)
-        if (agentPromptNotApplied(current)) throw new AgentMuxError('Core confirmed the original whole message was not applied. Use a new explicit operation to send a replacement.', 'AGENT_PROMPT_INPUT_NOT_APPLIED', 'not_applied')
+        if (admission.transport === 'native' && admission.native.outcome === 'admitted' && admission.acknowledged) return structuredClone(admission.intent.message!)
+        if (admission.transport === 'native' && admission.native.outcome === 'not-applied' && admission.notApplied) throw new AgentMuxError('Core confirmed the original whole message was not applied. Use a new explicit operation to send a replacement.', 'AGENT_PROMPT_INPUT_NOT_APPLIED', 'not_applied')
         throw new AgentMuxError('The original input admission is unknown. Its message and Run are retained; this operation will not be replayed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
       }
-      if ((previous === undefined ? null : previous.submissionId) !== condition.afterSubmissionId) throw new AgentMuxError('The original prompt condition changed.', 'AGENT_PROMPT_CONDITION_CHANGED')
-      if (previous && !previous.acknowledged && !agentPromptNotApplied(current)) throw new AgentMuxError('An earlier input admission is unknown. No later Native input was dispatched.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+      if (prepared?.plan.operation !== 'start-or-steer') throw new AgentMuxError(
+        'The Provider did not qualify an atomic manual input plan. Original historical plans and the terminal remain available.', 'AGENT_NATIVE_INPUT_UNCONFIRMED')
+      const assertPredecessor = (stored: AgentMuxAgentSession): void => {
+        const prior = stored.promptCompletionAdmission
+        if (stored.terminalPromptSubmission && !stored.terminalPromptSubmission.submit.acknowledged ||
+            admissionIntent.kind === 'manual-actor' && prior && prior.transport !== 'native') throw new AgentMuxError(
+          'The original terminal input remains on another input surface. Its facts and Raw are kept; independent manual Native admission is unconfirmed.', 'AGENT_PROMPT_TRANSPORT_UNCONFIRMED')
+        if (admissionIntent.kind === 'exact-condition') {
+          if ((prior === undefined ? null : prior.submissionId) !== admissionIntent.condition.afterSubmissionId) throw new AgentMuxError('The original prompt condition changed.', 'AGENT_PROMPT_CONDITION_CHANGED')
+          if (prior && !prior.acknowledged && !agentPromptNotApplied(stored)) throw new AgentMuxError('An earlier input admission is unknown. No later conditional Native input was dispatched.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+        } else if (prior) {
+          const originalPlan = prior.native!.plan, freshPlan = prepared?.plan
+          const confirmation = stored.nativeConfirmation, binding = stored.nativeBinding
+          // Explicit confirmation preserves the old admission while binding this
+          // same Run to a witnessed conversation. A fresh Provider plan may use
+          // that confirmed source; the old key still joins its original record.
+          const confirmedSource = confirmation && prior.submissionId !== undefined && confirmation.previousPromptSubmissionId === prior.submissionId &&
+            sameRun(confirmation.run, expectedRun) && binding?.source === 'user-confirmed' &&
+            sameRun(binding.run, expectedRun) &&
+            isDeepStrictEqual(confirmation.nativeHandle, stored.nativeHandle)
+          if (!freshPlan || freshPlan.operation !== 'start-or-steer' || !confirmedSource && (
+              originalPlan.protocolId !== freshPlan.protocolId || originalPlan.actorId !== freshPlan.actorId ||
+              originalPlan.sourceId !== freshPlan.sourceId || originalPlan.threadId !== freshPlan.threadId)) {
+            throw new AgentMuxError('Independent Native input on the original actor is unconfirmed. The original input and Raw are kept.', 'AGENT_PROMPT_SOURCE_CHANGED')
+          }
+        }
+      }
+      assertPredecessor(current)
       if (current.nativeSourceObservation?.state === 'changed' || promptBelongsToPreviousNativeSource(current, submissionId)) {
         throw new AgentMuxError('The original Native conversation changed. Its message and healthy terminal remain available.', 'AGENT_PROMPT_SOURCE_CHANGED')
       }
       const nativeHandleIdentity = JSON.stringify(current.nativeHandle ?? null)
+      // Hook observations may refresh observedAt on the same binding. Input
+      // authority follows its original source and Run, not that observation time.
+      const bindingIdentity = (binding: AgentMuxAgentSession['nativeBinding']): string =>
+        JSON.stringify(binding ? { source: binding.source, run: binding.run } : null)
+      const nativeBindingIdentity = bindingIdentity(current.nativeBinding)
       const sourceObservationIdentity = JSON.stringify(current.nativeSourceObservation ?? null)
       const assertScope = (stored: AgentMuxAgentSession, observedRun: CtxmuxAdapterRun): void => {
         this.deps.assertAgentRun(stored, observedRun)
         assertSession?.(stored)
         signal?.throwIfAborted()
-        if (!sameRun(stored.run, condition.expectedRun) || observedRun.state.type !== 'running' || observedRun.pid !== currentRun.pid) {
+        if (!sameRun(stored.run, expectedRun) || observedRun.state.type !== 'running' || observedRun.pid !== currentRun.pid) {
           throw new AgentMuxError('The original Native Run changed before dispatch.', 'STALE_AGENT_SESSION')
         }
-        if (stored.pendingInteraction) throw new AgentMuxError('Answer the original pending interaction before sending a message.', 'AGENT_INTERACTION_PENDING')
+        if (stored.pendingInteraction) {
+          const active = agentInteractionActiveRequest(stored.pendingInteraction)
+          throw new AgentMuxError(active ? 'Answer the original pending interaction before sending a message.'
+            : agentInteractionResponseUnavailableReason(stored.pendingInteraction) ?? 'The original interaction input remains unconfirmed.',
+            active ? 'AGENT_INTERACTION_PENDING' : 'AGENT_INTERACTION_UNCONFIRMED')
+        }
         if (stored.nativeSourceObservation?.state === 'changed' || promptBelongsToPreviousNativeSource(stored, submissionId) ||
             JSON.stringify(stored.nativeSourceObservation ?? null) !== sourceObservationIdentity) {
           throw new AgentMuxError('The original Native source observation changed before dispatch.', 'AGENT_PROMPT_SOURCE_CHANGED')
         }
-        if (JSON.stringify(stored.nativeHandle ?? null) !== nativeHandleIdentity) throw new AgentMuxError('The original Native input environment changed.', 'AGENT_NATIVE_INPUT_UNCONFIRMED')
+        if (JSON.stringify(stored.nativeHandle ?? null) !== nativeHandleIdentity ||
+            bindingIdentity(stored.nativeBinding) !== nativeBindingIdentity) throw new AgentMuxError('The original Native input environment changed.', 'AGENT_NATIVE_INPUT_UNCONFIRMED')
       }
-      if (!prepared || nativeHandleIdentity !== JSON.stringify(session.nativeHandle ?? null)) throw new AgentMuxError('The original Native input environment changed.', 'AGENT_NATIVE_INPUT_UNCONFIRMED')
+      if (!prepared || nativeHandleIdentity !== JSON.stringify(session.nativeHandle ?? null) ||
+          nativeBindingIdentity !== bindingIdentity(session.nativeBinding)) throw new AgentMuxError('The original Native input environment changed.', 'AGENT_NATIVE_INPUT_UNCONFIRMED')
       assertScope(current, currentRun)
       await authority?.assertCurrent()
       await prepared.assertCurrent(signal ?? AbortSignal.timeout(8_000))
@@ -324,13 +368,15 @@ export class AgentPromptSubmissionCoordinator {
       const plan = prepared.plan
       await this.deps.updateExactAgentSession(current.agentSessionId, current.run, stored => {
         assertScope(stored, currentRun)
-        if ((stored.promptCompletionAdmission === undefined ? null : stored.promptCompletionAdmission.submissionId) !== condition.afterSubmissionId) throw new AgentMuxError('The original Native input claim changed.', 'STALE_AGENT_SESSION')
+        assertPredecessor(stored)
         const next = { ...invalidateAgentIdleEvidence(stored), promptCompletionAdmission: {
-          transport: 'native' as const, submissionId, operationId: submissionId,
+          transport: 'native' as const, submissionId, operationId: submissionId, ...(inputKey ? { inputKey: structuredClone(inputKey) } : {}),
           native: { plan, outcome: 'claimed' as const },
-          intent: { run: { ...current.run }, ownerInstanceId, prompt, plan, execution, message: structuredClone(message) }
+          intent: { run: { ...current.run }, ownerInstanceId, prompt, plan, execution, admissionIntent: structuredClone(admissionIntent), message: structuredClone(message) }
         }, updatedAt: Math.max(stored.updatedAt, Date.now()) }
-        delete next.terminalPromptSubmission
+        // The existing exact-condition contract may replace a fully acknowledged
+        // terminal projection; the Store preserves its whole original record first.
+        if (stored.terminalPromptSubmission?.submit.acknowledged) delete next.terminalPromptSubmission
         return next
       }, undefined, authority?.binding)
       let dispatched = false
@@ -360,23 +406,21 @@ export class AgentPromptSubmissionCoordinator {
         dispatched = true
         receipt = await prepared.dispatch(prompt, submissionId, signal)
       } catch (error) {
-        await this.deps.updateExactAgentSession(current.agentSessionId, current.run, stored => {
-          const admission = stored.promptCompletionAdmission
-          if (admission?.transport !== 'native' || admission.submissionId !== submissionId || !admission.native) throw new AgentMuxError('Native admission changed before settlement.', 'STALE_AGENT_SESSION')
-          return { ...stored, promptCompletionAdmission: { ...admission, notApplied: !dispatched,
-            native: { ...admission.native, outcome: dispatched ? 'unknown' as const : 'not-applied' as const } }, updatedAt: Math.max(stored.updatedAt, Date.now()) }
-        })
+        const claimed = await this.deps.store.readPromptAdmission(current.agentSessionId, expectedRun, submissionId)
+        if (claimed?.admission?.transport !== 'native' || !isDeepStrictEqual(claimed.admission.native.plan, plan)) throw new AgentMuxError('The original Native claim is unconfirmed during settlement.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+        await this.deps.store.settlePromptAdmission(claimed, { ...claimed, admission: { ...claimed.admission, notApplied: !dispatched,
+          native: { ...claimed.admission.native, outcome: dispatched ? 'unknown' as const : 'not-applied' as const } } })
+        await this.deps.registry.refresh(current.agentSessionId, expectedRun)
         const reported = new AgentMuxError(dispatched ? 'Native admission is unknown. The original operation and Agent are retained; this message will not be replayed.' : 'The original Native association changed before dispatch. The message and Agent are retained.',
           dispatched ? 'AGENT_PROMPT_INPUT_UNCONFIRMED' : 'AGENT_NATIVE_INPUT_UNCONFIRMED', promptFailureCauseDetail(error))
         Object.defineProperty(reported, 'cause', { value: error })
         throw reported
       }
-      await this.deps.updateExactAgentSession(current.agentSessionId, current.run, stored => {
-        const admission = stored.promptCompletionAdmission
-        if (admission?.transport !== 'native' || admission.submissionId !== submissionId || !admission.native) throw new AgentMuxError('Native admission changed before receipt.', 'STALE_AGENT_SESSION')
-        return { ...stored, promptCompletionAdmission: { ...admission, acknowledged: receipt.outcome === 'admitted', notApplied: receipt.outcome === 'not-applied',
-          native: { plan, ...receipt } }, updatedAt: Math.max(stored.updatedAt, Date.now()) }
-      })
+      const claimed = await this.deps.store.readPromptAdmission(current.agentSessionId, expectedRun, submissionId)
+      if (claimed?.admission?.transport !== 'native' || !isDeepStrictEqual(claimed.admission.native.plan, plan)) throw new AgentMuxError('The original Native claim is unconfirmed at receipt.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+      await this.deps.store.settlePromptAdmission(claimed, { ...claimed, admission: { ...claimed.admission,
+        acknowledged: receipt.outcome === 'admitted', notApplied: receipt.outcome === 'not-applied', native: { plan, ...receipt } } })
+      await this.deps.registry.refresh(current.agentSessionId, expectedRun)
       if (receipt.outcome !== 'admitted') throw new AgentMuxError(receipt.outcome === 'not-applied' ? 'The original Native actor rejected this whole input before queueing. The message and Agent are retained.' : 'Native admission is unknown. The original operation is retained and will not be replayed.',
         receipt.outcome === 'not-applied' ? 'AGENT_PROMPT_INPUT_NOT_APPLIED' : 'AGENT_PROMPT_INPUT_UNCONFIRMED', receipt.outcome)
       return structuredClone(message)
