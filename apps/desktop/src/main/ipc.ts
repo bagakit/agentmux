@@ -1,3 +1,5 @@
+import { createDesktopConnections } from './connector-host.js'
+import { registerConnectorIpc } from './connector-ipc.js'
 import { GoalStartResponsibilityOwner } from './goal-start-responsibility.js'
 import { parseGoalDelegationParams, parseGoalDelegationResult, type GoalDelegationParamsMap } from '@agentmux/core/goal-delegation'
 import { GoalDelegationAttentionOwner } from './goal-delegation-attention.js'
@@ -87,6 +89,7 @@ import {
   ipcMain,
   nativeImage,
   nativeTheme,
+  safeStorage,
   shell,
   type BrowserWindow,
   type IpcMainEvent,
@@ -1926,7 +1929,10 @@ export async function registerIpc(args: {
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(args.window.webContents)
   const rpcHttp = agentMuxRpcHttpOptions()
+  const connectorServices = await createDesktopConnections({ directory: join(homedir(), '.agentmux', 'connectors'), encryption: safeStorage })
+  registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), secrets: connectorServices.secrets })
   const control = new AgentMuxControlServer({
+    connections: connectorServices.connections,
     deliveryAttempts,
     moteContext: moteContextEvidencePort(deliveryAttempts.hostId, request => executeControl(request)),
     execute: executeControl,
@@ -2007,6 +2013,7 @@ export async function registerIpc(args: {
       { owner: 'progress-changes', dispose: () => disposeProgressChanges() },
       { owner: 'control-bridge', dispose: () => controlBridge.dispose() },
       { owner: 'control-server', dispose: () => control.stop() },
+      { owner: 'connections', dispose: () => connectorServices.close() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },
       { owner: 'search-reads', dispose: () => searchReads.dispose() },

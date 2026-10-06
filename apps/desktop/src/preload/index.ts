@@ -158,6 +158,11 @@ const api: AgentMuxPreloadApi = {
     upgrade: (host: HostConfig, expected: import('@agentmux/core').RemoteCoreUpgradeExpected, operationId: string) => ipcRenderer.invoke('hosts:upgrade', host, expected, operationId),
     upgradeInspect: (host: HostConfig, operationId: string) => ipcRenderer.invoke('hosts:upgradeInspect', host, operationId)
   },
+  connections: {
+    call: (method, params) => ipcRenderer.invoke('connections:call', method, params),
+    storeCredential: input => ipcRenderer.invoke('connections:storeCredential', input),
+    inspectCredential: operationId => ipcRenderer.invoke('connections:inspectCredential', operationId)
+  },
   deviceManagement: {
     link: (params) => ipcRenderer.invoke('deviceManagement:link', params),
     ls: (params) => ipcRenderer.invoke('deviceManagement:ls', params),

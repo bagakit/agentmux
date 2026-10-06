@@ -1595,6 +1595,11 @@ export type AgentMuxDesktopApi = {
     upgrade(host: HostConfig, expected: import('@agentmux/core').RemoteCoreUpgradeExpected, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt>
     upgradeInspect(host: HostConfig, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt | null>
   }
+  connections: {
+    call<M extends import('@agentmux/core/connections').ConnectionMethod>(method: M, params: import('@agentmux/core/connections').ConnectionParamsMap[M]): Promise<import('@agentmux/core/connections').ConnectionResultMap[M]>
+    storeCredential(input: { operationId: string; secret: string }): Promise<{ credentialRef: string }>
+    inspectCredential(operationId: string): Promise<{ credentialRef: string } | null>
+  }
   deviceManagement: {
     link(params: AgentMuxRpcParams<'device.link'>): Promise<AgentMuxRpcResult<'device.link'>>
     ls(params: AgentMuxRpcParams<'device.ls'>): Promise<AgentMuxRpcResult<'device.ls'>>
