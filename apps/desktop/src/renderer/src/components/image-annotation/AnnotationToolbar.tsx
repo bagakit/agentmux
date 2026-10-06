@@ -1,3 +1,4 @@
+import { RovingToolbar, RovingToolbarButton } from '../RovingToolbar'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ScreenshotTool } from './drawing-model'
 
@@ -24,17 +25,17 @@ export function AnnotationToolbar({ tool, busy, undoable, redoable, selected, cl
   tool: AnnotationTool; busy: boolean; undoable: boolean; redoable: boolean; selected: boolean; clearable: boolean
   onTool(tool: AnnotationTool): void; onUndo(): void; onRedo(): void; onDelete(): void; onClear(): void
 }) {
-  return <div className="image-annotation-toolbar" role="toolbar" aria-label="Screenshot markup tools">
-    <div className="image-annotation-toolbar__tools">{ANNOTATION_TOOLS.map(item => <button key={item.id} type="button"
+  return <RovingToolbar className="image-annotation-toolbar" aria-label="Screenshot markup tools">
+    <div className="image-annotation-toolbar__tools">{ANNOTATION_TOOLS.map(item => <RovingToolbarButton key={item.id} type="button"
       aria-label={item.label} title={item.label + ' (' + item.key + ')'} aria-keyshortcuts={item.key}
       aria-pressed={tool === item.id} className={tool === item.id ? 'selected' : ''} disabled={busy && item.id !== 'pan'} onClick={() => onTool(item.id)}>
       <item.icon size={16} />
-    </button>)}</div>
+    </RovingToolbarButton>)}</div>
     <div className="image-annotation-toolbar__history">
-      <button type="button" aria-label="Undo" title="Undo" disabled={busy || !undoable} onClick={onUndo}><UndoIcon size={15} /></button>
-      <button type="button" aria-label="Redo" title="Redo" disabled={busy || !redoable} onClick={onRedo}><RedoIcon size={15} /></button>
-      <button type="button" aria-label="Delete selected" title="Delete selected (Delete)" disabled={busy || !selected} onClick={onDelete}><DeleteIcon size={15} /></button>
-      <button type="button" aria-label="Clear all" title="Clear all" disabled={busy || !clearable} onClick={onClear}>Clear</button>
+      <RovingToolbarButton type="button" aria-label="Undo" title="Undo" disabled={busy || !undoable} onClick={onUndo}><UndoIcon size={15} /></RovingToolbarButton>
+      <RovingToolbarButton type="button" aria-label="Redo" title="Redo" disabled={busy || !redoable} onClick={onRedo}><RedoIcon size={15} /></RovingToolbarButton>
+      <RovingToolbarButton type="button" aria-label="Delete selected" title="Delete selected (Delete)" disabled={busy || !selected} onClick={onDelete}><DeleteIcon size={15} /></RovingToolbarButton>
+      <RovingToolbarButton type="button" aria-label="Clear all" title="Clear all" disabled={busy || !clearable} onClick={onClear}>Clear</RovingToolbarButton>
     </div>
-  </div>
+  </RovingToolbar>
 }
