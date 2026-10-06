@@ -1,3 +1,4 @@
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { mobileQuestionReplyState, observeMobileQuestionAnswers, replyMobileQuestion } from './question-replies'
 import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
 import { ClientDeliveryDiagnostics, startDeliveryAttempt, type DeliveryAttemptSeed } from '@agentmux/client-ui/delivery-diagnostics'
@@ -372,7 +373,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           if (reading.olderWindow || reading.newerAvailable) void reading.refresh()
           else if (feed.current) feed.current.scrollTop = feed.current.scrollHeight
         }}>{reading.newerAvailable ? '有新回复 · 回到最新' : '回到最新'}</button>}
-        {session?.semanticStatus?.state === 'working' ? <p className="mobile-active-state" role="status"><span />正在执行</p> : null}
+        {session?.semanticStatus?.state === 'working' ? <p className="mobile-active-state" role="status"><SemanticIcon name="status.presence-working" size={5} />正在执行</p> : null}
         {reading.page && agentSessionId ? <>
           <ConversationView page={reading.page} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
             renderProcess={props => <NativeProcessObservation {...props} compact />}
