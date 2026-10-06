@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { pathToFileURL } from 'node:url'
@@ -14,13 +15,13 @@ const AgentMuxError: typeof SourceError = process.env.AGENTMUX_TEST_CLIENT_ENTRY
 
 function attachment(runId: string): AgentMuxRunAttachment {
   return { run: { nativeService: null, runId, kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
-    workspacePath: fixturePath("private-workspace"), pid: 421, state: 'running', cols: 80, rows: 24, observedAt: 1,
+    workspacePath: fixturePath("private-workspace"), pid: 421, state: 'running', cols: 80, rows: 24, observedAt: reshapeFixtureEpoch(0, 0, 1),
     latestOutputBytes: 4, acceptedInputBytes: 0 }, replay: [], gap: null, terminal: { type: 'not-requested' }, resizeRevision: 0 }
 }
 function fixture() {
-  const identity: AgentMuxHostedBootstrap['identity'] = { instanceId: 'original-daemon', ownership: 'owned', hostId: 'local',
+  const identity: NonNullable<AgentMuxHostedBootstrap['owner']['ctxmux']> = { instanceId: 'original-daemon', ownership: 'owned', hostId: 'local',
     buildIdentity: 'private-fixture', protocolVersion: 1, processId: 123 }
-  const initial: AgentMuxHostedBootstrap = { identity, owner: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', protocolVersion: 1, processId: 123, availability: 'connected', ctxmux: identity },
+  const initial: AgentMuxHostedBootstrap = { connection: null, owner: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', protocolVersion: 2, processId: 123, availability: 'connected', ctxmux: identity },
     storePath: fixturePath("private-store/sessions.json"), hostProcessId: 123, catalog: [], sessions: [], messageQueuePath: fixturePath("private-store/messages.ndjson") }
   const subscriptions: Array<{ method: string; handlers: Parameters<AgentMuxHostedRpcPort['subscribe']>[2]; closeTransport(): void }> = []
   const calls: AgentMuxHostedInvocation[] = []
@@ -97,6 +98,7 @@ describe('Hosted desired reading intent', () => {
     // Replace only the semantic owner process; the durable Runtime and original Run remain.
     f.initial.owner.ownerInstanceId = 'restarted-owner'; f.initial.owner.processId = 456
     await client.connect()
+    await vi.waitFor(() => expect(events.filter(event => event.type === 'attachment-state').map(event => event.state)).toEqual(['unavailable', 'restored']))
     const restored = events.filter(event => event.type === 'attachment-state')
     expect(restored).toEqual([
       expect.objectContaining({ state: 'unavailable', run: { runId: 'retained-run' } }),
@@ -106,11 +108,14 @@ describe('Hosted desired reading intent', () => {
     expect(events.filter(event => event.type === 'terminal-snapshot')).toEqual([
       { type: 'terminal-snapshot', ...attachment('retained-run'), afterByte: 4 }
     ])
-    expect(events.filter(event => event.type === 'connection-state').map(event => event.state)).toEqual(['lost', 'restored'])
+    await vi.waitFor(() => expect(events.filter(event => event.type === 'connection-state').map(event => event.state)).toEqual(['lost', 'restored']))
     expect(client.runtimeOwnerIdentity()).toMatchObject({ runtimeId: 'original-runtime', ownerInstanceId: 'restarted-owner', availability: 'connected' })
     expect(f.calls).toEqual([
       { method: 'runtimeProjection', args: [] }, { method: 'attachTerminal', args: ['retained-run', 2, 'terminal'] },
-      { method: 'refreshRunAttachment', args: [{ runId: 'retained-run' }, 4, 'terminal'] }, { method: 'runtimeProjection', args: [] }
+      // The independent reader can first observe the prior fence. The confirmed
+      // new metadata lease restores this same desired Run, without any Input.
+      { method: 'refreshRunAttachment', args: [{ runId: 'retained-run' }, 4, 'terminal'] }, { method: 'runtimeProjection', args: [] },
+      { method: 'refreshRunAttachment', args: [{ runId: 'retained-run' }, 4, 'terminal'] }
     ])
     await client.dispose()
   })
@@ -124,7 +129,7 @@ describe('Hosted desired reading intent', () => {
     const reader = f.subscriptions.find(value => value.method === 'runtime.attachment-watch')!
     // Original typed bytes carry a real cursor discontinuity on this one reader.
     const invalid: AgentMuxClientEvent = { type: 'terminal-output', run: { runId: 'failed-run' }, data: 'x', dataBytes: Uint8Array.of(120),
-      evidence: { source: 'terminal-output', observedAt: 2, run: { runId: 'failed-run' }, outputByteRange: { startByte: 5, endByte: 6 } } }
+      evidence: { source: 'terminal-output', observedAt: reshapeFixtureEpoch(0, 0, 2), run: { runId: 'failed-run' }, outputByteRange: { startByte: 5, endByte: 6 } } }
     for (const data of hostedTransfer({ kind: 'event', event: invalid }, 'invalid-cursor')) reader.handlers.onEvent({ type: 'snapshot', data })
     expect(events.filter(event => event.type === 'attachment-state')).toEqual([
       expect.objectContaining({ state: 'unavailable', run: { runId: 'failed-run' }, afterByte: 4,
@@ -141,7 +146,7 @@ describe('Hosted desired reading intent', () => {
       return attachment(invocation.args[0].runId)
     }
     f.disconnect(); await client.connect()
-    expect(events.filter(event => event.type === 'connection-state').map(event => event.state)).toEqual(['lost', 'restored'])
+    await vi.waitFor(() => expect(events.filter(event => event.type === 'connection-state').map(event => event.state)).toEqual(['lost', 'restored']))
     expect(events.filter(event => event.type === 'attachment-state' && event.run.runId === 'failed-run').at(-1),
       'endpoint restoration cannot settle an unconfirmed Run reader').toMatchObject({ state: 'unavailable', diagnostic: { code: 'CONTROL_PROTOCOL_ERROR' } })
     expect(events.filter(event => event.type === 'attachment-state' && event.run.runId === 'healthy-run')).toEqual([])
@@ -210,6 +215,7 @@ describe('Hosted desired reading intent', () => {
     const release = client.releaseRunAttachment({ runId: 'closed-run' })
     finish(attachment('closed-run'))
     await reconnect; await release
+    await vi.waitFor(() => expect(events.filter(event => event.type === 'connection-state').map(event => event.state)).toEqual(['lost', 'restored']))
     expect(events.filter(event => event.type === 'terminal-snapshot')).toEqual([])
     expect(f.calls).toEqual([
       { method: 'runtimeProjection', args: [] },

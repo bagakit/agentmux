@@ -4,7 +4,7 @@ import type { AgentMuxClient } from '../../src/client.js'
 
 /** Private transport collaborator; the production transfer codec remains real. */
 export function hostedTestOwner(client: Pick<AgentMuxClient, 'runtimeIdentity'>): AgentMuxRuntimeOwnerIdentity {
-  return { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', protocolVersion: 1,
+  return { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', protocolVersion: 2,
     processId: 123, availability: 'connected', ctxmux: client.runtimeIdentity() }
 }
 export const hostedTestFence = { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner' }

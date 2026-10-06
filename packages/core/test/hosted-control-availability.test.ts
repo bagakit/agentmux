@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { it } from 'vitest'
 import assert from 'node:assert/strict'
@@ -12,7 +13,7 @@ it('retains exact durable bodies while control and independent readers survive u
 const store = new AgentMuxMemoryAgentSessionStore()
 const base = { kind: 'agent', agentSessionId: 'archive', providerId: 'codex', executorId: 'codex', hostId: 'local',
   workspacePath: fixturePath("tmp/private-hosted-review"), run: { runId: 'archive-run' }, retiredRuns: [],
-  hookBindingId: 'private-binding', hookToken: 'private-token', createdAt: 1, updatedAt: 1 }
+  hookBindingId: 'private-binding', hookToken: 'private-token', createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
 await store.compareAndSwap(null, base)
 const core = new AgentMuxClient({ store })
 await (core as any).registry.load('local'); (core as any).connected = true
@@ -22,7 +23,7 @@ let physicalInputs = 0, transportConnected = true
   input: async (_run, op) => { physicalInputs++; return { run: { acceptedInputBytes: op.expectedByte + 1 },
     appliedByteRange: { startByte: op.expectedByte, endByte: op.expectedByte + 1 } } } }
 const fence = { runtimeId: 'private-review-runtime', ownerInstanceId: 'private-review-owner' }
-const service = new AgentMuxHostedRuntimeService(core, null, () => ({ ...fence, protocolVersion: 1,
+const service = new AgentMuxHostedRuntimeService(core, null, () => ({ ...fence, protocolVersion: 2,
   processId: process.pid, availability: 'connected', ctxmux: core.runtimeIdentity() }))
 const events = [], result = { isolation: 'Memory Store and deterministic Native collaborator; actual Core, Hosted service and codec; no user Runtime', transferBudget: AGENTMUX_HOSTED_TRANSFER_MAX_BYTES, artifacts: {} }
 let live

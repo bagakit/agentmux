@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { loadAgentSessions } from '../src/agent-session-store.js'
@@ -28,13 +29,13 @@ it('keeps a failed binding scoped in every public Session projection and refresh
   const projected = (await f.client.runtimeProjection()).subjects.find(value => value.kind === 'agent' && value.agentSession.agentSessionId === failed.agentSessionId)!
   expect(projected.kind === 'agent' && projected.agentSession.hookIngressObservation).toMatchObject(failure)
   const service = new AgentMuxHostedRuntimeService(f.client, null, () => hostedTestOwner(f.client))
-  expect(service.bootstrap().sessions.find(value => value.agentSessionId === failed.agentSessionId)?.hookIngressObservation).toMatchObject(failure)
+  expect((await service.bootstrap()).sessions.find(value => value.agentSessionId === failed.agentSessionId)?.hookIngressObservation).toMatchObject(failure)
   expect(f.client.agentSession(healthy.agentSessionId).hookIngressObservation).toBeUndefined()
   expect((await loadAgentSessions(f.store)).every(value => !('hookIngressObservation' in value))).toBe(true)
   expect(f.events.filter(value => value.type === 'agent-error')).toEqual([])
   await expect(f.client.refreshAgentSession(failed.agentSessionId, { runId: 'wrong-run' })).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
   expect(create).toHaveBeenCalledTimes(2)
-  const fixed = { ...failed, hookBindingId: 'f'.repeat(43), updatedAt: 2 }
+  const fixed = { ...failed, hookBindingId: 'f'.repeat(43), updatedAt: reshapeFixtureEpoch(0, 0, 2) }
   await f.store.compareAndSwap(failed, fixed)
   expect((await f.client.refreshAgentSession(failed.agentSessionId, failed.run)).hookIngressObservation).toBeUndefined()
   expect(f.inner.hookBindings.size).toBe(2); expect(f.inner.hookRestorations.size).toBe(0)
@@ -45,7 +46,7 @@ it('keeps a failed binding scoped in every public Session projection and refresh
 })
 
 it.each(['success', 'failure'])('ignores an old Run restoration that finishes with %s after a new Run failure', async shape => {
-  const old = session('same-session', 'old-run'), next = { ...old, run: { runId: 'new-run' }, hookBindingId: 'invalid', updatedAt: 2 }
+  const old = session('same-session', 'old-run'), next = { ...old, run: { runId: 'new-run' }, hookBindingId: 'invalid', updatedAt: reshapeFixtureEpoch(0, 0, 2) }
   const f = await fixture([old]), start = f.inner.hookServer.start.bind(f.inner.hookServer)
   let release!: (value: Awaited<ReturnType<AgentHookServer['start']>>) => void, reject!: (error: Error) => void
   let first = true
@@ -74,7 +75,7 @@ it.each([false, true])('releases the exact Run binding and retained failure on a
   await f.inner.tryRestoreHookIngress([run(original), run(other)])
   expect(f.client.agentSession(original.agentSessionId).hookIngressObservation !== undefined).toBe(failed)
   const bindingCount = f.inner.hookBindings.size
-  f.inner.acceptKernelEvent({ type: 'exit', runId: original.run.runId, state: { type: 'exited', code: 0, signal: null }, observedAt: 2 })
+  f.inner.acceptKernelEvent({ type: 'exit', runId: original.run.runId, state: { type: 'exited', code: 0, signal: null }, observedAt: reshapeFixtureEpoch(0, 0, 2) })
   expect(f.inner.hookBindings.has(original.run.runId)).toBe(false)
   expect(f.inner.hookBindings.size).toBe(bindingCount - (failed ? 0 : 1))
   expect(f.inner.hookBindings.has(other.run.runId)).toBe(true)
@@ -89,7 +90,7 @@ it('releases a binding that finishes admission after its original Run has ended'
   let release!: (value: Awaited<ReturnType<AgentHookServer['start']>>) => void
   vi.spyOn(f.inner.hookServer, 'start').mockImplementationOnce(async () => await new Promise(yes => { release = yes }))
   const pending = f.inner.tryRestoreHookIngress([run(original)])
-  f.inner.acceptKernelEvent({ type: 'exit', runId: original.run.runId, state: { type: 'exited', code: 0, signal: null }, observedAt: 2 })
+  f.inner.acceptKernelEvent({ type: 'exit', runId: original.run.runId, state: { type: 'exited', code: 0, signal: null }, observedAt: reshapeFixtureEpoch(0, 0, 2) })
   release(await start()); await pending
   expect(f.inner.hookBindings.size).toBe(0); expect(f.inner.hookRestorations.size).toBe(0)
   expect((f.inner.hookServer as unknown as { bindings: Map<string, unknown> }).bindings.size).toBe(0)
@@ -109,7 +110,7 @@ it('retains the original Session when refresh cannot observe the native Run and 
   expect(refreshed.terminalCapability).toEqual(before.terminalCapability)
   expect(refreshed.retiredRuns).toEqual(before.retiredRuns)
   f.inner.kernel.status = status
-  await f.store.compareAndSwap(original, { ...original, hookBindingId: 'f'.repeat(43), updatedAt: 2 })
+  await f.store.compareAndSwap(original, { ...original, hookBindingId: 'f'.repeat(43), updatedAt: reshapeFixtureEpoch(0, 0, 2) })
   expect((await f.client.refreshAgentSession(original.agentSessionId, original.run)).hookIngressObservation).toBeUndefined()
 })
 
@@ -130,7 +131,7 @@ it('consumes an ended binding drain rejection as a scoped diagnostic without an 
   await f.inner.tryRestoreHookIngress([run(original)])
   const binding = f.inner.hookBindings.get(original.run.runId) as { close(): Promise<void> }
   vi.spyOn(binding, 'close').mockRejectedValue(new Error('Private drain failed after authoritative exit'))
-  f.inner.acceptKernelEvent({ type: 'exit', runId: original.run.runId, state: { type: 'exited', code: 0, signal: null }, observedAt: 2 })
+  f.inner.acceptKernelEvent({ type: 'exit', runId: original.run.runId, state: { type: 'exited', code: 0, signal: null }, observedAt: reshapeFixtureEpoch(0, 0, 2) })
   await vi.waitFor(() => expect(f.events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'HOOK_BINDING_RELEASE_UNCONFIRMED',
     agentSessionId: original.agentSessionId, evidence: expect.objectContaining({ run: original.run }) })))
   expect(f.inner.hookBindings.has(original.run.runId)).toBe(false)

@@ -27,7 +27,19 @@ async function receipt(child: ChildProcess): Promise<{ owner: AgentMuxRuntimeOwn
     const timer = setTimeout(() => reject(new Error('Private Headless did not publish readiness: ' + errors)), 30_000)
     child.stderr!.on('data', data => { errors += String(data) })
     child.stdout!.on('data', data => { output += String(data); if (!output.includes('\n')) return
-      clearTimeout(timer); try { resolve(JSON.parse(output.slice(0, output.indexOf('\n')))) } catch (error) { reject(error) } })
+      clearTimeout(timer); try {
+        const published = JSON.parse(output.slice(0, output.indexOf('\n'))) as { owner: AgentMuxRuntimeOwnerIdentity; socketPath: string }
+        // This fixture promises a healthy Native. The production serve receipt itself
+        // confirms only the semantic owner; prove Native readiness through its public API.
+        void (async () => {
+          const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: published.socketPath } })
+          try {
+            const owner = await until(async () => (await rpc.call('runtime.owner.identity', {})).owner,
+              value => value.ctxmux !== null, 'private Native public identity')
+            resolve({ ...published, owner })
+          } finally { await rpc.dispose() }
+        })().catch(reject)
+      } catch (error) { reject(error) } })
     child.once('error', error => { clearTimeout(timer); reject(error) })
     child.once('exit', code => { clearTimeout(timer); reject(new Error(`Private Headless exited ${code}: ${errors}`)) })
   })

@@ -9,7 +9,7 @@ const client=new AgentMuxClient({store:new AgentMuxFileAgentSessionStore(storePa
 ;(client as any).ensureManagedHooks=async()=>undefined
 await client.connect()
 client.onEvent(event=>{if(event.type==='agent-error'||event.type==='agent-hook')void fs.appendFile(path.join(privateRoot,'owner-diagnostic.jsonl'),JSON.stringify(event)+'\n')})
-const identity={runtimeId:'private-native-source-host',ownerInstanceId:randomUUID(),protocolVersion:1,processId:process.pid,ctxmux:client.runtimeIdentity(),availability:'connected' as const}
+const identity={runtimeId:'private-native-source-host',ownerInstanceId:randomUUID(),protocolVersion:2,processId:process.pid,ctxmux:client.runtimeIdentity(),availability:'connected' as const}
 const hosted=new AgentMuxHostedRuntimeService(client,storePath,()=>identity)
 const server=new AgentMuxControlServer({socketPath:defaultAgentMuxControlSocketPath(),coreClients:()=>[{hostId:'local',client}],hostedRuntime:()=>hosted})
 await server.start()
