@@ -366,8 +366,17 @@ function DesktopApp() {
   const executorIdentity = useMemo(() => ({ config, onPanelVisibilityChange: onAgentPanelVisibilityChange }), [config, onAgentPanelVisibilityChange])
   const nativeOverlayWarning = useNativeOverlayChrome()
   const workspace = config?.workspaces.find((item) => item.id === activeWorkspaceId)
-  useLayoutEffect(() => mountThemeRuntime(window, useAppStore.getState().config?.appearance ?? {}), [])
-  useLayoutEffect(() => { updateThemeSelection(config?.appearance ?? {}) }, [config?.appearance.appAppearance, config?.appearance.themeId, config?.appearance.customThemes])
+  const initialTheme = api.ui.initialTheme
+  useLayoutEffect(() => {
+    const saved = useAppStore.getState().config?.appearance
+    const observed = initialTheme?.status === 'available'
+      ? { kind: 'observed' as const, document: initialTheme.document, appearance: initialTheme.appearance }
+      : undefined
+    return mountThemeRuntime(window, saved ?? observed ?? {})
+  }, [])
+  useLayoutEffect(() => {
+    if (config) updateThemeSelection(config.appearance)
+  }, [config?.appearance.appAppearance, config?.appearance.themeId, config?.appearance.customThemes])
   useEffect(() => api.config.onChange((committed) => useAppStore.getState().setConfig(committed)), [])
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const fileEditingProbe = typeof window !== 'undefined' &&
@@ -508,7 +517,7 @@ function DesktopApp() {
   }, [])
 
   if (loading) {
-    return <FullPageLoadingSurface scope="app" phase="loading" eyebrow="AgentMux startup" title="Restoring your workspace" detail={startupProgressDetail(startupProgress)} />
+    return <FullPageLoadingSurface scope="app" phase="loading" eyebrow="AgentMux startup" title="Restoring your workspace" detail={startupProgressDetail(startupProgress) + (!config && initialTheme?.status === 'unavailable' ? '\n' + initialTheme.message : '')} />
   }
 
   if (!config && error) {

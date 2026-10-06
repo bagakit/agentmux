@@ -5,6 +5,8 @@ import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_VISIBILIT
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
+import { THEME_BOOTSTRAP_CHANNEL, type ThemeBootstrap } from '../shared/theme-bootstrap'
+import { projectInitialTheme } from './theme-bootstrap'
 import { unwrapSessionReopenResult } from '../shared/session-reopen-result'
 import { unwrapSessionAgentLaunchResult, unconfirmedSessionAgentLaunch } from '../shared/session-agent-launch-result'
 import { unwrapSessionLaunchResult } from '../shared/session-launch-result'
@@ -78,6 +80,17 @@ import type {
   GitPushOptions,
   GitRemoteOptions
 } from '../shared/git-contracts.js'
+
+const initialTheme: ThemeBootstrap | null = process.isMainFrame ? (() => {
+  try {
+    const snapshot = ipcRenderer.sendSync(THEME_BOOTSTRAP_CHANNEL) as ThemeBootstrap | undefined
+    if (snapshot?.status === 'available' || snapshot?.status === 'unavailable') return snapshot
+    return { status: 'unavailable' as const, message: 'The original Main did not confirm this window’s initial theme. Saved appearance preferences are kept.' }
+  } catch (cause) {
+    return { status: 'unavailable' as const, message: 'Initial appearance could not be read. Saved preferences and the workspace are kept. ' + (cause instanceof Error ? cause.message : String(cause)) }
+  }
+})() : null
+projectInitialTheme(initialTheme)
 
 const api: AgentMuxPreloadApi = {
   readRendererMemory() {
@@ -282,6 +295,7 @@ const api: AgentMuxPreloadApi = {
     decision: (id, input) => ipcRenderer.invoke('demands:decision', id, input)
   },
   ui: {
+    initialTheme,
     onNativeBrowserInput(listener) {
       const wrapped = (_event: Electron.IpcRendererEvent, input: import('../shared/native-overlay').NativeBrowserInput): void => listener(input)
       ipcRenderer.on(NATIVE_BROWSER_INPUT_CHANNEL, wrapped)
