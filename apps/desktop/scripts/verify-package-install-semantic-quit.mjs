@@ -25,6 +25,13 @@ const receipt = { schema: 'agentmux.package-install-semantic-quit-causal.v1', pa
   runRoot: directory, sharedSourceModified: false, sharedDistModified: false, actualAppOrNativeLifecycleRequested: false,
   boundary: 'Actual default installer/quit/semantic fence with controlled private OS and filesystem, not installed App or Native qualification', checks: [], errors: [] }
 const successCase = 'the default full installer completes GUI quit while only its fenced semantic owner survives'
+const sameSourceCases = ['GUI-child', 'detached', 'endpoint-worker'].map(shape =>
+  `the same-Source full installer reloads its exact ${shape} semantic namespace`)
+const sameSourceChildCases = ['GUI-child', 'endpoint-worker'].map(shape =>
+  `the same-Source full installer reloads its exact ${shape} semantic namespace`)
+const endpointWorkerCase = 'the default installer drains the original Host endpoint worker without signalling it'
+const pureCaseNames = ['healthy', 'UID', 'birth', 'parent', 'executable', 'mode', 'cycle'].map(change =>
+  `semantic family requires a complete bound Node chain (${change})`).sort()
 const changedCases = ['birth', 'Store', 'PID', 'UID', 'argv', 'mode', 'Source'].map(name =>
   `the default full installer rejects changed ${name} facts before excluding or stopping an owner`)
 let caseNames
@@ -47,12 +54,17 @@ try {
 }
 
 `
+  const sourceQualification = '  const originalSource = await ops.source(currentApp), candidateSource = await ops.source(candidateApp)'
+  assert.equal(source[products[1]].split(sourceQualification).length - 1, 1)
   const phases = [
     { name: 'baseline-original', product: products[0], before: handoff, after: handoff, failures: [] },
-    { name: 'withdraw-prepared-plan-assertion-red', product: products[0], before: handoff, after: handoff.replace(', semanticHost)', ', null)'), failures: [successCase, ...changedCases] },
+    { name: 'withdraw-prepared-plan-assertion-red', product: products[0], before: handoff, after: handoff.replace(', semanticHost)', ', null)'), failures: [successCase, ...changedCases, endpointWorkerCase, ...sameSourceChildCases] },
     { name: 'prepared-plan-original-restored-green', product: products[0], before: handoff, after: handoff, failures: [] },
     { name: 'relax-exact-semantic-fence-assertion-red', product: products[1], before: fence, after: weakFence, failures: changedCases },
-    { name: 'exact-semantic-fence-original-restored-green', product: products[1], before: fence, after: fence, failures: [] }
+    { name: 'exact-semantic-fence-original-restored-green', product: products[1], before: fence, after: fence, failures: [] },
+    { name: 'same-source-owner-withdrawal-assertion-red', product: products[1], before: sourceQualification,
+      after: sourceQualification + '\n  if (originalSource === candidateSource) return null', failures: sameSourceCases },
+    { name: 'same-source-owner-original-restored-green', product: products[1], before: sourceQualification, after: sourceQualification, failures: [] }
   ]
   for (const phase of phases) {
     assert.deepEqual(await hashes(), receipt.inputsBefore, 'Actual Source/compiled/caller inputs changed before execution')
@@ -104,7 +116,10 @@ export default defineConfig({...base,root:${JSON.stringify(root)},plugins:[...(b
       assert.equal(capture.changed, name === phase.product && phase.before !== phase.after)
     }
     const scopes = (await fs.readFile(cleanupFile, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
-    assert.equal(scopes.length, cases.length, 'Every actual case must close its own private filesystem scope')
+    const pureCases = cases.filter(item => pureCaseNames.includes(item.name))
+    assert.deepEqual(pureCases.map(item => item.name).sort(), pureCaseNames, 'Exact pure namespace-family cases create no filesystem scope')
+    const resourceCaseNames = cases.filter(item => !pureCaseNames.includes(item.name)).map(item => item.name).sort()
+    assert.deepEqual(scopes.map(scope => scope.caseName).sort(), resourceCaseNames, 'Every exact filesystem case must close its own scope')
     for (const scope of scopes) {
       assert.equal(scope.removed, true); assert.equal(scope.noLiveProcessCreated, true)
       assert.ok(path.basename(scope.root).startsWith('agentmux-semantic-gui-quit-'))
@@ -114,7 +129,8 @@ export default defineConfig({...base,root:${JSON.stringify(root)},plugins:[...(b
     const check = { name: phase.name, command: [process.execPath, ...args], exitCode, total: cases.length,
       passed: result.numPassedTests, failed: result.numFailedTests, cases, loaded, resultFile,
       resultSHA256: sha(await fs.readFile(resultFile)), configSHA256: sha(config), cleanupFile,
-      cleanup: { actualCaseCount: scopes.length, errors: [], remaining: [], privateFilesystemRemoved: true, liveProcessCreated: false } }
+      cleanup: { actualCaseCount: cases.length, privateScopeCount: scopes.length, pureCaseCount: pureCases.length,
+        errors: [], remaining: [], privateFilesystemRemoved: true, liveProcessCreated: false } }
     receipt.checks.push(check); await write(path.join(directory, 'receipt.json'), receipt)
     const failed = cases.filter(item => item.status === 'failed')
     if (phase.failures.length) {
