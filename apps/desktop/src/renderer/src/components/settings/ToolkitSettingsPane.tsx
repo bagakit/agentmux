@@ -20,7 +20,7 @@ const ThemeActionInstallPackageIcon = semanticIconComponent('action.install-pack
 const ThemeActionCreateToolIcon = semanticIconComponent('action.create-tool')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeActionClearIcon = semanticIconComponent('action.clear')
-const ThemeActionConfirmIcon = semanticIconComponent('action.confirm')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeObjectPerformanceIcon = semanticIconComponent('object.performance')
 const ThemeStatusLockedIcon = semanticIconComponent('status.locked')
 const ThemeObjectPhoneIcon = semanticIconComponent('object.phone')
@@ -120,7 +120,7 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
             const identity = identityFor(id, entry), path = 'kind' in entry.value ? entry.value.packagePath : entry.value.workspacePath
             const directory = shortDirectory(path), fact = entry.expected ? packageFact(entry.expected, metadata.packages) : undefined
             return <button type="button" className="toolkit-library__item" key={id} data-tool-id={id} aria-pressed={selectedId === id} onClick={() => open(id)}>
-            <ToolkitIcon icon={identity.icon} size={17} /><span><strong>{identity.name}</strong><small>{'kind' in entry.value ? 'Custom · local package' : 'Custom · script'} · {entry.saving ? 'Saving…' : toolkitDraftDirty(entry) ? 'Unsaved' : 'Saved'}{entry.value.enabled ? '' : ' · Hidden'}{fact?.availability === 'unavailable' ? ' · Source unavailable' : ''}</small><code title={path}>{path ? <><span className="toolkit-library__parent">{directory.parent}</span><span className="toolkit-library__directory">{directory.name}</span></> : 'Choose a local directory'}</code></span>{selectedId === id ? <ThemeActionConfirmIcon className="toolkit-library__selected" size={12} aria-label="Selected tool" /> : null}
+            <ToolkitIcon icon={identity.icon} size={17} /><span><strong>{identity.name}</strong><small>{'kind' in entry.value ? 'Custom · local package' : 'Custom · script'} · {entry.saving ? 'Saving…' : toolkitDraftDirty(entry) ? 'Unsaved' : 'Saved'}{entry.value.enabled ? '' : ' · Hidden'}{fact?.availability === 'unavailable' ? ' · Source unavailable' : ''}</small><code title={path}>{path ? <><span className="toolkit-library__parent">{directory.parent}</span><span className="toolkit-library__directory">{directory.name}</span></> : 'Choose a local directory'}</code></span>{selectedId === id ? <ThemeStatusSelectedIcon className="toolkit-library__selected" size={12} aria-label="Selected tool" /> : null}
           </button>})}
           {!visible.length ? <p className="settings-resource-empty">{entries.length ? 'No matching custom tools. Your drafts are kept.' : 'Create a tool with your own script and actions.'}</p> : null}
           {showPerformance || showMobileConnection ? <p className="toolkit-library__group">Built-in</p> : null}

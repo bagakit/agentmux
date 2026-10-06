@@ -376,6 +376,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'action.remove': { label: 'Remove', glyph: 'trash-2' },
   'action.accept-results': { label: 'Accept results', glyph: 'check' },
   'action.review-source': { label: 'Review source change', glyph: 'check' },
+  'action.add-annotation': { label: 'Add annotation', glyph: 'check' },
   'action.add-quick-replies': { label: 'Add quick replies', glyph: 'check' },
   'action.confirm': { label: 'Confirm', glyph: 'check' },
   'action.copy': { label: 'Copy', glyph: 'copy' },
