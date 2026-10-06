@@ -94,6 +94,14 @@ const initialTheme: ThemeBootstrap | null = process.isMainFrame ? (() => {
 projectInitialTheme(initialTheme)
 
 const api: AgentMuxPreloadApi = {
+  search: {
+    query: async (input, context) => {
+      const token = crypto.randomUUID()
+      const pending = ipcRenderer.invoke('search:query', token, input)
+      const release = context?.onAbort?.(() => { void ipcRenderer.invoke('search:cancel', token).catch(() => {}) })
+      try { return await pending } finally { release?.() }
+    }
+  },
   readRendererMemory() {
     const sampledAt = Date.now()
     let creationTime: number | null = null

@@ -54,6 +54,7 @@ import { inspectDesktopClient } from './client-observation.js'
 import { inspectMoteContext, moteContextEvidencePort } from './mote-context-observation.js'
 import { observeClientRpcSnapshot } from './rpc-client-observations.js'
 import { SessionHistoryObservationOwners } from './session-history-observation.js'
+import { registerSearchIpc } from './search-ipc.js'
 import { SessionHistoryReadOwners } from './session-history-read.js'
 import { createResourceMetricsPort, observeRendererResources } from './resource-usage-control.js'
 import { ToolkitOwner } from './toolkit-owner.js'
@@ -575,9 +576,9 @@ export async function registerIpc(args: {
 
   // The original Unix transport supplies the local user principal after the
   // original trusted Renderer check; the request cannot assert human provenance.
-  const callUserRpc = async <M extends import('@agentmux/core').AgentMuxRpcMethod>(method: M, input: import('@agentmux/core').AgentMuxRpcParams<M>) => {
+  const callUserRpc = async <M extends import('@agentmux/core').AgentMuxRpcMethod>(method: M, input: import('@agentmux/core').AgentMuxRpcParams<M>, options?: { signal?: AbortSignal }) => {
     const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path } })
-    try { return await client.call(method, input) }
+    try { return await client.call(method, input, options) }
     finally { await client.dispose() }
   }
   handle('config:get', () => config)
@@ -1368,6 +1369,8 @@ export async function registerIpc(args: {
   handle('sessions:historyPage', async (session: import('../shared/contracts.js').SessionHistoryReference, options?: SessionHistoryPageOptions) => (
     args.runtime.sessionHistoryPage(session, options, config)
   ))
+  const searchReads = registerSearchIpc({ handle: handleWithEvent, trust: requireTrustedSender,
+    query: (input, signal) => callUserRpc('app.search', input, { signal }) })
   const historyReads = new SessionHistoryReadOwners()
   handleWithEvent('sessions:readHistory', (event, token: string, reference: import('../shared/contracts.js').SessionHistoryReference,
     options: Omit<import('@agentmux/core').AgentSessionHistoryReadInput, 'hostId' | 'agentSessionId'>) => {
@@ -2006,6 +2009,7 @@ export async function registerIpc(args: {
       { owner: 'control-server', dispose: () => control.stop() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },
+      { owner: 'search-reads', dispose: () => searchReads.dispose() },
       { owner: 'history-reads', dispose: () => historyReads.dispose() },
       { owner: 'resource-observation', dispose: () => releaseResourceObservation() },
       { owner: 'notifier', dispose: () => notifier.dispose() },

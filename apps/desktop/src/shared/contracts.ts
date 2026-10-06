@@ -1802,6 +1802,9 @@ export type AgentMuxDesktopApi = {
     resume(params: AgentMuxRpcParams<'schedule.resume'>): Promise<AgentMuxRpcResult<'schedule.resume'>>
     cancel(params: AgentMuxRpcParams<'schedule.cancel'>): Promise<AgentMuxRpcResult<'schedule.cancel'>>
   }
+  search: {
+    query(input: import('@agentmux/core/search').AgentMuxSearchInput, context?: { signal?: AbortSignal }): Promise<import('@agentmux/core/search').AgentMuxSearchPage>
+  }
   sessions: {
     snapshot(): Promise<RuntimeSnapshot>
     notifyInputOccupation(control: AgentSessionControl): Promise<void>
@@ -1991,7 +1994,10 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search'> & {
+  search: {
+    query(input: import('@agentmux/core/search').AgentMuxSearchInput, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core/search').AgentMuxSearchPage>>
+  }
   notebooks: import('@agentmux/core/notebook-catalog').NotebookApi & import('./notebook-observation').NotebookObservationPreloadApi
   scratch: Omit<AgentMuxDesktopApi['scratch'], 'listTopics'> & {
     listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicListResponse>

@@ -36,6 +36,7 @@ import { LAUNCH_OPTIONS_BY_PROVIDER_ID, describeLaunchOptions } from '@agentmux/
 import { createRendererControlApi } from './control-api'
 import { createRendererSessionEvents } from './session-events'
 import { createRendererHistoryObservation } from './history-observation'
+import { createRendererSearchRead } from './search-read'
 import { createRendererHistoryRead } from './history-read'
 import {
   DEFAULT_TOPIC_WIKI,
@@ -360,6 +361,7 @@ async function mockHistorySources(options?: { observation: true }): Promise<Agen
 }
 
 const mockApi: AgentMuxDesktopApi = {
+  search: { query: async () => { throw new Error('Open Desktop to query the original global search owner.') } },
   readRendererMemory: () => ({ process: { pid: null, creationTime: null }, memory: { sampledAt: Date.now(),
     scope: 'renderer-v8-isolate', heap: null, unavailable: 'Renderer process observation requires the desktop app.' } }),
   notesStorage: { inspect: async () => ({ directory: new URL("preview/notes", new URL('/', new URL(import.meta.url))).pathname, catalogPath: new URL("preview/notes/notebooks.json", new URL('/', new URL(import.meta.url))).pathname, resourceChanges: [], directoryChanges: [], operation: null }), change: async () => { throw new Error('Change the Notes directory in Desktop Settings. Your preview is retained.') }, onChange: () => () => {} },
@@ -1447,6 +1449,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
       return Object.assign(result.topics, result.issues.length ? { issues: result.issues } : {})
     } },
     control: createRendererControlApi(preload.control),
+    search: { query: createRendererSearchRead((input, context) => preload.search.query(input, context)) },
     sessions: {
       ...preload.sessions,
       write: (...args) => preload.sessions.write(...args).then(result => { unwrapSessionInputWriteResult(result) }),
