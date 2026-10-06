@@ -103,8 +103,8 @@ export class NotebookObservationRequests {
 }
 
 /** Production creates exactly one semantic file reader for public RPC and GUI readers. */
-export function createNotebookObservationServices(store: Pick<AgentMuxNotebookStore, 'read'>,
+export function createNotebookObservationServices(store: Pick<AgentMuxNotebookStore, 'read'> & Partial<Pick<AgentMuxNotebookStore, 'readProvenance'>>,
   ports: ConstructorParameters<typeof NotebookObservationOwner>[0], ready?: () => Promise<unknown>) {
-  const owner = new NotebookObservationOwner(ports)
+  const owner = new NotebookObservationOwner({ ...ports, ...(store.readProvenance ? { metadata: { readProvenance: store.readProvenance.bind(store) } } : {}) })
   return { owner, requests: new NotebookObservationRequests(store, owner, ready) }
 }

@@ -3,12 +3,14 @@ export { AgentMuxError } from './errors.js'
 import type { NotebookState, NoteResource } from './notebook-catalog.js'
 import type { NotebookResolveParams, NotebookResolveResult } from './note-links.js'
 import { parseNoteWikiQuery } from './note-links.js'
+import { parseNoteProvenanceSnapshot, noteProvenanceResourceKey, type NoteProvenanceSnapshot } from './note-provenance.js'
+import { fileUploadRevision } from './public-rpc-files.js'
 
 /** Original file observations, never another Note body or relationship store. */
 export type NoteContentObservation = { noteId: string; resource: NoteResource } & (
-  | { status: 'read'; revision: string; content: string; actualNoteId: string; blockIds: string[]; unanchoredBlockCount?: number }
+  | { status: 'read'; revision: string; content: string; actualNoteId: string; blockIds: string[]; unanchoredBlockCount?: number; noteProvenance?: NoteProvenanceSnapshot }
   | { status: 'missing' | 'unknown' | 'invalid' | 'identity-mismatch'; message: string; revision?: string; actualNoteId?: string })
-export type NoteContentMetadata = NoteContentObservation extends infer O ? O extends NoteContentObservation ? Omit<O, 'content'> : never : never
+export type NoteContentMetadata = NoteContentObservation extends infer O ? O extends NoteContentObservation ? Omit<O, 'content' | 'noteProvenance'> : never : never
 export type NotebookGraphParams = { notebookId?: string; noteId?: string; maxBytes?: number }
 export type NotebookGraphScope = { kind: 'catalog' } | { kind: 'notebook'; notebookId: string } | { kind: 'note'; noteId: string }
 export type NoteGraphEndpoint = { noteId: string; blockId: string }
@@ -67,17 +69,25 @@ export function parseNoteContentObservation(value: unknown, includeContent = tru
   return protocolResult(() => validateNoteContentObservation(value, includeContent))
 }
 function validateNoteContentObservation(value: unknown, includeContent: boolean): NoteContentObservation | NoteContentMetadata {
-  const p = object(value, ['noteId', 'resource', 'status', 'revision', 'content', 'actualNoteId', 'blockIds', 'unanchoredBlockCount', 'message'])
+  const p = object(value, ['noteId', 'resource', 'status', 'revision', 'content', 'actualNoteId', 'blockIds', 'unanchoredBlockCount', 'noteProvenance', 'message'])
   id(p.noteId); resource(p.resource)
   if (p.status === 'read') {
     if (p.unanchoredBlockCount !== undefined) count(p.unanchoredBlockCount)
     id(p.revision); id(p.actualNoteId); if (p.noteId !== p.actualNoteId) bad('A confirmed Note body belongs to another identity.')
     if (includeContent ? typeof p.content !== 'string' : p.content !== undefined) bad('Invalid Note content payload.')
     list(p.blockIds).forEach(id); if (new Set(p.blockIds as string[]).size !== (p.blockIds as string[]).length) bad('Duplicated observed block identities.'); if (p.message !== undefined) bad('Unexpected read issue.')
+    if (p.noteProvenance !== undefined) {
+      if (!includeContent) bad('A graph metadata observation cannot include per-block authorship.')
+      let metadata: NoteProvenanceSnapshot
+      try { metadata = parseNoteProvenanceSnapshot(p.noteProvenance) } catch { return bad('The original Note metadata is unconfirmed.') }
+      const blockIds = new Set(p.blockIds as string[])
+      if (metadata.noteId !== p.noteId || metadata.revision !== p.revision || fileUploadRevision(new TextEncoder().encode(p.content as string)) !== p.revision || noteProvenanceResourceKey(metadata.resource) !== noteProvenanceResourceKey(p.resource as NoteResource) ||
+          Object.keys(metadata.blocks).some(id => !blockIds.has(id)) || metadata.status === 'recorded' && Object.keys(metadata.blocks).length !== blockIds.size) bad('The Note metadata belongs to another original body, block set or revision.')
+    }
   } else {
     member(p.status, ['missing', 'unknown', 'invalid', 'identity-mismatch']); id(p.message)
     if (p.revision !== undefined) id(p.revision); if (p.actualNoteId !== undefined) id(p.actualNoteId)
-    if (p.content !== undefined || p.blockIds !== undefined || p.unanchoredBlockCount !== undefined) bad('Unconfirmed Note body cannot report parsed content.')
+    if (p.content !== undefined || p.blockIds !== undefined || p.unanchoredBlockCount !== undefined || p.noteProvenance !== undefined) bad('Unconfirmed Note body cannot report parsed content.')
   }
   return value as NoteContentObservation | NoteContentMetadata
 }

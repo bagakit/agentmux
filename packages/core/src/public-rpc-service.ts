@@ -894,7 +894,8 @@ export class AgentMuxRpcService {
       case 'notebook.ls': result = {state:await this.notebooks.read()}; break
       case 'notebook.inspect': {
         const input = parseNotebookObservationParams(p, true), state = await this.notebooks.read()
-        result = { ...inspectNotebook(state, input), ...(this.notebooks.storage ? { storageOperation: (await this.notebooks.storage.inspect(input.operationId)).operation } : {}),
+        const storage = this.notebooks.storage ? await this.notebooks.storage.inspect(input.operationId) : undefined
+        result = { ...inspectNotebook(state, input), ...(storage ? { storageOperation: storage.operation, resourceChanges: storage.resourceChanges, conversionIssues: storage.conversionIssues } : {}),
           ...(input.content ? { content: this.ports.notebookObservation
             ? await this.ports.notebookObservation.content(state, input.noteId!, { ...(input.maxBytes === undefined ? {} : { maxBytes: input.maxBytes }), ...(context.signal ? { signal: context.signal } : {}) })
             : (() => { throw new AgentMuxError('The original Host Note reader is unavailable. Directory and Agent capabilities remain available; retry this observation when the Host reconnects.', 'CONTROL_UNAVAILABLE') })() } : {}) }; break

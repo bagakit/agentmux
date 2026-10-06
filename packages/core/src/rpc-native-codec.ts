@@ -11,6 +11,8 @@ import { isMoteAvatarSeriesMethod, parseMoteAvatarSeriesParams, parseMoteAvatarS
 import { parseDiagnosticEvidenceResult } from './diagnostic-evidence-codec.js'
 import { parseControlEndpointState } from './control-endpoint-state.js'
 import { parseNotesStorageOperation } from './notes-storage.js'
+import { noteProvenanceResourceKey } from './note-provenance.js'
+import type { NoteResource } from './notebook-catalog.js'
 import { parseControlDemandActivity } from './control-codec.js'
 import { parseDeliveryAttemptLookup, parseDeliveryFailure } from './delivery-attempt.js'
 import { validateAgentInputWaitRef, type AgentInputSubmissionReceipt } from './agent-input-wait.js'
@@ -570,14 +572,40 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'notebook.inspect': {
-        record(p, ['state', 'notebook', 'pages', 'trail', 'recordedOperation', 'storageOperation', 'content'])
+        record(p, ['state', 'notebook', 'pages', 'trail', 'recordedOperation', 'storageOperation', 'resourceChanges', 'conversionIssues', 'content'])
         const state = parseNotebookState(p.state)
-        const { storageOperation, content, ...knowledge } = p
+        const { storageOperation, resourceChanges, conversionIssues, content, ...knowledge } = p
         const observationInput = parseNotebookObservationParams(input, true)
         if (observationInput.content === true) { const body = parseNoteContentObservation(content); const page = state.pages[observationInput.noteId!]; if (!page || body.noteId !== page.noteId || notebookFingerprint(body.resource) !== notebookFingerprint(page.resource)) fail() }
         else if (content !== undefined) fail()
         if (notebookFingerprint(knowledge) !== notebookFingerprint(inspectNotebook(state, input))) fail()
         if (storageOperation !== undefined && storageOperation !== null) { const original = parseNotesStorageOperation(storageOperation); if (input.operationId !== undefined && original.operationId !== input.operationId) fail() }
+        if (resourceChanges !== undefined) {
+          if (!Array.isArray(resourceChanges)) fail()
+          for (const value of resourceChanges as unknown[]) {
+            const change = record(value, ['noteId', 'from', 'to', 'conversion']); string(change.noteId)
+            for (const original of [change.from, change.to]) {
+              record(original, ['hostId', 'workspaceId', 'workspacePath', 'path'])
+              try { noteProvenanceResourceKey(original as NoteResource) } catch { fail() }
+            }
+            if (change.conversion !== undefined) {
+              const conversion = record(change.conversion, ['sourceRevision', 'targetRevision'])
+              for (const value of [conversion.sourceRevision, conversion.targetRevision]) if (typeof value !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(value)) fail()
+            }
+          }
+        }
+        if (conversionIssues !== undefined) {
+          if (!Array.isArray(conversionIssues)) fail()
+          for (const value of conversionIssues as unknown[]) {
+            const issue = record(value, ['noteId', 'resource', 'code', 'message'])
+            if (issue.noteId !== null) string(issue.noteId)
+            string(issue.code); string(issue.message)
+            if (issue.resource !== null) {
+              record(issue.resource, ['hostId', 'workspaceId', 'workspacePath', 'path'])
+              try { noteProvenanceResourceKey(issue.resource as NoteResource) } catch { fail() }
+            }
+          }
+        }
         break
       }
 

@@ -1,11 +1,13 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { sha256 } from '@noble/hashes/sha2.js'
+import { parseNoteProvenanceSnapshot, noteProvenanceResourceKey, type NoteProvenanceSnapshot } from './note-provenance.js'
+import { readNoteMarkdownHeader } from './note-format.js'
 
 /** The original Files owner and resource, independent of display occurrences. */
 export type FileResource = { hostId: string; workspaceId: string; workspacePath: string }
 export type FileReadResource = FileResource & { zoneId: string; zonePath: string; path: string; logicalDirectory?: string }
-export type FileDocument = { path: string; content: string; revision: string }
+export type FileDocument = { path: string; content: string; revision: string; noteProvenance?: NoteProvenanceSnapshot }
 export type FileDocumentReadResult =
   | { status: 'read'; document: FileDocument }
   | { status: 'binary'; path: string; revision: string; byteLength: number }
@@ -29,7 +31,7 @@ export type FileCreateResult = FileWriteResult
 export type FileWriteContext = { actor?: import('./notebook-catalog.js').NotebookActor | undefined }
 export type NoteWriteAttribution = { status: 'recorded' } | { status: 'unconfirmed'; reason: string }
 export type FileWriteReceipt =
-  | { status: 'written'; revision: string; content?: string; noteAttribution?: NoteWriteAttribution }
+  | { status: 'written'; revision: string; content?: string; noteAttribution?: NoteWriteAttribution; noteProvenance?: NoteProvenanceSnapshot }
   | { status: 'conflict'; observedRevision: string | null }
   | { status: 'error' | 'unknown'; code: string; message: string }
 export type FileWriteResult = { resource: FileReadResource | null; result: FileWriteReceipt }
@@ -149,6 +151,16 @@ export function parseFileListResult(value: unknown, params: FileListParams): Fil
   }
   return p as FileListResult
 }
+function validateFileNoteProvenance(value: unknown, bodyRevision: unknown, original: FileReadResource, content: string): void {
+  let metadata: NoteProvenanceSnapshot
+  try { metadata = parseNoteProvenanceSnapshot(value) }
+  catch { return invalid('The original Note metadata could not be confirmed.', 'CONTROL_PROTOCOL_ERROR') }
+  const header = readNoteMarkdownHeader(content)
+  if (metadata.revision !== bodyRevision || fileUploadRevision(new TextEncoder().encode(content)) !== bodyRevision || header.status !== 'valid' || metadata.noteId !== header.noteId ||
+      noteProvenanceResourceKey(metadata.resource) !== noteProvenanceResourceKey({ hostId: original.hostId, workspaceId: original.workspaceId, workspacePath: original.workspacePath, path: original.path })) {
+    invalid('The Note metadata belongs to another original body, resource or revision.', 'CONTROL_PROTOCOL_ERROR')
+  }
+}
 export function parseFileReadResult(value: unknown, params: FileReadParams): FileReadResult {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['resource', 'result'], code)
   const r = rpcRecord(p.result, undefined, code)
@@ -179,11 +191,12 @@ export function parseFileReadResult(value: unknown, params: FileReadParams): Fil
     if (original.path !== mapped) invalid('Another File path was returned.', code)
   }
   if (r.status === 'read') {
-    const d = rpcRecord(r.document, ['path', 'content', 'revision'], code)
+    const d = rpcRecord(r.document, ['path', 'content', 'revision', 'noteProvenance'], code)
     string(d.path, code); revision(d.revision, code)
     if (typeof d.content !== 'string') invalid('File content must be text.', code)
     if (params.maxBytes !== undefined && new TextEncoder().encode(d.content).byteLength > params.maxBytes) invalid('The original File read exceeded its requested byte cap.', code)
     if ((p.resource as FileReadResource | null)?.path !== d.path) invalid('Another File document was returned.', code)
+    if (d.noteProvenance !== undefined) validateFileNoteProvenance(d.noteProvenance, d.revision, p.resource as FileReadResource, d.content as string)
   } else if (r.status === 'binary') {
     string(r.path, code); revision(r.revision, code)
     if (!Number.isSafeInteger(r.byteLength) || (r.byteLength as number) < 0 || (p.resource as FileReadResource | null)?.path !== r.path) invalid('The original binary File evidence is invalid.', code)
@@ -213,7 +226,7 @@ export function parseFileCreateParams(value: unknown): FileCreateParams {
 }
 function parseFileMutationResult(value: unknown, params: FileWriteParams | FileCreateParams): FileWriteResult {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['resource', 'result'], code), r = rpcRecord(p.result, undefined, code)
-  const keys = r.status === 'written' ? ['status', 'revision', 'content', 'noteAttribution'] : r.status === 'conflict' ? ['status', 'observedRevision']
+  const keys = r.status === 'written' ? ['status', 'revision', 'content', 'noteAttribution', 'noteProvenance'] : r.status === 'conflict' ? ['status', 'observedRevision']
     : r.status === 'error' || r.status === 'unknown' ? ['status', 'code', 'message'] : null
   if (!keys) invalid('The original File write status is invalid.', code)
   rpcRecord(r, keys, code)
@@ -227,6 +240,7 @@ function parseFileMutationResult(value: unknown, params: FileWriteParams | FileC
       const attribution = rpcRecord(r.noteAttribution, ['status', 'reason'], code)
       if (attribution.status !== 'recorded' && attribution.status !== 'unconfirmed' || attribution.status === 'recorded' && attribution.reason !== undefined || attribution.status === 'unconfirmed' && (typeof attribution.reason !== 'string' || !attribution.reason)) invalid('The Note write attribution is unconfirmed.', code)
     }
+    if (r.noteProvenance !== undefined) validateFileNoteProvenance(r.noteProvenance, r.revision, p.resource as FileReadResource, (r.content as string | undefined) ?? params.content)
   }
   else if (r.status === 'conflict') { if (r.observedRevision !== null) revision(r.observedRevision, code) }
   else { string(r.code, code); if (typeof r.message !== 'string') invalid('File write diagnostics must remain text.', code) }

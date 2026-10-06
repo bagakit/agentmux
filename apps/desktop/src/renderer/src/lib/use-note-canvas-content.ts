@@ -49,7 +49,7 @@ export function useNoteCanvasContent(snapshot: NotebookGraphSnapshot | null, act
       setResults(values => ({ ...values, [id]: { snapshot, pending: true } }))
       // Explicit reading keeps the original owner's full-file budget and remains available after a small automatic read.
       void api.notebooks.content(id, { signal: controller.signal, ...intent.full ? {} : { maxBytes: AUTO_BYTES } }).then(value => {
-        if (!controller.signal.aborted && jobs.current.get(id) === job) setResults(values => ({ ...values, [id]: { snapshot, value, ...value.status === 'read' ? { document: { path: value.resource.path, content: value.content, revision: value.revision } } : {} } }))
+        if (!controller.signal.aborted && jobs.current.get(id) === job) setResults(values => ({ ...values, [id]: { snapshot, value, ...value.status === 'read' ? { document: { path: value.resource.path, content: value.content, revision: value.revision, ...(value.noteProvenance ? { noteProvenance: value.noteProvenance } : {}) } } : {} } }))
       }).catch(error => {
         if (!controller.signal.aborted && jobs.current.get(id) === job) setResults(values => ({ ...values, [id]: { snapshot, issue: error instanceof Error ? error.message : String(error) } }))
       }).finally(() => {

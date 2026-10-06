@@ -86,7 +86,7 @@ function NoteFile({ rpc, params, read, visible = true, target }: MobileNoteFileP
   const document = read.result.document
   return <>
     {draft.issue && <p role="status">{draft.issue}</p>}
-    <NoteReader content={document.content} path={document.path} workspaceId={params.expectedResource.workspaceId} revision={document.revision} documents={documents} target={target}
+    <NoteReader content={document.content} path={document.path} workspaceId={params.expectedResource.workspaceId} revision={document.revision} noteProvenance={document.noteProvenance} documents={documents} target={target}
       readReference={target => { void discover(target) }} editing={read.resource ? { initial: draft.initial, subscribe: draft.subscribe, readDeviceDraft: draft.readDevice, adoptDeviceDraft: draft.adoptDevice,
         onDraft: value => { try { draft.save(value) } catch (error) { setIssue(error instanceof Error ? error.message : String(error)); throw error } },
         save: async (content, expectedRevision) => draft.send(content, expectedRevision, async () => {
