@@ -31,3 +31,8 @@
 .delivery-log code { overflow-wrap: anywhere; font-size: .8em; }
 .delivery-log small { flex-basis: 100%; opacity: .8; overflow-wrap: anywhere; }
 .delivery-log button { font: inherit; font-size: .85em; }
+
+.message-delivery-failure__original { margin-top: 10px; }
+.message-delivery-failure__original > summary { cursor: pointer; margin-bottom: 6px; }
+.message-delivery-failure__original > [role='status'] { margin-left: 8px; overflow-wrap: anywhere; }
+.message-delivery-failure__original > [data-full-copy-state='failed'] { color: var(--amber); }

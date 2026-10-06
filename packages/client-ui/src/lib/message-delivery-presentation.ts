@@ -77,36 +77,86 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
     action: input.context === 'tool' ? '草稿已保留，可以重试此操作。' : noInput ? '原消息已保留，可以重试。' : '输入结果未知，请先核对原对话与投递记录。' }
 }
 
-function diagnosticJSON(value: unknown): string {
-  const ancestors: object[] = [], errors = new WeakMap<Error, Record<string, unknown>>()
+function diagnosticJSON(value: unknown, space = 2): string {
+  const ancestors: object[] = [], errors = new WeakMap<object, Record<string, unknown>>()
   return JSON.stringify(value, function (_key, item: unknown) {
     if (typeof item !== 'object' || item === null) return typeof item === 'bigint' ? String(item) : item
-    if (item instanceof Error) {
+    if (item instanceof Error || typeof DOMException !== 'undefined' && item instanceof DOMException) {
       let view = errors.get(item)
-      if (!view) { view = Object.fromEntries(Object.getOwnPropertyNames(item).map(key => [key, (item as unknown as Record<string, unknown>)[key]])); errors.set(item, view) }
+      if (!view) { view = Object.fromEntries([...new Set(['name', 'message', ...Object.getOwnPropertyNames(item)])].map(key => [key, (item as unknown as Record<string, unknown>)[key]])); errors.set(item, view) }
       item = view
     }
     while (ancestors.length && ancestors.at(-1) !== this) ancestors.pop()
     if (ancestors.includes(item as object)) return '[circular reference]'
     ancestors.push(item as object)
     return item
-  }, 2) ?? String(value)
+  }, space) ?? String(value)
 }
 
-/** Entire received error and existing journal; no display-length clipping or second diagnostic owner. */
+/** A readable projection of received facts, never an admission or retry decision. */
 export function messageDeliveryDiagnosticReport(input: MessageDeliveryDiagnostic): string {
-  const presented = describeError(input.error)
-  const summary = presentMessageDeliveryFailure(input)
-  return ['AgentMux Message Tool 诊断', summary.title, summary.state, summary.action,
-    ...(input.logId ? [`logid: ${input.logId}`] : []),
-    ...(input.errorCode ?? presented.code ? [`code: ${input.errorCode ?? presented.code}`] : []),
-    '', '原始错误（完整）', presented.raw,
-    ...(presented.detail ? ['', '原始 detail（完整）', presented.detail] : []),
-    ...(typeof input.error === 'object' && input.error !== null ? ['', '原始结构化错误', diagnosticJSON(input.error)] : []),
-    ...(input.log ? ['', '原投递诊断记录', diagnosticJSON(input.log)] : []),
-    ...(input.inputReceipt ? ['', '原输入回执（Core）', diagnosticJSON(input.inputReceipt)] : []),
-    ...(input.inputStopReceipt ? ['', '停止等待回执（Core）', diagnosticJSON(input.inputStopReceipt)] : []),
-    ...(input.inputUnconfirmed ? ['', input.inputReceipt?.status === 'admitted' || input.inputReceipt?.status === 'not-applied'
-      ? '此前客户端曾记录输入结果待核实；当前结果见原输入回执（Core）。'
-      : '原操作输入结果：仍待核实；本次拒绝不能代签此前没有输入。'] : [])].join('\n')
+  const summary = presentMessageDeliveryFailure(input), receipt = input.inputReceipt
+  const error = fields(input.error), wait = receipt?.control.waiting
+  const brief = (value: unknown, limit = 180) => {
+    const text = typeof value === 'string' ? value : diagnosticJSON(value, 0)
+    return text.length > limit ? `${text.slice(0, limit)}…（其余见完整资料）` : text
+  }
+  const lines = ['AgentMux Message Tool 诊断', `${summary.title} · ${summary.state}`, summary.action,
+    `原输入: ${receipt ? JSON.stringify(receipt.ref.key) : '未知（未收到 Core 输入回执）'}`,
+    `等待代次: ${receipt?.ref.waitGeneration ?? '未知'}`,
+    `Core: ${receipt ? `status=${receipt.status}; persistence=${receipt.persistence}; control=${receipt.control.state}; observation=${receipt.observation}` : '未知'}`,
+    `admission: ${receipt ? receipt.admission === null ? 'null（本回执无接纳记录，不代签此前未输入）' : '收到原接纳记录（完整字段见资料）' : '未知'}`]
+  const dispatch = receipt?.admission?.admission
+  if (dispatch) lines.push(`admission.admission: ${JSON.stringify({ transport: dispatch.transport,
+    nativeOutcome: dispatch.native?.outcome, acknowledged: dispatch.acknowledged, notApplied: dispatch.notApplied,
+    uncertainTurn: dispatch.uncertainTurn, startByte: dispatch.startByte, endByte: dispatch.endByte })}`)
+
+  if (wait) lines.push(`等待（inputReceipt.control.waiting）: phase=${wait.phase}; reason=${wait.reason}; wake=${wait.wake}${'mechanism' in wait && wait.mechanism ? `; mechanism=${wait.mechanism}` : ''}${'observation' in wait && wait.observation?.phase ? `; observation.phase=${wait.observation.phase}（观察位置）` : ''}`)
+  if (input.inputStopReceipt) lines.push(`停止回执: ${JSON.stringify(input.inputStopReceipt)}`)
+  if (input.inputUnconfirmed) lines.push('此前客户端输入标记: 待核实；当前结论见上述 Core 回执。')
+  if (input.errorCode && !error?.code) lines.push(`errorCode: ${input.errorCode}`)
+  if (error?.controlFailure) lines.push(`本次 error.controlFailure: ${JSON.stringify(error.controlFailure)}`)
+  const seen = new Set<object>()
+  let cause: unknown = input.error, source = 'error'
+  for (let depth = 0; depth < 3 && cause !== undefined; depth++) {
+    const record = fields(cause)
+    if (record && seen.has(record)) { lines.push(`${source}: [circular reference]`); break }
+    if (record) seen.add(record)
+    lines.push(`${source}: ${brief(record ? { name: record.name, code: depth === 0 ? input.errorCode ?? record.code : record.code, message: record.message, truncated: record.truncated } : cause, 360)}`)
+    // Opaque detail is evidence, not a parsed protocol or an inferred root cause.
+    if (record?.detail !== undefined) lines.push(`${source}.detail（收到的原因字段）: ${brief(record.detail, 800)}`)
+    cause = record?.cause; source += '.cause'
+    if (depth === 2 && cause !== undefined) lines.push('更深原因链见完整资料。')
+  }
+  const waitingFailure = wait?.phase === 'native-environment' ? wait.observation?.failure : wait?.failure
+  if (waitingFailure && waitingFailure !== input.error) {
+    const source = wait?.phase === 'native-environment' ? 'inputReceipt.control.waiting.observation.failure' : 'inputReceipt.control.waiting.failure'
+    lines.push(`${source}: ${brief({ name: waitingFailure.name, code: waitingFailure.code, message: waitingFailure.message, truncated: waitingFailure.truncated }, 360)}`)
+    if (waitingFailure.detail) lines.push(`${source}.detail（收到的原因字段）: ${brief(waitingFailure.detail, 800)}`)
+    if (waitingFailure.controlFailure) lines.push(`${source}.controlFailure: ${JSON.stringify(waitingFailure.controlFailure)}`)
+  }
+  if (input.log) lines.push(`日志来源: ${JSON.stringify({ owner: input.log.owner, localSaved: input.log.localSaved,
+    hostId: input.log.record.hostId, agentSessionId: input.log.record.agentSessionId, expectedRunId: input.log.record.expectedRunId,
+    operationId: input.log.record.operationId, afterSubmissionId: input.log.record.afterSubmissionId,
+    remoteAvailability: input.log.remote?.availability, remotePersistence: input.log.remote?.persistence })}`)
+  if (input.log?.record.error) {
+    lines.push(`log.record.error（日志来源）: ${brief({ name: input.log.record.error.name, code: input.log.record.error.code, message: input.log.record.error.message, truncated: input.log.record.error.truncated }, 360)}`)
+    if (input.log.record.error.detail) lines.push(`log.record.error.detail（收到的原因字段）: ${brief(input.log.record.error.detail, 800)}`)
+    if (input.log.record.error.controlFailure) lines.push(`log.record.error.controlFailure: ${JSON.stringify(input.log.record.error.controlFailure)}`)
+  }
+  const ids = [...new Set([input.logId, typeof error?.logId === 'string' ? error.logId : undefined,
+    input.log?.record.logId, input.log?.record.coreLogId].filter(Boolean))]
+  if (ids.length) lines.push(`logid: ${ids.join(', ')}`)
+  return lines.join('\n')
+}
+
+/** One received snapshot. Upstream truncation remains visible; omitted bytes cannot be recreated. */
+export function messageDeliveryDiagnosticExport(input: MessageDeliveryDiagnostic): string {
+  const wait = input.inputReceipt?.control.waiting
+  const original = wait?.phase === 'native-environment' ? wait.observation?.failure : wait?.failure
+  // Only the exact same object has a source reference. Equal text/code never merges sources.
+  const error = original !== undefined && input.error === original ? { sourceRef: wait?.phase === 'native-environment'
+    ? 'inputReceipt.control.waiting.observation.failure' : 'inputReceipt.control.waiting.failure' } : input.error
+  return diagnosticJSON({ scope: '实际收到的诊断资料；上游 truncated 标记保留，不代表恢复被上游省略的原文。',
+    ...input, error })
 }
