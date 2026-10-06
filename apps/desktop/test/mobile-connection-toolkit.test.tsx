@@ -3,7 +3,7 @@ import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-val
 import { act } from 'react'
 import { fixturePath as hygieneFixturePath } from '../scripts/lib/fixture-values.mjs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ToolkitAdmission, ToolkitConfirmedResult, ToolkitScriptSnapshot, ToolkitToolDefinition } from '@agentmux/core/control'
+import type { ToolkitAdmission, ToolkitConfirmedResult, ToolkitScriptSnapshot, ToolkitToolDefinition, ToolkitResultDocument } from '@agentmux/core/control'
 import { MobileConnectionResult } from '../src/renderer/src/components/toolkit/MobileConnectionResult'
 import { ToolkitStatusBar } from '../src/renderer/src/components/toolkit/ToolkitStatusBar'
 import { UserToolkitResult } from '../src/renderer/src/components/toolkit/UserToolkitResult'
@@ -19,13 +19,13 @@ const currentURL = 'http://192.0.2.24:8443/#offer=current-complete-offer'
 const definition: ToolkitToolDefinition = { id: MOBILE_CONNECTION_TOOL_ID, revision: 'original-version', name: 'Phone connection', icon: 'smartphone', enabled: true,
   statusBar: 'icon', workspacePath: hygieneFixturePath('tmp/phone'), script: 'status()', args: [], display: { script: 'currentConnection()', args: [] },
   actions: [{ id: 'link', label: 'Generate connection link', script: 'link()', args: [] }] }
-const text = (url: string | null, devices = [{ label: 'My phone', value: 'Online' }]) => JSON.stringify({ schema: 'agentmux.toolkit.result.v1', summary: '1 authorized', items: devices, links: url ? [{ label: 'Phone connection link', url }] : [], notice: 'Connect both devices to the same Wi-Fi.' })
+const connectionDocument = (url: string | null, devices = [{ label: 'My phone', value: 'Connected' }]): ToolkitResultDocument => ({ schema: 'agentmux.toolkit.result.v1', summary: '1 authorized', items: devices, links: url ? [{ label: 'Phone connection link', url }] : [], notice: 'Connect both devices to the same Wi-Fi.' })
 function result(invocationId = 'previous-request', url: string | null = originalURL): ToolkitConfirmedResult {
   return { executionId: 'execution-' + invocationId, invocationId, definition, expectedLatestExecutionId: null, action: null,
-    target: { workspacePath: definition.workspacePath }, run: { hostId: 'local', runId: 'run-' + invocationId }, startedAt: _reshape_fixtureEpoch(0, 0, 1), endedAt: _reshape_fixtureEpoch(0, 0, 2), state: 'succeeded', reason: null, exitCode: 0, text: text(url) }
+    target: { workspacePath: definition.workspacePath }, run: { hostId: 'local', runId: 'run-' + invocationId }, startedAt: _reshape_fixtureEpoch(0, 0, 1), endedAt: _reshape_fixtureEpoch(0, 0, 2), state: 'succeeded', reason: null, exitCode: 0, document: connectionDocument(url), text: 'Native diagnostic on the terminal stream\n' + JSON.stringify(connectionDocument(url)) }
 }
 function unknown(): ToolkitAdmission {
-  const { endedAt: _end, exitCode: _exit, ...base } = result('original-unknown')
+  const { endedAt: _end, exitCode: _exit, document: _document, ...base } = result('original-unknown')
   return { ...base, run: null, text: '', state: 'unknown', reason: 'Execution restored; exact Run outcome needs confirmation.',
     action: { id: 'link', sourceExecutionId: 'execution-previous-request', expectedAdmissionExecutionId: null } }
 }
@@ -58,6 +58,42 @@ async function click(label: string) { await act(async () => button(label).click(
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} }) })
 
 describe('phone Toolkit consumes the independent display program', () => {
+  it.each(['', 'Native bridge diagnostic\n', 'Warning: native logger unavailable\nDebug: using the original process\n'])('uses the typed document independently of terminal diagnostics %j', async diagnostics => {
+    const confirmed = { ...result('display-diagnostics', currentURL), text: diagnostics + JSON.stringify(connectionDocument(originalURL)) }
+    const f = fixture({ display: { state: 'succeeded', reason: null, admission: null, latestConfirmed: confirmed, sequence: 2 } })
+    await render(); await click('Copy link')
+    expect(f.clipboard).toHaveBeenCalledExactlyOnceWith(currentURL)
+    expect((dom.container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(currentURL)
+    expect(dom.container.querySelector('svg[role="img"]')).not.toBeNull()
+    expect(dom.container.textContent).not.toContain('Current connection details are unavailable')
+    expect(f.run).not.toHaveBeenCalled(); expect(f.action).not.toHaveBeenCalled(); expect(f.evaluate).not.toHaveBeenCalled()
+  })
+  it.each(['missing', 'unavailable'] as const)('keeps a typed saved QR and original time after a fresh mount with a %s machine result', async kind => {
+    const saved = { ...result('saved-machine-document', currentURL), endedAt: _reshape_fixtureEpoch(0, 0, 1234) }
+    const { document: _document, ...plain } = result('current-no-document', originalURL)
+    const latest = kind === 'missing' ? plain : { ...plain, document: null, reason: 'Authenticated machine document was invalid' }
+    const f = fixture({ display: { state: 'succeeded', reason: latest.reason, admission: null, latestConfirmed: latest, lastSucceeded: saved, sequence: 3 } })
+    for (let mount = 0; mount < 2; mount++) {
+      await render(); await click('Copy link')
+      expect((dom.container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(currentURL)
+      expect(dom.container.querySelector('.phone-connection__updated time')?.getAttribute('datetime')).toBe(new Date(saved.endedAt).toISOString())
+      expect(dom.container.textContent).toContain('Saved code · current details not confirmed')
+      expect(dom.container.querySelector('.phone-connection__service')?.textContent).toContain('Current connection details are unavailable')
+      expect(button('Retry connection').disabled).toBe(false)
+      await dom.render(<p>Closed</p>)
+    }
+    expect(f.clipboard.mock.calls).toEqual([[currentURL], [currentURL]])
+    expect(f.run).not.toHaveBeenCalled(); expect(f.action).not.toHaveBeenCalled(); expect(f.evaluate).not.toHaveBeenCalled()
+  })
+  it('shows a retryable service window for a successful plain JSON-looking result without interpreting its URL', async () => {
+    const { document: _document, ...plain } = result('plain-json-looking', currentURL)
+    fixture({ latestConfirmed: plain, display: { state: 'succeeded', reason: null, admission: null, latestConfirmed: plain, sequence: 1 } })
+    await render()
+    expect(dom.container.querySelector('svg[role="img"]')).toBeNull()
+    expect(dom.container.querySelector('.phone-connection__service')?.textContent).toContain('Current connection details are unavailable')
+    expect(button('Retry connection').disabled).toBe(false)
+    expect(dom.container.querySelector('textarea')).toBeNull()
+  })
   it('keeps clipboard failure with Copy instead of declaring current connection unavailable', async () => {
     const f = fixture(); f.clipboard.mockRejectedValue(new Error('clipboard is locked'))
     await render(); await click('Copy link')

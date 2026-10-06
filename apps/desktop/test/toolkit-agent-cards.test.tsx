@@ -1,3 +1,4 @@
+const { fixtureEpoch: _newTailFixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -55,7 +56,7 @@ it('ordinary Custom result consumes the public document and shared standard face
   const definition: ToolkitToolDefinition = { id: 'ordinary-tool', revision: 'r1', name: 'Ordinary tool', icon: 'terminal', enabled: true, statusBar: 'label', workspacePath: _hygiene_fixturePath("repo"), script: 'console.log(JSON.stringify(document))', args: [] }
   const document = documentFor(cards([card('canonical-sid')], [...TOOLKIT_AGENT_CARD_FIELDS]))
   const snapshot: ToolkitScriptSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'script', toolId: definition.id, definition, state: 'succeeded', reason: null, admission: null, consumerCount: 1, sequence: 1,
-    latestConfirmed: { executionId: 'captured-result', invocationId: 'original-invocation', definition, expectedLatestExecutionId: null, target: { workspacePath: _hygiene_fixturePath("repo") }, run: { hostId: 'local', runId: 'tool-run' }, startedAt: 1, endedAt: 2, state: 'succeeded', reason: null, exitCode: 0, text: JSON.stringify(document) } }
+    latestConfirmed: { executionId: 'captured-result', invocationId: 'original-invocation', definition, expectedLatestExecutionId: null, target: { workspacePath: _hygiene_fixturePath("repo") }, run: { hostId: 'local', runId: 'tool-run' }, startedAt: _newTailFixtureEpoch(0, 0, 1), endedAt: _newTailFixtureEpoch(0, 0, 2), state: 'succeeded', reason: null, exitCode: 0, document, text: 'Native diagnostic\n' + JSON.stringify(document) } }
   const release = vi.fn(), run = vi.spyOn(api.toolkit, 'run'), stop = vi.spyOn(api.toolkit, 'stop'), action = vi.spyOn(api.toolkit, 'action')
   vi.spyOn(api.toolkit, 'observe').mockImplementation((_id, read) => { read(snapshot); return { dispose: release } })
   await dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {} }}><UserToolkitResult definition={definition} active close={() => {}} /></SettingsNavigation.Provider>)
@@ -205,9 +206,24 @@ it('malformed optional document preserves exact confirmed raw output and the hea
   const original = agent('one'); useAppStore.setState({ sessions: [original] })
   const definition: ToolkitToolDefinition = { id: 'ordinary-invalid', revision: 'r1', name: 'Ordinary', icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: _hygiene_fixturePath("repo"), script: 'console.log("raw")', args: [] }
   const malformed = JSON.stringify({ ...documentFor(cards([card('one')])), agentCards: { fields: ['avatar'], omittedItems: 0, items: [{ ...card('one'), reference: { kind: 'session', hostId: 'local', sessionId: 'one', provider: 'made-up' } }] } })
-  const snapshot: ToolkitScriptSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'script', toolId: definition.id, definition, state: 'succeeded', reason: null, admission: null, latestConfirmed: { executionId: 'original', invocationId: 'invocation', definition, expectedLatestExecutionId: null, target: { workspacePath: _hygiene_fixturePath("repo") }, run: { hostId: 'local', runId: 'original-tool-run' }, startedAt: 1, endedAt: 2, exitCode: 0, state: 'succeeded', reason: null, text: malformed }, consumerCount: 1, sequence: 1 }
+  const snapshot: ToolkitScriptSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'script', toolId: definition.id, definition, state: 'succeeded', reason: null, admission: null, latestConfirmed: { executionId: 'original', invocationId: 'invocation', definition, expectedLatestExecutionId: null, target: { workspacePath: _hygiene_fixturePath("repo") }, run: { hostId: 'local', runId: 'original-tool-run' }, startedAt: _newTailFixtureEpoch(0, 0, 1), endedAt: _newTailFixtureEpoch(0, 0, 2), exitCode: 0, state: 'succeeded', reason: 'Machine document validation failed', document: null, text: malformed }, consumerCount: 1, sequence: 1 }
   vi.spyOn(api.toolkit, 'observe').mockImplementation((_id, read) => { read(snapshot); return { dispose() {} } })
   await dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {} }}><UserToolkitResult definition={definition} active close={() => {}} /></SettingsNavigation.Provider>)
   expect(dom.container.querySelector('[data-toolkit-output]')?.textContent).toBe(malformed)
   expect(dom.container.querySelector('[data-toolkit-agent-card]')).toBeNull(); expect(useAppStore.getState().sessions[0]).toBe(original)
+})
+
+it.each(['missing', 'unavailable'] as const)('keeps JSON-looking ordinary terminal text as exact text when a typed result is %s', async kind => {
+  const original = agent('one'); useAppStore.setState({ sessions: [original] })
+  const definition: ToolkitToolDefinition = { id: 'ordinary-plain-json', revision: 'r1', name: 'Plain output', icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: _hygiene_fixturePath('repo'), script: 'console.log("plain")', args: [] }
+  const text = JSON.stringify(documentFor(cards([card('one')]))), latestConfirmed = { executionId: 'plain-output', invocationId: 'plain-invocation', definition,
+    expectedLatestExecutionId: null, target: { workspacePath: definition.workspacePath }, run: { hostId: 'local', runId: 'plain-tool-run' },
+    startedAt: _newTailFixtureEpoch(0, 0, 1), endedAt: _newTailFixtureEpoch(0, 0, 2), exitCode: 0, state: 'succeeded' as const, reason: null, text, ...(kind === 'unavailable' ? { document: null } : {}) }
+  const snapshot: ToolkitScriptSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'script', toolId: definition.id, definition, state: 'succeeded', reason: null, admission: null, latestConfirmed, consumerCount: 1, sequence: 1 }
+  vi.spyOn(api.toolkit, 'observe').mockImplementation((_id, read) => { read(snapshot); return { dispose() {} } })
+  await dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {} }}><UserToolkitResult definition={definition} active close={() => {}} /></SettingsNavigation.Provider>)
+  expect(dom.container.querySelector('[data-toolkit-output]')?.textContent).toBe(text)
+  expect(dom.container.querySelector('.toolkit-result__document')).toBeNull()
+  expect(dom.container.querySelector('[data-toolkit-agent-card]')).toBeNull()
+  expect(useAppStore.getState().sessions[0]).toBe(original)
 })
