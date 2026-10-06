@@ -1,4 +1,4 @@
-import { Info } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../store'
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
 import type { AgentActivityHistoryProjection } from '@agentmux/core'
@@ -7,6 +7,10 @@ import { formatClock } from '@agentmux/client-ui/conversation-time'
 import type { RulerAxisItem, ConversationAxisMark } from '../lib/conversation-axis'
 import { conversationRulerDensity, rulerRecordQuote } from '../lib/conversation-ruler'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
+
+const ThemeConversationRangeIcon = semanticIconComponent('conversation.range')
+const ThemeActionHelpIcon = semanticIconComponent('action.help')
+
 /** The client-space rectangle the readout must stay clear of and inside — the whole ruler track. */
 function readoutAnchor(
   trackRect: DOMRect,
@@ -304,7 +308,7 @@ export function Ruler({
       </div>
       <div className="activity-ruler__summary">
         {span ? <span className="activity-ruler__span" title={`${span.from} → ${span.to} · ${span.elapsed} elapsed`}>
-          <span className="activity-ruler__span-range"><span>{span.from}</span><span className="activity-ruler__span-arrow" aria-hidden="true">→</span><span>{span.to}</span></span>
+          <span className="activity-ruler__span-range"><span>{span.from}</span><span className="activity-ruler__span-arrow" aria-hidden="true"><ThemeConversationRangeIcon size={10} /></span><span>{span.to}</span></span>
 
         </span> : <span className="activity-ruler__span">Record order</span>}
         <span className="activity-ruler__count" data-loading={reading?.loading ? 'true' : undefined} >
@@ -315,7 +319,7 @@ export function Ruler({
         {controls?.(closeReadout)}
         <button type="button" className="activity-ruler__guide-trigger" aria-label="Timeline guide"
           title="Explain this timeline" popoverTarget={legendId} popoverTargetAction="toggle"
-          style={{ anchorName: legendAnchor }} onClick={closeReadout}><Info size={13} aria-hidden="true" /></button>
+          style={{ anchorName: legendAnchor }} onClick={closeReadout}><ThemeActionHelpIcon size={13} aria-hidden="true" /></button>
       </div>
       <div id={legendId} popover="auto" className="activity-ruler__guide" role="dialog"
         aria-labelledby={`${legendId}-title`} style={{ positionAnchor: legendAnchor }}

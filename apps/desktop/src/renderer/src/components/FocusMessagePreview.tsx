@@ -1,6 +1,6 @@
 import { useId, useLayoutEffect, useRef } from 'react'
 import { autoUpdate, computePosition, offset, shift, size, type VirtualElement } from '@floating-ui/dom'
-import { ArrowUpRight, MessageSquare, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { describeConversationRecordSource, type ConversationRecord } from '@agentmux/client-ui/conversation-records'
 import { completedNativeReply } from '@agentmux/client-ui/conversation-files'
 import type { FocusContext } from '../lib/focus-context'
@@ -11,6 +11,12 @@ import type { FocusDescribeSpeaker } from '../lib/conversation-sender-details'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 import { api } from '../lib/api'
 import { createFocusTimeFormatters, type FocusTimeFormatters } from '../lib/focus-timeline-ruler'
+
+const ThemeConversationOutgoingIcon = semanticIconComponent('conversation.outgoing')
+const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+
 
 export type FocusMessageReader = {
   messages: readonly ConversationRecord[]; loading: boolean; coverage: string; error: string | null
@@ -117,9 +123,9 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
   return <WindowOverlayPortal layer={interactive ? 'popover' : 'tooltip'}><div ref={element} id={previewId} tabIndex={interactive ? -1 : undefined} className="recent-focus__message-preview" data-interactive={interactive} data-state="open"
     data-preview-message-id={message?.id} data-message-author={speaker?.role}
     onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onPointerDownCapture={event => { insidePointer.current = event.nativeEvent }} role={interactive ? 'dialog' : 'tooltip'} aria-label="Message">
-    <header>{!interactive && speaker ? <ConversationSpeakerAvatar speaker={speaker} name={described!.name} mote={described?.mote} {...(described?.providerId ? { providerId: described.providerId } : {})} size={20} /> : <MessageSquare size={14} aria-hidden="true" />}<strong>{interactive ? reader ? 'Conversation records' : targetName : described?.name ?? 'Input'}</strong>
+    <header>{!interactive && speaker ? <ConversationSpeakerAvatar speaker={speaker} name={described!.name} mote={described?.mote} {...(described?.providerId ? { providerId: described.providerId } : {})} size={20} /> : <ThemeObjectConversationIcon size={14} aria-hidden="true" />}<strong>{interactive ? reader ? 'Conversation records' : targetName : described?.name ?? 'Input'}</strong>
       {!interactive ? <span className="recent-focus__author-kind">{roleName}</span> : null}
-      {interactive ? <button type="button" className="icon-button" aria-label="Close message" onClick={onClose}><X size={12} /></button> : null}</header>
+      {interactive ? <button type="button" className="icon-button" aria-label="Close message" onClick={onClose}><ThemeActionCloseIcon size={12} /></button> : null}</header>
     {reader ? <div className="recent-focus__input-reader">
       {!reader.selectionOnly ? <><label>Context <select aria-label="Conversation records Context" value={reader.contextId ?? ''} onChange={event => reader.onContext(event.target.value)}><option value="" disabled>Choose a Context</option>{reader.contexts.map(context => <option key={context.id} value={context.id} title={context.details}>{context.name} · {context.workspaceName}</option>)}</select></label>
       {reader.contexts.find(context => context.id === reader.contextId)?.details ? <details className="recent-focus__source-details"><summary>Source details</summary><p>{reader.contexts.find(context => context.id === reader.contextId)!.details}</p></details> : null}
@@ -142,7 +148,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
       {!reader.loading && reader.messages.length === 0 ? <p>No conversation records read in this view. Coverage may be incomplete.</p> : null}
     </div> : null}
     {message ? !interactive ? <>
-      <p className="recent-focus__message-caption">{reply ? 'Reply in ' : '→ '}{targetName}</p>
+      <p className="recent-focus__message-caption">{reply ? 'Reply in ' : <><ThemeConversationOutgoingIcon size={11} role="img" aria-hidden="false" aria-label="To" /> </>}{targetName}</p>
       <p className="recent-focus__message-excerpt">{message.content.trim() || (resources.length ? resources.join(' · ') : 'Input has no recorded text')}</p>
       <footer className="recent-focus__message-meta"><span title={describeConversationRecordSource(message).title}>{describeConversationRecordSource(message).caption}</span><time title="Record time, not a verified sender time">{message.recordedAt !== undefined && Number.isFinite(message.recordedAt) ? time.dateClock(message.recordedAt) : 'Record time unknown'}</time></footer>
       <span className="recent-focus__message-hint">Click or press Enter to keep reading</span>
@@ -164,7 +170,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
       timeFormatter={time.clock}
       {...(message.recordedAt === undefined || !Number.isFinite(message.recordedAt) ? {} : { createdAt: message.recordedAt })}
       workspaceRoot={recipient?.workspacePath ?? workspaceRoot ?? ''} readPastedImage={readPastedImage} /></div>
-    {agent ? <button type="button" className="recent-focus__sender-link" disabled={!sender} onClick={() => navigate(sender)}>View sender<ArrowUpRight size={12} aria-hidden="true" /></button> : null}
+    {agent ? <button type="button" className="recent-focus__sender-link" disabled={!sender} onClick={() => navigate(sender)}>View sender<ThemeActionOpenExternalIcon size={12} aria-hidden="true" /></button> : null}
     <button type="button" disabled={!recipient} onClick={() => navigate(recipient)}>Return to Context</button></> : null}
   </div></WindowOverlayPortal>
 }

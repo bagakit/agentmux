@@ -1,6 +1,6 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
-import { Check, CheckCircle2, CirclePause, Inbox, ListFilter, PlayCircle, Search, Users } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
@@ -36,6 +36,17 @@ import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { WorkbenchPresentationContext, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { groupIds, regionIds } from '@agentmux/layout'
+
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeObjectInboxIcon = semanticIconComponent('object.inbox')
+const ThemeStatusWorkingIcon = semanticIconComponent('status.working')
+const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
+const ThemeStatusNeutralIcon = semanticIconComponent('status.neutral')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionFilterIcon = semanticIconComponent('action.filter')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeObjectTeamIcon = semanticIconComponent('object.team')
+
 
 function FocusLocationChoice({ reference, tab, workspaceName, groupIndex, regionIndex, onSelect }: {
   reference: WorkbenchProjectionSelection
@@ -194,7 +205,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   }, [visible, hasBoardLanes])
   const matchingGroups = groupFocusContexts(matching)
   const neutralSummary = focusNeutralGroupSummary(matchingGroups.idle)
-  const bucketMeta = { attention: { label: 'Attention', icon: Inbox }, working: { label: 'Working', icon: PlayCircle }, results: { label: 'Results', icon: CheckCircle2 }, idle: { label: neutralSummary.label, icon: CirclePause } }
+  const bucketMeta = { attention: { label: 'Attention', icon: ThemeObjectInboxIcon }, working: { label: 'Working', icon: ThemeStatusWorkingIcon }, results: { label: 'Results', icon: ThemeStatusCompletedIcon }, idle: { label: neutralSummary.label, icon: ThemeStatusNeutralIcon } }
   const buckets = FOCUS_BUCKETS
   const projectOptions = useMemo(() => {
     const options = [...new Map([...allLanes.map(lane => ({ id: focusProjectKey(lane.hostId, lane.projectId), name: lane.labels[0]!, hostId: lane.hostId })),
@@ -242,10 +253,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     <FocusToolbar selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
       <div className={`focus-filters${isMacPlatform() ? ' focus-filters--mac' : ''}`}>
         <div className="global-board-toolbar__controls">
-          <label className="global-board-search"><Search size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search contexts or amux ID" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+          <label className="global-board-search"><ThemeActionSearchIcon size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search contexts or amux ID" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <FilterMenu.Root>
             <FilterMenu.Trigger asChild><button type="button" className="focus-filter-trigger" aria-label="Focus filters" aria-description={filterSummary} title={filterSummary} data-active={filterCount > 0 ? 'true' : undefined}>
-              <ListFilter size={14} aria-hidden="true" /><span className="focus-filter-trigger__summary">{filterSummary}</span>{filterCount ? <span className="focus-filter-trigger__count" aria-hidden="true">{filterCount}</span> : null}
+              <ThemeActionFilterIcon size={14} aria-hidden="true" /><span className="focus-filter-trigger__summary">{filterSummary}</span>{filterCount ? <span className="focus-filter-trigger__count" aria-hidden="true">{filterCount}</span> : null}
             </button></FilterMenu.Trigger>
             <FilterMenu.Portal><FilterMenu.Content className="tab-context-menu focus-filter-menu" align="end" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => {
               // Preserve a later deliberate focus; explicit Escape still returns to this trigger.
@@ -256,14 +267,14 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
               <FilterMenu.Label className="focus-filter-menu__label">Project</FilterMenu.Label>
               <FilterMenu.RadioGroup className="focus-filter-menu__projects" aria-label="Focus project filter" value={project} onValueChange={setProject}>
                 {[{ id: 'all', name: 'All projects' }, ...projectOptions].map(option => <FilterMenu.RadioItem key={option.id} value={option.id} data-focus-project={option.id} className="tab-context-menu__item focus-filter-menu__item">
-                  <span className="focus-filter-menu__check"><FilterMenu.ItemIndicator><Check size={13} /></FilterMenu.ItemIndicator></span><span>{option.name}</span>
+                  <span className="focus-filter-menu__check"><FilterMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></FilterMenu.ItemIndicator></span><span>{option.name}</span>
                 </FilterMenu.RadioItem>)}
               </FilterMenu.RadioGroup>
               <FilterMenu.Separator className="tab-context-menu__separator" />
               <FilterMenu.Label className="focus-filter-menu__label">State</FilterMenu.Label>
               <FilterMenu.RadioGroup aria-label="Focus state filter" value={bucketFilter} onValueChange={value => setBucketFilter(value as FocusBucket | 'all')}>
                 {[{ id: 'all', label: 'All states' }, ...buckets.map(bucket => ({ id: bucket, label: `${bucketMeta[bucket].label} · ${matchingGroups[bucket].length}` }))].map(option => <FilterMenu.RadioItem key={option.id} value={option.id} data-focus-state={option.id} className="tab-context-menu__item focus-filter-menu__item">
-                  <span className="focus-filter-menu__check"><FilterMenu.ItemIndicator><Check size={13} /></FilterMenu.ItemIndicator></span><span>{option.label}</span>
+                  <span className="focus-filter-menu__check"><FilterMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></FilterMenu.ItemIndicator></span><span>{option.label}</span>
                 </FilterMenu.RadioItem>)}
               </FilterMenu.RadioGroup>
             </FilterMenu.Content></FilterMenu.Portal>
@@ -300,8 +311,8 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         requestPmoTeamsTopicFloatingOpen({ targetTopicId: topicId, ...(tab ? { targetTabId: tab.id } : {}), ...(reference ? { reference } : {}), onReturnFocus: () => {
           if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus({ preventScroll: true })
         } })
-      }}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context ↗</span></button> : null}
-      {executionRows.length === 0 && retainedProjects.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
+      }}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context <ThemeActionOpenExternalIcon size={12} /></span></button> : null}
+      {executionRows.length === 0 && retainedProjects.length === 0 ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">
           <WorkbenchPresentationContext.Provider value={{ active: visible, retainedRegionId: null }}><div className="focus-project-board__live" data-empty={!hasBoardLanes || undefined}>
             {hasBoardLanes ? <FocusProjectLanes lanes={boardLanes} recentProjects={recentProjects} onRead={readProjectHistory} selectedProjectKey={project} currentLaneId={currentLaneId} onSelect={setProject} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
