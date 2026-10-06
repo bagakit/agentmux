@@ -6,8 +6,9 @@ import type { SessionHistoryReference } from '../../../shared/contracts'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { readSessionConversationPage } from './session-user-messages'
 import { nativeBindingKey, type AgentNativeSourceFacts } from '../../../shared/agent-native-source'
+import { projectConversationRecordSequence } from '@agentmux/client-ui/conversation-record-sequence'
 
-type ReadingAnchor = { kind: 'record' | 'group'; id: string; offset: number }
+type ReadingAnchor = { kind: 'record' | 'group' | 'segment'; id: string; offset: number }
 export type ConversationReading = {
   reference: SessionHistoryReference
   /** A live Run fences the window; a retired Session needs no invented Run. */
@@ -35,6 +36,11 @@ type ReadingWindow = {
   boundary: { recordId: string; confirmed: boolean } | null
 }
 export type ConversationReadingIntent = 'current' | 'seed' | 'earlier' | 'newer' | 'coverage' | 'live'
+/** Exact committed DOM source and the next renderer boundary, independent of seed context. */
+export type ConversationWindowProjection = {
+  current: AgentSessionHistoryPage | null
+  recordBoundary?: { beforeRecordId: string }
+}
 const PAGE_COUNT = 3
 const PAGE_LIMIT = 100
 const RECORD_COUNT = 1200
@@ -58,9 +64,15 @@ function nativeSourceOption(source: AgentSessionHistorySource | undefined, facts
   throw new Error('This original conversation window is retained. Its source is no longer available for paging; explicitly open Current source or Previous source.')
 }
 
-export function conversationReadingAnchor(viewport: HTMLElement): ReadingAnchor | null {
+export function conversationReadingAnchor(viewport: HTMLElement, observedScope?: HTMLElement | null): ReadingAnchor | null {
   const bounds = viewport.getBoundingClientRect()
   if (bounds.height <= 0) return null
+  if (observedScope) for (const row of observedScope.querySelectorAll<HTMLElement>('[data-segment-key]')) {
+    const rect = row.getBoundingClientRect()
+    if (rect.height > 0 && rect.bottom > bounds.top && rect.top < bounds.bottom) {
+      return { kind: 'segment', id: row.dataset.segmentKey!, offset: rect.top - bounds.top }
+    }
+  }
   for (const row of viewport.querySelectorAll<HTMLElement>('[data-native-record-id]')) {
     const rect = row.getBoundingClientRect()
     if (rect.height > 0 && rect.bottom > bounds.top && rect.top < bounds.bottom) {
@@ -87,7 +99,7 @@ function rangeIntersectsElement(range: Range, el: HTMLElement): boolean {
 }
 
 /** Check real retained nodes before replacing any displayed raw record, including a cross-page Range. */
-export function protectsConversationWindow(viewport: HTMLElement | null, next: AgentSessionHistoryPage, preserveAnchor = true, currentOriginal?: AgentSessionHistoryPage): boolean {
+export function protectsConversationWindow(viewport: HTMLElement | null, next: AgentSessionHistoryPage, preserveAnchor = true, currentOriginal?: AgentSessionHistoryPage, projection?: ConversationWindowProjection): boolean {
   if (!viewport) return false
   const retained = new Set(next.items.map(item => item.id))
   // Entering the original window can leave unselected context outside that window.
@@ -106,15 +118,41 @@ export function protectsConversationWindow(viewport: HTMLElement | null, next: A
   for (const row of viewport.querySelectorAll<HTMLElement>('[data-native-record-id]')) {
     if ((!sameSource(row) || !retained.has(row.dataset.nativeRecordId!)) && rangeIntersectsElement(selection.getRangeAt(0), row)) return true
   }
-  for (const group of viewport.querySelectorAll<HTMLElement>('[data-native-record-ids]')) {
+  const selectedGroups = [...viewport.querySelectorAll<HTMLElement>('[data-native-record-ids]')].filter(group => {
     const head = group.querySelector<HTMLElement>('.wf-card--observation > .wf-head')
-    if (head && rangeIntersectsElement(selection.getRangeAt(0), head)) return true
+    return head && rangeIntersectsElement(selection.getRangeAt(0), head)
+  })
+  if (!selectedGroups.length) return false
+  const current = projection?.current
+  if (!current || current.agentSessionId !== next.agentSessionId || current.source.providerId !== next.source.providerId
+    || current.source.nativeSessionId !== next.source.nativeSessionId) return true
+  const previous = new Map<string, string>()
+  for (const group of viewport.querySelectorAll<HTMLElement>('[data-native-record-ids]')) {
+    if (!sameSource(group)) continue
+    const id = group.querySelector<HTMLElement>('[data-observation-id]')?.dataset.observationId
+    if (id) for (const recordId of JSON.parse(group.dataset.nativeRecordIds ?? '[]') as string[]) previous.set(recordId, id)
+  }
+  const sourceKey = JSON.stringify([next.agentSessionId, next.source.providerId, next.source.nativeSessionId])
+  const projected = projectConversationRecordSequence(next.items, sourceKey, previous, projection?.recordBoundary?.beforeRecordId)
+  const nextGroups = new Map(projected.rows.flatMap(row => row.kind === 'process' ? [[row.id, row.items] as const] : []))
+  const currentItems = new Map(current.items.map(item => [item.id, item]))
+  for (const group of selectedGroups) {
+    if (!sameSource(group)) return true
+    const id = group.querySelector<HTMLElement>('[data-observation-id]')?.dataset.observationId
+    const ids = JSON.parse(group.dataset.nativeRecordIds ?? '[]') as string[]
+    const items = id ? nextGroups.get(id) : undefined
+    if (!items || items.length !== ids.length || items.some((item, index) => {
+      const original = currentItems.get(ids[index]!)
+      return item.id !== ids[index] || !original || original !== item && JSON.stringify(original) !== JSON.stringify(item)
+    })) return true
   }
   return false
 }
 
 export function restoreConversationAnchor(viewport: HTMLElement, anchor: ReadingAnchor): void {
-  const row = anchor.kind === 'record'
+  const row = anchor.kind === 'segment'
+    ? [...viewport.querySelectorAll<HTMLElement>('[data-segment-key]')].find(node => node.dataset.segmentKey === anchor.id)
+    : anchor.kind === 'record'
     ? [...viewport.querySelectorAll<HTMLElement>('[data-native-record-id]')].find(node => node.dataset.nativeRecordId === anchor.id)
     : [...viewport.querySelectorAll<HTMLElement>('[data-observation-id]')].find(node => node.dataset.observationId === anchor.id)
       ?.querySelector<HTMLElement>(':scope > .wf-head[aria-expanded="false"]')
@@ -175,7 +213,7 @@ function needsTimeCoverage(page: AgentSessionHistoryPage, duration: number): boo
 }
 
 export function useSessionConversationWindow(reading: ConversationReading | undefined, recent: AgentSessionHistoryPage | null,
-  beforeCommit: (page: AgentSessionHistoryPage, intent: ConversationReadingIntent, currentOriginal?: AgentSessionHistoryPage) => boolean,
+  beforeCommit: (page: AgentSessionHistoryPage, intent: ConversationReadingIntent, currentOriginal?: AgentSessionHistoryPage, projection?: ConversationWindowProjection) => boolean,
   contextItems?: AgentSessionHistoryPage['items'], coverageDuration = 24 * 3_600_000) {
   const currentContext = useMemo(() => recent && contextItems ? { ...recent, items: contextItems } : recent, [recent, contextItems])
   const key = reading ? JSON.stringify([reading.reference.hostId, reading.reference.agentSessionId, reading.identity]) : ''
@@ -213,6 +251,14 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   }, [key, bindingKey, window, page, keepContext])
   const pageRef = useRef(page); pageRef.current = page
   function update(next: typeof state) { stateRef.current = next; setState(next) }
+  function allowsWindow(next: ReadingWindow, intent: ConversationReadingIntent, currentOriginal?: AgentSessionHistoryPage): boolean {
+    const committed = committedPage.current
+    return live.current.beforeCommit(next.page, intent, currentOriginal, {
+      current: committed.key === live.current.key ? committed.page : null,
+      ...(next.boundary?.confirmed && next.records.has(next.boundary.recordId)
+        ? { recordBoundary: { beforeRecordId: next.boundary.recordId } } : {})
+    })
+  }
   async function read(direction: ReadDirection, selectedSource?: AgentSessionHistorySource, retryPage = false): Promise<void> {
     const start = live.current
     if (!start.reading?.enabled) return
@@ -283,7 +329,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
         if (!navigation || direction === 'coverage') {
           const prefix = assemble([...parts], [...positions], head, navigation ? before.boundary : null,
             navigation ? before.newerOutside : false, null, positionBytes, start.bindingKey)
-          if (!live.current.beforeCommit(prefix.page, direction, !before ? start.recent ?? undefined : undefined)) throw new Error(protectedError)
+          if (!allowsWindow(prefix, direction, !before ? start.recent ?? undefined : undefined)) throw new Error(protectedError)
           accepted = prefix
           appliedRecent.current = start.recent
           update({ key: start.key, window: prefix, loading: true, error: null })
@@ -304,7 +350,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
       const nextWindow = assemble(parts, positions, head, boundary,
         navigation ? direction === 'coverage' ? before.newerOutside : parts[0]!.index > 0 : false,
         navigation && direction !== 'coverage' ? direction as 'earlier' | 'newer' : null, positionBytes, start.bindingKey)
-      if (!live.current.beforeCommit(nextWindow.page, direction, !before ? start.recent ?? undefined : undefined)) throw new Error(protectedError)
+      if (!allowsWindow(nextWindow, direction, !before ? start.recent ?? undefined : undefined)) throw new Error(protectedError)
       appliedRecent.current = navigation && direction === 'newer' ? null : start.recent
       automaticSeedBlocked.current = false
       if (direction === 'seed' || direction === 'current') coverageDemand.current = true
@@ -415,7 +461,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     }
     try {
       const next = assemble(parts, before.positions, before.head, before.boundary, false, 'newer', before.positionBytes, before.bindingKey)
-      if (!live.current.beforeCommit(next.page, 'live')) throw new Error(protectedError)
+      if (!allowsWindow(next, 'live')) throw new Error(protectedError)
       update({ ...stateRef.current, window: next })
     } catch (cause) { update({ ...stateRef.current, error: presentError(cause), window: { ...before, newerOutside: true } }) }
   }, [key, bindingKey, reading?.enabled, recent, state.window, state.loading])
@@ -443,6 +489,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     historical: Boolean(window && window.parts[0]!.index > 0) || previousSource || Boolean(window && window.bindingKey !== bindingKey) || Boolean(keepContext),
     hasEarlierNavigation: Boolean(window?.boundary) || previousSource || Boolean(keepContext),
     previousSource, coverageLoading: state.key === key && state.loading && retry.current.direction === 'coverage', loading: state.key === key && state.loading, error: state.key === key ? state.error : null,
+    loadingEarlier: state.key === key && state.loading && retry.current.direction === 'earlier',
     historyBoundary: window?.boundary?.confirmed && window.records.has(window.boundary.recordId) ? { beforeRecordId: window.boundary.recordId } : null,
     newerOutside, hasNewer: Boolean(window && window.parts[0]!.index > 0), hasMore: Boolean(page?.nextCursor),
     readEarlier: () => void read('earlier'), readNewer: () => void read('newer'), retry: () => { automaticSeedBlocked.current = false; if (retry.current.direction === 'coverage') coverageDemand.current = true; void read(retry.current.direction, retry.current.source, true) },

@@ -1,3 +1,4 @@
+import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -7,6 +8,7 @@ import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessag
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
   initFollowState,
+  FOLLOW_THRESHOLD_PX,
   onContentChange,
   onScroll,
   shouldShowJumpToLatest,
@@ -443,12 +445,15 @@ export function ActivityView({
   const followRef = useRef(initFollowState())
   const [showJump, setShowJump] = useState(false)
   const returnRef = useRef<HTMLButtonElement>(null)
-  const edgeRef = useRef({ earlier: false, newer: false, programmaticTop: null as number | null })
+  const earlierRef = useRef<HTMLDivElement>(null)
+  const nativeTailRef = useRef<HTMLDivElement>(null)
+  const physicalScrollRef = useRef<ScrollGeometry | null>(null)
+  const edgeRef = useRef({ earlier: false, newer: false })
   const [rulerWindow, setRulerWindow] = useState<RulerWindow>('24h')
-  const readingWindow = useSessionConversationWindow(conversationReading, recentNativePage ?? null, (page, intent, currentOriginal) => {
+  const readingWindow = useSessionConversationWindow(conversationReading, recentNativePage ?? null, (page, intent, currentOriginal, projection) => {
     const keepAnchor = intent === 'earlier' || intent === 'newer' || (intent !== 'current' && !followRef.current.following)
-    if (protectsConversationWindow(feedEl, page, keepAnchor, currentOriginal)) return false
-    anchorRef.current = keepAnchor && feedEl ? conversationReadingAnchor(feedEl) : null
+    if (protectsConversationWindow(feedEl, page, keepAnchor, currentOriginal, projection)) return false
+    anchorRef.current = keepAnchor && feedEl ? captureReadingAnchor(feedEl) : null
     if (intent === 'current') {
       followRef.current = { ...followRef.current, following: true }
       edgeRef.current.earlier = false; edgeRef.current.newer = false
@@ -458,6 +463,7 @@ export function ActivityView({
   const handleReadingKey = (event: KeyboardEvent<HTMLDivElement>): void => {
     const interactive = event.target instanceof Element && event.target.closest('input, textarea, select, button, a, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="button"], [role="textbox"], [role="combobox"], [role="menu"]')
     if (!event.defaultPrevented && !interactive) {
+      if (event.target !== event.currentTarget) anchorRef.current = captureReadingAnchor(event.currentTarget, event.target)
       if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) requestReadingEdge(-1, event.currentTarget)
       if (['ArrowDown', 'PageDown', 'End'].includes(event.key)) requestReadingEdge(1, event.currentTarget)
     }
@@ -466,9 +472,13 @@ export function ActivityView({
     }
   }
   useEffect(() => {
-    edgeRef.current = { earlier: false, newer: false, programmaticTop: null }
+    edgeRef.current = { earlier: false, newer: false }
+    physicalScrollRef.current = null
   }, [sessionId, conversationReading?.identity, conversationReading?.reference.hostId])
   const nativeHistoryPage = readingWindow.page
+  useEffect(() => {
+    edgeRef.current.earlier = false; edgeRef.current.newer = false
+  }, [nativeHistoryPage?.nextCursor, readingWindow.error])
   const questionAnswerContext = useMemo(() => recentNativePage
     ? { ...recentNativePage, items: nativeContextItems ?? recentNativePage.items } : null,
     [recentNativePage, nativeContextItems])
@@ -482,16 +492,23 @@ export function ActivityView({
   const readingEnabled = conversationReading?.enabled !== false
   useLayoutEffect(() => {
     if (conversationReading?.enabled && feedEl && anchorRef.current) restoreConversationAnchor(feedEl, anchorRef.current)
-    else if (conversationReading?.enabled && feedEl && followRef.current.following) feedEl.scrollTop = feedEl.scrollHeight
-    if (conversationReading?.enabled && feedEl) edgeRef.current.programmaticTop = feedEl.scrollTop
+    else if (conversationReading?.enabled && feedEl && followRef.current.following) pinToBottom()
+    if (conversationReading?.enabled && feedEl) markProgrammaticReadingScroll(feedEl)
   }, [nativeHistoryPage, feedEl, conversationReading?.enabled])
+  useLayoutEffect(() => {
+    // A failed page retains its body; the new notice can still move its known reading anchor.
+    if (conversationReading?.enabled && feedEl && anchorRef.current) {
+      restoreConversationAnchor(feedEl, anchorRef.current)
+      markProgrammaticReadingScroll(feedEl)
+    }
+  }, [readingWindow.error, feedEl, conversationReading?.enabled])
   useLayoutEffect(() => {
     if (!conversationReading?.enabled || !(readingWindow.historical || showJump) || !feedEl) return
     const content = feedEl.querySelector('.conversation-native-thread')
     if (!content) return
     let active = true
     const observer = new ResizeObserver(() => {
-      if (active && anchorRef.current) { restoreConversationAnchor(feedEl, anchorRef.current); edgeRef.current.programmaticTop = feedEl.scrollTop }
+      if (active && anchorRef.current) { restoreConversationAnchor(feedEl, anchorRef.current); markProgrammaticReadingScroll(feedEl) }
     })
     observer.observe(content)
     return () => { active = false; observer.disconnect() }
@@ -532,6 +549,12 @@ export function ActivityView({
   const [observationDisclosure, setObservationDisclosure] = useState({ sessionId, open: false })
   const observationOpen = observationDisclosure.sessionId === sessionId && observationDisclosure.open
   const observationVisible = observationOpen && conversationReading?.enabled !== false
+  function captureReadingAnchor(viewport: HTMLElement, target?: EventTarget | null): ReturnType<typeof conversationReadingAnchor> {
+    const observations = observationRef.current
+    const observed = observations?.open && (target instanceof Node ? observations.contains(target)
+      : anchorRef.current?.kind === 'segment' || observations.getBoundingClientRect().top <= viewport.getBoundingClientRect().top)
+    return conversationReadingAnchor(viewport, observed ? observations : null)
+  }
   const readObservationImage = useCallback<ReadPastedImage>(path => observationVisible && readPastedImage
     ? readPastedImage(path) : Promise.resolve(null), [observationVisible, readPastedImage])
   const expandObservationFor = (target: Element): void => {
@@ -584,44 +607,59 @@ export function ActivityView({
     }
   }, [currentSessionId, readingEnabled])
 
+  const nativeReadingTail = (el: HTMLElement): number | null => {
+    const tail = nativeTailRef.current
+    return tail && nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length
+      ? el.scrollTop + tail.getBoundingClientRect().top - el.getBoundingClientRect().top
+      : null
+  }
+  const readingHeight = (el: HTMLElement): number => Math.max(el.clientHeight, nativeReadingTail(el) ?? el.scrollHeight)
   const feedGeometry = (): ScrollGeometry | null => {
     const el = feedEl ?? logRef.current?.closest('.activity-feed')
     if (!(el instanceof HTMLElement)) return null
-    return { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }
+    return { scrollTop: el.scrollTop, scrollHeight: readingHeight(el), clientHeight: el.clientHeight }
   }
 
   const pinToBottom = (): void => {
     const el = feedEl ?? logRef.current?.closest('.activity-feed')
-    if (el instanceof HTMLElement) { el.scrollTop = el.scrollHeight; edgeRef.current.programmaticTop = el.scrollTop }
+    if (el instanceof HTMLElement) { el.scrollTop = Math.max(0, readingHeight(el) - el.clientHeight); markProgrammaticReadingScroll(el) }
   }
 
   const jumpToLatest = (): void => {
+    anchorRef.current = null
     pinToBottom()
     const geometry = feedGeometry()
-    if (geometry) followRef.current = onScroll(followRef.current, { ...geometry, scrollTop: geometry.scrollHeight })
+    if (geometry) followRef.current = onScroll(followRef.current, geometry)
     followRef.current = { ...followRef.current, following: true }
     setShowJump(shouldShowJumpToLatest(followRef.current))
   }
 
   const handleReadingWheel = (event: WheelEvent<HTMLDivElement>): void => {
     const el = event.currentTarget
+    anchorRef.current = captureReadingAnchor(el, event.target)
     const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? el.clientHeight : 1)
     requestReadingEdge(Math.sign(delta), el, delta)
   }
   const requestReadingEdge = (direction: number, el: HTMLElement, delta = 0): void => {
-    // Only this wheel/key input can request a page. Passive scroll, layout and
-    // anchor restoration update reading position without producing more reads.
+    if (!conversationReading?.enabled) return
+    if (direction < 0 && anchorRef.current?.kind === 'segment') {
+      const nativeAnchor = conversationReadingAnchor(el)
+      if (nativeAnchor) anchorRef.current = nativeAnchor
+    }
+    if (readingWindow.loading && !readingWindow.coverageLoading) return
     const edges = edgeRef.current
     const distance = Math.max(80, el.clientHeight * 2)
     const nextTop = Math.max(0, el.scrollTop + delta)
-    const earlier = nextTop <= distance
-    const newer = el.scrollHeight - el.clientHeight - nextTop <= distance
+    const boundary = earlierRef.current
+    const boundaryTop = boundary ? el.scrollTop + boundary.getBoundingClientRect().bottom - el.getBoundingClientRect().top : 0
+    const earlier = nextTop <= boundaryTop + distance
+    const tailTop = (nativeReadingTail(el) ?? el.scrollHeight) - el.scrollTop
+    const newer = tailTop >= 0 && readingHeight(el) - el.clientHeight - nextTop <= distance
     if (!earlier) edges.earlier = false
     if (!newer) edges.newer = false
-    if (!conversationReading?.enabled || readingWindow.loading && !readingWindow.coverageLoading) return
     if (direction < 0 && earlier && !edges.earlier && readingWindow.hasMore) {
       edges.earlier = true; readingWindow.readEarlier()
-    } else if (direction > 0 && newer && !edges.newer && readingWindow.hasNewer) {
+    } else if (direction > 0 && newer && anchorRef.current?.kind !== 'segment' && !edges.newer && readingWindow.hasNewer) {
       edges.newer = true; readingWindow.readNewer()
     }
   }
@@ -635,17 +673,28 @@ export function ActivityView({
     const handle = (): void => {
       const geometry = feedGeometry()
       if (!geometry) return
-      const programmatic = edgeRef.current.programmaticTop === geometry.scrollTop
-      edgeRef.current.programmaticTop = null
-      if (!programmatic && geometry.scrollTop !== followRef.current.lastScrollTop) anchorRef.current = conversationReadingAnchor(el)
-      followRef.current = programmatic
+      const programmatic = consumeProgrammaticReadingScroll(el)
+      const direction = Math.sign(geometry.scrollTop - followRef.current.lastScrollTop)
+      const physical = { ...geometry, scrollHeight: el.scrollHeight }
+      const previous = physicalScrollRef.current
+      physicalScrollRef.current = physical
+      // A browser clamps the existing position when the viewport or content extent shrinks.
+      // That completed layout move cannot borrow a direction for another page request.
+      const layoutClamp = previous && (previous.clientHeight !== physical.clientHeight || previous.scrollHeight !== physical.scrollHeight)
+        && physical.scrollTop < previous.scrollTop
+        && Math.abs(physical.scrollTop - Math.min(previous.scrollTop, Math.max(0, physical.scrollHeight - physical.clientHeight))) <= 1
+      if (programmatic !== 'restore' && geometry.scrollTop !== followRef.current.lastScrollTop) anchorRef.current = captureReadingAnchor(el)
+      followRef.current = programmatic === 'restore'
         ? { ...followRef.current, lastScrollTop: geometry.scrollTop }
         : onScroll(followRef.current, geometry)
+      if (geometry.scrollTop > Math.max(0, geometry.scrollHeight - geometry.clientHeight) + FOLLOW_THRESHOLD_PX)
+        followRef.current = { ...followRef.current, following: false }
       setShowJump(shouldShowJumpToLatest(followRef.current))
+      if (!programmatic && !layoutClamp && direction) requestReadingEdge(direction, el)
     }
     el.addEventListener('scroll', handle, { passive: true })
     return () => el.removeEventListener('scroll', handle)
-  }, [feedEl, readingWindow.historical, readingWindow.loading, readingWindow.hasMore, readingWindow.hasNewer, readingEnabled])
+  }, [feedEl, readingWindow.historical, readingWindow.loading, readingWindow.hasMore, readingWindow.hasNewer, readingWindow.error, readingWindow.coverageLoading, conversationReading?.enabled, readingEnabled])
 
   // 新内容到达时贴底。追加与原地变长都算"新内容"——流式回答最常见的形态正是后者（尾项没换，
   // 只是变长了）。只有仍在跟随时才贴，否则会把已经滚上去的读者拽回来。
@@ -705,6 +754,8 @@ export function ActivityView({
       followRef.current = { ...followRef.current, following: false }
       // No smooth scrolling or animation, including under reduced-motion preferences.
       head.scrollIntoView({ block: 'center', behavior: 'instant' })
+      anchorRef.current = captureReadingAnchor(feedEl, node)
+      markProgrammaticReadingScroll(feedEl, 'navigation')
       if (!revealRequest.isCurrent()) { revealRequest.complete(false); return }
       node.focus({ preventScroll: true })
       const r = head.getBoundingClientRect(), viewport = feedEl.getBoundingClientRect()
@@ -730,6 +781,10 @@ export function ActivityView({
     // second scroll controller for the Activity log.
     if (el) expandObservationFor(el)
     el?.scrollIntoView({ block: 'nearest' })
+    if (feedEl) {
+      anchorRef.current = captureReadingAnchor(feedEl, el)
+      markProgrammaticReadingScroll(feedEl, 'navigation')
+    }
   }
 
   // Retain confirmed DOM visibility through observation handoff, never message bodies.
@@ -839,6 +894,11 @@ export function ActivityView({
       const node = [...thread.querySelectorAll<HTMLElement>('[data-native-record-id], [data-native-step-id]')]
         .find(node => node.dataset.nativeRecordId === target.recordId || node.dataset.nativeStepId === target.recordId)
       node?.scrollIntoView({ block: 'nearest' })
+      const viewport = thread.closest<HTMLElement>('.activity-feed')
+      if (viewport) {
+        anchorRef.current = captureReadingAnchor(viewport, node)
+        markProgrammaticReadingScroll(viewport, 'navigation')
+      }
     })
   }
 
@@ -848,11 +908,14 @@ export function ActivityView({
   // Reading navigation belongs to the message flow; the ruler keeps temporal facts only.
   const readingEntry = conversationReading && (readingWindow.hasMore || readingWindow.hasEarlierNavigation || readingWindow.historical ||
     conversationReading.opened || readingWindow.newerOutside || readingWindow.error || readingAction || conversationReading.nativeSourceFacts?.nativeConfirmation) ? (
-    <div className="activity-feed__reading" data-conversation-reading={readingWindow.historical ? 'earlier' : 'current'}>
+    <div ref={earlierRef} className="activity-feed__reading" data-conversation-reading={readingWindow.historical ? 'earlier' : 'current'}>
       <div className="activity-feed__reading-entry">
         {readingWindow.hasMore ? (
           <button type="button" className="activity-feed__reading-action" disabled={readingWindow.loading && !readingWindow.coverageLoading || !conversationReading.enabled}
-            onClick={readingWindow.readEarlier}><ThemeNavigationUpIcon size={12} aria-hidden="true" />Earlier</button>
+            aria-busy={readingWindow.loadingEarlier || undefined} onClick={readingWindow.readEarlier}>
+            {readingWindow.loadingEarlier ? <WorkflowStatusGlyph status="running" /> : <ThemeNavigationUpIcon size={12} aria-hidden="true" />}
+            <span {...(readingWindow.loadingEarlier ? { role: 'status', 'aria-live': 'polite' as const } : {})}>{readingWindow.loadingEarlier ? 'Loading earlier…' : 'Earlier'}</span>
+          </button>
         ) : null}
         {readingWindow.hasEarlierNavigation || conversationReading.opened || readingWindow.newerOutside || readingWindow.error ? (
           <button type="button" className="activity-feed__reading-action" disabled={!conversationReading.enabled}
@@ -885,7 +948,7 @@ export function ActivityView({
   // Loading is a sibling overlay: neither scroll height nor card geometry depends on pending work.
   const renderSurface = (content: JSX.Element): JSX.Element => <div className="activity-feed-frame">
     {content}
-    {conversationReading?.enabled !== false && (readingWindow.loading || userMessageRead?.loading) ? <div className="activity-feed__loading-layer">
+    {conversationReading?.enabled !== false && (readingWindow.loading && !readingWindow.loadingEarlier || userMessageRead?.loading) ? <div className="activity-feed__loading-layer">
       <span role="status" aria-live="polite" className="activity-feed__reading-status">
         <WorkflowStatusGlyph status="running" />Reading records…
       </span>
@@ -962,7 +1025,6 @@ export function ActivityView({
         <Run items={entry.items} origin={origin} workspaceRoot={workspaceRoot} />
       ) : entry.kind === 'user-message' ? (
         <ConversationMessage
-          compact={!nativeSupplement(entry)}
           messageId={entry.message.id}
           conversationSessionId={sessionId}
           {...(executionHostId ? { executionHostId } : {})}
@@ -993,7 +1055,6 @@ export function ActivityView({
         />
       ) : speaker ? (
         <CapturedConversationMessage
-          compact
           item={entry.item}
           {...(renderMessageActions && entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
             !entry.item.authorAgentSessionId && entry.item.source !== 'user' && entry.item.content?.trim() && entry.item.status === 'complete'
@@ -1054,21 +1115,6 @@ export function ActivityView({
           ) : null
         }
       /> : null}
-      {observations.count > 0 ? <details key={sessionId} ref={observationRef} className="activity-feed__observations"
-        open={observationOpen} onToggle={event => {
-          if (event.currentTarget === observationRef.current) setObservationDisclosure({ sessionId, open: event.currentTarget.open })
-        }}>
-        <summary className="activity-feed__observation-source">
-          <ThemeNavigationDisclosureIcon size={12} aria-hidden="true" />
-          <span>投递与运行详情</span>
-          <span className="activity-feed__observation-count">· {observations.count} 项</span>
-          {observations.failed > 0 ? <span className="activity-feed__observation-issue">{observations.failed} failed records</span> : null}
-          {observations.unconfirmed > 0 ? <span className="activity-feed__observation-issue">{observations.unconfirmed} submissions unconfirmed</span> : null}
-        </summary>
-        <div className="activity-feed__observation-scope">包含发送回执和运行观察，不代表 Agent 已接纳的对话消息</div>
-        <div className="activity-log">{placed.filter(({ entry }) => !nativeSupplement(entry)).map(renderPlaced)}</div>
-      </details> : null}
-      <div className="activity-log" ref={logRef}>{placed.filter(({ entry }) => nativeSupplement(entry)).map(renderPlaced)}</div>
       {readingEntry}
       {nativeHistoryPage ? <ConversationView
         page={nativeHistoryPage}
@@ -1098,11 +1144,34 @@ export function ActivityView({
         {...(openHttpLink ? { openHttpLink } : {})}
         {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
       /> : null}
+      <div className="activity-log" ref={logRef}>{placed.filter(({ entry }) => nativeSupplement(entry)).map(renderPlaced)}</div>
+      <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" />
       {readingWindow.historical || readingWindow.newerOutside ? <div className="activity-feed__read-notice activity-feed__newer-edge" data-conversation-current-entry>
         <span role="status" aria-live="polite">{readingWindow.error ?? (readingWindow.newerOutside ? 'Current records updated or outside this window.' : 'Viewing earlier records.')} {readingWindow.hasNewer ? '较新记录可向下滚动继续读取' : ''}</span>
         {readingWindow.hasNewer ? <button type="button" className="small-button" disabled={readingWindow.loading && !readingWindow.coverageLoading || !conversationReading?.enabled} onClick={readingWindow.readNewer}>Newer</button> : null}
         <button type="button" className="small-button" disabled={!conversationReading?.enabled} onClick={readingWindow.showCurrent}>Show latest messages</button>
       </div> : null}
+      {observations.count > 0 ? <details key={sessionId} ref={observationRef} className="activity-feed__observations"
+        open={observationOpen} onToggle={event => {
+          if (event.currentTarget === observationRef.current) {
+            setObservationDisclosure({ sessionId, open: event.currentTarget.open })
+            if (event.currentTarget.open) {
+              followRef.current = { ...followRef.current, following: false }
+              if (feedEl) anchorRef.current = conversationReadingAnchor(feedEl, event.currentTarget)
+              setShowJump(true)
+            }
+          }
+        }}>
+        <summary className="activity-feed__observation-source">
+          <ThemeNavigationDisclosureIcon size={12} aria-hidden="true" />
+          <span>投递与运行详情</span>
+          <span className="activity-feed__observation-count">· {observations.count} 项</span>
+          {observations.failed > 0 ? <span className="activity-feed__observation-issue">{observations.failed} failed records</span> : null}
+          {observations.unconfirmed > 0 ? <span className="activity-feed__observation-issue">{observations.unconfirmed} submissions unconfirmed</span> : null}
+        </summary>
+        <div className="activity-feed__observation-scope">包含发送回执和运行观察，不代表 Agent 已接纳的对话消息</div>
+        <div className="activity-log">{placed.filter(({ entry }) => !nativeSupplement(entry)).map(renderPlaced)}</div>
+      </details> : null}
       {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
       {showJump && !readingWindow.historical ? (
         <button
