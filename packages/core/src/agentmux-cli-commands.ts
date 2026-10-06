@@ -258,6 +258,14 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.inspect', '(--session ID|--run ID|--provider-native ID --provider ID|--acp-native ID --adapter ID)', 'Inspect the service routeHostId, original Core identity and Desktop display facts separately.',
     { '--session': 'data', '--run': 'data', '--provider-native': 'data', '--provider': 'data', '--acp-native': 'data', '--adapter': 'data' }, f => ({ target: inspectTarget(f) }),
     'status.session.semanticStatus.failure carries code, message, recovery, nativeTurnId and available nativeCode/httpStatusCode. Failed turns retain their original healthy Run; observation errors are reported separately.'),
+  command('agent.conversation.inspect', '--host ID --session ID --source captured|native [--limit N] [--cursor CURSOR] [--max-bytes N]',
+    'Read the original bounded conversation with source-qualified records and retained byte fragments.',
+    { '--host': 'data', '--session': 'data', '--source': 'value', '--limit': 'value', '--cursor': 'data', '--max-bytes': 'value' }, f => {
+      const source = value(f, '--source', true)
+      if (source !== 'captured' && source !== 'native') invalid('--source requires captured or native.')
+      return { hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true), source,
+        ...numbers(f, { '--limit': 'limit', '--max-bytes': 'maxBytes' }), ...fields(f, { '--cursor': 'cursor' }) }
+    }, 'hostId and agentSessionId identify the exact original conversation. The original envelope keeps its history cursor, source identity and complete item or byte fragment contract. A successful read does not prove an input was adopted or an external message delivered. Cancellation only releases this read.'),
   command('agent.history', '--host ID --session ID --source captured|native [--kind user-message|text] [--query TEXT] [--scan-limit N] [--limit N] [--cursor CURSOR] [--max-bytes N]',
     'Read exact retained Session history without operating its Run.',
     { '--host': 'data', '--session': 'data', '--source': 'value', '--kind': 'value', '--query': 'data', '--scan-limit': 'value', '--limit': 'value', '--cursor': 'data', '--max-bytes': 'value' }, f => {

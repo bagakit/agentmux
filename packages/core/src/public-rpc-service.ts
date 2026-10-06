@@ -150,6 +150,7 @@ const NATIVE_FIELDS = {
   'agent.context': ['hostId', 'agentSessionId', 'cursor', 'limit'],
   'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel'],
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes'],
+  'agent.conversation.inspect': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes'],
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes', 'kind', 'query', 'scanLimit'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
@@ -610,6 +611,10 @@ export class AgentMuxRpcService {
           ...(context.signal ? { signal: context.signal } : {}) }) }
       }
       return parseSessionHistoryResourceResult(result, input) as AgentMuxRpcResult<M>
+    }
+    if (method === 'agent.conversation.inspect') {
+      // Reuse the exact original route, authorization, budget and fragment contract.
+      return await this.call('agent.history', params as AgentMuxRpcParams<'agent.history'>, context) as AgentMuxRpcResult<M>
     }
     if (method === 'agent.history') {
       const input = rpcRecord(params, NATIVE_FIELDS['agent.history']) as AgentMuxRpcParams<'agent.history'>

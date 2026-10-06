@@ -1,3 +1,4 @@
+import { parseConversationReadPage } from './conversation.js'
 import { parsePromptSubmissionRecord } from './prompt-submission-record.js'
 import { parseAgentInputSubmissionReceipt as inputReceipt } from './agent-input-receipt-codec.js'
 import { isGoalDelegationMethod } from './goal-delegation-methods.js'
@@ -393,6 +394,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'agent.history.resource': return parseSessionHistoryResourceResult(value, input as AgentSessionHistoryResourceParams)
+      case 'agent.conversation.inspect': return parseConversationReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.history': return parseAgentSessionHistoryReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.inspect': case 'whoami': {
         record(p, method === 'whoami' ? ['session', 'status', 'view', 'topic', 'messaging', 'unavailable'] : ['routeHostId', 'session', 'status', 'displayName', 'unavailable'])
