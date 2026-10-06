@@ -1,14 +1,14 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type NodeViewProps, useEditorState } from '@tiptap/react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { EditorContent, NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type NodeViewProps, useEditorState } from '@tiptap/react'
 import type { FileWriteReceipt, FileReadResult } from '@agentmux/core/files'
-import type { JSONContent } from '@tiptap/core'
+import { Node as TiptapNode, type JSONContent } from '@tiptap/core'
 import { noteContentExtensions, NoteBlockReferenceNode, NoteInlineLinkNode, noteIdentityExtensions } from '../note/note-content-schema.js'
 import { NoteInlineLink, type NoteLinkOpenRequest } from './NoteInlineLink.js'
 import { noteWikiLiteralExtension } from '../note/note-wiki-view.js'
 import { noteWikiInputExtension } from '../note/note-wiki-input.js'
 import type { NoteInlineLinkAttributes } from '@agentmux/core/note-links'
 import { readNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../note/note-document.js'
-import { noteKnowledge, resolveNoteBlock, type NoteKnowledge } from '../note/note-knowledge.js'
+import { noteKnowledge, projectNoteBlocks, resolveNoteBlock, type NoteKnowledge } from '../note/note-knowledge.js'
 import { acknowledgeNoteWrite, type NoteEditState } from '../note/note-edit-state.js'
 import { noteProvenanceAttributes } from '../note/note-provenance.js'
 export type { NoteEditState } from '../note/note-edit-state.js'
@@ -28,18 +28,39 @@ function Reference({ node }: NodeViewProps) {
   return <NodeViewWrapper className="mobile-note-reference" data-block-id={node.attrs.blockId} {...noteProvenanceAttributes(node.attrs.provenance)}>
     <strong>{reference.mode === 'embed' ? '引用原块' : '块引用'}</strong>
     {scope.trail.includes(key) ? <p role="status">循环引用，原引用保留。</p>
-      : result.status === 'resolved' ? reference.mode === 'embed'
-        ? <Scope.Provider value={{ ...scope, trail: [...scope.trail, key] }}><RichContent content={{ type: 'doc', content: [result.block.content.type === 'listItem' ? { type: 'bulletList', content: [result.block.content] } : result.block.content] }} /></Scope.Provider>
-        : <p>{result.block.text}</p>
+      : result.status === 'resolved' ? <Scope.Provider value={{ ...scope, trail: [...scope.trail, key] }}><RichContent content={projectNoteBlocks(result.source, [result.block.blockId]).content} /></Scope.Provider>
         : <><p role="status">引用正文尚未读取，原引用保留。</p>{scope.readReference && <button type="button" onClick={() => scope.readReference!(reference.target)}>读取引用原文</button>}</>}
     <details><summary>引用来源</summary><code>{reference.target.noteId} / {reference.target.blockId}</code></details>
   </NodeViewWrapper>
 }
+
+// Presentation-only wrapper, never part of a Note file or its identity index.
+function BlockExcerpt() {
+  const clip = useRef<HTMLDivElement>(null), [long, setLong] = useState(false), [expanded, expand] = useState(false)
+  useLayoutEffect(() => {
+    const element = clip.current
+    if (!element) return
+    const measure = () => setLong(element.scrollHeight > 112)
+    const observer = new ResizeObserver(measure)
+    observer.observe(element); if (element.firstElementChild) observer.observe(element.firstElementChild)
+    measure()
+    return () => observer.disconnect()
+  }, [])
+  return <NodeViewWrapper className="note-reader-excerpt" data-excerpt-expanded={expanded}>
+    <div ref={clip} className="note-reader-excerpt-clip" style={{ maxHeight: expanded ? undefined : 112, overflow: expanded ? undefined : 'hidden' }}><NodeViewContent /></div>
+    {long && <button type="button" contentEditable={false} className="note-reader-excerpt-continue" onClick={() => expand(value => !value)}>{expanded ? 'Show shorter block' : 'Continue block'}</button>}
+  </NodeViewWrapper>
+}
+const ExcerptNode = TiptapNode.create({ name: 'noteReadingExcerpt', group: 'block', content: 'block+', atom: false,
+  parseHTML: () => [], renderHTML: () => ['div', { class: 'note-reader-excerpt' }, 0],
+  addNodeView() { return ReactNodeViewRenderer(BlockExcerpt) },
+})
+
 function RichContent({ content, onChange }: { content: JSONContent; onChange?: ((value: JSONContent) => void) | undefined }) {
   const scope = useContext(Scope), open = useRef(scope?.onOpenLink); open.current = scope?.onOpenLink
   const extensions = useMemo(() => noteContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name
     ? NoteBlockReferenceNode.extend({ addNodeView() { return ReactNodeViewRenderer(Reference) } }) : extension.name === NoteInlineLinkNode.name
-    ? NoteInlineLinkNode.extend({ addNodeView() { return ReactNodeViewRenderer(InlineLink) } }) : extension).concat(onChange ? [...noteIdentityExtensions(), noteWikiInputExtension()] : []).concat([noteWikiLiteralExtension(link => open.current?.(link))]), [Boolean(onChange)])
+    ? NoteInlineLinkNode.extend({ addNodeView() { return ReactNodeViewRenderer(InlineLink) } }) : extension).concat(onChange ? [...noteIdentityExtensions(), noteWikiInputExtension()] : []).concat([noteWikiLiteralExtension(link => open.current?.(link)), ...onChange ? [] : [ExcerptNode]]), [Boolean(onChange)])
   const update = useRef(onChange); update.current = onChange
   const editor = useEditor({ extensions, content, editable: Boolean(onChange), onUpdate: ({ editor }) => update.current?.(editor.getJSON()), editorProps: { attributes: { class: 'mobile-note-body', 'aria-label': '原 Note 正文' } } }, [])
   useEffect(() => { if (editor) editor.commands.setContent(content, { emitUpdate: false }) }, [editor, content])
@@ -66,18 +87,24 @@ export type NoteEditing = {
 export type NoteReaderProps = { content: string; path: string; workspaceId: string; revision: string | null;
   documents?: Parameters<typeof noteKnowledge>[0] | undefined
   readReference?: ((target: NoteBlockTarget) => void) | undefined
+  /** Only the reading projection changes; content remains the complete original Note. */
+  blockIds?: readonly string[] | undefined
   editing?: NoteEditing | undefined
   target?: NoteBlockTarget | undefined
   onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined
 }
 const EMPTY_DOCUMENTS: NonNullable<NoteReaderProps['documents']> = []
-export function NoteReader({ content, path, workspaceId, revision, documents = EMPTY_DOCUMENTS, readReference, editing, target, onOpenLink }: NoteReaderProps) {
+export function NoteReader({ content, path, workspaceId, revision, documents = EMPTY_DOCUMENTS, blockIds, readReference, editing, target, onOpenLink }: NoteReaderProps) {
   const parsed = useMemo(() => readNoteDocument(content), [content])
   const body = useRef<HTMLDivElement>(null)
   const [working, setWorking] = useState<{ noteId: string; content: string } | null>(null)
   const workingContent = parsed.status === 'valid' && working?.noteId === parsed.note.noteId ? working.content
     : parsed.status === 'valid' && editing?.initial?.noteId === parsed.note.noteId ? editing.initial.draft : content
   const knowledge = useMemo(() => noteKnowledge([{ location: { workspaceId, path }, document: { path, content: workingContent, revision: revision ?? '' } }, ...documents]), [workingContent, path, workspaceId, revision, documents])
+  const excerpt = useMemo(() => {
+    const source = knowledge.sources.find(source => source.location.workspaceId === workspaceId && source.location.path === path)
+    return blockIds && source ? projectNoteBlocks(source, blockIds) : null
+  }, [knowledge, blockIds, workspaceId, path])
   const block = target ? resolveNoteBlock(knowledge, target) : null
   useEffect(() => {
     if (!target || block?.status !== 'resolved') return
@@ -88,7 +115,7 @@ export function NoteReader({ content, path, workspaceId, revision, documents = E
     {target && <section aria-label="原块定位" data-block-target-status={block?.status}>
       {block?.status === 'resolved' ? <><strong>引用的原块</strong><p>{block.block.text}</p></> : <p role="status">原块未确认：{block?.message} 原引用保留，仍可阅读完整笔记。</p>}
     </section>}
-    {editing && revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={content} revision={revision} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent content={parsed.note.content} />}
+    {editing && revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={content} revision={revision} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent content={excerpt ? { type: 'doc', content: excerpt.content.content?.map(node => ({ type: 'noteReadingExcerpt', content: [node] })) ?? [] } : parsed.note.content} />}
   </div></Scope.Provider> : <><p role="status">原笔记读取问题：{parsed.message}</p><pre>{content}</pre></>
 }
 function EditableNote({ note, content, revision, editing }: { note: NoteDocument; content: string; revision: string; editing: NoteEditing }) {
