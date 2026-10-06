@@ -179,7 +179,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const currentLaneId = currentContext ? laneByContext.get(currentContext.id)?.id ?? null
     : resourceLaneIds.size === 1 ? resourceLaneIds.values().next().value ?? null : null
   const matching = executionRows.filter(row => (project === 'all' || (() => { const lane = laneByContext.get(row.id); return lane && focusProjectKey(lane.hostId, lane.projectId) === project })()) &&
-    searchResult.contextKeys.has(focusSearchContextKey(row.hostId, row.id)))
+    searchResult.contextKeys.has(focusSearchContextKey(row.hostId, row.id, row.kind)))
   const filtered = matching.filter(row => bucketFilter === 'all' || row.bucket === bucketFilter)
   const selected = executionRows.find(row => row.id === shownSessionId)
   const filteredIds = new Set(filtered.map(row => row.id))
