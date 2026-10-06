@@ -1,5 +1,5 @@
 import { Textarea } from '@agentmux/client-ui/input'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeActionStartIcon = semanticIconComponent('action.start')
@@ -166,11 +166,12 @@ export function UserToolkitResult({ definition, active, close, official = false,
   const capturedAction = execution?.action ? capturedDefinition?.actions?.find(item => item.id === execution.action!.id) : undefined
   const capturedScript = showDisplay ? capturedDefinition?.display?.script : execution?.action ? capturedAction?.script : capturedDefinition?.script
   const capturedArgs = showDisplay ? capturedDefinition?.display?.args : execution?.action ? capturedAction?.args : capturedDefinition?.args
+  const resultStatus = unknown ? 'status.toolkit-unknown' : reading.pending && !snapshot ? 'status.toolkit-reading' : lane ? `status.toolkit-${lane.state}` as const : showDisplay ? 'status.toolkit-preparing-display' : 'status.toolkit-unloaded'
   const source = snapshot?.latestConfirmed
   const document = useMemo(() => execution?.text ? resultDocument(execution.text) : null, [execution?.text])
   return <>
     <header className="performance-header"><div className="performance-title"><ToolkitIcon icon={icon} size={17} /><div className="toolkit-result__identity"><small>{official ? 'Official toolkit' : 'Custom tool'}</small><h2>{name}</h2></div></div><button type="button" className="performance-icon-button" data-toolkit-close aria-label={`Close ${name}`} onClick={close}><ThemeActionCloseIcon size={14} /></button></header>
-    <div className="performance-observation"><span className="performance-status" data-state={unknown ? 'unknown' : lane?.state ?? 'idle'}><i />{reading.error ? 'Result unconfirmed' : reading.pending && !snapshot ? 'Reading result…' : lane ? showDisplay && lane.state === 'succeeded' ? 'Display checked' : stateLabel[lane.state] : showDisplay ? 'Preparing display…' : 'Result not loaded'}</span>
+    <div className="performance-observation"><span className="performance-status" data-state={unknown ? 'unknown' : lane?.state ?? 'idle'}><SemanticIcon name={resultStatus} size={5} />{reading.error ? 'Result unconfirmed' : reading.pending && !snapshot ? 'Reading result…' : lane ? showDisplay && lane.state === 'succeeded' ? 'Display checked' : stateLabel[lane.state] : showDisplay ? 'Preparing display…' : 'Result not loaded'}</span>
       {execution ? <time dateTime={new Date('endedAt' in execution ? execution.endedAt : execution.startedAt).toISOString()}>{new Date('endedAt' in execution ? execution.endedAt : execution.startedAt).toLocaleTimeString()}</time> : null}
     </div>
     <div className="performance-body toolkit-result">
