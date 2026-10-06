@@ -41,7 +41,7 @@ it('browses a complete same-source catalog with meaningful groups, labels and ac
   expect(host.querySelector('.theme-icon-editor__meaning svg')?.children.length).toBeGreaterThan(0)
 })
 it('searches meaning or drawing name and changes exactly one meaning through the visual picker', async () => {
-  await fill('Find semantic icon', 'activity')
+  await fill('Find semantic icon', 'work-')
   expect(host.querySelectorAll('.theme-icon-editor__meaning').length).toBeGreaterThan(1)
   await click('Edit status.working'); await click('Choose a drawing'); await fill('Find icon drawing', 'circle-play')
   expect(host.querySelectorAll('.theme-icon-editor__glyphs button').length).toBe(1)
