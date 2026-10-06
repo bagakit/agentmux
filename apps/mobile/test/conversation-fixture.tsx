@@ -32,7 +32,7 @@ export function fixture() {
   const inspectInput = vi.fn<AgentMuxHostedClient['inspectAgentInput']>().mockResolvedValue(null)
   const rejoinInput = vi.fn<AgentMuxHostedClient['rejoinAgentInputWaiting']>()
   const stopInput = vi.fn<AgentMuxHostedClient['stopAgentInputWaiting']>()
-  const respond = vi.fn<AgentMuxHostedClient['respondAgentInteraction']>().mockResolvedValue()
+  const respond = vi.fn<AgentMuxHostedClient['respondAgentInteraction']>().mockRejectedValue(new Error('Agent interaction receipt is not configured in this fixture'))
   const readHistory = vi.fn<AgentMuxHostedClient['sessionHistoryPage']>(async id => page.agentSessionId === id ? page : history(id))
   const readTimeline = vi.fn<AgentMuxHostedClient['sessionTimeline']>(async id => timeline.agentSessionId === id
     ? timeline : { agentSessionId: id, revision: 0, items: [] })

@@ -1,3 +1,4 @@
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -87,18 +88,18 @@ describe('original knowledge source read', () => {
   })
   it('asks the original owner for a registered Note logical mapping and shares NoteReader without duplicating Scratch rules', async () => {
     const physicalZone = { ...zone, directoryPath: fixturePath("outside/topic") }
-    const noteContent = JSON.stringify({ schema: 'agentmux.note.v1', noteId: 'original-note', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'original-block' }, content: [{ type: 'text', text: '原笔记正文' }] }] } })
-    const { rpc, call } = fixture(method => method === 'notebook.inspect' ? { pages: [{ noteId: 'original-note', resource: { ...expectedResource, path: 'logical-topic/note.note.json' }, workface: { zoneId: zone.zoneId, workspaceId: workspace.workspaceId } }] }
+    const noteContent = serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'original-note', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'original-block' }, content: [{ type: 'text', text: '原笔记正文' }] }] } })
+    const { rpc, call } = fixture(method => method === 'notebook.inspect' ? { pages: [{ noteId: 'original-note', resource: { ...expectedResource, path: 'logical-topic/note.note.md' }, workface: { zoneId: zone.zoneId, workspaceId: workspace.workspaceId } }] }
       : method === 'app.snapshot' ? { workspaces: [workspace], unavailable: [] } : method === 'space.ls' ? { catalog: { zones: [physicalZone] } }
         : method === 'file.list' ? { resource: { ...originalRead.resource, path: 'logical-topic' }, result: { status: 'listed', files: [], complete: true, omitted: 'none', partialReason: null } }
-          : { resource: originalRead.resource, result: { status: 'read', document: { path: 'logical-topic/note.note.json', content: noteContent, revision: 'sha256:' + 'a'.repeat(64) } } })
+          : { resource: originalRead.resource, result: { status: 'read', document: { path: 'logical-topic/note.note.md', content: noteContent, revision: 'sha256:' + 'a'.repeat(64) } } })
     const { element } = await mount({ source: { kind: 'note', noteId: 'original-note', blockId: 'original-block' }, rpc, onBack: vi.fn(), openScope: vi.fn() })
     expect(call).toHaveBeenCalledWith('file.list', { zoneId: zone.zoneId, path: '.', expectedResource })
-    expect(call).toHaveBeenCalledWith('file.read', { zoneId: zone.zoneId, path: 'note.note.json', expectedResource })
+    expect(call).toHaveBeenCalledWith('file.read', { zoneId: zone.zoneId, path: 'note.note.md', expectedResource })
     expect(element.textContent).toContain('原笔记正文'); expect(element.querySelector('[data-target-block="original-block"]')).not.toBeNull(); expect(element.textContent).toContain('引用的原块')
   })
   it('reads the original Notebook directory without fabricating a Notebook body or automatically opening its first page', async () => {
-    const { rpc, call } = fixture(() => ({ notebook: { notebookId: 'original-book', name: '原笔记本名' }, pages: [{ noteId: 'page-id', title: '原页标题', resource: { ...expectedResource, path: 'a.note.json' } }] }))
+    const { rpc, call } = fixture(() => ({ notebook: { notebookId: 'original-book', name: '原笔记本名' }, pages: [{ noteId: 'page-id', title: '原页标题', resource: { ...expectedResource, path: 'a.note.md' } }] }))
     const { element } = await mount({ source: { kind: 'notebook', notebookId: 'original-book' }, rpc, onBack: vi.fn(), openScope: vi.fn() })
     expect(call).toHaveBeenCalledExactlyOnceWith('notebook.inspect', { notebookId: 'original-book' })
     expect(element.textContent).toContain('原笔记本名'); expect(element.textContent).toContain('原页标题')
