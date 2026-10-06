@@ -21,7 +21,7 @@ export type ConnectionHostOptions = { databasePath?: string; database?: Database
 const unknown = (): ConnectionObservation => ({ authentication: { state: 'unknown', reason: 'not-tested' }, transport: { state: 'unknown', reason: 'not-tested' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } })
 function disabled(): ConnectionObservation { return { authentication: { state: 'disabled' }, transport: { state: 'disabled' }, intake: { state: 'disabled' }, delivery: { state: 'disabled' } } }
 function unavailable(reason: 'credential-missing' | 'adapter-unavailable' | 'check-failed'): ConnectionObservation {
-  return { ...unknown(), authentication: { state: reason === 'adapter-unavailable' ? 'unknown' : 'unavailable', reason }, transport: { state: 'unavailable', reason } }
+  return { ...unknown(), authentication: { state: reason === 'adapter-unavailable' || reason === 'check-failed' ? 'unknown' : 'unavailable', reason }, transport: { state: reason === 'check-failed' ? 'unknown' : 'unavailable', reason } }
 }
 /** Optional original Host owner. Configuration and its operation receipt commit in one SQLite transaction. */
 export class ConnectionHost implements ConnectionPort {
