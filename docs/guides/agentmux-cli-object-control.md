@@ -215,6 +215,17 @@ Project／Zone 的真实资源决定 `agent open` 的执行机器；展示 Space
 
 Prompt 的原 operation 若已由 Core 确认整条输入完全未应用，同 ID 不再重新执行，原拒绝与 Session 事实仍可查询。直接 SDK Prompt 恢复返回稳定 `not_applied`；`agent.send` RPC／CLI 仍沿原消息回执及查询合同报告，不能用其单次错误码代替整操作事实。下一次明确发送原拒绝消息使用新的 operation／message ID，沿当前条件建立新意图；原 unknown／partial 仍恢复原请求。公共事实及 SDK 判定见[Core Prompt 合同](../../packages/core/README.md#agent-调用与输入)。
 
+## 回答当前同步问题与权限请求
+
+`amux agent inspect --session '<session-id>'` 读取原 Session 的 typed pending request。将该请求的完整内容保存为 `expectedRequest`，连同 `agentSessionId`、`expectedRun`、稳定 `operationId` 与 typed `response` 一起交给：
+
+```sh
+amux agent interaction respond --input response.json
+amux agent interaction inspect --session '<session-id>' --operation-id '<operation-id>'
+```
+
+响应需要传输批准的 user／device；managed Agent 不能借这个入口替人确认。回执丢失后先查询同一 operationId，问题完成或 Run 更换后仍可查原结果。保存、字节接受、Hook 写入与原生完成各有含义，不能据传输成功宣称工具获准、任务完成或 Native 已采用答案。查询没有输入副作用；用户明确重试同一操作时保留原 request、Run、operationId 和答案，沿原 recoverable Input join，仍核对真实目标资格。unknown 不授权自动重放或换 ID，原终端继续可用。
+
 ## Answer native asynchronous questions
 
 Read original records with `agent history --host <host-id> --session <session-id> --source native`. Question IDs are opaque Provider values; never construct them. A missing answer means unknown, not proof that the Agent is waiting. `agent question reply --input FILE|-` answers through the same public business owner; its `--help` and [public types](../../packages/core/src/public-rpc.ts) define the input and original Run condition. A trusted user or device is required; managed Agents cannot impersonate human confirmation.
