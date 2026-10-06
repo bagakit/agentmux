@@ -19,6 +19,7 @@ export function observeAgentSession(
     {
       process: session.processState,
       status: session.status,
+      retainedStatus: session.semanticStatus,
       timelineCapability: session.capabilities.timeline,
       // 卡在一个待答的 typed 请求上：普通输入此刻送不进去（会被拒或被当成对请求的回答）。
       awaitingRequest: session.pendingInteraction !== undefined,
@@ -37,4 +38,19 @@ export function observeAgentSession(
  */
 export function observationSummary(observation: AgentObservation): string {
   return `${observation.process} · ${observation.semantic} · ${observation.readiness}`
+}
+
+/** Explanatory copy only; neither the last observation nor its age is a current task state. */
+export function activityObservationPresentation(observation: AgentObservation, observationAvailable = true): { label: string; detail: string } | null {
+  if (!observation.reason) return null
+  const last = observation.lastKnownActivity
+  const confirmed = last
+    ? `Last confirmed ${last.state} · ${new Date(last.observedAt).toLocaleString()}`
+    : 'No confirmed activity observed'
+  return {
+    label: observation.reason === 'activity-stale' ? 'Activity signal expired' : 'Activity not confirmed',
+    detail: `${confirmed} · ${observationAvailable
+      ? `Run ${observation.process} · Input ${observation.readiness === 'ready' ? 'available' : observation.readiness}`
+      : `Last observed Run ${observation.process} · Current input availability unconfirmed`}`
+  }
 }

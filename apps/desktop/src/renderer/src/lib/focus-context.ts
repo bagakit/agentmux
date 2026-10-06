@@ -13,7 +13,7 @@ import { sessionRecentActivity } from './session-recency'
 import { sessionStatusLabel } from './session-presentation'
 import { agentStateEnteredAt } from './agent-state-time'
 import { launcherTimelineRecap, type LauncherRecap } from './launcher-resume'
-import { observeAgentSession } from './agent-observation'
+import { observeAgentSession, activityObservationPresentation } from './agent-observation'
 import type { AgentObservation } from '@agentmux/core/agent-status'
 
 export const FOCUS_BUCKETS = ['attention', 'working', 'results', 'idle'] as const
@@ -95,11 +95,14 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
   const pending = session.kind === 'agent' && Boolean(session.pendingInteraction)
   const now = Date.now()
   const bucket = focusBucketForSession(session, Boolean(result), now)
-  const activitySemantic = session.kind === 'agent' ? observeAgentSession(session, now).semantic : undefined
+  const observation = session.kind === 'agent' ? observeAgentSession(session, now) : undefined
+  const activitySemantic = observation?.semantic
+  const activityExplanation = observation ? activityObservationPresentation(observation, state !== 'disconnected') : null
   const stateLabel = session.runUnobserved && bucket === 'idle' ? 'Run not observed'
     : session.processState === 'interrupted' && bucket === 'idle' ? 'Interrupted'
     : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'unknown'
-    ? 'Activity unknown' : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'unsupported'
+    ? activityExplanation!.label
+    : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'unsupported'
       ? 'Activity not reported' : sessionStatusLabel(session)
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
   const lastActivityAt = focusLastTaskActivityAt(items, activityEntryTime(session), now)
@@ -109,6 +112,9 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
   let detailKind: FocusContext['detailKind'] = pending || bucket === 'attention' || state === 'disconnected' || state === 'exited' ? 'service' : 'activity'
   if (bucket === 'idle' && (session.runUnobserved || session.processState === 'interrupted')) {
     detail = `${session.runUnobserved ? 'Run not observed' : 'Run interrupted'} · ${session.status.detail?.trim() || (session.runUnobserved ? 'Original Run state is unknown' : 'Cause unknown')}`
+    detailKind = 'service'
+  } else if (bucket === 'idle' && activityExplanation) {
+    detail = `${activityExplanation.label} · ${activityExplanation.detail}`
     detailKind = 'service'
   } else if (session.kind === 'terminal' && (state === 'error' || state === 'exited' || state === 'disconnected')) {
     const facts = [session.status.exitReason === 'user-stopped' ? 'Stopped by you' : null,
@@ -148,6 +154,7 @@ function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot, now: nu
     && a.workspacePath === b.workspacePath && a.processState === b.processState && a.status.state === b.status.state
     && a.status.detail === b.status.detail && a.runUnobserved === b.runUnobserved
     && a.status.source === b.status.source
+    && (a.kind === 'agent' ? a.semanticStatus : undefined) === (b.kind === 'agent' ? b.semanticStatus : undefined)
     && (a.kind !== 'terminal' || a.status.exitCode === b.status.exitCode && a.status.exitReason === b.status.exitReason)
     && activityEntryTime(a) === activityEntryTime(b)
     && a.control.run.runId === b.control.run.runId && workingEntryTime(a) === workingEntryTime(b)
