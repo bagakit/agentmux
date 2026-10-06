@@ -22,7 +22,7 @@ export const promptsSettingsModule = {
   title: 'Prompts',
   description: 'Keep your everyday instructions close at hand.',
   icon: ThemeObjectContextIcon,
-  keywords: 'prompt preset shortcut keyword slash command snippet template library review changes summarize progress eli5 custom',
+  keywords: 'message tool composer prompt preset shortcut keyword slash command snippet template library review changes summarize progress eli5 custom',
   savedSummary(config) {
     const count = resolveComposerShortcuts(config).length
     return `${count} ${count === 1 ? 'prompt' : 'prompts'}`

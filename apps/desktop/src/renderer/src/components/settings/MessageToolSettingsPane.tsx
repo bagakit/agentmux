@@ -2,6 +2,7 @@ import { useId } from 'react'
 import { MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_IDS, type MessageToolInitialLayout } from '../../../../shared/contracts'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraft } from './use-setting-draft'
+import { KeyboardShortcutsPane } from './KeyboardShortcutsPane'
 
 export function MessageToolSettingsPane({ initialLayout, onSave }: {
   initialLayout?: MessageToolInitialLayout
@@ -29,6 +30,10 @@ export function MessageToolSettingsPane({ initialLayout, onSave }: {
         </label>)}
       </fieldset>
       <p className="settings-workflows__note">Applies to newly opened inputs. Your current layout and drafts stay as you left them.</p>
+    </section>
+    <section className="settings-group" aria-label="Message Tool keyboard shortcuts">
+      <header><span>Keyboard shortcuts</span></header>
+      <KeyboardShortcutsPane group="message-tool" />
     </section>
     <section className="settings-group" aria-label="Mailbox">
       <header><span>Mailbox</span></header>
