@@ -27,7 +27,7 @@ describe('PMO teams topic role contract', () => {
     expect(prepared.snapshot.wiki?.content).toBe(DEFAULT_PMO_TEAMS_TOPIC_WIKI)
     expect(prepared.prompt).toContain(MOTE_COORDINATION_ROLE)
     expect(prepared.prompt).toContain('Implement personally only when the user explicitly asks')
-    expect(prepared.prompt).toContain('Do not create an empty Demand before the proposed requirement is understood and confirmed')
+    expect(prepared.prompt).toContain('Do not create an empty Goal before the proposed requirement is understood and confirmed')
   })
 
   it('injects the same coordination role for a fresh non-leader Mote', async () => {
@@ -41,6 +41,12 @@ describe('PMO teams topic role contract', () => {
     expect(prepared.prompt).toContain(MOTE_COORDINATION_ROLE)
     expect(prepared.prompt).toContain('initial-instruction path')
     expect(prepared.prompt).toContain('bind the actual Executor and Session')
+    expect(prepared.prompt).toContain('Own delivery and closeout along the original Demand')
+    expect(prepared.prompt).toContain('collect the original delegated reports')
+    expect(prepared.prompt).toContain('worker_done do not complete the business Goal')
+    expect(prepared.prompt).toContain('agent rename --derived')
+    expect(prepared.prompt).toContain('Preserve manual names and clears')
+    expect(prepared.prompt).toContain('Grill or Grounding request does not by itself authorize implementation')
   })
 
   it('keeps ordinary Topics on the generic role and Wiki', async () => {
@@ -49,6 +55,6 @@ describe('PMO teams topic role contract', () => {
 
     expect(prepared.snapshot.wiki?.content).toBe(DEFAULT_TOPIC_WIKI)
     expect(prepared.prompt).not.toContain(MOTE_COORDINATION_ROLE)
-    expect(prepared.prompt).not.toContain('Do not create an empty Demand before the proposed requirement is understood and confirmed')
+    expect(prepared.prompt).not.toContain('Do not create an empty Goal before the proposed requirement is understood and confirmed')
   })
 })

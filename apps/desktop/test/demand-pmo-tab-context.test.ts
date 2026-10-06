@@ -48,7 +48,7 @@ const demand = {
 function installPrimary() {
   const state = useAppStore.getState()
   const tab = { ...createWorkbenchTab('primary-tab', { regionId: 'primary-region', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'primary-session' }), topicId: PMO_TEAMS_TOPIC_ID }
-  const primary = { id: 'primary-session', kind: 'agent', executorId: 'codex', providerId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("scratch/topic--launcher--leader") }
+  const primary = { id: 'primary-session', kind: 'agent', executorId: 'codex', providerId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("scratch/topic--launcher--leader"), control: { kind: 'agent', hostId: 'local', agentSessionId: 'primary-session', run: { runId: 'primary-run' } } }
   const layout = state.layouts[SCRATCH_WORKSPACE_ID] ?? createWorkspaceLayout('scratch-group')
   useAppStore.setState({ tabs: { ...state.tabs, [tab.id]: tab }, sessions: [...state.sessions, primary as never],
     agentFocus: { ...state.agentFocus, pmo: { sessionId: primary.id } },
@@ -131,7 +131,7 @@ describe('Demand dedicated PMO Tab context', () => {
     expect(state.layouts[SCRATCH_WORKSPACE_ID]?.groups[0]?.tabOrder).toContain(secondTabId)
     expect(state.demandPmoTabIds[demand.id]).toBe(tabId)
     expect(state.demandPmoTabIds[secondDemand.id]).toBe(secondTabId)
-    expect(launchAgent).toHaveBeenCalledWith('codex', 'Clarify goal', 'scratch-group', expect.objectContaining({ tabId, regionId: tab?.layout.activeRegionId }), undefined, { tabName: 'PMO · One demand' }, expect.stringContaining('Grill:'), expect.objectContaining({ intent: { goalId: demand.id } }))
+    expect(launchAgent).toHaveBeenCalledWith('codex', 'Clarify goal', 'scratch-group', expect.objectContaining({ tabId, regionId: tab?.layout.activeRegionId }), undefined, { agentName: 'One demand · PMO', tabName: undefined, nameSource: 'derived' }, expect.stringContaining('Grill:'), expect.objectContaining({ intent: { goalId: demand.id } }))
     expect(launchAgent).toHaveBeenCalledTimes(1)
     const secondRegion = state.tabs[secondTabId]!.layout.activeRegionId
     expect(state.tabs[secondTabId]!.regions[secondRegion]).toMatchObject({ kind: 'launcher' })
@@ -196,12 +196,16 @@ describe('Demand dedicated PMO Tab context', () => {
     const retained = useAppStore.getState().agentSteerQueues[session.id]![0]!
     expect(retained.text).toBe('Ask agent to check work')
     expect(retained.agentMuxNote).toContain(MOTE_COORDINATION_ROLE)
+    expect(retained.agentMuxNote).toContain('collect the original delegated reports')
+    expect(retained.agentMuxNote).toContain('agent rename --derived')
+    expect(retained.agentMuxNote).toContain('continue execution only within authorization')
     expectProjectPayload(retained.agentMuxNote!)
     expect(retained.agentMuxNote).toContain("--goal 'goal'\"'\"'s-id'")
     expect(retained.agentMuxNote).toContain("criterion'\"'\"'s-id")
-    expect(submit).toHaveBeenCalledWith(session.control, retained.text, retained.operationId, expect.objectContaining({ expectedRun: { runId: 'healthy-run' } }), expect.objectContaining({ allowUncertainTurn: true }), false, retained.agentMuxNote, undefined, undefined, { goalId: quotedDemand.id })
+    expect(submit).toHaveBeenCalledWith(session.control, retained.text, retained.operationId, expect.objectContaining({ expectedRun: { runId: 'healthy-run' } }), expect.objectContaining({ allowUncertainTurn: true }), false, retained.agentMuxNote, undefined, undefined, { goalId: quotedDemand.id }, undefined)
     expect(useAppStore.getState().sessions).toEqual([session])
     expect(launch).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(useAppStore.getState().agentSteerInFlight[session.id]).toBeUndefined())
     submit.mockResolvedValue(undefined)
     useAppStore.setState({ config: { ...projectConfig, workspaces: [scratchWorkspace, otherHostProject] } })
     await useAppStore.getState().sendQueuedAgentSteer(session.id, retained.operationId)
