@@ -19,8 +19,8 @@ import {
   screenshotOutputShapes,
   undoShape,
   type ScreenshotShape
-} from '../src/renderer/src/components/browser-screenshot/drawing-model.js'
-import { drawScreenshotShapes } from '../src/renderer/src/components/browser-screenshot/drawing-renderer.js'
+} from '../src/renderer/src/components/image-annotation/drawing-model.js'
+import { drawScreenshotShapes } from '../src/renderer/src/components/image-annotation/drawing-renderer.js'
 
 function shape(id: string): ScreenshotShape {
   return {

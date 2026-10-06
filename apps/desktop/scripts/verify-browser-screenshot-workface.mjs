@@ -23,14 +23,14 @@ const out = resolve('.local/browser-screenshot-workface/editor-proof'), work = a
 await mkdir(out, { recursive: true })
 await rm(join(out, 'receipt.json'), { force: true })
 const pane = resolve('apps/desktop/src/renderer/src/components/BrowserPane.tsx')
-const editor = resolve('apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx')
+const editor = resolve('apps/desktop/src/renderer/src/components/image-annotation/ImageAnnotationEditor.tsx')
 const paneSource = await readFile(pane, 'utf8'), editorSource = await readFile(editor, 'utf8')
-const screenshotDirectory = 'apps/desktop/src/renderer/src/components/browser-screenshot'
+const screenshotDirectories = ['apps/desktop/src/renderer/src/components/browser-screenshot', 'apps/desktop/src/renderer/src/components/image-annotation']
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const sourceInputs = [
   'apps/desktop/src/renderer/src/components/BrowserPane.tsx', 'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx',
-  'apps/desktop/src/renderer/src/components/browser-screenshot/canvas-render.ts', 'apps/desktop/src/renderer/src/components/browser-screenshot/compose.ts',
-  'apps/desktop/src/renderer/src/components/browser-screenshot/drawing-model.ts', 'apps/desktop/src/renderer/src/components/browser-screenshot/drawing-renderer.ts',
+  'apps/desktop/src/renderer/src/components/image-annotation/canvas-render.ts', 'apps/desktop/src/renderer/src/components/browser-screenshot/compose.ts',
+  'apps/desktop/src/renderer/src/components/image-annotation/drawing-model.ts', 'apps/desktop/src/renderer/src/components/image-annotation/drawing-renderer.ts',
   'apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts', 'apps/desktop/src/renderer/src/lib/native-overlay-regions.ts',
   'apps/desktop/src/main/native-overlay-surfaces.ts', 'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/renderer/src/styles/browser.css',
   'apps/desktop/src/main/browser-screenshot-source.ts',
@@ -43,9 +43,9 @@ const sourceInputs = [
   'apps/desktop/scripts/verify-browser-screenshot-workface.mjs',
   ...['main.ts', 'renderer.tsx', 'bridge.ts', 'preload.cjs', 'fixture.css'].map(name => 'apps/desktop/scripts/fixtures/browser-screenshot-workface/' + name)
 ]
-for (const name of await readdir(screenshotDirectory)) {
-  const path = screenshotDirectory + '/' + name
-  if (/\.tsx?$/.test(name) && !sourceInputs.includes(path)) sourceInputs.push(path)
+for (const directory of screenshotDirectories) for (const name of await readdir(directory)) {
+  const path = directory + '/' + name
+  if (/\.(?:tsx?|css)$/.test(name) && !sourceInputs.includes(path)) sourceInputs.push(path)
 }
 const evidence = { schema: 'agentmux.browser-screenshot-workface-native.v1', sourceInputs: Object.fromEntries(await Promise.all(sourceInputs.map(async path => [path, sha(await readFile(path))]))), cases: [], passed: false }
 const base = { bundle: true, logLevel: 'silent', absWorkingDir: process.cwd(), jsx: 'automatic',
@@ -64,7 +64,7 @@ async function run(label, mutant) {
       assert.equal(paneSource.split(target).length - 1, 1, 'The actual legacy screenshot visibility consumer exists exactly once')
       return { contents: paneSource.replace(target, ''), loader: 'tsx', resolveDir: dirname(pane) }
     })
-    if (mutant === 'disable-busy-cancel') build.onLoad({ filter: /ScreenshotEditor\.tsx$/ }, value => {
+    if (mutant === 'disable-busy-cancel') build.onLoad({ filter: /ImageAnnotationEditor\.tsx$/ }, value => {
       assert.equal(value.path, editor)
       const matches = [...editorSource.matchAll(/<button\b[^>]*onClick=\{onCancel\}[^>]*>/g)]
       assert.equal(matches.length, 1, 'The actual Cancel action exists exactly once')
@@ -72,13 +72,13 @@ async function run(label, mutant) {
       assert.ok(!target.includes('disabled='), 'The original Cancel retains its existing enabled input capability')
       return { contents: editorSource.replace(target, target.replace('<button', '<button disabled={busy}')), loader: 'tsx', resolveDir: dirname(editor) }
     })
-    if (mutant === 'omit-selected-move') build.onLoad({ filter: /ScreenshotEditor\.tsx$/ }, value => {
+    if (mutant === 'omit-selected-move') build.onLoad({ filter: /ImageAnnotationEditor\.tsx$/ }, value => {
       assert.equal(value.path, editor)
       const target = 'currentGestureRef.current = moveShape(original, at.x - start.x, at.y - start.y)'
       assert.equal(editorSource.split(target).length - 1, 1, 'The actual selected-object move consumer exists exactly once')
       return { contents: editorSource.replace(target, 'currentGestureRef.current = original'), loader: 'tsx', resolveDir: dirname(editor) }
     })
-    if (mutant === 'omit-processed-crop') build.onLoad({ filter: /ScreenshotEditor\.tsx$/ }, value => {
+    if (mutant === 'omit-processed-crop') build.onLoad({ filter: /ImageAnnotationEditor\.tsx$/ }, value => {
       assert.equal(value.path, editor)
       const target = 'const input = { image: base, shapes, crop: documentState.crop, displayWidth: image.width, displayHeight: image.height }'
       assert.equal(editorSource.split(target).length - 1, 1, 'The actual processed image/context crop consumer exists exactly once')

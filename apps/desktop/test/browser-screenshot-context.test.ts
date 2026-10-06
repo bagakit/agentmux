@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { BrowserPng, BrowserScreenshotCapture } from '../src/shared/contracts.js'
 import { formatScreenshotContext } from '../src/renderer/src/components/browser-screenshot/context.js'
-import type { ScreenshotCompleteInput } from '../src/renderer/src/components/browser-screenshot/ScreenshotEditor.js'
-import type { ScreenshotShape } from '../src/renderer/src/components/browser-screenshot/drawing-model.js'
+import type { ImageAnnotationInput } from '../src/renderer/src/components/image-annotation/types.js'
+import type { ScreenshotShape } from '../src/renderer/src/components/image-annotation/drawing-model.js'
 
 const capture: BrowserScreenshotCapture = {
   browserId: 'original-browser', navigationId: 'original-navigation',
@@ -14,7 +14,7 @@ function note(id: string, number: number, x: number, y: number, comment: string)
   return { id, kind: 'note', number, note: comment, from: { x, y }, to: { x: x + 40, y: y + 30 },
     color: '#ef4444', width: 2, radius: 10 }
 }
-function input(shapes: ScreenshotShape[], crop: ScreenshotCompleteInput['crop'] = null): ScreenshotCompleteInput {
+function input(shapes: ScreenshotShape[], crop: ImageAnnotationInput['crop'] = null): ImageAnnotationInput {
   return { image: {} as HTMLImageElement, shapes, crop, displayWidth: capture.image.width, displayHeight: capture.image.height }
 }
 function output(width: number, height: number): BrowserPng {
