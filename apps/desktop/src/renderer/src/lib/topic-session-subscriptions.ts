@@ -3,7 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { scratchTopicDirectoryName, scratchTopicIdFromWorkspacePath, scratchTopicStorageRoots } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
-import { sessionPresentationById, sessionPresentationsAtPath } from './session-presentation'
+import { agentSessionPresentationIndex, sessionPresentationById, sessionPresentationsAtPath } from './session-presentation'
 import { useRetainedSessionPresentation } from './workbench-session-subscriptions'
 
 const NO_REGION_SESSION_IDS: readonly string[] = []
@@ -38,11 +38,18 @@ export function useTopicSessions(hostId: string, paths: readonly string[], regio
   const current = useAppStore(useShallow(state => {
     if (!active) return null
     if (paths.length === 0 && regionSessionIds.length === 0) return []
+    const key = (session: { hostId: string; id: string }) => JSON.stringify([session.hostId, session.id])
     const own = new Map(paths.flatMap(path => sessionPresentationsAtPath(state.sessions, hostId, path)
-      .map(session => [session.id, session] as const)))
+      .map(session => [key(session), session] as const)))
+    const agents = agentSessionPresentationIndex(state.sessions)
     for (const id of regionSessionIds) {
+      const candidates = agents.get(id)
+      if (candidates?.length) {
+        for (const session of candidates) own.set(key(session), session)
+        continue
+      }
       const session = sessionPresentationById(state.sessions).get(id)
-      if (session) own.set(id, session)
+      if (session) own.set(key(session), session)
     }
     return [...own.values()]
   }))

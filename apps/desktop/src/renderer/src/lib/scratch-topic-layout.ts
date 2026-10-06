@@ -278,6 +278,7 @@ export type TopicRegionCell = RegionGeometry & {
 }
 
 export type TopicTabSurface = {
+  groupId: string
   tabId: string
   active: boolean
   cells: readonly TopicRegionCell[]
@@ -300,7 +301,7 @@ export function openTopicWorkSurfaces(
       if (!tab?.topicId) continue
       const cells = topicTabRegionCells(tab)
       const existing = byTopic.get(tab.topicId) ?? []
-      existing.push({ tabId, active: group.activeTabId === tabId, cells })
+      existing.push({ groupId: group.id, tabId, active: group.activeTabId === tabId, cells })
       byTopic.set(tab.topicId, existing)
     }
   }
