@@ -1,3 +1,6 @@
+import { recordMarkdownProvenance } from './helpers/note-markdown-provenance'
+import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { EventEmitter } from 'node:events'
@@ -25,7 +28,7 @@ import { installNoteCanvasBlockRows } from './helpers/note-canvas-block-dom'
 
 const dom = composerDOM(), scope = { kind: 'note', noteId: 'target' } as const
 let directory: string, store: AgentMuxNotebookStore
-const body = (id: string, text: string, references = false) => JSON.stringify({ schema: 'agentmux.note.v1', noteId: id, content: { type: 'doc', content: [
+const body = (id: string, text: string, references = false) => serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: id, content: { type: 'doc', content: [
   { type: 'paragraph', attrs: { blockId: id + '-block', provenance: { created: { actor: { kind: 'agent', id: 'ExactResearchSession' }, at: _tailRefreshFixtureEpoch(0, 1) }, lastEdited: { actor: { kind: 'agent', id: 'ExactResearchSession' }, at: _tailRefreshFixtureEpoch(0, 1) } } }, content: [{ type: 'text', text }] },
   ...references ? [
     ...[0, 1, 2].map(index => ({ type: 'blockReference', attrs: { blockId: 'source-reference-' + index, referenceId: 'original-reference-' + index, mode: index === 2 ? 'embed' : 'reference', target: { noteId: 'target', blockId: 'target-block' } } })),
@@ -44,8 +47,10 @@ beforeEach(async () => {
   const workspace = { id: 'notes', hostId: 'local', path: directory, name: 'Notes', kind: 'folder' as const }
   store = new AgentMuxNotebookStore(join(directory, 'notebooks.json'))
   for (const id of ['target', 'closed-source']) {
-    await writeFile(join(directory, id + '.note.json'), body(id, 'Saved ' + id, id !== 'target'))
-    await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'register-' + id, change: { kind: 'register', noteId: id, title: 'Original ' + id, resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.json' } } }, { kind: 'user', id: 'ui-test' })
+    const content = body(id, 'Saved ' + id, id !== 'target')
+    await writeFile(join(directory, id + '.note.md'), content)
+    await recordMarkdownProvenance(store, { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.md' }, content, { kind: 'agent', id: 'ExactResearchSession' })
+    await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'register-' + id, change: { kind: 'register', noteId: id, title: 'Original ' + id, resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.md' } } }, { kind: 'user', id: 'ui-test' })
   }
   const services = createNotebookObservationServices(store, { files: new WorkspaceFiles(() => new LocalExecutionHost()), workspace: () => workspace })
   const sender = Object.assign(new EventEmitter(), { isDestroyed: () => false })
@@ -124,7 +129,7 @@ it('keeps newer bytes out of an older card and refreshes explicitly without repl
   installNoteCanvasBlockRows()
   const readOriginal = vi.mocked(api.notebooks.content).getMockImplementation()!
   vi.mocked(api.notebooks.content).mockImplementation(async (id, options) => {
-    if (id === 'target') await writeFile(join(directory, 'target.note.json'), body('target', 'Later saved bytes'))
+    if (id === 'target') await writeFile(join(directory, 'target.note.md'), body('target', 'Later saved bytes'))
     return readOriginal(id, options)
   })
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
@@ -136,7 +141,7 @@ it('keeps newer bytes out of an older card and refreshes explicitly without repl
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Later saved bytes'))
   expect(api.notebooks.graph).toHaveBeenCalledTimes(2)
   const readCount = vi.mocked(api.notebooks.content).mock.calls.length
-  await act(async () => useAppStore.setState({ documents: { 'notes\0target.note.json': { path: 'target.note.json', content: body('target', 'Unsaved draft is kept'), revision: 'draft' } }, dirtyDocuments: { 'notes\0target.note.json': true }, sessions: [...useAppStore.getState().sessions] }))
+  await act(async () => useAppStore.setState({ documents: { 'notes\0target.note.md': { path: 'target.note.md', content: body('target', 'Unsaved draft is kept'), revision: 'draft' } }, dirtyDocuments: { 'notes\0target.note.md': true }, sessions: [...useAppStore.getState().sessions] }))
   expect(api.notebooks.graph).toHaveBeenCalledTimes(2); expect(api.notebooks.content).toHaveBeenCalledTimes(readCount)
   expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Later saved bytes')
 })
@@ -170,15 +175,16 @@ it('persists completed keyboard moves through the same presentation owner and re
 })
 
 it('keeps a missing target explicit and inspects its registered original without guessing an exact block', async () => {
-  await writeFile(join(directory, 'target.note.json'), body('target', 'Original target').replaceAll('target-block', 'another-original-block'))
+  const original = noteFromMarkdown(body('target', 'Original target')); original.content.content![0]!.attrs!.blockId = 'another-original-block'
+  await writeFile(join(directory, 'target.note.md'), serializeNoteDocument(original))
   const open = vi.fn()
   await dom.render(<NoteCanvas scope={scope} onOpen={open} />); await ready()
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Inspect 2 references: Block → block"]')).not.toBeNull())
   await dom.click('[aria-label="Inspect 2 references: Block → block"]')
-  expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('Target missing.')
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('Target missing.'))
   expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).not.toContain('Open target block')
-  const original = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-canvas-inspector-actions button')].find(button => button.textContent === 'Inspect registered original')!
-  await act(async () => original.click())
+  const inspect = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-canvas-inspector-actions button')].find(button => button.textContent === 'Inspect registered original')!
+  await act(async () => inspect.click())
   expect(open).toHaveBeenLastCalledWith((await store.read()).pages.target, undefined)
 })
 
@@ -242,7 +248,7 @@ it('attaches the real Reader original blocks, regroups scrolled-out endpoints, a
   await vi.waitFor(() => expect(endpoint('target', 'target-block')).toBeDefined())
   await vi.waitFor(() => expect(labels().filter(label => label.dataset.relationshipKind === 'reference').map(label => label.dataset.sourceBlock)).toEqual(['source-reference-0', 'source-reference-1']))
   expect(dom.container.querySelector('.note-canvas-reader .mobile-note-reference[data-block-id="source-reference-0"]')).not.toBeNull()
-  expect(labels().filter(label => label.dataset.targetKind === 'block').every(label => label.dataset.targetBlock === 'target-block')).toBe(true)
+  await vi.waitFor(() => expect(labels().filter(label => label.dataset.targetKind === 'block').every(label => label.dataset.targetBlock === 'target-block')).toBe(true))
   const page = labels().find(label => label.dataset.targetKind === 'page')!
   expect(page.dataset.sourceBlock).toBe('source-inline'); expect(page.dataset.targetAttachment).toBe('page')
   expect(page.dataset.targetHandle).toMatch(/^page-in-/)
@@ -293,12 +299,12 @@ it('stops original-block geometry and clears exact ports while hidden, without c
 
 it('uses each exact target block rather than a nearby visible row, and withdraws only a duplicated DOM target', async () => {
   const geometry = installNoteCanvasBlockRows(); geometry.rows['target-other'] = 230
-  const target = JSON.parse(body('target', 'First original block'))
-  target.content.content.push({ type: 'heading', attrs: { level: 2, blockId: 'target-other' }, content: [{ type: 'text', text: 'Second original block' }] })
-  const source = JSON.parse(body('closed-source', 'Original source', true))
-  source.content.content.find((block: any) => block.attrs.blockId === 'source-inline').content.find((inline: any) => inline.attrs?.referenceId === 'heading-link').attrs.target.blockId = 'target-other'
-  await writeFile(join(directory, 'target.note.json'), JSON.stringify(target))
-  await writeFile(join(directory, 'closed-source.note.json'), JSON.stringify(source))
+  const target = noteFromMarkdown(body('target', 'First original block'))
+  target.content.content!.push({ type: 'heading', attrs: { level: 2, blockId: 'target-other' }, content: [{ type: 'text', text: 'Second original block' }] })
+  const source = noteFromMarkdown(body('closed-source', 'Original source', true))
+  source.content.content!.find(block => block.attrs!.blockId === 'source-inline')!.content!.find(inline => inline.attrs?.referenceId === 'heading-link')!.attrs!.target.blockId = 'target-other'
+  await writeFile(join(directory, 'target.note.md'), serializeNoteDocument(target))
+  await writeFile(join(directory, 'closed-source.note.md'), serializeNoteDocument(source))
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
   await dom.click('[aria-label="Full note: Original target"]')
   await vi.waitFor(() => expect(dom.container.querySelectorAll('.react-flow__node[data-id="target"] [data-port-block-id]')).toHaveLength(2))
@@ -314,13 +320,19 @@ it('uses each exact target block rather than a nearby visible row, and withdraws
 })
 
 it('keeps an expired raw occurrence explicit after a real saved-file revision refresh until the relationship is selected again', async () => {
-  await writeFile(join(directory, 'target.note.json'), body('target', 'See [[Original closed-source]]'))
+  await writeFile(join(directory, 'target.note.md'), body('target', 'See [[Original closed-source]]'))
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
   const link = () => dom.container.querySelector<HTMLButtonElement>('.note-canvas-edge-label[data-source-note="target"][data-target-kind="page"]')!
   await vi.waitFor(() => expect(link()).not.toBeNull())
   await act(async () => link().click())
   expect(dom.container.querySelectorAll('.note-canvas-inspector li')).toHaveLength(1)
-  await writeFile(join(directory, 'target.note.json'), body('target', 'See [[Original closed-source]] with newer saved context'))
+  // Finish the original revision's actual readers before replacing those bytes.
+  // The separate mismatch cases cover a file changing during an in-flight read.
+  await vi.waitFor(() => {
+    expect(dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-reader')).not.toBeNull()
+    expect(dom.container.querySelector('.react-flow__node[data-id="closed-source"] .note-canvas-reader')).not.toBeNull()
+  })
+  await writeFile(join(directory, 'target.note.md'), body('target', 'See [[Original closed-source]] with newer saved context'))
   await dom.click('[aria-label="Refresh saved graph"]')
   await vi.waitFor(() => {
     const status = dom.container.querySelector('.note-canvas-inspector [role="status"]')
@@ -400,7 +412,7 @@ it('retains source occurrence evidence on a newer original and on failed refresh
   await dom.render(<NoteLinksPanel noteId="target" onOpen={() => {}} />)
   await dom.click('.note-links-toggle')
   await vi.waitFor(() => expect(dom.container.querySelector('.note-links-source-toggle')).not.toBeNull())
-  await writeFile(join(directory, 'closed-source.note.json'), body('closed-source', 'New unrelated revision'))
+  await writeFile(join(directory, 'closed-source.note.md'), body('closed-source', 'New unrelated revision'))
   await dom.click('.note-links-source-toggle')
   await vi.waitFor(() => expect(dom.container.textContent).toContain('The saved source changed after this graph'))
   expect(dom.container.querySelectorAll('.note-links-occurrence')).toHaveLength(5)
@@ -438,8 +450,8 @@ it('does not revive a cancelled Arrange when a later original graph adds another
   expect(workers).toHaveLength(1)
   await act(async () => node.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })))
   const manual = useAppStore.getState().noteCanvasLayouts[key]!.positions.target
-  await writeFile(join(directory, 'new-child.note.json'), body('new-child', 'New saved related Note'))
-  await act(async () => { await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'later-child', change: { kind: 'register', noteId: 'new-child', parentNoteId: 'target', title: 'Later related child', resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: 'new-child.note.json' } } }, { kind: 'user', id: 'ui-test' }) })
+  await writeFile(join(directory, 'new-child.note.md'), body('new-child', 'New saved related Note'))
+  await act(async () => { await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'later-child', change: { kind: 'register', noteId: 'new-child', parentNoteId: 'target', title: 'Later related child', resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: 'new-child.note.md' } } }, { kind: 'user', id: 'ui-test' }) })
   await dom.click('[aria-label="Refresh saved graph"]')
   await vi.waitFor(() => expect(workers).toHaveLength(2))
   const later = workers[1]!
@@ -451,7 +463,7 @@ it('does not revive a cancelled Arrange when a later original graph adds another
 
 
 it('draws both directions and every relation kind on distinct lanes from original files, with incoming/outgoing counts', async () => {
-  await writeFile(join(directory, 'target.note.json'), body('target', 'See [[Original closed-source]]'))
+  await writeFile(join(directory, 'target.note.md'), body('target', 'See [[Original closed-source]]'))
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
   await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-edge-label')).toHaveLength(5))
   const labels = [...dom.container.querySelectorAll<HTMLElement>('.note-canvas-edge-label')]
@@ -506,9 +518,9 @@ it('keeps an explicit filter even when it matches every Notebook page, until Sho
 
 
 it('keeps different self-reference and embed loops separately visible and selectable', async () => {
-  const note = JSON.parse(body('target', 'A Note can cite itself'))
-  for (const mode of ['reference', 'embed']) note.content.content.push({ type: 'blockReference', attrs: { blockId: 'self-' + mode, referenceId: 'occurrence-' + mode, mode, target: { noteId: 'target', blockId: 'target-block' } } })
-  await writeFile(join(directory, 'target.note.json'), JSON.stringify(note))
+  const note = noteFromMarkdown(body('target', 'A Note can cite itself'))
+  for (const mode of ['reference', 'embed']) note.content.content!.push({ type: 'blockReference', attrs: { blockId: 'self-' + mode, referenceId: 'occurrence-' + mode, mode, target: { noteId: 'target', blockId: 'target-block' } } })
+  await writeFile(join(directory, 'target.note.md'), serializeNoteDocument(note))
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
   await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-edge-label[data-source-note="target"][data-target-note="target"]')).toHaveLength(2))
   const loops = [...dom.container.querySelectorAll<HTMLElement>('.note-canvas-edge-label[data-source-note="target"][data-target-note="target"]')]
@@ -519,3 +531,5 @@ it('keeps different self-reference and embed loops separately visible and select
     expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('self-' + loop.dataset.relationshipKind)
   }
 })
+
+function noteFromMarkdown(content:string) { const read=readNoteDocument(content);expect(read.status).toBe('valid');if(read.status!=='valid')throw Error(read.message);return read.note }

@@ -1,3 +1,5 @@
+import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -18,13 +20,13 @@ const roots:string[] = [], servers:AgentMuxControlServer[] = []
 afterEach(async()=>{for(const server of servers.splice(0))await server.stop();for(const root of roots.splice(0))await rm(root,{recursive:true,force:true})})
 class Sender extends EventEmitter { destroyed=false; isDestroyed(){return this.destroyed} }
 function deferred<T>() { let resolve!:(value:T)=>void; const promise=new Promise<T>(done=>{resolve=done});return {promise,resolve} }
-const body=(id:string,extra:unknown[]=[])=>JSON.stringify({schema:'agentmux.note.v1',noteId:id,content:{type:'doc',content:[{type:'paragraph',attrs:{blockId:id+'-block'},content:[{type:'text',text:id}]},...extra]}})
+const body=(id:string,extra:import('@tiptap/core').JSONContent[]=[])=>serializeNoteDocument({schema:'agentmux.note.v1',noteId:id,content:{type:'doc',content:[{type:'paragraph',attrs:{blockId:id+'-block'},content:[{type:'text',text:id}]},...extra]}})
 async function fixture() {
   const root=await realpath(await mkdtemp(join(tmpdir(),'amx-note-gui-')));roots.push(root)
   const workspace:WorkspaceRecord={id:'notes',hostId:'local',path:root,name:'Notes',kind:'folder'}, files=new WorkspaceFiles(()=>({kind:'local'} as ExecutionHost)),store=new AgentMuxNotebookStore(join(root,'notebooks.json'))
   for(const id of ['target','source']) {
-    await writeFile(join(root,id+'.note.json'),body(id,id==='source'?[{type:'blockReference',attrs:{blockId:'ref-block',referenceId:'ref-one',mode:'reference',target:{noteId:'target',blockId:'target-block'}}}]:[]))
-    await store.apply({expectedRevision:(await store.read()).revision,operationId:'register-'+id,change:{kind:'register',noteId:id,title:'Original '+id,resource:{hostId:'local',workspaceId:workspace.id,workspacePath:root,path:id+'.note.json'}}},{kind:'user',id:'test-user'})
+    await writeFile(join(root,id+'.note.md'),body(id,id==='source'?[{type:'blockReference',attrs:{blockId:'ref-block',referenceId:'ref-one',mode:'reference',target:{noteId:'target',blockId:'target-block'}}}]:[]))
+    await store.apply({expectedRevision:(await store.read()).revision,operationId:'register-'+id,change:{kind:'register',noteId:id,title:'Original '+id,resource:{hostId:'local',workspaceId:workspace.id,workspacePath:root,path:id+'.note.md'}}},{kind:'user',id:'test-user'})
   }
   const services=createNotebookObservationServices(store,{files,workspace:()=>workspace})
   return {root,workspace,files,store,services}
@@ -70,14 +72,14 @@ describe('Note graph original owner through Renderer, preload and scoped Main ob
   })
   it('keeps later, missing, mismatched and unavailable saved bodies out of an earlier card snapshot',async()=>{
     const f=await fixture(),desktop=gui(f.services.requests),snapshot=await desktop.api.graph({})
-    await writeFile(join(f.root,'target.note.json'),body('target',[{type:'paragraph',attrs:{blockId:'later-block'},content:[{type:'text',text:'Later saved body'}]}]))
+    await writeFile(join(f.root,'target.note.md'),body('target',[{type:'paragraph',attrs:{blockId:'later-block'},content:[{type:'text',text:'Later saved body'}]}]))
     const later=await desktop.api.content('target');expect(later.status).toBe('read');expect(noteContentMatchesGraph(snapshot,later)).toBe(false)
     if(later.status!=='read')throw new Error('Expected original saved bytes')
-    expect(noteContentMatchesGraph(snapshot,{...later,revision:snapshot.graph.observations[0]!.status==='read'?snapshot.graph.observations[0]!.revision:'unexpected',resource:{...later.resource,path:'another.note.json'}})).toBe(false)
-    await writeFile(join(f.root,'target.note.json'),body('another-identity'));const mismatch=await desktop.api.content('target');expect(mismatch.status).toBe('identity-mismatch');expect(noteContentMatchesGraph(snapshot,mismatch)).toBe(false)
-    await rm(join(f.root,'target.note.json'));expect((await desktop.api.content('target')).status).toBe('missing')
-    await mkdir(join(f.root,'target.note.json'));expect((await desktop.api.content('target')).status).toBe('unknown')
-    expect((await f.store.read()).pages.target!.resource.path).toBe('target.note.json')
+    expect(noteContentMatchesGraph(snapshot,{...later,revision:snapshot.graph.observations[0]!.status==='read'?snapshot.graph.observations[0]!.revision:'unexpected',resource:{...later.resource,path:'another.note.md'}})).toBe(false)
+    await writeFile(join(f.root,'target.note.md'),body('another-identity'));const mismatch=await desktop.api.content('target');expect(mismatch.status).toBe('identity-mismatch');expect(noteContentMatchesGraph(snapshot,mismatch)).toBe(false)
+    await rm(join(f.root,'target.note.md'));expect((await desktop.api.content('target')).status).toBe('missing')
+    await mkdir(join(f.root,'target.note.md'));expect((await desktop.api.content('target')).status).toBe('unknown')
+    expect((await f.store.read()).pages.target!.resource.path).toBe('target.note.md')
   })
   it('cancels the exact sender/request before another original file is read and restores the Renderer abort reason',async()=>{
     const f=await fixture(),entered=deferred<AbortSignal>(), reason=new Error('Canvas hidden'),reads:string[]=[]
@@ -91,8 +93,8 @@ describe('Note graph original owner through Renderer, preload and scoped Main ob
     try {
       services.requests.cancel(new Sender(),wire.requestId);services.requests.cancel(desktop.sender,'wrong-request');expect(signal.aborted).toBe(false)
       controller.abort(reason);expect(signal.aborted).toBe(true);await expect(pending).rejects.toBe(reason)
-      expect(desktop.calls.at(-1)!.channel).toBe('notebook:cancelObservation');expect(desktop.calls.at(-1)!.args).toEqual([wire.requestId]);expect(reads).toEqual(['target.note.json','source.note.json'])
-      expect(await readFile(join(f.root,'source.note.json'),'utf8')).toContain('ref-one');expect((await f.store.read()).pages.source).toBeDefined();expect(desktop.sender.listenerCount('destroyed')).toBe(0)
+      expect(desktop.calls.at(-1)!.channel).toBe('notebook:cancelObservation');expect(desktop.calls.at(-1)!.args).toEqual([wire.requestId]);expect(reads).toEqual(['target.note.md','source.note.md'])
+      expect(readNoteDocument(await readFile(join(f.root,'source.note.md'),'utf8'))).toMatchObject({status:'valid',note:{content:{content:expect.arrayContaining([expect.objectContaining({attrs:expect.objectContaining({referenceId:'ref-one'})})])}}});expect((await f.store.read()).pages.source).toBeDefined();expect(desktop.sender.listenerCount('destroyed')).toBe(0)
     }finally{services.requests.dispose();await pending.catch(()=>{})}
     expect((await desktop.api.content('target')).status).toBe('read')
   })
@@ -124,7 +126,7 @@ describe('Note graph original owner through Renderer, preload and scoped Main ob
     const base:NotebookObservationPreloadApi={resolve:vi.fn(),graph:async()=>({...good,graph:{...good.graph,catalogRevision:good.graph.catalogRevision+1}}),content:async()=>({...content,noteId:'different'}),cancelObservation:async()=>{}}
     await expect(createRendererNotebookObservation(base).graph({})).rejects.toMatchObject({code:'CONTROL_PROTOCOL_ERROR'})
     await expect(createRendererNotebookObservation(base).content('target')).rejects.toMatchObject({code:'CONTROL_PROTOCOL_ERROR'})
-    f.services.owner.content=async()=>({...content,resource:{...content.resource,path:'another.note.json'}})
+    f.services.owner.content=async()=>({...content,resource:{...content.resource,path:'another.note.md'}})
     await expect(gui(f.services.requests).api.content('target')).rejects.toMatchObject({code:'CONTROL_PROTOCOL_ERROR'})
     const controller=new AbortController();controller.abort(new Error('Already hidden'));const graph=vi.fn(base.graph);await expect(createRendererNotebookObservation({...base,graph}).graph({},{signal:controller.signal})).rejects.toThrow('Already hidden');expect(graph).not.toHaveBeenCalled()
   })

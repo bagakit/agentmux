@@ -1,3 +1,4 @@
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import type { Editor } from '@tiptap/core'
@@ -33,7 +34,7 @@ import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 
 const dom = composerDOM(), source = newNoteDocument('Original source', 'source', 'source-block')
 source.content.content!.push({ type: 'paragraph', attrs: { blockId: 'second-block' }, content: [{ type: 'text', text: 'Second original block' }] })
-const surface = { kind: 'file' as const, workspaceId: 'workspace', regionId: 'original-region', path: 'source.note.json' }, tabId = 'original-tab', groupId = 'original-group'
+const surface = { kind: 'file' as const, workspaceId: 'workspace', regionId: 'original-region', path: 'source.note.md' }, tabId = 'original-tab', groupId = 'original-group'
 const sourceKey = documentKey(surface.workspaceId, surface.path)
 let directory: string, store: AgentMuxNotebookStore, files: WorkspaceFiles
 let zoneId: string
@@ -46,7 +47,7 @@ beforeEach(async () => {
   files = new WorkspaceFiles(() => new LocalExecutionHost())
   store = new AgentMuxNotebookStore(join(directory, 'catalog.json'))
   for (const [id, title, note] of [['source', 'Source original', source], ['target', 'Target original', newNoteDocument('Target body', 'target', 'target-block')]] as const) {
-    const path = id + '.note.json'; await writeFile(join(directory, path), JSON.stringify(note))
+    const path = id + '.note.md'; await writeFile(join(directory, path), serializeNoteDocument(note))
     await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'register:' + id, change: { kind: 'register', noteId: id, title, resource: { hostId: 'local', workspaceId: workspace.id, workspacePath: directory, path }, workface: { zoneId, workspaceId: workspace.id } } }, { kind: 'user', id: 'entry-test' })
   }
   const read = await files.read(workspace, surface.path); if (read.status !== 'read') throw Error('Original file must read')

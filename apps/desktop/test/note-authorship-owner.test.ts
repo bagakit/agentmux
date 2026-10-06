@@ -1,3 +1,6 @@
+import { parseNoteFile } from '@agentmux/client-ui/note/note-knowledge'
+import { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
+import type { NoteProvenanceSnapshot } from '@agentmux/core/note-provenance'
 import { fixtureEpoch as _liveTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
@@ -11,7 +14,7 @@ import { WorkspaceFiles } from '../src/main/workspace-files'
 import { FileReadOwner } from '../src/main/file-read-owner'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
-import { newNoteDocument, readNoteDocument, type NoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument, type NoteDocument } from '../src/shared/note-document'
 import { attributeNoteBlocks } from '@agentmux/client-ui/note/note-provenance'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 import type { FileReadParams } from '@agentmux/core'
@@ -19,14 +22,15 @@ import type { FileReadParams } from '@agentmux/core'
 const roots: string[] = [], owners: WorkspaceFiles[] = []
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(owners.splice(0).map(owner => owner.dispose())); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 const actor = { kind: 'agent' as const, id: 'original-agent-session' }, human = { kind: 'user' as const, id: 'local-person' }
-const raw = (note: NoteDocument) => JSON.stringify(note, null, 2) + '\n'
+const raw = (note: NoteDocument) => serializeNoteDocument(note)
 const provenance = (note: NoteDocument, index = 0) => note.content.content![index]!.attrs!.provenance
-const parsed = (content: string) => { const result = readNoteDocument(content); expect(result.status).toBe('valid'); if (result.status !== 'valid') throw Error(result.message); return result.note }
+const parsed = (content: string, noteProvenance?: NoteProvenanceSnapshot) => { const result = parseNoteFile({path:'original.note.md',content,revision:noteProvenance?.revision??'original',...(noteProvenance?{noteProvenance}:{})}); expect(result.status).toBe('valid'); if (result.status !== 'valid') throw Error(result.message); return result.note }
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'note-authorship-'))); roots.push(root)
   const workspace: WorkspaceRecord = { id: 'original-workspace', hostId: 'local', name: 'Original', kind: 'folder', path: root }
   const files = new WorkspaceFiles(() => ({ id: 'local', kind: 'local' }) as never); owners.push(files)
-  return { workspace, files, writer: new NoteFileWriter(files), path: 'original.note.json' }
+  const metadata=new AgentMuxNotebookStore(join(root,'notebooks.sqlite'))
+  return { workspace, files, writer: new NoteFileWriter(files,undefined,metadata), path: 'original.note.md',metadata }
 }
 
 it('attributes real create/edit by stable block identity and preserves authors of untouched or reordered blocks', async () => {
@@ -36,7 +40,7 @@ it('attributes real create/edit by stable block identity and preserves authors o
   const created = await writer.write(workspace, { path, content: raw(original), expectedRevision: null }, { actor })
   expect(created).toMatchObject({ status: 'written', noteAttribution: { status: 'recorded' } })
   if (created.status !== 'written') throw Error('Creation must publish')
-  const saved = parsed(created.content!), first = provenance(saved), second = provenance(saved, 1)
+  const saved = parsed(created.content??raw(original),created.noteProvenance), first = provenance(saved), second = provenance(saved, 1)
   expect(first).toMatchObject({ created: { actor }, lastEdited: { actor } })
   const next = structuredClone(saved)
   next.content.content![0]!.content![0]!.text = 'Corrected finding'
@@ -44,19 +48,19 @@ it('attributes real create/edit by stable block identity and preserves authors o
   next.content.content![0]!.attrs!.provenance = { created: { actor: { ...actor, id: 'forged-agent' }, at: _liveTailFixtureEpoch(0, 0, 1) }, lastEdited: null }
   const changed = await writer.write(workspace, { path, content: raw(next), expectedRevision: created.revision }, { actor: human })
   expect(changed.status).toBe('written'); if (changed.status !== 'written') throw Error('Edit must publish')
-  const disk = parsed(await readFile(join(workspace.path, path), 'utf8'))
+  const disk = await readAttributed(writer,workspace,path)
   expect(provenance(disk)).toEqual(second)
   expect(provenance(disk, 1)).toMatchObject({ created: first.created, lastEdited: { actor: human } })
   expect(disk.noteId).toBe(original.noteId)
   expect(disk.content.content!.map(block => block.attrs!.blockId)).toEqual(['second', 'first'])
   expect(await files.read(workspace, path)).toMatchObject({ status: 'read', document: { content: changed.content, revision: changed.revision } })
   const conflict = await writer.write(workspace, { path, content: raw(original), expectedRevision: created.revision }, { actor })
-  expect(conflict.status).toBe('conflict'); expect(parsed(await readFile(join(workspace.path, path), 'utf8'))).toEqual(disk)
+  expect(conflict.status).toBe('conflict'); expect(await readAttributed(writer,workspace,path)).toEqual(disk)
 })
 
 it('keeps old unknown creation unknown and does not reattribute parent blocks for a nested text edit', () => {
   const old = newNoteDocument('Original', 'note', 'paragraph')
-  old.content.content = [{ type: 'blockquote', attrs: { blockId: 'parent' }, content: old.content.content }]
+  old.content.content = [{ type: 'blockquote', attrs: { blockId: 'parent' }, content: old.content.content! }]
   const changed = structuredClone(old); changed.content.content![0]!.content![0]!.content![0]!.text = 'Edited'
   const attributed = attributeNoteBlocks(old, changed, actor, _liveTailFixtureEpoch(0, 0, 100))
   expect(provenance(attributed)).toBeNull()
@@ -66,15 +70,16 @@ it('does not treat installed editor schema defaults as another edit to an unchan
   const { workspace, files, writer, path } = await fixture()
   const original = newNoteDocument('Body', 'original-note', 'body')
   original.content.content!.unshift({ type: 'heading', attrs: { blockId: 'heading' }, content: [{ type: 'text', text: 'Original heading' }] })
-  const attributed = attributeNoteBlocks(null, original, actor, _liveTailFixtureEpoch(0, 0, 100))
-  await writeFile(join(workspace.path, path), raw(attributed))
+  const created=await writer.write(workspace,{path,content:raw(original),expectedRevision:null},{actor})
+  expect(created.status).toBe('written')
+  const attributed=await readAttributed(writer,workspace,path)
   const observed = await files.read(workspace, path); if (observed.status !== 'read') throw Error('Baseline must read')
   const candidate = structuredClone(attributed)
   candidate.content.content![0]!.attrs!.level = 1
   candidate.content.content![1]!.content![0]!.text = 'New body'
   const result = await writer.write(workspace, { path, content: raw(candidate), expectedRevision: observed.document.revision }, { actor: human })
   expect(result.status).toBe('written')
-  const saved = parsed(await readFile(join(workspace.path, path), 'utf8'))
+  const saved = await readAttributed(writer,workspace,path)
   expect(provenance(saved)).toEqual(provenance(attributed))
   expect(provenance(saved, 1).lastEdited.actor).toEqual(human)
 })
@@ -88,7 +93,7 @@ it.each(['unreadable', 'invalid-baseline', 'changed-identity', 'unknown-actor'])
   if (mode === 'unreadable') vi.spyOn(files, 'read').mockRejectedValueOnce(new Error('Read unavailable'))
   const written = await writer.write(workspace, { path, content: raw(next), expectedRevision: observed.document.revision }, mode === 'unknown-actor' ? undefined : { actor })
   expect(written).toMatchObject({ status: 'written', noteAttribution: { status: 'unconfirmed' } })
-  const saved = parsed(await readFile(join(workspace.path, path), 'utf8'))
+  const saved = await readAttributed(writer,workspace,path)
   expect(JSON.stringify(saved)).not.toContain('forged-agent')
   expect(provenance(saved).created).toBeNull()
   if (mode !== 'unknown-actor') expect(provenance(saved).lastEdited).toBeNull()
@@ -107,7 +112,7 @@ it('passes only the authenticated public caller into the real file owner and val
   const { workspace, files, writer, path } = await fixture()
   const catalog = { zones: [{ zoneId: 'original-zone', workspaceId: workspace.id, kind: 'directory', hostId: 'local', directoryPath: workspace.path }], bindings: [] }
   const port = new FileReadOwner({ catalog: async () => catalog as never, workspace: () => workspace,
-    files: { read: files.read.bind(files), listFiles: files.listFiles.bind(files), write: writer.write.bind(writer) } })
+    files: { read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), write: writer.write.bind(writer) } })
   const scope = { hostId: 'local', client: { authorizeRetainedAgentCaller: async (capability: string, sid: string) => {
     expect(capability).toBe('original-capability'); expect(sid).toBe(actor.id)
     return { agentSessionId: actor.id, hostId: 'local', run: { runId: 'original-run' } }
@@ -119,10 +124,10 @@ it('passes only the authenticated public caller into the real file owner and val
   const candidate = attributeNoteBlocks(null, newNoteDocument('Public creation', 'public-note', 'public-block'), { ...actor, id: 'forged' }, _liveTailFixtureEpoch(0, 0, 1))
   const result = await service.call('file.create', { ...params, expectedResource: read.resource!, expectedRevision: null, content: raw(candidate) },
     { caller: { agentSessionId: actor.id, capability: 'original-capability' } })
-  expect(result.result).toMatchObject({ status: 'written', content: expect.any(String), noteAttribution: { status: 'recorded' } })
+  expect(result.result).toMatchObject({ status: 'written', noteAttribution: { status: 'recorded' } })
   const saved = await service.call('file.read', params)
   expect(saved.result.status).toBe('read'); if (saved.result.status !== 'read') throw Error('Saved Note read failed')
-  expect(provenance(parsed(saved.result.document.content))).toMatchObject({ created: { actor }, lastEdited: { actor } })
+  expect(provenance(parsed(saved.result.document.content,saved.result.document.noteProvenance))).toMatchObject({ created: { actor }, lastEdited: { actor } })
   expect(saved.result.document.content).not.toContain('forged')
 })
 
@@ -130,7 +135,7 @@ it('real executable CLI creates/edits the original Note through its authenticate
   const { workspace, files, writer, path } = await fixture()
   const catalog = { zones: [{ zoneId: 'original-zone', workspaceId: workspace.id, kind: 'directory', hostId: 'local', directoryPath: workspace.path }], bindings: [] }
   const port = new FileReadOwner({ catalog: async () => catalog as never, workspace: () => workspace,
-    files: { read: files.read.bind(files), listFiles: files.listFiles.bind(files), write: writer.write.bind(writer) } })
+    files: { read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), write: writer.write.bind(writer) } })
   const server = new AgentMuxControlServer({ socketPath: join(workspace.path, 'control.sock'), files: port,
     coreClients: () => [{ hostId: 'local', client: { authorizeRetainedAgentCaller: async () => ({ agentSessionId: actor.id, hostId: 'local', run: { runId: 'run' } }) } } as never],
     execute: async () => { throw Error('File CLI must not send Agent or UI operations') } })
@@ -149,13 +154,21 @@ it('real executable CLI creates/edits the original Note through its authenticate
     const absent = await cli(args), initial = newNoteDocument('CLI initial body', 'cli-note', 'cli-block')
     const created = await cli(['file', 'create', '--input', '-'], JSON.stringify({ zoneId: 'original-zone', path, expectedResource: absent.resource, expectedRevision: null, content: raw(initial) }))
     expect(created.result).toMatchObject({ status: 'written', noteAttribution: { status: 'recorded' } })
-    const observed = await cli(args), note = parsed(observed.result.document.content)
+    const observed = await cli(args), note = parsed(observed.result.document.content,observed.result.document.noteProvenance)
     note.content.content![0]!.content![0]!.text = 'CLI corrected body'
     const edited = await cli(['file', 'write', '--zone', 'original-zone', '--path', path, '--resource', JSON.stringify(observed.resource), '--expected-revision', observed.result.document.revision], raw(note))
     expect(edited.result.status).toBe('written')
-    const childRead = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', 'import { readFileSync } from "node:fs"; process.stdout.write(readFileSync(process.argv[1], "utf8"))', join(workspace.path, path)])
-    const restored = parsed(childRead.stdout)
+    const childRead = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', `
+      import {readFileSync} from 'node:fs';
+      const {AgentMuxNotebookStore}=await import(process.argv[2]);
+      const {fileUploadRevision}=await import(process.argv[3]);
+      const content=readFileSync(process.argv[1],'utf8'),resource=JSON.parse(process.argv[5]);
+      const metadata=await new AgentMuxNotebookStore(process.argv[4]).readProvenance({noteId:'cli-note',resource,revision:fileUploadRevision(new TextEncoder().encode(content)),blockIds:['cli-block']});
+      process.stdout.write(JSON.stringify({content,metadata}));`, join(workspace.path,path),new URL('../../../packages/core/dist/notebook-store.js',import.meta.url).href,new URL('../../../packages/core/dist/public-rpc-files.js',import.meta.url).href,join(workspace.path,'notebooks.sqlite'),JSON.stringify(observed.resource)])
+    const childSnapshot=JSON.parse(childRead.stdout),restored = parsed(childSnapshot.content,childSnapshot.metadata)
     expect(restored).toMatchObject({ noteId: 'cli-note', content: { content: [{ attrs: { blockId: 'cli-block' }, content: [{ text: 'CLI corrected body' }] }] } })
     expect(provenance(restored)).toMatchObject({ created: { actor }, lastEdited: { actor } })
   } finally { await server.stop() }
 }, 30_000)
+
+async function readAttributed(writer:NoteFileWriter,workspace:WorkspaceRecord,path:string){const read=await writer.read(workspace,path);expect(read.status).toBe('read');if(read.status!=='read')throw Error('Original body must read');return parsed(read.document.content,read.document.noteProvenance)}

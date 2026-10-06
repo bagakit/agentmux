@@ -1,3 +1,4 @@
+const { fixtureEpoch: _newTailFixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { readFileSync } from 'node:fs'
@@ -17,7 +18,7 @@ vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 const title = '一个需要保留全部文字的超长笔记标题'.repeat(12)
 const hostname = Array.from({ length: 4 }, () => 'a'.repeat(60)).join('.') + '.test'
 const book: Notebook = { notebookId: 'long-title-book', name: 'Long findings', createdAt: 1 }
-const pages: NotebookPage[] = Array.from({ length: 4 }, (_, i) => ({ noteId: `note-${i}`, notebookId: book.notebookId, parentNoteId: null, title: i ? `Original note ${i}` : title, createdAt: 1, updatedAt: 1, resource: { workspaceId: 'original', hostId: 'local', workspacePath: _hygiene_fixturePath("original"), path: `${i}.note.json` }, sources: [{ sourceId: `source-${i}`, url: `https://${hostname}/finding`, title: null, recordedAt: 1 }], topics: [] }))
+const pages: NotebookPage[] = Array.from({ length: 4 }, (_, i) => ({ noteId: `note-${i}`, notebookId: book.notebookId, parentNoteId: null, title: i ? `Original note ${i}` : title, createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 1), resource: { workspaceId: 'original', hostId: 'local', workspacePath: _hygiene_fixturePath("original"), path: `${i}.note.md` }, sources: [{ sourceId: `source-${i}`, url: `https://${hostname}/finding`, title: null, recordedAt: _newTailFixtureEpoch(0, 0, 1) }], topics: [] }))
 let host: HTMLDivElement, root: Root, style: HTMLStyleElement
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); host = document.createElement('div'); document.body.append(host); root = createRoot(host); style = document.createElement('style'); style.textContent = recallCss; document.head.append(style); useAppStore.setState({ documents: {}, config: null, noteCanvasLayouts: {}, noteCanvasSaveIssues: {} }); installNoteCanvasGeometry(); const catalog = emptyNotebookState(); catalog.pages = Object.fromEntries(pages.map(page => [page.noteId, page])); vi.spyOn(api.notebooks, 'graph').mockResolvedValue({ catalog, graph: { catalogRevision: 0, scope: { kind: 'catalog' }, scannedScope: 'catalog', completeness: 'unknown', observations: pages.map(page => ({ noteId: page.noteId, resource: page.resource, status: 'unknown', message: 'Original not yet read' })), duplicateNoteIds: [], references: [], hierarchy: [] } }); vi.spyOn(api.notebooks, 'onChange').mockImplementation(() => () => {}) })
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); style.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -39,8 +40,8 @@ it('bounds real Notebook long-title cards and Graph nodes while keeping original
   expect(nodes[0]!.title).toBe(title)
   expect(nodes[0]!.textContent).toBe(title)
   expect(canvasCss).toContain('overflow-wrap: anywhere')
-  expect(host.querySelector('[aria-label="Read saved body: ' + title + '"]')).not.toBeNull()
-  expect(host.querySelector('[aria-label="Expand relationships: ' + title + '"]')).not.toBeNull()
+  expect(host.querySelector('[aria-label="Full note: ' + title + '"]')).not.toBeNull()
+  expect(host.querySelector('[aria-label="Collapse relationships: ' + title + '"]')).not.toBeNull()
   expect(host.querySelector('[aria-label="Fit visible notes"]')).not.toBeNull()
   await act(async () => nodes[0]!.click()); expect(open).toHaveBeenLastCalledWith(pages[0])
 })

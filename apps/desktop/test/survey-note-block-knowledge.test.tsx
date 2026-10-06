@@ -1,3 +1,4 @@
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 // @vitest-environment happy-dom
 import { act, createRef, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -15,7 +16,7 @@ const source: NoteDocument = { schema: NOTE_SCHEMA, noteId: 'source-note', conte
 const related: NoteDocument = { schema: NOTE_SCHEMA, noteId: 'related-note', content: { type: 'doc', content: [
   { type: 'blockReference', attrs: { blockId: 'related-block', referenceId: 'reference-one', target: { noteId: source.noteId, blockId: 'source-block' }, mode: 'embed' } }
 ] } }
-const file = (note: NoteDocument, path = `${note.noteId}.note.json`): FileDocument => ({ path, content: JSON.stringify(note), revision: 'original-revision' })
+const file = (note: NoteDocument, path = `${note.noteId}.note.md`): FileDocument => ({ path, content: serializeNoteDocument(note), revision: 'original-revision' })
 const input = (document: FileDocument, workspaceId = 'original-resource') => ({ location: { workspaceId, path: document.path }, document })
 let host: HTMLDivElement, root: Root
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
@@ -63,18 +64,19 @@ describe('actual rich Note identity and controlled content', () => {
     expect(semanticIds(editor)).toEqual(['source-block'])
   })
   it.each([1, 5, 17])('splits with actual Enter at %i, keeps the original ID and restores exact undo/redo identities', async pos => {
-    const { editor, changes } = await mount()
+    const { editor, changes } = await mount(), beforeSplit = editor.getJSON()
     expect(semanticIds(editor)).toEqual(['source-block'])
     expect(changes).not.toHaveBeenCalled()
     await enter(editor, pos)
     const splitIds = semanticIds(editor), split = editor.getJSON()
-    expect(splitIds).toHaveLength(2)
-    expect(new Set(splitIds).size).toBe(2)
+    expect(split.content).toHaveLength(2)
+    expect(splitIds).toHaveLength(1)
+    expect(split.content!.filter(node => node.attrs?.blockId === null)).toHaveLength(1)
     expect(splitIds).toContain('source-block')
     expect(changes).toHaveBeenCalled()
     expect(readNoteDocument(changes.mock.lastCall![0]).status).toBe('valid')
     await act(async () => { expect(editor.commands.undo()).toBe(true) })
-    expect(editor.getJSON()).toEqual({ type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'source-block' }, content: [{ type: 'text', text: 'Original finding' }] }] })
+    expect(editor.getJSON()).toEqual(beforeSplit)
     await act(async () => { expect(editor.commands.redo()).toBe(true) })
     expect(editor.getJSON()).toEqual(split)
     expect(semanticIds(editor)).toEqual(splitIds)
@@ -138,7 +140,7 @@ describe('actual rich Note identity and controlled content', () => {
     expect(readNoteDocument(changes.mock.lastCall![0]).status).toBe('valid')
   })
   it('never mounts an allocator for malformed source, and preserves its raw body', async () => {
-    const document = { path: 'bad.note.json', content: JSON.stringify({ schema: NOTE_SCHEMA, noteId: 'bad', content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Keep this raw' }] }] } }), revision: 'raw' }
+    const document = { path: 'bad.note.md', content: '---\nschema: agentmux.note.md.v1\nnote-id: bad\n---\n\nKeep this raw\n\n<!--amux-ref:orphan-->\n', revision: 'raw' }
     const change = vi.fn()
     await render(<NoteFileView document={document} knowledge={noteKnowledge([input(document)])} onChange={change} onSave={() => {}} onOpen={() => {}} />)
     expect(host.querySelector('[contenteditable="true"]')).toBeNull()
@@ -147,7 +149,7 @@ describe('actual rich Note identity and controlled content', () => {
     expect(change).not.toHaveBeenCalled()
   })
   it('keeps the original Note and rich input alive for an actual pasted reference with an unconfirmed target', async () => {
-    const { editor, changes, issue } = await mount(source), original = JSON.stringify(source)
+    const { editor, changes, issue } = await mount(source), original = JSON.stringify(source), originalEditorContent = editor.getJSON()
     const transfer = new DataTransfer()
     transfer.setData('text/html', '<div data-note-block-reference="" data-note-target="broken-json" data-note-reference-mode="reference"></div>')
     transfer.setData('text/plain', 'Unconfirmed reference')
@@ -158,10 +160,10 @@ describe('actual rich Note identity and controlled content', () => {
     await expect(pasted).resolves.toBeUndefined()
     expect(host.querySelector('.note-block-content')).not.toBeNull()
     expect(host.textContent).toContain('pasted reference target is unconfirmed')
-    expect(changes).not.toHaveBeenCalled(); expect(issue.mock.lastCall![0]).not.toBeNull()
+    expect(changes).not.toHaveBeenCalled(); expect(issue).toHaveBeenCalled(); expect(issue.mock.lastCall![0]).not.toBeNull()
     expect(JSON.stringify(source)).toBe(original)
     await act(async () => editor.commands.undo())
-    expect(editor.getJSON()).toEqual(source.content)
+    expect(editor.getJSON()).toEqual(originalEditorContent)
     expect(host.textContent).not.toContain('pasted reference target is unconfirmed')
     await act(async () => editor.commands.insertContent('Continuing '))
     expect(readNoteDocument(changes.mock.lastCall![0]).status).toBe('valid')
@@ -169,9 +171,7 @@ describe('actual rich Note identity and controlled content', () => {
     expect(issue.mock.lastCall).toEqual([null])
   })
   it('preserves an unsupported mark field in the raw source without mounting a lossy rich editor', async () => {
-    const document = { path: 'unknown-mark.note.json', revision: 'original-revision', content: JSON.stringify({ schema: NOTE_SCHEMA, noteId: 'unknown-mark', content: { type: 'doc', content: [
-      { type: 'paragraph', attrs: { blockId: 'preserved-block' }, content: [{ type: 'text', text: 'Preserve this source', marks: [{ type: 'bold', extra: 'Keep this field' }] }] }
-    ] } }) }
+    const document = { path: 'unknown-mark.note.md', revision: 'original-revision', content: '---\nschema: agentmux.note.md.v1\nnote-id: unknown-mark\n---\n\n<strong extra="Keep this field">Preserve this source</strong> ^preserved-block\n' }
     const changes = vi.fn(), raw = document.content
     await render(<NoteFileView document={document} knowledge={noteKnowledge([input(document)])} onChange={changes} onSave={() => {}} onOpen={() => {}} />)
     expect(host.querySelector('[contenteditable="true"]')).toBeNull()
@@ -213,7 +213,7 @@ describe('actual rich Note identity and controlled content', () => {
     const knowledge = noteKnowledge([input(file(source)), input(file(draft))])
     await render(<NoteBlockEditor note={draft} knowledge={knowledge} onChange={changes} onOpen={() => {}} onSave={() => {}} onIssue={() => {}} />)
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-expanded="false"]')!.click())
-    const target = host.querySelector<HTMLButtonElement>('[aria-label="Reference original-resource · source-note.note.json · source-block"]')
+    const target = host.querySelector<HTMLButtonElement>('[aria-label="Reference original-resource · source-note.note.md · source-block"]')
     expect(target).not.toBeNull()
     await act(async () => target!.click())
     const read = readNoteDocument(changes.mock.lastCall![0])
@@ -235,7 +235,7 @@ describe('derived exact references and actual two Note presentation', () => {
     expect(first.sources).toHaveLength(2); expect(second.sources).toHaveLength(2)
     expect(second.sources[0]!.blocks).toBe(first.sources[0]!.blocks)
     expect(second.sources[1]!.blocks).toBe(first.sources[1]!.blocks)
-    const next = { ...original, content: JSON.stringify(newNoteDocument('Updated finding', 'source-note', 'source-block')), revision: 'next-revision' }
+    const next = { ...original, content: serializeNoteDocument(newNoteDocument('Updated finding', 'source-note', 'source-block')), revision: 'next-revision' }
     const third = noteKnowledge([input(next), input(relatedFile)])
     expect(third.sources[0]!.blocks).not.toBe(first.sources[0]!.blocks)
     expect(third.sources[0]!.blocks.get('source-block')!.text).toBe('Updated finding')
@@ -246,12 +246,12 @@ describe('derived exact references and actual two Note presentation', () => {
     const knowledge = noteKnowledge([input(first), input(first), input(second)])
     expect(knowledge.sources.map(source => source.note.noteId)).toEqual(['source-note', 'related-note'])
     const links = noteBacklinks(knowledge, { noteId: 'source-note', blockId: 'source-block' })
-    expect(links.map(link => [link.source.note.noteId, link.blockId, link.referenceId, link.mode])).toEqual([['related-note', 'related-block', 'reference-one', 'embed']])
+    expect(links.map(link => [link.source.note.noteId, link.blockId, link.occurrence.kind === 'stored' ? link.occurrence.referenceId : null, link.mode])).toEqual([['related-note', 'related-block', 'reference-one', 'embed']])
     expect(noteBacklinks(knowledge, { noteId: 'source-note', blockId: 'other-block' })).toEqual([])
     expect(noteBacklinks(knowledge, { noteId: 'other-note', blockId: 'source-block' })).toEqual([])
     expect(resolveNoteBlock(knowledge, { noteId: 'unread', blockId: 'unread' }).status).toBe('unknown')
     expect(resolveNoteBlock(knowledge, { noteId: 'source-note', blockId: 'deleted' }).status).toBe('missing')
-    const duplicate = noteKnowledge([input(first), input(file(source, 'copied.note.json'), 'other-resource')])
+    const duplicate = noteKnowledge([input(first), input(file(source, 'copied.note.md'), 'other-resource')])
     expect(duplicate.sources).toHaveLength(2)
     expect(resolveNoteBlock(duplicate, { noteId: 'source-note', blockId: 'source-block' }).status).toBe('ambiguous')
   })
@@ -271,7 +271,7 @@ describe('derived exact references and actual two Note presentation', () => {
     const link = host.querySelector<HTMLButtonElement>('.note-reference__source button')!
     await act(async () => link.click())
     expect(open).toHaveBeenCalledTimes(1)
-    expect(open.mock.lastCall![0].location).toEqual({ workspaceId: 'original-resource', path: 'source-note.note.json' })
+    expect(open.mock.lastCall![0].location).toEqual({ workspaceId: 'original-resource', path: 'source-note.note.md' })
     expect(open.mock.lastCall![1]).toBe('source-block')
     expect(host.textContent).toContain('Partial scope')
   })
@@ -280,7 +280,7 @@ describe('derived exact references and actual two Note presentation', () => {
     const knowledge = noteKnowledge([input(file(circular))])
     await render(<NoteFileView document={file(circular)} knowledge={knowledge} onChange={() => {}} onSave={() => {}} onOpen={() => {}} />)
     expect(host.textContent).toContain('This reference is circular')
-    expect(noteBacklinks(knowledge, { noteId: 'cycle', blockId: 'self' }).map(link => link.referenceId)).toEqual(['self-ref'])
+    expect(noteBacklinks(knowledge, { noteId: 'cycle', blockId: 'self' }).map(link => link.occurrence.kind === 'stored' ? link.occurrence.referenceId : null)).toEqual(['self-ref'])
     expect(host.querySelectorAll('.note-reference').length).toBe(2)
   })
 })

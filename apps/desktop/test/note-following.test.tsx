@@ -18,7 +18,7 @@ function Page() { const page = useNotebookLibrary(state => state.state?.pages.or
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'amx-note-follow-'))
   owner = new AgentMuxNotebookStore(join(directory, 'notebooks.json'))
-  await owner.apply({ expectedRevision: 0, operationId: 'register', change: { kind: 'register', noteId: 'original', title: 'A durable finding', resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: 'original.note.json' } } }, self)
+  await owner.apply({ expectedRevision: 0, operationId: 'register', change: { kind: 'register', noteId: 'original', title: 'A durable finding', resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: 'original.note.md' } } }, self)
   await owner.apply({ expectedRevision: 1, operationId: 'agent-follow', change: { kind: 'follow', noteId: 'original' } }, agent)
   vi.spyOn(api.notebooks, 'actor').mockResolvedValue(self)
   vi.spyOn(api.notebooks, 'read').mockImplementation(() => owner.read())
@@ -27,7 +27,7 @@ beforeEach(async () => {
   useNotebookLibrary.setState({ state: await owner.read(), issue: null })
   stop = observeNotebookLibrary()
 })
-afterEach(async () => { stop(); await rm(directory, { recursive: true, force: true }); useNotebookLibrary.setState({ state: null, issue: null }) })
+afterEach(async () => { stop(); await dom.render(null); await rm(directory, { recursive: true, force: true, maxRetries: 3 }); useNotebookLibrary.setState({ state: null, issue: null }) })
 
 it('uses the original Notebook owner to follow and unfollow, preserves other identities, and restores the saved list after remount', async () => {
   const original = useAppStore.getState(), run = original.sessions[0]

@@ -1,3 +1,4 @@
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
@@ -33,7 +34,7 @@ describe('original Store Note intent',()=>{
     expect(paths).toHaveLength(2);expect(bodies).toEqual([bodies[0],bodies[0]])
     const parsed=readNoteDocument(bodies[0]!);expect(parsed.status).toBe('valid')
     if(parsed.status==='valid'){expect(parsed.note.noteId).toBe(receipt.noteId);expect(parsed.note.content.content?.[0]?.attrs?.blockId).toBe(receipt.blockIds[0])}
-    expect(open.mock.calls).toHaveLength(1);expect(receipt.path).toMatch(/-2\.note\.json$/)
+    expect(open.mock.calls).toHaveLength(1);expect(receipt.path).toMatch(/-2\.note\.md$/)
   })
   it('retains a typed permission result and does not reveal or replay',async()=>{
     const launcher=fixture(), write=vi.spyOn(api.files,'write').mockResolvedValue({status:'error',code:'EACCES',message:'permission denied'})
@@ -103,7 +104,7 @@ describe('original Store Note intent',()=>{
   it('does not open a different Note found at an unknown candidate',async()=>{
     const launcher=fixture();vi.spyOn(api.files,'write').mockRejectedValue(new Error('transport'));const open=vi.fn(async()=>true);useAppStore.setState({openFile:open})
     const receipt=await useAppStore.getState().createNote('g',launcher,'draft')
-    vi.spyOn(api.files,'read').mockResolvedValue({status:'read',document:{path:receipt.path,content:'{"schema":"agentmux.note.v1","noteId":"another","content":{"type":"doc","content":[{"type":"paragraph","attrs":{"blockId":"another-block"}}]}}',revision:'other'}})
+    vi.spyOn(api.files,'read').mockResolvedValue({status:'read',document:{path:receipt.path,content:serializeNoteDocument(newNoteDocument('', 'another', 'another-block')),revision:'other'}})
     const result=await useAppStore.getState().revealCreatedNote('region:launcher-region')
     expect(result?.status).toBe('unknown');expect(result?.noteId).toBe(receipt.noteId);expect(result?.draft).toBe('draft');expect(open).not.toHaveBeenCalled()
   })
@@ -140,7 +141,7 @@ describe('original Store Note intent',()=>{
     resolve();const result=await creating
     expect(write).toHaveBeenCalledTimes(1);expect(open).not.toHaveBeenCalled()
     expect(result.status).toBe('error');expect(result.write).toMatchObject({code:'NOTE_RESOURCE_CHANGED'})
-    expect(result.path).not.toMatch(/-2\.note\.json$/);expect(result.draft).toBe('captured draft');expect(result.target.workspacePath).toBe(_hygiene_fixturePath("resource"))
+    expect(result.path).not.toMatch(/-2\.note\.md$/);expect(result.draft).toBe('captured draft');expect(result.target.workspacePath).toBe(_hygiene_fixturePath("resource"))
   })
   it('preserves later navigation and the written result instead of stealing focus',async()=>{
     const launcher=fixture();let resolve!:()=>void;const wait=new Promise<void>(yes=>{resolve=yes})
@@ -183,20 +184,20 @@ describe('original Store Note intent',()=>{
     fixture()
     const sourceSpace=directoryIdentity('local',_hygiene_fixturePath("resource")),reference={displayWorkspaceId:'d',groupId:'display-g',tabId:'mixed-original',regionId:'source-file'}
     let tab=createWorkbenchTab(reference.tabId,{kind:'launcher',regionId:'first-launcher',workspaceId:'r'})
-    tab=addWorkbenchRegion(tab,'first-launcher','right',{kind:'file',regionId:reference.regionId,workspaceId:'r',path:'a.note.json'})
+    tab=addWorkbenchRegion(tab,'first-launcher','right',{kind:'file',regionId:reference.regionId,workspaceId:'r',path:'a.note.md'})
     tab={...tab,space:{spaceId:sourceSpace,zoneId:'source-zone'},layout:{...tab.layout,activeRegionId:'first-launcher'}}
     const resourceLayout=createWorkspaceLayout('resource'),displayLayout=createWorkspaceLayout('display-g',[tab.id])
     useAppStore.setState({tabs:{[tab.id]:tab},layouts:{r:resourceLayout,d:displayLayout},spaceZoneBindings:{'source-zone':{workspaceId:'r',spaceId:sourceSpace,relations:{}}}})
-    const content=JSON.stringify(newNoteDocument('source text','source-note','source-block')),onSelect=vi.fn()
+    const content=serializeNoteDocument(newNoteDocument('source text','source-note','source-block')),onSelect=vi.fn()
     const projection:WorkbenchProjection={entity:{kind:'zone',zoneId:'source-zone'},presentationId:'survey-workbench',displayWorkspaceId:'d',catalog:spatialCatalog(useAppStore.getState(),[]),selection:[{...reference,regionId:'first-launcher'}],onSelect}
-    const read=vi.spyOn(api.files,'read').mockResolvedValue({status:'read',document:{path:'a.note.json',content,revision:'source'}})
+    const read=vi.spyOn(api.files,'read').mockResolvedValue({status:'read',document:{path:'a.note.md',content,revision:'source'}})
     vi.spyOn(api.files,'observe').mockResolvedValue(undefined);vi.spyOn(api.files,'unobserve').mockResolvedValue(undefined)
     const before=useAppStore.getState(),location={line:1,noteBlock:{noteId:'source-note',blockId:'source-block'}}
-    const opened=await useAppStore.getState().openFile('a.note.json','display-g',location,'r',undefined,{displayWorkspaceId:'d',space:tab.space!,resource:{hostId:'local',path:_hygiene_fixturePath("resource")},reference,...(projected?{projection}:{})})
+    const opened=await useAppStore.getState().openFile('a.note.md','display-g',location,'r',undefined,{displayWorkspaceId:'d',space:tab.space!,resource:{hostId:'local',path:_hygiene_fixturePath("resource")},reference,...(projected?{projection}:{})})
     const after=useAppStore.getState()
-    expect(opened).toBe(true);expect(read).toHaveBeenCalledWith('r','a.note.json')
-    expect(Object.keys(after.tabs)).toEqual([tab.id]);expect(after.tabs[fileTabId('r','a.note.json')]).toBeUndefined()
-    expect(after.documents[documentKey('r','a.note.json')]?.content).toBe(content);expect(after.documentRevealTargets[documentKey('r','a.note.json')]).toEqual(location)
+    expect(opened).toBe(true);expect(read).toHaveBeenCalledWith('r','a.note.md')
+    expect(Object.keys(after.tabs)).toEqual([tab.id]);expect(after.tabs[fileTabId('r','a.note.md')]).toBeUndefined()
+    expect(after.documents[documentKey('r','a.note.md')]?.content).toBe(content);expect(after.documentRevealTargets[documentKey('r','a.note.md')]).toEqual(location)
     expect(after.layouts.r).toBe(resourceLayout)
     if(projected){expect(after.tabs).toBe(before.tabs);expect(after.layouts.d).toBe(displayLayout);expect(onSelect).toHaveBeenCalledWith(reference)}
     else{expect(after.activeWorkspaceId).toBe('d');expect(after.tabs[tab.id]?.layout.activeRegionId).toBe('source-file');expect(findGroup(after.layouts.d!,'display-g')?.activeTabId).toBe(tab.id);expect(onSelect).not.toHaveBeenCalled()}
@@ -206,7 +207,7 @@ describe('original Store Note intent',()=>{
     const workspace:WorkspaceRecord={id:'r',name:'R',hostId:'local',path:root,kind:'folder'}
     const launcher=fixture(), state=useAppStore.getState(), tab={...state.tabs.launcher!,space:{spaceId:directoryIdentity('local',root),zoneId:'temporary-zone'}}
     useAppStore.setState({config:{...config,workspaces:[workspace,config.workspaces[1]!]},tabs:{launcher:tab},layouts:{r:createWorkspaceLayout('resource'),d:createWorkspaceLayout('display-g',['launcher'])},spaceZoneBindings:{'temporary-zone':{workspaceId:'r',spaceId:directoryIdentity('local',root),relations:{}}}})
-    const files=new WorkspaceFiles(id=>({id,kind:'local',label:'Local',run:vi.fn(),exposeLoopbackPort:async port=>port,dispose:async()=>{}}))
+    const files=new WorkspaceFiles(id=>({id,kind:'local',label:'Local',run:vi.fn(),exposeLoopbackPort:async (port: number)=>port,dispose:async()=>{}}))
     vi.spyOn(api.files,'write').mockImplementation(async(id,input)=>{expect(id).toBe('r');return await files.write(workspace,input)})
     vi.spyOn(api.files,'read').mockImplementation(async(id,path)=>{expect(id).toBe('r');return await files.read(workspace,path)})
     vi.spyOn(api.files,'observe').mockResolvedValue(undefined);vi.spyOn(api.files,'unobserve').mockResolvedValue(undefined)
