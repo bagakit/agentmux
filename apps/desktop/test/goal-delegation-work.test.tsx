@@ -254,6 +254,19 @@ describe('mounted original Goal delegation consumer', () => {
     expect(recovery.closest('details')).toBeNull(); expect(recovery.parentElement!.getAttribute('role')).toBe('status')
     expect(useAppStore.getState().goalAgentCreationDrafts[originalKey]!.operationId).toBe('original-creation')
   })
+  it('shows a finite Start reminder reason once while preserving a different unknown and original recovery', async () => {
+    const reason = 'The original reminder is prepared. Manual input remains available.'
+    const observed = { ...startObservation(), unknown: reason, attention: { state: 'prepared' as const, reason } }
+    const record = { ...goal(), delegations: [], dispatches: [finiteStart()], startObservations: [observed] }
+    vi.spyOn(api.demands, 'delegation').mockResolvedValue(result(record))
+    await mount(record)
+    expect(container.textContent!.split(reason)).toHaveLength(2)
+    expect(button('Open original Agent').disabled).toBe(false)
+    await act(async () => useAppStore.setState({ demands: { [record.id]: { ...record, startObservations: [{ ...observed, unknown: 'Original history is unavailable.' }] } } }))
+    expect(container.textContent).toContain('Original history is unavailable.')
+    expect(container.textContent!.split(reason)).toHaveLength(2)
+    await click('Open original Agent'); expect(api.ui.openObjectLink).toHaveBeenCalledWith('amux://agent/original-worker')
+  })
   it('distinguishes two same-state workers and current follow-up responsibility beside the visible report', async () => {
     const original = delegation(), second = { ...original, operationId: 'second-operation', sourceMessageId: 'second-message', workerAgentSessionId: 'second-worker' }
     const record = { ...goal(), supervisorSessionId: 'current-supervisor', delegations: [original, second] }
