@@ -90,7 +90,7 @@ export function ScreenshotEditor({ image, busy, copied, active = true, onCancel,
     // local handoff without taking focus from another workface or an editor input.
     const frame = requestAnimationFrame(focusCanvas)
     return () => cancelAnimationFrame(frame)
-  }, [active])
+  }, [active, pendingText])
 
   useEffect(() => {
     if (!active) return
