@@ -99,7 +99,7 @@ AgentMux 提供的对话与分享外框在此集中导航：平台说明、对�
 ## 交出去与派出去
 
 - **Handoff 与 Dispatch 表达协作意图。** Core 用 `originAwaits` 区分交出去（false）与派出去后原协调者仍等待问题、升级和收工（true）。该字段描述本次协作声明，不原子转移外部任务系统的所有权；准确执行与可观察范围见下文，不以普通消息措辞冒结构化事实。
-- **交接的发起者始终是人**。不引入 Agent 自主把任务派给另一个 Agent 的回路，因此 handoff **不夹带消息投递**——一旦它同时"转移所有权"和"投递指令"，那条被否决的回路就有了雏形。要送文本走 send/discuss，那是另一件事。
+- **全权交接须有人的明确授权**。用户已授权 Goal 范围内的 Mote 委派与结果回收沿[Goal 委派合同](goals-and-demand.md#委派回报与责任接续)，不因委派暗转业务所有权或扩大授权。handoff **不夹带消息投递**——一旦它同时"转移所有权"和"投递指令"，那条被否决的回路就有了雏形。要送文本走 send/discuss，那是另一件事。
 - **交接的目标用与位置无关的 Session 身份寻址**。多态寻址（Region/Tab）要过 Control 面解析成 Session，把一个原子动作拆成两跳，还让它依赖 Desktop 活着——而交出所有权不该有这个前提。
 - **交接回执不冒任务所有权记录。** `handOff()` 的本次返回值只表达 `ownerAgentSessionId`／`originAwaits`；准确合同以[Core handoff](../../../packages/core/src/agent-handoff.ts)为准。未取得持久任务 owner 确认时，界面不能从自由 `taskId` 或一次返回值宣称“任务当前归谁”，也不另存无法核对的 owner 字段。外部任务与 Goal/Demand 的实际关系沿其原 owner。
 
