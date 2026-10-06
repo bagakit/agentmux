@@ -5122,7 +5122,7 @@ export class AgentMuxClient {
       // Native message admission uses the same Core claim, producer and condition.
       // This early branch deliberately never creates a terminal prompt plan.
       if (input.expectedCompletionId !== undefined || input.expectedFutureIntent !== undefined || input.preparationRetry !== undefined) {
-        throw new AgentMuxError('Automatic Native input is awaiting its original machine admission contract. The intent and terminal remain available.', 'AGENT_NATIVE_INPUT_WAITING', JSON.stringify({ phase: 'native-intent', reason: 'automatic-admission-unavailable', cancellable: true }))
+        throw new AgentMuxError('The requested Native admission contract is unavailable. This submission attempt has ended before dispatch; the original Session and terminal remain available. Keep the original caller input.', 'AGENT_NATIVE_INPUT_WAITING', JSON.stringify({ phase: 'native-intent', reason: 'automatic-admission-unavailable' }))
       }
       let prepared: import('./agent-provider.js').AgentProviderNativePromptInput | undefined
       try {
@@ -5138,8 +5138,8 @@ export class AgentMuxClient {
               ...(session.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
               ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}) })
           } catch (error) {
-            const reported = new AgentMuxError('The original Native input environment is unconfirmed. The message is retained; waiting can be cancelled and the original terminal remains available.',
-              'AGENT_NATIVE_INPUT_WAITING', JSON.stringify({ preclaimObservation: observation, reason: preparationSignal.aborted ? 'observation-cancelled' : 'original-environment-unconfirmed', cancellable: true,
+            const reported = new AgentMuxError('The original Native input environment is unconfirmed. This read-only preparation observation has ended before dispatch; the original Session and terminal remain available. Keep the original caller input.',
+              'AGENT_NATIVE_INPUT_WAITING', JSON.stringify({ preclaimObservation: observation, reason: preparationSignal.aborted ? 'observation-cancelled' : 'original-environment-unconfirmed',
                 cause: error instanceof AgentMuxError ? { code: error.code, detail: error.detail } : {
                   name: error instanceof Error ? error.name : 'unknown',
                   ...(error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' && /^[A-Z0-9_]{1,64}$/u.test(error.code) ? { code: error.code } : {})
