@@ -1,0 +1,211 @@
+/* Shared original Tab/Region identity and readonly inspector. */
+.workbench-topology {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-3);
+  cursor: default;
+  outline: none;
+}
+.workbench-topology:hover,
+.workbench-topology:focus-visible,
+.workbench-topology:focus-within {
+  color: var(--text);
+}
+.workbench-topology__tab-rail {
+  max-width: min(196px, 52vw);
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.workbench-topology__tab-rail::-webkit-scrollbar { display: none; }
+.workbench-topology__tab-chip {
+  flex: 0 0 auto;
+  position: relative;
+  width: 22px;
+  height: 22px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  background: transparent;
+  cursor: pointer;
+}
+.workbench-topology__tab-chip + .workbench-topology__tab-chip {
+  margin-left: calc(-1 * var(--sp-4));
+}
+.workbench-topology__tab-glyph {
+  position: relative;
+  display: block;
+  width: 18px;
+  height: 18px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+  background: var(--surface-0);
+}
+.workbench-topology__tab-glyph__cell {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-sizing: border-box;
+  min-width: 1px;
+  min-height: 1px;
+  border: 1px solid var(--surface-0);
+  background: var(--surface-3);
+}
+.workbench-topology__tab-glyph--single .workbench-topology__tab-glyph__cell {
+  border-color: var(--line-soft);
+  background: var(--surface-2);
+}
+.workbench-topology__tab-glyph--single {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+}
+.workbench-topology__tab-glyph--single > .agent-avatar {
+  pointer-events: none;
+  transform: scale(.86);
+  transform-origin: center;
+}
+.workbench-topology__tab-glyph--single > svg { color: var(--text-2); }
+.workbench-topology__tab-chip.active {
+  border-color: var(--green-line);
+  color: var(--green);
+  background: var(--green-bg);
+}
+.workbench-topology__tab-chip.inspected,
+.workbench-topology__tab-chip:hover,
+.workbench-topology__tab-chip:focus-visible {
+  z-index: 20 !important;
+  border-color: var(--focus-line);
+  color: var(--text);
+  background: var(--surface-3);
+  outline: none;
+}
+.workbench-topology__tab-chip.active.inspected,
+.workbench-topology__tab-chip.active:hover,
+.workbench-topology__tab-chip.active:focus-visible {
+  border-color: var(--green);
+  color: var(--green);
+  background: var(--green-bg-hover);
+}
+.workbench-topology__inspector-regions {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+  background: var(--surface-0);
+}
+.workbench-topology__inspector-regions__region {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 1px;
+  border: 1px solid var(--surface-0);
+  color: var(--text-2);
+  background: var(--surface-3);
+  text-align: center;
+}
+.workbench-topology__inspector-regions__region-label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  gap: var(--sp-2);
+  overflow: hidden;
+}
+.workbench-topology__inspector-regions__region-label > .agent-avatar {
+  flex: 0 0 auto;
+  transform: scale(.82);
+  transform-origin: center;
+}
+.workbench-topology__inspector-regions__region-label strong,
+.workbench-topology__inspector-regions__region-label small {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workbench-topology__inspector-regions__region-label strong { font: var(--fs-micro)/1 var(--font-mono); font-weight: 600; }
+.workbench-topology__inspector-regions__region-label small { display: block; color: var(--text-3); font-size: var(--fs-micro); }
+.workbench-topology__inspector-regions { width: 100%; }
+.workbench-topology__inspector {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  bottom: calc(100% + var(--sp-2));
+  display: none;
+  width: 280px;
+  max-width: min(280px, 80vw);
+  max-height: min(520px, 70vh);
+  overflow: auto;
+  padding: var(--sp-3);
+  border: 1px solid var(--overlay-line);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--surface-1);
+  box-shadow: var(--elev-3), var(--hl);
+  pointer-events: none;
+}
+.workbench-topology__inspector--portal {
+  position: fixed;
+  z-index: var(--layer-tooltip);
+  right: auto;
+  bottom: auto;
+  display: grid;
+  gap: var(--sp-3);
+}
+.workbench-topology:hover .workbench-topology__inspector,
+.workbench-topology:focus-visible .workbench-topology__inspector,
+.workbench-topology:focus-within .workbench-topology__inspector { display: grid; gap: var(--sp-3); }
+.workbench-topology__inspector-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-width: 0;
+
+}
+.workbench-topology__inspector-head > span { min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.workbench-topology__inspector-head strong { min-width: 0; overflow: hidden; color: var(--text); font-size: var(--fs-meta); text-overflow: ellipsis; white-space: nowrap; }
+.workbench-topology__inspector-head svg { flex: 0 0 auto; color: var(--green-2); }
+
+/* Subject position is independent from active Tab, hover and semantic execution state. */
+.workbench-topology__tab-glyph__cell[data-subject-region='true'] {
+  background: var(--neutral-2);
+  box-shadow: inset 0 0 0 1px var(--text-2);
+}
+.workbench-topology__inspector-regions__region[data-subject-region='true'] {
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--text-2);
+}
+.workbench-topology__inspector-regions__region-label .workbench-topology__subject-label { color: var(--text-2); }
+
+.workbench-topology__tab-glyph__cell > .agent-avatar { flex: none; transform: scale(.5); transform-origin: center; }
+.workbench-topology__tab-glyph__cell > svg { width: min(100%, 14px); height: min(100%, 14px); }

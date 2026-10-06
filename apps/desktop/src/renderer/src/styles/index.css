@@ -16,6 +16,7 @@
 @import './selector.css';
 @import './dock.css';
 @import './topic-topology.css';
+@import './workbench-topology.css';
 @import './topic-knowledge.css';
 @import './file-explorer.css';
 @import './surface-mode-switch.css';
