@@ -10,7 +10,7 @@ import * as DropdownMenu from './HoverDropdownMenu'
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeActionConfirmIcon = semanticIconComponent('action.confirm')
 const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
-const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeActionReviewSourceIcon = semanticIconComponent('action.review-source')
 
 
 export type AgentNativeSourceReference = Pick<Extract<SessionSnapshot, { kind: 'agent' }>,
@@ -101,7 +101,7 @@ export function useAgentNativeSourceControls({ session, readOnly }: { session: A
       }}><ThemeActionCancelIcon size={14} /><span>Cancel source change</span></DropdownMenu.Item>
     </> : canReview ? <DropdownMenu.Item className="tab-context-menu__item" disabled={busy} onSelect={event => {
       event.preventDefault(); setNotice(null); setReview(nativeConfirmationInput(session, crypto.randomUUID()))
-    }}><ThemeStatusSelectedIcon size={14} /><span>Review source change…</span></DropdownMenu.Item> : null}
+    }}><ThemeActionReviewSourceIcon size={14} /><span>Review source change…</span></DropdownMenu.Item> : null}
     <DropdownMenu.Separator className="tab-context-menu__separator" />
   </>
 }

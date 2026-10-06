@@ -15,10 +15,12 @@ import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { describeAgentDisplayState } from '../../../../shared/agent-state-presentation'
 
 const ThemeActionCreatePromptIcon = semanticIconComponent('action.create-prompt')
+const ThemeActionAddQuickRepliesIcon = semanticIconComponent('action.add-quick-replies')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeActionClearIcon = semanticIconComponent('action.clear')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 
 
@@ -151,7 +153,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
         <span className="settings-resource-count">{drafts.length} {drafts.length === 1 ? 'prompt' : 'prompts'}</span>
         <button type="button" className="small-button" onClick={add}><ThemeActionCreatePromptIcon size={13} /> Add prompt</button>
         {PROMPT_REACTION_STARTERS.some(starter => !drafts.some(candidate => candidate.id === starter.id || candidate.keyword === starter.keyword)) ?
-          <button type="button" className="small-button" onClick={addReactionStarters}><ThemeStatusSelectedIcon size={13} /> Add quick replies</button> : null}
+          <button type="button" className="small-button" onClick={addReactionStarters}><ThemeActionAddQuickRepliesIcon size={13} /> Add quick replies</button> : null}
       </div>
       <div className="prompt-workbench__body">
         <section className="prompt-library" aria-label="Prompt library">
@@ -192,7 +194,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
               return <label key={state}><input type="checkbox" value={state} checked={prompt.states?.includes(state) ?? false} onChange={(event) => update(prompt.id, { states: event.target.checked ? [...(prompt.states ?? []), state] : (prompt.states ?? []).filter((candidate) => candidate !== state) })} /><span><strong>{meaning.label} <code>{state}</code></strong><small>{meaning.description}</small></span></label>
             })}</div><small>Each selection matches its exact state. Running does not include working. Visibility is separate from whether a message can be sent.</small></fieldset>
             <section className="prompt-usage" aria-label="Usage preview"><header>Usage preview <small>Read only</small></header><div><code>/{prompt.keyword.trim() || 'keyword'}</code><span>Type / or its bare keyword to add your instruction to a draft instead of sending.</span></div>{prompt.states?.length ? <div><span className="prompt-usage__example">{promptName(prompt)}</span><span>Open the receiving Agent avatar at {prompt.states.map(stateName).join(', ')} to choose this user prompt. Click sends this instruction only; pending permission or question requests queue it. Your draft is kept.</span></div> : <p>Draft shortcut only. Select states to make this instruction available in the receiving Agent avatar. Pending permission or question requests queue it.</p>}</section>
-            <div className="prompt-editor__remove"><button type="button" className="small-button" onClick={() => remove(prompt.id)}>{Object.hasOwn(resource.expected, prompt.id) ? <><ThemeActionRemoveIcon size={13} /> Delete prompt</> : <><ThemeActionRemoveIcon size={13} /> Cancel new prompt</>}</button></div>
+            <div className="prompt-editor__remove"><button type="button" className="small-button" onClick={() => remove(prompt.id)}>{Object.hasOwn(resource.expected, prompt.id) ? <><ThemeActionRemoveIcon size={13} /> Delete prompt</> : <><ThemeActionCancelIcon size={13} /> Cancel new prompt</>}</button></div>
           </div>
         </section> : <div className="prompt-editor__empty">Choose a prompt to edit its instruction and where it appears.</div>}
       </div>
