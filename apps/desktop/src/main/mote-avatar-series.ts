@@ -1,13 +1,15 @@
-import { constants, lstat, open, readdir, realpath } from 'node:fs/promises'
+import { constants, lstat, mkdir, open, readdir, realpath } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { isAbsolute, join, relative } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { nativeImage, type NativeImage } from 'electron'
 import {
   avatarSeriesCanonical, parseMoteAvatarSeriesDefinition, parseMoteAvatarSeriesLocator,
   parseMoteAvatarSeriesParams, parseMoteAvatarSeriesResult,
   type MoteAvatarSeriesCatalog, type MoteAvatarSeriesDefinition, type MoteAvatarSeriesIssue,
-  type MoteAvatarSeriesLocator, type MoteAvatarSeriesPrepared, type MoteAvatarSeriesPreviewParams
+  type MoteAvatarSeriesLocator, type MoteAvatarSeriesPrepared, type MoteAvatarSeriesPreviewParams,
+  type MoteAvatarSeriesCreateParams, type MoteAvatarSeriesCreateResult, type MoteAvatarSeriesRevealParams
 } from '@agentmux/core/mote-avatar-series'
+import { DEFAULT_MOTE_FACE } from '@agentmux/core/mote-face'
 import { AVATAR_INPUT_MAX_BYTES, AVATAR_MAX_PIXELS } from '../shared/object-avatars.js'
 import { decodeObjectAvatar, previewObjectAvatar } from './object-avatar-image.js'
 
@@ -56,6 +58,22 @@ async function directory(path: string): Promise<string> {
   const info = await lstat(path)
   if (!info.isDirectory() || info.isSymbolicLink()) throw sourceError('AVATAR_DIRECTORY_INVALID', 'The original avatar source is not a regular directory.')
   return await realpath(path)
+}
+/** Only a missing original Host directory is made; linked ancestors are never followed. */
+async function ensureUserDirectory(path: string): Promise<string> {
+  try {
+    const actual = await directory(path)
+    if (actual !== resolve(path)) throw sourceError('AVATAR_SOURCE_LINK', 'The original user avatar directory has a linked ancestor. Existing series are retained.')
+    return actual
+  } catch (error) {
+    if (!missing(error)) throw error
+  }
+  await ensureUserDirectory(dirname(path))
+  try { await mkdir(path, { mode: 0o700 }) }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+  const actual = await directory(path)
+  if (actual !== resolve(path)) throw sourceError('AVATAR_SOURCE_LINK', 'The user avatar directory changed during creation. Original content is retained.')
+  return actual
 }
 async function filePath(series: string, file: string): Promise<string> {
   let parent = series
@@ -197,13 +215,69 @@ function validateGlb(bytes: Buffer, definition: Extract<MoteAvatarSeriesDefiniti
   }
 }
 
-/** The only source reader. It neither owns a selected avatar nor performs a configuration write. */
+/** Original Host artwork sources. Creating a collection never publishes an avatar or configuration. */
 export class MoteAvatarSeriesOwner {
   constructor(private readonly options: { userRoot: string; builtinRoot: string },
     private readonly createImage: (bytes: Buffer) => NativeImage = bytes => nativeImage.createFromBuffer(bytes)) {
     if (!isAbsolute(options.userRoot) || !isAbsolute(options.builtinRoot)) throw sourceError('AVATAR_ROOT_INVALID', 'Avatar source roots must be the exact original Host directories.')
   }
   private root(origin: Origin): string { return origin === 'user' ? this.options.userRoot : this.options.builtinRoot }
+
+  async createSeries(raw: MoteAvatarSeriesCreateParams): Promise<MoteAvatarSeriesCreateResult> {
+    const input = parseMoteAvatarSeriesParams('space.mote.avatar.series.create', raw)
+    // Validate the actual approved sample before touching the user source tree.
+    const builtin = await directory(this.options.builtinRoot)
+    const sample = await readFileInSeries(builtin, 'lowpoly/lowpoly-owl.png', AVATAR_INPUT_MAX_BYTES)
+    decodeObjectAvatar({ mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + sample.toString('base64') }, this.createImage)
+    const root = await ensureUserDirectory(this.options.userRoot)
+    const path = join(root, input.seriesId)
+    try { await mkdir(path, { mode: 0o700 }) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw sourceError('AVATAR_SERIES_EXISTS', 'This avatar series directory already exists. Its original files are unchanged; choose another directory name or inspect the current series.')
+      throw sourceError('AVATAR_SERIES_CREATE_FAILED', 'The new avatar directory could not be created. Existing series remain available. ' + (error instanceof Error ? error.message : String(error)))
+    }
+    const identity = await lstat(path), rootIdentity = await lstat(root)
+    const unchanged = async () => {
+      const currentRoot = await lstat(root), current = await lstat(path)
+      if (!currentRoot.isDirectory() || currentRoot.isSymbolicLink() || currentRoot.dev !== rootIdentity.dev || currentRoot.ino !== rootIdentity.ino ||
+        !current.isDirectory() || current.isSymbolicLink() || current.dev !== identity.dev || current.ino !== identity.ino || await realpath(path) !== path)
+        throw sourceError('AVATAR_SOURCE_CHANGED', 'The exact new avatar directory changed during creation. Partial content is retained; inspect this original source before another create.')
+    }
+    const manifest = { schema: 'agentmux.avatar-series.v1', title: input.title, entries: [
+      { id: 'starter', title: 'Owl image', definition: { kind: 'image', file: 'starter.png' } },
+      { id: 'face', title: 'Face preset', definition: { kind: 'face2d', face: { ...DEFAULT_MOTE_FACE } } }
+    ] }
+    const readme = `# ${input.title}\n\nThis is your avatar collection. Creating it does not change any saved avatar.\n\n` +
+      '## Images\n\nDrop regular PNG or JPG images here. They appear in Series without a declaration. starter.png is copied from the packaged low-poly owl artwork.\n\n' +
+      '## Mixed collections\n\nseries.json declares the starter image and a preset using the original Mote face parts. Edit entry titles and face values, or add image entries referring to files in this same directory. Keep the schema agentmux.avatar-series.v1.\n\n' +
+      'Faces use kind face, shape, palette, eyes, brows, mouth and accessory. The starter contains a complete valid example. Self-contained GLB entries may also be declared; native material/morph/framing indices must actually exist in that model.\n\n' +
+      'Use regular files and directories, not links. Keep all artwork inside this series; remote images, executable scripts and custom shaders are not avatar sources.\n\n' +
+      'Refresh Series in the avatar editor, choose an entry and adjust it. Save avatar is a separate explicit action. Existing saved PNGs remain when their editing source is unavailable.\n'
+    const files = ['starter.png', 'series.json', 'README.md']
+    try {
+      for (const [file, bytes] of [['starter.png', sample], ['series.json', JSON.stringify(manifest, null, 2) + '\n'], ['README.md', readme]] as const) {
+        await unchanged()
+        const handle = await open(join(path, file), 'wx', 0o600)
+        try { await handle.writeFile(bytes); await handle.sync() } finally { await handle.close() }
+        await unchanged()
+      }
+      const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+      try { await handle.sync() } finally { await handle.close() }
+      await unchanged()
+    } catch (error) {
+      throw sourceError('AVATAR_SERIES_CREATE_INCOMPLETE', 'The new avatar series could not be completed at ' + path + '. Any files already created are retained; inspect this folder and the current catalog before another create. ' + (error instanceof Error ? error.message : String(error)))
+    }
+    return parseMoteAvatarSeriesResult('space.mote.avatar.series.create', { seriesId: input.seriesId, title: input.title, path, files, state: 'created' }, input)
+  }
+
+  async revealSeries(raw: MoteAvatarSeriesRevealParams): Promise<string> {
+    const input = parseMoteAvatarSeriesParams('space.mote.avatar.series.reveal', raw)
+    const root = await directory(this.options.userRoot)
+    if (root !== resolve(this.options.userRoot)) throw sourceError('AVATAR_SOURCE_LINK', 'The original user avatar directory has a linked ancestor.')
+    const path = join(root, input.seriesId), actual = await directory(path)
+    if (actual !== path) throw sourceError('AVATAR_SOURCE_LINK', 'The exact avatar series directory is linked. Existing artwork is retained.')
+    return path
+  }
 
   private async series(origin: Origin, root: string, seriesId: string): Promise<{ series: Series; path: string; issues: MoteAvatarSeriesIssue[] }> {
     parseMoteAvatarSeriesLocator({ origin, seriesId, entryId: '_' })

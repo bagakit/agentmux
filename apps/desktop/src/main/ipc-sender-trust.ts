@@ -52,6 +52,8 @@ export const PRIVILEGED_SENDER_LABELS = {
   'topics:call': 'Topic content',
   'moteAvatars:list': 'avatar sources',
   'moteAvatars:preview': 'avatar source preparation',
+  'moteAvatars:createSeries': 'avatar series creation',
+  'moteAvatars:revealSeries': 'avatar folder opening',
   'moteAvatars:read': 'saved avatar inspection',
   'moteAvatars:save': 'avatar publication',
   'spaceObjects:appearance': 'object image appearance',

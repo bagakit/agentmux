@@ -34,17 +34,26 @@ export type MoteAvatarSeriesChoice = {
   parameters: MoteAvatarSeriesParameters; image: { kind: 'image'; fileName: string }
 }
 export type MoteAvatarSeriesPreviewParams = { source: MoteAvatarSeriesLocator; expectedRevision?: string }
+export type MoteAvatarSeriesCreateParams = { seriesId: string; title: string }
+export type MoteAvatarSeriesCreateResult = { seriesId: string; title: string; path: string; files: string[]; state: 'created' }
+export type MoteAvatarSeriesRevealParams = { seriesId: string }
+export type MoteAvatarSeriesRevealResult = { seriesId: string; path: string; outcome: 'requested' }
 export type MoteAvatarSeriesParameterMap = {
   'space.mote.avatar.list': Record<string, never>;
-  'space.mote.avatar.preview': MoteAvatarSeriesPreviewParams
+  'space.mote.avatar.preview': MoteAvatarSeriesPreviewParams;
+  'space.mote.avatar.series.create': MoteAvatarSeriesCreateParams;
+  'space.mote.avatar.series.reveal': MoteAvatarSeriesRevealParams
 }
 export type MoteAvatarSeriesResultMap = {
   'space.mote.avatar.list': MoteAvatarSeriesCatalog;
-  'space.mote.avatar.preview': MoteAvatarSeriesPrepared
+  'space.mote.avatar.preview': MoteAvatarSeriesPrepared;
+  'space.mote.avatar.series.create': MoteAvatarSeriesCreateResult;
+  'space.mote.avatar.series.reveal': MoteAvatarSeriesRevealResult
 }
 export type MoteAvatarSeriesMethod = keyof MoteAvatarSeriesParameterMap
 export const AGENTMUX_RPC_MOTE_AVATAR_METHODS = {
-  'space.mote.avatar.list': 'long', 'space.mote.avatar.preview': 'long'
+  'space.mote.avatar.list': 'long', 'space.mote.avatar.preview': 'long',
+  'space.mote.avatar.series.create': 'long', 'space.mote.avatar.series.reveal': 'short'
 } as const
 export function isMoteAvatarSeriesMethod(value: unknown): value is MoteAvatarSeriesMethod {
   return typeof value === 'string' && Object.hasOwn(AGENTMUX_RPC_MOTE_AVATAR_METHODS, value)
@@ -154,6 +163,15 @@ function issues(value: unknown, code: string): void {
   }
 }
 export function parseMoteAvatarSeriesParams<M extends MoteAvatarSeriesMethod>(method: M, value: unknown): MoteAvatarSeriesParameterMap[M] {
+  if (method === 'space.mote.avatar.series.create' || method === 'space.mote.avatar.series.reveal') {
+    const p = rpcRecord(value, method === 'space.mote.avatar.series.create' ? ['seriesId', 'title'] : ['seriesId'])
+    parseMoteAvatarSeriesLocator({ origin: 'user', seriesId: p.seriesId, entryId: '_' })
+    if (method === 'space.mote.avatar.series.create') {
+      text(p.title, 'INVALID_CONTROL_REQUEST')
+      if (!(p.title as string).trim()) invalid('Give the new avatar series a title.', 'INVALID_CONTROL_REQUEST')
+    }
+    return p as MoteAvatarSeriesParameterMap[M]
+  }
   const p = rpcRecord(value, method === 'space.mote.avatar.list' ? [] : ['source','expectedRevision'])
   if (method === 'space.mote.avatar.preview') {
     parseMoteAvatarSeriesLocator(p.source)
@@ -163,6 +181,26 @@ export function parseMoteAvatarSeriesParams<M extends MoteAvatarSeriesMethod>(me
 }
 export function parseMoteAvatarSeriesResult<M extends MoteAvatarSeriesMethod>(method: M, value: unknown, input: MoteAvatarSeriesParameterMap[M]): MoteAvatarSeriesResultMap[M] {
   const code = 'CONTROL_PROTOCOL_ERROR'
+  if (method === 'space.mote.avatar.series.create' || method === 'space.mote.avatar.series.reveal') {
+    const create = method === 'space.mote.avatar.series.create'
+    const p = rpcRecord(value, create ? ['seriesId', 'title', 'path', 'files', 'state'] : ['seriesId', 'path', 'outcome'], code)
+    const expected = input as MoteAvatarSeriesCreateParams | MoteAvatarSeriesRevealParams
+    parseMoteAvatarSeriesLocator({ origin: 'user', seriesId: p.seriesId, entryId: '_' }, code)
+    if (p.seriesId !== expected.seriesId) invalid('The avatar series result belongs to a different exact directory.', code)
+    text(p.path, code)
+    if (!/^(?:\/|[a-z]:[\\/])/iu.test(p.path as string) || (p.path as string).split(/[\\/]/u).at(-1) !== p.seriesId) invalid('The avatar series result lost its absolute original directory.', code)
+    if (create) {
+      text(p.title, code)
+      if (p.title !== (expected as MoteAvatarSeriesCreateParams).title || p.state !== 'created' || !Array.isArray(p.files) || !p.files.length) invalid('The new avatar series result is incomplete or belongs to a different request.', code)
+      const files = new Set<string>()
+      for (const file of p.files as unknown[]) {
+        parseMoteAvatarSeriesLocator({ origin: 'user', seriesId: p.seriesId, entryId: file }, code)
+        if (files.has(file as string)) invalid('Created avatar files cannot repeat.', code)
+        files.add(file as string)
+      }
+    } else if (p.outcome !== 'requested') invalid('Opening an avatar folder reports only its original OS request.', code)
+    return p as MoteAvatarSeriesResultMap[M]
+  }
   const p = rpcRecord(value, method === 'space.mote.avatar.list' ? ['roots','series','issues'] : ['source','definition','payload','issues'], code)
   issues(p.issues, code)
   if (method === 'space.mote.avatar.list') {

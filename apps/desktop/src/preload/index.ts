@@ -243,6 +243,8 @@ const api: AgentMuxPreloadApi = {
   moteAvatars: {
     list: () => ipcRenderer.invoke('moteAvatars:list'),
     preview: params => ipcRenderer.invoke('moteAvatars:preview', params),
+    createSeries: params => ipcRenderer.invoke('moteAvatars:createSeries', params),
+    revealSeries: params => ipcRenderer.invoke('moteAvatars:revealSeries', params),
     read: params => ipcRenderer.invoke('moteAvatars:read', params),
     save: params => ipcRenderer.invoke('moteAvatars:save', params)
   },
