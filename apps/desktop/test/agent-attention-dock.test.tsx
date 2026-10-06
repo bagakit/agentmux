@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -29,7 +30,7 @@ const fixture = vi.hoisted(() => ({
     fixture.labels.push(label)
   }) }
 }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   app: { getPath: () => _hygiene_fixturePath("isolated-dock-test"), dock: fixture.dock },
   contextBridge: { exposeInMainWorld: (key: string, value: unknown) => Object.assign(window, { [key]: value }) },
   webFrame: { getZoomFactor: () => 1 },
@@ -86,14 +87,14 @@ let sessions: SessionSnapshot[]
 const submit = vi.fn()
 function agent(id: string, state: AgentDisplayState): SessionSnapshot {
   return { id, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"),
-    label: id, createdAt: 1, updatedAt: 1, latestOutputBytes: 0, processState: 'running',
+    label: id, createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), latestOutputBytes: 0, processState: 'running',
     status: { state, source: 'native-hook', observedAt: Date.now() },
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } } }
 }
 function terminal(): SessionSnapshot {
   return { id: 'terminal', kind: 'terminal', providerId: null, hostId: 'local', workspacePath: _hygiene_fixturePath("repo"), label: 'terminal',
-    createdAt: 1, updatedAt: 1, latestOutputBytes: 0, processState: 'running',
+    createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), latestOutputBytes: 0, processState: 'running',
     status: { state: 'waiting', source: 'run-process', observedAt: Date.now() },
     control: { kind: 'terminal', hostId: 'local', runId: 'terminal-run', run: { runId: 'terminal-run' } } }
 }
@@ -125,7 +126,7 @@ beforeEach(async () => {
     setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
     providerCatalog: () => [], snapshot: async () => ({ sessions, timelines: {}, recoveryCandidates: [] }), submitPrompt: submit
   } as unknown as RuntimeController
-  dispose = await registerIpc({ window: { webContents: fixture.sender } as unknown as BrowserWindow, runtime,
+  dispose = await registerIpc({ initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }), window: { setBackgroundColor: vi.fn(), webContents: fixture.sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }) } as unknown as ConfigStore,
     scratchTopics: { listTopics: async () => [] } as unknown as ScratchTopics,
     workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })

@@ -29,7 +29,7 @@ import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 // RuntimeController.prepare/assertConfigurable and the transaction stay actual source.
 const ipc = vi.hoisted(() => ({ directory: '', handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>() }))
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
-vi.mock('electron', () => ({ app: { getPath: () => ipc.directory || tmpdir() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() }, app: { getPath: () => ipc.directory || tmpdir() },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {} }))
@@ -268,7 +268,7 @@ it.each(['change', 'delete'] as const)('registered Main owner rejects referenced
   const sender = Object.assign(new EventEmitter(), { id: 992, isDestroyed: () => false, mainFrame: { framesInSubtree: [] },
     send: (channel: string, value: unknown) => { if (channel === CONFIG_CHANGED_CHANNEL) publications.push(value as AppConfig) } })
   ipc.handlers.clear()
-  const dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     configStore: disk, runtime, progressLoops: progress, scratchTopics: {} as ScratchTopics,
     workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   try {

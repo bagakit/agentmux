@@ -16,7 +16,7 @@ import type { ScratchTopics } from '../src/main/scratch-topics.js'
 import type { WorkspaceFiles } from '../src/main/workspace-files.js'
 
 const ipc = vi.hoisted(() => ({ root: '', handlers: new Map<string, Function>(), invoke: vi.fn(), api: null as AgentMuxPreloadApi | null }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { ipc.api = api } },
   ipcRenderer: { invoke: ipc.invoke, on: vi.fn(), removeListener: vi.fn(), off: vi.fn(), send: vi.fn() },
   webFrame: { getZoomFactor: () => 1 },
@@ -101,7 +101,7 @@ async function owner() {
   const sender = Object.assign(new EventEmitter(), { id: 77, isDestroyed: () => destroyed, send: vi.fn() })
   let wireSender = sender
   const unexpectedFileAccess = () => { throw new Error('Remote Agent launch must not access workspace files.') }
-  const dispose = await registerIpc({ window: { id: 88, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
+  const dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 88, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     progressLoops: { subscribe: () => () => {} } as never, configStore: { get: async () => config } as unknown as ConfigStore,
     scratchTopics: { setNameAudit: () => {} } as unknown as ScratchTopics,
     workspaceFiles: { read: unexpectedFileAccess, listFiles: unexpectedFileAccess, write: unexpectedFileAccess, dispose: async () => {} } as unknown as WorkspaceFiles })

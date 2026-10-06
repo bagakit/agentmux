@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { injectedContextCore } from './helpers/injected-context-core'
 import { startDirectGoal, retryDirectGoal, directGoalRequest } from '../src/renderer/src/lib/goals-direct-pmo'
@@ -25,7 +26,7 @@ const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invok
   handlers: new Map<string, (...args: any[]) => any>(), renderer: new Map<string, Set<(...args: any[]) => any>>(),
   main: new Map<string, Set<(...args: any[]) => any>>(), sender: null as any,
   deliver: (channel: string, ...args: any[]) => {}, reply: (channel: string, ...args: any[]) => {} }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   contextBridge: { exposeInMainWorld: (name: string, api: AgentMuxPreloadApi) => { bridge.api = api; Object.assign(window, { [name]: api }) } },
   ipcRenderer: { invoke: bridge.invoke,
     on: (channel: string, fn: (...args: any[]) => any) => { const set = bridge.renderer.get(channel) ?? new Set(); set.add(fn); bridge.renderer.set(channel, set) },
@@ -130,7 +131,7 @@ beforeEach(async () => {
   await mkdir(join(directory, 'home'))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(directory, 'runtime'))
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'runtime', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
-  writes = []; requests = []; observations = []; cursor = 0; now = 0; ended = false
+  writes = []; requests = []; observations = []; cursor = 0; now = _reshape_fixtureEpoch(0, 0, 0); ended = false
   corruptReply = false; dropReply = false; afterInputObservation = undefined
   const store = new AgentMuxMemoryAgentSessionStore(), timestamp = Date.now()
   activityCapability = issueAgentCapability()
@@ -185,7 +186,7 @@ beforeEach(async () => {
     } else send()
   }
   const fixtureConfigStore = new ConfigStore(join(directory, 'original-config.json'))
-  disposeIpc = await registerIpc({ window: { webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
+  disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
     runtime, progressLoops: manager, demands, configStore: { get: async () => config, validate: (next: AppConfig) => fixtureConfigStore.validate(next), save: async (next: AppConfig) => { config = await fixtureConfigStore.save(next); return config } } as unknown as ConfigStore,
     scratchTopics: new ScratchTopics(), workspaceFiles: expect.getState().currentTestName?.startsWith('Mote new-chat origin:')
       ? new MoteOriginWorkspaceFiles(() => ({ kind: 'local' }) as never)
@@ -219,7 +220,7 @@ afterEach(async () => {
 
 const request = (operationId = 'original-start') => ({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: operationId, operation: 'demand.start' as const, demandId: 'goal', sessionId: session.agentSessionId, continuation: { intervalMs: 60_000, alignmentRevision: 1 } })
 it('original activity public Source CLI authenticates the author and reaches Main owner and the same GoalDetail with recoverable operations', async () => {
-  await demands.addActivity('goal', { kind: 'note', message: 'Retained prior evidence', actorId: null, id: 'old-activity', createdAt: 1 })
+  await demands.addActivity('goal', { kind: 'note', message: 'Retained prior evidence', actorId: null, id: 'old-activity', createdAt: _reshape_fixtureEpoch(0, 0, 1) })
   const server = new PublicServer({ socketPath: join(directory, 'activity.sock'), coreClients: () => [{ hostId: 'local', client }], execute: (...args) => bridge.controlOptions.execute(...args) })
   await server.start()
   const typed = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path }, credentials: { agentSessionId: session.agentSessionId, capability: activityCapability } })
@@ -267,7 +268,7 @@ it('original activity public Source CLI authenticates the author and reaches Mai
     const read = await run(['goal', 'activity', '--goal', 'goal'])
     expect(read.result.diskDurability).toBe('confirmed')
     expect(read.result.activity).toContainEqual({ goalId: 'goal', ...activity })
-    expect(read.result.activity).toContainEqual({ goalId: 'goal', id: 'old-activity', kind: 'note', message: 'Retained prior evidence', actorId: null, createdAt: 1 })
+    expect(read.result.activity).toContainEqual({ goalId: 'goal', id: 'old-activity', kind: 'note', message: 'Retained prior evidence', actorId: null, createdAt: _reshape_fixtureEpoch(0, 0, 1) })
     expect((await run(['goal', 'activity', '--goal', 'goal', '--since', String(activity.createdAt)])).result.activity).not.toContainEqual(expect.objectContaining({ id: 'old-activity' }))
     expect((await typed.call('goal.inspect', { goalId: 'goal' })).goal?.activities).toContainEqual(activity)
     await expect(typed.call('goal.activity.append', { ...body, message: 'Different payload' })).rejects.toThrow('different Goal, payload or authenticated author')
@@ -629,7 +630,7 @@ it.each(['permission', 'changed Run'] as const)('finite Goal keeps its original 
   const preparation = refuseImmediatePreparation()
   const refresh = api.sessions.refresh
   vi.spyOn(api.sessions, 'refresh').mockImplementation(async (...args) => {
-    if (failure === 'permission') await (client as any).registry.update(session.agentSessionId, session.run, (current: AgentMuxStoredAgentSession) => ({ ...current, pendingInteraction: { request: { kind: 'permission', id: 'finite-permission', agentSessionId: session.agentSessionId, title: 'Pending human choice', options: [{ id: 'deny', label: 'Deny', kind: 'reject-once' }], evidence: { source: 'native-hook', observedAt: 200, run: session.run } } } }))
+    if (failure === 'permission') await (client as any).registry.update(session.agentSessionId, session.run, (current: AgentMuxStoredAgentSession) => ({ ...current, pendingInteraction: { request: { kind: 'permission', id: 'finite-permission', agentSessionId: session.agentSessionId, title: 'Pending human choice', options: [{ id: 'deny', label: 'Deny', kind: 'reject-once' }], evidence: { source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 200), run: session.run } } } }))
     const result = await refresh(...args)
     if (result.kind !== 'agent') throw new Error('The original fixture Agent is required')
     return failure === 'changed Run' ? { ...result, control: { ...result.control, run: { runId: 'later-run' } } } : result
@@ -981,7 +982,7 @@ it('origin Supervisor first-default public Source CLI settings and authenticated
     expect(resolved.demand).toMatchObject({ supervisorSessionId: null, assigneeSessionIds: [], creationOrigin: { requesterParticipationId: resolved.demand.participations[0]!.id, supervisorDefaultPending: false } })
     const replay = await demands.resolveCreationOrigin(current.id, { creationOperationId: 'manual-create', source, sourceOperationId: 'manual-original-source' }, { expectedUpdatedAt: manual.demand.updatedAt, allowSupervisorDefault: true })
     expect(replay.demand.participations).toEqual(resolved.demand.participations)
-    await expect(demands.resolveCreationOrigin('goal', { creationOperationId: 'legacy-no-origin', source, sourceOperationId: 'legacy-source' }, { expectedUpdatedAt: 1, allowSupervisorDefault: true })).rejects.toThrow('original Goal creation')
+    await expect(demands.resolveCreationOrigin('goal', { creationOperationId: 'legacy-no-origin', source, sourceOperationId: 'legacy-source' }, { expectedUpdatedAt: _reshape_fixtureEpoch(0, 0, 1), allowSupervisorDefault: true })).rejects.toThrow('original Goal creation')
     await expect(demands.resolveCreationOrigin(current.id, { creationOperationId: 'manual-create', source: { ...source, kind: 'requirements' }, sourceOperationId: 'later-source' }, { expectedUpdatedAt: current.updatedAt, allowSupervisorDefault: true })).rejects.toThrow('Later requirements')
     const stale = await demands.create({ id: 'stale-origin', title: 'Version protected' }, { operationId: 'stale-create', creationOrigin: { requesterAsSupervisor: true } })
     await demands.update(stale.demand.id, { description: 'A later edit' })
@@ -1212,7 +1213,7 @@ it('collaboration original provenance authenticates create and requirements whil
     expect(admittedDemandCreateMatches(admitted, input)).toBe(true)
     expect(admittedDemandCreateMatches(admitted, { ...input, projectId: 'other-project' })).toBe(false)
     expect(admittedDemandCreateMatches(admitted, { ...input, sessionIds: ['body-session'] })).toBe(false)
-    const updated = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'update-op', operation: 'demand.update' as const, demandId: 'goal', patch: { description: 'Authored description' }, expectedUpdatedAt: 7 }
+    const updated = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'update-op', operation: 'demand.update' as const, demandId: 'goal', patch: { description: 'Authored description' }, expectedUpdatedAt: _reshape_fixtureEpoch(0, 0, 7) }
     expect(admittedDemandUpdateMatches(updated, 'goal', { description: 'Authored description' }, 7)).toBe(true)
     expect(admittedDemandUpdateMatches(updated, 'goal', { description: 'Authored description', assigneeSessionIds: ['not-authored'] }, 7)).toBe(false)
     expect(admittedDemandUpdateMatches(updated, 'goal', { description: 'Authored description' }, 8)).toBe(false)
@@ -1408,7 +1409,7 @@ it('Demand picker: common properties and accurate names are in the actual body; 
   const workspace = { id: 'picker-project', name: 'Registered Project', hostId: 'local', path: join(directory, 'project'), kind: 'folder' as const }
   const source = { ...snapshot, id: 'source-view', label: 'Source label', control: { ...snapshot.control, agentSessionId: 'accurate-source' } }, project = { ...snapshot, id: 'project-view', label: 'Project Agent', workspacePath: workspace.path, control: { ...snapshot.control, agentSessionId: 'project-agent' } }
   const demand = { ...useAppStore.getState().demands.goal!, sessions: [], workspacePath: null, projectId: workspaceProjectId(workspace), sessionIds: [], assigneeSessionIds: [], supervisorSessionId: null,
-    participations: [{ id: 'source-record', operationId: 'origin-op', recordedAt: 1, kind: 'create' as const, agentSessionId: 'accurate-source', hostId: 'local', entryPoint: 'goal.create' }] }
+    participations: [{ id: 'source-record', operationId: 'origin-op', recordedAt: _reshape_fixtureEpoch(0, 0, 1), kind: 'create' as const, agentSessionId: 'accurate-source', hostId: 'local', entryPoint: 'goal.create' }] }
   const rows = goalAgentRows({ ...useAppStore.getState(), config: { ...config, workspaces: [...config.workspaces, workspace] }, sessions: [project, source], agentNames: { 'source-view': 'Named requester' } }, demand, ['unavailable-original'])
   expect(rows.map(row => row.id)).toEqual(['accurate-source', 'project-agent', 'unavailable-original'])
   expect(rows[0]).toMatchObject({ name: 'Named requester', participated: true, related: false, selectable: true }); expect(demand.sessionIds).toEqual([])

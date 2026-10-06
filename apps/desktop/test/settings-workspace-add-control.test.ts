@@ -13,7 +13,7 @@ import type { WorkspaceFiles } from '../src/main/workspace-files.js'
 const ipc = vi.hoisted(() => ({ root: '', handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined,
   choose: vi.fn() }))
-vi.mock('electron', () => ({ app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => process.cwd() + '/apps/desktop' },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() }, app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => process.cwd() + '/apps/desktop' },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: { showOpenDialog: ipc.choose }, nativeImage: {}, shell: {} }))
@@ -55,7 +55,7 @@ async function fixture() {
   const sender=Object.assign(new EventEmitter(),{id:932,isDestroyed:()=>false,mainFrame:{framesInSubtree:[]},
     send:vi.fn((channel:string,value:unknown)=>{if(channel===CONFIG_CHANGED_CHANNEL)publications.push(value as AppConfig)})})
   ipc.handlers.clear();ipc.execute=undefined
-  const dispose=await registerIpc({window:{isDestroyed:()=>false,webContents:sender} as unknown as BrowserWindow,
+  const dispose=await registerIpc({ initialConfig: await store.get(),window:{ setBackgroundColor: vi.fn(),isDestroyed:()=>false,webContents:sender} as unknown as BrowserWindow,
     configStore:store,runtime,progressLoops,scratchTopics:{setNameAudit:vi.fn(),normalizeDirectoryIdentities:vi.fn().mockResolvedValue(undefined)} as unknown as ScratchTopics,workspaceFiles:{read:vi.fn(),listFiles:vi.fn(),dispose:async()=>{}} as unknown as WorkspaceFiles})
   prepare.mockClear();const save=vi.spyOn(store,'save')
   const invoke=async<T>(channel:string,...values:unknown[])=>{

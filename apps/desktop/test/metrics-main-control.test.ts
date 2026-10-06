@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { rendererMemoryFixture } from '../../../packages/core/test/helpers/toolkit-metrics.js'
 import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
@@ -15,7 +16,7 @@ const fixture = vi.hoisted(() => ({ directory: process.env.AGENTMUX_METRICS_EVID
   ipc: new (class { listeners = new Map<string, Set<Function>>() })(),
   controlOptions: undefined as AgentMuxControlServerOptions | undefined,
   rendererRequest: undefined as undefined | ((request: any) => void), rendererCancel: undefined as undefined | ((request: any) => void) }))
-vi.mock('electron', () => ({ app: { getPath: () => fixture.directory, getAppPath: () => fixture.directory },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() }, app: { getPath: () => fixture.directory, getAppPath: () => fixture.directory },
   ipcMain: { handle: (channel: string, handler: (...args: any[]) => unknown) => fixture.handlers.set(channel, handler),
     removeHandler: (channel: string) => fixture.handlers.delete(channel),
     on: (channel: string, handler: Function) => { const values = fixture.ipc.listeners.get(channel) ?? new Set(); values.add(handler); fixture.ipc.listeners.set(channel, values) },
@@ -99,16 +100,16 @@ async function registered(options: { rendererFailure?: boolean } = {}) {
   await configStore.save(structuredClone(DEFAULT_CONFIG))
   const config = await configStore.get()
   const configBefore = await readFile(join(directory, 'config.json'))
-  let clock = 1000
+  let clock = _reshape_fixtureEpoch(0, 0, 1000)
   const readTable = vi.fn(async () => 'PID PPID RSS %CPU\n100 1 64 2\n101 100 32 1\n300 1 128 3\n777 1 1024 99')
-  const appMetrics = () => [{ pid: 300, creationTime: 1, type: 'Browser', memory: { workingSetSize: 128 }, cpu: { percentCPUUsage: 3 } }] as Electron.ProcessMetric[]
+  const appMetrics = () => [{ pid: 300, creationTime: _reshape_fixtureEpoch(0, 0, 1), type: 'Browser', memory: { workingSetSize: 128 }, cpu: { percentCPUUsage: 3 } }] as Electron.ProcessMetric[]
   const sampler = new ProcessResourceSampler(readTable, () => clock, appMetrics)
   const other = new ProcessResourceSampler(readTable, () => clock, appMetrics)
   ;(globalThis as any).__metricsMutantSampler = other
   cleanup.push(() => { sampler.dispose(); other.dispose() })
   const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector, undefined, sampler)
   const events = new Map<string, (event: any) => void>()
-  const resourceReads = vi.fn(async () => ({ observedAt: 900, runCount: 1, runningRuns: 1, terminatedRuns: 0,
+  const resourceReads = vi.fn(async () => ({ observedAt: _reshape_fixtureEpoch(0, 0, 900), runCount: 1, runningRuns: 1, terminatedRuns: 0,
     terminatedUnattachedRuns: 0, attachments: 1, retainedOutputBytes: 64 }))
   const diagnostics = vi.fn(async () => ({ ctxmux: { state: { servingDirectory: storage } } }))
   const stop = vi.fn(), input = vi.fn(), attach = vi.fn(), resume = vi.fn()
@@ -154,7 +155,7 @@ async function registered(options: { rendererFailure?: boolean } = {}) {
   const disposeRenderer = await useAppStore.getState().initialize()
   useAppStore.setState({ config, agentComposerDrafts: { 'healthy-session': 'preserved input' } })
   cleanup.push(() => { disposeRenderer(); rendererRelease?.(); useAppStore.setState(originalStore, true) })
-  const dispose = await registerIpc({ window: { id: 7, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ initialConfig: await configStore.get(), window: { setBackgroundColor: vi.fn(), id: 7, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     runtime, configStore, progressLoops: { subscribe: () => () => {} } as any,
     scratchTopics: { setNameAudit() {}, normalizeDirectoryIdentities() {} } as any, workspaceFiles: { dispose: async () => {}, read: vi.fn(async () => { throw new Error('Unexpected file read in metrics fixture') }), listFiles: vi.fn(async () => { throw new Error('Unexpected file list in metrics fixture') }), write: vi.fn(async () => { throw new Error('Unexpected file write in metrics fixture') }) } as any })
   cleanup.push(dispose)
@@ -298,7 +299,7 @@ describe('registered Main metrics and actual CLI', () => {
 
 describe('same sampler source age and bounded observations', () => {
   it('reports first-frame Runtime pending, then its own completion time without refreshing process success', async () => {
-    let now = 1000, complete!: (value: any[]) => void
+    let now = _reshape_fixtureEpoch(0, 0, 1000), complete!: (value: any[]) => void
     const sampler = new ProcessResourceSampler(async () => '100 1 42 2', () => now, () => [])
     cleanup.push(() => sampler.dispose())
     sampler.trackRun('healthy-run', 100, 'local')
@@ -311,8 +312,8 @@ describe('same sampler source age and bounded observations', () => {
     await waitFor(() => expect(values.length).toBeGreaterThan(0))
     expect(values[0].process.data).toHaveLength(1)
     expect(values[0].runtime).toEqual({ state: 'pending', data: null, observedAt: null, lastSuccessAt: null, reason: null })
-    now = 1200
-    complete([{ hostId: 'local', resources: { observedAt: 900, runCount: 1, runningRuns: 1, terminatedRuns: 0,
+    now = _reshape_fixtureEpoch(0, 0, 1200)
+    complete([{ hostId: 'local', resources: { observedAt: _reshape_fixtureEpoch(0, 0, 900), runCount: 1, runningRuns: 1, terminatedRuns: 0,
       terminatedUnattachedRuns: 0, attachments: 1, retainedOutputBytes: 7 }, unavailable: null,
       process: { cpuPercent: null, rssKib: null, unavailable: 'PID unavailable' }, runtimeStorage: null,
       runtimeStorageObservedAt: null, runtimeStorageUnavailable: 'No published directory' }])
@@ -323,13 +324,13 @@ describe('same sampler source age and bounded observations', () => {
   })
   it('retains real success ages after failure and does not refresh Runtime/storage with a process tick', async () => {
     vi.useFakeTimers({ toFake: ['setInterval','clearInterval'] })
-    let now = 1000, fail = false
+    let now = _reshape_fixtureEpoch(0, 0, 1000), fail = false
     const read = vi.fn(async () => { if (fail) throw new Error('table unavailable'); return '100 1 42 2' })
     const sampler = new ProcessResourceSampler(read, () => now, () => []); cleanup.push(() => sampler.dispose())
-    const runtime = vi.fn(async () => [{ hostId: 'local', resources: { observedAt: 800, runCount: 1, runningRuns: 1,
+    const runtime = vi.fn(async () => [{ hostId: 'local', resources: { observedAt: _reshape_fixtureEpoch(0, 0, 800), runCount: 1, runningRuns: 1,
       terminatedRuns: 0, terminatedUnattachedRuns: 0, attachments: 1, retainedOutputBytes: 3 }, unavailable: null,
       process: { cpuPercent: null, rssKib: null, unavailable: 'PID unavailable' }, runtimeStorage: { path: _hygiene_fixturePath("selected"), bytes: 7 },
-      runtimeStorageUnavailable: null, runtimeStorageObservedAt: 850 }] as const as any)
+      runtimeStorageUnavailable: null, runtimeStorageObservedAt: _reshape_fixtureEpoch(0, 0, 850) }] as const as any)
     sampler.setObservationSources({ observeRuntime: runtime, processOwners: () => ({ rendererPids: [], browserPids: [] }),
       mainOwners: () => ({ sessionAttachmentOwners: 1, sessionAttachmentLeases: 1, fileWatchers: 0, browserViews: 0, releasedBrowserViews: 0 }) })
     sampler.trackRun('healthy-run', 100, 'local')
@@ -338,11 +339,11 @@ describe('same sampler source age and bounded observations', () => {
     const subscription = await port.subscribe(v => values.push(v), vi.fn(), new AbortController().signal)
     await waitFor(() => expect(values.length).toBeGreaterThan(0))
     const initial = values.at(-1); expect(initial.process.data).toHaveLength(1)
-    fail = true; now = 4000
+    fail = true; now = _reshape_fixtureEpoch(0, 0, 4000)
     await vi.advanceTimersByTimeAsync(1000)
     await waitFor(() => expect(read).toHaveBeenCalledTimes(2))
     const failed = values.at(-1)
-    expect(failed.process).toMatchObject({ state: 'stale', observedAt: 1000, lastSuccessAt: 1000, reason: 'table unavailable' })
+    expect(failed.process).toMatchObject({ state: 'stale', observedAt: _reshape_fixtureEpoch(0, 0, 1000), lastSuccessAt: _reshape_fixtureEpoch(0, 0, 1000), reason: 'table unavailable' })
     expect(failed.runtime).toMatchObject({ observedAt: initial.runtime.observedAt, lastSuccessAt: initial.runtime.lastSuccessAt })
     expect(failed.runtime.data[0].resources.observedAt).toBe(800)
     expect(failed.runtime.data[0].runtimeStorageObservedAt).toBe(850)
@@ -365,7 +366,7 @@ describe('same sampler source age and bounded observations', () => {
     await vi.advanceTimersByTimeAsync(2000)
     expect(read).toHaveBeenCalledOnce(); expect(renderer).toHaveBeenCalledOnce()
     off(); const offNext = sampler.subscribe(v => next.push(v))
-    resolveTable('100 1 64 3'); resolveRenderer({ observedAt: 900, data: { ...rendererMemoryFixture(300), window: { windowId: 7, webContentsId: 919, generation: 0 }, counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() } })
+    resolveTable('100 1 64 3'); resolveRenderer({ observedAt: _reshape_fixtureEpoch(0, 0, 900), data: { ...rendererMemoryFixture(300), window: { windowId: 7, webContentsId: 919, generation: 0 }, counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() } })
     await new Promise(resolve => setTimeout(resolve, 50))
     expect(first).toEqual([]); expect(next).toEqual([])
     expect(renderer).toHaveBeenCalledTimes(2)
@@ -379,7 +380,7 @@ describe('same sampler source age and bounded observations', () => {
     expect(request.operation).toBe('metrics.renderer')
     window = { ...window, generation: 1 }
     bridge.accept({ requestId: request.requestId, ok: true, result: { operation: 'metrics.renderer', window: request.window,
-      observedAt: 1000, ...rendererMemoryFixture(300), counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() } })
+      observedAt: _reshape_fixtureEpoch(0, 0, 1000), ...rendererMemoryFixture(300), counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() } })
     await expect(reading).rejects.toMatchObject({ code: 'CONTROL_OWNER_LOST' })
     const controller = new AbortController()
     const cancelled = observeRendererResources(bridge, () => window, controller.signal, () => 300)

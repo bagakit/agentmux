@@ -13,7 +13,7 @@ import { WorkspaceFiles } from '../src/main/workspace-files'
 import { RuntimeController } from '../src/main/runtime-controller'
 
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
   app: { getPath: () => _hygiene_fixturePath("private-file-preview-ipc"), getAppPath: () => _hygiene_fixturePath("private-file-preview-ipc"), isPackaged: false },
@@ -54,7 +54,7 @@ it('registered bookmark IPC and Store report a byte-budget rejection without fal
     await writeFile(join(root, 'Numeric.webloc'), emitWebloc('placeholder').replace('placeholder', 'https://example.invalid/?a=&#38;b=&#x4E2D;&#x1F642;'))
     await writeFile(join(root, 'Large.webloc'), emitWebloc('https://example.invalid/large'))
     await truncate(join(root, 'Large.webloc'), BOOKMARK_FILE_MAX_BYTES + 1)
-    dispose = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime,
+    dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
       configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
       scratchTopics: {} as never, workspaceFiles: files })
     bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {

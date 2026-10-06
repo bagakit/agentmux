@@ -29,7 +29,7 @@ function deferred<T>() {
 
 const ipc = vi.hoisted(() => ({ directory: '', handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>() }))
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
-vi.mock('electron', () => ({ app: { getPath: () => ipc.directory },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() }, app: { getPath: () => ipc.directory },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {} }))
@@ -72,7 +72,7 @@ beforeEach(async () => {
       if (channel === CONFIG_CHANGED_CHANNEL) { config = value as AppConfig; publications.push(config); useAppStore.setState({ config }) }
     } })
   ipc.handlers.clear()
-  dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  dispose = await registerIpc({ initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     configStore: disk, runtime, progressLoops, scratchTopics: {} as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   useAppStore.setState({ config, hostChecks: {}, checkHost: vi.fn(async () => {}), providerCatalog: await api.providers.list() })
   vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => await invoke<AppConfig>('config:save', next, expected))

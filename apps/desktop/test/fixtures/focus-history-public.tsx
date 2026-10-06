@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../../test/fixture-values.mjs"))
 const { fixtureIso: _hygiene_fixtureIso, fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from '../helpers/local-runtime-connector.js'
@@ -16,7 +17,7 @@ import { AgentMuxClient, AgentMuxFileAgentSessionStore, loadAgentSessions, type 
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig, SessionHistoryReference } from '../../src/shared/contracts'
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, Function>() }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api; window.agentmux = api } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), removeListener: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
   app: { getPath: () => _hygiene_fixturePath("private-focus-retired-renderer"), getAppPath: () => process.cwd() + '/apps/desktop', isPackaged: false },
@@ -63,7 +64,7 @@ export async function fixture(records: Input[] = [{ id: 'one', body: BODY, at: N
     const values = options.recordsBySource ? options.recordsBySource(index) : index === 0 ? records : [{ id: `other-${index}`, body: `Unfocused source ${index}`, at: NOW - HOUR }]
     await writeFile(path, values.map(item => JSON.stringify({ sessionId: `native-${id}`, uuid: item.id, type: 'user', message: { role: 'user', content: item.body }, ...(item.at === undefined ? {} : { timestamp: new Date(item.at).toISOString() }) })).join('\n') + '\n')
     const session: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: id, providerId: 'claude', executorId: 'private-claude', hostId: 'private-host', workspacePath: directory,
-      run: { runId: `not-controlled-${id}` }, retiredRuns: [], createdAt: 1, updatedAt: 1, hookBindingId: `binding-${id}`, hookToken: 'private-secret',
+      run: { runId: `not-controlled-${id}` }, retiredRuns: [], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), hookBindingId: `binding-${id}`, hookToken: 'private-secret',
       ...(options.native === false ? {} : { nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: `native-${id}`, transcriptPath: path } }) }
     await store.compareAndSwap(null, session)
     if (index === 0) await store.applyTimelineMutation({ type: 'append', agentSessionId: id, item: { id: 'captured', agentSessionId: id, kind: 'user_message', source: 'user', status: 'complete', createdAt: NOW - HOUR, updatedAt: NOW - HOUR, title: 'Input', content: BODY } })
@@ -82,7 +83,7 @@ export async function fixture(records: Input[] = [{ id: 'one', body: BODY, at: N
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), hosts: [], workspaces: [], executors: { 'private-claude': { providerId: 'claude', label: 'Private', command: 'claude', args: [], env: {}, injectAgentMuxGuide: false } } }
   vi.spyOn(controller, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const sender = Object.assign(new EventEmitter(), { id: 91, isDestroyed: () => false, send: vi.fn() })
-  const dispose = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime: controller,
+  const dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime: controller,
     configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
     scratchTopics: new ScratchTopics(), workspaceFiles: { dispose: async () => {} } as never })
   bridge.invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {

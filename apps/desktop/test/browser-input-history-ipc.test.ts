@@ -15,7 +15,7 @@ const bridge = vi.hoisted(() => ({
   invoke: vi.fn(), owners: new Map<string, TestOwner>(), defaultProfile: '',
   navigate: vi.fn(), manager: null as unknown
 }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   app: { getPath: () => bridge.root || tmpdir() },
   ipcMain: { handle: (channel: string, listener: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => bridge.handlers.set(channel, listener),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
@@ -72,7 +72,7 @@ async function fixture() {
   const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] })
   const sender = Object.assign(new EventEmitter(), { id: 732, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
-  const dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     runtime, configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
     scratchTopics: {} as never, workspaceFiles: { dispose: async () => {} } as never })
   const invoke = async (channel: string, values: unknown[], actualSender: unknown = sender) => {

@@ -9,7 +9,7 @@ import type { ConfigStore } from '../src/main/config-store'
 import type { ScratchTopics } from '../src/main/scratch-topics'
 import type { WorkspaceFiles } from '../src/main/workspace-files'
 const preload = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, root: '', invoke: vi.fn(), handlers: new Map<string, Function>() }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { preload.api = api } },
   ipcRenderer: { invoke: preload.invoke, on: vi.fn(), removeListener: vi.fn(), off: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
   app: { getPath: () => preload.root, getAppPath: () => resolve('apps/desktop'), isPackaged: false },
@@ -40,7 +40,7 @@ async function owner() {
     command: 'current-private-cli', args: ['--model', 'current-model'], env: { CURRENT_POSTURE: 'configured' }, injectAgentMuxGuide: false } } }
   vi.spyOn(controller, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const sender = Object.assign(new EventEmitter(), { id: 77, isDestroyed: () => false, send: vi.fn() })
-  const dispose = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime: controller,
+  const dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime: controller,
     progressLoops: { subscribe: () => () => {} } as never, configStore: { get: async () => config } as unknown as ConfigStore,
     scratchTopics: {} as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   cleanups.push(dispose)

@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -71,7 +72,7 @@ const fakeWindow = {
   isDestroyed: () => false
 }
 
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   contextBridge: {
     exposeInMainWorld: (name: string, exposedApi: AgentMuxPreloadApi) => {
       bridge.api = exposedApi
@@ -267,8 +268,8 @@ describe('T041 Desktop Human Message Author vertical slice', () => {
       save: async () => {}
     } as unknown as Parameters<typeof registerIpc>[0]['configStore']
 
-    disposeIpc = await registerIpc({
-      window: fakeWindow as unknown as Parameters<typeof registerIpc>[0]['window'],
+    disposeIpc = await registerIpc({ initialConfig: await configStore.get(),
+      window: Object.assign(fakeWindow, { setBackgroundColor: vi.fn() }) as unknown as Parameters<typeof registerIpc>[0]['window'],
       configStore,
       runtime,
       progressLoops,
@@ -709,7 +710,7 @@ describe('T041 Desktop Human Message Author vertical slice', () => {
   it('actual openGoalPmo caller sends an unattributed task through the original queue and Main', async () => {
     const goal = { id: 'private-goal', title: 'Private goal', description: 'Keep task origin unknown',
       status: 'backlog' as const, priority: 'normal' as const, projectId: null, projectName: null,
-      sessionIds: [], createdAt: 1, updatedAt: 1, source: 'default-topic' as const }
+      sessionIds: [], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), source: 'default-topic' as const }
     const tab = { ...createWorkbenchTab('private-pmo-tab', { regionId: 'private-pmo-region', kind: 'agent',
       phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: SESSION_ID }), topicId: PMO_TEAMS_TOPIC_ID }
     const navigation = vi.spyOn(useAppStore.getState(), 'openScratchTopic').mockResolvedValue(undefined)
@@ -731,7 +732,7 @@ describe('T041 Desktop Human Message Author vertical slice', () => {
   it('actual demand.start control admits an unknown prompt through the original queue and Main', async () => {
     const goal = { id: 'private-control-goal', title: 'Private control goal', description: 'Start this explicit non-human task',
       status: 'backlog' as const, priority: 'normal' as const, projectId: null, projectName: null,
-      sessionIds: [], createdAt: 1, updatedAt: 1, source: 'default-topic' as const }
+      sessionIds: [], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), source: 'default-topic' as const }
     useAppStore.setState({ demands: { [goal.id]: goal } })
     // Only unrelated Goal metadata persistence is isolated. executeControl/startDemand,
     // admission, queue drain, Main, Runtime, public Core and FileStore remain actual.
@@ -782,7 +783,7 @@ describe('T041 Desktop Human Message Author vertical slice', () => {
     try {
       expect(await deliverContinuousProgress(runtime, {
         loopId: 'private-loop', hostId: 'local', agentSessionId: SESSION_ID, providerId: 'codex',
-        workspacePath: _hygiene_fixturePath("repo/test"), intervalMs: 10, prompt: 'Private automatic prompt', nextCheckAt: 0, status: 'active',
+        workspacePath: _hygiene_fixturePath("repo/test"), intervalMs: 10, prompt: 'Private automatic prompt', nextCheckAt: _reshape_fixtureEpoch(0, 0, 0), status: 'active',
         pendingCompletion: { id: completionId, operationId, inputByte: 0,
           condition: agentPromptCondition(client.agentSession(SESSION_ID)) }
       }, operationId, () => true, new AbortController().signal)).toBe('sent')

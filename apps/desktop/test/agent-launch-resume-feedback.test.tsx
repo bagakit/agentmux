@@ -21,7 +21,7 @@ const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
   invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
 // Electron transport and unrelated startup services are isolated. The target's Renderer, Store,
 // preload, registered IPC, RuntimeController and public Core submission all execute below.
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   contextBridge: { exposeInMainWorld: (name: string, api: AgentMuxPreloadApi) => {
     bridge.api = api; Object.assign(window, { [name]: api })
   } },
@@ -128,7 +128,7 @@ beforeEach(async () => {
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const sender = Object.assign(new EventEmitter(), { id: 9981, isDestroyed: () => destroyed, send: vi.fn(),
     session: { flushStorageData: vi.fn() } })
-  disposeIpc = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime,
+  disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config } as unknown as ConfigStore,
     progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never,
     scratchTopics: topics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })

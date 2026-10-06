@@ -18,7 +18,7 @@ const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
   directory: '', invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>(),
   listeners: new Map<string, Set<(...args: unknown[]) => void>>() }))
 export { bridge }
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   contextBridge: { exposeInMainWorld: (name: string, api: AgentMuxPreloadApi) => {
     bridge.api = api
     if (typeof window !== 'undefined') Object.assign(window, { [name]: api })
@@ -87,7 +87,7 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
     }),
     session: { flushStorageData: flush, getStoragePath: () => root } })
   let release: () => Promise<void>
-  try { release = await registerIpc({ window: { id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
+  try { release = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config, validate: (input: AppConfig) => input, save: async (input: AppConfig) => input } as unknown as ConfigStore,
     progressLoops: { pauseTarget, subscribe: () => () => {} } as never,
     scratchTopics: actual?.scratchTopics ?? new ScratchTopics(), workspaceFiles: new WorkspaceFiles(() => new LocalExecutionHost()) }) }

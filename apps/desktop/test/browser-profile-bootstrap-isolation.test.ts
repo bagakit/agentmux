@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 import { EventEmitter } from 'node:events'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -6,7 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 const fixture = vi.hoisted(() => ({ root: '', handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>() }))
-vi.mock('electron', () => ({ app: { getPath: () => fixture.root || tmpdir(), getAppPath: () => fixture.root || tmpdir() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() }, app: { getPath: () => fixture.root || tmpdir(), getAppPath: () => fixture.root || tmpdir() },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => fixture.handlers.set(channel, handler), removeHandler: (channel: string) => fixture.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, session: {}
 }))
@@ -22,7 +23,7 @@ import { BrowserProfileStore } from '../src/main/browser-profile-store.js'
 
 const roots: string[] = []
 const id = '11111111-1111-4111-8111-111111111111'
-const valid = JSON.stringify({ version: 1, defaultProfileId: id, profiles: [{ id, label: 'Original', createdAt: 1, source: null }], pendingImports: [] })
+const valid = JSON.stringify({ version: 1, defaultProfileId: id, profiles: [{ id, label: 'Original', createdAt: _reshape_fixtureEpoch(0, 0, 1), source: null }], pendingImports: [] })
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true }))) })
 
 it.each(['json', 'schema', 'io'] as const)('keeps host IPC available on actual original Profile %s failure and explicitly retries the original metadata', async shape => {
@@ -36,7 +37,7 @@ it.each(['json', 'schema', 'io'] as const)('keeps host IPC available on actual o
   const runtimeDispose = vi.spyOn(runtime, 'dispose')
   const sender = Object.assign(new EventEmitter(), { id: 731, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
   let startupError: unknown = null
-  const dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
+  const dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
     scratchTopics: { setNameAudit: vi.fn() } as never, workspaceFiles: { dispose: async () => {} } as never }).catch(error => { startupError = error; return null })
   expect(startupError, 'Browser Profile failure must not abort host IPC availability').toBeNull()
@@ -87,7 +88,7 @@ it('does not wait for an unconfirmed Profile read to expose healthy host APIs', 
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] })
   const runtimeDispose = vi.spyOn(runtime, 'dispose'), sender = Object.assign(new EventEmitter(), { id: 734, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
   let dispose: (() => Promise<void>) | null = null, bootstrapError: unknown = null
-  const started = registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
+  const started = registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
     scratchTopics: { setNameAudit: vi.fn() } as never, workspaceFiles: { dispose: async () => {} } as never }).then(value => { dispose = value }).catch(error => { bootstrapError = error })
   try {
