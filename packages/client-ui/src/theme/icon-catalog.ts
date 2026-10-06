@@ -5,6 +5,12 @@ export { ICON_GLYPHS, ICON_GLYPH_IDS, type IconGlyphId } from './icon-glyphs.js'
 export const SEMANTIC_ICON_CATALOG = {
   'object.model-3d': { label: '3D model', glyph: 'box' },
   'action.reset-options': { label: 'Reset adjustments', glyph: 'rotate-ccw' },
+  'action.read-terminal': { label: 'Terminal reading and status', glyph: 'case-sensitive' },
+  'action.decrease-font-size': { label: 'Decrease reading font size', glyph: 'minus' },
+  'action.increase-font-size': { label: 'Increase reading font size', glyph: 'plus' },
+  'status.terminal-notice': { label: 'Terminal reading notice', glyph: 'status-dot' },
+  'note.reference-incoming': { label: 'Incoming note references', glyph: 'arrow-down' },
+  'note.reference-outgoing': { label: 'Outgoing note references', glyph: 'arrow-up' },
   'control.checkbox-checked': { label: 'Checked checkbox', glyph: 'check' },
   'control.radio-checked': { label: 'Selected radio', glyph: 'status-dot' },
   'control.select-open': { label: 'Open selection options', glyph: 'chevron-down' },
