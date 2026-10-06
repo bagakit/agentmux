@@ -385,6 +385,12 @@ async function chooseNotebookSelect(label: string, value: string) {
   const field = dom.container.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!
   expect(field).not.toBeNull(); await act(async () => { field.value = value; field.dispatchEvent(new Event('change', { bubbles: true })) })
 }
+async function choosePageOption(label: string) {
+  const trigger = dom.container.querySelector<HTMLElement>('[aria-label="Page options"]')!
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await vi.waitFor(() => expect(document.querySelector(`[role="menuitem"][aria-label="${label}"]`)).not.toBeNull())
+  await act(async () => document.querySelector<HTMLElement>(`[role="menuitem"][aria-label="${label}"]`)!.click())
+}
 
 
 
@@ -668,7 +674,7 @@ it('organizes a real Notebook wiki tree through rename, subpage creation, search
   const parentButton = [...tree.querySelectorAll<HTMLButtonElement>('.survey-notebook-page')].find(button => button.textContent === 'A research question')!
   await act(async () => parentButton.click())
   await vi.waitFor(() => expect(dom.container.querySelector<HTMLInputElement>('.global-recall-surface [aria-label="Page title"]')?.value).toBe('A research question'))
-  await dom.click('[aria-label="Move page"]'); await chooseNotebookSelect('Destination notebook', 'quick-notes')
+  await choosePageOption('Move page'); await chooseNotebookSelect('Destination notebook', 'quick-notes')
   await submit(dom.container.querySelector<HTMLFormElement>('[aria-label="Move Note page"]')!)
   await vi.waitFor(async () => expect((await api.notebooks.read()).pages[parent.noteId]!.notebookId).toBe('quick-notes'))
   const final = await api.notebooks.read()
@@ -676,7 +682,7 @@ it('organizes a real Notebook wiki tree through rename, subpage creation, search
   expect(final.pages[parent.noteId]!.resource).toEqual(original.resource); expect(files.get(parent.resource.path)).toBe(before)
   expect(files.size).toBe(2); expect(new Set([parent.resource.path, child.resource.path]).size).toBe(2); expect(api.files.write).toHaveBeenCalledTimes(3)
   expect(final.trail.filter(event => event.action === 'moved')).toHaveLength(2)
-  await dom.click('[aria-label="Page history"]')
+  await choosePageOption('Page history')
   expect(dom.container.querySelector('[aria-label="Note history"]')?.textContent).toContain('Research wiki / Root → 随手记 / Root')
   expect(dom.container.querySelector('[aria-label="Note history"]')?.textContent).toContain('actual-ui-user')
   healthy()
@@ -813,7 +819,7 @@ it('deletes the selected Notebook only after confirmation and retains the origin
   expect(dom.container.querySelector('[aria-label="Archived pages"]')?.getAttribute('aria-pressed')).toBe('true')
   expect(dom.container.querySelector('.survey-notebook-page')?.textContent).toBe(child.title)
   expect(final.trail.filter(event => event.operationId === final.trail.at(-1)!.operationId)).toHaveLength(2)
-  await dom.click('[aria-label="Page history"]')
+  await choosePageOption('Page history')
   expect(dom.container.querySelector('[aria-label="Note history"]')?.textContent).toContain('Research notebook / Original question → 随手记 / Original question')
   expect(api.browser.close).not.toHaveBeenCalled(); healthy()
 })
