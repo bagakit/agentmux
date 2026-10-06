@@ -29,6 +29,12 @@ const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 type ReferenceContextValue = { knowledge: NoteKnowledge; trail: readonly string[]; onOpen: (source: NoteSource, blockId: string) => void; onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined }
 const ReferenceContext = createContext<ReferenceContextValue | null>(null)
 const targetKey = (target: NoteBlockTarget) => JSON.stringify([target.noteId, target.blockId])
+/** Only identity/metadata decoration may differ when reusing positions in this view. */
+function selectionContent(node: JSONContent): string {
+  const content = structuredClone(node)
+  const visit = (value: JSONContent) => { if (value.attrs) { delete value.attrs.blockId; delete value.attrs.provenance }; value.content?.forEach(visit) }
+  visit(content); return JSON.stringify(content)
+}
 
 function referenceExtension() {
   return NoteBlockReferenceNode.extend({ addNodeView() { return ReactNodeViewRenderer(NoteReferenceView) } })
@@ -153,8 +159,12 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     const syncContent = () => {
       if (editor.isDestroyed || editor.state.doc.eq(editor.schema.nodeFromJSON(note.content))) return
       const selection = editor.state.selection, blockId = selection.$from.parent.attrs.blockId, offset = selection.$from.parentOffset
+      const canonical = editor.schema.nodeFromJSON(note.content)
+      const samePositions = selectionContent(editor.state.doc.toJSON()) === selectionContent(canonical.toJSON())
+      const bookmark = selection.getBookmark()
       editor.chain().setMeta('noteSelectionRestore', true).setContent(note.content, { emitUpdate: false }).run()
-      if (typeof blockId === 'string') editor.state.doc.descendants((node, pos) => {
+      if (samePositions && editor.state.doc.eq(canonical)) editor.view.dispatch(editor.state.tr.setSelection(bookmark.resolve(editor.state.doc)).setMeta('noteSelectionRestore', true))
+      else if (typeof blockId === 'string') editor.state.doc.descendants((node, pos) => {
         if (node.attrs.blockId === blockId && node.isTextblock) { editor.chain().setMeta('noteSelectionRestore', true).setTextSelection(pos + 1 + Math.min(offset, node.content.size)).run(); return false }
       })
     }
