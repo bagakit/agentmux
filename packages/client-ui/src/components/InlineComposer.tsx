@@ -1,9 +1,10 @@
 import { insertComposerContent, replaceComposerDraft, replaceComposerRange, type ComposerInsertionHandle, type ComposerPasteImage } from '../lib/composer-insertion.js'
-import { createContext, useContext, useEffect, useLayoutEffect, useImperativeHandle, useMemo, useRef, type Ref } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useImperativeHandle, useMemo, useRef, useId, useState, type KeyboardEvent as ReactKeyboardEvent, type Ref } from 'react'
 import { Decoration, Extension, Node, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type NodeViewProps } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { EditorState, TextSelection } from '@tiptap/pm/state'
+import { closeHistory } from '@tiptap/pm/history'
 import { ConversationImage, type ReadPastedImage } from './ConversationImage.js'
 import { splitPastedImageReferences } from '../lib/pasted-image-reference.js'
 import { composerKeywordMatches } from '../lib/composer-keywords.js'
@@ -15,11 +16,11 @@ import { uniqueImageReferences, type ConversationImageReference } from '../lib/c
 import { SemanticIcon } from '../theme/icons.js'
 
 const ComposerImageReader = createContext<ReadPastedImage | undefined>(undefined)
-const ComposerImageEditable = createContext<boolean | undefined>(undefined)
+const ComposerDraftEditable = createContext<boolean | undefined>(undefined)
+const ComposerReferenceActivation = createContext<((reference: ComposerSemanticReference) => void) | undefined>(undefined)
 
-function ComposerImage({ node, editor, getPos, readImage }: Pick<NodeViewProps, 'node' | 'editor' | 'getPos'> & { readImage: ReadPastedImage }) {
-  const sourceReader = useContext(ComposerImageReader)
-  const editable = useContext(ComposerImageEditable) ?? editor.isEditable
+function useDraftNodeRemoval({ node, editor, getPos }: Pick<NodeViewProps, 'node' | 'editor' | 'getPos'>) {
+  const editable = useContext(ComposerDraftEditable) ?? editor.isEditable
   const current = useRef({ node, editable }); current.current = { node, editable }
   const alive = useRef(true)
   useLayoutEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
@@ -27,15 +28,53 @@ function ComposerImage({ node, editor, getPos, readImage }: Pick<NodeViewProps, 
     if (!alive.current || !current.current.editable || !editor.isEditable || editor.isDestroyed || current.current.node !== node) return
     const position = getPos()
     if (typeof position !== 'number' || editor.state.doc.nodeAt(position) !== node) return
-    editor.chain().deleteRange({ from: position, to: position + node.nodeSize }).setTextSelection(position).run()
+    editor.chain().command(({ tr }) => { closeHistory(tr); return true }).deleteRange({ from: position, to: position + node.nodeSize }).setTextSelection(position).run()
+    editor.view.dispatch(closeHistory(editor.state.tr))
     editor.view.focus()
   }
+  return { editable, remove }
+}
+
+function ComposerImage({ node, editor, getPos, readImage }: Pick<NodeViewProps, 'node' | 'editor' | 'getPos'> & { readImage: ReadPastedImage }) {
+  const sourceReader = useContext(ComposerImageReader)
+  const { editable, remove } = useDraftNodeRemoval({ node, editor, getPos })
   return <>
     <span className="composer-image__preview"><ConversationImage path={node.attrs.path} text={node.attrs.text} readImage={sourceReader ?? readImage} /></span>
     {editable ? <button type="button" className="composer-image__remove" aria-label="Remove image from draft" title="Remove image from draft" onClick={remove}>
       <SemanticIcon name="action.close" size={12} aria-hidden="true" />
     </button> : null}
   </>
+}
+
+function ComposerFile({ node, editor, getPos }: Pick<NodeViewProps, 'node' | 'editor' | 'getPos'>) {
+  const reference = node.attrs as ComposerSemanticReference
+  const activate = useContext(ComposerReferenceActivation)
+  const { editable, remove } = useDraftNodeRemoval({ node, editor, getPos })
+  const [revealed, setRevealed] = useState<typeof node | null>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const contentId = useId()
+  const detail = useRef<HTMLSpanElement>(null)
+  const open = revealed === node
+  useLayoutEffect(() => {
+    if (!open || !detail.current) return
+    const viewport = editor.view.dom, bounds = viewport.getBoundingClientRect(), referenceBounds = detail.current.getBoundingClientRect()
+    if (referenceBounds.bottom > bounds.bottom) viewport.scrollTop += referenceBounds.bottom - bounds.bottom
+    else if (referenceBounds.top < bounds.top) viewport.scrollTop += referenceBounds.top - bounds.top
+  }, [open, editor])
+  return <NodeViewWrapper as="span" className="composer-file" contentEditable={false} data-tool-reference="file"
+    onKeyDown={(event: ReactKeyboardEvent) => { if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); setRevealed(null); trigger.current?.focus() } }}>
+    <button ref={trigger} type="button" className="composer-file__name" title={reference.reference}
+      aria-label={'File reference: ' + reference.reference} aria-expanded={open} aria-controls={contentId}
+      onClick={() => setRevealed(open ? null : node)}>
+      <SemanticIcon name="conversation.reference-file" size={12} aria-hidden="true" /><span>{reference.label}</span>
+    </button>
+    {editable ? <button type="button" className="composer-file__remove" aria-label="Remove file from draft" title="Remove file from draft" onClick={remove}>
+      <SemanticIcon name="action.close" size={8} aria-hidden="true" />
+    </button> : null}
+    {open ? <span ref={detail} id={contentId} className="composer-file__reference"><code>{reference.reference}</code>
+      {activate ? <button type="button" onClick={() => activate(reference)}>Open file</button> : null}
+    </span> : null}
+  </NodeViewWrapper>
 }
 
 export function draftDocument(value: string): JSONContent {
@@ -108,15 +147,25 @@ export function composerExtensions(
     renderHTML({ node }) { return ['span', { 'data-tool-reference': '', class: `composer-semantic-token composer-semantic-token--${node.attrs.kind}` }, node.attrs.label] },
     renderText({ node }) { return encodeSemanticReference(node.attrs as ComposerSemanticReference) },
     addNodeView() {
-      return ({ node, editor, getPos }) => {
+      const renderFile = ReactNodeViewRenderer(ComposerFile, {
+        update: ({ oldNode, newNode, updateProps }) => {
+          if (newNode.attrs.kind !== 'file') return false
+          if (oldNode !== newNode) updateProps()
+          return true
+        },
+        stopEvent: ({ event }) => event.target instanceof Element && Boolean(event.target.closest('button'))
+      })
+      return props => {
+        const { node, editor, getPos } = props
+        if (node.attrs.kind === 'file') return renderFile(props)
         const reference = node.attrs as ComposerSemanticReference
-        const dom = document.createElement(reference.kind === 'file' ? 'span' : 'button')
-        if (dom instanceof HTMLButtonElement) dom.type = 'button'
+        const dom = document.createElement('button')
+        dom.type = 'button'
         dom.contentEditable = 'false'
         dom.className = `composer-semantic-token composer-semantic-token--${reference.kind}`
         dom.dataset.toolReference = reference.kind
         dom.append(createSemanticIconElement(`conversation.reference-${reference.kind}`, dom.ownerDocument, { size: 12 }), dom.ownerDocument.createTextNode(reference.label))
-        dom.title = `${reference.kind === 'subcommand' ? 'Expand prompt' : reference.kind === 'file' ? 'File reference' : 'Open reference'}: ${reference.reference}`
+        dom.title = `${reference.kind === 'subcommand' ? 'Expand prompt' : 'Open reference'}: ${reference.reference}`
         dom.setAttribute('aria-label', dom.title)
         dom.addEventListener('click', () => {
           if (reference.kind === 'subcommand') {
@@ -279,9 +328,9 @@ export function InlineComposer(props: InlineComposerProps) {
     editor.commands.updateDecorations()
   }, [editor, keywordKey])
   return <div className="composer__editor" data-placeholder={props.placeholder} data-disabled={props.disabled} data-empty={props.value.length === 0 ? 'true' : 'false'}>
-    <ComposerImageEditable.Provider value={!props.disabled}><ComposerImageReader.Provider value={props.readPastedImage}><ConversationImageCollection references={imageReferences} readImage={props.readPastedImage}>
+    <ComposerReferenceActivation.Provider value={props.onActivateReference}><ComposerDraftEditable.Provider value={!props.disabled}><ComposerImageReader.Provider value={props.readPastedImage}><ConversationImageCollection references={imageReferences} readImage={props.readPastedImage}>
       <EditorContent editor={editor} />
-    </ConversationImageCollection></ComposerImageReader.Provider></ComposerImageEditable.Provider>
+    </ConversationImageCollection></ComposerImageReader.Provider></ComposerDraftEditable.Provider></ComposerReferenceActivation.Provider>
     {!editor && props.value ? <span className="composer__editor-fallback">{props.value}</span> : null}
   </div>
 }
