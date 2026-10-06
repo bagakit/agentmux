@@ -534,7 +534,7 @@ export type AgentCapabilities = {
   providerFork?: { current: true }
   replyCorrelation: 'none' | 'native-turn-id' | 'acp-turn-id'
   /** Manual current-terminal submit reports bytes; it does not promise Native steering. */
-  promptExecution?: { immediate: 'terminal-submit' | 'interrupt-before-input' | 'native-steer' }
+  promptExecution?: { immediate: 'terminal-submit' | 'interrupt-before-input' }
   /**
    * 这个 Provider 是否报**真实**的原生 token 用量，以及它从哪条通道到达。
    *
