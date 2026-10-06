@@ -12,9 +12,13 @@ const canvases = vi.hoisted(() => [] as Array<{ options: Record<string, unknown>
 vi.mock('@xterm/xterm', () => ({ Terminal: class {
   options: Record<string, unknown>
   textarea = document.createElement('textarea')
+  rows = 24
+  buffer = { active: { type: 'normal', baseY: 0, viewportY: 0 } }
+  element: HTMLElement | undefined
   parser = { registerOscHandler: () => ({ dispose() {} }) }
   constructor(options: Record<string, unknown>) { this.options = options; canvases.push(this) }
-  open(container: HTMLElement) { container.appendChild(this.textarea) }
+  open(container: HTMLElement) { this.element = container; container.appendChild(this.textarea) }
+  scrollToLine() {}
   onUserInput() { return { dispose() {} } }
   onData() { return { dispose() {} } }
   onBinary() { return { dispose() {} } }
@@ -67,7 +71,7 @@ it('mounted first binding retains the exact durable unknown intent and original 
   expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
 })
 
-it('reads horizontal terminal overflow through the original touch viewport while preserving vertical events and passive input', async () => {
+it('owns horizontal reading without leaking touch gestures to xterm protocol input, and resets when hidden', async () => {
   const p = port(), view = await mount(p.client), canvas = view.node.querySelector<HTMLDivElement>('.mobile-terminal-canvas')!
   const moves: Event[] = [], observe = (event: Event) => moves.push(event)
   document.addEventListener('touchmove', observe)
@@ -79,11 +83,11 @@ it('reads horizontal terminal overflow through the original touch viewport while
   try {
     canvas.scrollLeft = 20
     await touch('touchstart', 270, 300)
-    expect((await touch('touchmove', 150, 302)).defaultPrevented).toBe(false)
+    expect((await touch('touchmove', 150, 302)).defaultPrevented).toBe(true)
     expect(canvas.scrollLeft).toBe(140)
     await touch('touchend', 150, 302)
     await touch('touchstart', 270, 300)
-    expect((await touch('touchmove', 268, 180)).defaultPrevented).toBe(false)
+    expect((await touch('touchmove', 268, 180)).defaultPrevented).toBe(true)
     expect(canvas.scrollLeft).toBe(140)
     await touch('touchcancel', 268, 180)
     await touch('touchmove', 120, 300)
@@ -92,7 +96,7 @@ it('reads horizontal terminal overflow through the original touch viewport while
     await view.render(p.client, false)
     await touch('touchmove', 150, 300)
     expect(canvas.scrollLeft).toBe(140)
-    expect(moves).toHaveLength(4)
+    expect(moves).toHaveLength(1)
     expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
   } finally { document.removeEventListener('touchmove', observe) }
 })
