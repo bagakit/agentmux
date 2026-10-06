@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtemp, writeFile, rm, realpath } from 'node:fs/promises'
@@ -13,6 +14,7 @@ import { AgentHookServer } from '../src/hook-server.js'
 import { AgentMuxError } from '../src/errors.js'
 import { agentTurnCompletionIdentity, agentTurnEndEvidence } from '../src/agent-session-identity.js'
 import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { currentAgentSemanticStatus, observeAgent } from '../src/agent-status-freshness.js'
 import { retiredReopenFixture } from './fixtures/retired-reopen.js'
 import type { AgentMuxStoredAgentSession, NativeHookEnvelope, AgentMuxClientEvent } from '../src/types.js'
@@ -55,10 +57,10 @@ async function harness(options: { provider?: string; legacy?: boolean; hookBound
   const initial: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'status-subject', providerId, executorId: providerId,
     hostId: 'local', workspacePath: fixture.root, run: { runId: `private-${fixture.pid}` }, retiredRuns: [],
-    hookBindingId: 'b'.repeat(43), hookToken: 't'.repeat(43), createdAt: 1, updatedAt: 1,
+    hookBindingId: 'b'.repeat(43), hookToken: 't'.repeat(43), createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1),
     ...(options.legacy || options.hookBound || options.protectedTarget ? { nativeHandle: { kind: 'provider' as const, providerId, sessionId: 'old-native', ...(options.nativePath ? { transcriptPath: fixture.main } : {}) } } : {}),
-    ...(options.hookBound ? { nativeBinding: { source: 'native-hook' as const, run: { runId: `private-${fixture.pid}` }, observedAt: 1 } } : {}),
-    ...(options.protectedTarget ? { nativeBinding: { source: 'semantic-resume-target' as const, run: { runId: `private-${fixture.pid}` }, observedAt: 1 } } : {})
+    ...(options.hookBound ? { nativeBinding: { source: 'native-hook' as const, run: { runId: `private-${fixture.pid}` }, observedAt: reshapeFixtureEpoch(0, 0, 1) } } : {}),
+    ...(options.protectedTarget ? { nativeBinding: { source: 'semantic-resume-target' as const, run: { runId: `private-${fixture.pid}` }, observedAt: reshapeFixtureEpoch(0, 0, 1) } } : {})
   }
   await store.compareAndSwap(null, initial)
   const client = new AgentMuxClient({ store }), internal = client as unknown as Internals
@@ -91,7 +93,18 @@ async function harness(options: { provider?: string; legacy?: boolean; hookBound
     const response = await post(eventName, payload)
     expect(response.status, await response.text()).toBe(204)
   }
-  return { client, store, kernel: internal.kernel, server, binding, post, feed, events, initial, fixture, setPid: (pid: number) => { processId = pid }, stored: async () => (await store.load())[0]!, input: (source: 'user' | 'terminal-protocol' = 'user') => client.writeAgent({ agentSessionId: initial.agentSessionId, expectedRun: initial.run, source, data: 'x' }) }
+  let submission = 0
+  const consume = async () => {
+    // Native transport is the fixture seam; the real Core semantic claim owns
+    // completion consumption. Raw ACKs are deliberately outside that boundary.
+    client.providers.get(providerId).prepareNativePromptInput = async () => ({
+      plan: { kind: 'native-rpc', protocolId: 'private-protocol', sourceId: 'main-native', actorId: initial.run.runId, threadId: 'main-native', operation: 'start-or-steer' },
+      assertCurrent: async () => {}, dispatch: async () => ({ outcome: 'admitted', turnId: 'private-next-turn' }), close: async () => {}
+    })
+    await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(initial.agentSessionId)),
+      agentSessionId: initial.agentSessionId, operationId: `private-semantic-${++submission}`, prompt: 'new task', execution: 'immediate' })
+  }
+  return { client, store, kernel: internal.kernel, server, binding, post, feed, consume, events, initial, fixture, setPid: (pid: number) => { processId = pid }, stored: async () => (await store.load())[0]!, input: (source: 'user' | 'terminal-protocol' = 'user') => client.writeAgent({ agentSessionId: initial.agentSessionId, expectedRun: initial.run, source, data: 'x' }) }
 }
 
 describe('Session status authority through authenticated Core ingress and public observation', () => {
@@ -100,6 +113,8 @@ describe('Session status authority through authenticated Core ingress and public
     const before = await h.stored(), completion = agentTurnCompletionIdentity(before)
     expect((await h.client.statusAgent(h.initial.agentSessionId)).observation.semantic).toBe('idle')
     await h.input()
+    expect((await h.client.statusAgent(h.initial.agentSessionId)).observation.semantic).toBe('idle')
+    await h.consume()
     const after = await h.stored()
     expect(after.semanticStatus?.state).toBe('done')
     expect(agentTurnCompletionIdentity(after)).toBe(completion)
@@ -130,7 +145,8 @@ describe('Session status authority through authenticated Core ingress and public
     expect(parseRpcAgentSession((await h.client.statusAgent(h.initial.agentSessionId)).session).hookReceipt).toMatchObject({ subject: { kind: 'child', reason: 'codex-child-of-confirmed-main' }, decision: { activityApplied: true, lifecycleApplied: false } })
     await h.feed('PostToolUse', { tool_name: 'shell' })
     expect((await h.stored()).semanticStatus?.observedAt).toBe(before.semanticStatus?.observedAt)
-    await h.input(); expect((await h.client.statusAgent(h.initial.agentSessionId)).observation.semantic).toBe('unknown')
+    await h.input(); expect((await h.client.statusAgent(h.initial.agentSessionId)).observation.semantic).toBe('active')
+    await h.consume(); expect((await h.client.statusAgent(h.initial.agentSessionId)).observation.semantic).toBe('unknown')
   })
   it('keeps pending parent completion until the proven child settles', async () => {
     const h = await harness(); await h.feed('SubagentStart', { agent_id: 'child-native' }); await h.feed('Stop')
@@ -205,7 +221,7 @@ describe('Session status authority through authenticated Core ingress and public
     expect(first.client.agentSession(first.initial.agentSessionId).hookReceipt?.subject?.reason).toBe('native-session-first-observation')
     for (const protectedTarget of [false, true]) {
       const h = await harness({ provider: protocol.provider, legacy: !protectedTarget, protectedTarget })
-      await h.feed(protocol.permission, { [protocol.key]: 'foreign-native', ...protocol.tool, agentmuxUsage: { inputTokens: 1, outputTokens: 2, totalTokens: 3, observedAt: 1 } })
+      await h.feed(protocol.permission, { [protocol.key]: 'foreign-native', ...protocol.tool, agentmuxUsage: { inputTokens: 1, outputTokens: 2, totalTokens: 3, observedAt: reshapeFixtureEpoch(0, 0, 1) } })
       const rejected = parseRpcAgentSession((await h.client.statusAgent(h.initial.agentSessionId)).session)
       expect(rejected.nativeHandle?.sessionId).toBe('old-native')
       expect(rejected.pendingInteraction).toBeUndefined(); expect(rejected.turnUsage).toBeUndefined()
@@ -304,11 +320,11 @@ describe('Session status authority through authenticated Core ingress and public
     await h.input()
     const core = (await h.client.statusAgent(h.initial.agentSessionId)).session
     const live = projectRuntimeEvent(state, { type: 'core', hostId: 'local', event: { type: 'agent-session', session: core } }).state
-    expect(live.sessions[0]?.status.state).toBe('running')
+    expect(live.sessions[0]?.status.state).toBe('done')
     expect(live.sessions[0]?.semanticStatus?.state).toBe('done')
     expect(live.tabs).toBe(state.tabs); expect(live.layouts).toBe(state.layouts)
     const cold = await controller.snapshot(config)
-    expect(cold.sessions[0]?.status.state).toBe('running')
+    expect(cold.sessions[0]?.status.state).toBe('done')
     expect(cold.sessions[0]?.semanticStatus?.state).toBe('done')
     await h.feed('PostToolUse', { agent_id: 'child-native', tool_name: 'shell' })
     const child = (await h.client.statusAgent(h.initial.agentSessionId)).session
@@ -317,7 +333,7 @@ describe('Session status authority through authenticated Core ingress and public
     expect((await controller.snapshot(config)).sessions[0]?.status.state).toBe('working')
     expect(active.sessions[0]?.semanticStatus?.observedAt).toBe(core.semanticStatus?.observedAt)
     const childRevision = child.semanticStatus!.currentActivityRevision!
-    await h.input()
+    await h.consume()
     const consumed = parseRpcAgentSession((await h.client.statusAgent(h.initial.agentSessionId)).session)
     const revoked = projectRuntimeEvent(active, { type: 'core', hostId: 'local', event: { type: 'agent-session', session: consumed } }).state
     expect(revoked.sessions[0]?.status.state).toBe('running')
@@ -335,7 +351,7 @@ describe('Session status authority through authenticated Core ingress and public
     const again = (await h.client.statusAgent(h.initial.agentSessionId)).session
     const workingAgain = projectRuntimeEvent(revoked, { type: 'core', hostId: 'local', event: { type: 'agent-session', session: again } }).state
     expect(workingAgain.sessions[0]?.status.state).toBe('working')
-    await h.input()
+    await h.consume()
     const consumedAgain = (await h.client.statusAgent(h.initial.agentSessionId)).session
     const unknownAgain = projectRuntimeEvent(workingAgain, { type: 'core', hostId: 'local', event: { type: 'agent-session', session: consumedAgain } }).state
     expect(unknownAgain.sessions[0]?.status.state).toBe('running')
@@ -343,7 +359,7 @@ describe('Session status authority through authenticated Core ingress and public
     const disconnected = { ...workingAgain, sessions: workingAgain.sessions.map(item => ({ ...item, status: { ...item.status, state: 'disconnected' as const } })) }
     expect(projectRuntimeEvent(disconnected, { type: 'core', hostId: 'local', event: { type: 'agent-session', session: consumedAgain } }).state.sessions[0]?.status.state).toBe('disconnected')
   })
-  it('first child activity followed by ACK revokes current work even with an unchanged native clock', async () => {
+  it('first child activity followed by semantic admission revokes current work even with an unchanged native clock', async () => {
     const h = await harness(); const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now())
     await h.feed('Stop'); const completed = (await h.client.statusAgent(h.initial.agentSessionId)).session
     expect(completed.semanticStatus?.currentActivityRevision).toBeUndefined()
@@ -359,7 +375,7 @@ describe('Session status authority through authenticated Core ingress and public
     const active = projectRuntimeEvent(state, { type: 'core', hostId: 'local', event: { type: 'agent-session', session: child } }).state
     expect(active.sessions[0]?.status.state).toBe('working')
     expect((await controller.snapshot(config)).sessions[0]?.status.state).toBe('working')
-    await h.input()
+    await h.consume()
     const consumed = parseRpcAgentSession((await h.client.statusAgent(h.initial.agentSessionId)).session)
     expect(currentAgentSemanticStatus(consumed.semanticStatus)?.state).toBe('running')
     expect(consumed.semanticStatus?.currentActivityRevision).toBeGreaterThan(child.semanticStatus!.currentActivityRevision!)
@@ -378,16 +394,16 @@ describe('Session status authority through authenticated Core ingress and public
     clock.mockRestore()
   })
   it('public lifecycle target provenance uses this operation observation despite a backwards wall clock', async () => {
-    const clock = vi.spyOn(Date, 'now').mockReturnValue(2_000)
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(reshapeFixtureEpoch(0, 0, 2_000))
     // Existing durable lifecycle fixture controls only SDK process/Hook seams; no native Agent is started.
     const f = await retiredReopenFixture(); cleanup.push(f.close)
-    clock.mockReturnValue(1_000)
-    await expect(f.client.reopenAgent(f.input)).resolves.toMatchObject({ nativeBinding: { source: 'semantic-resume-target', observedAt: 1_000 } })
+    clock.mockReturnValue(reshapeFixtureEpoch(0, 0, 1_000))
+    await expect(f.client.reopenAgent(f.input)).resolves.toMatchObject({ nativeBinding: { source: 'semantic-resume-target', observedAt: reshapeFixtureEpoch(0, 0, 1_000) } })
     const reopened = f.client.agentSession(f.old.agentSessionId)
     expect(parseRpcAgentSession(reopened).nativeBinding?.run).toEqual(reopened.run)
     f.inner.kernel.status.mockImplementation(async (id: string) => f.run(id, id !== reopened.run.runId))
-    clock.mockReturnValue(500)
-    await expect(f.client.resumeAgent({ agentSessionId: f.old.agentSessionId, operationId: 'private-backwards-clock', prompt: 'Private fixture prompt' })).resolves.toMatchObject({ nativeBinding: { source: 'semantic-resume-target', observedAt: 500 } })
+    clock.mockReturnValue(reshapeFixtureEpoch(0, 0, 500))
+    await expect(f.client.resumeAgent({ agentSessionId: f.old.agentSessionId, operationId: 'private-backwards-clock', prompt: 'Private fixture prompt' })).resolves.toMatchObject({ nativeBinding: { source: 'semantic-resume-target', observedAt: reshapeFixtureEpoch(0, 0, 500) } })
     const resumed = parseRpcAgentSession(f.client.agentSession(f.old.agentSessionId))
     expect(resumed.nativeBinding?.run).toEqual(resumed.run)
     expect(resumed.updatedAt).toBeGreaterThan(reopened.updatedAt)
@@ -399,8 +415,8 @@ describe('Session status authority through authenticated Core ingress and public
       throw new AgentMuxError('Private fixture lost start acknowledgement', 'CTXMUX_io', undefined, { disposition: 'unknown', confirmedInputBytes: null })
     })
     await expect(pending.client.reopenAgent(pending.input)).rejects.toMatchObject({ controlFailure: { disposition: 'unknown' } })
-    clock.mockReturnValue(250)
-    await expect(pending.client.reconcileAgentReopen(pending.input)).resolves.toMatchObject({ nativeBinding: { source: 'semantic-resume-target', observedAt: 250 } })
+    clock.mockReturnValue(reshapeFixtureEpoch(0, 0, 250))
+    await expect(pending.client.reconcileAgentReopen(pending.input)).resolves.toMatchObject({ nativeBinding: { source: 'semantic-resume-target', observedAt: reshapeFixtureEpoch(0, 0, 250) } })
     expect(pending.starts).toHaveLength(1)
     expect(pending.stops).toEqual([])
     clock.mockRestore()
@@ -421,7 +437,7 @@ describe('Session status authority through authenticated Core ingress and public
   it('nested Hermes protocol shares the public input/completion/current activity boundary', async () => {
     const h = await harness({ provider: 'hermes' }); await h.feed('on_session_end', { extra: { completed: true } })
     const before = await h.stored(); expect((await h.client.statusAgent(h.initial.agentSessionId)).observation.semantic).toBe('idle')
-    await h.input(); expect((await h.client.statusAgent(h.initial.agentSessionId)).observation.semantic).toBe('unknown')
+    await h.input(); expect((await h.client.statusAgent(h.initial.agentSessionId)).observation.semantic).toBe('idle')
     expect(agentTurnCompletionIdentity(await h.stored())).toBe(agentTurnCompletionIdentity(before))
     await h.feed('pre_llm_call', { extra: { status: 'ok' } }); expect((await h.client.statusAgent(h.initial.agentSessionId)).observation.semantic).toBe('active')
     expect(normalizeStoredAgentSession(await h.stored()).hookReceipt?.decision?.activityApplied).toBe(true)

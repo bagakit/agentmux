@@ -9,6 +9,15 @@ import { releaseSubagentRoster } from '../dist/hook-normalizer.js'
 import type { AgentNativeHookSpecification } from '../src/hook-normalizer.js'
 import type { AgentProviderSessionStatusObservationContext } from '../src/agent-provider.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession, AgentProviderId } from '../src/types.js'
+import { AgentMuxControlServer } from '../dist/public-rpc-server.js'
+import { agentPromptCondition } from '../dist/agent-prompt-condition.js'
+import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
+import { RuntimeController } from '../../../apps/desktop/src/main/runtime-controller.js'
+import { projectRuntimeEvent } from '../../../apps/desktop/src/renderer/src/lib/session-state.js'
+import { agentContextForSession } from '../../../apps/desktop/src/renderer/src/lib/focus-context.js'
+import type { AppConfig } from '../../../apps/desktop/src/shared/contracts.js'
+
+vi.mock('electron', () => ({ app: { isPackaged: false } }))
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -53,6 +62,7 @@ async function fixture(providerId: AgentProviderId, hook = native.get(providerId
     workspacePath: root, pid: null, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0,
     firstAvailableByte: 0, acceptedInputBytes: accepted })
   inner.kernel.isConnected = () => true; inner.kernel.status = async () => run()
+  inner.kernel.list = async () => [run()]
   inner.kernel.identity = () => ({ buildIdentity: 'private', protocolVersion: 1, daemonInstanceId: 'private-daemon' })
   for (const method of ['start', 'stop']) inner.kernel[method] = vi.fn(() => { throw new Error('Forbidden lifecycle: ' + method) })
   // Control the SDK transport only; raw input still goes through the public Core original-target guards.
@@ -79,7 +89,7 @@ async function fixture(providerId: AgentProviderId, hook = native.get(providerId
   const saved = async () => (await store.load() as readonly AgentMuxStoredAgentSession[])[0]!
   cleanup.push(async () => { await client.dispose(); releaseSubagentRoster(original.run.runId)
     expect(inner.kernel.start).not.toHaveBeenCalled(); expect(inner.kernel.stop).not.toHaveBeenCalled(); await rm(root, { recursive: true, force: true }) })
-  return { client, events, feed, saved, original,
+  return { client, events, feed, saved, original, root, store,
     rawInput: () => client.writeAgent({ agentSessionId: original.agentSessionId, expectedRun: original.run, source: 'user', data: 'private raw input\r' }),
     observer: async () => { await client.statusAgent(original.agentSessionId); expect(nativeObserver).toBeDefined(); return nativeObserver! } }
 }
@@ -91,6 +101,79 @@ const gates = [
 ] as const
 
 describe('native completion authority through actual Core consumers', () => {
+  it.each([
+    { provider: 'synthetic-raw-state', hook: generic, end: 'parent-settled', payload: {} },
+    { provider: 'hermes', hook: native.get('hermes').hook, end: 'on_session_end', payload: { extra: { completed: true } } }
+  ])('$provider raw editing and paste preserve completed work through Core and actual CLI', async p => {
+    const h = await fixture(p.provider, p.hook)
+    await h.feed(p.end, p.payload)
+    const before = await h.saved(), completion = agentTurnCompletionIdentity(before)
+    expect(completion).toBeDefined()
+    for (const data of ['draft', '\r', '\u001b[A', '\u001b[<64;20;10M']) {
+      expect((await h.client.writeAgent({ agentSessionId: h.original.agentSessionId, expectedRun: h.original.run, source: 'user', data })).appliedByteRange).not.toBeNull()
+    }
+    await h.client.pasteAgent({ agentSessionId: h.original.agentSessionId, expectedRun: h.original.run,
+      text: 'first line\nsecond line', terminalData: 'first line\nsecond line' })
+    expect((await h.saved()).semanticStatus).toEqual(before.semanticStatus)
+    expect(agentTurnCompletionIdentity(await h.saved())).toBe(completion)
+    const server = new AgentMuxControlServer({ socketPath: join(h.root, 'raw-state.sock'), coreClients: () => [{ hostId: 'local', client: h.client }] })
+    await server.start(); cleanup.push(() => server.stop())
+    const result = await runCompiledObjectCli(['--endpoint', `unix:${server.path}`, 'agent', 'inspect', '--session', h.original.agentSessionId], objectCliEnvironment(h.root))
+    expect(result.code, result.stderr).toBe(0)
+    expect(JSON.parse(result.stdout).result.status.observation).toMatchObject({ process: 'running', semantic: 'idle', readiness: 'ready' })
+  })
+
+  it('semantic admission still consumes completion and native events update Main Renderer and Focus in order', async () => {
+    const h = await fixture('synthetic-raw-consumers', { ...generic,
+      resolveSubject: payload => payload.workerId === 'real-child'
+        ? { kind: 'child', basis: 'provider-protocol', reason: 'fixture-confirmed-child', nativeSessionId: 'real-child' }
+        : { kind: 'main', basis: 'provider-protocol', reason: 'fixture-confirmed-main', nativeSessionId: 'original-native' }
+    }, true)
+    const observer = await h.observer()
+    observer.onStatus({ recordId: 'first-complete', nativeTurnId: 'first-turn', state: 'done', endReason: 'completed', sequence: 1 })
+    await vi.waitFor(async () => expect((await h.saved()).semanticStatus?.state).toBe('done'))
+    const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private fixture' }], executors: {}, workspaces: [],
+      appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
+    const controller = new RuntimeController(h.store, async () => h.client)
+    controller.commit(await controller.prepare(config)); cleanup.push(async () => controller.dispose())
+    const snapshot = await controller.snapshot(config)
+    let view = { sessions: snapshot.sessions, timelines: {}, pendingAgentLaunches: {}, tabs: {}, layouts: {}, viewModes: {} }
+    const originalTabs = view.tabs, originalLayouts = view.layouts
+    const project = async () => {
+      const session = (await h.client.statusAgent(h.original.agentSessionId)).session
+      view = projectRuntimeEvent(view, { type: 'core', hostId: 'local', event: { type: 'agent-session', session } }).state
+      expect(view.tabs).toBe(originalTabs); expect(view.layouts).toBe(originalLayouts)
+      return session
+    }
+    await h.rawInput(); await project()
+    expect(view.sessions[0]?.status.state).toBe('done')
+    expect((await controller.snapshot(config)).sessions[0]?.status.state).toBe('done')
+    await h.feed('child-begin', { workerId: 'real-child' })
+    const child = await project()
+    expect(view.sessions[0]?.status.state).toBe('working')
+    await h.rawInput()
+    expect((await project()).semanticStatus).toEqual(child.semanticStatus)
+    await h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession(h.original.agentSessionId)),
+      agentSessionId: h.original.agentSessionId, operationId: 'next-submission', prompt: 'new semantic task' })
+    expect((await h.saved()).promptCompletionAdmission).toMatchObject({ submissionId: 'next-submission', intent: { plan: { kind: 'single-phase' } } })
+    const consumed = await project()
+    expect(consumed.semanticStatus?.idleEvidenceConsumed).toBe(true)
+    expect(consumed.semanticStatus?.currentActivityRevision).toBeGreaterThan(child.semanticStatus!.currentActivityRevision!)
+    expect(view.sessions[0]?.status.state).toBe('running')
+    expect((await controller.snapshot(config)).sessions[0]?.status.state).toBe('running')
+    expect(agentContextForSession(view.sessions[0]!, undefined, undefined, undefined, null).stateLabel).toBe('Activity unknown')
+    expect(projectRuntimeEvent(view, { type: 'core', hostId: 'local', event: { type: 'agent-session', session: child } }).state).toBe(view)
+    observer.onStatus({ recordId: 'next-start', nativeTurnId: 'next-turn', state: 'working', sequence: 2 })
+    await vi.waitFor(async () => expect((await h.saved()).semanticStatus?.state).toBe('working'))
+    await project()
+    expect(agentContextForSession(view.sessions[0]!, undefined, undefined, undefined, null).bucket).toBe('working')
+    observer.onStatus({ recordId: 'next-complete', nativeTurnId: 'next-turn', state: 'done', endReason: 'completed', sequence: 3 })
+    await h.feed('child-settled', { workerId: 'real-child' })
+    await vi.waitFor(async () => expect((await h.saved()).semanticStatus?.state).toBe('done'))
+    await project()
+    expect(view.sessions[0]?.status.state).toBe('done')
+    expect((await controller.snapshot(config)).sessions[0]?.status.state).toBe('done')
+  })
   it.each(gates)('$provider gate cannot complete, mint readiness or latch out continued work', async p => {
     const h = await fixture(p.provider), main = { [p.key]: 'original-native' }
     await h.feed(p.begin, main); const started = await h.saved()
