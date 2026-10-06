@@ -253,7 +253,7 @@ to { transform: rotate(360deg); } }
 .mobile-object-avatar .space-object-icon { display: contents; }
 .mobile-object-avatar img { width: 100%; height: 100%; border-radius: 30%; object-fit: cover; }
 .mobile-object-avatar .mote-face { width: 100%; height: 100%; }
-.mobile-avatar-issue { position: absolute; right: -2px; bottom: -2px; background: var(--surface-0); color: var(--amber); border-radius: 50%; font-size: 10px; padding: 1px 3px; }
+.mobile-avatar-issue { position: absolute; right: -2px; bottom: -2px; background: var(--surface-0); color: var(--amber); border-radius: 50%; font-size: 10px; padding: 1px; display: inline-flex; }
 .mobile-connect-page { max-width: 440px; margin: 0 auto; min-height: 100%; padding: 20px 24px 30px; display: flex; flex-direction: column; align-items: center; text-align: center; justify-content: center; }
 .mobile-connect-dragon { object-fit: contain; margin-bottom: 12px; width: min(40vw, 150px); height: min(40vw, 150px); }
 .mobile-connect-page h1 { margin: 8px 0; font-size: 20px; }

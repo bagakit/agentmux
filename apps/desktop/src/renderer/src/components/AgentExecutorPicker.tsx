@@ -8,6 +8,7 @@ import { SettingsNavigation } from './SettingsNavigation'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { SelectionField } from './SelectionField'
 
+const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 
@@ -48,7 +49,7 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
         onClick={() => onSelect(executor.id)}>
         <span inert aria-hidden="true"><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={16} /></span>
         <strong>{executor.label}</strong>
-        {executor.detection?.state !== 'ready' ? <span className="agent-pick__unconfirmed" aria-label={executorDetectionLabel(executor.detection)}>?</span> : null}
+        {executor.detection?.state !== 'ready' ? <span className="agent-pick__unconfirmed" aria-label={executorDetectionLabel(executor.detection)}><ThemeStatusUnknownIcon size={10} /></span> : null}
         {executor.id === selected ? <ThemeStatusSelectedIcon size={12} className="agent-pick__check" /> : null}
       </button>)}
       {unavailable.length ? <button type="button" className="launcher-other-agents" aria-expanded={showUnavailable}
