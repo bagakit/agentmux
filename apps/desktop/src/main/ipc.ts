@@ -1,3 +1,4 @@
+import { parseGoalDelegationParams, parseGoalDelegationResult, type GoalDelegationParamsMap } from '@agentmux/core/goal-delegation'
 import { GoalDelegationOwner } from './goal-delegation-owner.js'
 import { observeTerminalBrightness, terminalPaletteChanged, terminalPaletteForAppearance } from './terminal-theme.js'
 import { exportThemeFile, writeThemeFile } from './theme-file-export.js'
@@ -908,6 +909,30 @@ export async function registerIpc(args: {
   handle('scratch:resetWiki', async (workspaceId: string, topicId: string) =>
     await args.scratchTopics.resetWiki(workspace(config, workspaceId), topicId)
   )
+  const goalDelegations = new GoalDelegationOwner(demands, args.runtime, input => publicFiles.read(input), {
+    call: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context),
+    readDispatch: (hostId, sourceMessageId) => args.runtime.readOriginalDispatch(hostId, sourceMessageId),
+    observeRun: (hostId, runId) => args.runtime.observeOriginalRun(hostId, runId)
+  })
+  const goalVersions = new Map<string, string>()
+  const disposeDemandChanges = demands.subscribe(snapshot => {
+    const changed: string[] = [], retained = new Set<string>()
+    for (const goal of snapshot.demands) {
+      retained.add(goal.id)
+      const version = JSON.stringify(goal)
+      if (goalVersions.get(goal.id) !== version) changed.push(goal.id)
+      goalVersions.set(goal.id, version)
+    }
+    for (const id of goalVersions.keys()) if (!retained.has(id)) { changed.push(id); goalVersions.delete(id) }
+    if (changed.length && !args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('demands:changed', changed)
+  })
+  handleWithEvent('demands:delegation', async (event, method: 'goal.delegations' | 'goal.collect', input: GoalDelegationParamsMap['goal.delegations'] | GoalDelegationParamsMap['goal.collect']) => {
+    requireTrustedSender('demands:delegation', event)
+    if (method !== 'goal.delegations' && method !== 'goal.collect') throw new AgentMuxError('This UI action requires the original Goal read or explicit report collection.', 'INVALID_CONTROL_REQUEST')
+    const parsed = parseGoalDelegationParams(method, input)
+    const actor = { kind: 'user' as const, id: 'local-user:' + (process.getuid?.() ?? 'current') }
+    return parseGoalDelegationResult(await goalDelegations.call(method, parsed, { principal: actor }, { actor }), parsed)
+  })
   handle('demands:list', async () => await demands.list())
   const goalDispatchInputs = new GoalDispatchInputOwner(demands, args.runtime)
   handleWithEvent('demands:inspectDispatch', async (event, reference: GoalDispatchReference) => {
@@ -1412,6 +1437,10 @@ export async function registerIpc(args: {
     requireTrustedSender('continuousProgress:pauseForInput', event)
     await args.progressLoops.pauseTarget(control, 'Paused for your draft or queued message. Resume explicitly after sending or clearing it.')
   })
+  handleWithEvent('sessions:inputOccupation', async (event, control: AgentSessionControl) => {
+    requireTrustedSender('sessions:inputOccupation', event)
+    args.runtime.notifyInputOccupation(control)
+  })
   handleWithEvent('sessions:write', async (event, session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source'], observation?: import('@agentmux/core/control').InputObservationReference): Promise<SessionInputWriteResult> => {
     if (source === 'user' && data.length > 0) pauseUserProgress(session, 'Paused for your terminal input.')
     return await sessionInputWriteResult(() => args.runtime.write(session, data, source, readInputObservation(observation) ?? undefined,
@@ -1856,7 +1885,7 @@ export async function registerIpc(args: {
 
     schedules: args.progressLoops,
     notebookStore,
-    goalDelegations: new GoalDelegationOwner(demands, args.runtime, input => publicFiles.read(input)),
+    goalDelegations,
     coreClients: () => args.runtime.rpcClients(),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
     nativeAgentSessions: params => args.runtime.nativeAgentSessions({ hostId: params.hostId, executorId: params.executorId,
@@ -1907,6 +1936,7 @@ export async function registerIpc(args: {
     await runOwnerDisposals([
       { owner: 'terminal-brightness', dispose: disposeTerminalBrightness },
       { owner: 'spatial', dispose: () => disposeSpatial() },
+      { owner: 'demand-changes', dispose: () => disposeDemandChanges() },
       { owner: 'notebook', dispose: () => disposeNotebook() },
       { owner: 'toolkit-ipc', dispose: () => disposeToolkitIpc() },
       { owner: 'toolkit', dispose: () => toolkit.dispose() },

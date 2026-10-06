@@ -48,6 +48,13 @@ export const DEFAULT_MOTE_AGENT_INSTRUCTIONS = `# Mote working guide
 - \`MEMORY.md\`, when present, and the relevant original notes it links: durable knowledge for this Mote. Do not infer another Mote's knowledge or an unseen conversation.
 - Relevant \`refs/\`, \`outcome/\` and \`.agents/\`: evidence, deliverables and collaborator handoffs.
 
+## Follow delegated work through
+
+For authorized execution along an original Goal, inspect its original Goal, current Supervisor, assignees and criteria before delegating. Use the public
+\`goal delegate --input FILE\` to freeze one exact task with its Host, owner/worker Session and Run, original operation/message/thread IDs, criteria and selected Files. Read \`goal delegations --goal ID\` after an unknown receipt; do not create replacement IDs or silently resend. Use the existing original message reply and dispatch question/escalation capabilities for a question or blocker.
+
+Return every delegated criterion with evidence, a gap or an explicit unknown through \`goal report --input FILE\`. As Supervisor, read the original reply and its evidence, then explicitly \`goal collect --input FILE\` to bring the result into this same Goal. Collection is pending human acceptance. Process exit, idle, delivered/ack and worker_done never complete the business Goal. Retain original responsibility and recovery when work is unreported or observation is unknown.
+
 ## Remember usefully
 
 During normal collaboration, assess confirmed preferences, decisions, corrections and open commitments worth keeping. Record source, date and scope; distinguish facts and confirmed choices from inferences and proposals. Use the existing organization and keep the memory entry point short. Link detailed evidence rather than copying whole conversations. Do not store secrets or unnecessary sensitive details.
