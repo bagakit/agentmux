@@ -33,6 +33,8 @@ Core 使用 Node 24+，包不设 OS 安装门，portable API 可独立使用；�
 
 Provider 明确标记的运行时上下文或系统指令使用 `AgentSessionHistoryItem.kind = 'system-message'`，与 `user-message`、`assistant-message` 和 `activity` 区分，仍保留原 source、记录 ID、title 与完整 content parts。此类型是只读历史语义，不授予指令优先级或控制权限；用户正文中的标签不改变分类。原 `sessionHistoryPage`、RPC 和 `agent history --source native` 直接传递该类型，客户端可复用系统卡片，不把它加入用户输入历史。
 
+Codex 保存的 JSONL 历史与原生 indexed history 复用同一完整问题回复协议：明确的用户文本回复附带 `questionAnswers`，保留完整 wire、原记录和未知作者；引用、混合正文、残缺或未知数据继续按原文阅读。可选答案字段挤出既有页预算时，仅撤回必要的附加字段并以 `questionDiagnostic` 说明原文仍完整；连诊断也无法装入时，保原页并由 Provider stderr 报告投影边界。该字段仅用于历史答案阅读与既有历史查询，不建立待回答状态、权限或发送资格。
+
 同一 SQLite 身份的写入竞争返回 `AGENT_SESSION_HISTORY_SNAPSHOT_CHANGED`，本次页不发布；观察保留，后续原生提交可恢复。主来源被替换或 native identity 不一致返回 `AGENT_SESSION_HISTORY_SOURCE_CHANGED`，只停止这个来源的观察。两种情况都不删除已有正文、原 Session 或健康 Run；调用者保留旧阅读窗口并显示明确的读取状态。无 WAL 的已关闭数据库沿同一只读 VFS 读取，不创建 native WAL/SHM。JSONL 来源替换按原来源边界处理，不能以相同路径或新 mtime 推断仍是原会话。
 
 `sessionHistoryResource(agentSessionId, request)` 读取原生记录中准确声明的资源。request 包含原 source、turnId（存在时）、recordId、partIndex 和 required expectedReference；错 Session／source／record／part／reference 拒绝本次操作。图片保持 `read`（MIME/base64/byteLength）、固定 16 MiB 原图上限及既有 Provider 准确 record 核验；opaque／HTTP 不自动抓取。JSONL 的巨大合法正文以 `resourceType: 'text'` 与 `content` 的原 semantic kind／总字节／SHA-256 标记，在准确原文件范围内按 `offsetBytes` 和 `maxBytes`（最多 128 KiB）返回 `fragment`。大项以内部显式文本值保留原物理来源，由 Provider 选择正文截取、JSON 格式化和 Base64 编码，大小字段遵循相同的语义规则；通用 Reader 不把占位字符串当正文。格式化后的内容通过有限物理块索引读取，每块以原字节 digest 校验，中间原地改写拒绝受影响的片读，合法末尾追加保留原引用；累计 IO 随该原记录增长，页内 materialization 仍有界，旧消息可用原 cursor 继续读取。
