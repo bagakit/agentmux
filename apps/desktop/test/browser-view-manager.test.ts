@@ -1,3 +1,4 @@
+const { fixtureFileUrl: _reshape_fixtureFileUrl } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixtureFileUrl: _hygiene_fixtureFileUrl, fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -237,7 +238,13 @@ function fakeWindow() {
     sent,
     window: {
       contentView: {
-        addChildView(view: InstanceType<typeof fakeElectron.FakeWebContentsView>) { children.push(view) },
+        addChildView(view: InstanceType<typeof fakeElectron.FakeWebContentsView>) {
+          // Electron View.addChildView reorders an existing child; it never duplicates it.
+          // https://www.electronjs.org/docs/latest/api/view#viewaddchildviewview-index
+          const index = children.indexOf(view)
+          if (index >= 0) children.splice(index, 1)
+          children.push(view)
+        },
         removeChildView(view: InstanceType<typeof fakeElectron.FakeWebContentsView>) {
           const index = children.indexOf(view)
           if (index >= 0) children.splice(index, 1)
@@ -635,7 +642,7 @@ describe('BrowserViewManager', () => {
     expect(normalizeBrowserUrl('localhost:4173')).toBe('http://localhost:4173/')
     expect(normalizeBrowserUrl('agent runtime docs')).toBe('https://www.google.com/search?q=agent%20runtime%20docs')
     expect(normalizeBrowserUrl('about:blank')).toBe('about:blank')
-    expect(normalizeBrowserUrl('file:///etc/passwd')).toBe('file:///etc/passwd')
+    expect(normalizeBrowserUrl(_reshape_fixtureFileUrl("browser-local-file"))).toBe(_reshape_fixtureFileUrl("browser-local-file"))
     expect(normalizeBrowserUrl((_hygiene_fixturePath("tmp/browser") + " page.html"))).toBe(_hygiene_fixtureFileUrl("tmp/browser%20page.html"))
     expect(new URL(normalizeBrowserUrl('./browser page.html')).protocol).toBe('file:')
     expect(new URL(normalizeBrowserUrl('../browser page.html')).protocol).toBe('file:')
@@ -742,6 +749,7 @@ describe('BrowserViewManager', () => {
     await expect(manager.captureScreenshot('browser-1')).resolves.toEqual({
       browserId: 'browser-1',
       navigationId: expect.any(String),
+      source: { url: view.webContents.getURL(), title: view.webContents.getTitle(), viewport: null, viewportWarning: expect.stringContaining('could not be confirmed') },
       image: {
         mimeType: 'image/png',
         dataUrl: `data:image/png;base64,${png().toString('base64')}`,
@@ -1234,7 +1242,7 @@ describe('BrowserViewManager', () => {
     const navigate = view.webContents.listeners.get('will-navigate')![0]!
     const redirect = view.webContents.listeners.get('will-redirect')![0]!
     const blockedNavigation = {
-      url: 'file:///etc/passwd',
+      url: _reshape_fixtureFileUrl("browser-local-file"),
       isMainFrame: true,
       preventDefault: vi.fn()
     }
@@ -1350,6 +1358,7 @@ describe('BrowserViewManager', () => {
     view.webContents.capturePageImpl = async () => await new Promise((resolve) => { resolveCapture = resolve })
 
     const pending = manager.captureScreenshot('browser-capture')
+    await vi.waitFor(() => expect(resolveCapture).toBeTypeOf('function'))
     view.webContents.emitDetails('did-start-navigation', {
       url: 'https://example.com/next',
       isSameDocument: false,
@@ -1422,6 +1431,7 @@ describe('BrowserViewManager', () => {
     firstView.webContents.capturePageImpl = async () => await new Promise((resolve) => { resolveCapture = resolve })
 
     const pending = manager.captureScreenshot('browser-recreated')
+    await vi.waitFor(() => expect(resolveCapture).toBeTypeOf('function'))
     manager.close('browser-recreated')
     await manager.create('browser-recreated', 'https://example.com/second')
     resolveCapture({
