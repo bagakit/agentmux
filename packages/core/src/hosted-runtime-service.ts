@@ -261,6 +261,16 @@ export class AgentMuxHostedRuntimeService {
       throw new AgentMuxError('Device origin is supplied by the authenticated Host.', 'INVALID_CONTROL_REQUEST')
     const modifying = /^(submit|reply|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|saveAgent|answer|cancel)/.test(invocation.method)
     const first = invocation.args[0] as unknown
+    // Match the public human question-reply owner. Only transport-approved
+    // user/device intent supplies human authorship; a wire claim cannot name an Agent.
+    if (invocation.method === 'replySessionQuestion' && context.caller === undefined && context.principal &&
+        ['user', 'device'].includes(context.principal.kind)) {
+      if (invocation.args.length !== 1 || !first || typeof first !== 'object' || 'authorAgentSessionId' in first || 'caller' in first) {
+        throw new AgentMuxError('A human question reply cannot assert an Agent author or caller.', 'INVALID_CONTROL_REQUEST')
+      }
+      rpcString(context.principal.id, 'Transport principal')
+      invocation.args[0] = { ...invocation.args[0], authorHuman: true }
+    }
     if (source && (invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'replySessionQuestion')) invocation.args[0] = { ...invocation.args[0], sourceDevice: source }
     if (source && invocation.method === 'saveAgentFuturePromptIntent') invocation.args[0] = { ...invocation.args[0], sourceDevice: source }
     const operationId = first && typeof first === 'object' && 'operationId' in first ? String(first.operationId) : randomUUID()
