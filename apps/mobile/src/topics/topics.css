@@ -1,18 +1,17 @@
-.mobile-topics { height: 100%; overflow-y: auto; color: var(--text); padding: 4px 12px 12px; font-size: 13px; }
+.mobile-topics { position: relative; height: 100%; overflow-y: auto; color: var(--text); padding: 4px 12px 12px; font-size: 13px; }
 .mobile-topics [hidden] { display: none !important; }
 .mobile-topics-heading { flex: 1; min-width: 0; }
 .mobile-topics-heading > small { display: block; font-size: 11px; line-height: 1.4; }
 .mobile-topics:not(.mobile-topic-source-reader) > header { min-height: 44px; padding-right: 52px; }
-.mobile-topics > .mobile-topic-organization { margin-top: -44px; }
-.mobile-topics > .mobile-topic-organization > summary { width: 44px; margin-left: auto; }
+.mobile-topics > .mobile-topic-organization > summary { position: absolute; top: 4px; right: 12px; width: 44px; }
 .mobile-topics h1, .mobile-topics h2 { overflow-wrap: anywhere; font-size: 17px; margin: 4px 0; }
 .mobile-topics button { min-height: 44px; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); }
 .mobile-topics button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .mobile-topics-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .mobile-topics-actions h1, .mobile-topics-actions small { flex: 1; }
-.mobile-topic-organization { position: relative; }
-.mobile-topic-organization > summary { min-height: 44px; display: flex; align-items: center; justify-content: flex-end; padding: var(--sp-4); cursor: pointer; font-size: 12px; }
-.mobile-topic-organization[open] > .mobile-topics-actions { position: absolute; right: 0; top: 100%; z-index: 3; min-width: 180px; padding: var(--sp-4); background: var(--surface-2); box-shadow: var(--elev-2); border-radius: var(--radius); display: grid; }
+.mobile-topic-organization { position: static; }
+.mobile-topic-organization > summary { min-height: 44px; display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; border-radius: var(--radius-sm); color: var(--text-3); list-style: none; }
+.mobile-topic-organization[open] > .mobile-topics-actions { position: absolute; right: 12px; top: 48px; z-index: 3; min-width: 180px; padding: var(--sp-4); background: var(--surface-2); box-shadow: var(--elev-2); border-radius: var(--radius); display: grid; }
 .mobile-topic-organization .mobile-topic-editor { position: static; margin: 0; padding: 8px 0; border-top: 1px solid var(--line-soft); }
 .mobile-topics-tabs { display: flex; gap: 3px; margin: 4px 0 10px; padding: 3px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
 .mobile-topics-tabs button { flex: 1; min-width: 0; background: transparent; color: var(--text-3); }
@@ -40,3 +39,22 @@
 .mobile-topic-editor form, .mobile-topic-editor label { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: var(--sp-4); }
 .mobile-topic-editor textarea { resize: vertical; }
 .mobile-topic-workface { min-height: 0; }
+
+.mobile-topic-organization > summary::-webkit-details-marker { display: none; }
+.mobile-topic-organization > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+.mobile-topics-tree > li { margin: 2px 0; }
+.mobile-topics-tree ul { list-style: none; margin: 0; padding: 0; }
+.mobile-topics-tree button.mobile-topics-category, .mobile-topics-tree button.mobile-topics-topic { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 5px 6px; border: 0; border-radius: var(--radius-sm); }
+.mobile-topics-tree button > svg { flex: none; color: var(--text-3); }
+.mobile-topics-tree button > span { display: grid; gap: 2px; min-width: 0; }
+.mobile-topics-category > svg { transition: transform 120ms ease; }
+.mobile-topics-category[aria-expanded="true"] > svg { transform: rotate(90deg); }
+.mobile-topics-category[aria-expanded="true"] { color: var(--green); }
+.mobile-topics-branch { margin: 0 0 4px 12px; padding-left: 14px; border-left: 1px solid var(--line-soft); }
+.mobile-topics-tree .mobile-topics-topic strong { font-weight: 500; }
+.mobile-topics-tree .mobile-topics-topic small { -webkit-line-clamp: 1; }
+.mobile-topics-branch > .mobile-topics-empty { margin: 6px; }
+.mobile-topics-service { margin: 4px 6px; font-size: var(--fs-meta); color: var(--amber); }
+.mobile-topics-service > summary { cursor: pointer; padding: 8px 0; }
+.mobile-topics-service .mobile-topics-issue { margin: 4px 0; }
+@media (prefers-reduced-motion: reduce) { .mobile-topics-category > svg { transition: none; } }
