@@ -50,6 +50,14 @@ export function ConversationInputDetails({ messageId, source, executionHostId, s
         <dt>当前执行 Host</dt><dd><code>{executionHostId ?? '未知'}</code></dd>
         <dt>Recorded author</dt><dd>{speaker?.role === 'unknown' ? recordedIdentity ? 'Not recorded' : sourceDeclaration ? 'Not recorded · source declared in message' : 'Not recorded · shown as You' : speaker?.role ?? 'Not recorded'}</dd>
       </dl> : null}
+      {speaker?.external ? <dl className="conversation-input-details__facts">
+        <dt>External application</dt><dd>{speaker.external.actor.application.domain} · {speaker.external.actor.application.appId}</dd>
+        <dt>External actor</dt><dd>{speaker.external.actor.idType} · {speaker.external.actor.userId}</dd>
+        <dt>External conversation</dt><dd>{speaker.external.externalConversationId}</dd>
+        <dt>External message</dt><dd>{speaker.external.externalMessageId}</dd>
+        <dt>Original binding</dt><dd>{speaker.external.bindingId} · {speaker.external.bindingRevision}</dd>
+        <dt>Original grant</dt><dd>{speaker.external.grantId} · {speaker.external.grantRevision}</dd>
+      </dl> : null}
       {children}
       {senderId ? <div className="conversation-input-details__sender">
         <h4>{declared ? 'Current details from message header' : 'Current sender'}</h4>

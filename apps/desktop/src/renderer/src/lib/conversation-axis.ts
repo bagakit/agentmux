@@ -42,8 +42,8 @@ export type RulerAxisItem = ConversationAxisItem | RulerRecord
  */
 export type SpeakerPredicate = (speaker: ConversationSpeaker) => boolean
 
-/** 说话人轴的默认语义：人类用户发言与未记录/原生用户输入。 */
-export const speaksAsHuman: SpeakerPredicate = (speaker) => speaker.role === 'human' || speaker.role === 'unknown'
+/** 输入轴保留人类、外部作者及未记录/原生输入；作者身份仍分别呈现。 */
+export const speaksAsHuman: SpeakerPredicate = (speaker) => speaker.role === 'human' || speaker.role === 'external' || speaker.role === 'unknown'
 
 /**
  * 自我 Agent 轴的语义：所有 agent 身份的基准谓词。在具体渲染时结合 sessionId 精确限定 recipient。

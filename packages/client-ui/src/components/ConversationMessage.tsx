@@ -7,7 +7,7 @@ import { SemanticIcon } from '../theme/icons.js'
 import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { formatClock, formatOffset } from '../lib/conversation-time.js'
 import { useClientUiPlatform } from '../platform.js'
-import { conversationAgentReference, speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker.js'
+import { externalSpeakerLabel, conversationAgentReference, speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { describeConversationInputSource } from '../lib/conversation-input-source.js'
 import { ConversationInputDetails } from './ConversationInputDetails.js'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown.js'
@@ -147,7 +147,7 @@ export function ConversationMessage({
   const inputOrigin = inputSource ? describeConversationInputSource(inputSource) : undefined
   const isSystemContext = speaker?.role === 'system'
   const systemSummary = isSystemContext ? parts.find(part => part.kind === 'text')?.text.slice(0, 240).replace(/\s+/gu, ' ').trim() : undefined
-  const isIncoming = speaker?.role === 'human' || isPeerAgent
+  const isIncoming = speaker?.role === 'human' || speaker?.role === 'external' || isPeerAgent
   const inputMarkdown = isIncoming || recordedIdentity && speaker?.role === 'unknown'
   const files = useMemo(() => speaker?.role === 'agent' && !isPeerAgent && !compact && messagePhase !== 'progress' && status === 'complete' && openWorkspaceFile
     ? conversationFiles(parts, workspaceRoot, homeDir) : [],
@@ -168,6 +168,7 @@ export function ConversationMessage({
     : providerId
   const displayName = recordedSpeaker?.role === 'unknown'
     ? recordedIdentity ? 'Author unknown' : 'You'
+    : speaker?.role === 'external' ? externalSpeakerLabel(speaker)
     : described?.name ?? name ?? (speaker?.role === 'human' ? 'You' : isPeerAgent ? speaker.id : isSystemContext ? 'AgentMux' : speaker ? 'Assistant' : 'Activity')
   const canAnnotate = onSelectAnnotation !== undefined && messageId.length > 0
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -303,7 +304,7 @@ export function ConversationMessage({
       data-declared-source={prefix?.sourceLabel}
       data-status={status}
       data-trace-only={isTraceOnly ? 'true' : undefined}
-      data-message-bubble={messagePhase !== 'progress' && !compact && !isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human') ? 'true' : undefined}
+      data-message-bubble={messagePhase !== 'progress' && !compact && !isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human' || speaker?.role === 'external') ? 'true' : undefined}
     >
       <span className="log-turn__node" aria-hidden="true">
         {avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12)}
