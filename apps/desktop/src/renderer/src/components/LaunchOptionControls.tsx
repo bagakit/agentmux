@@ -1,3 +1,4 @@
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState } from 'react'
@@ -44,8 +45,12 @@ export function LaunchRefine({ options, selection, expanded, active, onToggle, o
           } })] })
       if (!disposed) Object.assign(panel.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
     }
-    const stop = autoUpdate(anchor, panel, () => { void position() })
-    return () => { disposed = true; stop() }
+    let nextFrame = 0
+    const stop = autoUpdate(anchor, panel, () => {
+      cancelAnimationFrame(nextFrame)
+      nextFrame = requestAnimationFrame(() => { void position() })
+    })
+    return () => { disposed = true; cancelAnimationFrame(nextFrame); stop() }
   }, [active, expanded, content])
   if (!options.length && !names && !Object.values(selection).some(Boolean)) return null
   const chosen = options.flatMap(option => {
@@ -72,14 +77,14 @@ export function LaunchRefine({ options, selection, expanded, active, onToggle, o
     {active ? <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><Dialog.Content ref={setContent} className="launch-refine__panel" inert={!expanded} style={{ visibility: 'hidden' }}
       onEscapeKeyDown={() => trigger.current?.focus()} onCloseAutoFocus={event => event.preventDefault()}>
       <header><Dialog.Title>Launch options</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close launch options" onClick={() => trigger.current?.focus()}><ThemeActionCloseIcon size={14} /></Dialog.Close></header>
-      <Dialog.Description>Choices apply to this launch. Unset values use the Agent’s defaults.</Dialog.Description>
+      <Dialog.Description>For this launch. Unset values use Agent defaults.</Dialog.Description>
       {unavailable.length ? <p className="launch-refine__notice" role="status">Saved choices are no longer listed: {unavailable.map(({ label, choiceId }) => `${label}: ${choiceId}`).join(' · ')}. They are retained until you choose another value or use Agent defaults.</p> : null}
       {selectionCount && onReset ? <button type="button" className="small-button launch-refine__reset" disabled={disabled} onClick={onReset}>Use Agent defaults</button> : null}
       <div className="launch-refine__fields">
         {options.map(option => {
           const choice = option.choices.find(item => item.id === selection[option.id])
           return <div key={option.id} className="launch-refine__row" data-tier={choice?.tier ?? 'safe'}>
-            <span><strong>{option.label}</strong>{option.description ? <small>{option.description}</small> : null}</span>
+            <strong>{option.label}</strong>
             <SelectionField label={option.label} value={selection[option.id] ?? ''} disabled={Boolean(disabled)} menuClassName="launch-refine__choice-menu"
               menuBoundary={trigger.current?.closest<HTMLElement>('[data-workbench-region-id]') ?? null}
               onValueChange={value => onSelect(option.id, value || null)} options={[
@@ -88,6 +93,10 @@ export function LaunchRefine({ options, selection, expanded, active, onToggle, o
               ]} />
           </div>
         })}
+        {options.some(option => option.description) ? <details className="launch-refine__help">
+          <summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />About launch options</summary>
+          <dl>{options.map(option => option.description ? <div key={option.id}><dt>{option.label}</dt><dd>{option.description}</dd></div> : null)}</dl>
+        </details> : null}
         {names && onNameChange ? <fieldset className="launch-refine__names"><legend>Optional names</legend>
           <label>Agent<TextInput aria-label="Agent name" placeholder="Automatic" value={names.agentName} disabled={disabled} onChange={event => onNameChange('agentName', event.target.value)} /></label>
           <label>Tab<TextInput aria-label="Tab name" placeholder="Automatic" value={names.tabName} disabled={disabled} onChange={event => onNameChange('tabName', event.target.value)} /></label>
