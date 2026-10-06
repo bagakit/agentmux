@@ -18,6 +18,7 @@ import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli
 
 afterEach(() => vi.unstubAllEnvs())
 const binary = process.env.AGENTMUX_NATIVE_CODEX_BINARY
+const waitMode = process.env.AGENTMUX_NATIVE_WAIT_FIXTURE === '1'
 
 async function waitFor<T>(read: () => Promise<T>, accepts: (value: T) => boolean, budget = 15_000): Promise<T> {
   const deadline = Date.now() + budget
@@ -71,7 +72,8 @@ async function closePrivateFixture(root: string, identity: { dev: bigint; ino: b
 
 // Explicit opt-in test-owned real 0.162.1 backend + TUI in one original ctxmux Run.
 // No user HOME/auth/MCP/Native data, no model network outside the loopback fixture.
-it.runIf(Boolean(binary))('real original Native/TUI atomically starts idle manual input and appends busy input through SDK and public Send', async () => {
+it.runIf(Boolean(binary))(waitMode ? 'real original Native/TUI retains stopped input and admits a saved CLI message once after original Runtime reconnection'
+  : 'real original Native/TUI atomically starts idle manual input and appends busy input through SDK and public Send', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'am-native-')))
   const rootIdentity = await lstat(root, { bigint: true })
   const runtime = join(root, 'runtime'), workspace = join(root, 'workspace'), home = join(root, 'home'), nativeHome = join(root, 'codex')
@@ -131,6 +133,7 @@ tui.on('close',()=>{backend.kill('SIGTERM');process.exit()});
   const nativeDispatchIds: string[] = []
   let beforeCurrent: ((check: number) => Promise<void>) | undefined
   let notifyProtocol: (() => void) | undefined
+  let stopPreparationAtPeer: (() => void) | undefined
   let loseReceiptFor: string | undefined
   const provider = { ...builtin, planManagedHooks: () => null,
     prepareNativePromptInput: async (context: Parameters<NonNullable<typeof builtin.prepareNativePromptInput>>[0]) => {
@@ -141,9 +144,10 @@ tui.on('close',()=>{backend.kill('SIGTERM');process.exit()});
       try { const prepared = await builtin.prepareNativePromptInput!({ ...context, args: [], onPreparationPhase: phase => {
         const now = performance.now(); phases.push({ phase: current, durationMs: now - previous }); current = phase; previous = now
         context.onPreparationPhase?.(phase); if (phase === 'native-protocol') notifyProtocol?.()
+        if (phase === 'native-peer') stopPreparationAtPeer?.()
       } }); let checks = 0
-        return { ...prepared, assertCurrent: async signal => { await beforeCurrent?.(++checks); await prepared.assertCurrent(signal) },
-          dispatch: async (prompt, operationId, signal) => {
+        return { ...prepared, assertCurrent: async (signal: AbortSignal) => { await beforeCurrent?.(++checks); await prepared.assertCurrent(signal) },
+          dispatch: async (prompt: string, operationId: string, signal?: AbortSignal) => {
             nativeDispatchIds.push(operationId)
             const receipt = await prepared.dispatch(prompt, operationId, signal)
             if (operationId === loseReceiptFor) {
@@ -157,13 +161,14 @@ tui.on('close',()=>{backend.kill('SIGTERM');process.exit()});
       } finally { phases.push({ phase: current, durationMs: performance.now() - previous }); preparations.push({ durationMs: performance.now() - start, phases }) }
     } }
   // A real bounded Core credential producer; it claims no Native protocol facts.
-  const senderProvider = { ...builtin, id: 'private-sender', label: 'Private Core sender', executable: process.execPath,
+  const { planManagedHooks: _planManagedHooks, discoverNativeSession: _discoverNativeSession,
+    observeSessionStatus: _observeSessionStatus, prepareNativePromptInput: _prepareNativePromptInput,
+    terminalHandshake: _terminalHandshake, terminalPromptRender: _terminalPromptRender, ...senderBuiltin } = builtin
+  const senderProvider = { ...senderBuiltin, id: 'private-sender', label: 'Private Core sender', executable: process.execPath,
     catalog: { ...builtin.catalog, id: 'private-sender', label: 'Private Core sender', executable: process.execPath, expectedProcess: 'node',
       hookStrategy: { kind: 'none' as const }, resumeStrategy: { kind: 'none' as const },
       capabilities: { terminal: true as const, timeline: 'unavailable' as const, permission: 'none' as const, providerResume: false, replyCorrelation: 'none' as const } },
-    buildLaunch: (context: Parameters<typeof builtin.buildLaunch>[0]) => ({ command: process.execPath, args: [...context.args], env: context.env }),
-    planManagedHooks: undefined, discoverNativeSession: undefined, observeSessionStatus: undefined, prepareNativePromptInput: undefined,
-    terminalHandshake: undefined, terminalPromptRender: undefined }
+    buildLaunch: (context: Parameters<typeof builtin.buildLaunch>[0]) => ({ command: process.execPath, args: [...context.args], env: context.env }) }
   const store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
   let beforeAuthorSwap: ((...args: Parameters<typeof store.compareAndSwapMetadata>) => Promise<void>) | undefined
   const swap = store.compareAndSwapMetadata.bind(store)
@@ -203,6 +208,70 @@ tui.on('close',()=>{backend.kill('SIGTERM');process.exit()});
     await waitFor(screen, text => text.includes('PRIVATE-DRAFT-KEEP'))
     const before = (await client.statusAgent(session.agentSessionId)).run
     await control.start(); rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(root, 'control.sock') } })
+    if (waitMode) {
+      const events: import('../src/types.js').AgentMuxClientEvent[] = []
+      const off = client.onEvent(event => events.push(event))
+      try {
+        const records = () => readFile(session!.nativeHandle!.kind === 'provider' ? session!.nativeHandle!.transcriptPath! : '', 'utf8').then(text => text.split('\n').filter(Boolean).map(line => JSON.parse(line)))
+        client.disconnect()
+        const stoppedInput = await client.submitAgentPrompt({ agentSessionId: session.agentSessionId, expectedRun: original,
+          admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', operationId: 'native-wait-stop-A', prompt: 'PRIVATE-NATIVE-STOPPED-ORIGINAL', authorHuman: true }) as import('../src/agent-input-wait.js').AgentInputSubmissionReceipt
+        expect(stoppedInput).toMatchObject({ persistence: 'confirmed', status: 'waiting', admission: null })
+        expect(nativeDispatchIds).toEqual([])
+        const stop = await client.stopAgentInputWaiting({ ref: stoppedInput!.ref, cancelOperationId: 'native-wait-stop-original-action' })
+        expect(stop.outcome).toBe('stopped-before-dispatch')
+        const cliArgs = ['--endpoint', 'unix://' + join(root, 'control.sock'), 'agent', 'send', '--to-session', session.agentSessionId,
+          '--text', 'PRIVATE-NATIVE-WAIT-CLI', '--execution', 'immediate', '--operation-id', 'native-wait-original-control', '--message-id', 'native-wait-B']
+        const cli = await runCompiledObjectCli(cliArgs, objectCliEnvironment(root, {}), '', 50_000)
+        expect(cli.code, cli.stderr).toBe(0)
+        const firstsave = JSON.parse(cli.stdout).result
+        expect(firstsave).toMatchObject({ delivery: { state: 'queued' }, inputReceipt: { persistence: 'confirmed', status: 'waiting', admission: null } })
+        expect(nativeDispatchIds).toEqual([])
+        await client.connect()
+        const admitted = await waitFor(() => client.inspectAgentInput({ key: firstsave.inputReceipt.key }), receipt => receipt?.status === 'admitted', 50_000)
+        expect(events.some(event => event.type === 'connection-state' && event.state === 'restored')).toBe(true)
+        expect(admitted).toMatchObject({ status: 'admitted', admission: { admission: { transport: 'native', native: { outcome: 'admitted' } } } })
+        expect(nativeDispatchIds).toEqual(['native-wait-B'])
+        const consumed = await waitFor(records, values => values.some(value => value.payload?.item?.client_id === 'native-wait-B'))
+        expect(consumed.filter(value => value.payload?.item?.client_id === 'native-wait-B')).toHaveLength(1)
+        expect(consumed.some(value => value.payload?.item?.client_id === 'native-wait-stop-A')).toBe(false)
+        expect(await client.inspectAgentInput({ key: stoppedInput!.key })).toMatchObject({ status: 'stopped', ref: stoppedInput!.ref, admission: null })
+        expect(await client.stopAgentInputWaiting({ ref: stoppedInput!.ref, cancelOperationId: stop.cancelOperationId })).toEqual(stop)
+        const joined = await runCompiledObjectCli(cliArgs, objectCliEnvironment(root, {}), '', 50_000)
+        expect(joined.code, joined.stderr).toBe(0); expect(JSON.parse(joined.stdout).result.inputReceipt).toEqual(admitted)
+        expect(nativeDispatchIds).toEqual(['native-wait-B'])
+        // The real Builtin preparation is stopped at its original peer phase.
+        // Only phase observation and timing are test ports; Native helper/close,
+        // factory result, journal Stop and all Core consumers remain original.
+        const errorsBeforeStop = events.length
+        let receiveFirstsave!: () => void, stopCurrent!: () => Promise<import('../src/agent-input-wait.js').AgentInputWaitStopReceipt>
+        const receiptReady = new Promise<void>(resolve => { receiveFirstsave = resolve })
+        let stopAction: Promise<import('../src/agent-input-wait.js').AgentInputWaitStopReceipt> | undefined
+        stopPreparationAtPeer = () => { stopPreparationAtPeer = undefined; stopAction = receiptReady.then(() => stopCurrent()) }
+        const peerStopInput = await client.submitAgentPrompt({ agentSessionId: session.agentSessionId, expectedRun: original,
+          admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', operationId: 'native-prepare-stop-C', prompt: 'PRIVATE-NATIVE-PREPARATION-STOP', authorHuman: true }) as import('../src/agent-input-wait.js').AgentInputSubmissionReceipt
+        stopCurrent = async () => await client.stopAgentInputWaiting({ ref: peerStopInput.ref, cancelOperationId: 'native-prepare-stop-original-action' })
+        receiveFirstsave()
+        await waitFor(async () => stopAction, value => value !== undefined)
+        const peerStop = await stopAction!
+        expect(peerStop.outcome).toBe('stopped-before-dispatch')
+        await (Reflect.get(client, 'inputWaitingRecipients') as Map<string, { pending: Promise<void> }>).get(session.agentSessionId)?.pending
+        const normalStopErrors = events.slice(errorsBeforeStop).filter(event => event.type === 'agent-error')
+        expect(normalStopErrors, 'Confirmed normal Builtin observer Stop must not become a service failure').toEqual([])
+        expect(nativeDispatchIds).toEqual(['native-wait-B'])
+        expect((await records()).some(value => value.payload?.item?.client_id === 'native-prepare-stop-C')).toBe(false)
+        expect(await client.inspectAgentInput({ key: peerStopInput.key })).toMatchObject({ status: 'stopped', admission: null })
+        await client.reattachAgent(session.agentSessionId, 0)
+        await client.writeAgent({ agentSessionId: session.agentSessionId, expectedRun: original, source: 'terminal-protocol', data: '\x1b[I' })
+        const after = (await client.statusAgent(session.agentSessionId)).run
+        expect(after).toMatchObject({ runId: original.runId, pid: pids.root, state: 'running', acceptedInputBytes: before.acceptedInputBytes! + 3 })
+        expect(await screen()).toContain('PRIVATE-DRAFT-KEEP')
+        console.log(JSON.stringify({ schema: 'agentmux.native-durable-wait-fixture.v1', originalRun: original, pids, firstsave, stop, admitted,
+          repeatedCli: { code: joined.code, stdout: joined.stdout, stderr: joined.stderr }, normalBuiltinStop: { input: peerStopInput, stop: peerStop, errors: normalStopErrors }, nativeDispatchIds, preparations,
+          originalRuntimeRestoredEvents: events.filter(event => event.type === 'connection-state'), originalRaw: { before, after }, stoppedNativeRecords: 0, admittedNativeRecords: 1 }))
+      } finally { off() }
+      return
+    }
     const cli = await runCompiledObjectCli(['--endpoint', 'unix://' + join(root, 'control.sock'), 'agent', 'send', '--to-session', session.agentSessionId,
       '--text', 'PRIVATE-NATIVE-STEER', '--execution', 'immediate', '--operation-id', 'native-exact-steer'], objectCliEnvironment(root, {}), '', 50_000)
     expect(cli.code, cli.stderr).toBe(0)
