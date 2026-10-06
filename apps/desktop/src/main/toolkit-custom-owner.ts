@@ -1,7 +1,10 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
-import { join } from 'node:path'
-import { AgentMuxError, type AgentMuxClientEvent, type AgentMuxRunAttachment } from '@agentmux/core'
+import { isAbsolute, join, resolve, sep } from 'node:path'
+import { AgentMuxError, type AgentMuxClientEvent, type AgentMuxRunAttachment, type AgentMuxTerminalCreateInput } from '@agentmux/core'
+import { openToolkitResultChannel } from '@agentmux/core/toolkit-result-channel'
+import { parseToolkitResultDocument, TOOLKIT_RESULT_DOCUMENT_MAX_BYTES, type ToolkitResultDocument } from '@agentmux/core/toolkit-result-document'
+import { AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS } from '@agentmux/core/control'
 import { parseToolkitSnapshot, parseToolkitRunInput, parseToolkitActionInput, TOOLKIT_TEXT_MAX_BYTES, TOOLKIT_TEXT_MAX_JSON_BYTES,
   type ToolkitAdmission, type ToolkitConfirmedResult, type ToolkitRunInput,
   type ToolkitExecution, type ToolkitScriptSnapshot, type ToolkitDisplaySnapshot, type ToolkitToolDefinition, type ToolkitToolConfiguration, type ToolkitSnapshot } from '@agentmux/core/control'
@@ -16,12 +19,15 @@ type Lease = { snapshot(value: ToolkitSnapshot): void; end(error?: Error): void;
 type Tool = { id: string; loading: Promise<void> | null; latest: ToolkitConfirmedResult | null; admission: ToolkitAdmission | null
   error: string | null; sourceError: string | null; definition: ToolkitToolDefinition | null; sequence: number; leases: Set<Lease>; live: Execution | null
   parent: Tool | null; display: Tool | null; displayReaders: number; saving: Promise<void>; successful: ToolkitConfirmedResult | null
-  evaluationRequest: Promise<ToolkitSnapshot> | null }
-type Execution = { capture: CapturedToolkitPackage | null; tool: Tool; admission: ToolkitAdmission; port: ToolkitRunPort | null; cursor: number; rawBytes: number
+  evaluationRequest: Promise<ToolkitSnapshot> | null; createIntent: unknown }
+type Execution = { capture: CapturedToolkitPackage | null; snapshotRoot: string | null; tool: Tool; admission: ToolkitAdmission; port: ToolkitRunPort | null; cursor: number; rawBytes: number
   decoder: TextDecoder; replayText: string | null; failure: string | null; creating: boolean; attaching: boolean; ended: boolean; stopRequested: boolean
   terminalHint: boolean; uncertain: boolean; done: Promise<void>; complete(): void
+  channel: Awaited<ReturnType<typeof openToolkitResultChannel>> | null; resultBytes: number; resultBuffer: string; resultDecoder: TextDecoder
+  document: ToolkitResultDocument | null | undefined; resultError: string | null; resultEnded: boolean; resultReady: Promise<void>; endResult(): void
+  drainTimer: ReturnType<typeof setTimeout> | null
   finishing: Promise<'running' | void> | null; starting: Promise<void> | null; stopSubmission: Promise<void> | null }
-type LaneReceipt = { latestConfirmed: ToolkitConfirmedResult | null; admission: ToolkitAdmission | null; lastSucceeded?: ToolkitConfirmedResult }
+type LaneReceipt = { latestConfirmed: ToolkitConfirmedResult | null; admission: ToolkitAdmission | null; lastSucceeded?: ToolkitConfirmedResult; createIntent?: unknown }
 type Receipt = LaneReceipt & { display?: LaneReceipt }
 // A code unit may cost six JSON bytes; leave room for the fixed owner explanation.
 const message = (error: unknown) => String(error instanceof Error ? error.message : error).slice(0, 512)
@@ -44,7 +50,7 @@ export class CustomToolkitOwner {
   }
   private newTool(id: string, parent: Tool | null = null): Tool {
     return { id, parent, display: null, displayReaders: 0, saving: Promise.resolve(), successful: null, evaluationRequest: null, loading: null,
-      latest: null, admission: null, error: null, sourceError: null, definition: null, sequence: 0, leases: new Set(), live: null }
+      latest: null, admission: null, error: null, sourceError: null, definition: null, sequence: 0, leases: new Set(), live: null, createIntent: undefined }
   }
   private displayTool(tool: Tool): Tool { return tool.display ??= this.newTool(tool.id, tool) }
   private state(tool: Tool, definition: ToolkitToolDefinition) {
@@ -53,7 +59,7 @@ export class CustomToolkitOwner {
   private displaySnapshot(tool: Tool, definition: ToolkitToolDefinition): ToolkitDisplaySnapshot {
     return { state: this.state(tool, definition), reason: tool.error ?? tool.sourceError ?? tool.admission?.reason ?? tool.latest?.reason ?? null,
       admission: tool.admission, latestConfirmed: tool.latest, sequence: tool.sequence,
-      ...(tool.successful && tool.latest?.state !== 'succeeded' ? { lastSucceeded: tool.successful } : {}) }
+      ...(tool.successful && tool.latest?.executionId !== tool.successful.executionId ? { lastSucceeded: tool.successful } : {}) }
   }
   private scriptSnapshot(tool: Tool, definition: ToolkitToolDefinition): ToolkitScriptSnapshot {
     const display = definition.display || tool.display?.admission || tool.display?.latest || tool.display?.error
@@ -108,6 +114,46 @@ export class CustomToolkitOwner {
       this.tools.delete(id)
     }
   }
+  /** Private launch intent is never part of the public Toolkit execution DTO. */
+  private packageEntry(admission: ToolkitAdmission, display: boolean): string | undefined {
+    const captured = admission.definition.package
+    return display ? captured?.displayEntry : admission.action
+      ? captured?.actionEntries.find(entry => entry.id === admission.action!.id)?.entry : captured?.entry
+  }
+  private parseCreateIntent(value: unknown, admission: ToolkitAdmission | null, display: boolean): AgentMuxTerminalCreateInput | null {
+    if (value === undefined) return null
+    const invalid = (): never => { throw new AgentMuxError('Original Toolkit creation intent is invalid; the receipt is retained.', 'CONTROL_PROTOCOL_ERROR') }
+    const object = (value: unknown): Record<string, unknown> => {
+      if (!value || typeof value !== 'object' || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) invalid()
+      for (const key of Reflect.ownKeys(value as object)) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key)
+        if (typeof key !== 'string' || !descriptor?.enumerable || !('value' in descriptor)) invalid()
+      }
+      return value as Record<string, unknown>
+    }
+    const source = object(value), fields = ['createOperationId', 'workspacePath', 'command', 'args', 'env', 'cols', 'rows']
+    if (!admission) return invalid()
+    if (fields.some(key => !Object.hasOwn(source, key)) || Object.keys(source).some(key => !fields.includes(key)) ||
+        source.createOperationId !== admission.executionId || source.workspacePath !== admission.target.workspacePath ||
+        typeof source.command !== 'string' || !isAbsolute(source.command) || source.command.includes('\0') || source.cols !== 80 || source.rows !== 24) invalid()
+    const definition = admission.definition, program = display ? definition.display! : admission.action ? this.savedAction(definition, admission.action.id) : definition
+    if (!program) invalid()
+    const args = source.args
+    if (!Array.isArray(args) || Object.getPrototypeOf(args) !== Array.prototype ||
+        Reflect.ownKeys(args).length !== args.length + 1) return invalid()
+    const first = Object.getOwnPropertyDescriptor(args, '0'), entry = this.packageEntry(admission, display)
+    if (definition.package && (!entry || !first?.enumerable || !('value' in first) || typeof first.value !== 'string' ||
+        !isAbsolute(first.value) || first.value.includes('\0') || resolve(first.value) !== first.value || !first.value.endsWith(sep + join(admission.executionId, 'files', entry)))) invalid()
+    const expectedArgs = definition.package ? [first!.value, ...program.args] : ['--input-type=module', '--eval', program.script, '--', ...program.args]
+    if (args.length !== expectedArgs.length) invalid()
+    for (let index = 0; index < expectedArgs.length; index++) {
+      const descriptor = Object.getOwnPropertyDescriptor(args, String(index))
+      if (!descriptor?.enumerable || !('value' in descriptor) || descriptor.value !== expectedArgs[index]) invalid()
+    }
+    const env = object(source.env)
+    if (Object.entries(env).some(([key, item]) => !key || /[=\0]/u.test(key) || typeof item !== 'string' || item.includes('\0'))) invalid()
+    return structuredClone(source) as AgentMuxTerminalCreateInput
+  }
   private async load(id: string): Promise<Tool> {
     this.configuration(id)
     let tool = this.tools.get(id)
@@ -122,26 +168,34 @@ export class CustomToolkitOwner {
         if (receipt === null) return
         if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) ||
             !Object.hasOwn(receipt, 'admission') || !Object.hasOwn(receipt, 'latestConfirmed') ||
-            Object.keys(receipt).some(key => !['admission', 'latestConfirmed', 'display'].includes(key))) {
+            Object.keys(receipt).some(key => !['admission', 'latestConfirmed', 'display', 'createIntent'].includes(key))) {
           throw new AgentMuxError('Tool receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
         }
         const saved = receipt as Receipt
+        const { createIntent: displayIntent, ...displayReceipt } = saved.display ?? {}
         const record = this.configuration(id)
         const definition = saved.admission?.definition ?? saved.latestConfirmed?.definition ??
           saved.display?.admission?.definition ?? saved.display?.latestConfirmed?.definition ?? (!('kind' in record) ? record : null)
         if (!definition) throw new AgentMuxError('Tool receipt has no captured definition.', 'CONTROL_PROTOCOL_ERROR')
         const parsed = parseToolkitSnapshot({ ...this.scriptSnapshot(value, definition), admission: saved.admission,
           latestConfirmed: saved.latestConfirmed, state: saved.admission?.state ?? saved.latestConfirmed?.state ?? 'idle',
-          ...(saved.display ? { display: { ...saved.display, state: saved.display.admission?.state ?? saved.display.latestConfirmed?.state ?? 'idle',
+          ...(saved.display ? { display: { ...displayReceipt, state: saved.display.admission?.state ?? saved.display.latestConfirmed?.state ?? 'idle',
             reason: saved.display.admission?.reason ?? saved.display.latestConfirmed?.reason ?? null, sequence: 0 } } : {}) })
         if (parsed.kind !== 'script') throw new AgentMuxError('Tool receipt has another kind.', 'CONTROL_PROTOCOL_ERROR')
         value.latest = parsed.latestConfirmed; value.admission = parsed.admission
-        if (value.admission) value.admission = { ...value.admission, state: 'unknown', reason: 'Execution restored; exact Run outcome needs confirmation.' }
+        // Launch material is private and consumed only by an explicit original create continuation.
+        value.createIntent = saved.createIntent
+        if (value.admission) value.admission = { ...value.admission, state: 'unknown', reason: value.admission.document === null
+          ? value.admission.reason ?? 'Original machine document is unavailable; exact Run outcome needs confirmation.' : 'Execution restored; exact Run outcome needs confirmation.' }
         if (parsed.display) {
           const display = this.displayTool(value)
           display.latest = parsed.display.latestConfirmed; display.admission = parsed.display.admission
-          display.successful = parsed.display.latestConfirmed?.state === 'succeeded' ? parsed.display.latestConfirmed : parsed.display.lastSucceeded ?? null
-          if (display.admission) display.admission = { ...display.admission, state: 'unknown', reason: 'Display evaluation restored; exact Run outcome needs confirmation.' }
+          display.createIntent = displayIntent
+          display.successful = parsed.display.latestConfirmed?.state === 'succeeded' && parsed.display.latestConfirmed.document
+            ? parsed.display.latestConfirmed : parsed.display.lastSucceeded ??
+              (parsed.display.latestConfirmed?.state === 'succeeded' && parsed.display.latestConfirmed.document !== null ? parsed.display.latestConfirmed : null)
+          if (display.admission) display.admission = { ...display.admission, state: 'unknown', reason: display.admission.document === null
+            ? display.admission.reason ?? 'Original display document is unavailable; exact Run outcome needs confirmation.' : 'Display evaluation restored; exact Run outcome needs confirmation.' }
         }
       } catch (error) { value.error = 'Tool receipt is unconfirmed: ' + message(error) }
     })()
@@ -168,14 +222,20 @@ export class CustomToolkitOwner {
   private execution(tool: Tool, admission: ToolkitAdmission): Execution {
     let complete!: () => void
     const done = new Promise<void>(resolve => { complete = resolve })
-    return { capture: null, tool, admission, port: null, cursor: 0, rawBytes: 0, decoder: new TextDecoder('utf-8', { fatal: true }), replayText: null,
+    let endResult!: () => void
+    const resultReady = new Promise<void>(resolve => { endResult = resolve })
+    return { capture: null, snapshotRoot: null, tool, admission, port: null, cursor: 0, rawBytes: 0, decoder: new TextDecoder('utf-8', { fatal: true }), replayText: null,
       failure: null, creating: false, attaching: false, ended: false, stopRequested: false, terminalHint: false, uncertain: false,
+      channel: null, resultBytes: 0, resultBuffer: '', resultDecoder: new TextDecoder('utf-8', { fatal: true }), document: undefined,
+      resultError: admission.document === null ? admission.reason ?? 'Original machine document is unavailable.' : null,
+      resultEnded: false, resultReady, endResult, drainTimer: null,
       done, complete, finishing: null, starting: null, stopSubmission: null }
   }
   private receipt(tool: Tool, replacement?: { lane: Tool; value: LaneReceipt }): Receipt {
     const facts = (lane: Tool): LaneReceipt => {
       const value = replacement?.lane === lane ? replacement.value : { latestConfirmed: lane.latest, admission: lane.admission }
-      return { ...value, ...(lane.parent && lane.successful && value.latestConfirmed?.state !== 'succeeded' ? { lastSucceeded: lane.successful } : {}) }
+      return { ...value, ...(value.admission && lane.createIntent !== undefined ? { createIntent: lane.createIntent } : {}),
+        ...(lane.parent && lane.successful && value.latestConfirmed?.executionId !== lane.successful.executionId ? { lastSucceeded: lane.successful } : {}) }
     }
     return structuredClone({ ...facts(tool), ...(tool.display ? { display: facts(tool.display) } : {}) })
   }
@@ -195,6 +255,65 @@ export class CustomToolkitOwner {
     execution.complete()
     execution.admission.state = 'unknown'; execution.admission.reason = message(error)
     this.publish(execution.tool)
+  }
+  private async closeChannel(execution: Execution): Promise<void> {
+    if (execution.drainTimer) { clearTimeout(execution.drainTimer); execution.drainTimer = null }
+    const channel = execution.channel
+    await channel?.close()
+    if (execution.channel === channel) execution.channel = null
+  }
+  /** Early frames stay private until Core confirms this creation's exact Run. */
+  private applyDocument(execution: Execution): boolean {
+    if (execution.tool.live !== execution || execution.ended || !execution.admission.run || execution.document === undefined) return false
+    execution.admission.document = execution.document
+    if (execution.resultError) {
+      execution.admission.state = 'unknown'; execution.admission.reason = execution.resultError
+    }
+    return true
+  }
+  private publishDocument(execution: Execution) {
+    if (!this.applyDocument(execution)) return
+    void this.save(execution.tool).then(() => {
+      if (execution.tool.live === execution && !execution.ended) this.publish(execution.tool)
+    }, error => this.unknown(execution, 'Tool document persistence is unconfirmed: ' + message(error)))
+  }
+  private unavailableDocument(execution: Execution, error: unknown) {
+    if (execution.tool.live !== execution || execution.ended || execution.resultEnded) return
+    execution.document = null; execution.resultError = 'Tool machine document is unavailable: ' + message(error)
+    execution.resultEnded = true; execution.resultBuffer = ''; execution.endResult()
+    this.publishDocument(execution)
+    // Losing an observation capability never authorizes stopping its healthy Run.
+    void this.closeChannel(execution).catch(failure => this.unknown(execution, execution.resultError + '; result channel cleanup is unconfirmed: ' + message(failure)))
+  }
+  private documentBytes(execution: Execution, bytes: Uint8Array) {
+    if (execution.tool.live !== execution || execution.ended || execution.resultEnded) return
+    try {
+      execution.resultBytes += bytes.byteLength
+      if (execution.resultBytes > TOOLKIT_RESULT_DOCUMENT_MAX_BYTES + 1) throw new AgentMuxError('Tool machine document exceeds its byte budget.', 'CONTROL_PROTOCOL_ERROR')
+      execution.resultBuffer += execution.resultDecoder.decode(bytes, { stream: true })
+    } catch (error) { this.unavailableDocument(execution, error) }
+  }
+  private documentEnded(execution: Execution) {
+    if (execution.tool.live !== execution || execution.ended || execution.resultEnded) return
+    try {
+      const text = execution.resultBuffer + execution.resultDecoder.decode()
+      if (!text.endsWith('\n') || text.indexOf('\n') !== text.length - 1) throw new AgentMuxError('Tool machine result requires exactly one complete LF document and EOF.', 'CONTROL_PROTOCOL_ERROR')
+      execution.document = parseToolkitResultDocument(JSON.parse(text.slice(0, -1)))
+      execution.resultEnded = true; execution.resultBuffer = ''; execution.endResult()
+      this.publishDocument(execution)
+    } catch (error) { this.unavailableDocument(execution, error) }
+  }
+  private async drainDocument(execution: Execution): Promise<void> {
+    if (!execution.channel?.connected || execution.resultEnded) return
+    execution.admission.state = 'unknown'; execution.admission.reason = 'Run exited; the original machine document is awaiting EOF.'
+    this.publish(execution.tool)
+    // Only the completed Run's observation waits; expiry cannot change its terminal fact.
+    execution.drainTimer ??= setTimeout(() => {
+      this.unavailableDocument(execution, new AgentMuxError('Original result-channel EOF is unconfirmed after Run exit.', 'CONTROL_TIMEOUT'))
+    }, AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS)
+    execution.drainTimer.unref()
+    await execution.resultReady
+    if (execution.drainTimer) { clearTimeout(execution.drainTimer); execution.drainTimer = null }
   }
   private savedAction(definition: ToolkitToolDefinition, id: string) {
     const action = definition.actions?.find(action => action.id === id)
@@ -342,15 +461,16 @@ export class CustomToolkitOwner {
       }
       const definition = execution.admission.definition
       const program = execution.tool.parent ? definition.display! : execution.admission.action ? this.savedAction(definition, execution.admission.action.id) : definition
+      const retainedIntent = retained ? this.parseCreateIntent(execution.tool.createIntent, execution.admission, Boolean(execution.tool.parent)) : null
       let args = ['--input-type=module', '--eval', program.script, '--', ...program.args]
       if (definition.package) {
-        if (!this.args.snapshotRoot) throw new AgentMuxError('Package snapshot owner is unavailable.', 'TOOLKIT_PACKAGE_UNAVAILABLE')
+        const entry = this.packageEntry(execution.admission, Boolean(execution.tool.parent))!
+        const snapshotRoot = retainedIntent ? resolve(retainedIntent.args![0]!.slice(0, -join(execution.admission.executionId, 'files', entry).length)) : this.args.snapshotRoot
+        if (!snapshotRoot) throw new AgentMuxError('Package snapshot owner is unavailable.', 'TOOLKIT_PACKAGE_UNAVAILABLE')
         const directory = retained
-          ? await readToolkitPackageSnapshot(this.args.snapshotRoot, execution.admission.executionId, definition)
-          : await writeToolkitPackageSnapshot(this.args.snapshotRoot, execution.admission.executionId, execution.capture!)
-        const entry = execution.tool.parent ? definition.package.displayEntry! : execution.admission.action
-          ? definition.package.actionEntries.find(entry => entry.id === execution.admission.action!.id)!.entry
-          : definition.package.entry
+          ? await readToolkitPackageSnapshot(snapshotRoot, execution.admission.executionId, definition)
+          : await writeToolkitPackageSnapshot(snapshotRoot, execution.admission.executionId, execution.capture!)
+        execution.snapshotRoot = snapshotRoot
         args = [join(directory, entry), ...program.args]
         execution.capture = null
       }
@@ -359,22 +479,45 @@ export class CustomToolkitOwner {
         else await this.confirm(execution, 'stopped', 'Owner closed before the script started.', null)
         return
       }
+      if (!retained) {
+        const env = { ...this.args.env }
+        delete env.AGENTMUX_TOOLKIT_RESULT_PATH; delete env.AGENTMUX_TOOLKIT_RESULT_TOKEN
+        try {
+          execution.channel = await openToolkitResultChannel({ onBytes: bytes => this.documentBytes(execution, bytes),
+            onEnd: () => this.documentEnded(execution), onError: error => this.unavailableDocument(execution, error) })
+          Object.assign(env, execution.channel.env)
+        } catch (error) { this.unavailableDocument(execution, error) }
+        execution.tool.createIntent = { createOperationId: execution.admission.executionId,
+          workspacePath: definition.workspacePath, command: this.args.runner, args, env, cols: 80, rows: 24 }
+        // Persist the complete original request before Core can admit its operation key.
+        await this.save(execution.tool)
+      }
+      if (this.closed) {
+        await this.closeChannel(execution)
+        if (retained) this.unknown(execution, 'Owner closed before the original request could be confirmed.')
+        else await this.confirm(execution, 'stopped', 'Owner closed before the script started.', null)
+        return
+      }
+      // Old text-only admissions without a captured intent keep their original recipe.
+      // A retained modern intent reuses its exact input without reopening its ephemeral socket.
+      const createIntent = retainedIntent ?? this.parseCreateIntent(execution.tool.createIntent, execution.admission, Boolean(execution.tool.parent)) ?? { createOperationId: execution.admission.executionId,
+        workspacePath: definition.workspacePath, command: this.args.runner, args, env: this.args.env, cols: 80, rows: 24 }
       // A failed create may still have admitted a Run; only confirmed outcomes permit cleanup.
       execution.creating = true
-      const run = await execution.port.create({ createOperationId: execution.admission.executionId,
-        workspacePath: definition.workspacePath, command: this.args.runner,
-        args, env: this.args.env, cols: 80, rows: 24 },
+      const run = await execution.port.create(structuredClone(createIntent),
         event => this.accept(execution, event))
       execution.admission.run = { hostId: 'local', runId: run.runId }; execution.creating = false
+      this.applyDocument(execution)
       await this.save(execution.tool)
       const attached = await this.attach(execution)
       if (execution.ended || execution.tool.live !== execution || execution.uncertain) return
       if (attached.run.state !== 'running') await this.finish(execution, attached)
       else if (this.closed || execution.stopRequested || execution.failure) await this.stopLane(execution.tool, execution.admission.executionId)
-      else { execution.admission.state = 'running'; this.publish(execution.tool) }
+      else { execution.admission.state = execution.resultError ? 'unknown' : 'running'; this.publish(execution.tool) }
     } catch (error) {
       if (retained || execution.creating || execution.admission.run) this.unknown(execution, error)
       else await this.confirm(execution, 'failed', 'Tool preparation failed: ' + message(error), null)
+      await this.closeChannel(execution).catch(failure => this.unknown(execution, 'Tool channel cleanup is unconfirmed: ' + message(failure)))
     }
   }
   private async recover(tool: Tool): Promise<void> {
@@ -388,7 +531,7 @@ export class CustomToolkitOwner {
         if (execution.ended || tool.live !== execution || execution.uncertain) return
         if (attached.run.state !== 'running') await this.finish(execution, attached)
         else if (this.closed || execution.failure || execution.stopRequested) await this.stopLane(tool, execution.admission.executionId)
-        else { execution.admission.state = 'running'; execution.admission.reason = null; this.publish(tool) }
+        else { execution.admission.state = execution.resultError ? 'unknown' : 'running'; execution.admission.reason = execution.resultError; this.publish(tool) }
       } catch (error) {
         this.unknown(execution, error)
         if (execution.port && execution.admission.run) {
@@ -509,12 +652,14 @@ export class CustomToolkitOwner {
           catch (error) { execution.failure = message(error) }
         }
         this.restoreText(execution, final)
+        await this.drainDocument(execution)
         // An exit event can arrive inside Core Stop, before its acceptance is known.
         // Wait only for that submission, never for Stop's later call back into finish.
         try { await execution.stopSubmission } catch { /* Rejected Stop leaves the natural terminal fact authoritative. */ }
         if (execution.tool.live !== execution || execution.ended) return
         const state = execution.failure ? 'failed' : execution.stopRequested ? 'stopped' : final.run.exitCode === 0 ? 'succeeded' : 'failed'
-        const reason = execution.failure ?? (state === 'succeeded' ? null : state === 'stopped' ? 'Stopped explicitly.' : 'Script exited unsuccessfully.')
+        const terminalReason = execution.failure ?? (state === 'succeeded' ? null : state === 'stopped' ? 'Stopped explicitly.' : 'Script exited unsuccessfully.')
+        const reason = [terminalReason, execution.resultError].filter(Boolean).join('; ') || null
         await this.confirm(execution, state, reason, final.run.exitCode ?? null)
       } catch (error) { this.unknown(execution, error) }
     })().finally(() => { execution.finishing = null })
@@ -528,21 +673,24 @@ export class CustomToolkitOwner {
     try {
       await this.save(tool, { latestConfirmed: confirmed, admission: execution.admission }, () => {
         tool.latest = confirmed; execution.ended = true
-        if (tool.parent && confirmed.state === 'succeeded') tool.successful = confirmed
+        if (tool.parent && confirmed.state === 'succeeded' && confirmed.document !== null &&
+            (confirmed.document !== undefined || !tool.successful?.document)) tool.successful = confirmed
         execution.admission.state = 'stopping'; execution.admission.reason = 'Result confirmed; exact Run cleanup pending.'
       })
       this.publish(tool)
+      await this.closeChannel(execution)
       if (execution.port && execution.admission.run) {
         await execution.port.release(ref(execution))
         await execution.port.remove(ref(execution))
       }
       await this.save(tool, { latestConfirmed: confirmed, admission: null }, () => {
-        tool.admission = null; tool.live = null; execution.capture = null; execution.complete()
+        tool.admission = null; tool.live = null; tool.createIntent = undefined; execution.capture = null; execution.complete()
       })
       this.publish(tool)
       // Cleanup failure retains only an owned cache; it cannot turn a confirmed result into an unknown Run.
-      if (execution.admission.definition.package && this.args.snapshotRoot) {
-        await removeToolkitPackageSnapshot(this.args.snapshotRoot, execution.admission.executionId, execution.admission.definition.package.contentSHA256).catch(error => {
+      const snapshotRoot = execution.snapshotRoot ?? this.args.snapshotRoot
+      if (execution.admission.definition.package && snapshotRoot) {
+        await removeToolkitPackageSnapshot(snapshotRoot, execution.admission.executionId, execution.admission.definition.package.contentSHA256).catch(error => {
           console.warn("Confirmed Toolkit execution cache cleanup failed:", message(error))
         })
       }
@@ -640,6 +788,8 @@ export class CustomToolkitOwner {
       for (const lease of [...tool.leases]) { lease.release(); try { lease.end() } catch {} }
       const execution = tool.live
       if (!execution) continue
+      if (execution.channel?.connected && !execution.resultEnded) this.unavailableDocument(execution, 'Owner closed before the original machine stream reached EOF.')
+      await this.closeChannel(execution).catch(error => this.unknown(execution, 'Tool channel cleanup is unconfirmed: ' + message(error)))
       if (execution.starting) {
         try { await execution.starting } catch (error) { this.unknown(execution, error) }
       }
