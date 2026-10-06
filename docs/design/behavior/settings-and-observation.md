@@ -193,6 +193,8 @@ Prompts 的明确保存动作仍提交全库本次编辑，界面必须让用户
 
 ### 全分区一致性与相关消费者成本
 
+同一窗口内关闭 Settings 后再打开，保留已访问分区的未保存编辑与原字段期望值；关闭不自动提交、不默认弹确认，也不把草稿复制成另一份配置事实。未访问分区仍按需进入；关闭期间不截获背景键盘，不保持隐藏弹层或运行可见期观测，焦点回原入口。显式新导航仍到准确分区，原保存、冲突与恢复沿原 owner；此编辑连续性不承诺未保存内容跨进程耐久。
+
 所有真实设置分区都要具有一致的交互完成度，同时保留各页目的、原草稿、expected、保存范围、输入节点、焦点与 IME；视觉层级见密度 SSOT[《Settings 控制工作面》](../presentation/settings-and-observation.md#settings-控制工作面)，不复制 Prompt 的工作流给无关设置。
 
 Settings 的工作量应随真正相关的消费者与事实增长。无关 Session、Host 或 timeline 更新不能持续放大可见设置或已访问隐藏分区的 render、draft reconcile、probe 和 observer 工作；隐藏保留草稿与必要配置基线同步，恢复可见时读取最新相关事实。自己拥有的视觉工作在静止、离场或 document 真正隐藏时收敛或停止；不能通过清空草稿、停止健康 Run、移除工作面或把未知当成功制造性能改善。Terminal 连续阅读与原工作面保留仍以本文件[《Terminal 连续向上阅读历史》](terminal-reading.md#terminal-连续向上阅读历史)的成本合同为准，不另建常驻 sampler 或 Runtime 事实。
