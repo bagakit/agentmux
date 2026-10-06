@@ -1,5 +1,8 @@
 import { themeIdSchema, themeValueSchema, serializeThemeFile, BUILTIN_THEME_IDS, themeValue, type ThemeDocument, type ThemeValue, type ThemeMode, type AppAppearanceId } from './schema.js'
 
+import { FALLOUT_THEME } from './builtin-fallout.js'
+export { FALLOUT_THEME }
+
 export const DEFAULT_THEME_ID = 'graphite' as const
 export const GRAPHITE_THEME: ThemeDocument = {
   format: 'agentmux.theme', version: 1, id: 'graphite', name: 'Graphite / Mint', description: 'Quiet graphite and clear daylight, with mint actions.',
@@ -24,7 +27,8 @@ function freezeBuiltin(value: object): void {
   Object.freeze(value)
 }
 freezeBuiltin(GRAPHITE_THEME)
-export const BUILTIN_THEMES: readonly ThemeDocument[] = Object.freeze([GRAPHITE_THEME])
+freezeBuiltin(FALLOUT_THEME)
+export const BUILTIN_THEMES: readonly ThemeDocument[] = Object.freeze([GRAPHITE_THEME, FALLOUT_THEME])
 export type ThemeCatalogItem = { id: string; value: ThemeValue; readonly: boolean }
 export type ThemeIssue = { id: string; message: string }
 export function isBuiltinThemeId(id: string): boolean { return (BUILTIN_THEME_IDS as readonly string[]).includes(id) }

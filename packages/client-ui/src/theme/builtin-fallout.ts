@@ -1,0 +1,56 @@
+import type { ThemeDocument } from './schema.js'
+
+/* Pip-Boy instrument vocabulary; no scanlines, glow animation or game imagery. */
+export const FALLOUT_THEME: ThemeDocument = {
+  format: 'agentmux.theme', version: 1, id: 'fallout4', name: 'Fallout 4',
+  description: 'Phosphor green, olive instrument panels and precise industrial geometry. Quiet enough for a long terminal session.',
+  iconStyle: { strokeWidth: 2, linecap: 'butt', linejoin: 'miter' },
+  icons: {
+    'action.close': { kind: 'paths', paths: [{ d: 'M6 6 L18 18 M18 6 L6 18' }] },
+    'action.cancel': { kind: 'paths', paths: [{ d: 'M6 6 L18 18 M18 6 L6 18' }] },
+    'action.create': { kind: 'paths', paths: [{ d: 'M12 4 L12 20 M4 12 L20 12 M4 4 L7 4 M17 20 L20 20' }] },
+    'action.confirm': { kind: 'paths', paths: [{ d: 'M4 12 L9 17 L20 6' }] },
+    'action.remove': { kind: 'paths', paths: [{ d: 'M5 6 L19 6 M9 6 L9 3 L15 3 L15 6 M7 6 L8 21 L16 21 L17 6 M10 10 L10 17 M14 10 L14 17' }] },
+    'action.search': { kind: 'paths', paths: [{ d: 'M4 4 L15 4 L15 15 L4 15 Z M15 15 L21 21 M7 7 L12 7' }] },
+    'action.copy': { kind: 'paths', paths: [{ d: 'M8 8 L20 8 L20 20 L8 20 Z M16 8 L16 4 L4 4 L4 16 L8 16' }] },
+    'action.save': { kind: 'paths', paths: [{ d: 'M4 4 L17 4 L20 7 L20 20 L4 20 Z M8 4 L8 10 L16 10 L16 4 M8 20 L8 14 L16 14 L16 20' }] },
+    'action.edit': { kind: 'paths', paths: [{ d: 'M4 16 L15 5 L19 9 L8 20 L4 20 Z M13 7 L17 11' }] },
+    'action.refresh': { kind: 'paths', paths: [{ d: 'M20 8 L20 3 M20 8 L15 8 M20 8 L16 4 L8 4 L4 8 L4 16 L8 20 L16 20 L20 16' }] },
+    'action.upload': { kind: 'paths', paths: [{ d: 'M4 16 L4 20 L20 20 L20 16 M12 16 L12 4 M7 9 L12 4 L17 9' }] },
+    'action.download': { kind: 'paths', paths: [{ d: 'M4 16 L4 20 L20 20 L20 16 M12 4 L12 16 M7 11 L12 16 L17 11' }] },
+    'action.send': { kind: 'paths', paths: [{ d: 'M3 5 L21 12 L3 19 L7 12 Z M7 12 L21 12' }] },
+    'action.start': { kind: 'paths', paths: [{ d: 'M7 4 L20 12 L7 20 Z' }] },
+    'action.stop': { kind: 'paths', paths: [{ d: 'M5 5 L19 5 L19 19 L5 19 Z' }] },
+    'action.open-external': { kind: 'paths', paths: [{ d: 'M13 3 L21 3 L21 11 M21 3 L10 14 M9 5 L3 5 L3 21 L19 21 L19 15' }] },
+    'object.terminal': { kind: 'paths', paths: [{ d: 'M3 4 L21 4 L21 20 L3 20 Z M6 8 L10 12 L6 16 M13 16 L18 16' }] },
+    'object.agent': { kind: 'paths', paths: [{ d: 'M5 8 L19 8 L19 19 L5 19 Z M12 8 L12 3 M9 3 L15 3 M8 12 L8 14 M16 12 L16 14 M9 17 L15 17 M2 10 L2 16 M22 10 L22 16' }] },
+    'object.file': { kind: 'paths', paths: [{ d: 'M5 3 L14 3 L19 8 L19 21 L5 21 Z M14 3 L14 8 L19 8 M8 12 L16 12 M8 16 L16 16' }] },
+    'object.folder': { kind: 'paths', paths: [{ d: 'M3 5 L9 5 L12 8 L21 8 L21 20 L3 20 Z M3 11 L21 11' }] },
+    'object.browser': { kind: 'paths', paths: [{ d: 'M3 4 L21 4 L21 20 L3 20 Z M3 8 L21 8 M6 6 L7 6 M10 6 L11 6 M7 14 L17 14 M12 10 L12 18' }] },
+    'object.goal': { kind: 'paths', paths: [{ d: 'M4 4 L9 4 M4 4 L4 9 M20 4 L15 4 M20 4 L20 9 M4 20 L9 20 M4 20 L4 15 M20 20 L15 20 M20 20 L20 15 M8 8 L16 8 L16 16 L8 16 Z M12 2 L12 6 M12 18 L12 22 M2 12 L6 12 M18 12 L22 12' }] },
+    'status.completed': { kind: 'paths', paths: [{ d: 'M4 4 L20 4 L20 20 L4 20 Z M7 12 L11 16 L17 8' }] },
+    'status.failed': { kind: 'paths', paths: [{ d: 'M7 3 L17 3 L21 7 L21 17 L17 21 L7 21 L3 17 L3 7 Z M8 8 L16 16 M16 8 L8 16' }] },
+    'status.paused': { kind: 'paths', paths: [{ d: 'M4 4 L20 4 L20 20 L4 20 Z M9 8 L9 16 M15 8 L15 16' }] },
+    'status.running': { kind: 'paths', paths: [{ d: 'M4 8 L8 4 L16 4 L20 8 L20 16 L16 20 L8 20 L4 16 Z M9 9 L15 9 L15 15 L9 15 Z' }] },
+    'status.working': { kind: 'paths', paths: [{ d: 'M3 12 L7 12 L10 5 L14 19 L17 12 L21 12' }] },
+    'status.unknown': { kind: 'paths', paths: [{ d: 'M4 4 L20 4 L20 20 L4 20 Z M9 8 L9 7 L15 7 L15 11 L12 13 L12 14 M12 17 L12 18' }] },
+    'status.warning': { kind: 'paths', paths: [{ d: 'M12 3 L22 21 L2 21 Z M12 9 L12 15 M12 18 L12 19' }] },
+    'status.info': { kind: 'paths', paths: [{ d: 'M4 4 L20 4 L20 20 L4 20 Z M12 10 L12 17 M12 7 L12 8' }] },
+  },
+  variants: {
+    dark: { font: 'mono', radius: 2, elevation: 'flat', colors: {
+      background: '#10150f', surface0: '#151c13', surface1: '#1d2618', surface2: '#27321f', surface3: '#333e2a',
+      line: '#4c5b3e', lineSoft: '#303c29', text: '#dae8ca', textMuted: '#b7c6a3', textSubtle: '#9cac8e',
+      action: '#9bd969', actionHover: '#b3e58a', success: '#a8cc78', warning: '#e2be6e', danger: '#ef9280',
+      info: '#87bec1', special: '#bca9d3', focus: '#a6df79', neutral1: '#445238', neutral2: '#687c54',
+      neutral3: '#96a783',
+    } },
+    light: { font: 'mono', radius: 2, elevation: 'flat', colors: {
+      background: '#f2f1e5', surface0: '#faf9ef', surface1: '#e9ecd9', surface2: '#e0e5cd', surface3: '#d8ddc6',
+      line: '#aeb99a', lineSoft: '#cbd2ba', text: '#24301e', textMuted: '#47563a', textSubtle: '#536147',
+      action: '#456e2d', actionHover: '#345723', success: '#466c32', warning: '#855d14', danger: '#a23f30',
+      info: '#28646b', special: '#695085', focus: '#456e2d', neutral1: '#bec9ad', neutral2: '#8b9a77',
+      neutral3: '#586b42',
+    } },
+  }
+}
