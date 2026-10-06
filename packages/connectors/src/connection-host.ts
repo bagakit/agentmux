@@ -15,6 +15,8 @@ export interface WritableSecretPort extends SecretPort {
 export interface ConnectionAdapter {
   readonly adapterId: string
   readonly publication?: import('./publication-adapter.js').PublicationAdapter
+  readonly ingress?: import('./durable-ingress.js').IngressAuthenticator
+  readonly transport?: import('./connection-receivers.js').ConnectionIngressTransport
   /** Return facts from the original adapter protocol; no implicit send or Agent execution. */
   test(config: ConnectionConfig, credential: string): Promise<ConnectionObservation>
 }
@@ -29,6 +31,7 @@ export class ConnectionHost implements ConnectionPort {
   bindings?: import('@agentmux/core/connections').RoomBindingsPort
   delivery?: import('@agentmux/core/connections').ConnectionDeliveryPort
   ingress?: import('@agentmux/core/connections').ConnectionIngressReadPort
+  receiverObservation?: ((connectionId: string, revision: number) => Pick<ConnectionObservation, 'authentication' | 'transport' | 'intake'> | null) | undefined
   readonly database: DatabaseSync
   private readonly adapters: Map<string, ConnectionAdapter>
   private readonly observations = new Map<string, { revision: number; value: ConnectionObservation }>()
@@ -46,14 +49,15 @@ export class ConnectionHost implements ConnectionPort {
     this.adapters = new Map((options.adapters ?? []).map(adapter => [adapter.adapterId, adapter]))
     if (this.adapters.size !== (options.adapters?.length ?? 0)) { if (!options.database) this.database.close(); throw new AgentMuxError('Connection adapter IDs must be unique.', 'INVALID_CONNECTION_DATA') }
   }
-  private read(connectionId: string): ConnectionRecord | null {
+  private read(connectionId: string, includeReceiver = true): ConnectionRecord | null {
     const row = this.database.prepare('SELECT config_json, revision FROM connection_configuration WHERE connection_id = ?').get(connectionId)
     if (!row) return null
     const config = parseConnectionConfig(JSON.parse(row.config_json as string)), revision = Number(row.revision), observed = this.observations.get(connectionId)
-    return parseConnectionRecord({ config, revision, observation: !config.enabled ? disabled() : observed?.revision === revision ? observed.value : unknown() })
+    const observation = !config.enabled ? disabled() : { ...(observed?.revision === revision ? observed.value : unknown()), ...(includeReceiver ? this.receiverObservation?.(connectionId, revision) : {}) }
+    return parseConnectionRecord({ config, revision, observation })
   }
   /** Synchronous exact configuration read for owners joining this same database transaction. */
-  readConfiguration(connectionId: string): ConnectionRecord | null { return this.safe(() => this.read(connectionId)) }
+  readConfiguration(connectionId: string): ConnectionRecord | null { return this.safe(() => this.read(connectionId, false)) }
   private storedOperation(operationId: string): { input: ConnectionConfigureInput; operation: ConnectionOperation } | null {
     const row = this.database.prepare('SELECT input_json, result_json FROM connection_configuration_operation WHERE operation_id = ?').get(operationId)
     if (!row) return null
@@ -117,11 +121,19 @@ export class ConnectionHost implements ConnectionPort {
     const current = this.safe(() => this.read(input.connectionId))
     if (!current) throw new AgentMuxError('The exact connection is unknown.', 'UNKNOWN_CONNECTION')
     if (current.revision === record.revision) this.observations.set(input.connectionId, { revision: record.revision, value: observation })
-    return { ...current, observation: current.revision === record.revision ? observation : current.observation }
+    return current.revision === record.revision ? this.safe(() => this.read(input.connectionId))! : current
   }
   publicationAdapter(connectionId: string): import('./publication-adapter.js').PublicationAdapter | null {
     const config = this.readConfiguration(connectionId)?.config
     return config?.enabled ? this.adapters.get(config.adapterId)?.publication ?? null : null
+  }
+  registeredAdapter(adapterId: string): ConnectionAdapter | undefined { return this.adapters.get(adapterId) }
+  ingressAuthenticators(): import('./durable-ingress.js').IngressAuthenticator[] {
+    return [...this.adapters.values()].flatMap(adapter => adapter.ingress ? [{ adapterId: adapter.adapterId, verify: (config: ConnectionConfig, raw: string, proof?: unknown) => adapter.ingress!.verify(config, raw, proof) }] : [])
+  }
+  async resolveIngressCredential(connectionId: string): Promise<string | null> {
+    const config = this.readConfiguration(connectionId)?.config
+    return config?.enabled ? this.options.secrets.resolve(config.credentialRef) : null
   }
   async resolvePublicationCredential(connectionId: string): Promise<string | null> {
     const config = this.readConfiguration(connectionId)?.config

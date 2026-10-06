@@ -14,7 +14,7 @@ export type VerifiedIngressEvent = {
 export interface IngressAuthenticator {
   readonly adapterId: string
   /** Own signature/token verification and issuer checks. Never expose this port over RPC. */
-  verify(config: ConnectionConfig, raw: string): Promise<VerifiedIngressEvent>
+  verify(config: ConnectionConfig, raw: string, transportProof?: unknown): Promise<VerifiedIngressEvent>
 }
 type Core = Pick<AgentMuxClient, 'metadata' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'>
 export type DurableIngressOptions = {
@@ -44,6 +44,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     this.safe(() => this.database.exec(`
       CREATE TABLE IF NOT EXISTS connection_ingress_message (sequence INTEGER PRIMARY KEY AUTOINCREMENT, ingress_id TEXT NOT NULL UNIQUE, domain TEXT NOT NULL, app_id TEXT NOT NULL, message_id TEXT NOT NULL, connection_id TEXT NOT NULL, event_json TEXT NOT NULL, record_json TEXT NOT NULL, UNIQUE(domain, app_id, message_id));
       CREATE TABLE IF NOT EXISTS connection_ingress_event (domain TEXT NOT NULL, app_id TEXT NOT NULL, event_id TEXT NOT NULL, ingress_id TEXT NOT NULL, event_json TEXT NOT NULL, raw_payload TEXT NOT NULL, PRIMARY KEY(domain, app_id, event_id));
+      CREATE INDEX IF NOT EXISTS connection_ingress_received ON connection_ingress_message(connection_id,sequence) WHERE json_extract(record_json,'$.state')='received';
     `))
   }
   private safe<T>(read: () => T): T {
@@ -68,14 +69,14 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     return value
   }
   /** Authenticate, retain the complete original event, then ACK. ACK certifies persistence alone. */
-  async receive(input: { connectionId: string; raw: string }, acknowledge: () => void | Promise<void>): Promise<{ ingress: ConnectionIngressRecord; duplicate: 'event' | 'message' | null }> {
+  async receive(input: { connectionId: string; raw: string; transportProof?: unknown }, acknowledge: () => void | Promise<void>): Promise<{ ingress: ConnectionIngressRecord; duplicate: 'event' | 'message' | null }> {
     input = { ...input }
     const connection = this.options.connections.readConfiguration(input.connectionId)
     if (!connection?.config.enabled) fail('INGRESS_CONNECTION_UNAVAILABLE')
     const authenticator = this.authenticators.get(connection.config.adapterId)
     if (!authenticator || typeof input.raw !== 'string') fail('INGRESS_AUTHENTICATION_UNAVAILABLE')
     let event: VerifiedIngressEvent
-    try { event = verified(await authenticator.verify(structuredClone(connection.config), input.raw)) }
+    try { event = verified(await authenticator.verify(structuredClone(connection.config), input.raw, input.transportProof)) }
     catch { return fail('INGRESS_AUTHENTICATION_FAILED') }
     if (!equal(event.actor.application, connection.config.application)) fail('INGRESS_ISSUER_MISMATCH')
     const saved = this.transaction(() => {
@@ -191,6 +192,18 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       const rows = this.database.prepare('SELECT record_json FROM connection_ingress_message WHERE connection_id=? AND sequence>? ' + (input.bindingId ? "AND json_extract(record_json,'$.input.author.bindingId')=? " : '') + 'ORDER BY sequence LIMIT ?').all(input.connectionId, Number(after?.sequence ?? 0), ...(input.bindingId ? [input.bindingId] : []), (input.limit ?? 25) + 1)
       const ingresses = rows.slice(0, input.limit ?? 25).map(row => parseConnectionIngressRecord(JSON.parse(String(row.record_json))))
       return { ingresses, nextAfterIngressId: rows.length > ingresses.length ? ingresses.at(-1)!.ingressId : null }
+    })
+  }
+  /** Private recovery reader: only unclaimed intake, with a bounded continuation over this connection. */
+  received(connectionId: string, afterIngressId?: string, limit = 25): { ingressIds: string[]; nextAfterIngressId: string | null } {
+    return this.safe(() => {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail('INVALID_CONNECTION_INGRESS')
+      const after = afterIngressId ? this.database.prepare('SELECT sequence FROM connection_ingress_message WHERE connection_id=? AND ingress_id=?').get(connectionId, afterIngressId) : undefined
+      if (afterIngressId && !after) fail('INGRESS_CURSOR_MISMATCH')
+      const rows = this.database.prepare("SELECT ingress_id FROM connection_ingress_message WHERE connection_id=? AND json_extract(record_json,'$.state')='received' AND sequence>? ORDER BY sequence LIMIT ?")
+        .all(connectionId, Number(after?.sequence ?? 0), limit + 1)
+      const ingressIds = rows.slice(0, limit).map(row => String(row.ingress_id))
+      return { ingressIds, nextAfterIngressId: rows.length > ingressIds.length ? ingressIds.at(-1)! : null }
     })
   }
 }
