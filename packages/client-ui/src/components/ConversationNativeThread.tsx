@@ -44,8 +44,9 @@ export const ConversationNativeThread = memo(function ConversationNativeThread({
       const body = <ConversationMessage messageId={user?.id ?? recordId} conversationSessionId={sessionId}
           located={Boolean(user && locatedMessageKey === conversationMessageSourceKey(sessionId, user.source))}
           nativeResourceRecord={{ source: page.source, recordId: item.id, ...(item.turnId === undefined ? {} : { turnId: item.turnId }) }}
-          content={item.contentParts} {...(item.kind === 'system-message' ? { recordTitle: `${page.source.providerId} · ${item.title ?? 'System record'}` } : {})} {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})} {...(user ? { inputSource: user.source } : {})}
+          content={item.contentParts} {...(item.questionAnswers ? { questionAnswers: item.questionAnswers } : {})} {...(item.kind === 'system-message' ? { recordTitle: `${page.source.providerId} · ${item.title ?? 'System record'}` } : {})} {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})} {...(user ? { inputSource: user.source } : {})}
           {...(speaker ? { speaker } : {})}
+          {...(item.questionDiagnostic ? { questionDiagnostic: item.questionDiagnostic } : {})}
           name={item.kind === 'system-message' ? page.source.providerId : described?.name ?? (user ? 'Input' : speaker ? 'Assistant' : recordTitle(item))}
           providerId={described?.providerId ?? page.source.providerId}
           {...(describeSpeaker ? { describeSpeaker } : {})}

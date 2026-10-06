@@ -852,7 +852,7 @@ export type AgentSessionHistoryItem = {
   messagePhase?: AgentSessionHistoryMessagePhase
   questionRequest?: AgentSessionHistoryQuestionRequest
   questionAnswers?: AgentSessionHistoryQuestionAnswer[]
-  /** A local native question parsing failure; original speech and adjacent history stay readable. */
+  /** A local native question/answer reading projection diagnostic; original speech and adjacent history stay readable. */
   questionDiagnostic?: { code: string; message: string }
   /** Original contentParts remain complete and copyable alongside this optional summary. */
   collaboration?: AgentSessionHistoryCollaboration
@@ -1069,6 +1069,8 @@ export type AgentSessionUserMessage = {
   contentParts: AgentSessionHistoryContentPart[]
   /** Existing Provider reply facts; the original contentParts remain complete for Copy. */
   questionAnswers?: AgentSessionHistoryQuestionAnswer[]
+  /** Read-only projection details; original contentParts stay readable and copyable. */
+  questionDiagnostic?: { code: string; message: string }
   recordedAt?: number
   deliveryStatus?: 'complete' | 'unverified' | 'failed'
 }

@@ -73,6 +73,15 @@ export function conversationRulerDensity(items: readonly RulerAxisItem[], width:
 /** Called only for a requested excerpt, never while projecting the overview. */
 export function rulerRecordQuote(item: RulerAxisItem): string | null {
   const record = 'kind' in item && item.kind === 'ruler-record' ? item.record : item
+  if ('questionAnswers' in record && record.questionAnswers?.length) {
+    let quote = ''
+    for (const answer of record.questionAnswers) {
+      if (quote) quote += '\n\n'.slice(0, 280 - quote.length)
+      quote += answer.answer.slice(0, 280 - quote.length)
+      if (quote.length >= 280) break
+    }
+    return quote.trim() || null
+  }
   if ('content' in record) return record.content?.trim().slice(0, 280) || null
   if ('contentParts' in record) {
     let quote = ''

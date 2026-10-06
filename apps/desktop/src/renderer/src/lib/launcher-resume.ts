@@ -1,5 +1,6 @@
 import type { AgentNativeSessionCandidate, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
+import { sessionUserMessageText } from '@agentmux/core/session-user-messages'
 import { clampStep } from '@agentmux/client-ui/activity-step-summary'
 import type { AgentSessionRecoveryCandidate, AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
@@ -40,7 +41,7 @@ export function launcherNativeRecap(page: Pick<AgentSessionHistoryPage, 'items'>
     for (let index = page.items.length - 1; index >= 0; index -= 1) {
       const item = page.items[index]!
       if (item.kind !== kind) continue
-      const text = excerpt(item.contentParts.flatMap(part => part.kind === 'text' ? [part.text] : []).join(' '))
+      const text = excerpt(sessionUserMessageText(item.contentParts, kind === 'user-message' ? item.questionAnswers : undefined))
       if (text) return { ...text, source: kind === 'assistant-message' ? 'Last assistant message' : 'Last prompt', origin: 'native' }
     }
   }
