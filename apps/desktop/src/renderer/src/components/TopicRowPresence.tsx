@@ -1,5 +1,6 @@
 import { memo, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
+import { groupIds } from '@agentmux/layout'
 import type { ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { agentRegionExecution, useAppStore } from '../store'
 import { useTopicSessions } from '../lib/topic-session-subscriptions'
@@ -35,6 +36,8 @@ export const TopicRowPresence = memo(function TopicRowPresence({ workspace, topi
   const timelines = useAppStore(useShallow(state => recordForSessionIds(state.timelines, ids)))
   const executors = useAppStore(state => state.config?.executors)
   const retainedAvatars = useAppStore(state => state.config?.appearance.agentAvatars)
+  const root = useAppStore(state => state.layouts[workspace.id]?.root)
+  const groups = useMemo(() => root ? groupIds(root) : [], [root])
   const selectSession = useAppStore(state => state.selectSession)
   // Geometry and activity facts are independent from active-tab selection. Selecting another
   // Topic may update the highlight, but does not scan unchanged timelines or Region trees.
@@ -98,9 +101,10 @@ export const TopicRowPresence = memo(function TopicRowPresence({ workspace, topi
   }, [tabs, sessions, names, timelines, executors, retainedAvatars, workspace.path])
   const presentedTabs = useMemo(() => details.flatMap((detail, index) => detail ? [{ ...detail,
     occurrenceKey: JSON.stringify([workspace.id, surfaces[index]?.groupId, detail.tabId]),
+    locationLabel: `${workspace.name} · ${groups.includes(surfaces[index]!.groupId) ? `Group ${groups.indexOf(surfaces[index]!.groupId) + 1}` : 'Original Group'}`,
     active: surfaces[index]?.active ?? false,
     ...(subject?.tabId === detail.tabId && subject.groupId === surfaces[index]?.groupId && detail.regions.some(region => region.regionId === subject.regionId && region.agent?.sessionId === subject.sessionId && region.agent.hostId === subject.hostId)
-      ? { highlightedRegionIds: [subject.regionId] } : {}) } satisfies WorkbenchTabDetail] : []), [details, surfaces, subject, workspace.id])
+      ? { highlightedRegionIds: [subject.regionId] } : {}) } satisfies WorkbenchTabDetail] : []), [details, surfaces, subject, workspace.id, workspace.name, groups])
   const agents = useMemo(() => {
     const rank = new Map<string, number>()
     tabs.forEach((tab, index) => {

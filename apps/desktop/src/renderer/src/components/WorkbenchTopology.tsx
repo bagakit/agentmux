@@ -28,6 +28,8 @@ export type WorkbenchTabDetail = {
   tabId: string
   /** Original display occurrence when one Tab is presented in more than one Group. */
   occurrenceKey?: string
+  /** Readable context from the original display Workspace and Group. */
+  locationLabel?: string | undefined
   title: string
   active: boolean
   /** Exact subject Region supplied by the original occurrence owner; separate from active Tab. */
@@ -243,6 +245,7 @@ export function WorkbenchTopology({ tabs, onSelectTab, interactive = true, enabl
     >
       <span className="workbench-topology__inspector-head">
         <span><ThemeLayoutDockIcon size={13} /><strong>{inspected?.title ?? 'Workbench'}</strong></span>
+        {inspected?.locationLabel ? <small>{inspected.locationLabel}</small> : null}
       </span>
       {inspected ? <WorkbenchRegionMap regions={inspected.regions} aspectRatio={aspectRatio} highlightedRegionIds={inspected.highlightedRegionIds} className="workbench-topology__inspector-regions" /> : null}
     </span>
@@ -273,7 +276,7 @@ export function WorkbenchTopology({ tabs, onSelectTab, interactive = true, enabl
             style={{ zIndex: index + 1 }}
             data-topic-tab-id={tab.tabId}
             aria-pressed={interactive ? tab.active : undefined}
-            aria-label={`T${index + 1}: ${tab.title}, ${tab.regions.length} ${tab.regions.length === 1 ? 'Region' : 'Regions'}${tab.regions.some(region => tab.highlightedRegionIds?.includes(region.regionId)) ? '. Current Agent Region highlighted' : ''}`}
+            aria-label={`T${index + 1}: ${tab.title}${tab.locationLabel ? ` · ${tab.locationLabel}` : ''}, ${tab.regions.length} ${tab.regions.length === 1 ? 'Region' : 'Regions'}${tab.regions.some(region => tab.highlightedRegionIds?.includes(region.regionId)) ? '. Current Agent Region highlighted' : ''}`}
             title={`${tab.title} · ${tab.regions.length} ${tab.regions.length === 1 ? 'Region' : 'Regions'}`}
             onMouseEnter={() => inspectTab(entryKey(tab, index))}
             onFocus={() => inspectTab(entryKey(tab, index))}
