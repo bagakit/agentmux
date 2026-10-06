@@ -68,6 +68,8 @@
 
 准确 Run 的 Runtime 连接与 Session 目录、持久写入收口、Hook 和语义恢复观察分别确认。观察尚未完成或失败时，已确认的原终端输入、输出、尺寸与控制沿原连接继续可用；Hosted 与直接 Core 使用同一边界，不因重复等待整体恢复而截断健康通道。原输入仍保准确 owner、Run、operation 与字节前驱，结构化投递所需的权限及语义条件不被连接成功代签。
 
+失联或操作长期未取得回执时，服务窗须说清未知发生在 Desktop↔Core 控制连接、Core↔原 ctxmux、准确 Run 的输入／输出观察，还是原 durable 操作的收口；按观察范围绑定原 Host、Run 或 operation，保留最后已确认事实与来源，缺少确认时间时如实未知。原服务投影只表示最后确认，不能在失联后冒称当前仍 serving；socket 能回应、存储未报告 firstFailure 或 writer 未报告 stopped，均不代签原操作正在推进。没有权威进度判据时保持“进展／回执未确认”，不按经过时间猜死亡、拒绝健康能力或自动重放。只有 Core／ctxmux 的准确 Run 终局事实才表达已结束；原工作面、身份、草稿与未知操作保留，沿现有服务窗提供确认原观察／原操作的真实入口，不另造健康检测器或事实 Store。呈现与收起仍沿[服务窗的三分类与事实保留](#我们的流程坏了不等于-agent-坏了)。
+
 Hook 恢复只为当前仍运行的准确 Run 建立绑定；已结束的持久 Session 不占用 live Hook 资源，保留 Session 的累计数量不能成为启动上限。监听或单条绑定恢复失败只属于受影响的 Session／Run，不让公共 Headless Runtime 退出，也不把健康 Agent 置为失败。Core 保留当前进程内的 `hookIngressObservation`，由公开 Session 快照、Hosted 启动快照与服务窗持续表达失败阶段和恢复动作，不写用户存储、不冒充语义状态；晚订阅者不能错过它。沿现有 Session 刷新入口核对原 Run 并重试其 Hook，只有该绑定恢复或对应 Run 的终局事实才清除该诊断；其他 Run、整个连接或旧 Run 的迟到结果不能代签恢复。Hook 的原 token、身份和 Run 校验仍成立，观察恢复不重放输入。
 
 Runtime 连接反复波动或短期重试耗尽后，停止高频重试并转为单在途、可取消的低频恢复；原连接上的显式重试应立即可达。主动断开、释放或新连接代次结束旧等待，旧回执不得覆盖新失联事实。连接、Run 事实重观察与恢复记账分别判定；后两步失败须说明当前可用能力与原身份恢复动作，不拿走已接回的健康通道，也不虚报恢复完成。该变化复用 Core connect／connection-state、Hosted runtime events 与 Desktop 原服务窗，不新建替代 Session 或重放未知 Input。
