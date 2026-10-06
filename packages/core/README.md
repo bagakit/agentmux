@@ -99,7 +99,8 @@ Hook 的 stable binding identity 与随机 bearer 只存在于权限为 `0600` �
 
 Provider/ACP semantic status 与 pending Permission/Question 也是 Core-owned Session 事实。Client
 通过 `interaction` 事件和 `session.pendingInteraction` 公开 typed request；Consumer 用
-`respondAgentInteraction({ agentSessionId, expectedRun, response })` 回答。Core 会验证 exact Session、
+`respondAgentInteraction({ agentSessionId, expectedRun, operationId, expectedRequest, response })` 回答并取得
+`AgentMuxInteractionOperationReceipt`；`expectedRequest` 保留用户作答时的原 typed 内容与 evidence。Core 会验证 exact Session、
 Run、request 与选项，ACP response 回到 Adapter，Native response 交给 Provider 规划终端协议。
 结构化回答的 Consumer 不生成厂商按键，也不从 `status.detail` 猜交互。需要两阶段 Prompt 的 Provider 必须同时
 声明真实 transport `payload` 与 TUI `renderedText`；bracketed paste 不是 Core 默认行为。Prompt 采用
@@ -109,8 +110,21 @@ Run、request 与选项，ACP response 回到 Adapter，Native response 交给 P
 只记录调用时精确请求的投递事实；accepted/unknown 不等于批准，不自动重放。Consumer 从
 `session.pendingInteraction` 读取当前事实，用 `agentInteractionResponseUnavailableReason` 显示
 结构化回答不可用的原因与原生入口；新请求、Working 或 Stop 不证明旧请求已完成。ACP response
-只有在 Adapter delivery 与 semantic settlement 完成后才成功，Native response 按原 ctxmux
+按原 Adapter 的操作回执表达，Native response 按原 ctxmux
 recoverable Input claim 收敛。
+
+`inspectAgentInteractionOperation({ agentSessionId, operationId })` 只读原操作，问题完成或 Run 更换后仍可查询。
+原 SessionStore 保留操作索引，普通 Session／事件投影不广播其累计内容。回执分别报告保存、派发未知、
+PTY 字节接受、Hook connection written、ACP adapter acknowledgement 和准确原生完成；Native adoption
+没有协议事实时保持 `unknown`。相同 operationId 不允许更改答案或原目标，竞争操作不能覆盖同一原请求。
+丢回执先查询；查询不派发输入。用户明确重试同一操作与内容时，PTY 沿原 recoverable Input join；
+可能首次施效时仍核对原 request、Run 与当前 native target，已经施效则消费原去重回执。Hook unknown
+不能重放到另一回调。原生终端输入与健康 Agent 不因查询或目标资格未知而关闭。
+
+公共 RPC `agent.interaction.respond`／`agent.interaction.inspect` 与 CLI
+`agent interaction respond --input FILE|-`／`agent interaction inspect --session ID --operation-id ID`
+复用同一 owner。响应需要传输批准的 user／device；正文中的身份声明和 managed Agent capability
+不能取得权限确认。同步原请求与历史异步问题继续分别处理。
 
 普通 Prompt 通过 `submitAgentPrompt` 投递。首次可能执行的调用前，用
 `agentPromptCondition(await client.refreshAgentSession(agentSessionId, expectedRun))`
