@@ -485,6 +485,33 @@ describe('actual native Chrome owner', () => {
       ])
     } finally { owner.dispose() }
   })
+  it('keeps new clicks and keyboard input available while the confirmed same-position owner repaints', async () => {
+    const { owner, contents } = fixture()
+    let finishContent: (() => void) | undefined
+    let repaint: Promise<unknown> | undefined
+    try {
+      await owner.update([float])
+      const view = fake.views[0]
+      fake.image = new Promise(resolve => { finishContent = resolve })
+      repaint = owner.update([{ ...float, bounds: { ...float.bounds } }])
+      await vi.waitFor(() => expect(view.webContents.executeJavaScript).toHaveBeenCalledTimes(2))
+      view.listeners['input-event']({}, { type: 'mouseDown', x: 5, y: 7, button: 'left' })
+      view.listeners['input-event']({}, { type: 'mouseUp', x: 5, y: 7, button: 'left' })
+      view.listeners['input-event']({}, { type: 'keyDown', keyCode: 'Escape' })
+      expect(contents.sendInputEvent.mock.calls.map(call => call[0])).toEqual([
+        { type: 'mouseDown', x: 125, y: 157, button: 'left' },
+        { type: 'mouseUp', x: 125, y: 157, button: 'left' },
+        { type: 'keyDown', keyCode: 'Escape' }
+      ])
+      finishContent!()
+      expect(await repaint).toEqual({ projected: 1, capturedPixels: 8000 })
+      expect(view.getBounds()).toEqual(float.bounds)
+    } finally {
+      finishContent?.()
+      await repaint?.catch(() => {})
+      owner.dispose()
+    }
+  })
   it('continues and releases an accepted gesture at actual View bounds during a held repaint', async () => {
     const { owner, contents, warning } = fixture()
     let finishContent: (() => void) | undefined
