@@ -158,11 +158,26 @@ describe('Browser annotation host save and reopen consumers', () => {
     await click(opened, 'Save original'); const later = dialog()
     await act(async () => pending.resolve(status === 'written' ? { status, revision: 'late-written-revision' } : { status, code: 'REPLY_LOST', message: 'Unknown write' }))
     expect(dialog()).toBe(later); expect(write).toHaveBeenCalledOnce(); expect(read).not.toHaveBeenCalled()
+    expect(opened.querySelector('[role="status"]')!.textContent).toBe(status === 'written'
+      ? 'Earlier save confirmed · Check file before saving again' : 'Earlier save unconfirmed · Check file before saving again')
     await submit(); expect(write).toHaveBeenCalledOnce(); expect(button(dialog(), 'Save original').disabled).toBe(true)
     const content = write.mock.calls[0]![1].content
     read.mockResolvedValueOnce({ status: 'read', document: { path: 'chosen original.json', content, revision: 'late-verified-revision' } })
     await click(dialog(), 'Check file')
     expect(write).toHaveBeenCalledOnce(); expect(button(dialog(), 'Save original').disabled).toBe(false)
+  })
+
+  it('does not let an earlier cancelled save receipt overwrite the status or document opened later', async () => {
+    const pending = deferred<Awaited<ReturnType<typeof api.files.write>>>()
+    write.mockReturnValueOnce(pending.promise)
+    await mount(); const capturedEditor = await beginCapture()
+    await click(capturedEditor, 'Save original'); await submit(); await click(dialog(), 'Cancel')
+    await click(capturedEditor, 'Open original'); await submit(); const reopened = await decode()
+    const before = reopened.querySelector('[role="status"]')!.textContent
+    await act(async () => pending.resolve({ status: 'written', revision: 'earlier-save-revision' }))
+    expect(editor()).toBe(reopened); expect(reopened.querySelector('[role="status"]')!.textContent).toBe(before)
+    expect((await copyContext()).source).toEqual(historical)
+    expect(write).toHaveBeenCalledOnce()
   })
 
   it('keeps an unknown save read-only until exact on-disk verification, then uses that confirmed revision', async () => {
