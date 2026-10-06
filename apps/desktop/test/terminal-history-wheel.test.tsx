@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history-menu'
@@ -64,9 +65,9 @@ vi.mock('../src/renderer/src/components/SessionResultReview', () => ({ SessionRe
 
 const originalState = useAppStore.getState()
 const session: Extract<SessionSnapshot, { kind: 'agent' }> = {
-  id: 'wheel-agent', hostId: 'local', workspacePath: _hygiene_fixturePath("synthetic"), label: 'Wheel Agent', createdAt: 1, updatedAt: 1,
-  kind: 'agent', providerId: 'codex', executorId: 'codex', agentSessionUpdatedAt: 1, processState: 'running',
-  status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0,
+  id: 'wheel-agent', hostId: 'local', workspacePath: _hygiene_fixturePath("synthetic"), label: 'Wheel Agent', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1),
+  kind: 'agent', providerId: 'codex', executorId: 'codex', agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 1), processState: 'running',
+  status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, latestOutputBytes: 0,
   capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
   control: { kind: 'agent', hostId: 'local', agentSessionId: 'wheel-agent', run: { runId: 'wheel-run' } }
 }
@@ -89,7 +90,7 @@ function state(current: SessionSnapshot = session) {
     // that exact record instead of adding a native read to this unrelated reader's budget.
     timelines: current.kind === 'agent' ? { [current.id]: { agentSessionId: current.id, revision: 1,
       items: [{ id: 'captured-reply', agentSessionId: current.id, kind: 'assistant_message', status: 'complete',
-        source: 'native-hook', title: 'Reply', createdAt: 1, updatedAt: 1, content: 'Retained reply for this Session' }] } } : {},
+        source: 'native-hook', title: 'Reply', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), content: 'Retained reply for this Session' }] } } : {},
     pendingAgentLaunches: {}, recoveryCandidates: [], runtimeOwnershipWarnings: [], viewModes: {}, agentNames: {} })
 }
 function replay(data: string, current: SessionSnapshot = session): SessionAttachResult {
@@ -225,7 +226,7 @@ it('keeps readOnly and pending-interaction active views in Terminal while replay
   let release!: (value: SessionAttachResult) => void
   attach.mockReturnValue(new Promise(resolve => { release = resolve }))
   const pending: typeof session = { ...session, pendingInteraction: { id: 'private-permission', kind: 'permission', agentSessionId: session.id,
-    title: 'Private permission', options: [], evidence: { source: 'native-hook', observedAt: 1 } } }
+    title: 'Private permission', options: [], evidence: { source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } } }
   state(pending); await render(pending, true)
   expect((await wheel()).defaultPrevented).toBe(false)
   await act(async () => release(replay(repaint, pending)))
@@ -364,4 +365,21 @@ it('does not offer Agent records for an ordinary Terminal', async () => {
   await ready(repaint, terminal)
   expect((await wheel()).defaultPrevented).toBe(false); expect(fixture.handlers).toEqual([])
   expect(history).not.toHaveBeenCalled(); noExecution()
+})
+
+it('restores the retained reading line when covered output trims a full buffer', async () => {
+  const terminal = await ready(lines)
+  terminal.options.scrollback = 100
+  terminal.scrollToLine(50)
+  const line = terminal.buffer.active.getLine(50)!.translateToString(true)
+  await render(session, false, false)
+  expect(terminal.markers).toHaveLength(1)
+  await parser(terminal, Array.from({ length: 40 }, (_, i) => `new-${i}\r\n`).join(''))
+  expect(terminal.buffer.active.baseY).toBe(100)
+  await render(session, false, true)
+  expect(terminal.buffer.active.getLine(terminal.buffer.active.viewportY)!.translateToString(true)).toBe(line)
+  await act(async () => await vi.waitFor(() => expect(terminal.markers).toHaveLength(0)))
+  expect(fixture.terminals).toEqual([terminal])
+  expect(attach).toHaveBeenCalledTimes(1)
+  noExecution()
 })
