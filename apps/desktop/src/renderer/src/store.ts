@@ -431,7 +431,7 @@ export type HostExecutorInventoryState = {
   observedAt?: number
 }
 
-/** Attributes of the one current/last transient notice, never a second Agent status record. */
+/** Attributes supplied by the original error producer, never a second Agent status record. */
 export type ErrorNoticeContext = {
   kind: ServiceNoticeKind
   /** Explicit presentation from the diagnostic producer; the complete error remains authoritative. */
@@ -10453,7 +10453,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const notificationEvents = !retainEvent ? current.notificationEvents
       : existing ? current.notificationEvents.map(item => item === existing ? event : item)
       : [...current.notificationEvents, event]
-    set({ error: message, lastError: message, errorNoticeContext: context ?? null, errorDismissed: false, notificationEvents })
+    // Ordinary failures have their own history now; they must not replace an unfinished startup source.
+    const preserveStartupSource = retainEvent &&
+      (current.errorNoticeContext?.startupSessionSnapshot || current.errorNoticeContext?.startupProviderCatalog)
+    set({ ...(!preserveStartupSource
+      ? { error: message, lastError: message, errorNoticeContext: context ?? null, errorDismissed: false } : {}), notificationEvents })
   },
   dismissError() {
     if (!get().error) return
