@@ -27,6 +27,11 @@ export type ConnectionDelivery = {
   reason?: ConnectionDeliveryReason
   receipt?: ConnectionDeliveryReceipt
 }
+/** Current process service window for the requested Binding scope; never platform delivery or Agent health. */
+export type ConnectionDeliveryObservation = {
+  state: 'unknown' | 'ready' | 'unavailable' | 'disabled'
+  reason?: 'not-started' | 'source-unconfirmed' | 'source-gap' | 'storage-unconfirmed' | 'adapter-unavailable' | 'credential-missing' | 'effect-unconfirmed'
+}
 export type ConnectionDeliveryOperationInput = { operationId: string }
 export type ConnectionDeliveryListInput = { connectionId: string; bindingId: string; bindingRevision: number; after?: string; limit?: number }
 export type ConnectionDeliveryParamsMap = {
@@ -36,7 +41,7 @@ export type ConnectionDeliveryParamsMap = {
 }
 export type ConnectionDeliveryResultMap = {
   'connection.delivery.inspect': { delivery: ConnectionDelivery | null }
-  'connection.delivery.ls': { deliveries: ConnectionDelivery[]; next: string | null }
+  'connection.delivery.ls': { deliveries: ConnectionDelivery[]; next: string | null; observation?: ConnectionDeliveryObservation }
   'connection.delivery.retry': { delivery: ConnectionDelivery }
 }
 export type ConnectionDeliveryMethod = keyof ConnectionDeliveryParamsMap
