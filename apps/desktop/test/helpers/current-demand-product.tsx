@@ -7,7 +7,7 @@ import { goalPmoOperation } from '../../src/shared/goal-pmo-origin'
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { act, Profiler } from 'react'
@@ -97,13 +97,15 @@ beforeAll(async () => {
   cliRoot = await mkdtemp(join(tmpdir(), 'ag-goal-cli-')); sourceCli = join(cliRoot, 'agentmux.mjs')
   const repository = process.env.AGENTMUX_DAILY_GOAL_REPOSITORY!, proof = process.env.AGENTMUX_DAILY_GOAL_PROOF ?? process.env.AGENTMUX_GOAL_CONTENT_PROOF
   expect(repository).toBeTruthy()
+  // The actual Source CLI keeps dynamic native dependencies at their owning Core package.
+  await symlink(resolve(repository, 'packages/core/node_modules'), join(cliRoot, 'node_modules'))
   const listenerPackage = join(cliRoot, 'source-core'), worker = resolve(repository, 'packages/core/src/control-endpoint-listener-worker.ts')
   await mkdir(join(listenerPackage, 'dist'), { recursive: true }); bridge.listenerPackagePath = join(listenerPackage, 'package.json')
   await writeFile(bridge.listenerPackagePath, JSON.stringify({ name: '@agentmux/core', type: 'module' }))
   process.env.AGENTMUX_PRIVATE_LISTENER_ASSET = join(listenerPackage, 'dist/control-endpoint-listener-worker.js')
   await build({ entryPoints: [worker], outfile: join(listenerPackage, 'dist/control-endpoint-listener-worker.js'), bundle: true, platform: 'node', format: 'esm', logLevel: 'error' })
   if (proof) appendFileSync(proof, JSON.stringify({ file: relative(repository, worker), sha256: createHash('sha256').update(readFileSync(worker)).digest('hex'), consumer: 'actual-source-listener-worker' }) + '\n')
-  await build({ entryPoints: [resolve(repository, 'packages/core/src/agentmux.ts')], outfile: sourceCli, alias: { '@agentmux/demand/goals': resolve(repository, 'packages/demand/src/goals.ts'), '@agentmux/demand': resolve(repository, 'packages/demand/src/index.ts'), '@scure/base': resolve(repository, 'node_modules/.pnpm/@scure+base@2.2.0/node_modules/@scure/base/index.js') }, bundle: true, platform: 'node', format: 'esm', logLevel: 'error', banner: { js: "import { createRequire as bundleRequire } from 'node:module'; const require=bundleRequire(import.meta.url);" },
+  await build({ entryPoints: [resolve(repository, 'packages/core/src/agentmux.ts')], outfile: sourceCli, alias: { '@agentmux/demand/delegations': resolve(repository, 'packages/demand/src/delegations.ts'), '@agentmux/demand/goals': resolve(repository, 'packages/demand/src/goals.ts'), '@agentmux/demand': resolve(repository, 'packages/demand/src/index.ts'), '@scure/base': resolve(repository, 'node_modules/.pnpm/@scure+base@2.2.0/node_modules/@scure/base/index.js') }, bundle: true, platform: 'node', format: 'esm', logLevel: 'error', banner: { js: "import { createRequire as bundleRequire } from 'node:module'; const require=bundleRequire(import.meta.url);" },
     plugins: [{ name: 'actual-daily-goal-cli-imports', setup(builder: { onLoad(filter: { filter: RegExp }, handler: (args: { path: string }) => { contents: string; loader: 'ts' } | null): void }) { builder.onLoad({ filter: /\.(ts|json)$/ }, args => {
       if (proof && (args.path.startsWith(resolve(repository, 'packages/core/src') + '/') || args.path.startsWith(resolve(repository, 'packages/demand/src') + '/'))) appendFileSync(proof, JSON.stringify({ file: relative(repository, args.path), sha256: createHash('sha256').update(readFileSync(args.path)).digest('hex'), consumer: 'actual-source-cli' }) + '\n')
       const mutant = process.env.AGENTMUX_DAILY_GOAL_MUTANT ? JSON.parse(process.env.AGENTMUX_DAILY_GOAL_MUTANT) : null
