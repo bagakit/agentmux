@@ -97,6 +97,7 @@ function MessageHistory({ mailboxOrigin, items, incoming, selectedKey, onOpen, o
     <ConversationMessage {...reading} compact recordedIdentity {...(sessionId ? { conversationSessionId: sessionId } : {})}
       messageId={messageKey(selected)} speaker={speakerOf(selected) as ConversationSpeaker} name={authorLabel(selected)}
       content={isUserMessage(selected) && selected.contentParts.length > 0 ? selected.contentParts : selected.content ?? ''}
+      {...(isUserMessage(selected) && selected.questionAnswers ? { questionAnswers: selected.questionAnswers } : {})}
       {...(isUserMessage(selected) && selected.source.kind === 'native' && selected.contentParts.length > 0
         ? {} : { copyText: selected.content ?? '' })}
       {...(time(selected) === undefined ? {} : { createdAt: time(selected)! })}
@@ -403,7 +404,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       onPointerEnter={(event) => { if (event.pointerType === 'mouse') { cancelClose(); setViewed(true) } }}
       onPointerLeave={leave} onPointerDownCapture={pin} onFocusCapture={event => { lastReadingFocus.current = event.target; pin() }}
       onKeyDown={(event) => {
-        if (event.key !== 'Escape' || isImeOwnedKeyboardEvent(event)) return
+        if (event.key !== 'Escape' || event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return
         event.preventDefault(); event.stopPropagation()
         popover.current!.hidePopover(); trigger.current!.focus({ preventScroll: true })
       }}
