@@ -80,10 +80,143 @@ it('history changes reach the persisted fastpath, navigation stays transient, an
  const saved=partialize(useAppStore.getState()) as any
  expect(saved).not.toBe(before);expect(saved.agentComposerHistory).toEqual({'agent-1':['accepted unknown original']})
  state.recallAgentComposerHistory('agent-1','older','private draft')
- expect(partialize(useAppStore.getState())).toBe(saved)
+ const recalled=partialize(useAppStore.getState()) as any
+ expect(recalled).not.toBe(saved)
+ expect(recalled.agentComposerDrafts).toEqual({'agent-1':'accepted unknown original','agent-2':'neighbor draft'})
+ state.recallAgentComposerHistory('agent-1','older','accepted unknown original')
+ expect(partialize(useAppStore.getState())).toBe(recalled)
  expect(saved).not.toHaveProperty('agentComposerHistoryNavigation')
  const restored=merge(saved,{...state,agentComposerHistory:{},agentComposerHistoryNavigation:{}})
  expect(restored.agentComposerHistory).toEqual(saved.agentComposerHistory);expect(restored.agentComposerHistoryNavigation).toEqual({})
  expect(restored.agentSteerQueues['agent-1']).toEqual([original]);expect(restored.agentComposerDrafts).toEqual({'agent-1':'private draft','agent-2':'neighbor draft'})
  expect(merge({...saved,agentComposerHistory:{broken:[null],valid:['exact body']}},state).agentComposerHistory).toEqual({valid:['exact body']})
+})
+
+it('plain arrows browse consecutive multiline records and return once to the original blank draft', async () => {
+ const state=useAppStore.getState()
+ state.recordAgentComposerHistory('agent-1','older first\nolder last')
+ state.recordAgentComposerHistory('agent-1','newer first\nnewer last')
+ await draft('');await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+ editor().focus()
+ const input=editor() as HTMLElement & { editor: import('@tiptap/core').Editor }
+ expect((await key('ArrowUp')).defaultPrevented).toBe(true);expect(dom.draft()).toBe('newer first\nnewer last')
+ expect((await key('ArrowUp')).defaultPrevented).toBe(true);expect(dom.draft()).toBe('older first\nolder last')
+ expect((await key('ArrowDown')).defaultPrevented).toBe(true);expect(dom.draft()).toBe('newer first\nnewer last')
+ expect((await key('ArrowDown')).defaultPrevented).toBe(true);expect(dom.draft()).toBe('')
+ expect((await key('ArrowDown')).defaultPrevented).toBe(false)
+ // Temporary history navigation did not create a stack of undoable prompt replacements.
+ await act(async()=>{expect(input.editor.commands.undo()).toBe(false)})
+ expect(dom.draft()).toBe('')
+ expect(api.continuousProgress.pauseForInput).not.toHaveBeenCalled()
+})
+
+it('modifiers, IME and selected text remain editor-owned before and during browsing', async () => {
+ useAppStore.getState().recordAgentComposerHistory('agent-1','history first\nhistory last')
+ await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+ const input=editor() as HTMLElement & { editor: import('@tiptap/core').Editor }
+ input.focus()
+ for(const marker of [{shiftKey:true},{metaKey:true},{ctrlKey:true},{altKey:true},{isComposing:true},{keyCode:229}]) {
+  const before=dom.draft()
+  expect((await key('ArrowUp',marker)).defaultPrevented).toBe(false)
+  expect(dom.draft()).toBe(before)
+ }
+ await act(async()=>{input.editor.commands.setTextSelection({from:1,to:5})})
+ expect((await key('ArrowUp')).defaultPrevented).toBe(false);expect(dom.draft()).toBe('Keep my draft')
+ await act(async()=>{input.editor.commands.setTextSelection(1)})
+ await key('ArrowUp');expect(dom.draft()).toBe('history first\nhistory last')
+ await act(async()=>{input.editor.commands.setTextSelection({from:1,to:5})})
+ expect((await key('ArrowDown')).defaultPrevented).toBe(false);expect(dom.draft()).toBe('history first\nhistory last')
+})
+
+it('an actual edit and its undo exit old browsing without resurrecting the old stash', async () => {
+ useAppStore.getState().recordAgentComposerHistory('agent-1','recalled body')
+ await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+ const input=editor() as HTMLElement & { editor: import('@tiptap/core').Editor };input.focus()
+ await key('ArrowUp')
+ await act(async()=>{input.editor.commands.insertContent(' edited')})
+ const edited=dom.draft()
+ expect(edited).toContain(' edited')
+ expect(useAppStore.getState().agentComposerHistoryNavigation['agent-1']).toBeUndefined()
+ expect((await key('ArrowDown')).defaultPrevented).toBe(false);expect(dom.draft()).toBe(edited)
+ await act(async()=>{expect(input.editor.commands.undo()).toBe(true)})
+ expect(dom.draft()).toBe('recalled body')
+ expect(useAppStore.getState().agentComposerHistoryNavigation['agent-1']).toBeUndefined()
+ expect((await key('ArrowDown')).defaultPrevented).toBe(false);expect(dom.draft()).toBe('recalled body')
+})
+
+it('an external same-Session draft replacement survives remount and a different Agent never shares its stash', async () => {
+ await act(async()=>useAppStore.setState({sessions:[composerSession(),composerSession('agent-2')]}))
+ const state=useAppStore.getState();state.recordAgentComposerHistory('agent-1','A history');state.recordAgentComposerHistory('agent-2','B history')
+ await dom.render(<AgentSessionComposer key="A" sessionId="agent-1" />);await key('ArrowUp')
+ await act(async()=>state.setAgentComposerDraft('agent-2','B unfinished'))
+ await dom.render(<AgentSessionComposer key="B" sessionId="agent-2" />)
+ const event=new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true})
+ await act(async()=>editor().dispatchEvent(event));expect(dom.draft('agent-2')).toBe('B history')
+ await draft('A new draft from another surface')
+ await dom.render(<AgentSessionComposer key="A" sessionId="agent-1" />)
+ expect((await key('ArrowDown')).defaultPrevented).toBe(false)
+ expect(dom.draft()).toBe('A new draft from another surface')
+ expect(dom.draft('agent-2')).toBe('B history')
+})
+
+it('suggestions keep arrows and Enter at their real focused button, and Escape returns to editing', async () => {
+ await act(async()=>useAppStore.setState(s=>({config:{...s.config!,composerShortcuts:[
+  {id:'a',keyword:'alpha',label:'Alpha',body:'body A'}, {id:'b',keyword:'beta',label:'Beta',body:'body B'}
+ ]}})))
+ await draft('/');await dom.render(<AgentSessionComposer sessionId="agent-1" />);editor().focus()
+ const send=vi.spyOn(useAppStore.getState(),'send'),enqueue=vi.spyOn(useAppStore.getState(),'enqueueAgentSteer')
+ const buttons=()=>[...dom.container.querySelectorAll<HTMLButtonElement>('.composer__suggestions button')]
+ async function focusedKey(name:string){const event=new KeyboardEvent('keydown',{key:name,bubbles:true,cancelable:true});await act(async()=>document.activeElement!.dispatchEvent(event));return event}
+ await focusedKey('ArrowDown');expect(document.activeElement).toBe(buttons()[0])
+ await focusedKey('ArrowDown');expect(document.activeElement).toBe(buttons()[1])
+ await focusedKey('ArrowUp');expect(document.activeElement).toBe(buttons()[0])
+ expect((await focusedKey('Escape')).defaultPrevented).toBe(true)
+ expect(document.activeElement).toBe(editor());expect(buttons()).toHaveLength(0);expect(dom.draft()).toBe('/')
+ await draft('/b');expect(buttons()).toHaveLength(1)
+ await focusedKey('ArrowDown');expect(document.activeElement).toBe(buttons()[0])
+ expect((await focusedKey('Enter')).defaultPrevented).toBe(true)
+ expect(dom.draft()).toContain('agentmux-subcommand:body%20B');expect(document.activeElement).toBe(editor())
+ expect(send).not.toHaveBeenCalled();expect(enqueue).not.toHaveBeenCalled()
+})
+
+
+it('a browsing snapshot keeps its original records when a query page changes, then releases at the live draft', () => {
+ const state=useAppStore.getState()
+ state.recordAgentComposerHistory('agent-1','saved local body')
+ const candidates=['query older','query newest']
+ expect(state.recallAgentComposerHistory('agent-1','older','private unfinished',candidates)).toBe('query newest')
+ candidates.reverse()
+ expect(state.recallAgentComposerHistory('agent-1','older','query newest',['different newest'])).toBe('query older')
+ expect(state.recallAgentComposerHistory('agent-1','newer','query older',[])).toBe('query newest')
+ expect(state.recallAgentComposerHistory('agent-1','newer','query newest',[])).toBe('private unfinished')
+ expect(useAppStore.getState().agentComposerHistoryNavigation['agent-1']).not.toHaveProperty('entries')
+ expect(state.recallAgentComposerHistory('agent-1','older','private unfinished',['different newest'])).toBe('different newest')
+ expect(useAppStore.getState().agentComposerHistory['agent-1']).toEqual(['saved local body'])
+})
+
+
+it('returning from temporary history browsing preserves the original typed-draft undo', async () => {
+ useAppStore.getState().recordAgentComposerHistory('agent-1','history first\nhistory last')
+ await draft('');await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+ const input=editor() as HTMLElement & { editor: import('@tiptap/core').Editor };input.focus()
+ await act(async()=>{input.editor.commands.insertContent('typed live draft')})
+ await key('ArrowUp');await key('ArrowDown')
+ expect(dom.draft()).toBe('typed live draft')
+ await act(async()=>{expect(input.editor.commands.undo()).toBe(true)})
+ expect(dom.draft()).toBe('')
+ await act(async()=>{expect(input.editor.commands.redo()).toBe(true)})
+ expect(dom.draft()).toBe('typed live draft')
+})
+
+
+it('an external edit with the same original body is not a history restoration', async () => {
+ useAppStore.getState().recordAgentComposerHistory('agent-1','preview body')
+ await draft('');await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+ const input=editor() as HTMLElement & { editor: import('@tiptap/core').Editor };input.focus()
+ await act(async()=>{input.editor.commands.insertContent('original typed body')})
+ await key('ArrowUp')
+ await draft('original typed body')
+ expect(useAppStore.getState().agentComposerHistoryNavigation['agent-1']).toBeUndefined()
+ await act(async()=>{expect(input.editor.commands.undo()).toBe(false)})
+ expect(dom.draft()).toBe('original typed body')
 })

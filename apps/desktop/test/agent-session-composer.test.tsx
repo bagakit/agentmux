@@ -25,6 +25,8 @@ const fixture = vi.hoisted(() => ({
     scratchTopicSnapshots: {},
     timelines: {},
     agentComposerDrafts: {} as Record<string, string>,
+    agentComposerHistory: {} as Record<string, readonly string[]>,
+    agentComposerHistoryNavigation: {} as Record<string, { cursor: number; stash: string | null }>,
     noticeReadReceipts: {},
     agentSteerQueues: {} as Record<string, Array<{ operationId: string; runId?: string; text: string; status: 'queued' | 'restoring' | 'deferred' | 'failed'; error?: string }>>,
     setAgentComposerDraft: vi.fn(),
@@ -55,6 +57,10 @@ vi.mock('../src/renderer/src/store.js', async (importOriginal) => {
     actual.useAppStore.getState().recordAgentComposerHistory(sessionId, text))
   fixture.state.recallAgentComposerHistory.mockImplementation((sessionId: string, direction: 'older' | 'newer', draft: string) =>
     actual.useAppStore.getState().recallAgentComposerHistory(sessionId, direction, draft))
+  Object.defineProperties(fixture.state, {
+    agentComposerHistory: { get: () => actual.useAppStore.getState().agentComposerHistory },
+    agentComposerHistoryNavigation: { get: () => actual.useAppStore.getState().agentComposerHistoryNavigation }
+  })
   return {
     ...actual,
     useAppStore: Object.assign(
@@ -71,6 +77,10 @@ const nativeApi = vi.hoisted(() => ({
   chooseFiles: vi.fn(async () => null as string[] | null),
   savePastedImage: vi.fn(async () => _hygiene_fixturePath("tmp/pasted.png"))
 }))
+
+// This shallow SSR adapter test has no mounted Runtime subscription; actual Runtime reads belong
+// to the mounted composer integration suite, which does not substitute this owner.
+vi.mock('../src/renderer/src/lib/run-service-projection', () => ({ useRunService: () => undefined }))
 
 vi.mock('../src/renderer/src/lib/api.js', () => ({
   api: { ui: nativeApi }
@@ -329,7 +339,7 @@ describe('AgentSessionComposer adapter', () => {
 
   it('offers history recall wired to the shared composer', async () => {
     // The recall callback is the shell up/down affordance. It only fires at a line boundary (checked in the
-    // pure lib) and returns the value to place or null to fall through. Here: after one recorded submit,
+    // pure lib), updates the original draft/navigation owner and returns handled value or null. Here: after one recorded submit,
     // arrowing up from an empty first-line draft recalls it; arrowing back down restores the (empty) draft.
     fixture.state.sessions = [agentSession()]
     fixture.state.agentComposerDrafts = { 'agent-1': 'first prompt' }
@@ -687,7 +697,7 @@ describe('AgentSessionComposer adapter', () => {
       props: { onAttach(): void; insertionRef: { current: ComposerInsertionHandle | null } }
     }
 
-    composer.props.insertionRef.current = { insert: async (resolve) => { await resolve() } }
+    composer.props.insertionRef.current = { insert: async (resolve) => { await resolve() }, replace: vi.fn() }
     composer.props.onAttach()
 
     await vi.waitFor(() => expect(nativeApi.chooseFiles).toHaveBeenCalledOnce())
