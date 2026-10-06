@@ -212,3 +212,30 @@ it('keeps shared rich input and undo alive when actual pasted reference cannot b
   expect(draft).toHaveBeenCalled();const next=readNoteDocument(draft.mock.lastCall![0].draft)
   expect(next.status).toBe('valid');expect(editor.state.doc.textContent).toContain('Continuing ')
 })
+
+it('keeps the current middle unanchored caret when the original writer allocates its durable ID',async()=>{
+  const f=await originalFiles()
+  try {
+    const note=newNoteDocument('First original','middle-caret','first-block')
+    note.content.content!.push({type:'paragraph',attrs:{blockId:null},content:[{type:'text',text:'New middle'}]},{type:'paragraph',attrs:{blockId:'last-block'},content:[{type:'text',text:'Last original'}]})
+    const content=serializeNoteDocument(note)
+    await writeFile(join(f.path,'caret.note.md'),content)
+    const callbacks={knowledge:noteKnowledge([]),onChange:vi.fn(),onSave:vi.fn(),onOpen:vi.fn(),onIssue:vi.fn()}
+    await dom.render(<NoteBlockEditor {...callbacks} note={note} />)
+    const editor=(dom.container.querySelector('.note-block-content') as HTMLElement&{editor:Editor}).editor
+    let middle=0;editor.state.doc.descendants((node,pos)=>{if(node.type.name==='paragraph'&&node.attrs.blockId===null)middle=pos})
+    await act(async()=>{editor.view.focus();editor.commands.setTextSelection(middle+4)})
+    expect(editor.state.selection.$from.parentOffset).toBe(3)
+    const read=await f.files.read(f.workspace,'caret.note.md');if(read.status!=='read')throw Error('Original not read')
+    const saved=await f.writer.write(f.workspace,{path:'caret.note.md',content,expectedRevision:read.document.revision})
+    expect(saved.status).toBe('written');if(saved.status!=='written')throw Error('Writer did not save')
+    const canonical=readNoteDocument(saved.content??content);if(canonical.status!=='valid')throw Error(canonical.message)
+    const middleId=canonical.note.content.content![1]!.attrs!.blockId;expect(middleId).toEqual(expect.any(String))
+    await dom.render(<NoteBlockEditor {...callbacks} note={canonical.note} />)
+    expect((dom.container.querySelector('.note-block-content') as HTMLElement&{editor:Editor}).editor).toBe(editor)
+    expect(editor.state.selection.$from.parent.attrs.blockId).toBe(middleId);expect(editor.state.selection.$from.parentOffset).toBe(3)
+    await act(async()=>editor.commands.insertContent(' continuing '))
+    expect(editor.state.selection.$from.parent.textContent).toBe('New continuing  middle')
+    expect(editor.state.selection.$from.parent.attrs.blockId).toBe(middleId)
+  } finally {await f.dispose()}
+})
