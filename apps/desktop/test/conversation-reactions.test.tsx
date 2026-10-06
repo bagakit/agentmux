@@ -277,14 +277,21 @@ describe('Saved Prompt → explicit lookup → exact reply card → original use
   await press();expect(text.isConnected).toBe(true);expect(selection.toString()).toBe('The original answer');expect(dom.container.scrollTop).toBe(99)
   expect(api.config.get).toHaveBeenCalledTimes(1);expect(queued()).toHaveLength(1)
  })
- it('attaches actions to assistant replies in source order, excluding user and informal progress records',async()=>{
+ it('preserves original assistant reply actions across progress and resource bodies in source order',async()=>{
   const page:AgentSessionHistoryPage={agentSessionId:'agent-1',source:{providerId:'codex',nativeSessionId:'original-native'},items:[
    {id:'u',kind:'user-message',contentParts:[{kind:'text',text:'User input'}]},
+   {id:'s',kind:'system-message',contentParts:[{kind:'text',text:'System context'}]},
    {id:'p',kind:'assistant-message',messagePhase:'progress',contentParts:[{kind:'text',text:'Thinking aloud'}]},
+   {id:'r',kind:'assistant-message',contentParts:[{kind:'resource',resourceType:'text',reference:'original-text-resource',content:{kind:'text',encoding:'json-utf8',byteLength:100,sha256:'a'.repeat(64)}}]},
+   {id:'t',kind:'activity',contentParts:[{kind:'text',text:'Machine activity'}]},
    {id:'a',kind:'assistant-message',contentParts:[{kind:'text',text:'Final answer'}]}
   ],nextCursor:null}
   const sources:ConversationReplySource[]=[]
   await dom.render(<ConversationView page={page} sessionId="agent-1" renderMessageActions={source=>{sources.push(source);return <span data-real-reply-actions />}} />)
-  expect(sources).toEqual([{...reply,recordId:'a'}]);expect(dom.container.querySelectorAll('[data-real-reply-actions]')).toHaveLength(1)
+  expect(sources).toEqual(['p','r','a'].map(recordId=>({...reply,recordId})))
+  expect(dom.container.querySelectorAll('[data-real-reply-actions]')).toHaveLength(3)
+  expect(dom.container.querySelector('[data-native-record-id="p"] [data-real-reply-actions]')).not.toBeNull()
+  expect(dom.container.querySelector('[data-native-record-id="r"] [data-real-reply-actions]')).not.toBeNull()
+  for(const id of ['u','s','t']) expect(dom.container.querySelector(`[data-native-record-id="${id}"] [data-real-reply-actions]`)).toBeNull()
  })
 })
