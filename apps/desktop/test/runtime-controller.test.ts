@@ -1677,7 +1677,7 @@ describe('RuntimeController configuration transaction', () => {
     await expect(controller.submitPrompt(control, 'hello', 'test-prompt-operation', { expectedRun: control.run, afterSubmissionId: null })).rejects.toThrow(/Another message is still being delivered/i)
   })
 
-  it('forwards a typed interaction response with the exact Session Run fence', async () => {
+  it('forwards a typed interaction response with the exact Session Run fence despite Runtime observation failure', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
     const control = {
@@ -1692,7 +1692,10 @@ describe('RuntimeController configuration transaction', () => {
       decision: { outcome: 'selected' as const, optionId: 'allow' }
     }
 
+    client.connect.mockRejectedValue(new Error('Runtime observation unavailable'))
+    const beforeConnect = client.connect.mock.calls.length
     await controller.respondInteraction(control, response)
+    expect(client.connect.mock.calls.length).toBe(beforeConnect)
 
     expect(client.respondAgentInteraction).toHaveBeenCalledWith({
       agentSessionId: 'agent-1',
