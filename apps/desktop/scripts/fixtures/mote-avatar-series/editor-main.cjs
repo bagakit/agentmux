@@ -2,26 +2,52 @@ const { app, BrowserWindow, Menu, ipcMain, nativeImage } = require('electron')
 const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict'), { createHash } = require('node:crypto')
 const [html, directory, originalBuiltin, scope = 'full'] = process.argv.slice(2)
 app.setPath('userData', path.join(directory, 'userData'))
-const result = { passed: false, scope, pid: process.pid, images: [], operations: [], sourceCalls: [], errors: [], writes: 0 }
+app.setPath('sessionData', path.join(directory, 'userData'))
+app.setPath('home', path.join(directory, 'private-home'))
+const result = { passed: false, scope, pid: process.pid, images: [], operations: [], sourceCalls: [], readCalls: [], saveCalls: [], pngReads: [], publications: [], requestStorage: [], flushRequests: [], errors: [], writes: 0 }
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 const sha = value => createHash('sha256').update(value).digest('hex')
 app.whenReady().then(async () => {
   console.log('editor-main: ready')
-  let win, hold = false, releases = []
+  let win, hold = false, releases = [], loseAckOnce = false, historicalChoiceOnce = null, holdReadKey = null, heldReads = [], holdSaveKey = null, heldSaves = [], failNativePublicationOnce = false, failFlushOnce = false, failFlushAt = null
   try {
     Menu.setApplicationMenu(null)
-    const { MoteAvatarSeriesOwner, MoteAvatarControl } = require(path.join(path.dirname(html), 'editor-native.cjs'))
+    await fs.mkdir(path.join(app.getPath('home'), '.agentmux'), { recursive: true })
+    const { MoteAvatarSeriesOwner, MoteAvatarControl, createMoteAvatarWriter, ConfigStore, DEFAULT_CONFIG, ConfigOwner, ScratchTopics, directoryIdentity, CONFIG_CHANGED_CHANNEL, observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } = require(path.join(path.dirname(html), 'editor-native.cjs'))
     const builtinRoot = path.join(directory, 'builtin'), userRoot = path.join(directory, 'avatars')
     await fs.cp(originalBuiltin, builtinRoot, { recursive: true })
     await fs.mkdir(path.join(userRoot, 'personal'), { recursive: true })
     await fs.copyFile(path.join(builtinRoot, 'geometry/owl.png'), path.join(userRoot, 'personal/own.png'))
-    const workspace = path.join(directory, 'workspace/.agentmux/scratch')
-    for (const name of ['topic--launcher--leader', 'topic--launcher--analyst']) {
-      await fs.mkdir(path.join(workspace, name), { recursive: true })
-      await fs.writeFile(path.join(workspace, name, 'topic.md'), '# Fixture Mote\n')
-      await fs.writeFile(path.join(workspace, name, 'SOUL.md'), '# Original fixture Mote\n')
+    const store = new ConfigStore(path.join(directory, 'config.json'))
+    let config = scope === 'durable-reopen' ? await store.get() : await store.save({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: '__scratch__', hostId: 'local', path: path.join(app.getPath('home'), '.agentmux/scratch'), name: 'Private Motes', kind: 'folder' }] })
+    const workspace = config.workspaces.find(value => value.id === '__scratch__')
+    assert.ok(workspace && workspace.path.startsWith(app.getPath('home')), 'The actual scratch configuration must stay inside the private home')
+    const topics = new ScratchTopics(), targets = {}
+    for (const topicId of ['launcher:leader', 'launcher:analyst', ...(scope === 'request-label-delta' ? ['launcher:blank'] : [])]) {
+      const actual = await topics.ensureMote(workspace, topicId)
+      assert.ok(actual.identityDirectoryPath)
+      const key = directoryIdentity(workspace.hostId, actual.identityDirectoryPath)
+      targets[topicId] = { key, kind: 'mote', name: topicId === 'launcher:leader' ? 'Mote' : 'Second Mote', avatarTarget: { workspaceId: workspace.id, topicId, objectKey: key } }
     }
-    const control = new MoteAvatarControl(new MoteAvatarSeriesOwner({ userRoot, builtinRoot }))
+    if (scope !== 'durable-reopen') config = await store.save({ ...config, appearance: { ...config.appearance, spaceObjectIcons: { [targets['launcher:leader'].key]: 'rocket' } } })
+    const originalStoreSave = store.save.bind(store)
+    store.save = async next => {
+      if (failNativePublicationOnce) { failNativePublicationOnce = false; throw new Error('The actual private ConfigStore publication was interrupted by this fixture.') }
+      return originalStoreSave(next)
+    }
+    const owner = new ConfigOwner({ read: () => config, save: next => store.save(next), publish: saved => {
+      config = saved; result.publications.push({ choices: structuredClone(saved.appearance.spaceObjectIcons) }); win?.webContents.send(CONFIG_CHANGED_CHANNEL, saved)
+    } })
+    const originalConfirm = store.confirmSaved.bind(store)
+    store.confirmSaved = async saved => {
+      await originalConfirm(saved)
+      if (historicalChoiceOnce) {
+        const change = historicalChoiceOnce; historicalChoiceOnce = null
+        await owner.update(current => ({ ...current, appearance: { ...current.appearance, spaceObjectIcons: { ...current.appearance.spaceObjectIcons, [change.key]: change.choice } } }))
+      }
+    }
+    const sources = new MoteAvatarSeriesOwner({ userRoot, builtinRoot })
+    const control = new MoteAvatarControl(sources, ['durable', 'durable-reopen', 'request-label-delta'].includes(scope) ? createMoteAvatarWriter(owner, sources, topics, store) : undefined)
     ipcMain.handle('moteAvatars:list', async () => {
       const value = await control.call('space.mote.avatar.list', {})
       result.sourceCalls.push({ method: 'list', roots: value.roots, series: value.series.map(item => ({ origin: item.origin, seriesId: item.seriesId, entries: item.entries.map(entry => entry.entryId) })) })
@@ -36,7 +62,48 @@ app.whenReady().then(async () => {
         return value
       } catch (error) { result.sourceCalls.push({ method: 'preview', input, error: error.message, code: error.code }); throw error }
     })
-    ipcMain.handle('config:save', () => { result.writes++; throw new Error('T-002 never publishes a configuration.') })
+    ipcMain.handle('moteAvatars:read', async (_event, input) => {
+      const value = await control.call('space.mote.avatar.read', input)
+      result.readCalls.push({ input, value })
+      if (input.target.objectKey === holdReadKey) await new Promise(resolve => heldReads.push(resolve))
+      return value
+    })
+    ipcMain.handle('moteAvatars:save', async (_event, input) => {
+      if (!['durable', 'durable-reopen', 'request-label-delta'].includes(scope)) throw new Error('Only the explicit durable product scopes may save.')
+      const kept = await win.webContents.executeJavaScript(`seriesEditorFixture.keptRequest(${JSON.stringify(input.target)})`)
+      result.requestStorage.push({ operationId: input.operationId, kept, matched: JSON.stringify(kept) === JSON.stringify(input) })
+      assert.deepEqual(kept, input, 'The complete original request must be kept before native Save.')
+      const value = await control.call('space.mote.avatar.save', input)
+      result.saveCalls.push({ input, wireSha256: sha(JSON.stringify(input)), value })
+      if (input.target.objectKey === holdSaveKey) await new Promise(resolve => heldSaves.push(resolve))
+      if (loseAckOnce) { loseAckOnce = false; throw new Error('The original completed native IPC acknowledgement was withheld by this fixture.') }
+      return value
+    })
+    ipcMain.handle('ui:requestStorageFlush', async () => {
+      const authority = await observeWorkbenchStorageAuthority(win.webContents.session, { userData: app.getPath('userData'), sessionData: app.getPath('sessionData') })
+      requireWorkbenchStorageAuthority(authority)
+      const interrupted = failFlushOnce || result.flushRequests.length + 1 === failFlushAt
+      result.flushRequests.push({ authority, requested: !interrupted })
+      if (interrupted) { failFlushOnce = false; failFlushAt = null; throw new Error('The real private storage flush request was interrupted by this fixture.') }
+      win.webContents.session.flushStorageData()
+    })
+    ipcMain.handle('config:get', () => structuredClone(config))
+    ipcMain.handle('config:save', async (_event, next, before) => {
+      result.writes++
+      if (scope !== 'durable') throw new Error('T-002 never publishes a configuration.')
+      return owner.edit(before, next)
+    })
+    ipcMain.handle('scratch:readMoteAvatar', async (_event, workspaceId, topicId, ref, objectKey) => {
+      assert.equal(workspaceId, workspace.id)
+      const value = await topics.readAvatar(workspace, topicId, ref, objectKey)
+      result.pngReads.push({ workspaceId, topicId, ref, objectKey, pngSha256: sha(nativeImage.createFromDataURL(value.dataUrl).toPNG()) })
+      return value
+    })
+    ipcMain.handle('scratch:listTopics', async (_event, workspaceId) => {
+      assert.equal(workspaceId, workspace.id)
+      const actual = await topics.list(workspace)
+      return { topics: [...actual], issues: actual.issues ?? [] }
+    })
     console.log('editor-main: native owner ready')
     win = new BrowserWindow({ width: 1040, height: 900, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false,
       sandbox: false, backgroundThrottling: false, preload: path.join(path.dirname(html), 'editor-preload.cjs') } })
@@ -63,10 +130,10 @@ app.whenReady().then(async () => {
       }});
     })()` })
     console.log('editor-main: loading product')
-    await win.loadFile(html, { query: { workspace } })
+    await win.loadFile(html, { query: { targets: JSON.stringify(targets) } })
     console.log('editor-main: product loaded')
     const read = script => win.webContents.executeJavaScript(script)
-    const wait = async script => { for (let index = 0; index < 200; index++) { if (await read(script)) return; await pause(30) } throw new Error('Timed out: ' + script) }
+    const wait = async script => { for (let index = 0; index < 200; index++) { assert.ok(result.requestStorage.every(value => value.matched), 'The complete original request must survive storage before native Save.'); if (await read(script)) return; await pause(30) } throw new Error('Timed out: ' + script) }
     const key = async (keyCode, modifiers = []) => {
       win.focus(); win.webContents.focus()
       for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode, modifiers })
@@ -97,33 +164,80 @@ app.whenReady().then(async () => {
     const png = () => read('document.querySelector(".mote-series__sizes img")?.src')
     const waitHeldSource = async () => { for (let index = 0; index < 200 && !releases.length; index++) await pause(30); assert.ok(releases.length > 0, 'The actual native source response must be held') }
     const sameFrame = async (expected, message) => assert.equal(sha(await png() ?? ''), sha(expected ?? ''), message)
-    const capture = async (name, bottom = false) => {
-      await ready()
+    const settleSurface = () => read(`(async()=>{
+      const frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      await document.fonts.ready;
+      await Promise.all([...document.querySelectorAll('img')].map(image=>image.decode()));
+      const observed=[],started=performance.now();
+      for(let attempt=0;attempt<20;attempt++){
+        await frame();
+        const finite=document.getAnimations().filter(animation=>{
+          const timing=animation.effect?.getComputedTiming();
+          return (animation instanceof CSSTransition||animation instanceof CSSAnimation)&&
+            animation.playState!=='finished'&&animation.playState!=='idle'&&Number.isFinite(timing?.endTime);
+        });
+        if(!finite.length)return {elapsedMs:performance.now()-started,finite:observed,remainingFinite:0};
+        observed.push(...finite.map(animation=>({type:animation instanceof CSSTransition?'transition':'animation',property:animation.transitionProperty??animation.animationName,endTime:animation.effect.getComputedTiming().endTime})));
+        await Promise.allSettled(finite.map(animation=>animation.finished));
+      }
+      throw Error('Finite CSS motion did not settle before capture');
+    })()`)
+    const captureIdentity = async name => {
+      await wait('document.querySelectorAll("#saved-identities img").length===4 && [...document.querySelectorAll("#saved-identities img")].every(n=>n.complete && n.naturalWidth===256)')
+      const settled = await settleSurface()
+      await fs.writeFile(path.join(directory, name + '.png'), (await win.webContents.capturePage()).toPNG()); result.images.push(name + '.png')
+      result.operations.push({ action: 'capture-saved-production-identity', name, settled, facts: await read('({choices:seriesEditorFixture.facts().originalChoices,gpu:seriesGPUFacts(),images:[...document.querySelectorAll("#saved-identities img")].map(n=>({width:n.getBoundingClientRect().width,height:n.getBoundingClientRect().height,naturalWidth:n.naturalWidth,source:n.src}))})') })
+    }
+    const capture = async (name, bottom = false, requireDraft = true) => {
+      if (requireDraft) await ready()
+      else await wait('document.querySelector(".space-icon-picker")?.dataset.avatarBaselineReady==="true" && !!document.querySelector(".mote-series__sizes img")')
       await wait(`!document.querySelector('select[aria-label="Avatar series"]').disabled && !document.querySelector('.mote-series__refresh').disabled`)
       await read(`(()=>{const n=document.querySelector(".space-icon-picker");n.scrollTop=${bottom ? 'n.scrollHeight' : '0'}})()`)
-      const settled = await read(`(async()=>{
-        const frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-        await document.fonts.ready;
-        await Promise.all([...document.querySelectorAll('.space-icon-picker img')].map(image=>image.decode()));
-        const observed=[],started=performance.now();
-        for(let attempt=0;attempt<20;attempt++){
-          await frame();
-          const finite=document.getAnimations().filter(animation=>{
-            const timing=animation.effect?.getComputedTiming();
-            return (animation instanceof CSSTransition||animation instanceof CSSAnimation)&&
-              animation.playState!=='finished'&&animation.playState!=='idle'&&Number.isFinite(timing?.endTime);
-          });
-          if(!finite.length)return {elapsedMs:performance.now()-started,finite:observed,remainingFinite:0};
-          observed.push(...finite.map(animation=>({type:animation instanceof CSSTransition?'transition':'animation',property:animation.transitionProperty??animation.animationName,endTime:animation.effect.getComputedTiming().endTime})));
-          await Promise.allSettled(finite.map(animation=>animation.finished));
-        }
-        throw Error('Finite CSS motion did not settle before capture');
-      })()`)
+      const settled = await settleSurface()
       await fs.writeFile(path.join(directory, name + '.png'), (await win.webContents.capturePage()).toPNG()); result.images.push(name + '.png')
       result.operations.push({ action: 'capture', name, settled, facts: await read(`({ target:seriesEditorFixture.facts(),kind:document.querySelector('.mote-series__preview').dataset.seriesPreviewKind,sizes:[...document.querySelectorAll('.mote-series__sizes img')].map(n=>({width:n.getBoundingClientRect().width,height:n.getBoundingClientRect().height,naturalWidth:n.naturalWidth})),gpu:seriesGPUFacts(),renderer:document.querySelector('.mote-series__preview canvas')?.dataset.seriesRenderFacts??null,selectedMaterials:[...document.querySelectorAll('.mote-series__materials button[aria-pressed=true]')].map(n=>({material:n.dataset.seriesMaterial,hovered:n.matches(':hover'),focused:n.matches(':focus-visible'),boxShadow:getComputedStyle(n).boxShadow,background:getComputedStyle(n).backgroundColor,color:getComputedStyle(n).color})) })`) })
     }
-    await wait('!!window.seriesEditorFixture')
+    await wait('!!window.seriesEditorFixture && window.seriesEditorFixture.facts().ready')
     console.log('editor-main: fixture mounted', await read('typeof window.seriesGPUFacts'))
+    if (scope === 'request-label-delta') {
+      await read('seriesEditorFixture.replaceTarget("launcher:blank")'); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarBaselineReady==="true"')
+      assert.equal(await read('document.querySelector("[data-avatar-source=face]").getAttribute("aria-pressed")'), 'true')
+      assert.equal((await control.call('space.mote.avatar.read', { target: targets['launcher:blank'].avatarTarget })).choice, null)
+      assert.equal(result.sourceCalls.length, 0, 'An uncustomized Mote starts with Make a face without promoting Series')
+      await key('Escape'); await wait('!document.querySelector(".space-icon-picker")')
+      assert.ok(!Object.hasOwn(config.appearance.spaceObjectIcons, targets['launcher:blank'].key)); assert.equal(result.saveCalls.length, 0); assert.equal(result.writes, 0)
+      result.operations.push({ action: 'uncustomized-mote-face-first-cancel-keeps-original-default', target: targets['launcher:blank'].avatarTarget })
+    }
+    if (scope === 'durable-reopen') {
+      const original = await control.call('space.mote.avatar.read', { target: targets['launcher:leader'].avatarTarget })
+      assert.equal(original.choice.kind, 'series')
+      await captureIdentity('saved-series-fresh-process')
+      assert.equal((await read('seriesGPUFacts()')).length, 0, 'The ordinary saved identities must not instantiate GLB renderers')
+      assert.equal(result.sourceCalls.length, 0, 'The ordinary saved identities must not scan source catalogs or prepare models')
+      await click('#open-avatar'); await ready()
+      assert.equal(await read('document.querySelector("[data-avatar-source=series]").getAttribute("aria-pressed")'), 'true')
+      assert.equal(await read('document.querySelector("[data-series-morph=b]").value'), String(original.choice.parameters.morphs.b))
+      await capture('saved-series-fresh-process-editable')
+      result.reopened = original
+      await key('Escape'); await wait('!document.querySelector(".space-icon-picker")')
+      const before = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8')).persistedUnknown
+      await read('seriesEditorFixture.replaceTarget("launcher:analyst")'); await ready(); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarSaveState==="unknown"')
+      const kept = await read(`seriesEditorFixture.keptRequest(${JSON.stringify(targets['launcher:analyst'].avatarTarget)})`)
+      assert.deepEqual(kept, before.input)
+      await sameFrame(before.input.pngDataUrl, 'A fresh GUI must retain the original unknown request PNG and parameters')
+      assert.equal(await read('document.querySelector(".space-icon-picker").dataset.avatarOperation'), before.input.operationId)
+      assert.equal(result.saveCalls.length, 0, 'Reopening an original unknown request only reads; it never automatically saves')
+      assert.ok(result.readCalls.some(call => call.input.operationId === before.input.operationId && call.value.operation?.phase === 'publication-unknown'))
+      await capture('unknown-series-fresh-process-original-request')
+      await click('[data-avatar-retry-save]'); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarSaveState==="unknown"')
+      assert.equal(result.saveCalls.length, 1); assert.deepEqual(result.saveCalls[0].input, before.input)
+      assert.equal(result.saveCalls[0].value.state, 'unknown'); assert.equal(result.publications.length, 0)
+      assert.deepEqual(config.appearance.spaceObjectIcons[targets['launcher:analyst'].key], before.current.choice)
+      result.unknownReopened = { request: kept, current: result.saveCalls[0].value.current }
+      result.operations.push({ action: 'second-process-unknown-read-and-explicit-original-request-retry', operationId: kept.operationId })
+      result.passed = true
+      return
+    }
     await click('#open-avatar'); await wait('!!document.querySelector(".space-icon-picker")')
     assert.equal(await read('document.querySelector("[data-space-icon-choice=rocket]").getAttribute("aria-pressed")'), 'true')
     await click('[data-avatar-source=series]'); await wait('document.querySelectorAll(".mote-series__select option").length>1')
@@ -133,6 +247,201 @@ app.whenReady().then(async () => {
     assert.deepEqual(firstImage.getSize(), { width: 256, height: 256 }); assert.ok(firstImage.toPNG().length > 1000)
     result.firstFrame = { sha256: sha(firstImage.toPNG()), bytes: firstImage.toPNG().length }
     assert.deepEqual(await read('[...document.querySelectorAll(".mote-series__sizes img")].map(n=>n.getBoundingClientRect().width)'), [24, 34, 48, 104])
+    if (scope === 'request-label-delta') {
+      await click('[data-series-entry=quiet]'); await ready(); await select('select[aria-label="Series face Eyes"]', 'wink'); await ready()
+      await click('.space-icon-picker__save'); await wait('!document.querySelector(".space-icon-picker")')
+      const original = targets['launcher:leader'].avatarTarget
+      const keyName = 'agentmux.mote-avatar-save-draft.v1:' + JSON.stringify([original.workspaceId, original.topicId, original.objectKey])
+      const bytes = '{"original-unreadable-request"'
+      await read(`localStorage.setItem(${JSON.stringify(keyName)},${JSON.stringify(bytes)})`)
+      await click('#open-avatar'); await ready(); await wait('document.querySelector("[data-avatar-save-notice]")?.textContent.includes("Kept request is unreadable")')
+      assert.equal(await read(`localStorage.getItem(${JSON.stringify(keyName)})`), bytes)
+      assert.equal(await read('document.querySelector(".space-icon-picker footer > button").textContent'), 'Close')
+      await capture('durable-request-bytes-unreadable-kept-close-delta')
+      assert.equal(result.saveCalls.length, 1); assert.equal(result.writes, 0)
+      result.passed = true
+      return
+    }
+    if (scope === 'durable') {
+      await range('[data-series-morph=b]', 0.25); await ready()
+      const submittedPng = await png(), publicationsBefore = result.publications.length
+      await capture('durable-series-ready-to-save')
+      assert.equal(await read('document.querySelector(".space-icon-picker__save").disabled'), false)
+      await click('.space-icon-picker__save'); await wait('!document.querySelector(".space-icon-picker")')
+      assert.equal(result.saveCalls.length, 1); assert.equal(result.saveCalls[0].value.state, 'saved')
+      assert.equal(result.publications.length, publicationsBefore + 1); assert.equal(result.writes, 0, 'Series publication must not call the old config:save path a second time')
+      const saved = await control.call('space.mote.avatar.read', { target: targets['launcher:leader'].avatarTarget, operationId: result.saveCalls[0].input.operationId })
+      assert.equal(saved.choice.kind, 'series'); assert.equal(saved.operation.durability, 'confirmed')
+      assert.deepEqual(saved.choice.parameters, result.saveCalls[0].input.parameters)
+      assert.equal(sha(nativeImage.createFromDataURL(saved.image.dataUrl).toBitmap()), sha(nativeImage.createFromDataURL(submittedPng).toBitmap()))
+      await captureIdentity('durable-series-saved-identity')
+      const pngReadsBeforeProjection = result.pngReads.length, sourceCallsBeforeProjection = result.sourceCalls.length
+      const mobileMetadata = await read('seriesEditorFixture.mobileAppearance(false)'), mobileDetail = await read('seriesEditorFixture.mobileAppearance(true)')
+      assert.equal(mobileMetadata.find(value => value.spaceId === targets['launcher:leader'].key).image.dataUrl, null)
+      assert.equal(mobileMetadata.find(value => value.spaceId === targets['launcher:leader'].key).image.revision, saved.choice.image.fileName)
+      assert.equal(mobileDetail.find(value => value.spaceId === targets['launcher:leader'].key).image.dataUrl, saved.image.dataUrl)
+      assert.equal(result.pngReads.length, pngReadsBeforeProjection + 1, 'Only the original selected Mobile image consumer reads PNG bytes')
+      assert.equal(result.sourceCalls.length, sourceCallsBeforeProjection, 'Mobile appearance must not scan or prepare editable sources')
+      assert.deepEqual(await read(`seriesEditorFixture.facts().originalChoices[${JSON.stringify(targets['launcher:leader'].key)}]`), saved.choice)
+      result.operations.push({ action: 'production-mobile-presentation-consumes-original-png-keeps-full-choice', metadata: mobileMetadata, detail: mobileDetail })
+      const dailyCalls = result.sourceCalls.length; await pause(160)
+      assert.equal(result.sourceCalls.length, dailyCalls); assert.ok((await read('seriesGPUFacts()')).every(value => value.contextLost))
+      await click('#open-avatar'); await ready()
+      assert.equal(await read('document.querySelector("[data-series-morph=b]").value'), String(saved.choice.parameters.morphs.b))
+      assert.ok(result.sourceCalls.filter(call => call.method === 'preview').every(call => !Object.hasOwn(call.input.source, 'revision')), 'Preview receives a Locator with expectedRevision separate')
+      await capture('durable-series-saved-reopened')
+      await key('Escape'); await wait('!document.querySelector(".space-icon-picker")')
+      const model = path.join(builtinRoot, 'geometry/RobotExpressive.glb')
+      await fs.rename(model, model + '.kept')
+      await click('#open-avatar'); await wait('!!document.querySelector(".mote-series .mote-series__notice")')
+      await sameFrame(saved.image.dataUrl, 'Losing the editable source must retain the actual saved PNG')
+      assert.equal(await read('document.querySelector(".space-icon-picker__save").disabled'), true)
+      await capture('durable-saved-source-unavailable', false, false)
+      assert.equal(config.appearance.spaceObjectIcons[targets['launcher:leader'].key].source.revision, saved.choice.source.revision)
+      await fs.rename(model + '.kept', model); await click('.mote-series .mote-series__notice button'); await ready()
+      assert.equal(await read('document.querySelector("[data-series-morph=b]").value'), String(saved.choice.parameters.morphs.b))
+      await capture('durable-source-restored-original-parameters')
+      await key('Escape'); await wait('!document.querySelector(".space-icon-picker")')
+      await read('seriesEditorFixture.replaceTarget("launcher:analyst")'); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarBaselineReady==="true"')
+      await click('[data-avatar-source=series]'); await wait('document.querySelectorAll(".mote-series__select option").length>1')
+      await select('select[aria-label="Avatar series"]', JSON.stringify(['builtin', 'geometry']))
+      await click('[data-series-entry=quiet]'); await ready()
+      loseAckOnce = true
+      const retryStart = result.saveCalls.length, beforeRetryPublication = result.publications.length
+      await click('.space-icon-picker__save'); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarSaveState==="unknown"')
+      const originalOperation = await read('document.querySelector(".space-icon-picker").dataset.avatarOperation')
+      assert.equal(await read('document.querySelector(".space-icon-picker__save").disabled'), true)
+      await capture('durable-lost-ack-keeps-draft')
+      win.setContentSize(440, 900); await capture('durable-lost-ack-narrow-top'); await capture('durable-lost-ack-narrow-controls', true); win.setContentSize(1040, 900)
+      await click('[data-avatar-retry-save]')
+      for (let index = 0; index < 200 && result.saveCalls.length < retryStart + 2; index++) await pause(30)
+      assert.equal(result.saveCalls.length, retryStart + 2)
+      assert.deepEqual(result.saveCalls[retryStart].input, result.saveCalls[retryStart + 1].input)
+      assert.equal(result.saveCalls[retryStart + 1].input.operationId, originalOperation)
+      await wait('!document.querySelector(".space-icon-picker")')
+      assert.equal(result.publications.length, beforeRetryPublication + 1, 'A confirmed original operation retry must not publish again')
+      result.operations.push({ action: 'unknown-retry-keeps-original-complete-request-and-uuid', operationId: originalOperation })
+      await read('seriesEditorFixture.replaceTarget("launcher:analyst")'); await ready()
+      await select('select[aria-label="Series face Eyes"]', 'oval'); await ready()
+      loseAckOnce = true
+      await click('.space-icon-picker__save'); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarSaveState==="unknown"')
+      const inspectOperation = await read('document.querySelector(".space-icon-picker").dataset.avatarOperation'), savesBeforeInspect = result.saveCalls.length
+      await click('[data-avatar-inspect-save]'); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarSaveState==="saved"')
+      assert.equal(result.saveCalls.length, savesBeforeInspect)
+      assert.ok(result.readCalls.some(call => call.input.operationId === inspectOperation && call.value.operation?.durability === 'confirmed'))
+      await capture('durable-original-operation-inspected')
+      result.operations.push({ action: 'unknown-inspect-original-ack-without-new-publication', operationId: inspectOperation })
+      await select('select[aria-label="Series face Eyes"]', 'wink'); await ready(); loseAckOnce = true
+      await click('.space-icon-picker__save'); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarSaveState==="unknown"')
+      const keptOperation = await read('document.querySelector(".space-icon-picker").dataset.avatarOperation'), savesBeforeClose = result.saveCalls.length
+      await key('Escape'); await wait('!document.querySelector(".space-icon-picker")')
+      await read('seriesEditorFixture.replaceTarget("launcher:analyst")'); await ready(); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarSaveState==="saved"')
+      assert.equal(result.saveCalls.length, savesBeforeClose)
+      assert.ok(result.readCalls.some(call => call.input.operationId === keptOperation && call.value.operation?.durability === 'confirmed'))
+      result.operations.push({ action: 'closed-unknown-editor-keeps-original-request-for-read-only-reconciliation', operationId: keptOperation })
+      historicalChoiceOnce = { key: targets['launcher:analyst'].key, choice: 'gem' }
+      await select('select[aria-label="Series face Eyes"]', 'round'); await ready()
+      await click('.space-icon-picker__save'); await wait('!document.querySelector(".space-icon-picker")')
+      assert.equal(result.saveCalls.at(-1).value.state, 'saved')
+      assert.equal(result.saveCalls.at(-1).value.current.choice, 'gem')
+      assert.equal(await read(`seriesEditorFixture.facts().originalChoices[${JSON.stringify(targets['launcher:analyst'].key)}]`), 'gem', 'Historical ACK must retain the original config owner later choice')
+      result.operations.push({ action: 'historical-saved-ack-retains-later-current-choice', choice: 'gem' })
+      holdReadKey = targets['launcher:leader'].key
+      await click('#open-avatar')
+      for (let index = 0; index < 200 && !heldReads.length; index++) await pause(30)
+      assert.ok(heldReads.length)
+      await read('seriesEditorFixture.replaceTarget("launcher:analyst")'); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarBaselineReady==="true"')
+      holdReadKey = null; heldReads.splice(0).forEach(resolve => resolve()); await pause(100)
+      assert.equal(await read('document.querySelector("[data-space-icon-choice=gem]").getAttribute("aria-pressed")'), 'true')
+      assert.equal(await read('document.querySelector(".mote-series")?.dataset.seriesTarget'), targets['launcher:analyst'].key)
+      result.operations.push({ action: 'late-original-baseline-cannot-populate-replaced-target' })
+      await click('[data-avatar-source=series]'); await wait('document.querySelectorAll(".mote-series__select option").length>1')
+      await select('select[aria-label="Avatar series"]', JSON.stringify(['builtin', 'geometry'])); await click('[data-series-entry=quiet]'); await ready()
+      holdSaveKey = targets['launcher:analyst'].key
+      await click('.space-icon-picker__save')
+      for (let index = 0; index < 200 && !heldSaves.length; index++) await pause(30)
+      assert.ok(heldSaves.length)
+      await read('seriesEditorFixture.replaceTarget("launcher:leader")'); await ready()
+      const correctPrimary = await png()
+      holdSaveKey = null; heldSaves.splice(0).forEach(resolve => resolve()); await pause(160)
+      assert.equal(await read('seriesEditorFixture.facts().currentTarget.key'), targets['launcher:leader'].key)
+      assert.ok(await read('!!document.querySelector(".space-icon-picker")'), 'A late saved acknowledgement must not close a different original editor')
+      await sameFrame(correctPrimary, 'A late saved acknowledgement must not replace the different target draft')
+      assert.equal(result.saveCalls.at(-1).input.target.objectKey, targets['launcher:analyst'].key)
+      result.operations.push({ action: 'late-original-save-ack-fences-new-target-draft-and-close' })
+      await key('Escape'); await wait('!document.querySelector(".space-icon-picker")')
+      await read('seriesEditorFixture.replaceTarget("launcher:analyst")'); await ready()
+      await select('select[aria-label="Series face Eyes"]', 'wink'); await ready()
+      const refusedDraft = await png(), beforeRefusedPublication = result.publications.length
+      await owner.update(current => ({ ...current, appearance: { ...current.appearance, spaceObjectIcons: { ...current.appearance.spaceObjectIcons, [targets['launcher:analyst'].key]: 'rocket' } } }))
+      await click('.space-icon-picker__save'); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarSaveState==="refused"')
+      const refused = result.saveCalls.at(-1)
+      assert.equal(refused.value.state, 'refused'); assert.equal(result.publications.length, beforeRefusedPublication + 1)
+      await sameFrame(refusedDraft, 'A real refused save must retain the editable draft')
+      assert.equal(await read('document.querySelector(".space-icon-picker__save").disabled'), true)
+      await capture('durable-refused-save-keeps-draft')
+      await click('[data-avatar-review-current]'); await wait('!document.querySelector(".space-icon-picker").dataset.avatarSaveState')
+      await sameFrame(refusedDraft, 'Reviewing the original current choice must retain the draft')
+      const savesBeforeNewIntent = result.saveCalls.length
+      await click('.space-icon-picker__save'); await wait('!document.querySelector(".space-icon-picker")')
+      assert.equal(result.saveCalls.length, savesBeforeNewIntent + 1); assert.equal(result.saveCalls.at(-1).value.state, 'saved')
+      assert.notEqual(result.saveCalls.at(-1).input.operationId, refused.input.operationId)
+      assert.notEqual(result.saveCalls.at(-1).input.beforeRevision, refused.input.beforeRevision)
+      result.operations.push({ action: 'refused-save-keeps-draft-review-current-then-explicit-new-intent', refusedOperationId: refused.input.operationId, newOperationId: result.saveCalls.at(-1).input.operationId })
+      await read('seriesEditorFixture.replaceTarget("launcher:analyst")'); await ready()
+      const requestKey = 'agentmux.mote-avatar-save-draft.v1:' + JSON.stringify(Object.values(targets['launcher:analyst'].avatarTarget))
+      const damagedRequestBytes = '{"original-unreadable-request"'
+      await read(`localStorage.setItem(${JSON.stringify(requestKey)},${JSON.stringify(damagedRequestBytes)})`)
+      await read('seriesEditorFixture.mountPicker(false)'); await wait('!document.querySelector(".space-icon-picker")')
+      await read('seriesEditorFixture.mountPicker(true)'); await ready(); await wait('document.querySelector("[data-avatar-save-notice]")?.textContent.includes("Kept request is unreadable")')
+      assert.equal(await read(`localStorage.getItem(${JSON.stringify(requestKey)})`), damagedRequestBytes, 'An unreadable original request must not be normalized or overwritten')
+      assert.equal(await read('document.querySelector(".space-icon-picker__save").disabled'), true)
+      await capture('durable-request-bytes-unreadable-kept')
+      await read(`localStorage.removeItem(${JSON.stringify(requestKey)})`)
+      await read('seriesEditorFixture.mountPicker(false)'); await wait('!document.querySelector(".space-icon-picker")')
+      await read('seriesEditorFixture.mountPicker(true)'); await ready()
+      await select('select[aria-label="Series face Eyes"]', 'round'); await ready()
+      failFlushAt = result.flushRequests.length + 2
+      await click('.space-icon-picker__save'); await wait('document.querySelector("[data-avatar-save-notice]")?.textContent.includes("Request cleanup is unconfirmed")')
+      const cleanupRequest = result.saveCalls.at(-1).input, savesBeforeCleanup = result.saveCalls.length
+      assert.equal(result.saveCalls.at(-1).value.state, 'saved')
+      assert.deepEqual(await read(`seriesEditorFixture.keptRequest(${JSON.stringify(targets['launcher:analyst'].avatarTarget)})`), cleanupRequest, 'A failed retirement flush must restore the same original request')
+      await capture('durable-confirmed-request-retirement-unconfirmed')
+      await click('[data-avatar-review-current]'); await wait('document.querySelector(".space-icon-picker__save")?.disabled===false')
+      assert.equal(await read(`localStorage.getItem(${JSON.stringify(requestKey)})`), null)
+      assert.equal(result.saveCalls.length, savesBeforeCleanup, 'Retirement reconciliation only reads the original native operation')
+      await select('select[aria-label="Series face Eyes"]', 'oval'); await ready()
+      const beforeStorageFailure = result.saveCalls.length, originalCurrent = structuredClone(config.appearance.spaceObjectIcons[targets['launcher:analyst'].key])
+      failFlushOnce = true
+      await click('.space-icon-picker__save'); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarSaveState==="unsent"')
+      assert.equal(result.saveCalls.length, beforeStorageFailure, 'A failed storage flush request must not send native Save')
+      const originalRequest = await read(`seriesEditorFixture.keptRequest(${JSON.stringify(targets['launcher:analyst'].avatarTarget)})`)
+      assert.ok(originalRequest); assert.equal(originalRequest.operationId, await read('document.querySelector(".space-icon-picker").dataset.avatarOperation'))
+      assert.deepEqual(config.appearance.spaceObjectIcons[targets['launcher:analyst'].key], originalCurrent)
+      await capture('durable-request-storage-unconfirmed-keeps-draft')
+      await click('[data-avatar-source=alternative]'); assert.equal(await read('document.querySelector(".space-icon-picker__save").disabled'), false, 'A refused request-storage step must keep the legacy icon capability')
+      await click('[data-avatar-source=series]'); await ready()
+      failNativePublicationOnce = true
+      await click('[data-avatar-retry-save]'); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarSaveState==="unknown"')
+      assert.equal(result.saveCalls.length, beforeStorageFailure + 1); assert.deepEqual(result.saveCalls.at(-1).input, originalRequest)
+      assert.equal(result.saveCalls.at(-1).value.state, 'unknown'); assert.equal(result.saveCalls.at(-1).value.operation.phase, 'publication-unknown')
+      result.persistedUnknown = result.saveCalls.at(-1).value
+      result.persistedUnknown.input = originalRequest
+      const callsBeforeRemount = result.saveCalls.length
+      await read('seriesEditorFixture.mountPicker(false)'); await wait('!document.querySelector(".space-icon-picker")')
+      await read('seriesEditorFixture.mountPicker(true)'); await ready(); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarSaveState==="unknown"')
+      assert.equal(result.saveCalls.length, callsBeforeRemount, 'A real Picker remount must only inspect the original operation')
+      await sameFrame(originalRequest.pngDataUrl, 'A real Picker remount must restore the original unknown draft')
+      assert.equal(await read('document.querySelector(".space-icon-picker").dataset.avatarOperation'), originalRequest.operationId)
+      await capture('durable-unknown-request-after-picker-remount')
+      result.operations.push({ action: 'kept-request-survives-picker-unmount-remount-without-auto-save', operationId: originalRequest.operationId })
+      await key('Escape'); await wait('!document.querySelector(".space-icon-picker")')
+      result.finalPrimary = await control.call('space.mote.avatar.read', { target: targets['launcher:leader'].avatarTarget })
+      assert.deepEqual(result.finalPrimary.choice, saved.choice)
+      assert.equal(result.writes, 0)
+      result.passed = true
+      return
+    }
     await capture('editor-glb-normal-dark')
     await range('[data-series-morph=b]', 0.25); await ready(); assert.notEqual(await png(), first)
     await click('[data-series-material=toon]'); await ready(); assert.notEqual(await png(), first); await capture('editor-toon-dark')
@@ -235,5 +544,5 @@ app.whenReady().then(async () => {
   } catch (error) {
     result.error = { message: error.message, stack: error.stack }
     if (win) { result.failedFrame = await win.webContents.executeJavaScript('({text:document.body.textContent,html:document.body.innerHTML})').catch(() => null); await fs.writeFile(path.join(directory, 'failed.png'), (await win.webContents.capturePage()).toPNG()) }
-  } finally { await fs.writeFile(path.join(directory, 'renderer-result.json'), JSON.stringify(result, null, 2)); win?.destroy(); app.exit(result.passed ? 0 : 1) }
+  } finally { await fs.writeFile(path.join(directory, scope === 'durable-reopen' ? 'reader-result.json' : 'renderer-result.json'), JSON.stringify(result, null, 2)); win?.destroy(); app.exit(result.passed ? 0 : 1) }
 })

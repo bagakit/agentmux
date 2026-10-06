@@ -15,15 +15,19 @@ const receipt = { passed: false, aestheticReview: 'not-performed', source: {}, i
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 try {
   const option = process.argv.length > 2 ? process.argv[2] : null
-  const mutationIds = ['stale-source', 'stale-frame', 'reused-target', 'skip-dispose']
-  assert.ok(option === null || option === 'visual-delta' || mutationIds.includes(option), 'Unknown editor scope or mutation')
+  const mutationIds = ['stale-source', 'stale-frame', 'reused-target', 'skip-dispose', 'new-retry-id', 'lost-png-projection', 'lost-mobile-projection', 'forget-kept-request']
+  assert.ok(option === null || option === 'visual-delta' || option === 'durable' || option === 'consumer-build' || option === 'request-label-delta' || mutationIds.includes(option), 'Unknown editor scope or mutation')
   const mutation = mutationIds.includes(option) ? option : null
-  receipt.scope = option === 'visual-delta' ? 'visual-delta' : 'full'
+  receipt.scope = option === 'visual-delta' || option === 'durable' || option === 'consumer-build' || option === 'request-label-delta' ? option : ['new-retry-id', 'lost-png-projection', 'lost-mobile-projection', 'forget-kept-request'].includes(option) ? 'durable' : 'full'
   const edits = {
     'stale-source': ['apps/desktop/src/renderer/src/components/MoteAvatarSeriesEditor.tsx', 'if (!alive.current || request !== sourceRequest.current || originalTarget.current !== target) return', 'if (!alive.current || originalTarget.current !== target) return'],
     'stale-frame': ['apps/desktop/src/renderer/src/components/MoteAvatarSeriesEditor.tsx', 'const valid = () => alive.current && request === frameRequest.current && originalTarget.current === target', 'const valid = () => alive.current && originalTarget.current === target'],
-    'reused-target': ['apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx', 'MoteAvatarSeriesEditor key={target.key}', 'MoteAvatarSeriesEditor'],
+    'reused-target': ['apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx', 'MoteAvatarSeriesEditor key={targetIdentity}', 'MoteAvatarSeriesEditor'],
     'skip-dispose': ['apps/desktop/src/renderer/src/lib/mote-avatar-series-renderer.ts', 'function dispose() {', 'function dispose() { return;'],
+    'new-retry-id': ['apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx', 'submitSeriesSave(seriesAttempt.request, target)', 'submitSeriesSave({ ...seriesAttempt.request, operationId: crypto.randomUUID() }, target)'],
+    'lost-png-projection': ['apps/desktop/src/renderer/src/components/SpaceObjectIcon.tsx', "manualIcon.kind === 'series' ? manualIcon.image : manualIcon", "manualIcon.kind === 'series' ? manualIcon : manualIcon"],
+    'lost-mobile-projection': ['apps/desktop/src/renderer/src/lib/mobile-presentation.ts', "choice?.kind === 'series' ? choice.image :", "choice?.kind === 'series' ? null :"],
+    'forget-kept-request': ['apps/desktop/src/renderer/src/lib/mote-avatar-save-draft.ts', 'if (!existing) localStorage.setItem(moteAvatarSaveDraftKey(request.target), JSON.stringify(request))', 'if (!existing) void request'],
   }
   const mutated = { name: 'bounded-production-mutation', setup(plugin) {
     if (!mutation) return
@@ -84,8 +88,28 @@ try {
     define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' } })
   const preload = await build({ absWorkingDir: root, entryPoints: [path.join(root, 'apps/desktop/src/preload/index.ts')], outfile: path.join(compiled, 'production-preload.cjs'),
     platform: 'node', format: 'cjs', bundle: true, external: ['electron'], alias, metafile: true, logLevel: 'error' })
-  const native = await build({ absWorkingDir: root, stdin: { contents: 'export { MoteAvatarSeriesOwner } from "./apps/desktop/src/main/mote-avatar-series.ts"; export { MoteAvatarControl } from "./apps/desktop/src/main/mote-avatar-control.ts";', resolveDir: root, sourcefile: 'original-source-entry.ts' },
-    outfile: path.join(compiled, 'editor-native.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], alias, metafile: true, logLevel: 'error' })
+  const nativeAlias = Object.fromEntries(Object.entries(alias).filter(([name]) => !name.startsWith('@agentmux/core')))
+  const nativeCoreFiles = new Set()
+  const nativeCore = { name: 'original-built-core-native-exports', setup(plugin) {
+    plugin.onResolve({ filter: /\.mjs$/ }, args => {
+      if (!args.path.startsWith('.')) return
+      const file = path.resolve(args.resolveDir, args.path); nativeCoreFiles.add(file)
+      return { path: file, external: true }
+    })
+    plugin.onResolve({ filter: /^@agentmux\/core(?:\/.*)?$/ }, async args => {
+      const folder = path.join(root, 'packages/core'), manifest = JSON.parse(await fs.readFile(path.join(folder, 'package.json'), 'utf8'))
+      const subpath = args.path === '@agentmux/core' ? '.' : '.' + args.path.slice('@agentmux/core'.length)
+      const exported = manifest.exports[subpath]?.import
+      if (!exported) throw new Error('The original Core native export is unavailable: ' + args.path)
+      const file = path.join(folder, exported); nativeCoreFiles.add(file)
+      return { path: file, external: true }
+    })
+  } }
+  const nativeEntry = ['durable', 'consumer-build', 'request-label-delta'].includes(receipt.scope)
+    ? 'export { MoteAvatarSeriesOwner, MoteAvatarControl, createMoteAvatarWriter, ConfigStore, DEFAULT_CONFIG, ConfigOwner, ScratchTopics, directoryIdentity } from "./apps/desktop/scripts/fixtures/mote-avatar-series/writer-entry.ts";'
+    : 'export { MoteAvatarSeriesOwner, MoteAvatarControl } from "./apps/desktop/scripts/fixtures/mote-avatar-series/source-entry.ts"; export { ConfigStore, DEFAULT_CONFIG } from "./apps/desktop/src/main/config-store.ts"; export { ConfigOwner } from "./apps/desktop/src/main/config-owner.ts"; export { ScratchTopics } from "./apps/desktop/src/main/scratch-topics.ts"; export { directoryIdentity } from "./apps/desktop/src/shared/space-addresses.ts";'
+  const native = await build({ absWorkingDir: root, stdin: { contents: nativeEntry + ' export { CONFIG_CHANGED_CHANNEL } from "./apps/desktop/src/shared/contracts.ts"; export { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from "./apps/desktop/src/main/workbench-storage-authority.ts";', resolveDir: root, sourcefile: 'original-source-entry.ts' },
+    outfile: path.join(compiled, 'editor-native.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], alias: nativeAlias, plugins: [nativeCore, uiSources], metafile: true, logLevel: 'error' })
   for (const file of Object.keys({ ...built.metafile.inputs, ...preload.metafile.inputs, ...native.metafile.inputs, ...workerInputs })) {
     if (file === 'original-source-entry.ts' || file.startsWith('original-worker:') || file.startsWith('original-url:') || file.startsWith('original-raw:')) continue
     receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
@@ -99,17 +123,43 @@ try {
     }
   }
   await recordResources(path.join(root, 'apps/desktop/resources/avatar-series'))
+  await recordResources(path.join(root, 'packages/core/dist'))
+  receipt.nativeCoreExports = Object.fromEntries(await Promise.all([...nativeCoreFiles].map(async file => [path.relative(root, file), sha(await fs.readFile(file))])))
+  Object.assign(receipt.source, receipt.nativeCoreExports)
+  receipt.boundary = ['durable', 'request-label-delta'].includes(receipt.scope)
+    ? 'Production Picker/Editor/SpaceObjectIcon and default API/production preload consume the production Main source control + createMoteAvatarWriter factory, actual ScratchTopics/nativeImage bounded PNG owner, durable ConfigStore/ConfigOwner and original CONFIG_CHANGED channel. Writes and target replacements are confined to private fixture Motes; no fixed saved replies, live App/Session/layout preservation, installed-package or final aesthetic claim.'
+    : receipt.boundary
   for (const name of ['SpaceIconPicker.tsx', 'MoteAvatarSeriesEditor.tsx']) assert.ok(receipt.source['apps/desktop/src/renderer/src/components/' + name], 'Original production consumer must be compiled')
   assert.ok(receipt.source['apps/desktop/src/main/mote-avatar-series.ts']); assert.ok(receipt.source['apps/desktop/src/preload/index.ts'])
   if (mutation) assert.equal(receipt.mutation?.id, mutation, 'The selected production mutation must run')
   await fs.copyFile(path.join(fixture, 'editor-preload.cjs'), path.join(compiled, 'editor-preload.cjs'))
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="editor-entry.css"></head><body><div id="root"></div><script type="module" src="editor-entry.js"></script></body></html>')
+  if (receipt.scope === 'consumer-build') {
+    receipt.status = 'compiled-not-executed'
+    receipt.directory = directory
+    receipt.boundary = 'Current original product consumer, preload and native owner compiled only. No consumer execution, saved-flow, restart or visual approval claim.'
+    await fs.writeFile(path.join(directory, 'receipt.json'), JSON.stringify(receipt, null, 2))
+    console.log(path.join(directory, 'receipt.json'))
+    process.exit(0)
+  }
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
   receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'editor-main.cjs'), path.join(compiled, 'index.html'), directory, path.join(root, 'apps/desktop/resources/avatar-series'), receipt.scope],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => { logs.push(line); console.log(line) } })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
+  if (receipt.scope === 'durable' && receipt.renderer.passed) {
+    const readerLogs = []
+    receipt.readerProcess = await runProbeProcess(require('electron'), [path.join(fixture, 'editor-main.cjs'), path.join(compiled, 'index.html'), directory, path.join(root, 'apps/desktop/resources/avatar-series'), 'durable-reopen'],
+      { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => { readerLogs.push(line); console.log(line) } })
+    await fs.writeFile(path.join(directory, 'reader.log'), readerLogs.join('\n'))
+    receipt.reader = JSON.parse(await fs.readFile(path.join(directory, 'reader-result.json'), 'utf8'))
+    assert.equal(receipt.readerProcess.exitCode, 0, receipt.reader.error?.message); assert.equal(receipt.reader.passed, true)
+    assert.notEqual(receipt.reader.pid, receipt.renderer.pid, 'Saved PNG and native parameters must be read by a fresh GUI process')
+    assert.deepEqual(receipt.reader.reopened.choice, receipt.renderer.finalPrimary.choice)
+    assert.equal(receipt.reader.reopened.image.dataUrl, receipt.renderer.finalPrimary.image.dataUrl)
+    for (const file of receipt.reader.images) receipt.images[file] = sha(await fs.readFile(path.join(directory, file)))
+  }
   for (const file of receipt.renderer.images) receipt.images[file] = sha(await fs.readFile(path.join(directory, file)))
   receipt.sourceDrift = []
   for (const [file, hash] of Object.entries(receipt.source)) if (sha(await fs.readFile(path.resolve(root, file))) !== hash) receipt.sourceDrift.push(file)
