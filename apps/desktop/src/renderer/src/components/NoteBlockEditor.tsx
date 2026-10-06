@@ -239,7 +239,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
           editor.view.dispatch(editor.state.tr.setMeta('noteFold', true)); setFoldRevision(value => value + 1)
         }}><ThemeNavigationDownIcon size={15} /></button>
       </div>
-      <button type="button" className="note-tool note-tool--label" title="Reference block" aria-label="Reference block" aria-expanded={picker} onClick={() => setPicker(value => !value)}><ThemeObjectLinkIcon size={14} /><span>Reference block</span></button>
+      <div className="note-editor__tool-group" role="group" aria-label="Block references"><button type="button" className="note-tool note-tool--label" title="Reference block" aria-label="Reference block" aria-expanded={picker} onClick={() => setPicker(value => !value)}><ThemeObjectLinkIcon size={14} /><span>Reference block</span></button></div>
     </div>
     {picker ? <section className="note-reference-picker" aria-label="Choose an original block">
       <TextInput aria-label="Find a Note block" placeholder="Find in loaded Notes…" value={query} onChange={event => setQuery(event.target.value)} />
