@@ -1,5 +1,6 @@
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryMessagePhase, AgentSessionHistoryQuestionAnswer, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
+import type { ConversationItemRef } from '@agentmux/core/conversation'
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
 import { readSessionHistoryTextResource } from '@agentmux/core/session-history-content'
 import { SemanticIcon } from '../theme/icons.js'
@@ -44,6 +45,8 @@ export type ConversationMessageProps = {
   speaker?: ConversationSpeaker
   /** Current conversation identity, supplied by its host; never inferred from a name. */
   conversationSessionId?: string
+  /** Location metadata for any original speech, independent of user input semantics. */
+  itemRef?: ConversationItemRef
   inputSource?: AgentSessionUserMessageSource
   /** Current receiving session Host, independent of this message's sender. */
   executionHostId?: string
@@ -122,7 +125,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
   compact = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
-  speaker: recordedSpeaker, conversationSessionId, inputSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
+  speaker: recordedSpeaker, conversationSessionId, itemRef, inputSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
   const platform = useClientUiPlatform()
@@ -290,7 +293,8 @@ export function ConversationMessage({
       data-message-phase={messagePhase}
       data-recorded-identity={recordedIdentity || undefined}
       data-message-id={messageId || undefined}
-      data-message-source-key={conversationMessageSourceKey(conversationSessionId, inputSource)}
+      data-message-source-key={conversationMessageSourceKey(itemRef?.agentSessionId ?? conversationSessionId, itemRef?.source ?? inputSource)}
+      data-conversation-item-ref={itemRef ? JSON.stringify(itemRef) : undefined}
       data-message-located={located || undefined}
       tabIndex={-1}
       data-speaker-role={speaker?.role}

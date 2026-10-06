@@ -11,6 +11,7 @@ import { AgentAsyncQuestionCard, type QuestionNoticeRenderer } from './AgentAsyn
 import type { ConversationQuestionInput, ConversationQuestionTarget, QuestionReplyState } from '../lib/conversation-question-reply.js'
 import { projectConversationQuestions } from '@agentmux/core/conversation'
 import { completedNativeReply } from '../lib/conversation-files.js'
+import { conversationItemRef } from '@agentmux/core/conversation'
 
 type ReadingProps = Pick<ConversationMessageProps,
   'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
@@ -55,11 +56,13 @@ export const ConversationView = memo(function ConversationView({
       const recordId = record.id
       const question = questions.get(item.id)
       const user = record.input
+      const itemRef = conversationItemRef(record)
       const speaker = record.speaker
       const described = speaker && item.kind !== 'system-message' ? describeSpeaker?.(speaker) : undefined
       const body = <ConversationMessage messageId={messageIdForRecord?.(item) ?? user?.id ?? recordId} conversationSessionId={sessionId}
           {...(completedNativeReply(item) ? { status: 'complete' } : {})}
-          located={Boolean(user && locatedMessageKey === conversationMessageSourceKey(sessionId, user.source))}
+          {...(itemRef ? { itemRef } : {})}
+          located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source)}
           {...(item.kind === 'system-message' ? { recordTitle: `${page.source.providerId} · ${item.title ?? 'System record'}` }
             : user && item.title ? { recordTitle: item.title } : {})}
           nativeResourceRecord={{ source: page.source, recordId: item.id, ...(item.turnId === undefined ? {} : { turnId: item.turnId }) }}
