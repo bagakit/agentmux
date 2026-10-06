@@ -106,8 +106,6 @@
 .mobile-send-status__diagnosis dt { color: var(--text-3); }
 .mobile-send-status__diagnosis dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
 .mobile-send-status summary { display: flex; align-items: center; gap: 8px; color: var(--text-3); }
-.mobile-send-status summary::after { content: ''; width: 6px; height: 6px; flex: none; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(45deg) translateY(-2px); }
-.mobile-send-status details[open] > summary::after { transform: rotate(225deg) translate(-1px, -1px); }
 /* Attachments stay beside the original message, with one explicit transfer action. */
 .mobile-attachments:empty { display: none; }
 .mobile-attachments { display: grid; gap: 6px; max-height: min(24dvh, 180px); overflow: auto; overscroll-behavior: contain; }

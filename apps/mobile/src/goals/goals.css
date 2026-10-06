@@ -27,8 +27,6 @@
 .mobile-goal-create > button:first-child { width: auto; text-align: left; color: var(--green); }
 .mobile-goal-create > details { flex: 1 1 150px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .mobile-goal-create > details[open], .mobile-goal-create > p { flex-basis: 100%; }
-.mobile-goals summary::after { content: '⌄'; margin-left: auto; padding-inline: 6px; }
-.mobile-goals details[open] > summary::after { transform: rotate(180deg); }
 .mobile-goals input, .mobile-goals select, .mobile-goals textarea { font-size: 16px; min-width: 0; }
 .mobile-goal-editor-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .mobile-goal-unknown > details pre { max-height: 35vh; overflow-y: auto; }
