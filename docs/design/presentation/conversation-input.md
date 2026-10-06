@@ -7,6 +7,7 @@
 **本页章节**
 
 - [Agent 输入行密度](#agent-输入行密度)
+- [Message Tool 输入历史列表](#message-tool-输入历史列表)
 - [System Reminder 的默认与本次控件](#system-reminder-的默认与本次控件)
 - [Explorer 与快捷输入区](#explorer-与快捷输入区)
 - [Explorer 提交历史的密度、分支颜色与连线](#explorer-提交历史的密度分支颜色与连线)
@@ -42,6 +43,12 @@
 - Agent 身份的来源与行为按交互合同[《Agent Region 关闭与身份入口》](../behavior/spaces-and-layout.md#agent-region-关闭与身份入口)，顶栏呈现只按[《Agent Region 的关闭与动作密度》](spaces-and-layout.md#agent-region-的关闭与动作密度)执行；输入区仅保留原输入模式与动作密度，不重复名字或补一条身份 toolbar。
 - Terminal/Activity 视图切换使用一个 28px 左右的图标按钮，不使用常驻的双按钮分段控件；图标只表达下一步动作，焦点环和 tooltip 保留可发现性。
 - Scratch Topic 点击后右侧必须有内容面或明确的 loading/failed surface；不可用状态沿用同一 Region 几何，不留无文字、无动作的空白区域。
+
+## Message Tool 输入历史列表
+
+历史查询沿现有 Message Tool 的历史区展开，保留待发列表和历史阅读的清楚分工，不在输入区增加常驻第二套消息列表。列表顶部以一行查询输入与明确搜索动作起步，正文优先；来源与记录时间是紧凑的次级信息，缺失事实用短说明，不堆叠原生标识和技术详情。
+
+每行可读正文摘要、真实来源和清楚的回填动作；长正文及资源沿原阅读组件展开，复制与填入草稿分开，不能让点击阅读暗中发送。查询中、部分范围、可继续读取、不可用与确实无匹配就地呈现，已有结果仍可使用。正常与窄工作面保留查询、结果及原草稿的可读空间，键盘焦点与关闭返回路径明确；行为边界唯一见[按 Agent 的输入历史](../behavior/conversation-input.md#message-tool-按-agent-的输入历史)。
 
 ## System Reminder 的默认与本次控件
 
