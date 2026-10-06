@@ -7,8 +7,8 @@ const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeActionStopIcon = semanticIconComponent('action.stop')
 const ThemeObjectSourceCodeIcon = semanticIconComponent('object.source-code')
 const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { parseToolkitResultDocument, type ToolkitAction, type ToolkitConfirmedResult } from '@agentmux/core/control'
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { ToolkitAction, ToolkitConfirmedResult } from '@agentmux/core/control'
 import { api } from '../../lib/api'
 import { usePathDisplay } from '../../hooks/usePathDisplay'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -21,9 +21,6 @@ import { useToolkitScriptObservation } from './use-toolkit-script-observation'
 import { continueToolkitRequest, CONTINUE_TOOLKIT_NOTICE } from './continue-toolkit-request'
 
 const stateLabel = { idle: 'Not run yet', disabled: 'Hidden · new runs disabled', pending: 'Starting saved version', running: 'Running saved version', stopping: 'Stopping this execution', unknown: 'Execution unconfirmed', succeeded: 'Finished', failed: 'Failed', stopped: 'Stopped' } as const
-function resultDocument(text: string) {
-  try { return parseToolkitResultDocument(JSON.parse(text.trim())) } catch { return null }
-}
 function Output({ executionId, text }: { executionId: string; text: string }) {
   const pre = useRef<HTMLPreElement>(null)
   const previous = useRef<{ id: string; text: string } | null>(null)
@@ -61,14 +58,14 @@ export function UserToolkitResult({ definition, active, close, official = false,
     if (!result || result.invocationId !== copyInvocation.current) return
     copyInvocation.current = null
     if (result.state !== 'succeeded') { setConnecting(false); return }
-    const link = resultDocument(result.text)?.links[0]
+    const link = result.document?.links[0]
     if (link) void api.ui.writeClipboardText(link.url).then(() => setCopyNotice('Link copied. Open it in your phone browser.'), () => setCopyNotice('Link ready. Use Copy link below.')).finally(() => setConnecting(false))
     else { setConnecting(false); setOperationError('The tool finished without a connection link.') }
   }, [snapshot?.latestConfirmed])
   const display = snapshot?.display
   const showDisplay = Boolean(snapshot?.definition.display || display)
   const lane = showDisplay ? display : snapshot
-  const retainedDisplay = display?.latestConfirmed?.state === 'succeeded' ? display.latestConfirmed : display?.lastSucceeded
+  const retainedDisplay = display?.latestConfirmed?.state === 'succeeded' && display.latestConfirmed.document !== null ? display.latestConfirmed : display?.lastSucceeded
   const execution = showDisplay ? retainedDisplay ?? display?.admission ?? display?.latestConfirmed : lane?.admission ?? lane?.latestConfirmed
   const unknown = reading.error || lane?.state === 'unknown'
   const ordinaryUnknown = snapshot?.state === 'unknown'
@@ -168,10 +165,10 @@ export function UserToolkitResult({ definition, active, close, official = false,
   const capturedArgs = showDisplay ? capturedDefinition?.display?.args : execution?.action ? capturedAction?.args : capturedDefinition?.args
   const resultStatus = unknown ? 'status.toolkit-unknown' : reading.pending && !snapshot ? 'status.toolkit-reading' : lane ? `status.toolkit-${lane.state}` as const : showDisplay ? 'status.toolkit-preparing-display' : 'status.toolkit-unloaded'
   const source = snapshot?.latestConfirmed
-  const document = useMemo(() => execution?.text ? resultDocument(execution.text) : null, [execution?.text])
+  const document = execution?.document
   return <>
     <header className="performance-header"><div className="performance-title"><ToolkitIcon icon={icon} size={17} /><div className="toolkit-result__identity"><small>{official ? 'Official toolkit' : 'Custom tool'}</small><h2>{name}</h2></div></div><button type="button" className="performance-icon-button" data-toolkit-close aria-label={`Close ${name}`} onClick={close}><ThemeActionCloseIcon size={14} /></button></header>
-    <div className="performance-observation"><span className="performance-status" data-state={unknown ? 'unknown' : lane?.state ?? 'idle'}><SemanticIcon name={resultStatus} size={5} />{reading.error ? 'Result unconfirmed' : reading.pending && !snapshot ? 'Reading result…' : lane ? showDisplay && lane.state === 'succeeded' ? 'Display checked' : stateLabel[lane.state] : showDisplay ? 'Preparing display…' : 'Result not loaded'}</span>
+    <div className="performance-observation"><span className="performance-status" data-state={unknown ? 'unknown' : lane?.state ?? 'idle'}><SemanticIcon name={resultStatus} size={5} />{reading.error ? 'Result unconfirmed' : reading.pending && !snapshot ? 'Reading result…' : lane ? showDisplay && lane.state === 'succeeded' ? display?.latestConfirmed?.document === null ? 'Display result unavailable' : 'Display checked' : stateLabel[lane.state] : showDisplay ? 'Preparing display…' : 'Result not loaded'}</span>
       {execution ? <time dateTime={new Date('endedAt' in execution ? execution.endedAt : execution.startedAt).toISOString()}>{new Date('endedAt' in execution ? execution.endedAt : execution.startedAt).toLocaleTimeString()}</time> : null}
     </div>
     <div className="performance-body toolkit-result">
