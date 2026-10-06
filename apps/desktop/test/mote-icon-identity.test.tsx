@@ -9,6 +9,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createSourceFile, isImportDeclaration, isNamedImports, ScriptTarget } from 'typescript'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { iconShapes, semanticIconHref } from '@agentmux/client-ui/icons'
 import { MoteIcon } from '../src/renderer/src/components/MoteIcon'
 import { SpaceTopicsTree } from '../src/renderer/src/components/SpaceTopicsTree'
 import { SpaceCreateMenu } from '../src/renderer/src/components/SpaceCreateMenu'
@@ -57,13 +58,14 @@ describe('Mote vector identity', () => {
       expect(svg.getAttribute('width')).toBe(String(size))
       expect(svg.getAttribute('height')).toBe(String(size))
       expect(svg.getAttribute('viewBox')).toBe('0 0 24 24')
-      expect(svg.getAttribute('fill')).toBe('currentColor')
-      expect(svg.getAttribute('stroke')).toBe('none')
+      expect(svg.getAttribute('fill')).toBe('none')
+      expect(svg.getAttribute('stroke')).toBe('currentColor')
       expect(svg.getAttribute('aria-hidden')).toBe('true')
-      expect(svg.querySelectorAll('path')).toHaveLength(1)
-      const path = svg.querySelector('path')!
-      expect(path.getAttribute('fill-rule')).toBe('evenodd')
-      const d = path.getAttribute('d')!
+      expect(svg.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('object.mote'))
+      const [tag, path] = iconShapes('object.mote')[0]!
+      expect(tag).toBe('path')
+      expect(path['fill-rule']).toBe('evenodd')
+      const d = path.d!
       expect(d.length).toBeGreaterThan(100)
       expect(d.match(/[Mm]/gu)).toHaveLength(2)
       expect(svg.querySelector('filter, linearGradient, radialGradient, animate, image')).toBeNull()
@@ -83,15 +85,15 @@ describe('Mote vector identity', () => {
     expect(primary?.getAttribute('src')).toContain('pmo-teams-topic-avatar.png')
     const tree = container.querySelector('[aria-label="Open Mote · Research Mote"] svg')
     expect(tree).not.toBeNull()
-    const contour = renderedMote(14).querySelector('path')!.getAttribute('d')
-    expect(tree?.querySelector('path')?.getAttribute('d')).toBe(contour)
+    const contour = semanticIconHref('object.mote')
+    expect(tree?.querySelector('use')?.getAttribute('href')).toBe(contour)
     const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Add Space"]')!
     expect(trigger).not.toBeNull()
     await act(async () => { trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, ctrlKey: false })) })
     const items = [...document.querySelectorAll('[role="menuitem"]')]
     expect(items.map((item) => item.textContent)).toEqual(['Open Folder As a Project', 'Create Another Topic', 'Create Mote'])
     const creation = items.find((item) => item.textContent === 'Create Mote')!
-    expect(creation.querySelector('svg path')?.getAttribute('d')).toBe(contour)
+    expect(creation.querySelector('svg use')?.getAttribute('href')).toBe(contour)
   })
 
   it('keeps the spark badge data and official Provider asset while changing its glyph', () => {
@@ -100,7 +102,7 @@ describe('Mote vector identity', () => {
     expect(node.querySelector('[data-agent-provider="codex"]')).not.toBeNull()
     const badge = node.querySelector('[data-avatar-badge="spark"]')
     expect(badge).not.toBeNull()
-    expect(badge?.querySelector('path')?.getAttribute('d')).toBe(renderedMote(8).querySelector('path')!.getAttribute('d'))
+    expect(badge?.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('object.mote'))
     expect(badge?.querySelector('svg')?.getAttribute('width')).toBe('6')
   })
 
@@ -109,19 +111,19 @@ describe('Mote vector identity', () => {
       tabId: 'new-tab', title: 'New Tab', active: true,
       regions: [{ regionId: 'new-region', surfaceKind: 'launcher', bounds: { x: 0, y: 0, width: 1, height: 1 }, executorLabel: '', activity: '' }]
     }]} />)
-    expect(launcher).toContain('lucide-panels-top-left')
-    expect(renderToStaticMarkup(<SemanticIcon name="skill" />)).toContain('lucide-puzzle')
+    expect(launcher).toContain('data-semantic-icon="object.launcher"')
+    expect(renderToStaticMarkup(<SemanticIcon name="object.skill" />)).toContain('agentmux-icon-object.skill')
     const config = await api.config.get()
     await act(async () => root.render(<AgentSettingsPane config={config} onSave={async () => {}} />))
     const actions = [...container.querySelectorAll('button')].filter((button) => button.textContent?.includes('Enable YOLO'))
     expect(actions.length).toBeGreaterThan(0)
-    for (const button of actions) expect(button.querySelector('.lucide-shield-off')).not.toBeNull()
+    for (const button of actions) expect(button.querySelector('[data-semantic-icon="status.unrestricted"]')).not.toBeNull()
     const tab = createWorkbenchTab('new-tab', { regionId: 'new-region', kind: 'launcher', workspaceId: workspace.id })
     useAppStore.setState({ config: { ...config, workspaces: [workspace] }, sessions: [],
       tabs: { [tab.id]: tab }, layouts: { [workspace.id]: createWorkspaceLayout('main', [tab.id]) } })
     await act(async () => root.render(<QuickSwitcher open onClose={() => {}} />))
     expect(document.querySelectorAll('.quick-switch__row')).toHaveLength(1)
-    expect(document.querySelector('.quick-switch__row .lucide-panels-top-left')).not.toBeNull()
+    expect(document.querySelector('.quick-switch__row [data-semantic-icon="object.launcher"]')).not.toBeNull()
   })
 
   it('scans a nonempty production source set for starburst imports and real mark callers', () => {
@@ -148,7 +150,8 @@ describe('Mote vector identity', () => {
       }
       if (!file.endsWith('/MoteIcon.tsx') && /<MoteIcon\b|spark:\s*MoteIcon\b/u.test(source)) callers.push(file)
     }
-    expect(imports.length).toBeGreaterThan(0)
+    expect(files.length).toBeGreaterThan(500)
+    expect(imports).toEqual([])
     expect(forbidden).toEqual([])
     expect(callers.length).toBeGreaterThan(0)
   })
