@@ -12,7 +12,7 @@ import { AgentComposerTools } from '../src/renderer/src/components/AgentComposer
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM, composerConfig } from './helpers/composer-dom-fixture'
-import { generalSettingsModule } from '../src/renderer/src/components/settings/modules/general'
+import { messageToolSettingsModule } from '../src/renderer/src/components/settings/modules/message-tool'
 import { AgentMuxControlServer } from '../../../packages/core/dist/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../../../packages/core/dist/public-rpc-client.js'
 import { spawn } from 'node:child_process'
@@ -22,9 +22,9 @@ import { dirname, join, resolve } from 'node:path'
 const dom = composerDOM()
 const envelope = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'layout-preference' } as const
 const entry = { key: 'messageToolInitialLayout', kind: 'string', value: 'one-line', default: 'one-line', enum: ['one-line', 'two-line'] }
-const pane = () => dom.container.querySelector<HTMLElement>('[data-settings-pane="general"]')!
+const pane = (section = 'message-tool') => dom.container.querySelector<HTMLElement>(`[data-settings-pane="${section}"]`)!
 const choose = async (layout: string) => { await act(async () => pane().querySelector<HTMLInputElement>(`input[value="${layout}"]`)!.click()) }
-const save = async () => { await act(async () => pane().querySelector<HTMLButtonElement>('[data-settings-save-bar] button')!.click()) }
+const save = async (section = 'message-tool') => { await act(async () => pane(section).querySelector<HTMLButtonElement>('[data-settings-save-bar] button')!.click()) }
 const phase = () => dom.container.querySelector('.composer-tools')?.getAttribute('data-mode')
 
 it('discovers the effective default without writing it, persists the choice and reads it after reopening the config', async () => {
@@ -71,14 +71,14 @@ it('consumes the same Main preference through public RPC and the compiled CLI', 
   } finally { rpc.dispose(); await server.stop() }
 })
 
-it('saves the first two-line edit through the real General adapter and ConfigOwner, preserving an unrelated concurrent change', async () => {
+it('saves the first two-line edit through the real Message Tool adapter and ConfigOwner, preserving an unrelated concurrent change', async () => {
   const f = await configOwnerFixture()
   useAppStore.setState({ config: f.owner.current })
   const ipc = vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => {
     const committed = await f.owner.edit(expected!, next)
     useAppStore.getState().setConfig(committed)
   })
-  await dom.render(<SettingsPanel initialSection="general" onClose={() => {}} />)
+  await dom.render(<SettingsPanel initialSection="message-tool" onClose={() => {}} />)
   expect(pane().querySelector<HTMLInputElement>('input[value="one-line"]')!.checked).toBe(true)
   await choose('two-line')
   expect(pane().textContent).toContain('Saved: One line')
@@ -91,7 +91,7 @@ it('saves the first two-line edit through the real General adapter and ConfigOwn
   expect(ipc).toHaveBeenCalledTimes(1)
   expect(pane().textContent).toContain('Saved: Two lines')
   expect(pane().querySelector('[data-settings-save-bar]')!.textContent).toContain('Changes saved')
-  expect(generalSettingsModule.savedSummary(f.owner.current)).toContain('Two-line Message Tool')
+  expect(messageToolSettingsModule.savedSummary(f.owner.current)).toContain('Two-line input')
 })
 
 it('saving only copied paths leaves the absent layout preference absent', async () => {
@@ -99,8 +99,8 @@ it('saving only copied paths leaves the absent layout preference absent', async 
   useAppStore.setState({ config: f.owner.current })
   const ipc = vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => { await f.owner.edit(expected!, next) })
   await dom.render(<SettingsPanel initialSection="general" onClose={() => {}} />)
-  await act(async () => pane().querySelector<HTMLInputElement>('input[type="checkbox"]')!.click())
-  await save()
+  await act(async () => pane('general').querySelector<HTMLInputElement>('input[type="checkbox"]')!.click())
+  await save('general')
   await act(async () => { expect((await Promise.allSettled([ipc.mock.results[0].value])).map(result => result.status)).toEqual(['fulfilled']) })
   await vi.waitFor(async () => expect((await f.disk()).copyPathsAsAbsolute).toBe(true))
   expect((await f.disk()).copyPathsAsAbsolute).toBe(true)
@@ -134,7 +134,7 @@ it('keeps launcher tools available without a layout toggle', async () => {
 })
 
 it('finds the initial layout through the actual settings search and retains the dirty choice', async () => {
-  await dom.render(<SettingsPanel initialSection="general" onClose={() => {}} />)
+  await dom.render(<SettingsPanel initialSection="message-tool" onClose={() => {}} />)
   const original = pane()
   await choose('two-line')
   const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!
@@ -152,7 +152,7 @@ it('finds the initial layout through the actual settings search and retains the 
 it('preserves a later edit while the original save is pending', async () => {
   const pending = deferred<void>()
   vi.spyOn(api.config, 'save').mockImplementation(() => pending.promise)
-  await dom.render(<SettingsPanel initialSection="general" onClose={() => {}} />)
+  await dom.render(<SettingsPanel initialSection="message-tool" onClose={() => {}} />)
   await choose('two-line'); await save(); await choose('one-line')
   await act(async () => pending.resolve())
   expect(pane().querySelector<HTMLInputElement>('input[value="one-line"]')!.checked).toBe(true)
