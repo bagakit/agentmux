@@ -22,6 +22,7 @@ export async function observeNativeSqliteHistory(
   let failed = false
   let directoryWatch: FSWatcher | undefined
   const files = new Map<string, { watcher: FSWatcher; dev: bigint; ino: bigint }>()
+  const closed = new AbortController()
   const dispose = (): void => {
     if (disposed) return
     disposed = true
@@ -30,14 +31,16 @@ export async function observeNativeSqliteHistory(
     for (const file of files.values()) file.watcher.close()
     files.clear()
     context.signal.removeEventListener('abort', dispose)
+    closed.abort(new AgentMuxError('Native history observation was released.', 'AGENT_SESSION_HISTORY_CANCELLED'))
   }
   const unavailable = (error: unknown, fatal = false): void => {
     if (disposed) return
-    if (fatal) dispose()
     failed = true
-    context.onChange({ kind: 'unavailable', source: context.source,
-      code: error instanceof AgentMuxError ? error.code : 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE',
-      message: error instanceof Error ? error.message : 'Native history observation is unavailable.' })
+    try {
+      context.onChange({ kind: 'unavailable', source: context.source,
+        code: error instanceof AgentMuxError ? error.code : 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE',
+        message: error instanceof Error ? error.message : 'Native history observation is unavailable.' })
+    } finally { if (fatal) dispose() }
   }
   const check = (): void => {
     if (disposed) return
@@ -102,5 +105,5 @@ export async function observeNativeSqliteHistory(
   if (context.signal.aborted) { dispose(); context.signal.throwIfAborted() }
   try { await attachFiles() } catch (error) { dispose(); throw error }
   check() // Confirm changes in the initial read → watch setup gap.
-  return { source: context.source, dispose }
+  return { source: context.source, closed: closed.signal, dispose }
 }
