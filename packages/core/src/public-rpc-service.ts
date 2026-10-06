@@ -1612,7 +1612,11 @@ export class AgentMuxRpcService {
         const observer = await owners[0]!.client.observeSessionHistory(input.agentSessionId, observation => {
           void emit({ type: 'snapshot', data: { ...input, observation } })
         }, { signal: controller.signal })
-        initial = { ...input, source: observer.source }; cleanup = () => observer.dispose()
+        const ended = () => { void Promise.resolve(emit({ type: 'end', data: { reason: 'source-observation-released' } })).finally(dispose).catch(() => {}) }
+        observer.closed?.addEventListener('abort', ended, { once: true })
+        initial = { ...input, source: observer.source }
+        cleanup = () => { observer.closed?.removeEventListener('abort', ended); observer.dispose() }
+        if (observer.closed?.aborted) ended()
       } else if (method === 'agent.output') {
         const owner = outputOwner!
         const cursor = rpcCount(params.afterByte, 0)
