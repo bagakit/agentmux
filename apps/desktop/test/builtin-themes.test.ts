@@ -14,7 +14,7 @@ vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
 const cleanup: (() => void | Promise<void>)[] = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
-it.each(['fallout4'])('selects readonly %s through the compiled public CLI, reloads it and applies both variants and original semantic drawings to the shared root', async id => {
+it.each(['fallout4', 'retro-future'])('selects readonly %s through the compiled public CLI, reloads it and applies both variants and original semantic drawings to the shared root', async id => {
   const f = await configOwnerFixture(), directory = await mkdtemp(join(tmpdir(), 'builtin-theme-'))
   cleanup.push(() => rm(directory, { recursive: true, force: true }))
   const server = new AgentMuxControlServer({ socketPath: join(directory, 'control.sock'), coreClients: () => [], execute: request =>
