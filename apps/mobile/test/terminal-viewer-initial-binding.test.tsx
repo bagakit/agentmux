@@ -7,12 +7,15 @@ import type { MobileTerminalReading } from '../src/terminal/reader'
 import { MobileTerminalViewer } from '../src/terminal/MobileTerminalViewer'
 
 const canvases = vi.hoisted(() => [] as Array<{ options: Record<string, unknown>; textarea: HTMLTextAreaElement }>)
+const unicodeRefusal = vi.hoisted(() => ({ active: false }))
 const readings = vi.hoisted(() => [] as Array<(reading: MobileTerminalReading) => void>)
 
 // This mounted check isolates initial control ownership. Output parsing and
 // actual xterm/Host transport retain their separate production-chain evidence.
 vi.mock('@xterm/xterm', () => ({ Terminal: class {
   options: Record<string, unknown>
+  unicode = { activeVersion: '6' }
+  loadAddon() { if (unicodeRefusal.active) throw new Error('Width configuration unavailable') }
   textarea = document.createElement('textarea')
   rows = 24
   buffer = { active: { type: 'normal', baseY: 0, viewportY: 0 } }
@@ -33,9 +36,9 @@ vi.mock('../src/terminal/reader', () => ({ createMobileTerminalReader: ({ report
 } }))
 const key = 'agentmux-mobile-terminal-intent-v1:initial-original-session'
 const connection = { state: 'connected' as const, message: '原连接' }
-const platform = { copyText: async () => true } as Parameters<typeof MobileTerminalViewer>[0]['platform']
+const platform = { copyText: async () => true, overlayContainer: () => document.body } as Parameters<typeof MobileTerminalViewer>[0]['platform']
 const roots: ReturnType<typeof createRoot>[] = []
-beforeEach(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true })
+beforeEach(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; unicodeRefusal.active = false })
 afterEach(async () => { for (const root of roots.splice(0)) await act(async () => root.unmount()); document.body.innerHTML = ''; localStorage.clear(); canvases.length = 0; readings.length = 0 })
 
 function port() {
@@ -54,26 +57,34 @@ async function mount(client: AgentMuxHostedClient) {
   await render(client); return { node, render }
 }
 
-it('mounted initial Viewer keeps its constructor watch notice; a different SDK still explicitly returns to watch without input', async () => {
+async function openReading(node: HTMLElement) {
+  await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="终端阅读与状态"]')!.click())
+  return document.querySelector<HTMLElement>('.mobile-terminal-details')!
+}
+
+it('keeps normal watch information on demand across SDK replacement without submitting input', async () => {
   const first = port(), view = await mount(first.client)
-  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('观看不发送输入')
-  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).not.toContain('连接已变化')
+  expect(view.node.querySelector('.mobile-terminal-notice')).toBeNull()
+  const details = await openReading(view.node)
+  expect(details.textContent).toContain('观看不发送输入')
+  expect(details.textContent).not.toContain('连接已变化')
   const next = port(); await view.render(next.client)
   expect(view.node.querySelector('.mobile-terminal')?.getAttribute('data-control')).toBe('watch')
-  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('连接已变化')
+  expect(details.textContent).toContain('连接已变化')
   for (const p of [first, next]) { expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled() }
 })
 
-it('mounted first binding retains the exact durable unknown intent and original diagnostic without claiming a connection change', async () => {
+it('retains the exact durable unknown intent with a marked information entry and original recovery action', async () => {
   const original = JSON.stringify({ version: 1, intentId: 'original-intent', runId: 'original-run', kind: 'input', createdAt: _reshape_fixtureEpoch(0, 0, 12) })
   localStorage.setItem(key, original)
   const p = port(), view = await mount(p.client)
   expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('重启前的终端操作回执未确认')
-  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).not.toContain('连接已变化')
-  expect(view.node.querySelector('.mobile-terminal-details')?.textContent).toContain('original-intent')
+  expect(view.node.querySelector('[aria-label="终端阅读与状态"]')?.getAttribute('data-notice')).toBe('true')
+  const details = await openReading(view.node)
+  expect(details.textContent).toContain('original-intent')
+  expect([...details.querySelectorAll('button')].some(button => button.textContent === '已在原会话核对，继续新输入')).toBe(true)
   expect(localStorage.getItem(key)).toBe(original)
   expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
-  expect([...view.node.querySelectorAll('.mobile-terminal-notice > p')].map(node => node.textContent)).toContain('终端操作回执未确认；原操作不会重发。')
   expect(view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')?.disabled).toBe(true)
 })
 
@@ -94,19 +105,24 @@ it('keeps one toolbar mode switch and exposes PTY size and keys only during expl
   expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
 })
 
-it('keeps reading, boundary and idle input diagnostics directly visible after toolbar compression', async () => {
+it('uses explicit service facts rather than display wording and keeps full boundaries on demand', async () => {
   const p = port(), view = await mount(p.client)
-  const report = readings.at(-1)!, message = '同一显示文案；具体事实由原 owner 给出。'
-  await act(async () => report({ phase: 'reading', message, historyBoundary: null }))
-  expect([...view.node.querySelectorAll('.mobile-terminal-notice > p')].map(node => node.textContent)).toEqual(['同一显示文案', '观看不发送输入'])
-  expect(view.node.querySelector('.mobile-terminal-details')?.textContent).toContain(message)
-  expect(view.node.querySelector<HTMLDetailsElement>('.mobile-terminal-details')?.open).toBe(false)
-  await act(async () => report({ phase: 'reading', message, historyBoundary: '原历史边界' }))
-  expect([...view.node.querySelectorAll('.mobile-terminal-notice > p')].map(node => node.textContent)).toEqual(['同一显示文案', '观看不发送输入', '原历史边界'])
+  const report = readings.at(-1)!, message = '完全正常；也可能只是展示文案。'
+  await act(async () => report({ phase: 'reading', message, historyBoundary: '原历史边界', notice: null }))
+  expect(view.node.querySelector('.mobile-terminal-notice')).toBeNull()
+  const details = await openReading(view.node)
+  expect(details.textContent).toContain(message); expect(details.textContent).toContain('原历史边界')
+  await act(async () => report({ phase: 'reading', message, historyBoundary: null, notice: '原输出连接未知' }))
+  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('原输出连接未知')
+  expect(details.textContent).toContain('原输出连接未知')
+  expect(details.textContent).toContain(message)
+  await act(async () => report({ phase: 'reading', message, historyBoundary: null, notice: null }))
+  expect(view.node.querySelector('.mobile-terminal-notice')).toBeNull()
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="关闭终端阅读"]')!.click())
   vi.spyOn(p.client, 'runtimeIdentity').mockImplementation(() => { throw new Error('原 owner 身份仍未知') })
   await act(async () => view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')!.click())
   expect(view.node.querySelector('.mobile-terminal')?.getAttribute('data-control')).toBe('watch')
-  expect([...view.node.querySelectorAll('.mobile-terminal-notice > p')].map(node => node.textContent)).toContain('原会话身份尚未核实，可在 Mac 继续操作')
+  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('原会话身份尚未核实')
   expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
 })
 
@@ -157,4 +173,19 @@ it('applies explicit Host terminal colors to the retained canvas without recreat
   expect(canvases).toHaveLength(1); expect(canvases[0]).toBe(canvas); expect(canvas.options.theme).toEqual(next)
   expect(canvas.textarea).toBe(textarea); expect(textarea.value).toBe('Retained native buffer')
   expect(canvas.options.disableStdin).toBe(true); expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
+})
+
+it('keeps the retained terminal and explicit control available when Unicode configuration fails', async () => {
+  unicodeRefusal.active = true
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const p = port(), view = await mount(p.client), original = canvases[0]
+  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('终端字宽配置尚未生效')
+  const details = await openReading(view.node)
+  expect(details.textContent).toContain('原输出与输入继续可用')
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="关闭终端阅读"]')!.click())
+  await act(async () => view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')!.click())
+  expect(view.node.querySelector('.mobile-terminal')?.getAttribute('data-control')).toBe('control')
+  expect(canvases[0]).toBe(original); expect(canvases).toHaveLength(1)
+  expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
+  warn.mockRestore()
 })
