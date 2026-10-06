@@ -23,6 +23,7 @@ export type FocusContext = {
   processState: SessionSnapshot['processState']
   runUnobserved?: boolean
   bucket: FocusBucket; kind: SessionSnapshot['kind']; providerId: string | null
+  executorId?: string
   hostId: string; topicId: string | null; workspaceId: string; workspaceName: string; workspacePath: string; liveAgent: boolean; actionable: boolean
   lastActivityAt: number | null
   runId: string; workingEnteredAt: number | null
@@ -147,6 +148,7 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
     && latest.kind === (recap.source === 'Last assistant message' ? 'assistant_message' : 'user_message'))
   const retainedRunIds = [...new Set(items.flatMap(item => item.activityState ? [item.activityState.run.runId] : []))]
   return { ...(retainedRunIds.length ? { retainedRunIds } : {}), id: session.id, ...(session.kind === 'agent' && (session.nativeHandle?.sessionId ?? session.nativeSessionId) ? { nativeSessionId: session.nativeHandle?.sessionId ?? session.nativeSessionId } : {}), name, detail, state: state === 'working' && activitySemantic !== 'active' ? 'running' : state, stateLabel, processState: session.processState, runUnobserved: session.runUnobserved === true, bucket, kind: session.kind, providerId: session.providerId,
+    ...(session.kind === 'agent' ? { executorId: session.executorId } : {}),
     hostId: session.hostId, topicId, workspace, workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
     liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state) || session.kind === 'agent' && state === 'error', lastActivityAt,
     runId: session.control.run.runId, ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }), workingEnteredAt: activitySemantic === 'unknown' || activitySemantic === 'unsupported' ? null : workingEntryTime(session), recap, detailIsRecap, detailKind,
@@ -155,6 +157,7 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
 function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot, now: number): boolean {
   return (a.kind === 'agent' ? a.nativeHandle?.sessionId ?? a.nativeSessionId : null) === (b.kind === 'agent' ? b.nativeHandle?.sessionId ?? b.nativeSessionId : null)
     && a.kind === b.kind && a.label === b.label && a.providerId === b.providerId && a.hostId === b.hostId
+    && (a.kind === 'agent' ? a.executorId : null) === (b.kind === 'agent' ? b.executorId : null)
     && a.workspacePath === b.workspacePath && a.processState === b.processState && a.status.state === b.status.state
     && a.status.detail === b.status.detail && a.runUnobserved === b.runUnobserved
     && a.status.source === b.status.source

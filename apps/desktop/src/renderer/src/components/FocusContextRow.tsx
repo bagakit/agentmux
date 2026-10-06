@@ -6,17 +6,18 @@ import { FocusContextMenu } from './FocusContextMenu'
 import { useFocusContextHover } from './FocusContextHover'
 import { currentDisplayNameRevision, useAppStore } from '../store'
 import { AgentContextContent } from './AgentContextContent'
+import { WorkbenchTopology } from './WorkbenchTopology'
+import type { FocusContextIdentity } from '../lib/focus-context-identity'
 
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 
 
-export const FocusContextRow = memo(function FocusContextRow({ context, selected, compact = false, onSelect }: { context: FocusContext; selected: boolean; compact?: boolean; onSelect(id: string): void }) {
+export const FocusContextRow = memo(function FocusContextRow({ context, identity, selected, compact = false, onSelect }: { context: FocusContext; identity?: FocusContextIdentity | undefined; selected: boolean; compact?: boolean; onSelect(id: string): void }) {
   const [menuOpen, setMenuOpen] = useState(false), [draft, setDraft] = useState<string | null>(null)
   const input = useRef<HTMLInputElement>(null), cancelled = useRef(false)
   const expectedNameRevision = useRef({ revision: 0 }), saving = useRef(false), editGeneration = useRef(0)
   useEffect(() => () => { ++editGeneration.current; expectedNameRevision.current = { revision: 0 } }, [context.id])
-  const hover = useFocusContextHover(context, !menuOpen && draft === null)
+  const hover = useFocusContextHover(context, !menuOpen && draft === null, identity)
   useEffect(() => {
     if (draft !== null) { input.current?.focus(); input.current?.select() }
     else if (cancelled.current) { cancelled.current = false; hover.anchor.current?.focus({ preventScroll: true }); hover.close() }
@@ -34,7 +35,7 @@ export const FocusContextRow = memo(function FocusContextRow({ context, selected
     finally { saving.current = false }
   }
   const description = [context.detailIsRecap && context.recap ? null : context.detail, context.recap ? `${context.recap.source} (${context.recap.origin}) · ${context.recap.text}` : null].filter(Boolean).join('\n')
-  const className = `focus-context${compact ? ' focus-context--compact' : ''}${selected ? ' is-selected' : ''}${menuOpen ? ' is-menu-open' : ''}`
+  const className = `focus-context focus-context--card${compact ? ' focus-context--compact' : ''}${selected ? ' is-selected' : ''}${menuOpen ? ' is-menu-open' : ''}`
   if (draft !== null) return <div className={`${className} focus-context--renaming`} data-session-id={context.id}>
     <ThemeActionEditIcon size={16} className="focus-context__rename-mark" aria-hidden="true" />
     <TextInput ref={input} className="focus-context__rename" aria-label={`Rename Agent ${context.name}`} value={draft} onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onBlur={commitRename}
@@ -45,9 +46,13 @@ export const FocusContextRow = memo(function FocusContextRow({ context, selected
         if (event.key === 'Escape') { event.preventDefault(); cancelled.current = true; ++editGeneration.current; setDraft(null) }
       }} />
   </div>
+  const position = identity?.tabs.some(tab => tab.regions.length > 1) ? <span className="focus-context__position"
+    aria-label={`${identity.occurrenceCount} confirmed ${identity.occurrenceCount === 1 ? 'position' : 'positions'}`}
+    onPointerEnter={hover.close} onPointerLeave={event => {
+      if (event.relatedTarget instanceof Node && hover.anchor.current?.contains(event.relatedTarget)) hover.triggerEvents.onPointerEnter()
+    }}><WorkbenchTopology tabs={identity.tabs} interactive={false} enabled={!menuOpen && draft === null && !hover.describedBy} /></span> : undefined
   const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel} · ${description}`} aria-description={context.originAddress} aria-describedby={hover.describedBy} {...hover.triggerEvents} onClick={() => { hover.close(); onSelect(context.id) }} onContextMenu={hover.close}>
-    <AgentContextContent context={context} />
-    <ThemeActionOpenExternalIcon className="focus-context__open" size={13} aria-hidden="true" />
+    <AgentContextContent context={context} identity={position} presentation="card" />
   </button>
   return <>{context.kind === 'agent' ? <FocusContextMenu context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={() => { hover.close(); ++editGeneration.current; expectedNameRevision.current = { revision: currentDisplayNameRevision('agent-session', context.id) }; setDraft(context.name) }}>{card}</FocusContextMenu> : card}{hover.preview}</>
 })

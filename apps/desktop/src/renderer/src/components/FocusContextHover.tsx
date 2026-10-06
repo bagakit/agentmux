@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import type { FocusContextIdentity } from '../lib/focus-context-identity'
+import { WorkbenchRegionMap } from './WorkbenchTopology'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import { useShallow } from 'zustand/react/shallow'
 import { createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
@@ -94,7 +96,7 @@ function FocusContextStateSummary({ context }: { context: FocusContext }) {
 }
 
 /** Intent reveals held card facts and one scoped, read-only input preview. */
-export function useFocusContextHover(context: FocusContext, requested: boolean) {
+export function useFocusContextHover(context: FocusContext, requested: boolean, identity?: FocusContextIdentity) {
   const active = useWorkbenchPresentationActive()
   const enabled = requested && active
   const displayPath = usePathDisplay()
@@ -175,6 +177,13 @@ export function useFocusContextHover(context: FocusContext, requested: boolean) 
     {context.recap ? <section className="focus-context-hover__recap">
       <small title={`${context.recap.source} · ${context.recap.origin} · ${context.recap.text}`}>{context.recap.source === 'Last assistant message' ? 'Latest reply' : 'Latest input'}{(context.recap.reading?.truncated ?? true) ? ' · Excerpt' : ''}</small>
       <ReadingBody reading={context.recap.reading ?? { text: context.recap.text, truncated: true }} />
+    </section> : null}
+    {identity ? <section className="focus-context-hover__workbench" aria-label="Original workbench positions">
+      <small>{identity.occurrenceCount} confirmed {identity.occurrenceCount === 1 ? 'position' : 'positions'}</small>
+      {identity.tabs.map(tab => <section key={tab.tabId}>
+        <strong>{tab.title}</strong>
+        <WorkbenchRegionMap regions={tab.regions} highlightedRegionIds={tab.highlightedRegionIds} aspectRatio={16 / 10} className="workbench-topology__inspector-regions" />
+      </section>)}
     </section> : null}
     {context.kind === 'agent' ? <FocusContextInputs key={`${context.hostId}:${context.id}:${context.runId}`} context={context} /> : null}
     <footer title={location} aria-label={location}><strong>{context.workspaceName}</strong><span>{path}</span></footer>

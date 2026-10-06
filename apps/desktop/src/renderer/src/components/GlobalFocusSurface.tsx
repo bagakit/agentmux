@@ -2,7 +2,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { useAppStore } from '../store'
+import { agentRegionExecution, useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
 import { createFocusProjectionSelector, focusNeutralGroupSummary, FOCUS_BUCKETS, groupFocusContexts, type FocusBucket } from '../lib/focus-context'
 import { FocusContextRow } from './FocusContextRow'
@@ -45,6 +45,8 @@ import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { WorkbenchPresentationContext, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { groupIds, regionIds } from '@agentmux/layout'
+import { createFocusContextIdentitySelector, focusContextIdentityKey } from '../lib/focus-context-identity'
+import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeObjectInboxIcon = semanticIconComponent('object.inbox')
@@ -125,6 +127,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   }))
   const surfaceVisible = useAppStore(state => state.mainSurface === 'agents')
   const visible = hostVisible && surfaceVisible
+  const cardPresentation = useMemo(() => ({ active: visible, retainedRegionId: null }), [visible])
   const catalogue = useFocusHistorySources(visible)
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
   const storedFocusExecutionSession = useAppStore((state) => state.focusExecutionSession)
@@ -180,6 +183,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const boardRowsRef = useRef<HTMLDivElement>(null)
   const orderedLanes = useFocusProjectOrder(allLanes, visible, boardRowsRef)
   const navigationCatalog = useAppStore(workbenchSelectionCatalog)
+  const identityTabs = workbenchNavigationTabs(tabs)
+  const identitySelector = useMemo(createFocusContextIdentitySelector, [])
+  const contextIdentities = useMemo(() => identitySelector(navigationCatalog, identityTabs, executionRows, config, agentRegionExecution),
+    [identitySelector, navigationCatalog, identityTabs, executionRows, config?.executors, config?.appearance.agentAvatars])
   const survey = useAppStore(useShallow(state => ({ surveyCollectedZones: state.surveyCollectedZones, surveyExplorationNames: state.surveyExplorationNames })))
   const originContent = useAppStore(useShallow(state => ({ bindings: state.spaceZoneBindings, categories: state.topicCategories })))
   const surveyItems = useMemo(() => readSurveyPresentation({ ...survey, surveyZoneSelection: null, tabs }, navigationCatalog).items, [survey, tabs, navigationCatalog])
@@ -282,7 +289,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         const label = neutral?.label ?? meta.label
         return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-focus-sparse={sparse || undefined} style={{ '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
           {!sparse ? groupHeader(bucket) : null}
-            <div className="focus-context-group__cards">{grouped.map(context => <FocusContextRow key={context.id} context={context} selected={shownSessionId === context.id} onSelect={focusExecutionSession} />)}</div>
+            <div className="focus-context-group__cards">{grouped.map(context => <FocusContextRow key={context.id} context={context} identity={contextIdentities.get(focusContextIdentityKey(context.hostId, context.id))} selected={shownSessionId === context.id} onSelect={focusExecutionSession} />)}</div>
         </section>
       })
     }</FocusLaneGroups> : null}</>
@@ -358,7 +365,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       }}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><span>Mote</span><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context <ThemeActionOpenExternalIcon size={12} /></span></button> : null}
       {executionRows.length === 0 && retainedProjects.length === 0 ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">
-          <WorkbenchPresentationContext.Provider value={{ active: visible, retainedRegionId: null }}><div className="focus-project-board__live" data-empty={!hasBoardLanes || undefined}>
+          <WorkbenchPresentationContext.Provider value={cardPresentation}><div className="focus-project-board__live" data-empty={!hasBoardLanes || undefined}>
             {hasBoardLanes ? <FocusProjectLanes visible={visible} origins={laneOrigins} lanes={boardLanes} recentProjects={recentProjects} onRead={readProjectHistory} selectedProjectKey={project} currentLaneId={currentLaneId} onSelect={setProject} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
             {filtered.length === 0 && filteredRetainedProjects.length === 0 ? <p className="focus-project-lanes__empty">
               <span>No contexts match these local filters.</span>

@@ -110,6 +110,20 @@
 .focus-context__detail--service .focus-context__recap > span { -webkit-line-clamp: 1; }
 .focus-context__activity { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .focus-context__activity { color: var(--text-3); }
+.focus-context--card { align-items: flex-start; }
+.focus-context--card .focus-context__identity { align-items: center; gap: 5px; min-height: 18px; }
+.focus-context--card .focus-context__copy { gap: 5px; }
+.focus-context--card .focus-context__recap { display: block; }
+.focus-context__position { display: inline-flex; flex: none; min-width: 0; max-width: 72px; }
+.focus-context__position .workbench-topology { min-height: 18px; max-width: 100%; }
+.focus-context__position .workbench-topology__tab-rail { max-width: 100%; }
+.focus-context__position .workbench-topology__tab-chip { width: 20px; height: 18px; cursor: inherit; }
+.focus-context__position .workbench-topology__tab-chip + .workbench-topology__tab-chip { margin-left: 0; }
+.focus-context__position .agent-avatar__status { display: none; }
+.focus-context-hover__workbench { display: grid; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.focus-context-hover__workbench > small { color: var(--text-3); font-size: var(--fs-micro); }
+.focus-context-hover__workbench > section { display: grid; gap: 5px; }
+.focus-context-hover__workbench > section > strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }
 .focus-context__open { flex: none; opacity: 0; color: var(--text-3); }
 .focus-context:hover .focus-context__open, .focus-context:focus-visible .focus-context__open { opacity: 1; }
 .focus-context.is-menu-open .focus-context__open { opacity: 1; }
