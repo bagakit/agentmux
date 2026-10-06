@@ -5,7 +5,7 @@ import { parseGoalContinuationLoop } from './continuous-progress-scheduler.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { isPendingMessageOperation, parsePendingMessage } from './pending-message-control.js'
 import { parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal } from '@agentmux/demand/goals'
-import { validateAgentPromptCondition } from './agent-prompt-condition.js'
+import { validateAgentPromptAdmissionIntent, validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { BROWSER_COMPLETION_UNAVAILABLE_WARNING, parseBrowserCompletionFacts } from './browser-completion-facts.js'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
@@ -436,7 +436,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
         }
   }
   if (source.operation === 'send') {
-    settingsFields(source, ['schemaVersion','requestId','operation','target','text','promptCondition','execution','sourceChannel','caller','message'], 'INVALID_CONTROL_REQUEST')
+    settingsFields(source, ['schemaVersion','requestId','operation','target','text','promptCondition','admissionIntent','execution','sourceChannel','caller','message'], 'INVALID_CONTROL_REQUEST')
     if (source.execution !== undefined && source.execution !== 'default' && source.execution !== 'immediate') {
       throw new AgentMuxError('Prompt execution is invalid.', 'INVALID_CONTROL_REQUEST')
     }
@@ -452,11 +452,16 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (message.recipient.kind === 'agent-session' && target.kind === 'agent-session' && message.recipient.agentSessionId !== target.agentSessionId) {
       throw new AgentMuxError('Message recipient does not match the Control target.', 'MESSAGE_RECIPIENT_MISMATCH')
     }
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target,
-      text: text(source.text, 'Message text'), promptCondition: validateAgentPromptCondition(source.promptCondition),
-      ...(source.execution === undefined ? {} : { execution: source.execution }),
+    const intent = source.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(source.admissionIntent)
+    if (intent && (intent.kind !== 'manual-actor' || Object.hasOwn(source, 'promptCondition') || source.execution !== 'immediate' ||
+        intent.expectedRun.runId !== message.recipientRunId)) throw new AgentMuxError('Control manual input cannot replace an exact condition or Run.', 'INVALID_CONTROL_REQUEST')
+    const common = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target,
+      text: text(source.text, 'Message text'),
       ...(source.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(source.sourceChannel) }),
       ...(owner ? { caller: owner } : {}), message }
+    if (intent?.kind === 'manual-actor') return { ...common, admissionIntent: intent, execution: 'immediate' }
+    return { ...common, promptCondition: validateAgentPromptCondition(source.promptCondition),
+      ...(source.execution === undefined ? {} : { execution: source.execution }) }
   }
   if (source.operation === 'list.agents') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }

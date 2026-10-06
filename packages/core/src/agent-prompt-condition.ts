@@ -7,6 +7,49 @@ export type AgentPromptCondition = {
   afterSubmissionId: string | null
 }
 
+/** Explicit caller intent. A coordination predecessor never supplies manual authority. */
+export type AgentPromptAdmissionIntent =
+  | { kind: 'exact-condition'; condition: AgentPromptCondition }
+  | { kind: 'manual-actor'; expectedRun: AgentMuxRunRef }
+
+export type AgentPromptInputKey =
+  | { kind: 'prompt'; agentSessionId: string; expectedRun: AgentMuxRunRef; submissionId: string }
+  | { kind: 'message'; agentSessionId: string; expectedRun: AgentMuxRunRef; messageId: string }
+
+export function agentPromptInputId(key: AgentPromptInputKey): string {
+  return key.kind === 'prompt' ? key.submissionId : key.messageId
+}
+
+function inputIdentity(value: unknown): value is string {
+  return typeof value === 'string' && Boolean(value.trim()) && value.length <= 512 &&
+    new TextEncoder().encode(value).byteLength <= 512 && !/[\0\r\n]/u.test(value)
+}
+function inputRun(value: unknown): value is AgentMuxRunRef {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).every(key => key === 'runId') && inputIdentity((value as AgentMuxRunRef).runId))
+}
+
+export function validateAgentPromptInputKey(value: unknown): AgentPromptInputKey {
+  const v = value as AgentPromptInputKey | undefined
+  if (!v || !['prompt', 'message'].includes(v.kind) || !inputIdentity(v.agentSessionId) || !inputRun(v.expectedRun) || !inputIdentity(agentPromptInputId(v)) ||
+      Object.keys(v).some(k => !['kind', 'agentSessionId', 'expectedRun', v.kind === 'prompt' ? 'submissionId' : 'messageId'].includes(k))) {
+    throw new AgentMuxError('The original input identity is invalid.', 'INVALID_AGENT_PROMPT')
+  }
+  return structuredClone(v)
+}
+
+export function validateAgentPromptAdmissionIntent(value: unknown): AgentPromptAdmissionIntent {
+  const v = value as AgentPromptAdmissionIntent | undefined
+  if (v?.kind === 'exact-condition' && Object.keys(v).every(k => k === 'kind' || k === 'condition')) {
+    return { kind: v.kind, condition: validateAgentPromptCondition(v.condition) }
+  }
+  if (v?.kind === 'manual-actor' && Object.keys(v).every(k => k === 'kind' || k === 'expectedRun') &&
+      inputRun(v.expectedRun)) {
+    return { kind: v.kind, expectedRun: { ...v.expectedRun } }
+  }
+  throw new AgentMuxError('The input admission intent is invalid.', 'INVALID_AGENT_PROMPT')
+}
+
 export function validateAgentPromptCondition(value: unknown): AgentPromptCondition {
   const condition = value as Partial<AgentPromptCondition> | null | undefined
   if (!condition || typeof condition.expectedRun?.runId !== 'string' || !condition.expectedRun.runId.trim() ||

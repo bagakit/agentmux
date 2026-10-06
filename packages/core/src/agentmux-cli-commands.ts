@@ -310,6 +310,9 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.question.reply', '--input FILE|-', 'Answer exact native asynchronous questions through ordinary user input.', { '--input': 'data' },
     async f => ({ ...await readControlJsonInput(value(f, '--input', true)!, 'Question reply') as Record<string, unknown>, sourceChannel: 'cli' }),
     'JSON carries agentSessionId, source, turnId, recordId, answers [{questionId,answer}], operationId and the original expectedRun/afterSubmissionId condition. Read agent history first. Submitted input is not proof of an observed native answer; no Agent message envelope or Hook confirmation is created.'),
+  command('agent.input.inspect', '--input FILE|-', 'Read one original input claim without preparing or replaying it.', { '--input': 'data' },
+    async f => await readControlJsonInput(value(f, '--input', true)!, 'Original input key') as Record<string, unknown>,
+    'JSON carries key {kind:prompt|message,agentSessionId,expectedRun:{runId},submissionId|messageId}. Missing legacy fields remain unknown; history is read from the original Session owner, independent of the latest prompt projection.'),
   command('agent.send', '(--to-session ID|--to-region ID|--to-tab ID) --text TEXT [--execution default|immediate] [message identity]', 'Queue and deliver one exact semantic Agent message.', { '--to-session': 'data', '--to-region': 'data', '--to-tab': 'data', '--text': 'data', '--execution': 'value', '--message-id': 'data', '--thread': 'data', '--correlation': 'data', '--reply-to': 'data', ...OP }, f => {
     const selected = one(f, ['--to-session', '--to-region', '--to-tab'], 'Agent send')
     const execution = value(f,'--execution')

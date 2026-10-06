@@ -265,8 +265,9 @@ export type AgentMuxMessageTarget =
   | { kind: 'tab'; tabId: string }
   | { kind: 'region'; regionId: string }
 export type AgentMuxControlSendRequest = RequestBase & {
-  operation: 'send'; target: AgentMuxMessageTarget; text: string; promptCondition: AgentPromptCondition; execution?: AgentPromptExecution; sourceChannel?: AgentMessageChannel; caller?: AgentMuxControlCaller; message: AgentMuxMessageEnvelope
-}
+  operation: 'send'; target: AgentMuxMessageTarget; text: string; execution?: AgentPromptExecution; sourceChannel?: AgentMessageChannel; caller?: AgentMuxControlCaller; message: AgentMuxMessageEnvelope
+} & ({ promptCondition: AgentPromptCondition; admissionIntent?: never } |
+  { promptCondition?: never; admissionIntent: { kind: 'manual-actor'; expectedRun: import('./types.js').AgentMuxRunRef }; execution: 'immediate' })
 export type AgentMuxControlFocusRequest = RequestBase & {
   operation: 'focus'; target: AgentMuxDesktopFocusTarget; inputPolicy: AgentMuxDesktopInputPolicy
   /** Checked against the exact Region occupant before applying navigation. */

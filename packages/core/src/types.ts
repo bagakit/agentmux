@@ -1117,6 +1117,8 @@ export type AgentMuxAgentSession = {
   futurePromptIntents?: Record<string, AgentFuturePromptIntent>
   /** Latest claimed prompt range; successful completion is consumed by the same admission. */
   promptCompletionAdmission?: {
+    /** Exact producer identity captured only by the original new input admission. */
+    inputKey?: import('./agent-prompt-condition.js').AgentPromptInputKey
     /** Logical identity when captured at admission; operationId always binds the Run and bytes. */
     submissionId?: string
     completionId?: string
@@ -1131,6 +1133,7 @@ export type AgentMuxAgentSession = {
       prompt: string
       plan: AgentPromptInputPlan | AgentNativePromptInputPlan
       execution?: AgentPromptExecution
+      admissionIntent?: import('./agent-prompt-condition.js').AgentPromptAdmissionIntent
       /** Producer facts frozen with the first wire; tags in user text never establish these. */
       message?: AgentPromptMessageContent
     }
@@ -1170,6 +1173,14 @@ export type AgentMuxAgentSession = {
    * 两者在 UI 上都不显示 0。
    */
   turnUsage?: AgentTurnUsage
+}
+
+/** Original Session-owner record; legacy missing identity/source remains missing. */
+export type AgentPromptSubmissionRecord = {
+  agentSessionId: string
+  run: AgentMuxRunRef
+  admission?: NonNullable<AgentMuxAgentSession['promptCompletionAdmission']>
+  terminalPromptSubmission?: AgentTerminalPromptSubmissionState
 }
 
 export type AgentMuxAgentCreationFact = {

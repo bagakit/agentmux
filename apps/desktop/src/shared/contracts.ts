@@ -15,7 +15,7 @@ import type {
   AgentPromptCondition,
   AgentPromptExecution,
   AgentMessageChannel,
-  AgentMuxAgentMessageInput,
+  AgentMuxAgentMessageSubmission,
   AgentMuxSessionQuestionReplyInput,
   AgentSessionQuestionReplyReceipt,
   AgentMuxAgentCreateInput,
@@ -1808,7 +1808,7 @@ export type AgentMuxDesktopApi = {
     recordDeliveryFailure(record: DeliveryAttempt): Promise<DeliveryAttemptLookup>
     submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('./goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference): Promise<void>
     replyQuestion(session: AgentSessionControl, input: SessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt>
-    submitMessage(session: AgentSessionControl, message: Omit<AgentMuxAgentMessageInput, 'agentSessionId'>): Promise<void>
+    submitMessage(session: AgentSessionControl, message: AgentMuxAgentMessageSubmission): Promise<void>
     respondInteraction(
       session: AgentSessionControl,
       response: AgentMuxInteractionResponse

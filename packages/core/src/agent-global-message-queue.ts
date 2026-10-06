@@ -5,7 +5,7 @@ import { dirname } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from './errors.js'
 import { assertDispatchEventKind, assertDispatchMessage, openDispatch, recordDispatchEvent, type Dispatch, type DispatchEvent, type DispatchEventKind } from './agent-handoff.js'
-import { validateAgentPromptCondition, type AgentPromptCondition } from './agent-prompt-condition.js'
+import { validateAgentPromptAdmissionIntent, validateAgentPromptCondition, type AgentPromptAdmissionIntent, type AgentPromptCondition } from './agent-prompt-condition.js'
 import { ackDeliveryBatch, checkDeliveries, type ConsumerCursor, type DeliveryQueue } from './agent-delivery-queue.js'
 import { advanceDelivery, type AgentDeliveryState } from './agent-message.js'
 import type { AgentMuxMessageTarget } from './control.js'
@@ -58,6 +58,7 @@ export type DurableAgentMuxMessage = {
   readonly promptCondition?: AgentPromptCondition | null
   /** This journal admission freezes the requested execution independently of the opaque envelope. */
   readonly execution?: AgentPromptExecution
+  readonly admissionIntent?: AgentPromptAdmissionIntent
   readonly sourceChannel?: AgentMessageChannel
   readonly sourceDevice?: AgentOperationDevice
 }
@@ -90,6 +91,7 @@ export type AgentMuxMessageReceipt = {
   readonly envelope: AgentMuxMessageEnvelope
   readonly delivery: AgentMuxMessageDeliveryState
   readonly promptCondition?: AgentPromptCondition | null
+  readonly admissionIntent?: AgentPromptAdmissionIntent
   readonly sourceChannel?: AgentMessageChannel
   readonly sourceDevice?: AgentOperationDevice
 }
@@ -97,6 +99,7 @@ export type AgentMuxMessageReceipt = {
 export type AgentMuxMessageAppendInput = Omit<AgentMuxMessageEnvelope, 'schema' | 'messageId'> & {
   readonly messageId?: string
   readonly execution?: AgentPromptExecution
+  readonly admissionIntent?: AgentPromptAdmissionIntent
   readonly sourceChannel?: AgentMessageChannel
   readonly sourceDevice?: AgentOperationDevice
 }
@@ -113,7 +116,7 @@ export { renderAgentMuxMessageEnvelope } from './agent-message-render.js'
 const processQueueTails = new Map<string, Promise<void>>()
 
 export type AgentMuxMessageJournalRecord =
-  | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
+  | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly admissionIntent?: AgentPromptAdmissionIntent; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
   | { readonly kind: 'prompt-condition'; readonly sequence: number; readonly messageId: string; readonly condition: AgentPromptCondition }
   | { readonly kind: 'delivery-issue'; readonly sequence: number; readonly messageId: string; readonly at: number; readonly reason: string }
   | { readonly kind: 'delivery'; readonly sequence: number; readonly messageId: string; readonly state: AgentDeliveryState; readonly at: number; readonly reason?: string }
@@ -358,6 +361,7 @@ export class DurableAgentMuxMessageQueue {
     return { sequence: Number(row.sequence), envelope, delivery,
       ...(condition ? { promptCondition: validateAgentPromptCondition(condition.condition) } : original.promptCondition === null ? { promptCondition: null } : {}),
       ...(original.execution === undefined ? {} : { execution: original.execution }),
+      ...(original.admissionIntent === undefined ? {} : { admissionIntent: validateAgentPromptAdmissionIntent(original.admissionIntent) }),
       ...(original.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(original.sourceChannel) }),
       ...(original.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(original.sourceDevice) }) }
   }
@@ -411,6 +415,10 @@ export class DurableAgentMuxMessageQueue {
     if (record.kind === 'message') {
       if (record.execution !== undefined && record.execution !== 'default' && record.execution !== 'immediate') throw new AgentMuxError('Message execution is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
       const envelope = validateAgentMuxMessageEnvelope(record.envelope)
+      if (record.admissionIntent !== undefined) {
+        const intent = validateAgentPromptAdmissionIntent(record.admissionIntent)
+        if (intent.kind !== 'manual-actor' || record.execution !== 'immediate' || envelope.recipientRunId !== intent.expectedRun.runId) throw new AgentMuxError('Message manual intent changed its original Run or execution.', 'MESSAGE_QUEUE_UNAVAILABLE')
+      }
       if (record.promptCondition !== undefined && record.promptCondition !== null) throw new AgentMuxError('Message initial condition is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
       if (record.sourceChannel !== undefined) normalizeMessageChannel(record.sourceChannel)
       if (record.sourceDevice !== undefined) normalizeOperationDevice(record.sourceDevice)
@@ -492,15 +500,17 @@ export class DurableAgentMuxMessageQueue {
     }
   }
 
-  async append(input: AgentMuxMessageAppendInput): Promise<AgentMuxMessageReceipt> {
+  async append(input: AgentMuxMessageAppendInput, newMessage?: { admissionIntent?: AgentPromptAdmissionIntent }): Promise<AgentMuxMessageReceipt> {
     return this.withLock(async () => {
       const messageId = input.messageId ?? mintObjectId()
       if (input.execution !== undefined && input.execution !== 'default' && input.execution !== 'immediate') throw new AgentMuxError('Message execution is invalid.', 'INVALID_CONTROL_REQUEST')
       const execution = input.execution ?? 'default'
+      const admissionIntent = input.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(input.admissionIntent)
       const sourceChannel = input.sourceChannel === undefined ? undefined : normalizeMessageChannel(input.sourceChannel)
       const sourceDevice = input.sourceDevice === undefined ? undefined : normalizeOperationDevice(input.sourceDevice)
       const sameOrigin = (existing: DurableAgentMuxMessage) => existing.sourceChannel === sourceChannel &&
-        JSON.stringify(existing.sourceDevice) === JSON.stringify(sourceDevice)
+        JSON.stringify(existing.sourceDevice) === JSON.stringify(sourceDevice) &&
+        (newMessage !== undefined && input.admissionIntent === undefined || JSON.stringify(existing.admissionIntent) === JSON.stringify(admissionIntent))
       const envelope = validateAgentMuxMessageEnvelope({ ...input, schema: 'agentmux.a2a.v1', messageId })
       const existingId = this.operationMessageId(envelope.operationId)
       if (existingId) {
@@ -513,7 +523,11 @@ export class DurableAgentMuxMessageQueue {
         if (!sameEnvelope(existing.envelope, envelope) || (existing.execution ?? 'default') !== execution || !sameOrigin(existing)) throw new AgentMuxError('Message id already names another envelope, execution or source.', 'MESSAGE_ID_CONFLICT')
         return this.receipt(existing)
       }
+      // The direct producer may select intent for a new record only. A retry
+      // returns an old record above; it never manufactures a manual tag for it.
+      const frozenIntent = admissionIntent ?? (newMessage?.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(newMessage.admissionIntent))
       const record: JournalMessage = { kind: 'message', sequence: this.nextSequence, envelope, promptCondition: null, execution,
+        ...(frozenIntent === undefined ? {} : { admissionIntent: frozenIntent }),
         ...(sourceChannel === undefined ? {} : { sourceChannel }), ...(sourceDevice === undefined ? {} : { sourceDevice }) }
       await this.appendRecord(record)
       return this.receipt(this.message(messageId)!)
@@ -723,14 +737,15 @@ export class DurableAgentMuxMessageQueue {
       envelope: structuredClone(message.envelope),
       delivery: { ...message.delivery },
       ...(message.promptCondition === undefined ? {} : { promptCondition: structuredClone(message.promptCondition) }),
+      ...(message.admissionIntent === undefined ? {} : { admissionIntent: structuredClone(message.admissionIntent) }),
       ...(message.sourceChannel === undefined ? {} : { sourceChannel: message.sourceChannel }),
       ...(message.sourceDevice === undefined ? {} : { sourceDevice: { ...message.sourceDevice } })
     }
   }
 }
 
-export async function appendGlobalMessage(input: AgentMuxMessageAppendInput, path = defaultAgentMuxMessageQueuePath()): Promise<AgentMuxMessageReceipt> {
-  return await new DurableAgentMuxMessageQueue(path).append(input)
+export async function appendGlobalMessage(input: AgentMuxMessageAppendInput, path = defaultAgentMuxMessageQueuePath(), newMessage?: { admissionIntent?: AgentPromptAdmissionIntent }): Promise<AgentMuxMessageReceipt> {
+  return await new DurableAgentMuxMessageQueue(path).append(input, newMessage)
 }
 
 export async function recordGlobalMessageDelivery(messageId: string, state: Exclude<AgentDeliveryState, 'queued'>, at = Date.now(), reason?: string, path = defaultAgentMuxMessageQueuePath()): Promise<AgentMuxMessageReceipt> {
