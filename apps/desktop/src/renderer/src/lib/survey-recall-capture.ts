@@ -1,7 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { NoteSource } from '@agentmux/core/notebook-catalog'
 import { NOTES_WORKSPACE_ID } from '../../../shared/notes-library'
-import { newNoteDocument, readNoteDocument } from '../../../shared/note-document'
+import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '../../../shared/note-document'
 import { registerCreatedNote, useAppStore } from '../store'
 import { api } from './api'
 import { useLauncherState } from './launcher-state'
@@ -65,7 +65,7 @@ async function save(target: SurveyRecallCapture, notebookId: string, draft: stri
       receipt = { ...receipt, target: { ...receipt.target, zoneId: face.zoneId } }; publish()
     }
     if (!resourceCurrent()) throw new Error('The Notes resource changed before this save. The original capture and target are kept.')
-    const content = JSON.stringify(newNoteDocument(receipt.draft, receipt.noteId, receipt.blockIds[0]!), null, 2)
+    const content = serializeNoteDocument(newNoteDocument(receipt.draft, receipt.noteId, receipt.blockIds[0]!))
     receipt = { ...receipt, status: 'pending', issue: undefined }; publish()
     const named = await createNoteWithAvailableName(new Date(receipt.createdAt), async name => {
       if (!resourceCurrent()) return { status: 'error', code: 'NOTE_RESOURCE_CHANGED', message: 'The original Notes resource changed. No new write was issued; reconnect it to continue this capture.' }

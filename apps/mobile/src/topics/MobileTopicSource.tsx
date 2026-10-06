@@ -1,3 +1,4 @@
+import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentMuxRpcResult } from '@agentmux/core'
 import type { TopicKnowledgeSource } from '@agentmux/core/control'
@@ -270,7 +271,7 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
       <details><summary>当前文件位置</summary><p>{pathLabel(view.scope.directoryPath, view.scope.workspace.hostId)} / {view.scope.path}</p></details>
       {view.read.result.status === 'read' && <>
         {source.kind === 'file' && source.revision && scopes.some(scope => JSON.stringify(params(scope)) === JSON.stringify(params(view.scope))) && source.revision !== view.read.result.document.revision && <p role="status">当前保存版本与来源记录的版本不同；以下为原文件当前正文。</p>}
-        {source.kind === 'note' || view.read.result.document.path.endsWith('.note.json')
+        {source.kind === 'note' || view.read.result.document.path.endsWith(NOTE_FILE_EXTENSION)
           ? <MobileNoteFile rpc={rpc} params={params(view.scope)} read={view.read}
             visible={visible && !selectedPage} {...(source.kind === 'note' && source.blockId ? { target: { noteId: source.noteId, blockId: source.blockId } } : {})} />
           : <AgentMarkdown content={view.read.result.document.content} workspaceRoot={view.scope.directoryPath} sourcePath={view.scope.path} documentMode

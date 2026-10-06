@@ -1,3 +1,4 @@
+import { NOTE_FILE_EXTENSION } from '../../../shared/note-format'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { recordNotebookChanges, retryNotebookRecoveries, useNotebookLibrary } from '../lib/notebook-library'
 import { surveyExplorationName } from '../lib/survey-exploration-name'
@@ -230,7 +231,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const browsers = surfaces.filter(surface => surface.kind === 'browser')
     if (surfaces.length === 1 && browsers.length === 1 && browsers[0]!.faviconDataUrl) return <span className="survey-page-favicon" aria-hidden="true"><ThemeObjectBrowserIcon size={16} /><img key={browsers[0]!.faviconDataUrl} src={browsers[0]!.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /></span>
     const Icon = surfaces.length && surfaces.every(surface => surface.kind === 'browser') ? ThemeObjectBrowserIcon
-      : surfaces.length && surfaces.every(surface => surface.kind === 'file' && surface.path.endsWith('.note.json')) ? ThemeActionEditNoteIcon
+      : surfaces.length && surfaces.every(surface => surface.kind === 'file' && surface.path.endsWith(NOTE_FILE_EXTENSION)) ? ThemeActionEditNoteIcon
         : surfaces.length && surfaces.every(surface => surface.kind === 'file') ? ThemeFileTextIcon : ThemeObjectLauncherIcon
     return <Icon size={16} />
   }

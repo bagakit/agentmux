@@ -12,7 +12,7 @@ import { noteWikiLiteralExtension } from '@agentmux/client-ui/note/note-wiki-vie
 import type { NoteInlineLinkAttributes, NoteLinkTarget } from '@agentmux/core/note-links'
 import { bindNoteWikiLink, noteWikiTextTokens } from '@agentmux/client-ui/note/note-wikilinks'
 import { useNoteWikiCompletion } from './NoteWikiCompletion'
-import { readNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
+import { readNoteDocument, serializeNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
 import { noteProvenanceAttributes } from '@agentmux/client-ui/note/note-provenance'
 import { noteBacklinks, resolveNoteBlock, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
 
@@ -119,7 +119,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     setSelected(id)
     if (id && !transaction.getMeta('noteSelectionRestore') && !editor.isDestroyed && editor.view.hasFocus()) props.current.onSelectedBlock?.({ noteId: props.current.note.noteId, blockId: id })
   }, onUpdate({ editor }) {
-    const current = props.current, raw = JSON.stringify({ ...current.note, content: editor.getJSON() }, null, 2) + '\n'
+    const current = props.current, raw = serializeNoteDocument({ ...current.note, content: editor.getJSON() })
     const read = readNoteDocument(raw)
     if (read.status === 'invalid') { current.onIssue(read.message); return }
     current.onIssue(null)

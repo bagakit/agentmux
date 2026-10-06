@@ -34,7 +34,7 @@ export function parseNoteFile(document: NoteFileDocument): NoteDocumentRead {
 /** Derive only from files the original owner has actually read. No discovery or IO at render time. */
 export function noteKnowledge(documents: readonly { location: NoteLocation; document: NoteFileDocument }[], scope: NoteKnowledge['scope'] = 'partial'): NoteKnowledge {
   const sources: NoteSource[] = [], invalid: NoteKnowledge['invalid'][number][] = [], references: NoteBacklink[] = []
-  const seen = new Set<string>()
+  const seen = new Set<string>(); let unanchored = false
   for (const { location, document } of documents) {
     if (!location.path.endsWith(NOTE_FILE_EXTENSION)) continue
     const key = JSON.stringify([location.workspaceId, location.path])
@@ -42,6 +42,7 @@ export function noteKnowledge(documents: readonly { location: NoteLocation; docu
     seen.add(key)
     const read = parseNoteFile(document)
     if (read.status === 'invalid') { invalid.push({ location, message: read.message }); continue }
+    unanchored ||= read.unanchoredBlockCount > 0
     let indexed = indexedDocuments.get(document)
     if (!indexed) {
       const blocks = new Map<string, NoteBlock>(), forward: Omit<NoteBacklink, 'source'>[] = []
@@ -66,7 +67,7 @@ export function noteKnowledge(documents: readonly { location: NoteLocation; docu
     sources.push(source)
     references.push(...indexed.references.map(reference => ({ ...reference, source })))
   }
-  return { scope, sources, invalid, references }
+  return { scope: unanchored && scope === 'complete' ? 'partial' : scope, sources, invalid, references }
 }
 
 export function resolveNoteBlock(knowledge: NoteKnowledge, target: NoteBlockTarget): NoteBlockResolution {

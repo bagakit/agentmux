@@ -1,3 +1,4 @@
+import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { MobileNoteFile } from './MobileNoteFile'
@@ -15,7 +16,7 @@ function confirmsOriginalResource(resource: FileReadResource | null, params: Fil
 }
 function OriginalFile({ value, client, visible, openHttpLink }: { value: Content; client: AgentMuxHostedClient | null; visible: boolean; openHttpLink?: OpenHttpLink | undefined }) {
   if (value.content === null) return null
-  return value.path.endsWith('.note.json') && client?.forwardRpc
+  return value.path.endsWith(NOTE_FILE_EXTENSION) && client?.forwardRpc
     ? <MobileNoteFile rpc={client.forwardRpc} params={value.params} read={value.read} visible={visible} />
     : /\.(md|markdown|mdx)$/iu.test(value.path) ? <AgentMarkdown content={value.content} documentMode sourcePath={value.path} workspaceRoot={value.params.expectedResource.workspacePath} {...(openHttpLink ? { openHttpLink } : {})} />
       : <pre className="mobile-region-source">{value.content}</pre>

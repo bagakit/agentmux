@@ -47,7 +47,7 @@ import { useLauncherState } from './lib/launcher-state'
 import { noteBlockSelectionKey, restoreNoteBlockSelections, type NoteBlockPresentation } from './lib/note-block-selection'
 import { noteKnowledge, parseNoteFile } from './lib/note-knowledge'
 import { warmLauncherId, warmTerminalForLauncher, type WarmTerminalCreation } from './lib/warm-terminal-preview'
-import { NOTE_FILE_EXTENSION, newNoteDocument, readNoteDocument } from '../../shared/note-document'
+import { NOTE_FILE_EXTENSION, newNoteDocument, readNoteDocument, serializeNoteDocument } from '../../shared/note-document'
 import { noteCreationTarget, noteCreationDisplayWorkspace, noteCreationResourceMatches, noteFilePlacement, type NoteCreationReceipt } from './lib/note-creation'
 import type { NoteBlockTarget } from '../../shared/note-document'
 import type { FileOpenPlacement, FileOpenResult, ConfirmedExistingFileSpace } from './lib/file-workbench-state'
@@ -7916,7 +7916,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       projection.entity.kind === 'zone' && projection.entity.zoneId === target.zoneId && target.zoneId) {
       get().setSurveyZoneCollected(target.zoneId, true)
     }
-    const content = JSON.stringify(newNoteDocument(draft, noteId, blockId), null, 2)
+    const content = serializeNoteDocument(newNoteDocument(draft, noteId, blockId))
     publish()
     const named = await createNoteWithAvailableName(new Date(receipt.createdAt), async name => {
       if (!noteCreationResourceMatches(get().config, target)) return { status: 'error', code: 'NOTE_RESOURCE_CHANGED', message: 'The original Note resource is no longer confirmed. Its draft and target are retained; no further write was issued.' }

@@ -1,3 +1,4 @@
+import { NOTE_FILE_EXTENSION } from '../../../shared/note-format'
 import { scratchWorkspaceFilePath, scratchTopicLogicalPath, scratchTopicPhysicalPath, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type TopicKnowledgeSource, type KnowledgeTopic } from '@agentmux/core/control'
@@ -35,7 +36,7 @@ export function selectedKnowledgeSources(workspaceId: string): { title: string; 
   if (!surface) return null
   const workspace = state.config?.workspaces.find(workspace => workspace.id === surface.workspaceId)
   if (surface.kind === 'file' && workspace) {
-    const document = state.documents[documentKey(workspace.id, surface.path)], note = document && surface.path.endsWith('.note.json') ? parseNoteFile(document) : null
+    const document = state.documents[documentKey(workspace.id, surface.path)], note = document && surface.path.endsWith(NOTE_FILE_EXTENSION) ? parseNoteFile(document) : null
     return { title: surface.path.split('/').at(-1) ?? surface.path, sources: [
       { kind: 'file', hostId: workspace.hostId, path: scratchWorkspaceFilePath(workspace, scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace), surface.path) ?? (() => { throw new Error('The original source file path is not confirmed. Its workface is kept.') })(),
         ...(document?.revision ? { revision: document.revision } : {}) },
@@ -76,7 +77,7 @@ export async function openKnowledgeSource(source: TopicKnowledgeSource): Promise
   }
   if (source.kind === 'note') {
     const candidates = Object.entries(state.documents).filter(([, document]) => {
-      if (!document.path.endsWith('.note.json')) return false
+      if (!document.path.endsWith(NOTE_FILE_EXTENSION)) return false
       const note = parseNoteFile(document); return note.status === 'valid' && note.note.noteId === source.noteId
     })
     if (candidates.length !== 1) throw new Error('The original note is not uniquely loaded. Use its source file; this reference is kept.')

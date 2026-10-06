@@ -28,7 +28,7 @@ export class NotebookObservationOwner implements NotebookObservationPort {
       if (parsed.status === 'invalid') return { observation: { ...base, status: 'invalid', revision: document.revision, message: parsed.message } }
       if (parsed.note.noteId !== page.noteId) return { observation: { ...base, status: 'identity-mismatch', revision: document.revision, actualNoteId: parsed.note.noteId, message: 'The original file contains another Note identity. Both identities and bytes are retained; inspect its source before editing.' } }
       const knowledge = noteKnowledge([{ location: { workspaceId: original.workspaceId, path: original.path }, document }])
-      return { document, observation: { ...base, status: 'read', revision: document.revision, content: document.content, actualNoteId: parsed.note.noteId, blockIds: [...knowledge.sources[0]!.blocks.keys()] } }
+      return { document, observation: { ...base, status: 'read', revision: document.revision, content: document.content, actualNoteId: parsed.note.noteId, unanchoredBlockCount: parsed.unanchoredBlockCount, blockIds: [...knowledge.sources[0]!.blocks.keys()] } }
     } catch (error) { options?.signal?.throwIfAborted(); return unknown(error instanceof Error ? error.message : String(error)) }
   }
   async content(state: NotebookState, noteId: string, options?: { maxBytes?: number; signal?: AbortSignal }): Promise<NoteContentObservation> {
@@ -49,7 +49,7 @@ export class NotebookObservationOwner implements NotebookObservationPort {
       if (!promise) {
         if (source && notebookFingerprint(source.resource) === key) {
           const parsed = parseNoteFile(source.document), knowledge = noteKnowledge([{ location: { workspaceId: page.resource.workspaceId, path: page.resource.path }, document: source.document }])
-          promise = parsed.status === 'valid' && parsed.note.noteId === page.noteId ? Promise.resolve({ document: source.document, observation: { status: 'read' as const, noteId: page.noteId, resource: page.resource, revision: source.document.revision, content: source.document.content, actualNoteId: page.noteId, blockIds: [...knowledge.sources[0]!.blocks.keys()] } }) : this.read(page)
+          promise = parsed.status === 'valid' && parsed.note.noteId === page.noteId ? Promise.resolve({ document: source.document, observation: { status: 'read' as const, noteId: page.noteId, resource: page.resource, revision: source.document.revision, content: source.document.content, actualNoteId: page.noteId, unanchoredBlockCount: parsed.unanchoredBlockCount, blockIds: [...knowledge.sources[0]!.blocks.keys()] } }) : this.read(page)
         } else promise = this.read(page)
         reads.set(key, promise)
       }
@@ -82,6 +82,7 @@ export class NotebookObservationOwner implements NotebookObservationPort {
     const blocks = [...knowledge.sources[0]!.blocks.values()].map(block => ({ blockId: block.blockId, text: block.text, type: block.content.type! }))
     const resultBase = { ...base, blocks, observation: metadata }
     if (!parsed.query.fragment) return { ...resultBase, result: { status: 'resolved', target: { noteId: selected.noteId } } }
+    if (!params.select?.blockId && parsed.query.fragment.kind !== 'block' && (observation.unanchoredBlockCount ?? 0) > 0) return { ...resultBase, result: { status: 'unknown', stage: 'fragment', message: 'Some original blocks have no persisted identity. Save the original Markdown to assign their IDs before confirming a unique heading.' } }
     const matches = params.select?.blockId ? blocks.filter(block => block.blockId === params.select!.blockId) : matchingNoteLinkBlocks(blocks, parsed.query.fragment)
     if (matches.length !== 1) return { ...resultBase, result: { status: matches.length ? 'ambiguous' : 'missing', stage: 'fragment', message: matches.length ? 'Several original blocks match. Choose their exact Block ID; no first match was selected.' : 'This heading or block is absent from the confirmed original. The query is retained.' } }
     return { ...resultBase, result: { status: 'resolved', target: { noteId: selected.noteId, blockId: matches[0]!.blockId } } }
@@ -135,7 +136,7 @@ export class NotebookObservationOwner implements NotebookObservationPort {
       references.push({ source: { noteId: reference.source.note.noteId, blockId: reference.blockId }, sourceResource: resources.get(JSON.stringify([reference.source.location.workspaceId, reference.source.location.path]))!, target, occurrence: reference.occurrence, mode: reference.mode, resolution, ...(query === undefined ? {} : { query }) })
     }
     const hasUnbound = references.some(reference => reference.target.kind === 'unbound')
-    const completeness = observations.every(o => o.status === 'read') && duplicateNoteIds.length === 0 && !hasExternalTargets && !hasUnbound ? 'complete' : knowledge.sources.length === 0 && observations.length > 0 ? 'unknown' : 'partial'
+    const completeness = observations.every(o => o.status === 'read' && (o.unanchoredBlockCount ?? 0) === 0) && duplicateNoteIds.length === 0 && !hasExternalTargets && !hasUnbound ? 'complete' : knowledge.sources.length === 0 && observations.length > 0 ? 'unknown' : 'partial'
     return {
       catalogRevision: state.revision, scope: params.noteId ? { kind: 'note', noteId: params.noteId } : params.notebookId ? { kind: 'notebook', notebookId: params.notebookId } : { kind: 'catalog' }, scannedScope: 'catalog', completeness, observations, duplicateNoteIds,
       hierarchy: Object.values(state.pages).filter(p => p.parentNoteId && (selected.has(p.noteId) || selected.has(p.parentNoteId))).map(p => ({ parentNoteId: p.parentNoteId!, noteId: p.noteId })),

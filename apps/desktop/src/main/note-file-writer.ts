@@ -1,5 +1,5 @@
 import type { FileWriteContext } from '@agentmux/core'
-import { NOTE_FILE_EXTENSION, readNoteDocument } from '../shared/note-document.js'
+import { NOTE_FILE_EXTENSION, NOTE_BLOCK_TYPES, readNoteDocument, serializeNoteDocument } from '../shared/note-document.js'
 import { attributeNoteBlocks } from '@agentmux/client-ui/note/note-provenance'
 import { noteContentSchema } from '../shared/note-content-schema.js'
 import type { WorkspaceFileWriteInput, WorkspaceFileWriteResult, WorkspaceRecord } from '../shared/contracts.js'
@@ -34,19 +34,25 @@ export class NoteFileWriter {
       if (before && before.noteId !== candidate.note.noteId) reason = 'The original Note identity changed; block attribution is unconfirmed.'
       // Compare the original schema's canonical nodes so editor-added default attributes are not edits.
       const normalized = (note: typeof candidate.note) => ({ ...note, content: noteContentSchema.nodeFromJSON(note.content).toJSON() })
-      const prepared = prepareNoteWikiLinks(normalized(candidate.note), randomUUID)
+      const identified = normalized(candidate.note)
+      const identify = (node: typeof identified.content) => {
+        if (NOTE_BLOCK_TYPES.some(type => type === node.type) && node.attrs?.blockId == null) node.attrs = { ...node.attrs, blockId: randomUUID() }
+        node.content?.forEach(identify)
+      }
+      identify(identified.content)
+      const prepared = prepareNoteWikiLinks(identified, randomUUID)
       let linked = prepared.note
       if (prepared.pending.length && this.links) {
         try {
           const targets = await this.links.owner.resolvePending(await this.links.state(), prepared.pending, {
             resource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path: input.path },
-            document: { path: input.path, content: JSON.stringify(prepared.note), revision: input.expectedRevision ?? 'pending-create' }
+            document: { path: input.path, content: serializeNoteDocument(prepared.note), revision: input.expectedRevision ?? 'pending-create' }
           })
           for (const link of prepared.pending) { const target = targets.get(link.referenceId); if (target) linked = bindNoteWikiLink(linked, { referenceId: link.referenceId, text: link.text, target }) }
         } catch { /* Name observation cannot take away saving; structured unbound queries are retained. */ }
       }
       const next = attributeNoteBlocks(before ? normalized(before) : null, linked, confirmedBaseline ? context?.actor : undefined, Date.now())
-      if (JSON.stringify(next) !== JSON.stringify(candidate.note)) content = JSON.stringify(next, null, 2) + '\n'
+      content = serializeNoteDocument(next)
       if (!context?.actor) reason = 'The original write actor is unknown; changed block attribution is unconfirmed.'
     }
     const result = await this.files.write(workspace, { ...input, content })
