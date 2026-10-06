@@ -2,7 +2,7 @@ import { chmod, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from '@agentmux/core'
-import { ConnectionHost, type ConnectionAdapter } from '@agentmux/connectors'
+import { ConnectionHost, RoomBindingHost, type RoomBindingHostOptions, type ConnectionAdapter } from '@agentmux/connectors'
 import type { ConnectionPort } from '@agentmux/core/connections'
 import { DesktopConnectorSecrets, type CredentialEncryption } from './connector-secrets.js'
 
@@ -10,11 +10,12 @@ export type DesktopConnectionServices = {
   connections: ConnectionPort
   secrets: Pick<DesktopConnectorSecrets, 'store' | 'inspect'>
   readonly database: DatabaseSync | null
+  readonly bindings: RoomBindingHost | null
   close(): void
 }
-type LiveServices = { database: DatabaseSync; connections: ConnectionHost; secrets: DesktopConnectorSecrets }
+type LiveServices = { database: DatabaseSync; connections: ConnectionHost; secrets: DesktopConnectorSecrets; bindings?: RoomBindingHost }
 /** Optional failure stays local. A later exact operation retries storage on the same Host and database. */
-export async function createDesktopConnections(options: { directory: string; encryption: CredentialEncryption; adapters?: readonly ConnectionAdapter[] }): Promise<DesktopConnectionServices> {
+export async function createDesktopConnections(options: { directory: string; encryption: CredentialEncryption; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'> }): Promise<DesktopConnectionServices> {
   let live: LiveServices | undefined, opening: Promise<LiveServices> | undefined, closed = false
   const ensure = async (): Promise<LiveServices> => {
     if (closed) throw new AgentMuxError('The original connection owner is closed.', 'CONNECTION_STORAGE_UNAVAILABLE')
@@ -27,8 +28,10 @@ export async function createDesktopConnections(options: { directory: string; enc
         database = new DatabaseSync(path); await chmod(path, 0o600)
         const secrets = new DesktopConnectorSecrets(database, options.encryption)
         const connections = new ConnectionHost({ database, secrets, ...(options.adapters ? { adapters: options.adapters } : {}) })
+        const bindings = options.bindings ? new RoomBindingHost({ ...options.bindings, connections }) : undefined
+        if (bindings) connections.bindings = bindings
         if (closed) { database.close(); throw new Error('Owner closed while opening.') }
-        return live = { database, connections, secrets }
+        return live = { database, connections, secrets, ...(bindings ? { bindings } : {}) }
       } catch {
         try { database?.close() } catch { /* Original Host remains usable; connection storage is unconfirmed. */ }
         throw new AgentMuxError('Connection storage is unavailable on this Host. Existing Agents remain available. Restore access to the Host connection storage and retry the original operation.', 'CONNECTION_STORAGE_UNAVAILABLE')
@@ -39,8 +42,17 @@ export async function createDesktopConnections(options: { directory: string; enc
   // Warm the optional owner without making its availability a Host startup prerequisite.
   await ensure().catch(() => {})
   return {
+    get bindings() { return live?.bindings ?? null },
     get database() { return live?.database ?? null },
     connections: {
+      ...(options.bindings ? { bindings: {
+        bind: async (input, context) => (await ensure()).bindings!.bind(input, context),
+        inspect: async input => (await ensure()).bindings!.inspect(input),
+        list: async input => (await ensure()).bindings!.list(input),
+        pause: async (input, context) => (await ensure()).bindings!.pause(input, context),
+        relink: async (input, context) => (await ensure()).bindings!.relink(input, context),
+        grant: async (input, context) => (await ensure()).bindings!.grant(input, context)
+      } satisfies import('@agentmux/core/connections').RoomBindingsPort } : {}),
       list: async () => (await ensure()).connections.list(),
       inspect: async input => (await ensure()).connections.inspect(input),
       configure: async input => (await ensure()).connections.configure(input),
