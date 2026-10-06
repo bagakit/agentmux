@@ -9,6 +9,7 @@
 @import './conversation-message.css';
 @import './conversation-resource-text.css';
 @import './markdown.css';
+@import './content-copy.css';
 @import './conversation-image.css';
 @import './conversation-input-details.css';
 @import './conversation-tool-trace.css';
