@@ -1,3 +1,4 @@
+import type { AgentConversationReadPage } from './conversation.js'
 import { createInputPerformanceRecorder, hostedCarrierPerformance, readInputObservation, readInputObservationField, type InputObservationReference, type ClientPerformanceDiagnostics, type InputPerformanceHandle } from './performance-diagnostics.js'
 import { DeliveryAttemptStore } from './delivery-attempt-store.js'
 import { deliveryFailure, newDeliveryLogId, type DeliveryAttempt, type DeliveryAttemptLookup, type DeliveryInputPhase } from './delivery-attempt.js'
@@ -2304,6 +2305,11 @@ export class AgentMuxClient {
     const page = await readAgentSessionHistory(this, descriptor ? { ...input, hostId: descriptor.hostId } : input,
       { ...options, resolveSource: id => this.historyDescriptor(id) })
     return descriptor ? { ...page, hostId: input.hostId } : page
+  }
+
+  /** The original bounded history owner, exposed through the common conversation contract. */
+  async readAgentConversation(input: AgentSessionHistoryReadInput, options: { signal?: AbortSignal } = {}): Promise<AgentConversationReadPage> {
+    return await this.readAgentSessionHistory(input, options)
   }
 
   /** Discover bounded retained sources without connecting to or controlling Runtime. */
