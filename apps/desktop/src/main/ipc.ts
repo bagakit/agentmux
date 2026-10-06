@@ -1354,6 +1354,8 @@ export async function registerIpc(args: {
   }))
   handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => sessionLaunchResult(() => args.runtime.launchTerminal(input, config)))
   handle('sessions:timeline', async (session: import('../shared/contracts.js').SessionHistoryReference) => await args.runtime.sessionTimeline(session))
+  handle('sessions:dispatches', (session: import('../shared/contracts.js').SessionHistoryReference, options?: import('../shared/contracts.js').SessionDispatchPageOptions) => args.runtime.sessionDispatches(session, options))
+  handle('sessions:dispatch', (session: import('../shared/contracts.js').SessionHistoryReference, sourceMessageId: string) => args.runtime.sessionDispatch(session, sourceMessageId))
   handle('sessions:creation', async (hostId: string, agentSessionId: string) => await args.runtime.agentCreation(hostId, agentSessionId))
   handle('sessions:resolveCreationSessionId', async (hostId: string, createOperationId: string) => args.runtime.resolveCreationSessionId(hostId, createOperationId))
   handle('sessions:historySources', async (options?: { observation: true }) => {

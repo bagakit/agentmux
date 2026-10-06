@@ -898,6 +898,8 @@ const mockApi: AgentMuxDesktopApi = {
     cancel: async () => { throw new Error('Cancelling an arrangement requires the connected desktop Host. Its state is unconfirmed.') }
   },
   sessions: {
+    dispatches: async () => { throw new Error('Original supervised collaboration records require the connected desktop Host. The Session and existing records remain available.') },
+    dispatch: async () => { throw new Error('Original collaboration message details require the connected desktop Host. The selected source is retained.') },
     notifyInputOccupation: async () => { throw new Error('User input observation requires the connected desktop Host. The original Agent and draft remain available.') },
     nativeSessions: async input => ({ hostId: input.hostId, executorId: input.executorId,
       providerId: mockConfig.executors[input.executorId]?.providerId ?? 'codex',

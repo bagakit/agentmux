@@ -2361,6 +2361,18 @@ export class RuntimeController {
     return { ...await this.configuredClient(hostId).readDispatch({ sourceMessageId }), hostId }
   }
 
+  async sessionDispatches(reference: SessionHistoryReference, options?: import('../shared/contracts.js').SessionDispatchPageOptions) {
+    return { ...await this.configuredClient(reference.hostId).listDispatches({ ...options, participantSessionId: reference.agentSessionId }), hostId: reference.hostId }
+  }
+
+  async sessionDispatch(reference: SessionHistoryReference, sourceMessageId: string) {
+    const original = await this.readOriginalDispatch(reference.hostId, sourceMessageId)
+    if (original.dispatch.ownerAgentSessionId !== reference.agentSessionId && original.dispatch.workerAgentSessionId !== reference.agentSessionId) {
+      throw new AgentMuxError('This original Dispatch belongs to another participant. The current Session and records remain available.', 'DISPATCH_PARTICIPANT_MISMATCH')
+    }
+    return original
+  }
+
   async observeOriginalRun(hostId: string, runId: string): Promise<Pick<AgentMuxRun, 'runId' | 'state'>> {
     const subject = await (await this.connectedClient(hostId, 'runtime')).runtimeSubject({ kind: 'terminal-run', runId })
     return { runId: subject.run.runId, state: subject.run.state }
