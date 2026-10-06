@@ -401,6 +401,11 @@ export class AgentMuxRpcService {
           : await delivery.retry(parseConnectionDeliveryParams(method, params), retryContext)
         return parseConnectionResult(method, result, input) as AgentMuxRpcResult<M>
       }
+      if (method === 'connection.ingress.inspect' || method === 'connection.ingress.ls') {
+        if (!owner.ingress) throw new AgentMuxError('Ingress observation is unavailable on this Host. Existing Agents and inputs remain available.', 'CONTROL_UNAVAILABLE')
+        const result = method === 'connection.ingress.inspect' ? await owner.ingress.inspect(parseConnectionParams(method, params)) : await owner.ingress.list(parseConnectionParams(method, params))
+        return parseConnectionResult(method, result, input) as AgentMuxRpcResult<M>
+      }
       if (isRoomBindingMethod(method)) {
         const bindings = owner.bindings
         if (!bindings) throw new AgentMuxError('Room bindings are not enabled on this Host. Existing Agents and connections remain available.', 'CONTROL_UNAVAILABLE')
