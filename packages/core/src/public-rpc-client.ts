@@ -271,7 +271,7 @@ class RpcClient implements AgentMuxRpcClient {
     let reader: Reader | undefined, finalReader: Reader | undefined, opening: Promise<Reader> | undefined
     let unavailableTransport: AgentMuxError | undefined
     let finished = false
-    const abort = () => controller.abort()
+    const abort = () => end(new AgentMuxError('RPC reader was cancelled; an admitted operation may still complete at its original owner.', 'CONTROL_CANCELLED'))
     signal?.addEventListener('abort', abort, { once: true })
     let deadline: ReturnType<typeof setTimeout> | undefined
     const deviceRecovery = () => method === 'device.hello'
@@ -289,6 +289,11 @@ class RpcClient implements AgentMuxRpcClient {
       controller.abort(); if (finalReader) this.readers.delete(finalReader); if (reader) void reader.dispose()
       if (!responseDelivered) {
         let failure = error ?? new AgentMuxError('RPC ended before its response.', 'CONTROL_PROTOCOL_ERROR')
+        if (failure instanceof AgentMuxError && failure.code === 'CONTROL_CANCELLED') {
+          // Ending a reply reader cannot establish that the original owner did not apply it.
+          failure = new AgentMuxError(failure.message, failure.code, failure.detail,
+            { disposition: 'unknown', confirmedInputBytes: null }, failure.logId)
+        }
         if (isAgentMuxRpcDeviceMethod(method) && failure instanceof AgentMuxError) {
           failure = new AgentMuxError(failure.message + ' ' + deviceRecovery(), failure.code, failure.detail, failure.controlFailure, failure.logId)
         }
@@ -346,21 +351,28 @@ class RpcClient implements AgentMuxRpcClient {
         }
       } catch (error) { end(transportError(error)) }
     }
-    const rpc = new JSONRPCClient(async payload => {
-      try {
-        if (this.endpoint.transport === 'ssh') {
-          if (!this.ssh) this.ssh = new AgentMuxRpcSshTransport(agentMuxRpcSshArguments(this.endpoint), () => { this.ssh = undefined }, this.endpoint.socketPath)
-          opening = this.ssh.open(payload, receive, end, controller.signal, armDeadline)
-        } else { armDeadline(); opening = openRequest(this.endpoint, payload, receive, end, controller.signal, this.relayKeyPair) }
-        reader = await opening
-      } catch (error) { end(transportError(error)); return }
-      finalReader = { dispose: async () => { end(new AgentMuxError('RPC reader was cancelled.', 'CONTROL_CANCELLED')); await reader!.dispose() } }
-      if (finished) await reader.dispose(); else this.readers.add(finalReader)
+    // Register cancellation before transport admission. A late HTTP/SSH/Relay opening
+    // still belongs to this exact cancelled reader and must never escape disposal.
+    finalReader = { dispose: async () => { end(new AgentMuxError('RPC reader was cancelled; an admitted operation may still complete at its original owner.', 'CONTROL_CANCELLED')); await reader?.dispose() } }
+    this.readers.add(finalReader)
+    const rpc = new JSONRPCClient(payload => {
+      // json-rpc-2.0 waits for send() before exposing its response promise. Opening
+      // is independently owned here so cancelling a late opening can settle now.
+      void (async () => {
+        try {
+          if (this.endpoint.transport === 'ssh') {
+            if (!this.ssh) this.ssh = new AgentMuxRpcSshTransport(agentMuxRpcSshArguments(this.endpoint), () => { this.ssh = undefined }, this.endpoint.socketPath)
+            opening = this.ssh.open(payload, receive, end, controller.signal, armDeadline)
+          } else { armDeadline(); opening = openRequest(this.endpoint, payload, receive, end, controller.signal, this.relayKeyPair) }
+          reader = await opening
+        } catch (error) { end(transportError(error)); return }
+        if (finished) await reader.dispose()
+      })().catch(error => end(transportError(error)))
+      return Promise.resolve()
     })
     if (signal?.aborted) controller.abort()
     let response: JSONRPCResponse
     try { response = await rpc.requestAdvanced(request, undefined)
-      if (opening) await opening.catch(() => {})
       const error = rpcResponseError(response); if (error) throw unavailableTransport ?? error
     } catch (error) { end(transportError(error)); throw error }
     return { response, reader: finalReader!, ...(subscriptionId === undefined ? {} : { subscriptionId }) }

@@ -396,6 +396,19 @@ async function disposePrepared(hosts: readonly PreparedRuntimeHost[]): Promise<v
   if (errors.length > 0) throw new AggregateError(errors, 'Failed to dispose prepared Runtime hosts.')
 }
 
+/** A scheduler may abandon this read without stopping the retained Session or its Run. */
+async function observeProgressRead<T>(signal: AbortSignal | undefined, read: () => Promise<T>): Promise<T> {
+  if (!signal) return await read()
+  signal.throwIfAborted()
+  let abort!: () => void
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(signal.reason)
+    signal.addEventListener('abort', abort, { once: true })
+  })
+  try { return await Promise.race([read(), cancelled]) }
+  finally { signal.removeEventListener('abort', abort) }
+}
+
 export class RuntimeController {
   private readonly hosts = new Map<string, RuntimeHost>()
   private readonly toolkitRuns = new Map<string, (event: AgentMuxClientEvent) => void>()
@@ -1724,11 +1737,11 @@ export class RuntimeController {
   ): Promise<void> {
     const capturedCondition = validateAgentPromptCondition(condition)
     await this.trackHostLifecycleOperation(control.hostId, async () => {
-      const client = await this.connectedClient(control.hostId)
+      const client = await observeProgressRead(automation?.signal, () => this.connectedClient(control.hostId))
       if (control.run.runId !== capturedCondition.expectedRun.runId) {
         throw new AgentMuxError('Prompt intent targets another Run.', 'STALE_AGENT_SESSION')
       }
-      const status = await client.statusAgent(control.agentSessionId)
+      const status = await observeProgressRead(automation?.signal, () => client.statusAgent(control.agentSessionId))
       if (status.run.runId !== control.run.runId) {
         throw new AgentMuxError('Agent Session changed before prompt submission.', 'STALE_AGENT_SESSION')
       }
@@ -1761,7 +1774,7 @@ export class RuntimeController {
           error.code === 'AGENT_PROMPT_SUBMISSION_BUSY'
         )) {
           try {
-            const latest = await client.statusAgent(control.agentSessionId)
+            const latest = await observeProgressRead(automation?.signal, () => client.statusAgent(control.agentSessionId))
             if (latest.run.runId === control.run.runId) {
               if (latest.run.state !== 'running') runState = 'ended'
 
@@ -1826,14 +1839,15 @@ export class RuntimeController {
   }
   async observeCheckIn(target: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string }, now: number, signal: AbortSignal, config: AppConfig): Promise<CheckInObservation> {
     signal.throwIfAborted()
-    const client = await this.connectedClient(target.hostId), before = await client.statusAgent(target.agentSessionId)
+    const client = await observeProgressRead(signal, () => this.connectedClient(target.hostId))
+    const before = await observeProgressRead(signal, () => client.statusAgent(target.agentSessionId))
     const matches = (session: typeof before.session) => session.agentSessionId === target.agentSessionId && session.hostId === target.hostId && session.providerId === target.providerId && session.workspacePath === target.workspacePath
     if (!matches(before.session)) return { known: false, reason: 'The original quiet follow-up target is unconfirmed.' }
-    const timeline = await client.sessionTimeline(target.agentSessionId)
+    const timeline = await observeProgressRead(signal, () => client.sessionTimeline(target.agentSessionId))
     const executor = this.sessionExecutorOptions(target.hostId, client, config, before.session)
     const page = await client.sessionHistoryPage(target.agentSessionId, { limit: 100, refreshNativeSource: true, requireCurrentSource: true, signal, ...executor })
     signal.throwIfAborted()
-    const after = await client.statusAgent(target.agentSessionId)
+    const after = await observeProgressRead(signal, () => client.statusAgent(target.agentSessionId))
     signal.throwIfAborted()
     const handle = after.session.nativeHandle
     if (!matches(after.session) || before.session.run.runId !== after.session.run.runId || JSON.stringify(before.session.nativeHandle) !== JSON.stringify(handle) ||
@@ -1849,7 +1863,7 @@ export class RuntimeController {
   async observeContinuousProgress(loop: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string; futureIntentId?: string }, tickId: string, now: number, signal?: AbortSignal) {
     const host = this.hosts.get(loop.hostId)
     if (!host) throw new AgentMuxError('Continuous progress target host is unavailable.', 'UNKNOWN_AGENT_SESSION')
-    const status = await host.client.statusAgent(loop.agentSessionId)
+    const status = await observeProgressRead(signal, () => host.client.statusAgent(loop.agentSessionId))
     if (status.session.hostId !== loop.hostId || status.session.providerId !== loop.providerId ||
         status.session.workspacePath !== loop.workspacePath) {
       throw new AgentMuxError('Continuous progress target identity changed. Review this loop before resuming.', 'STALE_AGENT_SESSION')
@@ -1857,8 +1871,8 @@ export class RuntimeController {
     if (status.run.acceptedInputBytes === null) throw new AgentMuxError('The original Native input cursor is unconfirmed. Automatic progress is paused; manual input and your Agent remain available.', 'CONTROL_UNAVAILABLE')
     const observer = this.progressInputObserver
     if (!observer) throw new Error('User input observation is unavailable. Automatic progress is paused; manual input remains available.')
-    const inputOccupied = await observer({ kind: 'agent', hostId: loop.hostId, agentSessionId: loop.agentSessionId, run: status.session.run }, signal)
-    const saved = loop.futureIntentId ? await host.client.readAgentFuturePromptIntent(loop.agentSessionId, loop.futureIntentId) : null
+    const inputOccupied = await observeProgressRead(signal, () => observer({ kind: 'agent', hostId: loop.hostId, agentSessionId: loop.agentSessionId, run: status.session.run }, signal))
+    const saved = loop.futureIntentId ? await observeProgressRead(signal, () => host.client.readAgentFuturePromptIntent(loop.agentSessionId, loop.futureIntentId!)) : null
     const session = loop.futureIntentId ? { ...status.session, futurePromptIntents: saved ? { [loop.futureIntentId]: saved } : {} } : status.session
     return { session, observation: status.observation, inputByte: status.run.acceptedInputBytes, inputOccupied, tickId, now }
   }
@@ -2163,7 +2177,9 @@ export class RuntimeController {
     const hosts = [...this.hosts.entries()]
     for (const [hostId] of hosts) this.hostReconfigurationReservations.add(hostId)
     try {
-      await Promise.all(hosts.map(async ([hostId]) => await this.waitForHostQuiescence(hostId)))
+      // Quit releases this GUI consumer, not the original Core/ctxmux business owner.
+      // Cancel its readers first: an admitted create/resume/input may still complete durably
+      // after its reply becomes unknown. Host replacement separately requires quiescence.
       // Keep the current host/client projection until every owner has actually been disposed. If
       // cleanup fails, the window can report the failure and retry/recover against still-live
       // owners; clearing the maps first used to leave the reservation set behind and every later

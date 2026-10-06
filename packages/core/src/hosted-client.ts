@@ -25,6 +25,10 @@ export async function connectHostedAgentMux(options: {
 }): Promise<AgentMuxHostedClient> {
   const consumerId = options.consumerId ?? randomClientRequestId(), rpc = options.rpc
   const publisher = new AgentMuxClientEventPublisher()
+  // This consumer owns reply/observation readers, never an admitted durable operation.
+  const observationLifetime = new AbortController()
+  const observationSignal = (signal?: AbortSignal): AbortSignal => signal
+    ? AbortSignal.any([observationLifetime.signal, signal]) : observationLifetime.signal
   const publicReaders = new Set<AgentMuxHostedSubscription>()
   const publicOpenings = new Set<AbortController>()
   let publicReaderEpoch = 0
@@ -57,7 +61,7 @@ export async function connectHostedAgentMux(options: {
   const discoverControlOwner = async (expectedRuntimeId?: string): Promise<AgentMuxRuntimeOwnerIdentity> => {
     const previous = controlOwner
     try {
-      const discovery = await rpc.call('runtime.owner.identity', expectedRuntimeId === undefined ? {} : { expectedRuntimeId })
+      const discovery = await rpc.call('runtime.owner.identity', expectedRuntimeId === undefined ? {} : { expectedRuntimeId }, { signal: observationSignal() })
       return parseHostedRuntimeOwnerIdentity(discovery.owner)
     } catch (error) {
       // A failed control identity read differs from a failed observation lease.
@@ -182,7 +186,7 @@ export async function connectHostedAgentMux(options: {
       }
     }
     const response = await rpc.call('runtime.invoke', { consumerId, fence: fence(),
-      invocation: encodeHostedValue({ method, args: wireArgs }) as AgentMuxHostedInvocation }, signal ? { signal } : {})
+      invocation: encodeHostedValue({ method, args: wireArgs }) as AgentMuxHostedInvocation }, { signal: observationSignal(signal) })
     if (method === 'connectRuntime') await connectControl(true)
     const decoded = decodeHostedValue(response.value)
     if (method === 'sessionHistoryResource') {
@@ -231,7 +235,7 @@ export async function connectHostedAgentMux(options: {
       const transfer = new AgentMuxHostedTransferReader()
       const watch = await rpc.subscribe('runtime.history-watch', { consumerId, fence: fence(), agentSessionId: read.id,
         options: encodeHostedValue(signal ? historyOptions : read.options) as never }, {
-        ...(signal ? { signal } : {}),
+        signal: observationSignal(signal),
         onInitial: value => {
           if (!value.source) throw new AgentMuxError('History watch omitted its exact native source.', 'CONTROL_PROTOCOL_ERROR')
           if (read.source && (read.source.providerId !== value.source.providerId || read.source.nativeSessionId !== value.source.nativeSessionId)) {
@@ -299,6 +303,7 @@ export async function connectHostedAgentMux(options: {
       }
       const expectedRuntimeId = options.expectedRuntimeId ?? previous?.owner.runtimeId
       const owner = await discoverControlOwner(expectedRuntimeId)
+      requireObservation()
       acceptOwner(owner)
       const expected = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
       const transfer = new AgentMuxHostedTransferReader()
@@ -325,6 +330,7 @@ export async function connectHostedAgentMux(options: {
       }
       try {
         acquired = await rpc.subscribe('runtime.events', { consumerId, fence: expected }, {
+          signal: observationSignal(),
           onInitial: value => {
             requireObservation()
             if (value.owner.runtimeId !== expected.runtimeId || value.owner.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError('Runtime opening belongs to another owner.', 'RUNTIME_OWNER_CHANGED')
@@ -373,7 +379,7 @@ export async function connectHostedAgentMux(options: {
       let projectionFailure: unknown
       try {
         const projectionResponse = await rpc.call('runtime.invoke', { consumerId, fence: fence(),
-          invocation: { method: 'runtimeProjection', args: [] } })
+          invocation: { method: 'runtimeProjection', args: [] } }, { signal: observationSignal() })
         const projection = decodeHostedValue(projectionResponse.value) as Awaited<ReturnType<AgentMuxHostedClient['runtimeProjection']>>
         for (const subject of projection.subjects) publisher.publishRunState(subject.run,
           subject.kind === 'agent' ? subject.agentSession.agentSessionId : undefined)
@@ -458,6 +464,7 @@ export async function connectHostedAgentMux(options: {
       const params = { consumerId, fence: expected, target: { ...target, ...(runId ? { runId } : {}) }, afterByte, view }
       subscription = await rpc.subscribe(replayOnly ? 'runtime.replay-watch' : 'runtime.attachment-watch',
         { ...params, ...(!replayOnly && refresh ? { refresh: true, ...(operationId === undefined ? {} : { operationId }) } : {}) }, {
+          signal: observationSignal(),
           onInitial: value => {
             if (value.owner.runtimeId !== expected.runtimeId || value.owner.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError('Attachment belongs to another owner.', 'RUNTIME_OWNER_CHANGED')
             transferId = value.transferId
@@ -528,7 +535,7 @@ export async function connectHostedAgentMux(options: {
       for (const reading of attached.values()) void reading.stream.dispose(); attached.clear();
       for (const read of [...histories]) releaseHistory(read) },
     ...(options.forwardRpc ? { forwardRpc: async (method: Parameters<AgentMuxHostedForwardRpc>[0], params: Parameters<AgentMuxHostedForwardRpc>[1], context: Parameters<AgentMuxHostedForwardRpc>[2] = {}) => {
-      await connectControl(); return await options.forwardRpc!(method, params, { ...context, runtimeFence: fence() }) } } : {}),
+      await connectControl(); return await options.forwardRpc!(method, params, { ...context, signal: observationSignal(context.signal), runtimeFence: fence() }) } } : {}),
     ...(options.subscribeRpc ? { subscribeRpc: async (...[method, params, handlers]: Parameters<AgentMuxHostedSubscribeRpc>) => {
       if (disposed) throw new AgentMuxError('Hosted consumer is disposed.', 'CONTROL_CANCELLED')
       const epoch = publicReaderEpoch, controller = new AbortController()
@@ -540,7 +547,7 @@ export async function connectHostedAgentMux(options: {
       if (handlers.signal?.aborted) controller.abort()
       publicOpenings.add(controller)
       try {
-        const subscription = await options.subscribeRpc!(method, params, { ...handlers, signal: controller.signal,
+        const subscription = await options.subscribeRpc!(method, params, { ...handlers, signal: observationSignal(controller.signal),
           onInitial: value => { if (active()) handlers.onInitial(value) },
           onEvent: value => { if (active()) handlers.onEvent(value) },
           onFrame: value => { if (active()) handlers.onFrame?.(value) },
@@ -585,7 +592,7 @@ export async function connectHostedAgentMux(options: {
     observeAgentOutput: async (...args: Parameters<AgentMuxHostedClient['observeAgentOutput']>) => {
       await connectControl()
       if (disposed) throw new AgentMuxError('Hosted consumer is disposed.', 'CONTROL_CANCELLED')
-      const output = createHostedOutputObservation({ subscribe: (method, params, handlers) => rpc.subscribe(method, params, { ...handlers, runtimeFence: fence() }) }, ...args)
+      const output = createHostedOutputObservation({ subscribe: (method, params, handlers) => rpc.subscribe(method, params, { ...handlers, signal: observationSignal(handlers.signal), runtimeFence: fence() }) }, ...args)
       outputs.add(output)
       try {
         const { initial, replay } = await output.ready
@@ -611,16 +618,16 @@ export async function connectHostedAgentMux(options: {
     dispose: async () => {
       if (disposed) return
       disposed = true; publicReaderEpoch++; for (const controller of publicOpenings) controller.abort(); publicOpenings.clear(); eventEpoch++; controlEpoch++; openingReaders.clear()
+      observationLifetime.abort()
       if (retry) clearTimeout(retry)
-      const finalFence = controlOwner ? { runtimeId: controlOwner.runtimeId, ownerInstanceId: controlOwner.ownerInstanceId } : undefined
       const resources = [...publicReaders, stream, ...[...attached.values()].map(value => value.stream)].filter((value): value is AgentMuxHostedSubscription => Boolean(value))
       publicReaders.clear()
       for (const read of [...histories]) releaseHistory(read)
       const ownedOutputs = [...outputs]; outputs.clear()
       stream = undefined; publisher.dispose()
       await Promise.allSettled([...resources.map(value => value.dispose()), ...ownedOutputs.map(value => value.close())])
-      // Explicit client disposal releases all observations owned by this consumer.
-      if (finalFence) await rpc.call('runtime.release-consumer', { consumerId, fence: finalFence }).catch(() => {})
+      // Each exact watch owns its server-side lease, including cancelled openings.
+      // A second sweep would make GUI exit wait on unrelated Native cleanup receipts.
       attached.clear()
     },
     onEvent: <Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions) => publisher.onEvent(listener, options, () => endpointState ? structuredClone(endpointState) : undefined)
