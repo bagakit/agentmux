@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { Terminal } from '@xterm/xterm'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxClientEvent, AgentMuxRunAttachment, AgentMuxAgentWriteInput } from '@agentmux/core'
+import { createBrowserPlatform } from '../src/platform/browser'
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { MobileTerminalViewer } from '../src/terminal/MobileTerminalViewer'
 import '../src/mobile.css'
@@ -10,18 +11,18 @@ import '@agentmux/client-ui/styles.css'
 
 // Only the SDK transport is controlled; production Viewer, reader, control,
 // input subscriptions, xterm parser/gesture/wheel encoding and CSS are real.
-let terminal: Terminal | null = null, cursor = 0, accepted = 0, appPosition = 0, mounted = true
+let terminal: Terminal | null = null, cursor = 0, accepted = 0, appPosition = 0, mounted = true, cols = 80, rows = 24, resizeRevision = 0, loseReceipt = false
 const encoder = new TextEncoder(), listeners = new Set<(event: AgentMuxClientEvent) => void>()
-const calls: Array<{ method: string; args: unknown[] }> = []
+const calls: Array<{ method: string; args: unknown[] }> = [], copies: string[] = []
 const originalOpen = Terminal.prototype.open
 Terminal.prototype.open = function (...args) { terminal = this; return originalOpen.apply(this, args) }
 const session = { kind: 'agent', agentSessionId: 'gesture-session', hostId: 'gesture-host', providerId: 'fixture', executorId: 'fixture',
   workspacePath: fixturePath('terminal-gestures'), run: { runId: 'gesture-run' }, retiredRuns: [], createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1) } as const
 const snapshot = (): AgentMuxRunAttachment => ({ run: { ...session.run, nativeService: null, kind: 'agent', agentSessionId: session.agentSessionId,
   providerId: session.providerId, executorId: session.executorId, workspacePath: session.workspacePath,
-  pid: 1, state: 'running', cols: 80, rows: 24, observedAt: _tailRefreshFixtureEpoch(0, 0, 1), latestOutputBytes: cursor, acceptedInputBytes: accepted }, replay: [], gap: null,
-  resizeRevision: 0, terminal: { type: 'basic-vt', checkpoint: { runId: session.run.runId, throughByte: cursor, resizeRevision: 0,
-    size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
+  pid: 1, state: 'running', cols, rows, observedAt: _tailRefreshFixtureEpoch(0, 0, 1), latestOutputBytes: cursor, acceptedInputBytes: accepted }, replay: [], gap: null,
+  resizeRevision, terminal: { type: 'basic-vt', checkpoint: { runId: session.run.runId, throughByte: cursor, resizeRevision,
+    size: { cols, rows }, restoreSize: { cols, rows }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
     restoreBytes: encoder.encode('\x1b[0m'), resizes: [] } })
 function output(text: string) {
   const dataBytes = encoder.encode(text), startByte = cursor; cursor += dataBytes.length
@@ -38,6 +39,7 @@ const client = {
     if (input.agentSessionId !== session.agentSessionId || input.expectedRun.runId !== session.run.runId || input.source !== 'user') throw new Error('Wrong input owner')
     calls.push({ method: 'writeAgent', args: [input] })
     const text = typeof input.data === 'string' ? input.data : new TextDecoder().decode(input.data)
+    if (loseReceipt) throw new Error('Original input receipt remains unconfirmed')
     const startByte = accepted; accepted += encoder.encode(text).length
     const down = [...text.matchAll(/\x1b(?:\[|O)B|\x1b\[<65;\d+;\d+M/gu)].length
     const up = [...text.matchAll(/\x1b(?:\[|O)A|\x1b\[<64;\d+;\d+M/gu)].length
@@ -51,7 +53,7 @@ const root = createRoot(document.getElementById('root')!)
 const render = (visible = true) => root.render(<div className="mobile-app"><header className="mobile-header"><span /><div className="mobile-brand">AgentMux</div><span /></header>
   <div className="mobile-context">会话 / 终端</div><main className="mobile-terminal-panel" hidden={!visible}>
     <MobileTerminalViewer client={client} agentSessionId={session.agentSessionId} connection={{ state: 'connected', message: 'Connected' }}
-      platform={{ copyText: async () => true } as never} visible={visible} />
+      platform={createBrowserPlatform({ clipboard: { async writeText(text) { copies.push(text) } } })} visible={visible} />
   </main><nav className="mobile-navigation"><button>Goals</button><button>Topics</button><button>Mote</button><button>Focus</button><button>Space</button></nav></div>)
 render()
 const facts = () => {
@@ -60,7 +62,9 @@ const facts = () => {
   const first = buffer.viewportY + Math.floor(canvas.scrollTop / cellHeight)
   return { fontSize: terminal!.options.fontSize, cols: terminal!.cols, rows: terminal!.rows, buffer: buffer.type, baseY: buffer.baseY,
     viewportY: buffer.viewportY, selection: terminal!.getSelection(), mode: document.querySelector('.mobile-terminal')?.getAttribute('data-control'),
-    firstVisibleLine: buffer.getLine(first)?.translateToString(true), appPosition, calls: [...calls], listenerCount: listeners.size,
+    unicode: terminal!.unicode.activeVersion, cursorX: buffer.cursorX, cursorY: buffer.cursorY,
+    cellProbe: Array.from({length: Math.min(12, terminal!.cols)}, (_, i) => ({text:buffer.getLine(0)?.getCell(i)?.getChars(),width:buffer.getLine(0)?.getCell(i)?.getWidth()})),
+    firstVisibleLine: buffer.getLine(first)?.translateToString(true), appPosition, calls: [...calls], copies: [...copies], listenerCount: listeners.size,
     outer: { top: canvas.scrollTop, left: canvas.scrollLeft, width: canvas.clientWidth, height: canvas.clientHeight, scrollWidth: canvas.scrollWidth, scrollHeight: canvas.scrollHeight },
     screen: screen.getBoundingClientRect().toJSON(), canvas: canvas.getBoundingClientRect().toJSON(),
     terminalCount: document.querySelectorAll('.xterm').length, currentText: buffer.getLine(buffer.viewportY)?.translateToString(true) }
@@ -79,6 +83,15 @@ Object.assign(window, { terminalGestureScene: {
       if (mode === 'mouse') output('\x1b[?1000h\x1b[?1006h')
     }
   },
+  grid(nextCols: number, nextRows: number) {
+    cols = nextCols; rows = nextRows; resizeRevision++
+    for (const listener of listeners) listener({ type: 'terminal-resized', run: session.run, agentSessionId: session.agentSessionId, cols, rows, throughByte: cursor, resizeRevision })
+  },
+  bytes: output,
+  uncertain() { loseReceipt = true; terminal!.input('original uncertain input', true); terminal!.input('retained unsent input', true) },
+  acceptReplies() { loseReceipt = false },
+  input(text: string) { terminal!.input(text, true) },
+  line(index: number) { const line = terminal!.buffer.active.getLine(index); return { text: line?.translateToString(true), cells: Array.from({length: terminal!.cols}, (_, i) => ({ text: line?.getCell(i)?.getChars(), width: line?.getCell(i)?.getWidth(), foreground: line?.getCell(i)?.getFgColor() })) } },
   select() { terminal!.select(0, terminal!.buffer.active.viewportY, 12) },
   output: () => output('Additional live output\r\n'),
   hide: () => render(false), show: () => render(true),
