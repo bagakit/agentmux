@@ -142,7 +142,7 @@ export type AgentMuxRpcAgentInspection = {
   session: ReturnType<AgentMuxClient['agentSession']>
   status: Awaited<ReturnType<AgentMuxClient['statusAgent']>> | null
   unavailable: AgentMuxRpcUnavailable[]
-  displayName: { override: string | null; nameRevision: number | null; availability: 'observed' | 'unavailable' }
+  displayName: { override: string | null; source: import('./display-label.js').AgentMuxDisplayLabelSource | null; nameRevision: number | null; availability: 'observed' | 'unavailable' }
 }
 export type AgentMuxRpcSnapshotParams = {
   projectId?: string; workspaceId?: string; topicId?: string; agentSessionId?: string;

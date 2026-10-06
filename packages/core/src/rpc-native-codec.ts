@@ -395,7 +395,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
             ('providerId' in handle ? handle.providerId !== target.providerId : handle.adapterId !== target.adapterId)) fail()
         }
         if (p.status !== null) status(p.status, session); issues(p.unavailable)
-        if (method === 'agent.inspect') { string(p.routeHostId); const name = record(p.displayName, ['override', 'nameRevision', 'availability']); if (name.override !== null) text(name.override); if (name.nameRevision !== null) count(name.nameRevision); member(name.availability, ['observed', 'unavailable']) }
+        if (method === 'agent.inspect') { string(p.routeHostId); const name = record(p.displayName, ['override', 'source', 'nameRevision', 'availability']); if (name.override !== null) text(name.override); if (name.source !== null) member(name.source, ['manual', 'launch', 'derived', 'retained']); if (name.nameRevision !== null) count(name.nameRevision); member(name.availability, ['observed', 'unavailable']) }
         else { text(p.topic); const messaging = record(p.messaging, Object.keys(AGENTMUX_AGENT_MESSAGING_RULES))
           for (const [key, rule] of Object.entries(AGENTMUX_AGENT_MESSAGING_RULES)) if (messaging[key] !== rule) fail()
           const view = record(p.view); bool(view.attached)

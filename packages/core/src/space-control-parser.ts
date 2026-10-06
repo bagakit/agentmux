@@ -60,6 +60,9 @@ function nameRevision(value: unknown, code: Code): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) fail('An exact nonnegative name revision is required.', code)
   return value as number
 }
+function derivedNameSource(value: unknown, code: Code): { nameSource?: 'derived' } {
+  return value === undefined ? {} : { nameSource: member(value, ['derived'], 'Name source', code) }
+}
 function nullableId(value: unknown, name: string, code: Code, spatial = false): string | null {
   return value === null ? null : spaceControlId(value, name, code, spatial)
 }
@@ -116,7 +119,7 @@ export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceC
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'nameSource'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
@@ -160,11 +163,11 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
       ...(Object.hasOwn(source, 'displayWorkspaceId') ? { displayWorkspaceId: spaceControlId(source.displayWorkspaceId, 'Display Workspace', code), groupId: spaceControlId(source.groupId, 'Group', code) } : {}),
       ...(regionPlacement ? { tabId: spaceControlId(source.tabId, 'File Tab', code, true), regionId: spaceControlId(source.regionId, 'File anchor Region', code, true), split: split as import('./split-direction-ssot.js').SplitDirection } : {}) }
   } else if (operation === 'agent.rename') {
-    fields(source, ['schemaVersion', 'requestId', 'operation', 'agentSessionId', 'name', 'expectedNameRevision'], code)
-    request = { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code), name: nullableString(source.name, 'Display name', code), expectedNameRevision: nameRevision(source.expectedNameRevision, code) }
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'agentSessionId', 'name', 'expectedNameRevision', 'nameSource'], code)
+    request = { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code), name: nullableString(source.name, 'Display name', code), expectedNameRevision: nameRevision(source.expectedNameRevision, code), ...derivedNameSource(source.nameSource, code) }
   } else if (operation === 'space.rename') {
-    fields(source, ['schemaVersion', 'requestId', 'operation', 'tabId', 'name', 'expectedNameRevision'], code)
-    request = { ...base, operation, tabId: spaceControlId(source.tabId, 'Tab', code, true), name: nullableString(source.name, 'Display name', code), expectedNameRevision: nameRevision(source.expectedNameRevision, code) }
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'tabId', 'name', 'expectedNameRevision', 'nameSource'], code)
+    request = { ...base, operation, tabId: spaceControlId(source.tabId, 'Tab', code, true), name: nullableString(source.name, 'Display name', code), expectedNameRevision: nameRevision(source.expectedNameRevision, code), ...derivedNameSource(source.nameSource, code) }
   } else if (operation === 'agent.inspect') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'agentSessionId'], code)
     request = { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code) }
