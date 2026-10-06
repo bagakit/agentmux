@@ -13,7 +13,7 @@ import type { AgentFocusHistoryEntry, AgentFocusHistoryIdentity } from '../lib/a
 import type { FocusContext } from '../lib/focus-context'
 import { useAppStore } from '../store'
 import { FOCUS_TIMELINE_HEIGHT_MAX, FOCUS_TIMELINE_HEIGHT_MIN } from '../lib/focus-timeline-height'
-import { FOCUS_TIMELINE_NAME_WIDTH_MIN, FOCUS_TIMELINE_NAME_WIDTH_MAX } from '../lib/focus-timeline-name-width'
+import { FOCUS_TIMELINE_NAME_WIDTH_DEFAULT, FOCUS_TIMELINE_NAME_WIDTH_MIN, FOCUS_TIMELINE_NAME_WIDTH_MAX } from '../lib/focus-timeline-name-width'
 import { useSidebarResize } from '../hooks/useSidebarResize'
 import { AgentAvatar } from './AgentAvatar'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
@@ -679,7 +679,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     nameHandleRef.current?.setAttribute('aria-valuenow', String(rendered))
   }, [nameMaximum])
   const nameResize = useSidebarResize<HTMLDivElement>({
-    isOpen: mode !== 'collapsed', width: savedNameWidth,
+    isOpen: mode !== 'collapsed', resizable: visible && mode !== 'collapsed', defaultWidth: FOCUS_TIMELINE_NAME_WIDTH_DEFAULT, width: savedNameWidth,
     minWidth: FOCUS_TIMELINE_NAME_WIDTH_MIN, maxWidth: nameMaximum, deltaSign: 1,
     setWidth: saveNameWidth, onDraftWidthChange: applyNameWidth
   })
@@ -1029,9 +1029,11 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     <FocusLatestInputs control={inputControl} timeline={inputTimeline} enabled={readingEnabled && !historical} pinned={historical || !preview?.interactive ? undefined : preview.message} onChange={setLatest} />
     {mode !== 'collapsed' ? <div ref={nameResize.containerRef} className="recent-focus__name-column-resize" data-resizing={nameResize.isResizing} style={{ top: headerHeight + 8 }}>
       <div ref={nameHandleRef} className="recent-focus__name-separator" role="separator" tabIndex={0} aria-label="Resize timeline names" aria-orientation="vertical" aria-valuemin={FOCUS_TIMELINE_NAME_WIDTH_MIN} aria-valuemax={nameMaximum} aria-valuenow={nameWidth}
+        title="Drag to resize timeline names · Double-click or Enter to reset" onDoubleClick={nameResize.onResizeReset}
         onPointerDownCapture={event => event.stopPropagation()}
         onMouseDown={event => { if (event.button === 0) nameResize.onResizeStart(event) }}
         onKeyDown={event => {
+          if (event.key === 'Enter') { nameResize.onResizeReset(event); return }
           const next = event.key === 'ArrowLeft' ? nameWidth - 16 : event.key === 'ArrowRight' ? nameWidth + 16 : event.key === 'Home' ? FOCUS_TIMELINE_NAME_WIDTH_MIN : event.key === 'End' ? nameMaximum : null
           if (next === null) return
           event.preventDefault(); event.stopPropagation()
