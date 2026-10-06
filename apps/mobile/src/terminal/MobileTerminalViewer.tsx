@@ -8,6 +8,7 @@ import type { MobileConnection } from '../conversation/MobileConversationSurface
 import { createMobileTerminalReader, type MobileTerminalReading } from './reader'
 import { createMobileTerminalControl, type MobileTerminalControlState } from './control'
 import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
+import { bindMobileTerminalGestures, MOBILE_TERMINAL_FONT_DEFAULT } from './gestures'
 import '@xterm/xterm/css/xterm.css'
 import './terminal.css'
 
@@ -34,15 +35,16 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
   const visibleRef = useRef(visible); visibleRef.current = visible
   const [reading, setReading] = useState<MobileTerminalReading>({ phase: 'unavailable', message: '终端输出尚未核实。请选择原会话并恢复 Mac 连接。', historyBoundary: null })
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
-  const horizontalTouch = useRef<{ id: number; x: number; y: number; left: number } | null>(null)
+  const gestures = useRef<ReturnType<typeof bindMobileTerminalGestures> | null>(null)
+  const [fontSize, setFontSize] = useState(MOBILE_TERMINAL_FONT_DEFAULT)
   useEffect(() => {
-    horizontalTouch.current = null
+    gestures.current?.reset()
     if (canvasSession.current !== agentSessionId) {
       if (reader.current) { released.current = reader.current.dispose(); reader.current = null }
       terminal.current?.dispose(); terminal.current = null; setCurrentCanvas(null); canvasSession.current = agentSessionId
     }
     if (!container.current || !agentSessionId || !visible || terminal.current) return
-    const canvas = new Terminal({ cols: 80, rows: 24, scrollback: 10_000, fontSize: 12, lineHeight: 1.15,
+    const canvas = new Terminal({ cols: 80, rows: 24, scrollback: 10_000, fontSize, lineHeight: 1.15,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', disableStdin: true,
       altClickMovesCursor: false, mouseEventsRequireAlt: true, cursorBlink: false, cursorInactiveStyle: 'none', scrollOnUserInput: false,
       windowOptions: {}, theme: paletteRef.current ?? { background: '#151b1b', foreground: '#dce4e0', selectionBackground: '#bedbba40' } })
@@ -54,6 +56,19 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
     setCurrentCanvas(canvas)
   }, [agentSessionId, visible])
   useEffect(() => { if (terminal.current && terminalPalette) terminal.current.options.theme = terminalPalette }, [terminalPalette])
+  useEffect(() => {
+    const canvas = currentCanvas, element = container.current
+    if (!canvas || !element || !visible) return
+    const binding = bindMobileTerminalGestures({ element, canvas,
+      isVisible: () => visibleRef.current,
+      isControl: () => {
+        const facts = control.current?.facts()
+        return canvas.options.disableStdin === false && facts?.mode === 'control' && facts.phase !== 'unknown'
+      },
+      reportFont: setFontSize })
+    gestures.current = binding
+    return () => { binding.dispose(); if (gestures.current === binding) gestures.current = null }
+  }, [currentCanvas, visible])
   useEffect(() => () => {
     if (reader.current) { released.current = reader.current.dispose(); reader.current = null }
     terminal.current?.dispose(); terminal.current = null
@@ -134,6 +149,12 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
   const originalPending = control.current === controls.current.get(agentSessionId ?? '') ? control.current?.facts().pending : null
   return <section className="mobile-terminal" data-control={inputState.mode} data-agent-session-id={agentSessionId ?? undefined} data-reading={client && agentSessionId ? reading.phase : 'unavailable'}>
     <div className="mobile-terminal-toolbar"><span><SemanticIcon name="object.terminal" size={16} />{inputState.mode === 'control' ? '控制终端' : '观看终端'}</span><button aria-label="复制选中文字" onClick={() => { void copy() }}><SemanticIcon name="action.copy" size={17} /></button><button aria-label="重新核实终端输出" onClick={() => { void reader.current?.retry() }}><SemanticIcon name="action.refresh" size={17} /></button></div>
+    <div className="mobile-terminal-reading-tools" aria-label="本机终端阅读">
+      <button aria-label="缩小终端文字" onClick={() => gestures.current?.zoom(fontSize - 1)}>A−</button>
+      <button aria-label="恢复终端文字大小" onClick={() => gestures.current?.zoom(MOBILE_TERMINAL_FONT_DEFAULT)}>{fontSize}px</button>
+      <button aria-label="放大终端文字" onClick={() => gestures.current?.zoom(fontSize + 1)}>A+</button>
+      <button onClick={() => { terminal.current?.scrollToBottom(); if (container.current) container.current.scrollTop = container.current.scrollHeight }}>最新输出</button>
+    </div>
     {agentSessionId && <div className="mobile-terminal-actions">
       {inputState.mode === 'watch' ? <button disabled={!client || connection.state !== 'connected' || inputState.phase === 'unknown'} onClick={enableControl}><SemanticIcon name="object.keyboard" size={16} />控制终端</button>
         : <button onClick={() => control.current?.watch()}><SemanticIcon name="action.reveal" size={16} />回到观看</button>}
@@ -147,21 +168,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
       event.preventDefault(); if (control.current?.resize(Number(cols), Number(rows))) setSizeOpen(false)
     }}><label>列<TextInput aria-label="PTY 列数" inputMode="numeric" value={cols} onChange={event => setCols(event.target.value)} /></label><label>行<TextInput aria-label="PTY 行数" inputMode="numeric" value={rows} onChange={event => setRows(event.target.value)} /></label><button disabled={inputState.mode !== 'control' || inputState.phase === 'unknown'} type="submit">应用到原 Run</button><p>只按这次选择改变 Mac 的 PTY；手机旋转不会再改尺寸。</p></form>}
     {!agentSessionId && <div className="mobile-terminal-empty"><h2>查看原会话的终端</h2><p>先从会话列表选择一个已授权会话。这里只显示 Mac 持有的输出。</p></div>}
-    <div className="mobile-terminal-canvas" ref={container} aria-label="原会话终端输出"
-      onTouchStart={event => {
-        const touch = event.touches.length === 1 ? event.touches[0] : null
-        horizontalTouch.current = touch ? { id: touch.identifier, x: touch.clientX, y: touch.clientY, left: event.currentTarget.scrollLeft } : null
-      }}
-      onTouchMove={event => {
-        const start = horizontalTouch.current, touch = event.touches.length === 1 ? event.touches[0] : null
-        if (start && touch?.identifier === start.id) {
-          const dx = start.x - touch.clientX, dy = start.y - touch.clientY
-          // xterm consumes touch gestures for its vertical history. Move only
-          // our local horizontal viewport; leave its events and PTY untouched.
-          if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) event.currentTarget.scrollLeft = start.left + dx
-        } else horizontalTouch.current = null
-      }}
-      onTouchEnd={() => { horizontalTouch.current = null }} onTouchCancel={() => { horizontalTouch.current = null }} />
+    <div className="mobile-terminal-canvas" ref={container} aria-label="原会话终端输出" />
     <aside className="mobile-terminal-notice" role="status">
       <p>{noticeSummary(!client || !agentSessionId ? connection.message : reading.message)}</p>
       {agentSessionId && <p>{inputState.phase === 'unknown' ? '终端操作回执未确认；原操作不会重发。' : noticeSummary(inputState.message)}</p>}
