@@ -334,7 +334,7 @@ export function ConversationMessage({
           {recordTitle && !isSystemContext ? <span className="log-turn__sender-kind">{recordTitle}</span> : null}
           {hasQuestionAnswers ? <span className="log-turn__sender-kind">问题答复</span> : null}
           {status === 'streaming' ? (
-            <span className="log-row__chip" role="status">{platform.renderIcon('working', 12)}Streaming</span>
+            <span className="log-row__chip" role="status"><SemanticIcon name="status.streaming" size={12} />Streaming</span>
           ) : null}
           {status === 'failed' ? (
             <span className="log-row__chip log-row__chip--failed" role="status">{platform.renderIcon('failed', 12)}Failed</span>

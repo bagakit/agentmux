@@ -61,7 +61,7 @@ export function RecordedStepsCard({ observation, compact = false, expanded, onEx
         {status === 'running' ? <span className="wf-chip" title="Last recorded operation status"><WorkflowStatusGlyph status="running" recorded />Recorded running</span> : null}
         {status === 'interrupted' ? <span className="wf-chip"><WorkflowStatusGlyph status="killed" recorded />Interrupted</span> : null}
         {status === 'failed' ? <span className="wf-chip log-row__chip--failed"><WorkflowStatusGlyph status="failed" />Failed</span> : null}
-        {observation.streaming ? <span className="wf-chip"><WorkflowStatusGlyph status="running" />Streaming</span> : null}
+        {observation.streaming ? <span className="wf-chip"><SemanticIcon name="status.streaming" size={12} className="wf-ico" />Streaming</span> : null}
         {status === 'complete' ? <span className="wf-observation__recorded">Recorded</span> : null}
         {status === undefined ? <span className="wf-observation__recorded">{compact ? '状态未记录' : 'Status not recorded'}</span> : null}
       </span>
@@ -69,7 +69,7 @@ export function RecordedStepsCard({ observation, compact = false, expanded, onEx
     {observation.counts ? <div className="wf-observation__summary" aria-label="Recorded step states">
       <span className="wf-observation__caption">Recorded activity</span>
       {observation.counts.complete > 0 ? <span className="wf-observation__stat" data-state="complete"><WorkflowStatusGlyph status="completed" />{observation.counts.complete} complete</span> : null}
-      {observation.counts.streaming > 0 ? <span className="wf-observation__stat" data-state="streaming"><WorkflowStatusGlyph status="running" />{observation.counts.streaming} streaming</span> : null}
+      {observation.counts.streaming > 0 ? <span className="wf-observation__stat" data-state="streaming"><SemanticIcon name="status.streaming" size={12} className="wf-ico" />{observation.counts.streaming} streaming</span> : null}
       {observation.counts.failed > 0 ? <span className="wf-observation__stat" data-state="failed"><WorkflowStatusGlyph status="failed" />{observation.counts.failed} failed</span> : null}
       {observation.counts.unknown > 0 ? <span className="wf-observation__stat">{observation.counts.unknown} status not recorded</span> : null}
     </div> : null}
@@ -87,7 +87,7 @@ export function RecordedToolRow({ observation, className, icon, expanded, onTogg
       : <time className="log-row__time" tabIndex={0} aria-description={recordedTime.offset} title={recordedTime.offset}>{recordedTime.from}</time> : null}
     <span className="log-row__title">{observation.title}</span>
     <span className="log-row__meta">
-      {status === 'streaming' ? <span className="log-row__chip"><WorkflowStatusGlyph status="running" />Streaming</span> : null}
+      {status === 'streaming' ? <span className="log-row__chip"><SemanticIcon name="status.streaming" size={12} className="wf-ico" />Streaming</span> : null}
       {status === 'running' ? <span className="log-row__chip" title="Last recorded operation status"><WorkflowStatusGlyph status="running" recorded />Recorded running</span> : null}
       {status === 'interrupted' ? <span className="log-row__chip" title="Last recorded operation status"><WorkflowStatusGlyph status="killed" recorded />Interrupted</span> : null}
       {status === 'failed' ? <span className="log-row__chip log-row__chip--failed"><WorkflowStatusGlyph status="failed" />Failed</span> : null}

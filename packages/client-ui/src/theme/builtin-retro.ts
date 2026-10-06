@@ -32,7 +32,7 @@ export const RETRO_THEME: ThemeDocument = {
     'status.failed': { kind: 'paths', paths: [{ d: 'M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M8 8 L16 16 M16 8 L8 16' }] },
     'status.paused': { kind: 'paths', paths: [{ d: 'M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M9 8 L9 16 M15 8 L15 16' }] },
     'status.running': { kind: 'paths', paths: [{ d: 'M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M12 8 L16 12 L12 16 L8 12 Z' }] },
-    'status.working': { kind: 'paths', paths: [{ d: 'M3 13 L7 13 L10 6 L14 18 L17 11 L21 11' }] },
+    'status.working': { kind: 'glyph', glyph: 'work-writing' },
     'status.unknown': { kind: 'paths', paths: [{ d: 'M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M9 8 Q9 5 12 5 Q16 5 15 9 Q15 10 12 12 L12 14 M12 17 L12 18' }] },
     'status.warning': { kind: 'paths', paths: [{ d: 'M11 4 Q12 2 13 4 L21 19 Q22 21 20 21 L4 21 Q2 21 3 19 Z M12 9 L12 14 M12 18 L12 18.1' }] },
     'status.info': { kind: 'paths', paths: [{ d: 'M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M12 10 L12 17 M12 7 L12 7.1' }] },

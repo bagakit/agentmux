@@ -1,7 +1,12 @@
-/** Lucide 0.468.0 geometry (ISC, Copyright Lucide Contributors).
+/** Lucide 0.468.0 geometry (ISC, Copyright Lucide Contributors) and authored AgentMux drawings.
  * Selected for actual AgentMux semantic roles; identity marks have their own owner.
  * Data only: no library React components, handlers, URLs or active SVG. */
 export const ICON_GLYPHS = {
+  // AgentMux: work, incoming text, browser execution and recorded history share a quiet outline pen.
+  "work-writing": [["path",{"d":"M4 6h8 M4 12h5"}],["path",{"d":"M9 20l1-4 9-9 3 3-9 9-4 1Z"}]],
+  "content-stream": [["path",{"d":"M4 6h16 M4 12h11 M4 18h7"}],["path",{"d":"M15 15v6"}]],
+  "browser-executing": [["path",{"d":"M11 20H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6"}],["path",{"d":"M3 9h4l2-3h5l2 3h5"}],["path",{"d":"M14 16h8m-3-3 3 3-3 3"}]],
+  "work-history": [["path",{"d":"M6 7.5v3 M6 13.5v3 M11 6h9 M11 12h7 M11 18h9"}],["circle",{"cx":"6","cy":"6","r":"1.5"}],["circle",{"cx":"6","cy":"12","r":"1.5"}],["circle",{"cx":"6","cy":"18","r":"1.5"}]],
   "mouse-pointer-2": [["path",{"d":"m4 4 7.07 17 2.51-7.39L21 11.07z"}]],
   "crop": [["path",{"d":"M6 3v12a3 3 0 0 0 3 3h12"}],["path",{"d":"M18 21V9a3 3 0 0 0-3-3H3"}]],
   "status-dot": [["circle",{"cx":"12","cy":"12","r":"10","fill":"currentColor","stroke":"none"}]],

@@ -336,7 +336,7 @@ function replayOutcomeLabel(kind: Exclude<BrowserScriptRunReport['outcome']['kin
 }
 
 function PhaseGlyph({ phase }: { phase: BrowserOperationPhase }) {
-  if (phase === 'running') return <SemanticIcon name="status.working" size={13} />
+  if (phase === 'running') return <SemanticIcon name="status.browser-running" size={13} />
   if (phase === 'preparing') return <ThemeStatusLoadingIcon className="spin" size={13} aria-hidden="true" />
   if (phase === 'waiting') return <ThemeActionPauseIcon size={13} aria-hidden="true" />
   if (phase === 'human') return <ThemeObjectUserIcon size={13} aria-hidden="true" />
