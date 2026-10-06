@@ -145,5 +145,15 @@
 .connector-stage-list > div { min-width: 0; display: grid; gap: var(--sp-1); }
 .connector-stage-list dt { color: var(--text-3); font-size: var(--fs-meta); }
 .connector-stage-list dd { margin: 0; color: var(--text-2); font-size: var(--fs-body); overflow-wrap: anywhere; }
-[data-connection-editor] > .primary-button, [data-connection-editor] > .small-button { justify-self: start; }
 [data-connection-editor] input[type='checkbox'] { width: 16px; height: 16px; padding: 0; accent-color: var(--green); }
+.connector-section-label { color: var(--text-3); font-size: var(--fs-meta); }
+.connector-record .connector-record__name, [data-connection-editor] .connector-editor-title { margin: 0; color: var(--text-2); font-size: var(--fs-title); font-weight: 550; }
+.connector-identity { display: flex; flex-wrap: wrap; gap: var(--sp-4) var(--sp-6); margin: 0; }
+.connector-identity > div { min-width: 0; display: grid; gap: var(--sp-1); }
+.connector-identity dt { color: var(--text-3); font-size: var(--fs-meta); }
+.connector-identity dd { margin: 0; color: var(--text-2); font-size: var(--fs-body); overflow-wrap: anywhere; }
+.connector-identity code { font-family: var(--font-mono); font-size: inherit; }
+[data-connection-editor] .connector-enabled { display: flex; align-items: center; gap: var(--sp-3); }
+[data-connection-editor] .connector-enabled input { flex: none; margin: 0; }
+.connector-editor-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.connector-check-feedback, [data-connection-editor] .connector-save-feedback { margin: 0; }
