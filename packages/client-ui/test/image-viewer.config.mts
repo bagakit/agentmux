@@ -9,6 +9,10 @@ const changes = {
   bounds: ['packages/client-ui/src/lib/image-view-transform.ts', 'return { scale, x: Math.max(-boundX, Math.min(boundX, view.x)), y: Math.max(-boundY, Math.min(boundY, view.y)) }', 'return { scale, x: view.x, y: view.y }'],
   wheel: ['packages/client-ui/src/components/ConversationImageViewport.tsx', "host.addEventListener('wheel', wheel, { passive: false })", 'void wheel'],
   drag: ['packages/client-ui/src/components/ConversationImageViewport.tsx', 'const zoom = (factor: number) => { endDrag();', 'const zoom = (factor: number) => {'],
+  selected: ['packages/client-ui/src/components/ConversationImageGallery.tsx', 'initial.reader(reference.path).then', 'initial.reader(initial.path).then'],
+  source: ['packages/client-ui/src/components/InlineComposer.tsx', 'readImage={sourceReader ?? readImage}', 'readImage={readImage}'],
+  streaming: ['packages/client-ui/src/components/ConversationImageCollection.tsx', '[referenceKey, readImage]', '[references, readImage]'],
+  fallback: ['packages/client-ui/src/lib/conversation-image-references.ts', "node.kind === 'link' && plainLink(node)", "node.kind === 'link' && false"],
 } as const
 export default defineConfig({ root,
   plugins: [{ name: 'actual-image-viewer-mutation', enforce: 'pre', transform(source, id) {
