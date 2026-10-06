@@ -152,6 +152,9 @@
 @keyframes focus-context-hover-enter { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .focus-context-hover { animation: none; } }
 .focus-project-lanes__empty { margin: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.focus-project-lanes__clear { margin-inline-start: var(--sp-3); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
+.focus-project-lanes__clear:hover { background: var(--surface-2); color: var(--text); }
+.focus-project-lanes__clear:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .focus-workspace-resize-handle { position: relative; z-index: 3; flex: 0 0 6px; min-width: 6px; cursor: col-resize; background: var(--surface-0); touch-action: none; }
 .focus-workspace-resize-handle::after { position: absolute; inset: 0 2px; background: transparent; content: ''; }
 .focus-workspace-resize-handle:hover, .focus-workspace-resize-handle:focus-visible { background: var(--line); outline: none; }

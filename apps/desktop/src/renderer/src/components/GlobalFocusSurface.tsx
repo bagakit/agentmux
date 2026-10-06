@@ -136,6 +136,11 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const [historyWindowRequest, setHistoryWindowRequest] = useState<{ at: number; sequence: number }>()
   const [workspaceRatio, setWorkspaceRatio] = useState(0.618)
   const searchRef = useRef<HTMLInputElement | null>(null)
+  const clearLocalFilters = () => {
+    historySearch.retainForLocalQuery('')
+    setQuery(''); setProject('all'); setBucketFilter('all')
+    searchRef.current?.focus()
+  }
   const closeWorkspace = () => { onCloseWorkspace?.(); searchRef.current?.focus() }
   const focusLayoutRef = useRef<HTMLDivElement | null>(null)
   const resizingFocusRef = useRef(false)
@@ -339,7 +344,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         <div className="focus-project-board">
           <WorkbenchPresentationContext.Provider value={{ active: visible, retainedRegionId: null }}><div className="focus-project-board__live" data-empty={!hasBoardLanes || undefined}>
             {hasBoardLanes ? <FocusProjectLanes visible={visible} origins={laneOrigins} lanes={boardLanes} recentProjects={recentProjects} onRead={readProjectHistory} selectedProjectKey={project} currentLaneId={currentLaneId} onSelect={setProject} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
-            {filtered.length === 0 && filteredRetainedProjects.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
+            {filtered.length === 0 && filteredRetainedProjects.length === 0 ? <p className="focus-project-lanes__empty">
+              <span>No contexts match these local filters.</span>
+              {query || project !== 'all' || bucketFilter !== 'all' ? <button type="button" className="focus-project-lanes__clear" onClick={clearLocalFilters}>Clear filters</button> : null}
+            </p> : null}
           </div></WorkbenchPresentationContext.Provider>
           <FocusRetainedProjects projects={pastProjects} total={retainedProjects.filter(item => !item.recent).length} onRead={readProjectHistory} />
         </div>
