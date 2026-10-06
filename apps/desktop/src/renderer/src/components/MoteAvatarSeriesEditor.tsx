@@ -219,8 +219,19 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
             context.clearRect(0, 0, 256, 256); context.drawImage(bitmap.current, layout.x, layout.y, layout.width, layout.height)
             finished(canvas.current.toDataURL('image/png'))
           } else {
-            const svg = face.current?.querySelector('svg')?.cloneNode(true) as SVGSVGElement | undefined
-            if (!svg) return
+            const original = face.current?.querySelector('svg')
+            if (!original) return
+            const svg = original.cloneNode(true) as SVGSVGElement
+            // The face's HTML articulation needs its layout outside the page's
+            // stylesheet too. Carry the neutral preview's original coordinates.
+            const layoutParts = '.mote-face__articulation, .mote-face__model, .mote-face__bone, .mote-face__drawing'
+            const copies = svg.querySelectorAll<HTMLElement | SVGElement>(layoutParts)
+            original.querySelectorAll<HTMLElement | SVGElement>(layoutParts).forEach((node, index) => {
+              const style = getComputedStyle(node)
+              for (const property of ['display', 'position', 'left', 'top', 'width', 'height', 'overflow', 'transform', 'transform-origin', 'transform-box']) {
+                copies[index]!.style.setProperty(property, style.getPropertyValue(property))
+              }
+            })
             svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg'); svg.setAttribute('width', '256'); svg.setAttribute('height', '256')
             const image = new Image()
             image.onload = () => {
