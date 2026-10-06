@@ -294,4 +294,20 @@ describe('Saved Prompt → explicit lookup → exact reply card → original use
   expect(dom.container.querySelector('[data-native-record-id="r"] [data-real-reply-actions]')).not.toBeNull()
   for(const id of ['u','s','t']) expect(dom.container.querySelector(`[data-native-record-id="${id}"] [data-real-reply-actions]`)).toBeNull()
  })
+ it('reveals the saved meaning in the host overlay for hover and keyboard without queue or config work',async()=>{
+  await mount()
+  const button=dom.container.querySelector<HTMLButtonElement>('[aria-label="回复：认可"]')!
+  expect(document.querySelector('.conversation-reactions__hint')).toBeNull()
+  await dom.hover('.conversation-reactions__choice')
+  const hint=document.getElementById(button.getAttribute('aria-describedby')!)!
+  expect(hint?.getAttribute('role')).toBe('tooltip');expect(hint.textContent).toContain(definition.body)
+  expect(dom.container.contains(hint)).toBe(false)
+  await act(async()=>button.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})))
+  expect(document.querySelector('.conversation-reactions__hint')).toBeNull()
+  await act(async()=>button.focus())
+  expect(document.getElementById(button.getAttribute('aria-describedby')!)?.textContent).toContain(definition.body)
+  await act(async()=>button.blur())
+  expect(document.querySelector('.conversation-reactions__hint')).toBeNull()
+  expect(api.config.get).not.toHaveBeenCalled();expect(queued()??[]).toEqual([]);expect(dom.draft()).toBe('Keep my draft')
+ })
 })

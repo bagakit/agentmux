@@ -20,6 +20,7 @@ const changes = {
  'primary-only-actions': ['apps/desktop/src/renderer/src/components/SessionPane.tsx',"useConversationReactions(sessionId, observationVisible && !readOnly", "useConversationReactions(sessionId, visible && !readOnly"],
  'complete-captured-actions': ['apps/desktop/src/renderer/src/components/ActivityView.tsx',"entry.item.source !== 'user'\n", "entry.item.source !== 'user' && entry.item.status === 'complete'\n"],
  'human-as-assistant-actions': ['apps/desktop/src/renderer/src/components/ActivityView.tsx',"entry.item.authorHuman !== true && entry.item.authorExternal === undefined && ", ""],
+ 'hint-in-card': ['packages/client-ui/src/components/ConversationReactionActions.tsx','platform.overlayContainer()', 'anchor.current!'],
  'forget-reply-identity': ['apps/desktop/src/renderer/src/store.ts','reaction: structuredClone(options.reaction)','reaction: { code: options.reaction.code, replySource: {kind: \'captured\', agentSessionId: sessionId, recordId: \'wrong\'} }'],
  'auto-repeat': ['apps/desktop/src/renderer/src/store.ts','if (!explicitAttempt && entry.promptCondition !== null)', 'if (false)']
 } as const
