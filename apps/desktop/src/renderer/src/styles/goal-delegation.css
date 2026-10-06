@@ -17,3 +17,12 @@
 .goal-delegation .goals-service { padding: 0; font-size: var(--fs-meta); }
 .goal-delegation__identity { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
 .goal-delegation__identity span { color: var(--text-2); }
+.goal-delegation__identity > span { display: inline-flex; align-items: center; gap: var(--sp-1); max-width: 100%; vertical-align: bottom; }
+.goal-delegation__identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 24ch; font-weight: 500; }
+.goal-delegation__summary { margin: 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; overflow-wrap: anywhere; }
+.goal-delegation__notice { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.goal-delegation__notice summary { cursor: pointer; }
+.goal-delegation__notice p { margin: var(--sp-2) 0 0; }
+.goal-collaboration__relationships { display: grid; gap: var(--sp-3); }
+.goal-collaboration__relationships > summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
+.goal-collaboration__relationships > summary .goals-caption { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }

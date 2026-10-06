@@ -144,7 +144,7 @@ function continuationAgentPresentation(state: ReturnType<typeof useAppStore.getS
     appearance: session ? state.config?.executors[session.executorId]?.avatar ?? state.config?.appearance.agentAvatars?.[session.executorId] : undefined
   }
 }
-function GoalContinuationAgent({ agentSessionId, hostId, active, size }: { agentSessionId: string; hostId?: string; active: boolean; size: number }) {
+export function GoalContinuationAgent({ agentSessionId, hostId, active, size }: { agentSessionId: string; hostId?: string; active: boolean; size: number }) {
   const observed = useAppStore(useShallow(state => active ? continuationAgentPresentation(state, agentSessionId, hostId) : null))
   const key = JSON.stringify([agentSessionId, hostId]), retained = useRef<{ key: string; value: ReturnType<typeof continuationAgentPresentation> } | null>(null)
   if (observed !== null) retained.current = { key, value: observed }

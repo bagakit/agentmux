@@ -41,8 +41,12 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
     catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
   }
   const members = (items: typeof rows, empty: string) => items.length ? items.map(row => <button key={row.id} type="button" className="goal-collaboration__member" disabled={!row.session} title={`${row.name} · ${row.status}\n${row.id}`} onClick={() => { if (row.session) selectSession(row.session.id) }}><GoalAgentFace row={row} /><span>{row.name}<small>{row.status}</small></span>{row.session ? <ThemeActionOpenExternalIcon size={11} /> : null}</button>) : <span className="goals-caption">{empty}</span>
+  const hasOriginalWork = Boolean(demand.delegations?.length || demand.dispatches?.some(start => start.execution === 'finite'))
   return <section className="goal-collaboration" aria-label="Goal collaboration">
     <div className="goals-section-heading"><h2><ThemeObjectTeamIcon size={15} />Collaboration</h2><span className="goals-caption">Selection does not start execution</span></div>
+    <GoalDelegationWork demand={demand} />
+    <details className="goal-collaboration__relationships" open={!hasOriginalWork || !demand.supervisorSessionId}>
+      <summary>People and related sessions <span className="goals-caption" title={supervisor?.name ?? demand.supervisorSessionId ?? 'Not selected'}>Supervisor · {supervisor?.name ?? demand.supervisorSessionId ?? 'Not selected'}</span></summary>
     <div className="goal-collaboration__line"><strong>Assignees</strong><div>{members(assignees, 'No assignees yet')}</div><button type="button" className="goals-button" onClick={() => setRole('assignees')} aria-label="Choose Goal assignees"><ThemeActionChooseAssigneeIcon size={12} />Choose</button></div>
     <div className="goal-collaboration__line"><strong>Related</strong><div>{members(related, 'No related sessions')}</div><button type="button" className="goals-button" onClick={() => setRole('related')} aria-label="Choose related Goal sessions">Edit</button></div>
     <div className="goal-collaboration__line"><strong>Supervisor</strong><div>{supervisor ? members([supervisor], '') : <span className="goals-caption">Not selected</span>}</div><button type="button" className="goals-button" onClick={() => setRole('supervisor')} aria-label="Choose Goal Supervisor">Choose</button></div>
@@ -50,7 +54,7 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
     {!supervisor && demand.creationOrigin?.supervisorDefaultPending ? <p className="goals-condition">The original requester is not yet confirmed. You can choose a Supervisor explicitly.</p> : null}
     {creationDrafts.map(draft => <p key={draft.operationId} className="goals-service" role="status">Original Agent creation retained.<button type="button" className="goals-button" onClick={() => setRole(draft.role)}>Check creation and relationship</button></p>)}
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
-    <GoalDelegationWork demand={demand} />
+    </details>
     <GoalContinuationControl demand={demand} onChooseSupervisor={() => setRole('supervisor')} />
     {demand.sessionIds.length ? <details className="goals-topology" onToggle={event => { if (event.target === event.currentTarget) setArrangementOpen(event.currentTarget.open) }}><summary>Arrangement</summary>{arrangementOpen ? <GoalArrangement sessionIds={related.map(row => row.session?.id ?? row.id)} /> : null}</details> : null}
     {role ? <GoalAgentPicker key={`${demand.id}:${role}`} demand={demand} role={role} onSave={onUpdate} onClose={() => setRole(null)} /> : null}
