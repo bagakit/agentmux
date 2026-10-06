@@ -18,5 +18,5 @@ export default defineConfig({
     { find: /^@agentmux\/client-ui\/theme$/, replacement: resolve(import.meta.dirname, '../../../../../packages/client-ui/src/theme/index.ts') },
     { find: /^@agentmux\/client-ui\/icons$/, replacement: resolve(import.meta.dirname, '../../../../../packages/client-ui/src/theme/icons.tsx') }
   ] }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
-  test: { include: ['apps/desktop/test/theme-editor-runtime.test.tsx', 'apps/desktop/test/theme-files-runtime.test.tsx'], environment: 'happy-dom', maxWorkers: 1 }
+  test: { include: ['apps/desktop/test/theme-editor-runtime.test.tsx', 'apps/desktop/test/theme-files-runtime.test.tsx', 'apps/desktop/test/theme-save-receipt.test.tsx'], environment: 'happy-dom', maxWorkers: 1 }
 })
