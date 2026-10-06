@@ -7,7 +7,7 @@ import {
   BROWSER_PNG_MAX_PIXELS,
   type BrowserPng
 } from '../../../../shared/contracts'
-import { scaleShape, type ScreenshotShape } from './drawing-model'
+import { intersectRect, scaleShape, screenshotOutputShapes, type NormalizedRect, type ScreenshotShape } from './drawing-model'
 import { drawScreenshotShapes } from './drawing-renderer'
 
 export const SCREENSHOT_DOWNSCALE_STEPS = [1, 0.85, 0.7, 0.55, 0.4, 0.3] as const
@@ -54,20 +54,36 @@ function canvas(width: number, height: number): HTMLCanvasElement {
   return element
 }
 
+export function screenshotCropGeometry(displayWidth: number, displayHeight: number, outputScale: number, crop?: NormalizedRect | null) {
+  const size = screenshotCanvasSize(displayWidth, displayHeight, outputScale)
+  const rect = crop ? intersectRect(crop, { x: 0, y: 0, width: displayWidth, height: displayHeight }) : { x: 0, y: 0, width: displayWidth, height: displayHeight }
+  if (!rect) throw new Error('Screenshot crop is outside the captured image')
+  const left = Math.max(0, Math.floor(rect.x * size.scale)), top = Math.max(0, Math.floor(rect.y * size.scale))
+  const right = Math.min(size.width, Math.ceil((rect.x + rect.width) * size.scale))
+  const bottom = Math.min(size.height, Math.ceil((rect.y + rect.height) * size.scale))
+  return { ...size, left, top, cropWidth: right - left, cropHeight: bottom - top, rect }
+}
+
 function renderComposite(input: {
   image: CanvasImageSource
   displayWidth: number
   displayHeight: number
   outputScale: number
   shapes: readonly ScreenshotShape[]
+  crop?: NormalizedRect | null
 }): HTMLCanvasElement {
-  const size = screenshotCanvasSize(input.displayWidth, input.displayHeight, input.outputScale)
+  const size = screenshotCropGeometry(input.displayWidth, input.displayHeight, input.outputScale, input.crop)
   const output = canvas(size.width, size.height)
   const context = output.getContext('2d')
   if (!context) throw new Error('Screenshot compose requires a 2D canvas')
   context.drawImage(input.image, 0, 0, size.width, size.height)
-  drawScreenshotShapes(context, input.shapes.map((shape) => scaleShape(shape, size.scale)))
-  return output
+  drawScreenshotShapes(context, screenshotOutputShapes(input.shapes, input.crop).map((shape) => scaleShape(shape, size.scale)))
+  if (!input.crop) return output
+  const cropped = canvas(size.cropWidth, size.cropHeight)
+  const target = cropped.getContext('2d')
+  if (!target) throw new Error('Screenshot crop requires a 2D canvas')
+  target.drawImage(output, size.left, size.top, cropped.width, cropped.height, 0, 0, cropped.width, cropped.height)
+  return cropped
 }
 
 function downscale(source: HTMLCanvasElement, factor: number): HTMLCanvasElement {
@@ -100,6 +116,7 @@ export async function composeScreenshot(input: {
   displayHeight: number
   outputScale: number
   shapes: readonly ScreenshotShape[]
+  crop?: NormalizedRect | null
 }): Promise<BrowserPng> {
   const composite = renderComposite(input)
   for (const step of SCREENSHOT_DOWNSCALE_STEPS) {
