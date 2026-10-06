@@ -178,7 +178,7 @@
 .goals-service > span { color: var(--text-3); overflow-wrap: anywhere; }
 .goals-properties, .goals-execution, .goals-activity { border-top: 1px solid var(--line-soft); padding: var(--sp-5) 0; }
 .goals-document details > summary { display: flex; align-items: center; gap: var(--sp-4); color: var(--text-3); font-size: var(--fs-body); cursor: pointer; list-style: none; }
-.goals-document details > summary::before { content: '›'; color: var(--text-3); }
+.goals-document details > summary::before { content: ''; width: 12px; height: 12px; flex: none; background: currentColor; mask: var(--native-disclosure-mask) center / contain no-repeat; }
 .goals-document details[open] > summary::before { transform: rotate(90deg); }
 .goals-document details > summary > span { margin-left: auto; font-size: var(--fs-meta); }
 .goals-properties__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4) var(--sp-6); margin-top: var(--sp-5); }
