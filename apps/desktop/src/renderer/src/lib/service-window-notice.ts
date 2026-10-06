@@ -182,13 +182,11 @@ export function serviceNoticeAriaLive(kind: ServiceNoticeClass['kind']): Service
  * 「重启后会话恢复」是唯一还没接线的消费者：它落地后会在这里多加一个自己的 marker 分支，共用同一存活判定。
  */
 /** Revisions and byte counters are diagnostics, not a new notice cause. */
-export function nativeSessionServiceCause(session: SessionSnapshot): string {
-  const service = session.nativeService
+export function nativeSessionServiceCause(session: SessionSnapshot, service = session.nativeService): string {
   return JSON.stringify([service?.owner, service?.output, service?.input.phase, service?.terminalFault?.stage])
 }
 
-export function nativeSessionServiceOutcome(session: SessionSnapshot): StepOutcome {
-  const service = session.nativeService
+export function nativeSessionServiceOutcome(session: SessionSnapshot, service = session.nativeService): StepOutcome {
   if (!service) return { completed: true }
   const unavailable = [
     service.owner.type === 'stopped' && service.owner.reason !== 'historical' ? 'owner stopped' : null,

@@ -93,6 +93,7 @@ import {
   terminalRevealServiceOutcome
 } from '../lib/terminal-reveal'
 import { agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, hookIngressServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
+import { useRunService } from '../lib/run-service-projection'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { TerminalServiceNotices } from './TerminalServiceNotices'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -215,6 +216,7 @@ export function TerminalView({
   autoFocusRef.current = autoFocus
   const readOnlyRef = useRef(readOnly)
   readOnlyRef.current = readOnly
+  const nativeService = useRunService(session)
   const rootRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const observationReaderRef = useRef<(() => AgentMuxTerminalViewObservation | undefined) | null>(null)
@@ -1800,7 +1802,7 @@ export function TerminalView({
   const continuationNotice = serviceNoticeToRender(classifyServiceNotice(
     terminalContinuationOutcome(continuationAbsence, session.processState)
   ))
-  const sessionObservationNotice = serviceNoticeToRender(classifyServiceNotice(nativeSessionServiceOutcome(session))) ??
+  const sessionObservationNotice = serviceNoticeToRender(classifyServiceNotice(nativeSessionServiceOutcome(session, nativeService))) ??
     (session.kind === 'agent' ? serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(session))) : null)
   const hookIngressNotice = serviceNoticeToRender(classifyServiceNotice(hookIngressServiceOutcome(session)))
   const attachmentNotice = attachmentFailure ? { kind: 'indeterminate' as const, notice: {
@@ -1946,7 +1948,7 @@ export function TerminalView({
               attachment: JSON.stringify([attachmentFailure?.step, attachmentFailure ? errorIdentity(attachmentFailure.message) : null]),
               sessionObservation: JSON.stringify([session.kind === 'agent' ? session.terminalCapability?.reason : null,
                 session.kind === 'agent' ? session.terminalOutputChannel?.reason : null,
-                session.status.state === 'disconnected' ? session.status.detail : null, nativeSessionServiceCause(session)]),
+                session.status.state === 'disconnected' ? session.status.detail : null, nativeSessionServiceCause(session, nativeService)]),
               hookIngress: session.kind === 'agent' ? JSON.stringify([session.hookIngressObservation?.phase, session.hookIngressObservation?.code, session.hookIngressObservation?.message]) : '',
               reveal: 'restoration-deadline', replayGeometry: 'retained-size-unknown', viewportSync: 'viewport-sync-failed',
               continuation: JSON.stringify([continuationAbsence?.type, continuationAbsence?.reason])
