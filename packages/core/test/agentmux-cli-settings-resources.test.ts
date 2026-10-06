@@ -2,6 +2,7 @@ import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js
 import { fixturePath } from './helpers/fixture-values.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { objectCliReceipt } from './helpers/object-cli-receipt.js'
+import { settingsIconCatalogFixture } from './helpers/settings-icon-catalog-fixture.js'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
@@ -35,6 +36,8 @@ describe('resource CLI consumes the public Control owner without a caller or Vie
       if (!('resource' in request)) throw new Error(`Unexpected ${request.operation}`)
       const store = records[request.resource]
       if (request.operation === 'settings.resource.list') {
+        if (request.resource === 'themes') return { operation: request.operation, resource: request.resource,
+          items: [...store].map(([id, value]) => ({ id, value })), partial: true, iconCatalog: settingsIconCatalogFixture() }
         return { operation: request.operation, resource: request.resource,
           items: [...store].map(([id, value]) => ({ id, value })), partial: true }
       }
@@ -119,6 +122,7 @@ describe('resource CLI consumes the public Control owner without a caller or Vie
     expect(request).toMatchObject({ expected: null })
     const result = parseAgentMuxControlReceipt({ ...base, ok: true, operation: 'settings.resource.list', result: {
       resource: 'themes', partial: true, items: [{ id: 'graphite', value: initial, readonly: true }],
+      iconCatalog: settingsIconCatalogFixture(),
       issues: [{ id: 'custom.raw', message: 'Original retained.' }, { id: '', message: 'Malformed identity retained.' }]
     } })
     expect(result).toMatchObject({ result: { items: [{ readonly: true }], issues: [{ id: 'custom.raw' }, { id: '' }] } })
