@@ -14,8 +14,8 @@ import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 // Only the typed desktop filesystem boundary supplies controlled document bytes.
 const dom = composerDOM()
 
-function prepareReference(path: string) {
-  const draft = `Review ${encodeSemanticReference({ token: '', label: 'Card', kind: 'component', reference: `@${path}` })}`
+function prepareReference(path: string, kind: 'component' | 'file' = 'component') {
+  const draft = `Review ${encodeSemanticReference({ token: '', label: 'Card', kind, reference: `@${path}` })}`
   const targetLayout = createWorkspaceLayout('target-group')
   const currentLayout = createWorkspaceLayout('other-group')
   useAppStore.setState({
@@ -132,4 +132,36 @@ it('keeps the original error, draft and healthy Session when a reference read fa
   expect(state.tabs[fileTabId('workspace', path)]).toBeUndefined()
   expect(state.sessions[0]).toBe(sessionBefore)
   expect(dom.draft()).toBe(draft)
+})
+
+it('opens a deliberately revealed file through the exact original Agent Workspace action', async () => {
+  const path = 'src/selected.txt', { draft, sessionBefore } = prepareReference(path, 'file')
+  const read = vi.spyOn(api.files, 'read').mockImplementation(async (_workspaceId, readPath) => ({
+    status: 'read', document: { path: readPath, content: 'export const card = true\n', revision: 'r1' }
+  }))
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await dom.click('.composer-file__name')
+  expect(dom.container.querySelector('.composer-file__reference code')?.textContent).toBe('@' + path)
+  expect(read).not.toHaveBeenCalled(); expect(dom.draft()).toBe(draft)
+  await dom.click('.composer-file__reference button')
+  await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1))
+  expect(read.mock.calls).toEqual([['workspace', path]])
+  await vi.waitFor(() => expectFilePlaced(path))
+  expect(useAppStore.getState().sessions[0]).toBe(sessionBefore); expect(dom.draft()).toBe(draft)
+})
+
+it('retains reference reading, removal and a healthy input when its original Workspace is unknown', async () => {
+  const path = 'src/selected.txt', { draft, sessionBefore } = prepareReference(path, 'file')
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [] } })
+  const read = vi.spyOn(api.files, 'read')
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await dom.click('.composer-file__name')
+  expect(dom.container.querySelector('.composer-file__reference code')?.textContent).toBe('@' + path)
+  expect(dom.container.querySelector('.composer-file__reference button')).toBeNull()
+  expect(read).not.toHaveBeenCalled(); expect(dom.draft()).toBe(draft)
+  expect(dom.container.querySelector('.tiptap')?.getAttribute('contenteditable')).toBe('true')
+  await dom.click('[aria-label="Remove file from draft"]'); expect(dom.draft()).toBe('Review ')
+  await act(async () => (dom.container.querySelector('.tiptap') as HTMLElement & { editor: { commands: { undo(): boolean } } }).editor.commands.undo())
+  expect(dom.draft()).toBe(draft); expect(useAppStore.getState().sessions[0]).toBe(sessionBefore)
+  expect(useAppStore.getState().error).toBeNull(); expect(read).not.toHaveBeenCalled()
 })
