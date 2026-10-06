@@ -27,11 +27,11 @@ it('filters the original directory locally while retaining the untrimmed query a
   const rpc = vi.fn(async (method: string) => method === 'topic.category.ls' ? { categories: [category, { ...category, categoryId: 'other', title: '参考资料' }], unavailable: [] } : { topics: [], unavailable: [] }) as unknown as TopicsRpc
   const element = await mount(<MobileTopicsSurface rpc={rpc} onOpenTopic={vi.fn()} renderWorkface={() => null} openSource={vi.fn()} />)
   const field = element.querySelector<HTMLInputElement>('[aria-label="查找 Topic 或分类"]')!
-  expect(field.placeholder).toBe('查找分类'); await fill(field, '  工作  ')
+  expect(field.placeholder).toBe('查找 Topic 或分类'); await fill(field, '  工作  ')
   expect(field.value).toBe('  工作  '); expect(element.querySelector('.mobile-topics-list')?.textContent).toBe('工作笔记')
   expect(vi.mocked(rpc).mock.calls).toHaveLength(1)
   await click(element, '工作笔记'); expect(rpc).toHaveBeenLastCalledWith('topic.ls', { categoryId: category.categoryId })
-  expect(field.placeholder).toBe('查找此分类的 Topic'); expect(field.value).toBe('')
+  expect(field.placeholder).toBe('查找 Topic 或分类'); expect(field.value).toBe('  工作  ')
 })
 
 it('keeps the exact organization draft and native attrs after an unknown original create without replaying it', async () => {
