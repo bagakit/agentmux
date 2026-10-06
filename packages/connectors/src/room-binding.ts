@@ -80,13 +80,13 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
   readGrant(grantId: string, revision?: number): ConnectionGrant | null {
     return this.safe(() => {
       const row = revision === undefined
-        ? this.database.prepare('SELECT r.snapshot_json FROM room_grant_revision r JOIN room_grant_head h ON h.grant_id=r.grant_id AND h.revision=r.revision WHERE h.grant_id=?').get(grantId)
+        ? this.database.prepare('SELECT snapshot_json FROM room_grant_revision WHERE grant_id=? ORDER BY revision DESC LIMIT 1').get(grantId)
         : this.database.prepare('SELECT snapshot_json FROM room_grant_revision WHERE grant_id=? AND revision=?').get(grantId, revision)
       return row ? parseConnectionGrant(JSON.parse(String(row.snapshot_json))) : null
     })
   }
   findGrant(input: { connectionId: string; externalConversationId: string; actor: ConnectionGrant['actor'] }): ConnectionGrant | null {
-    return this.safe(() => { const row = this.database.prepare('SELECT grant_id FROM room_grant_head WHERE connection_id=? AND room_id=? AND actor_json=?').get(input.connectionId, input.externalConversationId, JSON.stringify(parseConnectionActor(input.actor))); return row ? this.readGrant(String(row.grant_id)) : null })
+    return this.safe(() => { const row = this.database.prepare("SELECT h.grant_id FROM room_grant_head h JOIN room_binding_head b ON b.binding_id=h.binding_id JOIN room_grant_revision r ON r.grant_id=h.grant_id AND r.revision=h.revision WHERE h.connection_id=? AND h.room_id=? AND h.actor_json=? AND b.connection_id=h.connection_id AND b.room_id=h.room_id AND b.revision=json_extract(r.snapshot_json,'$.bindingRevision')").get(input.connectionId, input.externalConversationId, JSON.stringify(parseConnectionActor(input.actor))); return row ? this.readGrant(String(row.grant_id)) : null })
   }
   private grants(binding: RoomBinding | null): ConnectionGrant[] {
     if (!binding) return []
@@ -240,6 +240,9 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
         if (other && other.grantId !== input.grantId) refuse('ROOM_GRANT_ACTOR_CONFLICT')
         const grant: ConnectionGrant = { grantId: input.grantId, revision: (current?.revision ?? 0) + 1, bindingId: binding.bindingId, bindingRevision: binding.revision, connectionId: binding.connectionId, actor: input.actor, externalConversationId: binding.externalConversationId, state: input.state, capabilities: input.capabilities }
         this.database.prepare('INSERT INTO room_grant_revision (grant_id,revision,snapshot_json) VALUES (?,?,?)').run(grant.grantId, grant.revision, JSON.stringify(grant))
+        // This head is an audience routing projection. Immutable revisions retain each grant's latest identity.
+        // A stale route can be replaced only by this explicit authorization in the same transaction.
+        this.database.prepare('DELETE FROM room_grant_head WHERE connection_id=? AND room_id=? AND actor_json=? AND grant_id<>?').run(grant.connectionId, grant.externalConversationId, JSON.stringify(grant.actor), grant.grantId)
         this.database.prepare('INSERT INTO room_grant_head (grant_id,revision,binding_id,connection_id,room_id,actor_json) VALUES (?,?,?,?,?,?) ON CONFLICT(grant_id) DO UPDATE SET revision=excluded.revision,binding_id=excluded.binding_id,connection_id=excluded.connection_id,room_id=excluded.room_id,actor_json=excluded.actor_json').run(grant.grantId, grant.revision, grant.bindingId, grant.connectionId, grant.externalConversationId, JSON.stringify(grant.actor))
         return this.finish({ operationId: input.operationId, action: 'grant', state: 'applied', binding, grant })
       })
