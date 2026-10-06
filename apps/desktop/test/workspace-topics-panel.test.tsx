@@ -13,6 +13,7 @@ import type { SessionSnapshot, ScratchTopicSnapshot, WorkspaceRecord } from '../
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 
 type AgentSessionSnapshot = Extract<SessionSnapshot, { kind: 'agent' }>
 
@@ -31,6 +32,12 @@ const fixture = vi.hoisted(() => ({
     scratchTopicOrder: [] as string[],
     pinnedItems: {} as Record<string, string[]>,
     spaceObjectIcons: {},
+    topicCategories: [],
+    spaceZoneBindings: {},
+    workbenchSpaceSelection: null,
+    get config() { return { workspaces: [workspace], hosts: [], executors: {} } },
+    get scratchTopicSnapshots() { return { [workspace.id]: { scope: scratchTopicsScope(workspace), revision: 0, topics: fixture.snapshot, error: null, reading: false } } },
+    refreshScratchTopics: vi.fn(),
     createScratchTopic: vi.fn(),
     openScratchTopic: vi.fn(),
     renameScratchTopic: vi.fn(),
@@ -43,10 +50,10 @@ const fixture = vi.hoisted(() => ({
   }
 }))
 
-// 组件靠 useEffect 调 api.scratch.listTopics 取数——renderToStaticMarkup 不跑 effect，所以这一族走
-// happy-dom 真渲染。listTopics 成为可控输入。
+// 已读取目录沿原 useScratchTopics 快照提供；这里验证真实行与共享身份消费，不验证目录 IO。
 vi.mock('../src/renderer/src/lib/api.js', () => ({
   api: {
+    spaceObjects: { appearance: vi.fn(async () => ({ local: true, icon: null })) },
     scratch: {
       listTopics: vi.fn(async () => fixture.snapshot)
     }
@@ -54,6 +61,7 @@ vi.mock('../src/renderer/src/lib/api.js', () => ({
 }))
 
 vi.mock('../src/renderer/src/store.js', () => ({
+  agentRegionExecution: () => null,
   useAppStore: Object.assign(
     (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
     { getState: () => fixture.state }
@@ -222,7 +230,7 @@ describe('Topic live Agent presence', () => {
     fixture.state.layouts = { [workspace.id]: createWorkspaceLayout('main', ['split']) }
     await mount()
     const row = rowByTitle('Shared Topic')
-    const cells = [...row.querySelectorAll<HTMLElement>('.topic-workbench-topology__tab-glyph__cell')]
+    const cells = [...row.querySelectorAll<HTMLElement>('.workbench-topology__tab-glyph__cell')]
     expect(cells).toHaveLength(2)
     expect(cells.map((cell) => cell.dataset.regionKind)).toEqual(['agent', 'agent'])
     const avatars = [...row.querySelectorAll<HTMLButtonElement>('.agent-avatar')]

@@ -12,7 +12,7 @@ vi.hoisted(() => {
 })
 
 import { AgentAvatar, ExecutorIdentityContext } from '../src/renderer/src/components/AgentAvatar'
-import { TopicWorkbenchTopology } from '../src/renderer/src/components/TopicPresence'
+import { WorkbenchTopology } from '../src/renderer/src/components/WorkbenchTopology'
 import { getWindowOverlayHost } from '../src/renderer/src/components/WindowOverlayHost'
 import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome'
 import { OpenDestinationPopover } from '../src/renderer/src/components/OpenDestinationBar'
@@ -23,7 +23,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { deriveOverlayInventoryFromSource } from './helpers/overlay-source-inventory.js'
 
 const AVATAR_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/agent-avatar.css'), 'utf8')
-const TOPOLOGY_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/topic-topology.css'), 'utf8')
+const TOPOLOGY_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/workbench-topology.css'), 'utf8')
 const OVERLAYS_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/overlays.css'), 'utf8')
 const NOTICES_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/GlobalSystemNotices.tsx'), 'utf8')
 const CONTEXT_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/AgentContextUsage.tsx'), 'utf8')
@@ -138,9 +138,9 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     browserStage.remove()
   })
 
-  it('TopicWorkbenchTopology portals into shared host and uses CSS layer tokens', async () => {
+  it('WorkbenchTopology portals into shared host and uses CSS layer tokens', async () => {
     expect(TOPOLOGY_CSS).toContain('z-index: var(--layer-tooltip);')
-    expect(TOPOLOGY_CSS).not.toContain('.topic-workbench-topology__inspector--portal {\n  position: fixed;\n  z-index: 10000;')
+    expect(TOPOLOGY_CSS).not.toContain('.workbench-topology__inspector--portal {\n  position: fixed;\n  z-index: 10000;')
 
     const tabs = [
       {
@@ -158,10 +158,10 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     ]
 
     await act(async () => {
-      root?.render(<TopicWorkbenchTopology tabs={tabs} />)
+      root?.render(<WorkbenchTopology tabs={tabs} />)
     })
 
-    const topology = container?.querySelector<HTMLElement>('.topic-workbench-topology')
+    const topology = container?.querySelector<HTMLElement>('.workbench-topology')
     expect(topology).toBeTruthy()
 
     // Focus triggers inspector in portal
@@ -169,19 +169,19 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
       topology?.focus()
     })
 
-    const inspectorInHost = host?.querySelector('.topic-workbench-topology__inspector--portal')
+    const inspectorInHost = host?.querySelector('.workbench-topology__inspector--portal')
     expect(inspectorInHost).toBeTruthy()
 
     // Blur dismisses inspector
     await act(async () => {
       topology?.blur()
     })
-    expect(host?.querySelector('.topic-workbench-topology__inspector--portal')).toBeNull()
+    expect(host?.querySelector('.workbench-topology__inspector--portal')).toBeNull()
   })
 
-  it('TopicWorkbenchTopology absent-host state renders null/closed with zero inline fallback', async () => {
+  it('WorkbenchTopology absent-host state renders null/closed with zero inline fallback', async () => {
     // Contract: TopicPresence source does not contain an inline inspector fallback
-    const TOPOLOGY_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/TopicPresence.tsx'), 'utf8')
+    const TOPOLOGY_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/WorkbenchTopology.tsx'), 'utf8')
     expect(TOPOLOGY_TSX).not.toMatch(/createPortal\([^)]+\)\s*:\s*inspector/)
 
     // When overlay host is absent
@@ -204,20 +204,20 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     ]
 
     await act(async () => {
-      root?.render(<TopicWorkbenchTopology tabs={tabs} />)
+      root?.render(<WorkbenchTopology tabs={tabs} />)
     })
 
-    const topology = container?.querySelector<HTMLElement>('.topic-workbench-topology')
+    const topology = container?.querySelector<HTMLElement>('.workbench-topology')
     expect(topology).toBeTruthy()
 
     // Closed / unhovered: no inline inspector in container
-    expect(container?.querySelector('.topic-workbench-topology__inspector')).toBeNull()
+    expect(container?.querySelector('.workbench-topology__inspector')).toBeNull()
 
     // Even when focused without host: never renders inline fallback
     await act(async () => {
       topology?.focus()
     })
-    expect(container?.querySelector('.topic-workbench-topology__inspector')).toBeNull()
+    expect(container?.querySelector('.workbench-topology__inspector')).toBeNull()
   })
 
   it('Dock tooltip closes on Escape, window blur, and unmount; avoids inline fallback', async () => {
@@ -452,7 +452,7 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     // Verify discovered components cover all native and bespoke families
     const owners = new Set(nativeAndBespoke.map((item) => item.lifecycleOwner))
     expect(owners).toContain('AgentAvatar')
-    expect(owners).toContain('TopicWorkbenchTopology')
+    expect(owners).toContain('WorkbenchTopology')
     expect(owners).toContain('OpenDestinationPopover')
     expect(owners).toContain('GlobalSystemNotices')
     expect(owners).toContain('SessionMailbox')

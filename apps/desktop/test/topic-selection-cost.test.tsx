@@ -125,8 +125,8 @@ it('preserves the original Windows separator forms without alias guessing', () =
 
 it('keeps each original Tab occurrence active state, including a missing preceding Tab', async () => {
   const tab = tabs['tab-0']!, cells = topicTabRegionCells(tab)
-  const surfaces = [{ tabId: 'missing-original-tab', active: false, cells: [] },
-    { tabId: tab.id, active: true, cells }, { tabId: tab.id, active: false, cells }]
+  const surfaces = [{ groupId: 'missing-group', tabId: 'missing-original-tab', active: false, cells: [] },
+    { groupId: 'original-group', tabId: tab.id, active: true, cells }, { groupId: 'other-group', tabId: tab.id, active: false, cells }]
   await dom.render(<TopicRowPresence workspace={workspace} topic={topics[0]!} paths={[topics[0]!.physicalDirectoryPath!]}
     surfaces={surfaces} active onSelectTab={async () => {}} />)
   expect(observed.tabs).toEqual([{ tabId: tab.id, active: true }, { tabId: tab.id, active: false }])

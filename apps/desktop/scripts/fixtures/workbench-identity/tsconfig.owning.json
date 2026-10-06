@@ -1,0 +1,4 @@
+{
+  "extends": "../../../tsconfig.renderer.json",
+  "include": ["../../../src/renderer/**/*.ts", "../../../src/renderer/**/*.tsx", "../../../src/shared/**/*.ts", "../../../test/workbench-identity.test.tsx", "./vitest.owning.config.mts"]
+}
