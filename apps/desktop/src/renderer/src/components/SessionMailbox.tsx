@@ -6,6 +6,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { ContinuousProgressControl, type ContinuousProgressStatus } from './ContinuousProgressControl'
 import { ComposerPendingDelivery } from './ComposerPendingDelivery'
+import { useMailboxMotion } from './use-mailbox-motion'
 import type { EditQueuedMessage } from './ComposerQueuedMessageEditor'
 import { ComposerOutbox, type ComposerQueuedMessage, type ArchiveQueuedMessage, type MoveQueuedMessageToDraft } from './ComposerOutbox'
 import { useAppStore } from '../store'
@@ -154,6 +155,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   const [viewed, setViewed] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const popover = useRef<HTMLDivElement>(null)
+  const dock = useRef<HTMLElement>(null)
   const requestedFolder = useRef<Folder | null>(null)
   const preview = useRef(false)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -349,6 +351,11 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     window.addEventListener('resize', measure)
     return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
   }, [open])
+  const motion = useMailboxMotion(popover, dock, open, visible, scope)
+  const readingMounted = open || motion.retaining
+  // Retain the original reading DOM through exit paint so its native anchor baseline
+  // cannot jump; native closed/inert state and delivery facts already apply immediately.
+  useEffect(() => { if (!readingMounted) setSelection(null) }, [readingMounted])
   useLayoutEffect(() => {
     const intent = explicitOutboxReveal.current
     if (!intent) return
@@ -361,6 +368,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   }, [open, folder, scope, selection])
   const mailboxLabel = `Mailbox: Inbox ${unread} unread, Outbox ${pending.length} pending, Notices ${system.unread.length} need attention${progressSession ? `. ${progressLabel}` : ''}`
   function showOutbox(operationId: string) {
+    motion.captureSource(Array.from(dock.current?.querySelectorAll<HTMLElement>('[data-operation-id]') ?? []).find(node => node.dataset.operationId === operationId))
     explicitOutboxReveal.current = { scope, operationId }
     requestedFolder.current = 'outbox'
     pin(); chooseFolder('outbox')
@@ -383,7 +391,12 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </span> : null}
     </button>
     <div ref={popover} id={id} popover="auto" className="composer-mailbox" aria-label="Mailbox"
-      data-state={open ? 'open' : 'closed'}
+      data-state={open ? 'open' : 'closed'} inert={!open}
+      onBeforeToggle={event => {
+        if (event.target !== event.currentTarget) return
+        event.currentTarget.inert = event.newState !== 'open'
+        motion.beforeToggle(event.newState)
+      }}
       onPointerEnter={(event) => { if (event.pointerType === 'mouse') { cancelClose(); setViewed(true) } }}
       onPointerLeave={leave} onPointerDownCapture={pin} onFocusCapture={event => { lastReadingFocus.current = event.target; pin() }}
       onKeyDown={(event) => {
@@ -395,8 +408,9 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
         if (event.target !== event.currentTarget) return
         const opening = event.newState === 'open'
         if (opening) { setFolder(requestedFolder.current ?? openFolder()); requestedFolder.current = null; if (!preview.current) setViewed(true) }
-        else { cancelClose(); preview.current = false; setViewed(false); setSelection(null); focusAfter.current = null }
+        else { cancelClose(); preview.current = false; setViewed(false); focusAfter.current = null }
         setOpen(opening)
+        motion.afterToggle(event.newState)
       }}>
       <div className="composer-mailbox__heading"><strong>Mailbox</strong>
         <button type="button" className="composer-tool" aria-label="Close mailbox" popoverTarget={id} popoverTargetAction="hide"
@@ -421,10 +435,10 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       {detail ? <div className="composer-mailbox__back"><button ref={back} type="button" className="composer-tool" onClick={leaveRecord}><ThemeNavigationBackIcon size={14} aria-hidden="true" />Back to {folderLabels[folder]}</button></div> : null}
       <div ref={body} className="composer-mailbox__content" onFocusCapture={event => { lastReadingFocus.current = event.target }}>
       <div id={`${id}-inbox`} role="tabpanel" aria-labelledby={`${id}-inbox-tab`} hidden={folder !== 'inbox'}>
-        {open && folder === 'inbox' ? mailboxSessionId && (timeline || propUserMessages || incoming.length) ? <MessageHistory mailboxOrigin={mailboxOrigin} items={incoming} incoming selectedKey={detail ? wanted : null} onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} renderNavigation={renderNavigation} /> : <MailboxEmpty title="Waiting for message history" /> : null}
+        {readingMounted && folder === 'inbox' ? mailboxSessionId && (timeline || propUserMessages || incoming.length) ? <MessageHistory mailboxOrigin={mailboxOrigin} items={incoming} incoming selectedKey={detail ? wanted : null} onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} renderNavigation={renderNavigation} /> : <MailboxEmpty title="Waiting for message history" /> : null}
       </div>
       <div id={`${id}-outbox`} role="tabpanel" aria-labelledby={`${id}-outbox-tab`} hidden={folder !== 'outbox'}>
-        {open && folder === 'outbox' ? <>
+        {readingMounted && folder === 'outbox' ? <>
           {!selectedMessage && pending.length ? <ComposerOutbox sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} queued={pending} pendingInteraction={pendingInteraction} onCancelPreparation={onCancelQueuedPreparation} selectedId={selectedQueue?.id ?? null}
             onSelect={(key) => { focusAfter.current=null; setSelection({scope,folder:'outbox',key:`queue:${key}`}) }} reading={reading}
             {...(onArchiveQueued ? { onArchive: onArchiveQueued } : {})} {...(onMoveQueued ? { onMove: onMoveQueued } : {})}
@@ -448,7 +462,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
         </> : null}
       </div>
       <div id={`${id}-system`} role="tabpanel" aria-labelledby={`${id}-system-tab`} hidden={folder !== 'system'}>
-        {open && folder === 'system' ? selectedNotice ? <article className="composer-mailbox__detail composer-notice" data-kind={selectedNotice.notice.kind}>
+        {readingMounted && folder === 'system' ? selectedNotice ? <article className="composer-mailbox__detail composer-notice" data-kind={selectedNotice.notice.kind}>
           <div className="composer-notice__body">{noticePresentation?.id === selectedNotice.id ? noticePresentation.content : <><ServiceWindowNotice notice={selectedNotice.notice} />
             <MailboxTime value={selectedNotice.observedAt} complete />
             {selectedNotice.id === 'queue' ? <button type="button" className="composer-tool" onClick={() => chooseFolder('outbox')}>View outbox</button> : null}
@@ -468,5 +482,5 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </div>
     </div>
   </>
-  return children ? children(mailbox, visible ? <ComposerPendingDelivery notice={noticePresentation?.content} suppressed={open} anchorRef={trigger} queued={pending} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCancelPreparation={onCancelQueuedPreparation} onCopy={onCopyQueued} onEdit={onEditQueued} onArchive={onArchiveQueued} onMoveToDraft={onMoveQueuedToDraft} sendImmediately={sendImmediately} onMore={showOutbox} /> : null) : mailbox
+  return children ? children(mailbox, visible ? <ComposerPendingDelivery surfaceRef={dock} returning={!open && motion.retaining} notice={noticePresentation?.content} suppressed={open} anchorRef={trigger} queued={pending} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCancelPreparation={onCancelQueuedPreparation} onCopy={onCopyQueued} onEdit={onEditQueued} onArchive={onArchiveQueued} onMoveToDraft={onMoveQueuedToDraft} sendImmediately={sendImmediately} onMore={showOutbox} /> : null) : mailbox
 }

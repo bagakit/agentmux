@@ -18,10 +18,11 @@ const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 
 
 /** Original queue facts, viewed by operation identity; this surface owns no delivery state. */
-export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef, onSend, onCancelPreparation, onCopy, onEdit, onArchive, onMoveToDraft, sendImmediately = false, suppressed = false, onMore, notice }: {
+export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef, surfaceRef, onSend, onCancelPreparation, onCopy, onEdit, onArchive, onMoveToDraft, sendImmediately = false, suppressed = false, returning = false, onMore, notice }: {
   queued: readonly ComposerQueuedMessage[]
   pendingInteraction: boolean
   anchorRef: RefObject<HTMLButtonElement | null>
+  surfaceRef: RefObject<HTMLElement | null>
   onSend?: ((id: string) => void) | undefined
   onCancelPreparation?: ((id: string) => void) | undefined
   onCopy?: ((text: string) => Promise<boolean>) | undefined
@@ -30,6 +31,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
   onArchive?: ArchiveQueuedMessage | undefined
   sendImmediately?: boolean
   suppressed?: boolean
+  returning?: boolean
   onMore: (id: string) => void
   /** Existing notice owner supplies presentation only, never queue or delivery state. */
   notice?: ReactNode
@@ -41,7 +43,6 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
   const copyActionRef = useRef(0)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const queuedRef = useRef(queued)
-  const surfaceRef = useRef<HTMLElement>(null)
   const pointerRef = useRef<{ x: number; y: number } | null>(null)
   const listRef = useRef<HTMLOListElement>(null)
   const active = queued.find(entry => entry.preparing || entry.sending)
@@ -295,6 +296,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
   }
   return <WindowOverlayPortal>
     <section ref={surfaceRef} className="composer-pending" aria-label={selected ? '待发消息' : 'Message Tool 提醒'} hidden={suppressed} data-state={suppressed ? 'closed' : 'open'}
+      data-mailbox-returning={returning || undefined}
       data-operation-id={selected?.id} data-count={queued.length}
       onPointerLeave={() => setHoveredId(null)}
       onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setSelectedId(null) }}
