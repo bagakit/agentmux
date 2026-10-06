@@ -8,6 +8,7 @@ import { build } from 'esbuild'
 import ts from 'typescript'
 import { expect, it } from 'vitest'
 import type { AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
+import { createHistoryQueryFixture } from './helpers/session-history-query.js'
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const coreRoot = join(repositoryRoot, 'packages/core')
@@ -136,7 +137,37 @@ it('keeps the root and browser subpath exports on the same compiled function', a
       same: root.projectSessionUserMessages === browser.projectSessionUserMessages }));
   `], { cwd: coreRoot }))
   expect(loaded.error).toBeNull()
-  expect(JSON.parse(loaded.value!.stdout)).toEqual({ exports: ['projectSessionUserMessages'], type: 'function', same: true })
+  expect(JSON.parse(loaded.value!.stdout)).toEqual({ exports: ['projectSessionUserMessages', 'sessionHistoryTextForReading', 'sessionUserMessageText'], type: 'function', same: true })
+})
+
+it('bundles the actual Hosted query consumer and validates nonempty history without Node globals or Host readers', async () => {
+  const cleanup: Array<() => Promise<unknown>> = []
+  const fixture = await createHistoryQueryFixture(cleanup)
+  try {
+    const request = { ...fixture.reference, source: 'native' as const, kind: 'user-message' as const }
+    const page = await fixture.client.readAgentSessionHistory(request)
+    expect(page.userMessages!.length).toBeGreaterThan(0)
+    const bundled = await capture(() => build({
+      absWorkingDir: repositoryRoot,
+      stdin: { contents: `import { connectHostedAgentMux } from '@agentmux/core/hosted';
+        import { parseAgentSessionHistoryReadPage } from './dist/session-history-read-codec.js';
+        export { connectHostedAgentMux };
+        export function validate(value, input) { return parseAgentSessionHistoryReadPage(JSON.parse(JSON.stringify(value)), JSON.parse(JSON.stringify(input))); }`,
+        resolveDir: coreRoot, sourcefile: 'hosted-history-browser.js', loader: 'js' },
+      bundle: true, platform: 'browser', format: 'iife', globalName: 'HostedHistory', write: false, metafile: true, logLevel: 'silent'
+    }))
+    expect(bundled.error).toBeNull()
+    const graph = Object.keys(bundled.value!.metafile!.inputs)
+    expect(graph).toContain('packages/core/dist/hosted-client.js')
+    expect(graph).toContain('packages/core/dist/session-history-read-codec.js')
+    expect(graph).not.toContain('packages/core/dist/session-history-reader.js')
+    expect(graph).not.toContain('packages/core/dist/session-history-query.js')
+    const context: { HostedHistory?: { connectHostedAgentMux: unknown; validate(value: unknown, input: unknown): unknown } } = {}
+    runInNewContext(bundled.value!.outputFiles[0]!.text, Object.assign(context, { TextEncoder, TextDecoder, AbortController, AbortSignal, crypto, setTimeout, clearTimeout }))
+    expect(typeof context.HostedHistory!.connectHostedAgentMux).toBe('function')
+    expect(JSON.parse(JSON.stringify(context.HostedHistory!.validate(page, request)))).toEqual(page)
+    await fixture.noControls()
+  } finally { for (const close of cleanup.reverse()) await close() }
 })
 
 it('finds real renderer imports and the Mailbox/Composer call chain outside projector definitions', async () => {

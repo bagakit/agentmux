@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": { "rootDir": "../../../../..", "noEmit": true },
+  "include": [
+    "../../../src/**/*.ts",
+    "../../session-history-query.test.ts",
+    "../../agent-session-history-cli.test.ts",
+    "../../provider-user-message-source.integration.test.ts",
+    "../../session-user-messages-browser-entry.test.ts"
+  ]
+}
