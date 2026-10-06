@@ -342,6 +342,8 @@ Topic 行的 topology 收起态是一排紧凑 Tab 图标位；每枚只表达�
 
 收起态的每枚 Tab 只占一个小图标槽位：单 Region 直接放该 Region 的图标，不再套一层空心方框；多 Region 按真实 bounds 形成紧凑方形宫格。相邻槽位不再被一整块带内边距的胶囊包住；图标之间用间距与当前项边界建立可读性，不在槽位中写 `Tn`、`nR` 或其它实现计数。右侧不重复堆叠已在 Tab 中出现的 Agent 头像。Inspector 采用较窄的内容宽度，以 Agent 头像为身份锚点，名称、surface 类型和最近活动紧邻其后；超长文字省略但保留完整 tooltip/无障碍名称。
 
+Tab 缩略图、单格 Executor 身份与 Region 地图采用同一可复用控件语言，不因嵌入列表或卡片另造一套头像、宫格和 hover 面。多 Region 的缩略图与检视地图都让本次目标 Agent 对应格可辨：使用克制的边界与低对比 surface 强调，保留邻格、真实比例和内容身份；不放大目标格、不改变几何，也不以 Working／Results 色冒充目标位置。当前 Tab、被检视项与目标 Region 的层级各自可辨。单格沿原 Executor／内容身份设计，不叠加无意义分格框；hover 与键盘聚焦取得等价的原 Region 信息，浮层继续遵守本节窗口边界。准确目标、多位置及未知只见[共同拓扑行为](../behavior/spaces-and-layout.md#topic-工作面拓扑与在场状态)。
+
 多个 Tab 的图标槽位采用与 Agent presence 相同的轻微叠压：相邻 Tab 约重叠一个小间距，整体宽度按簇收敛；当前、hover 和 focus 项通过层级浮到最上面，不改变其它图标的位置。叠压只表达同一 Topic 的集合关系，不遮住图标的主要识别形状。
 
 ### Topic Tab Rail 与 Region 地图密度
