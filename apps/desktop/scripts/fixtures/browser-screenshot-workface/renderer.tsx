@@ -7,6 +7,7 @@ import { rendererPerformance } from '../../../src/renderer/src/lib/renderer-perf
 import '../../../src/renderer/src/styles/tokens.css'
 import '../../../src/renderer/src/styles/base.css'
 import '../../../src/renderer/src/styles/overlays.css'
+import '../../../src/renderer/src/styles/chrome.css'
 import '../../../src/renderer/src/styles/browser.css'
 import '../../../src/renderer/src/styles/agent.css'
 import './fixture.css'
@@ -49,13 +50,17 @@ root.render(<Fixture />)
   read() {
     const editor = document.querySelector('.image-annotation-editor'), canvas = editor?.querySelector('canvas')
     const box = (node: Element | null) => { const r = node?.getBoundingClientRect(); return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null }
+    const matrix = canvas?.getContext('2d')?.getTransform(), dpr = canvas && canvas.getBoundingClientRect().width ? canvas.width / canvas.getBoundingClientRect().width : 1
     return { editor: !!editor, bounds: box(editor), canvas: box(canvas ?? null), canvasPixels: canvas ? [canvas.width, canvas.height] : null,
+      imageView: matrix ? { scale: matrix.a / dpr, x: matrix.e / dpr, y: matrix.f / dpr } : null,
+      canvasCost: (window as any).__annotationCanvasCost ?? null,
       withinStage: !!editor?.closest('[data-native-browser-stage]'), imageLoaded: !!editor?.querySelector<HTMLImageElement>('img')?.complete,
       copying: !![...document.querySelectorAll('button')].find(button => button.textContent?.includes('Copying')),
       cancelDisabled: [...(editor?.querySelectorAll('button') ?? [])].find(button => button.textContent?.includes('Cancel'))?.disabled,
       events: events.slice(), errors: errors.slice(), warning, encoded, encodingHeld: !!heldEncoding,
       appearance: document.documentElement.dataset.appearance,
       activeElement: document.activeElement?.getAttribute('aria-label'),
+      bodyPointerEvents: document.body.style.pointerEvents,
       overlay: rendererPerformance.snapshot().overlay }
   },
   inkPixels() {
@@ -96,7 +101,8 @@ root.render(<Fixture />)
     }
     return { transitions, adjacent, opaque, width, height }
   },
-  field(name: string) { return document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${name}"]`)?.value },
+  field(name: string) { return (document.querySelector(`[aria-label="${name}"]`) ?? [...document.querySelectorAll('label')]
+    .find(label => label.textContent?.trim() === name)?.control as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null)?.value },
   appearance(mode: 'light' | 'dark') { return updateThemeSelection({ appAppearance: mode }) },
   holdEncoding() { holdNextEncoding = true },
   releaseEncoding() { if (!heldEncoding) throw new Error('No actual PNG encoding is held'); heldEncoding() },
