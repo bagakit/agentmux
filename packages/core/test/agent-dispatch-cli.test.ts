@@ -63,6 +63,24 @@ async function publicFixture() {
 }
 
 describe('public durable Dispatch authority', () => {
+  it('keeps dispatch discovery indexes out of ordinary message and exact observation prerequisites', async () => {
+    const f = await publicFixture()
+    const { DatabaseSync } = await import('node:sqlite')
+    const indexes = () => {
+      const db = new DatabaseSync(f.queue.path, { readOnly: true })
+      try { return db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name IN ('message_sender', 'message_recipient') ORDER BY name").all().map(row => row.name) }
+      finally { db.close() }
+    }
+    await f.queue.append(message('source'))
+    expect(indexes()).toEqual([])
+    await f.client.openDispatch({ ...f.input('owner'), sourceMessageId: 'source' })
+    expect(indexes()).toEqual([])
+    expect((await f.client.readDispatch({ sourceMessageId: 'source' })).source.envelope.body).toBe('Synthetic source')
+    expect(indexes()).toEqual([])
+    await f.client.listDispatches({ participantSessionId: 'owner' })
+    expect(indexes()).toEqual(['message_recipient', 'message_sender'])
+    expect((await f.client.readDispatch({ sourceMessageId: 'source' })).dispatch.originAwaits).toBe(true)
+  })
   it('keeps original records readable with identity diagnostics when the worker observation fails', async () => {
     const f = await publicFixture()
     await f.queue.append(message('source'))
