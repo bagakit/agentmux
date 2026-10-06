@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { parsePreparedPublication, type PreparedPublication, type PublicationPreparer } from './publication-wire.js'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError, type AgentSessionHistoryItem } from '@agentmux/core'
-import type { RoomBinding } from '@agentmux/core/connections'
+import { parseConnectionDelivery, parseConnectionDeliveryReceipt, type ConnectionDelivery, type ConnectionDeliveryState, type ConnectionDeliveryMapping, type ConnectionDeliveryReceiptReason, type ConnectionDeliveryReceipt, type RoomBinding } from '@agentmux/core/connections'
 import { parseConversationChangesPage, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
 
 /** The immutable authorized audience; presentation and current focus are deliberately absent. */
@@ -14,30 +14,22 @@ export type PublicationPayload = {
   questions?: NonNullable<AgentSessionHistoryItem['questionRequest']>['questions']
 }
 export type PublicationTarget = Pick<PublicationBoundary, 'connectionId' | 'application' | 'externalConversationId'>
-export type PublicationState = 'pending' | 'dispatching' | 'unknown' | 'confirmed' | 'not-applied' | 'cancelled' | 'superseded'
-export type PublicationMapping = { messageId: string; threadId?: string }
-const PUBLICATION_FAILURE_REASONS = ['effect-unconfirmed', 'platform-rejected', 'adapter-unavailable', 'platform-unavailable', 'rate-limited', 'thread-unavailable', 'unsupported-format'] as const
-export type PublicationFailureReason = typeof PUBLICATION_FAILURE_REASONS[number]
-export type PublicationReceipt = { state: 'confirmed'; mapping: PublicationMapping } | { state: 'unknown' | 'not-applied'; reason: PublicationFailureReason }
-export type PublicationOperation = {
-  operationId: string
-  projectionId: string
-  sourceRevision: string
-  bindingId: string
-  bindingRevision: number
-  reference: ConversationItemRef
-  target: PublicationTarget
+export type PublicationState = ConnectionDeliveryState
+export type PublicationMapping = ConnectionDeliveryMapping
+export type PublicationFailureReason = ConnectionDeliveryReceiptReason
+export type PublicationReceipt = ConnectionDeliveryReceipt
+export type PublicationOperation = ConnectionDelivery & {
   payload: PublicationPayload
-  effect: 'upsert' | 'withdraw'
-  fragment: { ordinal: number; count: number }
-  state: PublicationState
-  predecessorOperationId?: string
-  mapping?: PublicationMapping
-  reason?: string
-  /** Queue fate can change without erasing the original platform outcome. */
-  receipt?: PublicationReceipt
+  /** Private receipt correlation; never changes the original operation or platform request key. */
+  attempt?: number
   /** Frozen before dispatch; private to this Host, never exposed in public delivery DTOs. */
   prepared?: PreparedPublication
+}
+/** Reuse the original public receipt codec without accepting private request or body fields. */
+const parseReceipt = parseConnectionDeliveryReceipt
+export function publicDelivery(operation: PublicationOperation): ConnectionDelivery {
+  const { payload: _payload, prepared: _prepared, attempt: _attempt, ...delivery } = operation
+  return parseConnectionDelivery(delivery)
 }
 type Decision = { recordId: string; revision: string; payload?: PublicationPayload; reason?: 'not-assistant-speech' | 'no-public-text' }
 export type PublicationPageOptions = {
@@ -50,24 +42,9 @@ const encode = (value: unknown) => JSON.stringify(value, (_key, item) => item &&
   ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item)
 const digest = (value: unknown) => createHash('sha256').update(encode(value)).digest('base64url')
 const sourceKey = (source: ConversationCheckpoint['source']) => encode([source.providerId, source.nativeSessionId])
-const scopeKey = (boundary: PublicationBoundary) => [boundary.bindingId, boundary.revision] as const
+const scopeKey = (boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>) => [boundary.bindingId, boundary.revision] as const
 const ref = (boundary: PublicationBoundary): ConversationRef => ({ hostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId })
 const same = (a: unknown, b: unknown) => encode(a) === encode(b)
-function parseReceipt(value: unknown): PublicationReceipt {
-  const invalid = (): never => { throw new AgentMuxError('The adapter receipt does not describe this original publication outcome.', 'INVALID_PUBLICATION_RECEIPT') }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid()
-  const candidate = value as Record<string, unknown>
-  if (candidate.state === 'confirmed') {
-    if (Object.keys(candidate).some(key => !['state', 'mapping'].includes(key)) || !candidate.mapping || typeof candidate.mapping !== 'object' || Array.isArray(candidate.mapping)) return invalid()
-    const mapping = candidate.mapping as Record<string, unknown>
-    const id = (item: unknown) => typeof item === 'string' && item.length > 0 && item.length <= 16_384 && !/[\u0000-\u001f\u007f]/u.test(item)
-    if (Object.keys(mapping).some(key => !['messageId', 'threadId'].includes(key)) || !id(mapping.messageId) || mapping.threadId !== undefined && !id(mapping.threadId)) return invalid()
-    return { state: 'confirmed', mapping: { messageId: mapping.messageId as string, ...(mapping.threadId === undefined ? {} : { threadId: mapping.threadId as string }) } }
-  }
-  if (!['unknown', 'not-applied'].includes(String(candidate.state)) || Object.keys(candidate).some(key => !['state', 'reason'].includes(key)) || !PUBLICATION_FAILURE_REASONS.includes(candidate.reason as PublicationFailureReason)) return invalid()
-  return { state: candidate.state as 'unknown' | 'not-applied', reason: candidate.reason as PublicationFailureReason }
-}
-
 /** Exact UTF-8 text fragments. The adapter declares its supported payload budget before admission. */
 function fragments(payload: PublicationPayload, byteLimit: number): PublicationPayload[] {
   if (!Number.isSafeInteger(byteLimit) || byteLimit < 4 || byteLimit > 128 * 1024)
@@ -117,6 +94,10 @@ export class PublicationStore {
         fragment_ordinal INTEGER NOT NULL,
         binding_id TEXT NOT NULL, binding_revision INTEGER NOT NULL,
         operation_json TEXT NOT NULL, state TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS connector_publication_attempt (
+        operation_id TEXT NOT NULL, attempt INTEGER NOT NULL, receipt_json TEXT,
+        PRIMARY KEY(operation_id, attempt)
       );
       CREATE INDEX IF NOT EXISTS connector_publication_pending
         ON connector_publication_operation(binding_id, binding_revision, ordinal)
@@ -218,6 +199,9 @@ export class PublicationStore {
       original = original.predecessorOperationId ? this.inspect(original.predecessorOperationId) : null
     return original
   }
+  next(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>): PublicationOperation | null {
+    return this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') ORDER BY ordinal LIMIT 1").get(...scopeKey(boundary)))
+  }
   /** Save the exact effect identity before any adapter call. Unknown work blocks this audience alone. */
   claimNext(boundary: PublicationBoundary, authorized: () => boolean, adapter: PublicationPreparer): PublicationOperation | null {
     return this.transaction(() => {
@@ -237,7 +221,8 @@ export class PublicationStore {
       if (!original.prepared && prepared.renderVersion !== adapter.renderVersion)
         throw new AgentMuxError('The adapter must prepare its declared current render version.', 'PUBLICATION_PREPARATION_UNCONFIRMED')
       if (!authorized()) return null
-      const claimed = { ...original, prepared, state: 'dispatching' as const }
+      const claimed = { ...original, prepared, attempt: (original.attempt ?? 0) + 1, state: 'dispatching' as const }
+      this.database.prepare('INSERT INTO connector_publication_attempt (operation_id,attempt) VALUES (?,?)').run(claimed.operationId, claimed.attempt)
       this.write(claimed)
       return claimed
     })
@@ -246,11 +231,23 @@ export class PublicationStore {
     this.database.prepare('UPDATE connector_publication_operation SET operation_json=?, state=? WHERE operation_id=?')
       .run(encode(operation), operation.state, operation.operationId)
   }
-  settle(operationId: string, value: PublicationReceipt): PublicationOperation {
+  settle(operationId: string, attempt: number, value: PublicationReceipt): PublicationOperation {
     const result = parseReceipt(value)
     return this.transaction(() => {
       const original = this.inspect(operationId)
       if (!original) throw new AgentMuxError('The original publication operation is unknown.', 'UNKNOWN_PUBLICATION_OPERATION')
+      const dispatch = this.database.prepare('SELECT receipt_json FROM connector_publication_attempt WHERE operation_id=? AND attempt=?').get(operationId, attempt)
+      if (!Number.isSafeInteger(attempt) || attempt < 1 || !dispatch) throw new AgentMuxError('The receipt does not identify an original dispatch attempt.', 'PUBLICATION_RECEIPT_CONFLICT')
+      const previous: PublicationReceipt | null = dispatch.receipt_json ? parseReceipt(JSON.parse(String(dispatch.receipt_json))) : null
+      if (previous && previous.state !== 'unknown') {
+        // A stale uncertainty cannot erase an authoritative outcome for its own attempt.
+        if (result.state === 'unknown') return original
+        if (!same(previous, result)) throw new AgentMuxError('The original dispatch attempt has a different authoritative outcome; its confirmed mapping cannot be replaced.', 'PUBLICATION_RECEIPT_CONFLICT')
+        return original
+      }
+      this.database.prepare('UPDATE connector_publication_attempt SET receipt_json=? WHERE operation_id=? AND attempt=?').run(encode(result), operationId, attempt)
+      // Late outcomes belong to that attempt alone, even when the same operation has been explicitly retried.
+      if (original.attempt !== attempt) return original
       if (original.state === 'confirmed') {
         if (result.state !== 'confirmed' || !same(original.mapping, result.mapping))
           throw new AgentMuxError('The original confirmed platform mapping cannot be replaced.', 'PUBLICATION_RECEIPT_CONFLICT')
@@ -283,6 +280,9 @@ export class PublicationStore {
       }
       return settled
     })
+  }
+  attempts(operationId: string): Array<{ attempt: number; receipt: PublicationReceipt | null }> {
+    return this.database.prepare('SELECT attempt,receipt_json FROM connector_publication_attempt WHERE operation_id=? ORDER BY attempt').all(operationId).map(row => ({ attempt: Number(row.attempt), receipt: row.receipt_json ? parseReceipt(JSON.parse(String(row.receipt_json))) : null }))
   }
   /** Only an explicit retry of an authoritative non-application can return to the dispatch lane. */
   retry(operationId: string, authorized: () => boolean): PublicationOperation {
