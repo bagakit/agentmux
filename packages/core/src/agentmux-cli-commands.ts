@@ -1,5 +1,6 @@
 import { parseConversationChangesInput } from './conversation-changes.js'
 import { parseAgentMuxSearchInput } from './search-codec.js'
+import { parseConnectionParams } from './connections-codec.js'
 import { parseNotebookObservationParams } from './notebook-observation.js'
 import { parseNotebookResolveParams, scanNoteWikiLinks } from './note-links.js'
 import { parseMoteAvatarWriteParams } from './mote-avatar-write.js'
@@ -543,6 +544,10 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   { ...empty('mote.playbook.pmo', 'Read the PMO work manual using the actual public commands.'), local: true },
   { ...empty('settings.appearance.watch', 'Observe the original client appearance snapshot and later changes; cancel only this reader.'), stream: true,
     details: 'Opening contains the current owner sourceId and revision. Later snapshots are newer values from that owner; they are observations, not configuration writes. Disconnect preserves the last confirmed theme; reopen to read the current owner.' },
+  empty('connection.ls', 'List external application connections on this Host without resolving credentials.'),
+  command('connection.inspect', '(--connection ID|--operation-id ID)', 'Read one original connection or configuration operation without replaying it.', { '--connection': 'data', ...OP }, f => parseConnectionParams('connection.inspect', { ...fields(f, { '--connection': 'connectionId', '--operation-id': 'operationId' }) })),
+  command('connection.configure', '--input FILE|-', 'Save an exact external connection using an opaque Host credential reference.', { '--input': 'data' }, async f => parseConnectionParams('connection.configure', await readControlJsonInput(value(f, '--input', true)!, 'Connection configuration')), 'Input requires operationId, expectedRevision (null for creation), and connection. Credentials must already be stored at the executing Host. Inspect the same operation after an unknown response; never replay with a new ID.'),
+  command('connection.test', '--connection ID', 'Check original authentication and transport; intake and delivery remain separate facts.', { '--connection': 'data' }, f => parseConnectionParams('connection.test', { connectionId: id(f, '--connection', true) })),
   settings('settings.inspect', '[target]', 'Read supported host settings.'),
   settings('settings.set', '<key> <value> [--operation-id ID]', 'Set one supported value; reuse the original operation ID to recover a directory move.', 2),
   ...(['executors', 'prompts', 'themes'] as const).flatMap(resource => [
