@@ -78,7 +78,48 @@ it('shows and refreshes the existing Topic summary without replacing the live ca
   topics.mockResolvedValue([{ ...topic, readError: 'Unreadable topic', summary: 'Stale prose' }])
   await act(async () => useAppStore.setState({ workspaceFileRevisions: { [SCRATCH_WORKSPACE_ID]: 2 } }))
   expect(summary().textContent).toBe('Preserve reading through reconnect')
-  expect(container.querySelector('.focus-hierarchy-warning')!.getAttribute('title')).toContain('Unreadable topic')
+  expect(container.querySelector('.focus-source-status__cause')!.getAttribute('title')).toContain('Unreadable topic')
+})
+
+it('retries a failed Topic read through the existing snapshot owner while retaining its original card', async () => {
+  const topic = { id: 'launcher:retry', title: 'Original Topic', directoryPath: _hygiene_fixturePath('scratch/topic--launcher--retry'), topicPath: _hygiene_fixturePath('scratch/topic--launcher--retry/topic.md'), summary: 'Original summary', collaborators: [] }
+  const reads = vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([topic])
+  useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [{ id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', kind: 'folder', path: _hygiene_fixturePath('scratch') }] },
+    scratchTopicSnapshots: {}, sessions: [{ ...base, workspacePath: topic.directoryPath, status: { ...base.status, state: 'working' } }] }))
+  await mount()
+  const card = row()
+  reads.mockRejectedValueOnce(new Error('Original Topic read failure'))
+  await act(async () => useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true))
+  expect(container.querySelector('.focus-source-status__cause')!.textContent).toContain('Original Topic read failure')
+  const count = reads.mock.calls.length
+  reads.mockResolvedValue([topic])
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.focus-source-status button')].find(button => button.textContent === 'Retry lane details')!.click())
+  expect(reads).toHaveBeenCalledTimes(count + 1)
+  expect(container.querySelector('.focus-source-status')).toBeNull()
+  expect(row()).toBe(card)
+})
+
+it('retries only the failed represented workspace and preserves healthy cached lane reads', async () => {
+  const healthy = { id: 'healthy', name: 'Healthy', hostId: 'local', kind: 'folder' as const, path: _hygiene_fixturePath('healthy') }
+  useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, healthy] },
+    sessions: [base, { ...base, id: 'healthy', workspacePath: healthy.path, control: { ...base.control, agentSessionId: 'healthy' } }] }))
+  const reads = vi.mocked(api.workspaces.listBranches)
+  reads.mockImplementation(async id => {
+    if (id === 'repo') throw new Error('Original workspace read failure')
+    return { kind: 'not-a-git-repository', hostId: 'local', workspacePath: healthy.path }
+  })
+  await mount()
+  const card = row()
+  expect(reads.mock.calls.map(args => args[0])).toEqual(['repo', 'healthy'])
+  let finish!: (value: Awaited<ReturnType<typeof api.workspaces.listBranches>>) => void
+  reads.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const retry = [...container.querySelectorAll<HTMLButtonElement>('.focus-source-status button')].find(button => button.textContent === 'Retry lane details')!
+  await act(async () => retry.click())
+  expect(reads.mock.calls.map(args => args[0])).toEqual(['repo', 'healthy', 'repo'])
+  expect(container.querySelector('.focus-source-status__cause')!.textContent).toContain('Original workspace read failure')
+  await act(async () => finish({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: base.workspacePath }))
+  expect(container.querySelector('.focus-source-status')).toBeNull()
+  expect(row()).toBe(card)
 })
 it('binds a worktree icon to its registered root and does not probe an unregistered context', async () => {
   const appearance = vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'repository', icon: null })

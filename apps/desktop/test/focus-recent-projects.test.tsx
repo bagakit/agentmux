@@ -118,18 +118,59 @@ it('requires every recorded Host/SID source to be retired, isolates equal projec
 
 it('shares exactly one actual catalogue read with Timeline, keeps errors visible on recent unknown, and hidden/bytes add no catalogue or body reads', async () => {
   vi.mocked(api.sessions.historySources).mockRejectedValue(new Error('Catalogue service unavailable'))
-  await mount([visit('missing')], { visible: false })
+  await mount([visit('missing')], { visible: false, sessions: [agent('healthy')] })
   expect(api.sessions.historySources).not.toHaveBeenCalled()
   await act(async () => root.render(<GlobalFocusSurface visible />))
   await act(async () => new Promise<void>(resolve => setTimeout(resolve, 25)))
   expect(api.sessions.historySources).toHaveBeenCalledTimes(1)
   expect(recent()).toHaveLength(1); expect(recent()[0]!.textContent).toContain('Current status unknown')
-  expect(container.querySelector('[role="status"][title="Catalogue service unavailable"]')).not.toBeNull()
+  const notice = container.querySelector('.focus-filters .focus-source-status')!
+  expect(notice).not.toBeNull()
+  expect(notice.querySelector('[title="Catalogue service unavailable"]')).not.toBeNull()
+  expect(container.querySelector('.global-focus-main > [role="status"]')).toBeNull()
+  await act(async () => notice.querySelector<HTMLButtonElement>('.service-disclosure__close')!.click())
+  expect(notice.getAttribute('data-unread')).toBe('false')
+  expect(notice.querySelector('.service-disclosure__trigger')).not.toBeNull()
   const node = recent()[0], reads = [api.sessions.historySources, api.sessions.historyPage, api.sessions.observeHistory, api.sessions.timeline].map(fn => vi.mocked(fn).mock.calls.length)
   for (let i = 0; i < 12; i++) await act(async () => useAppStore.setState({ sessions: [agent('healthy')] }))
   expect(recent()[0]).toBe(node)
   await act(async () => root.render(<GlobalFocusSurface visible={false} />))
   expect([api.sessions.historySources, api.sessions.historyPage, api.sessions.observeHistory, api.sessions.timeline].map(fn => vi.mocked(fn).mock.calls.length)).toEqual(reads)
+})
+
+it('marks a different source failure unread after the previous notice was acknowledged', async () => {
+  vi.mocked(api.sessions.historySources).mockRejectedValueOnce(new Error('First source failure'))
+  await mount([visit('missing')])
+  const notice = container.querySelector('.focus-source-status')!
+  await act(async () => notice.querySelector<HTMLButtonElement>('.service-disclosure__close')!.click())
+  expect(notice.getAttribute('data-unread')).toBe('false')
+  vi.mocked(api.sessions.historySources).mockRejectedValueOnce(new Error('Different source failure'))
+  await act(async () => [...notice.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Retry project sources')!.click())
+  expect(notice.getAttribute('data-unread')).toBe('true')
+  expect(notice.querySelector('.focus-source-status__cause')!.textContent).toBe('Different source failure')
+})
+
+it('keeps a failed project source visible during retry and clears it only on confirmed success', async () => {
+  vi.mocked(api.sessions.historySources).mockRejectedValueOnce(new Error('Original source failure'))
+  await mount([visit('missing')], { sessions: [agent('healthy')] })
+  const card = container.querySelector('[data-session-id="healthy"]'), project = recent()[0]!, before = useAppStore.getState()
+  let finish!: (sources: AgentSessionHistoryDescriptor[]) => void
+  vi.mocked(api.sessions.historySources).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  const retry = [...container.querySelectorAll<HTMLButtonElement>('.focus-source-status button')].find(button => button.textContent === 'Retry project sources')!
+  await act(async () => retry.click())
+  expect(api.sessions.historySources).toHaveBeenCalledTimes(2)
+  expect(container.querySelector('.focus-source-status__cause')).not.toBeNull()
+  expect(container.querySelector('.focus-source-status__cause')!.textContent).toBe('Original source failure')
+  expect(container.querySelector('.focus-source-status')!.textContent).toContain('Retrying project sources')
+  expect(project.textContent).toContain('Current status unknown')
+  expect(container.querySelector('[data-session-id="healthy"]')).toBe(card)
+  expect(recent()[0]).toBe(project)
+  await act(async () => finish([]))
+  expect(container.querySelector('.focus-source-status')).toBeNull()
+  expect(recent()[0]).toBe(project)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
+  for (const method of ['launchAgent', 'recover', 'resume', 'stop', 'write', 'interrupt'] as const) expect(api.sessions[method]).not.toHaveBeenCalled()
 })
 
 it('unrelated loaded timeline changes do not rerender the real lane consumer or reread project sources', async () => {
