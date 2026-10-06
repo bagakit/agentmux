@@ -9,6 +9,7 @@ import { useAgentAttentionNotifications } from './hooks/useAgentAttentionNotific
 import { useSidebarResize } from './hooks/useSidebarResize'
 import {
   TOOL_DOCK_MAX_WIDTH,
+  TOOL_DOCK_DEFAULT_WIDTH,
   getRenderedToolDockWidth,
   getToolDockMinimumWidth
 } from './lib/surface-tool-dock'
@@ -439,9 +440,11 @@ function DesktopApp() {
   const workbenchVisible = mainSurface === 'workbench' && !settingsRoute
   const terminalParkingMeasurement = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).has('agentmux-resource-probe')
-  const { containerRef, isResizing, onResizeStart } = useSidebarResize<HTMLDivElement>({
+  const { containerRef, isResizing, onResizeStart, onResizeReset } = useSidebarResize<HTMLDivElement>({
     isOpen: toolsVisible,
+    resizable: toolsVisible && workbenchVisible,
     width: toolDockWidth,
+    defaultWidth: TOOL_DOCK_DEFAULT_WIDTH,
     minWidth: toolDockMinimumWidth,
     maxWidth: toolDockMaximumWidth,
     deltaSign: 1,
@@ -557,13 +560,15 @@ function DesktopApp() {
                   className="surface-tool-width-handle"
                   role="separator"
                   aria-label="Resize surface tools"
+                  title="Drag to resize · Double-click or Enter to reset"
                   aria-orientation="vertical"
                   aria-valuemin={toolDockMinimumWidth}
                   aria-valuemax={toolDockMaximumWidth}
                   aria-valuenow={renderedToolDockWidth}
                   tabIndex={0}
-                  onMouseDown={onResizeStart}
+                  onMouseDown={onResizeStart} onDoubleClick={onResizeReset}
                   onKeyDown={(event) => {
+                    if (event.key === 'Enter') { onResizeReset(event); return }
                     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
                     event.preventDefault()
                     setToolDockWidth(

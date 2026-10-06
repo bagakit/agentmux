@@ -31,7 +31,7 @@ import type { SurveyRecallCapture as RecallCaptureTarget } from '../lib/survey-r
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { WorkbenchZone } from './WorkbenchZone'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
-import { surveySidebarBounds } from '../lib/survey-sidebar-width'
+import { SURVEY_SIDEBAR_DEFAULT_WIDTH, surveySidebarBounds } from '../lib/survey-sidebar-width'
 import { clampSidebarResizeWidth, useSidebarResize } from '../hooks/useSidebarResize'
 import { isMacPlatform } from '../lib/host-platform'
 import { api } from '../lib/api'
@@ -149,8 +149,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     resizeHandle.current?.setAttribute('aria-valuenow', String(clampSidebarResizeWidth(width, minWidth, maxWidth)))
     surfaceRef.current?.style.setProperty('--survey-navigation-width', `${sidebarCollapsed ? 40 : clampSidebarResizeWidth(width, minWidth, maxWidth)}px`)
   }, [minWidth, maxWidth, sidebarCollapsed])
-  const { containerRef: sidebarRef, isResizing, onResizeStart } = useSidebarResize<HTMLElement>({
-    isOpen: true, width: sidebarCollapsed ? 40 : sidebarWidth, setWidth: setSidebarWidth, deltaSign: 1, minWidth: sidebarCollapsed ? 40 : minWidth, maxWidth: sidebarCollapsed ? 40 : maxWidth, onDraftWidthChange: reportDraftWidth
+  const { containerRef: sidebarRef, isResizing, onResizeStart, onResizeReset } = useSidebarResize<HTMLElement>({
+    isOpen: true, resizable: visible && !sidebarCollapsed, defaultWidth: SURVEY_SIDEBAR_DEFAULT_WIDTH, width: sidebarCollapsed ? 40 : sidebarWidth, setWidth: setSidebarWidth, deltaSign: 1, minWidth: sidebarCollapsed ? 40 : minWidth, maxWidth: sidebarCollapsed ? 40 : maxWidth, onDraftWidthChange: reportDraftWidth
   })
   const selectionKey = selection ? JSON.stringify([selection.zoneId, selection.active]) : null
   const intent = useRef(0)
@@ -411,10 +411,11 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           <ThemeActionOpenExternalIcon size={14} />{sidebarCollapsed ? null : <span>Save to Recall…</span>}
         </button> : null}
       </div>
-      <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Survey items" title="Resize Survey items"
+      <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Survey items" title="Drag to resize Survey items · Double-click or Enter to reset"
         hidden={sidebarCollapsed}
-        aria-orientation="vertical" aria-valuemin={minWidth} aria-valuemax={maxWidth} aria-valuenow={effectiveSidebarWidth} onMouseDown={onResizeStart}
+        aria-orientation="vertical" aria-valuemin={minWidth} aria-valuemax={maxWidth} aria-valuenow={effectiveSidebarWidth} onMouseDown={onResizeStart} onDoubleClick={onResizeReset}
         onKeyDown={event => {
+          if (event.key === 'Enter') { onResizeReset(event); return }
           const next = event.key === 'Home' ? minWidth : event.key === 'End' ? maxWidth : event.key === 'ArrowLeft' ? effectiveSidebarWidth - 16 : event.key === 'ArrowRight' ? effectiveSidebarWidth + 16 : null
           if (next === null) return
           event.preventDefault(); event.stopPropagation(); setSidebarWidth(next)

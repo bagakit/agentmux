@@ -22,7 +22,7 @@ import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { NOTES_WORKSPACE_ID } from '../../../shared/notes-library'
-import { SURVEY_SIDEBAR_MIN_WIDTH, surveySidebarBounds } from '../lib/survey-sidebar-width'
+import { SURVEY_SIDEBAR_DEFAULT_WIDTH, SURVEY_SIDEBAR_MIN_WIDTH, surveySidebarBounds } from '../lib/survey-sidebar-width'
 import { clampSidebarResizeWidth, useSidebarResize } from '../hooks/useSidebarResize'
 import { isMacPlatform } from '../lib/host-platform'
 import { api } from '../lib/api'
@@ -94,7 +94,7 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
     resizeHandle.current?.setAttribute('aria-valuenow', String(clampSidebarResizeWidth(value, minWidth, maxWidth)))
     surfaceRef.current?.style.setProperty('--survey-navigation-width', `${sidebarCollapsed ? 40 : clampSidebarResizeWidth(value, minWidth, maxWidth)}px`)
   }, [minWidth, maxWidth, sidebarCollapsed])
-  const { containerRef, isResizing, onResizeStart } = useSidebarResize<HTMLElement>({ isOpen: !sidebarCollapsed, width: sidebarWidth, setWidth: setSidebarWidth, deltaSign: 1, minWidth, maxWidth, onDraftWidthChange: draftWidth })
+  const { containerRef, isResizing, onResizeStart, onResizeReset } = useSidebarResize<HTMLElement>({ isOpen: !sidebarCollapsed, resizable: visible && !sidebarCollapsed, defaultWidth: SURVEY_SIDEBAR_DEFAULT_WIDTH, width: sidebarWidth, setWidth: setSidebarWidth, deltaSign: 1, minWidth, maxWidth, onDraftWidthChange: draftWidth })
   function chooseNotebook(id: string | null) {
     intent.current += 1; const state = useAppStore.getState(); state.setRecallNotebook(id); state.setRecallZoneSelection(null); setDirectoryOpen(true); setError(null)
   }
@@ -178,7 +178,7 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
         <div className="survey-page-list" data-notebook-view={Boolean(activeNotebook)}><NotebookNavigation notebooks={notebooks} pages={pages} selectedId={notebookId} selectedNoteId={directoryOpen ? null : noteId} onSelect={() => setDirectoryOpen(true)} onOpen={page => void showPage(page)} onTalk={beginTalk} query={query} onQuery={setQuery} onCreateChild={page => { setQuery(''); void createPage(page.noteId) }} onCreate={() => void createPage()} pending={opening} actions={actions} archived={archived} onArchivedChange={value => { setArchived(value); setQuery('') }} /></div>
       </aside>
       {sidebarCollapsed && activeNotebook ? <div className="survey-item-actions"><button className="survey-icon-button" aria-label="Show notebook directory" onClick={() => setDirectoryOpen(true)}><ThemeObjectNoteIcon size={14} /></button>{actions}<button className="survey-icon-button" aria-label="New page" disabled={opening} onClick={() => void createPage()}><ThemeActionCreateNoteIcon size={14} /></button></div> : null}
-      <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Recall items" hidden={sidebarCollapsed || navigationStacked} aria-orientation="vertical" aria-valuemin={minWidth} aria-valuemax={maxWidth} aria-valuenow={effectiveWidth} onMouseDown={onResizeStart} onKeyDown={event => { const next = event.key === 'Home' ? minWidth : event.key === 'End' ? maxWidth : event.key === 'ArrowLeft' ? effectiveWidth - 16 : event.key === 'ArrowRight' ? effectiveWidth + 16 : null; if (next === null) return; event.preventDefault(); setSidebarWidth(next) }} />
+      <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Recall items" title="Drag to resize Recall items · Double-click or Enter to reset" hidden={sidebarCollapsed || navigationStacked} aria-orientation="vertical" aria-valuemin={minWidth} aria-valuemax={maxWidth} aria-valuenow={effectiveWidth} onMouseDown={onResizeStart} onDoubleClick={onResizeReset} onKeyDown={event => { if (event.key === 'Enter') { onResizeReset(event); return }; const next = event.key === 'Home' ? minWidth : event.key === 'End' ? maxWidth : event.key === 'ArrowLeft' ? effectiveWidth - 16 : event.key === 'ArrowRight' ? effectiveWidth + 16 : null; if (next === null) return; event.preventDefault(); setSidebarWidth(next) }} />
     </nav>
     <div className="survey-content"><div className="survey-page-content">
       {error ? <p className="survey-error" role="alert">{error}</p> : null}
