@@ -25,6 +25,7 @@ type SourceChoice = { source: NoteSource; blockId: string; location: AgentMuxSpa
 export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface: FileWorkbenchSurface }) {
   const key = documentKey(surface.workspaceId, surface.path)
   const document = useAppStore(state => state.documents[key])
+  const dirty = useAppStore(state => Boolean(state.dirtyDocuments[key]))
   const notes = useAppStore(useShallow(state => noteFilesFromDocuments(state.documents)))
   const knowledge = useMemo(() => noteKnowledge(loadedNoteFiles(notes), 'partial'), [notes])
   const directory = useAppStore(state => state.noteDirectorySources[noteDirectorySourceKey(surface.workspaceId, surface.path)])
@@ -141,7 +142,7 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
       key={JSON.stringify([choice.location.displayWorkspaceId, choice.location.groupId, choice.location.tabId, choice.location.regionId])} onClick={() => void openAt(choice)}>
       <span title={`${choice.location.displayWorkspaceId} · ${choice.location.groupId} · ${choice.location.tabId} · ${choice.location.regionId}`}>{choice.displayName} · {choice.tabName}</span><small>{choice.source.location.path} · {choice.position}</small>
     </button>)}</div> : null}
-    <NoteFileView {...(originalResource ? { resource: { hostId: originalResource.hostId, workspaceId: originalResource.id, workspacePath: originalResource.path, path: surface.path } } : {})} document={document} knowledge={knowledge} onChange={raw => update(tabId, raw, surface.regionId)} onSave={onSave} onOpen={onOpen} onOpenPage={openPage}
+    <NoteFileView {...(originalResource ? { resource: { hostId: originalResource.hostId, workspaceId: originalResource.id, workspacePath: originalResource.path, path: surface.path } } : {})} document={document} dirty={dirty} knowledge={knowledge} onChange={raw => update(tabId, raw, surface.regionId)} onSave={onSave} onOpen={onOpen} onOpenPage={openPage}
       {...(blockPresentation ? { onSelectedBlock } : {})} {...(restoredBlock ? { restoredBlock } : {})}
       {...(focusRequest !== undefined ? { focusRequest, canFocus, onFocused } : {})}
       {...(reveal?.noteBlock && presentation.active ? { revealBlock: reveal.noteBlock, onRevealed } : {})} />

@@ -19,6 +19,14 @@
 .recall-directory-tools { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .recall-directory-home { padding: var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font-size: var(--fs-meta); cursor: pointer; }
 .recall-directory-home:hover, .recall-directory-home[aria-current] { color: var(--text); background: var(--wash-1); }
+.recall-directory-destinations { display: flex; align-items: center; gap: var(--sp-1); }
+.recall-directory-graph { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-2); }
+.recall-directory-graph[aria-pressed="true"], .recall-collapsed-graph[aria-pressed="true"] { color: var(--text); background: var(--wash-2); }
+.recall-return-note { display: flex; align-items: center; gap: var(--sp-3); max-width: 100%; flex: none; margin: var(--sp-4) var(--sp-6) 0; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); color: var(--text-2); font: var(--fs-body)/1.5 var(--font-sans); text-align: left; cursor: pointer; }
+.recall-return-note > svg, .recall-return-note > span { flex: none; }
+.recall-return-note small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-meta); }
+.recall-return-note:hover { background: var(--wash-2); color: var(--text); }
+.recall-return-note:focus-visible, .recall-directory-graph:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .recall-directory-state { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-5); max-width: 500px; margin: 10vh auto; padding: var(--sp-7); color: var(--text-3); }
 .recall-directory-state h2 { margin: 0; font-size: var(--fs-display); font-weight: 500; color: var(--text); }
 .recall-directory-state p { margin: 0; line-height: 1.7; font-size: var(--fs-prose); }
