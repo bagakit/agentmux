@@ -14,5 +14,5 @@ export const keyboardShortcutsSettingsModule = {
   icon: ThemeObjectKeyboardIcon,
   keywords: 'keyboard shortcuts keys keybindings hotkeys commands bindings chord help',
   savedSummary: () => `${SHORTCUT_BINDINGS.length} read-only bindings`,
-  Pane: KeyboardShortcutsPane
+  Pane: () => <KeyboardShortcutsPane />
 } as const satisfies SettingsModule

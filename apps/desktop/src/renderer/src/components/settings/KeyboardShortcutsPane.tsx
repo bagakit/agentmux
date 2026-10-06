@@ -1,7 +1,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useMemo, useRef, useState } from 'react'
-import { buildCheatSheet, type CheatSheetRow } from '../../lib/shortcut-cheat-sheet'
+import { buildCheatSheet, type CheatSheetRow, type CheatSheetGroupId } from '../../lib/shortcut-cheat-sheet'
 import { bindingById, type ShortcutBinding } from '../../lib/shortcut-registry'
 import { isMacPlatform } from '../../lib/host-platform'
 import '../../styles/settings-keyboard-shortcuts.css'
@@ -16,6 +16,7 @@ function scopeDescription(binding: ShortcutBinding): string {
     case 'terminal': return 'Terminal · when a terminal has focus'
     case 'editor': return 'Editor · when an editor has focus'
     case 'launcher': return 'Start page · in the prompt input'
+    case 'message-tool': return 'Message Tool · in the message editor or its suggestion list'
   }
 }
 
@@ -23,14 +24,14 @@ function searchableChord(row: CheatSheetRow): string {
   return row.keys.map(token => token === '⌘' ? '⌘ cmd command' : token === '⌥' ? '⌥ alt option' : token === '⇧' ? '⇧ shift' : token).join(' ')
 }
 
-export function KeyboardShortcutsPane() {
+export function KeyboardShortcutsPane({ group: groupId }: { group?: CheatSheetGroupId } = {}) {
   const [query, setQuery] = useState('')
   const search = useRef<HTMLInputElement>(null)
   const isMac = isMacPlatform()
-  const groups = useMemo(() => buildCheatSheet(isMac), [isMac])
+  const groups = useMemo(() => buildCheatSheet(isMac).filter(group => !groupId || group.id === groupId), [isMac, groupId])
   const terms = query.trim().toLowerCase().split(/[+\s]+/).filter(Boolean)
   const visible = groups.map(group => ({ ...group, rows: group.rows.filter(row => {
-    const text = `${row.label} ${searchableChord(row)} ${group.title}`.toLowerCase()
+    const text = `${row.label} ${row.description ?? ''} ${searchableChord(row)} ${group.title}`.toLowerCase()
     return terms.every(term => text.includes(term))
   }) })).filter(group => group.rows.length > 0)
   const count = visible.reduce((total, group) => total + group.rows.length, 0)
@@ -44,9 +45,9 @@ export function KeyboardShortcutsPane() {
     </div>
     {count === 0 ? <div className="keyboard-shortcuts__empty"><p>No shortcuts match “{query}”.</p><button type="button" className="small-button" onClick={clearSearch}>Clear search</button></div> : null}
     {visible.map(group => <section key={group.id} className="keyboard-shortcuts__group" data-shortcut-group={group.id}>
-      <header><h3>{group.title}</h3><p>{scopeDescription(bindingById(group.rows[0]!.id)!)}</p></header>
+      {!groupId ? <header><h3>{group.title}</h3><p>{scopeDescription(bindingById(group.rows[0]!.id)!)}</p></header> : null}
       <ul>{group.rows.map(row => <li key={row.id} data-binding-id={row.id}>
-        <span className="keyboard-shortcuts__label">{row.label}</span><span className="keyboard-shortcuts__chord">{row.keys.map((token, index) => <kbd key={index}>{token}</kbd>)}</span>
+        <span className="keyboard-shortcuts__label">{row.label}{row.description ? <small>{row.description}</small> : null}</span><span className="keyboard-shortcuts__chord">{row.keys.map((token, index) => <kbd key={index}>{token}</kbd>)}</span>
       </li>)}</ul>
     </section>)}
   </div>

@@ -14,6 +14,7 @@
 .keyboard-shortcuts__group ul { margin: 0; padding: 0; list-style: none; }
 .keyboard-shortcuts__group li { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); padding: var(--sp-3) 0; border-bottom: 1px solid var(--line-soft); }
 .keyboard-shortcuts__label { min-width: 0; color: var(--text); font-size: var(--fs-body); overflow-wrap: anywhere; }
+.keyboard-shortcuts__label small { display: block; margin-top: var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); }
 .keyboard-shortcuts__chord { display: inline-flex; flex: none; align-items: center; gap: var(--sp-1); }
 .keyboard-shortcuts__chord kbd { display: inline-flex; justify-content: center; align-items: center; min-width: 22px; height: 22px; padding: 0 var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); font: var(--fs-micro) var(--font-mono); }
 .keyboard-shortcuts__empty { padding: var(--sp-6) 0; color: var(--text-3); font-size: var(--fs-body); }

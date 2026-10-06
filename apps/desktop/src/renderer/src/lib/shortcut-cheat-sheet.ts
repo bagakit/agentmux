@@ -19,12 +19,13 @@
 import { SHORTCUT_BINDINGS, chordForPlatform, type Chord, type ShortcutBinding } from './shortcut-registry'
 
 /** A cheat-sheet group id, derived from (scope, gate). Not a new taxonomy — a projection of existing fields. */
-export type CheatSheetGroupId = 'global' | 'workbench' | 'terminal' | 'editor' | 'launcher'
+export type CheatSheetGroupId = 'global' | 'workbench' | 'terminal' | 'editor' | 'launcher' | 'message-tool'
 
 export interface CheatSheetRow {
   /** The registry binding id — the anchor that ties a rendered row back to its SSOT entry. */
   id: string
   label: string
+  description?: string
   /** The chord tokens for the running platform, in display order (modifiers then key). */
   keys: string[]
 }
@@ -49,6 +50,7 @@ export function groupIdForBinding(binding: ShortcutBinding): CheatSheetGroupId {
     case 'terminal': return 'terminal'
     case 'editor': return 'editor'
     case 'launcher': return 'launcher'
+    case 'message-tool': return 'message-tool'
     case 'window':
       // window scope splits on the gate: the two un-gated gestures are global (reach the user mid-typing);
       // everything else is a workbench action suppressed inside editable inputs.
@@ -71,6 +73,7 @@ export const CHEAT_SHEET_GROUPS: readonly { id: CheatSheetGroupId; title: string
   { id: 'global', title: 'Global' },
   { id: 'workbench', title: 'Workbench' },
   { id: 'launcher', title: 'Start page' },
+  { id: 'message-tool', title: 'Message Tool' },
   { id: 'terminal', title: 'Terminal' },
   { id: 'editor', title: 'Editor' }
 ]
@@ -83,6 +86,8 @@ function keyToken(key: string): string {
     case 'arrowup': return '↑'
     case 'arrowdown': return '↓'
     case 'enter': return 'Enter'
+    case 'escape': return 'Esc'
+    case 'tab': return 'Tab'
     // A function key's own name IS its label — upper-casing it is the whole rendering, and it needs no
     // modifier glyph in front (`f1` → `F1`, never `⌘F1`), which the chord's all-false modifiers already say.
     case 'f1': return 'F1'
@@ -119,6 +124,7 @@ export function buildCheatSheet(isMac: boolean): CheatSheetGroup[] {
       .map((binding) => ({
         id: binding.id,
         label: binding.label,
+        ...(binding.description ? { description: binding.description } : {}),
         keys: formatChord(chordForPlatform(binding, isMac), isMac)
       }))
   })).filter((group) => group.rows.length > 0)

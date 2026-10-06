@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, 
 import { SemanticIcon } from '../theme/icons.js'
 import { composerKeywordAtCaret } from '../lib/composer-keywords.js'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
+import { matchComposerShortcut } from '../lib/composer-keyboard.js'
 import { InlineComposer } from './InlineComposer.js'
 import { ComposerReferenceTool } from './ComposerReferenceTool.js'
 import type { ReadPastedImage } from './ConversationImage.js'
@@ -128,25 +129,26 @@ export function AgentComposer({
   }
   function suggestionKeyDown(event: KeyboardEvent | ReactKeyboardEvent): boolean {
     if (!suggestions.length || isImeOwnedKeyboardEvent(event) || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return false
-    if (event.key === 'Escape') {
+    const shortcut = matchComposerShortcut(event)
+    if (shortcut === 'message-tool.dismiss-suggestions') {
       event.preventDefault()
       setDismissedSuggestions(value)
       focusEditor()
       return true
     }
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Enter') return false
+    if (shortcut !== 'message-tool.next' && shortcut !== 'message-tool.previous' && shortcut !== 'message-tool.send') return false
     const buttons = [...(composerRef.current?.querySelectorAll<HTMLButtonElement>('.composer__suggestions button') ?? [])]
     if (!buttons.length) return false
     const current = buttons.indexOf(document.activeElement as HTMLButtonElement)
-    if (event.key === 'Enter') {
+    if (shortcut === 'message-tool.send') {
       if (current < 0) return false
       event.preventDefault()
       buttons[current]!.click()
       return true
     }
     event.preventDefault()
-    const next = current < 0 ? (event.key === 'ArrowDown' ? 0 : buttons.length - 1)
-      : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length
+    const next = current < 0 ? (shortcut === 'message-tool.next' ? 0 : buttons.length - 1)
+      : (current + (shortcut === 'message-tool.next' ? 1 : -1) + buttons.length) % buttons.length
     buttons[next]!.focus()
     return true
   }
@@ -178,17 +180,17 @@ export function AgentComposer({
           // `nativeEvent.keyCode`。只标记那两路的输入法照旧会把半转换草稿提交上去。
           // Candidates retain their own scope after moving focus out of the editor.
           if (selectionEmpty && suggestionKeyDown(event)) return
-          const plainArrow = !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey
-          if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && plainArrow && selectionEmpty &&
-            !suggestions.length && onHistoryRecall && !isImeOwnedKeyboardEvent(event)) {
-            if (onHistoryRecall(event.key === 'ArrowUp' ? 'older' : 'newer', value, caret) !== null) event.preventDefault()
+          const shortcut = matchComposerShortcut(event)
+          if ((shortcut === 'message-tool.previous' || shortcut === 'message-tool.next') && selectionEmpty &&
+            !suggestions.length && onHistoryRecall) {
+            if (onHistoryRecall(shortcut === 'message-tool.previous' ? 'older' : 'newer', value, caret) !== null) event.preventDefault()
             return
           }
           // Tab 一键替换识别词。**只在光标正停在某个识别词末尾时**接管，否则一律放行——Tab 是焦点
           // 遍历键，无条件 preventDefault 会把用户永久困在输入框里（照既有 onHistoryRecall 返回
           // null 就让箭头正常移动的纪律）。命中判定与下划线共用 composerKeywordAtCaret，两处不许各算
           // 一次：分开算就会出现"划了线却按不动"。
-          if (event.key === 'Tab' && !event.shiftKey && !isImeOwnedKeyboardEvent(event)) {
+          if (shortcut === 'message-tool.expand-prompt') {
             const hit = composerKeywordAtCaret(value, caret, keywordTexts)
             if (hit) {
               event.preventDefault()
@@ -201,12 +203,12 @@ export function AgentComposer({
           // Bare Enter follows the parent's queue intent, including a pending interaction. Stop is
           // a separate action and must not decide whether a waiting/blocked Agent can retain a draft.
           // Cmd/Ctrl+Enter follows immediate submission when available; Shift+Enter and IME stay editing.
-          if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !isImeOwnedKeyboardEvent(event) && onQueue && value.trim()) {
+          if (shortcut === 'message-tool.send' && onQueue && value.trim()) {
             event.preventDefault()
             onQueue()
             return
           }
-          if (event.key === 'Enter'  && !event.shiftKey && !isImeOwnedKeyboardEvent(event) && canSubmit) {
+          if ((shortcut === 'message-tool.send' || shortcut === 'message-tool.send-immediately') && canSubmit) {
             event.preventDefault()
             onSubmit?.()
           }
