@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { KnowledgeTopic, TopicCategory, TopicKnowledgeSource } from '@agentmux/core/control'
 import type { OpenHttpLink } from '@agentmux/client-ui/components/AgentMarkdown'
@@ -7,6 +8,9 @@ import { MobileTopicKnowledge, type TopicsRpc } from './MobileTopicKnowledge'
 import { MobileTopicOrganization } from './MobileTopicOrganization'
 import type { MobileKnowledgeReference } from '../recovery/presentation-route'
 import './topics.css'
+
+const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
+const ThemeObjectTopicIcon = semanticIconComponent('object.notebook')
 
 export type MobileTopicsSurfaceProps = { rpc: TopicsRpc; visible?: boolean; topicId?: string | null; onOpenTopic(topic: KnowledgeTopic): void | Promise<void>;
   client?: AgentMuxHostedClient | null; connected?: boolean;
@@ -23,7 +27,6 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
   const [categories, setCategories] = useState<TopicCategory[]>([]), [categoryId, setCategoryId] = useState(initial.current.categoryId)
   const category = categories.find(value => value.categoryId === categoryId) ?? null
   const [topicDirectories, setTopicDirectories] = useState<Record<string, KnowledgeTopic[]>>({})
-  const topics = categoryId ? topicDirectories[categoryId] ?? [] : []
   const [visited, setVisited] = useState<KnowledgeTopic[]>([])
   const [selectedTopicId, setSelectedTopicId] = useState(initial.current.topicId)
   const inTopic = selectedTopicId !== null
@@ -35,7 +38,8 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
   const reportKnowledgeReference = useCallback((scopeId: string, reference: MobileKnowledgeReference) => {
     if ((contextRef.current.topicId ?? 'all-topics') === scopeId) referenceCallback.current?.(reference)
   }, [])
-  const [categoryIssue, setCategoryIssue] = useState(''), [topicsIssue, setTopicsIssue] = useState(''), [openIssue, setOpenIssue] = useState(''), [loading, setLoading] = useState(false), [refresh, setRefresh] = useState(0)
+  const [topicIssues, setTopicIssues] = useState<Record<string, string>>({}), [topicLoading, setTopicLoading] = useState<string | null>(null)
+  const [categoryIssue, setCategoryIssue] = useState(''), [openIssue, setOpenIssue] = useState(''), [loading, setLoading] = useState(false), [refresh, setRefresh] = useState(0)
   const [knowledgeBack, setKnowledgeBack] = useState<{ scopeId: string; back: () => void } | null>(null)
   const [organizationBack, setOrganizationBack] = useState<(() => void) | null>(null)
   const leaveTopicRef = useRef(onLeaveTopic); leaveTopicRef.current = onLeaveTopic
@@ -90,7 +94,7 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
     if (!visible) return
     let live = true; setLoading(true)
     void rpc('topic.category.ls', {}).then(result => {
-      if (live) { setCategories(result.categories); setCategoryIssue(result.unavailable.map(value => `${value.message} ${value.recovery}`).join('\n')) }
+      if (live) { setCategories(previous => result.unavailable.length && !result.categories.length ? previous : result.categories); setCategoryIssue(result.unavailable.map(value => `${value.message} ${value.recovery}`).join('\n')) }
     }).catch(error => { if (live) setCategoryIssue(`分类读取失败：${error instanceof Error ? error.message : String(error)}。原目录保留，可重试。`) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
@@ -98,9 +102,12 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
   useEffect(() => {
     if (!visible || !categoryId) return
     let live = true
-    void rpc('topic.ls', { categoryId }).then(result => {
-      if (live) { setTopicDirectories(previous => ({ ...previous, [categoryId]: result.topics })); setTopicsIssue(result.unavailable.map(value => `${value.message} ${value.recovery}`).join('\n')) }
-    }).catch(error => { if (live) setTopicsIssue(`Topic 读取失败：${error instanceof Error ? error.message : String(error)}。原工作面保留，可重试。`) })
+    const requestedCategoryId = categoryId
+    setTopicLoading(requestedCategoryId)
+    void rpc('topic.ls', { categoryId: requestedCategoryId }).then(result => {
+      if (live) { setTopicDirectories(previous => ({ ...previous, [requestedCategoryId]: result.unavailable.length && !result.topics.length ? previous[requestedCategoryId] ?? [] : result.topics })); setTopicIssues(previous => ({ ...previous, [requestedCategoryId]: result.unavailable.map(value => `${value.message} ${value.recovery}`).join('\n') })) }
+    }).catch(error => { if (live) setTopicIssues(previous => ({ ...previous, [requestedCategoryId]: `Topic 读取失败：${error instanceof Error ? error.message : String(error)}。原工作面保留，可重试。` })) })
+      .finally(() => { if (live) setTopicLoading(null) })
     return () => { live = false }
   }, [rpc, categoryId, refresh, visible])
   function open(value: KnowledgeTopic) {
@@ -109,24 +116,44 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
     const failed = (error: unknown) => setOpenIssue(`原 Topic 打开未确认：${error instanceof Error ? error.message : String(error)}。原身份与工作面保留。`)
     try { void Promise.resolve(onOpenTopic(value)).catch(failed) } catch (error) { failed(error) }
   }
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const matchesCategory = (value: TopicCategory) => value.title.toLocaleLowerCase().includes(normalizedQuery)
+  const matchesTopic = (value: KnowledgeTopic) => `${value.title} ${value.summary}`.toLocaleLowerCase().includes(normalizedQuery)
+  const matchingCategories = categories.filter(value => matchesCategory(value) || (topicDirectories[value.categoryId] ?? []).some(matchesTopic))
   return <section className="mobile-topics" aria-label="Topics" hidden={!visible}>
     <header className="mobile-topics-actions">
       {inTopic ? <button aria-label={topicBackLabel ?? '返回分类目录'} onClick={backToCategory}>{topicBackLabel ?? '返回'}</button>
         : categoryId && <button aria-label="返回所有分类" onClick={backToAllCategories}>返回</button>}
-      <div className="mobile-topics-heading"><small>{inTopic ? category?.title ?? 'Topics' : categoryId ? 'Topics' : '知识与讨论'}</small><h1>{inTopic ? currentTopic?.title ?? '原 Topic 尚未确认' : category?.title ?? (categoryId ? '原分类尚未确认' : 'Topics')}</h1></div>
+      <div className="mobile-topics-heading"><small>{inTopic ? category?.title ?? 'Topics' : category?.title ?? '知识与讨论'}</small><h1>{inTopic ? currentTopic?.title ?? '原 Topic 尚未确认' : 'Topics'}</h1></div>
     </header>
     <MobileTopicOrganization rpc={rpc} categories={categories} category={category} topic={currentTopic} visible={visible} onBackChange={reportOrganizationBack} onRefresh={() => setRefresh(value => value + 1)} onChanged={() => setRefresh(value => value + 1)} />
-    {[categoryIssue, topicsIssue, openIssue].filter(Boolean).map((value, index) => <p key={index} className="mobile-topics-issue" role="status">{value}</p>)}
+    {[categoryIssue, openIssue].filter(Boolean).map((value, index) => <p key={index} className="mobile-topics-issue" role="status">{value}</p>)}
     {deepLinkIssue && <p className="mobile-topics-issue" role="status">{deepLinkIssue}<button onClick={() => setDeepLinkRetry(value => value + 1)}>重试原 Topic</button></p>}
     <div hidden={Boolean(organizationBack)}>
     <div className="mobile-topics-tabs" role="group" aria-label="Topic 内容"><button aria-pressed={mode === 'topics'} onClick={() => setMode('topics')}>{inTopic ? '讨论' : 'Topics'}</button><button aria-pressed={mode === 'knowledge'} onClick={() => setMode('knowledge')}>知识</button></div>
     <div hidden={inTopic || mode !== 'topics'}>
-      <label className="mobile-topics-search"><TextInput aria-label="查找 Topic 或分类" value={query} placeholder={categoryId ? '查找此分类的 Topic' : '查找分类'} onChange={event => setQuery(event.target.value)} /></label>
-      <ul className="mobile-topics-list">{!categoryId ? categories.filter(value => value.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).map(value => <li key={value.categoryId}>
-        <button onClick={() => { setCategoryId(value.categoryId); setQuery('') }}><strong>{value.title}</strong>{value.readError && <small>{value.readError}</small>}</button></li>)
-        : topics.filter(value => `${value.title} ${value.summary}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).map(value => <li key={value.topicId}>
-          <button onClick={() => open(value)}><strong>{value.title}</strong><small>{value.readError ?? value.summary}</small></button></li>)}</ul>
-      {!loading && !(categoryId ? topics.length : categories.length) && <p className="mobile-topics-empty">{(categoryId ? topicsIssue : categoryIssue) ? '目录尚未确认，原工作面仍保留。' : categoryId ? '此分类暂无已确认 Topic。' : '暂无已确认分类。'}</p>}
+      <label className="mobile-topics-search"><TextInput aria-label="查找 Topic 或分类" value={query} placeholder="查找 Topic 或分类" onChange={event => setQuery(event.target.value)} /></label>
+      <ul className="mobile-topics-list mobile-topics-tree" aria-label="Topic 分类目录">{matchingCategories.map(value => {
+        const expanded = categoryId === value.categoryId
+        const children = topicDirectories[value.categoryId] ?? []
+        const issue = topicIssues[value.categoryId]
+        const matchingTopics = matchesCategory(value) ? children : children.filter(matchesTopic)
+        return <li key={value.categoryId} data-topic-category={value.categoryId}>
+          <button className="mobile-topics-category" aria-expanded={expanded} onClick={() => { setCategoryId(expanded ? null : value.categoryId) }}>
+            <ThemeNavigationSubmenuIcon size={14} aria-hidden="true" /><span><strong>{value.title}</strong>{value.readError && <small>{value.readError}</small>}</span>
+          </button>
+          {expanded && <div className="mobile-topics-branch" data-topic-branch={value.categoryId}>
+            {issue && <details className="mobile-topics-service"><summary>此分类更新未确认</summary><p className="mobile-topics-issue" role="status">{issue}</p><button type="button" onClick={() => setRefresh(current => current + 1)}>重试此分类</button></details>}
+            <ul aria-label={`${value.title}的 Topics`}>{matchingTopics.map(child => <li key={child.topicId}>
+              <button className="mobile-topics-topic" onClick={() => open(child)}><ThemeObjectTopicIcon size={15} aria-hidden="true" /><span><strong>{child.title}</strong><small>{child.readError ?? child.summary}</small></span></button>
+            </li>)}</ul>
+            {topicLoading === value.categoryId && <p className="mobile-topics-empty" role="status">读取此分类的 Topics…</p>}
+            {topicLoading !== value.categoryId && !matchingTopics.length && <p className="mobile-topics-empty">{issue ? '目录尚未确认，原工作面仍保留。' : children.length ? '没有匹配的 Topic。' : '此分类暂无已确认 Topic。'}</p>}
+          </div>}
+        </li>
+      })}</ul>
+      {!loading && !matchingCategories.length && <p className="mobile-topics-empty">{categoryIssue ? '目录尚未确认，原工作面仍保留。' : categories.length ? '没有匹配的分类或已读取 Topic。' : '暂无已确认分类。'}</p>}
+      {categoryId && !category && !loading && <p className="mobile-topics-issue" role="status">原分类尚未确认，原目录身份保留。可刷新目录或返回所有分类。</p>}
     </div>
     <div hidden={mode !== 'knowledge' || inTopic}><ScopedKnowledge reportBack={reportKnowledgeBack} reportReference={reportKnowledgeReference} client={client ?? null} {...(connected !== undefined ? { connected } : {})}
       {...(initialContext?.topicId === null && initialKnowledge ? { initialReference: initialKnowledge } : {})}

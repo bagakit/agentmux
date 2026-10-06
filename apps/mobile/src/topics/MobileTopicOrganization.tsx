@@ -1,8 +1,11 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useCallback, useEffect, useState } from 'react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { KnowledgeTopic, TopicCategory } from '@agentmux/core/control'
 import type { TopicsRpc } from './MobileTopicKnowledge'
+
+const ThemeActionMoreIcon = semanticIconComponent('action.more')
 
 type Action = { kind: 'category-create' } | { kind: 'topic-create'; category: TopicCategory }
   | { kind: 'category-rename'; category: TopicCategory } | { kind: 'topic-move'; topic: KnowledgeTopic }
@@ -19,7 +22,7 @@ export function MobileTopicOrganization({ rpc, categories, category, topic, onCh
     return () => onBackChange(null)
   }, [visible, onBackChange, open, close])
   function begin(value: Action) { if (!action) setAction(value); setOpen(true) }
-  return <details className="mobile-topic-organization"><summary>更多</summary>
+  return <details className="mobile-topic-organization"><summary aria-label="Topics 更多操作" title="更多操作"><ThemeActionMoreIcon size={18} aria-hidden="true" /></summary>
     {!open && <div className="mobile-topics-actions"><button onClick={() => begin({ kind: 'category-create' })}>新建分类</button>
       {onRefresh && <button onClick={onRefresh}>刷新目录</button>}
       {category && <><button onClick={() => begin({ kind: 'topic-create', category })}>新建 Topic</button><button onClick={() => begin({ kind: 'category-rename', category })}>重命名分类</button></>}
