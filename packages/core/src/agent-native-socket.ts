@@ -28,9 +28,36 @@ export function nativeSocketSourceId(value: NativeSocketBinding): string {
   return createHash('sha256').update(JSON.stringify(actorIdentity)).digest('base64url')
 }
 
-function failure(phase: string, reason: string): AgentMuxError {
+type NativeSocketFailureObservation = {
+  code: 'NATIVE_SOCKET_PEER_UNCONFIRMED'; phase: string; errno: number | null
+  reason?: string; expectedUid?: number; stat?: { type: number; uid: number; mode: number }
+}
+/** The original owned C observer emits this bounded machine record. Neither an
+ * error nor its text can grant an actor, input readiness, or a retry. */
+function failureObservation(value: unknown): NativeSocketFailureObservation | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const x = value as Record<string, unknown>
+  const integer = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) >= 0
+  const token = (v: unknown): v is string => typeof v === 'string' && /^[a-z-]{1,64}$/u.test(v)
+  if (Object.keys(x).some(key => !['code', 'phase', 'errno', 'reason', 'expectedUid', 'stat'].includes(key)) ||
+      x.code !== 'NATIVE_SOCKET_PEER_UNCONFIRMED' || !token(x.phase) || x.errno !== null && !integer(x.errno) ||
+      x.reason !== undefined && !token(x.reason) || x.expectedUid !== undefined && !integer(x.expectedUid)) return undefined
+  if (x.stat !== undefined) {
+    if (!x.stat || typeof x.stat !== 'object' || Array.isArray(x.stat)) return undefined
+    const stat = x.stat as Record<string, unknown>
+    if (Object.keys(stat).some(key => !['type', 'uid', 'mode'].includes(key)) ||
+        !integer(stat.type) || !integer(stat.uid) || !integer(stat.mode) || x.errno !== null) return undefined
+  }
+  if (x.reason !== undefined) {
+    if (!['stat-failed', 'not-socket', 'uid-mismatch', 'permissions-mismatch'].includes(x.reason as string) || x.expectedUid === undefined) return undefined
+    if (x.reason === 'stat-failed' ? x.stat !== undefined || !integer(x.errno) || x.errno === 0
+      : x.stat === undefined || x.errno !== null) return undefined
+  }
+  return structuredClone(x) as NativeSocketFailureObservation
+}
+function failure(phase: string, reason: string, observation?: NativeSocketFailureObservation): AgentMuxError {
   return new AgentMuxError('The original native socket is unconfirmed. The Agent and message remain available.',
-    'AGENT_NATIVE_INPUT_UNCONFIRMED', JSON.stringify({ phase, reason }))
+    'AGENT_NATIVE_INPUT_UNCONFIRMED', JSON.stringify({ phase, reason, ...(observation ? { observation } : {}) }))
 }
 function binding(value: unknown, runPid: number, endpoint: string): NativeSocketBinding {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw failure('native-peer', 'binding-shape')
@@ -91,8 +118,8 @@ export async function openNativeSocketChannel(runPid: number, endpoint: string, 
     for (let end; (end = diagnostics.indexOf('\n')) !== -1;) {
       const line = diagnostics.slice(0, end); diagnostics = diagnostics.slice(end + 1)
       try {
-        const x = JSON.parse(line) as { code?: unknown; phase?: unknown; errno?: unknown }
-        if (x.code === 'NATIVE_SOCKET_PEER_UNCONFIRMED' && typeof x.phase === 'string' && /^[a-z-]{1,64}$/u.test(x.phase)) fail(failure('native-peer', x.phase))
+        const observation = failureObservation(JSON.parse(line))
+        if (observation) fail(failure('native-peer', observation.phase, observation))
       } catch { /* Unstructured diagnostics never establish an owner or input result. */ }
     }
     if (diagnostics.length > 4096) diagnostics = '' // Only the bounded observer record has a contract.
@@ -147,10 +174,11 @@ export async function openNativeSocketChannel(runPid: number, endpoint: string, 
           current.endpoint, `${current.device}:${current.inode}`], { signal: currentSignal, timeoutMs: 2000, maxOutputBytes: 4096 })
         if (checked.exitCode !== 0 || checked.stdout !== '{"type":"native-socket-current","schema":1}\n') {
           let reason = 'original-association-unconfirmed'
-          try { const record = JSON.parse(checked.stderr) as { code?: unknown; phase?: unknown }
-            if (record.code === 'NATIVE_SOCKET_PEER_UNCONFIRMED' && typeof record.phase === 'string' && /^[a-z-]{1,64}$/u.test(record.phase)) reason = record.phase
+          let observation: NativeSocketFailureObservation | undefined
+          try { observation = failureObservation(JSON.parse(checked.stderr))
+            if (observation) reason = observation.phase
           } catch { /* Observation failure is unknown, never current authority. */ }
-          throw failure('native-current-peer', reason)
+          throw failure('native-current-peer', reason, observation)
         }
         for (const pid of [current.tuiPid, current.peerPid]) {
           const image = await openNativeProcessImage(pid, currentSignal)
