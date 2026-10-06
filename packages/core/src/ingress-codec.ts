@@ -16,7 +16,7 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
   const p = object(value, ['ingressId', 'connectionId', 'application', 'eventId', 'externalMessageId', 'externalConversationId', 'actor', 'body', 'state', 'code', 'input'])
   const actor = parseConnectionActor(p.actor), app = object(p.application, ['domain', 'appId'])
   const application = { domain: text(app.domain), appId: text(app.appId) }
-  if (!equal(actor.application, application) || typeof p.body !== 'string' || !['received', 'refused', 'claimed'].includes(String(p.state))) fail()
+  if (!equal(actor.application, application) || typeof p.body !== 'string' || p.state !== 'received' && p.state !== 'refused' && p.state !== 'claimed') fail()
   const base = { ingressId: text(p.ingressId), connectionId: text(p.connectionId), application, eventId: text(p.eventId), externalMessageId: text(p.externalMessageId), externalConversationId: text(p.externalConversationId), actor, body: p.body as string }
   if (p.state === 'refused') { if (p.input !== undefined) fail(); return { ...base, state: 'refused', code: text(p.code) } }
   if (p.code !== undefined) fail()
@@ -37,9 +37,10 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
   if (method === 'connection.ingress.authority') {
     const p = object(value, ['ingress', 'authority', 'code']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
     if (ingress && (ingress.state !== 'claimed' || ingress.input?.operationId !== (input as ConnectionIngressParamsMap['connection.ingress.authority']).operationId)) fail()
-    if (!['current', 'refused', 'unavailable'].includes(String(p.authority))) fail()
+    if (p.authority !== 'current' && p.authority !== 'refused' && p.authority !== 'unavailable') fail()
     if (p.authority === 'current' ? !ingress || p.code !== undefined : !CONNECTION_INGRESS_AUTHORITY_CODES.includes(p.code as never)) fail()
-    if (p.authority === 'unavailable' ? !['INGRESS_STORAGE_UNCONFIRMED', 'INGRESS_ADDRESSING_UNCONFIRMED'].includes(String(p.code)) : ['INGRESS_STORAGE_UNCONFIRMED', 'INGRESS_ADDRESSING_UNCONFIRMED'].includes(String(p.code))) fail()
+    const unavailable = p.code === 'INGRESS_STORAGE_UNCONFIRMED' || p.code === 'INGRESS_ADDRESSING_UNCONFIRMED'
+    if (p.authority === 'unavailable' ? !unavailable : unavailable) fail()
     return { ingress, authority: p.authority, ...(p.code === undefined ? {} : { code: p.code }) } as ConnectionIngressResultMap[M]
   }
   if (method === 'connection.ingress.inspect') {
