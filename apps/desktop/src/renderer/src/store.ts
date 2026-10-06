@@ -2899,7 +2899,7 @@ function partializeAppState(state: AppState): PersistedAppState {
     recallNotebookId: presentation.recallNotebookId, recallNoteId: presentation.recallNoteId,
     recallZoneSelection: persistedSurveyZoneSelection(presentation.recallZoneSelection),
     surveyZoneSelection: persistedSurveyZoneSelection(presentation.surveyZoneSelection),
-    documents: Object.fromEntries(Object.entries(documents).filter(([key]) => dirtyDocuments[key])),
+    documents: Object.fromEntries(Object.entries(documents).filter(([key, document]) => dirtyDocuments[key] || document.noteConversion)),
     dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
     restoredWorkbench: projectPersistedWorkbench({ tabs, layouts })
   }
@@ -3339,6 +3339,10 @@ function surveyPresentationAfterClose(state: AppState, tabs: AppState['tabs']) {
 export async function registerCreatedNote(receipt: NoteCreationReceipt): Promise<NoteCreationReceipt> {
   if (receipt.status !== 'written' || receipt.notebookRegistered) return receipt
   try {
+    if (receipt.legacyConversion) {
+      const catalog = await refreshNotebookLibrary(), page = catalog.pages[receipt.noteId]
+      if (page && page.resource.hostId === receipt.target.hostId && page.resource.workspaceId === receipt.target.workspaceId && page.resource.workspacePath === receipt.target.workspacePath && page.resource.path === receipt.path) return { ...receipt, notebookRegistered: true, notebookIssue: undefined }
+    }
     await changeNotebook({ kind: 'register', noteId: receipt.noteId, title: receipt.draft.trim().split('\n')[0]?.slice(0, 100) || 'Untitled note',
       resource: { hostId: receipt.target.hostId, workspaceId: receipt.target.workspaceId, workspacePath: receipt.target.workspacePath, path: receipt.path },
       ...(receipt.target.zoneId ? { workface: { zoneId: receipt.target.zoneId, workspaceId: receipt.target.workspaceId } } : {}), ...receipt.notebook }, 'note-register:' + receipt.intentId)

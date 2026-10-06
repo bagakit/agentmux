@@ -599,6 +599,13 @@ export type FileDocument = {
   path: string
   content: string
   revision: string
+  /** One-time client draft backup; never a canonical Note body or a replay queue. */
+  noteConversion?: {
+    originalContent: string
+    originalRevision: string
+    source: import('@agentmux/core/notebook-catalog').NoteResource
+    unconfirmedWrite?: { content: string; expectedRevision: string | null; generation: number; resource: { hostId: string; path: string } }
+  } | undefined
   /** Original trusted metadata, bound to this exact Markdown body and resource. */
   noteProvenance?: import('@agentmux/core/note-provenance').NoteProvenanceSnapshot
   /** Local last-save observation; never part of the filesystem body or public read DTO. */

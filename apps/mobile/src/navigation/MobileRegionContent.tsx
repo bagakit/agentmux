@@ -19,7 +19,21 @@ function OriginalFile({ value, client, visible, openHttpLink }: { value: Content
   return value.path.endsWith(NOTE_FILE_EXTENSION) && client?.forwardRpc
     ? <MobileNoteFile rpc={client.forwardRpc} params={value.params} read={value.read} visible={visible} />
     : /\.(md|markdown|mdx)$/iu.test(value.path) ? <AgentMarkdown content={value.content} documentMode sourcePath={value.path} workspaceRoot={value.params.expectedResource.workspacePath} {...(openHttpLink ? { openHttpLink } : {})} />
-      : <pre className="mobile-region-source">{value.content}</pre>
+      : <><LegacyConversionNotice value={value} client={client} visible={visible} /><pre className="mobile-region-source">{value.content}</pre></>
+}
+/** A remote/failed legacy Note remains a readable original file; conversion observation grants no write. */
+function LegacyConversionNotice({ value, client, visible }: { value: Content; client: AgentMuxHostedClient | null; visible: boolean }) {
+  const [message, setMessage] = useState(''), [attempt, retry] = useState(0)
+  useEffect(() => {
+    if (!visible || !value.path.endsWith('.note.json') || !client?.forwardRpc || !value.read.resource) return
+    let disposed = false
+    const resource = value.read.resource
+    void client.forwardRpc('notebook.inspect', {}).then(result => {
+      if (!disposed) setMessage((result.conversionIssues ?? []).filter(issue => issue.resource?.hostId === resource.hostId && issue.resource.workspaceId === resource.workspaceId && issue.resource.workspacePath === resource.workspacePath && issue.resource.path === resource.path).map(issue => issue.message).join(' '))
+    }).catch(error => { if (!disposed) setMessage('原格式转换状态尚未确认；原文件仍可阅读。' + String(error)) })
+    return () => { disposed = true }
+  }, [visible, client, value.path, value.read.resource, attempt])
+  return message ? <p role="status">{message}<button type="button" onClick={() => retry(value => value + 1)}>刷新原转换状态</button></p> : null
 }
 export type MobileRegionContentProps = { client: AgentMuxHostedClient | null; connected?: boolean; visible?: boolean; showTitle?: boolean; tabId: string; regionId: string; zoneId: string | null; kind: 'file' | 'browser'; browserId?: string | undefined; file?: AgentMuxSpaceCatalog['regions'][number]['file']; openHttpLink?: OpenHttpLink; onBackChange?(back: (() => void) | null): void }
 export function MobileRegionContent(props: MobileRegionContentProps) {
