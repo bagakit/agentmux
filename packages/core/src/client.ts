@@ -23,7 +23,7 @@ import { parseAgentNativeSessionConfirmation } from './agent-native-session-conf
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { nativeCatalogIssue } from './providers/native-session-catalog-files.js'
 import { agentForkIdentityReminder, assertAgentForkSource, parseAgentForkSource, type AgentMuxAgentForkSource } from './agent-fork.js'
-import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionResponseSettled } from './agent-interaction-state.js'
+import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionResponseSettled, agentInteractionRequestTarget } from './agent-interaction-state.js'
 import {
   normalizeLaunchOptionSelection,
   type LaunchOptionSelection
@@ -124,6 +124,7 @@ import { readAgentSessionHistory, type AgentSessionHistoryReadInput, type AgentS
 import { removeHostColorSignals } from './terminal-environment-policy.js'
 import { deriveAgentSessionId, mintAgentSessionId } from './agent-session-id.js'
 import {
+  normalizeAgentInteractionRequest,
   AgentMuxFileAgentSessionStore,
   AgentMuxSessionDurabilityError,
   loadAgentSessionMetadata,
@@ -173,6 +174,8 @@ import type {
   AgentMuxObservationOrigin,
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
+  AgentMuxInteractionOperationReceipt,
+  AgentMuxInteractionOperationIntent,
   AgentMuxRun,
   AgentMuxRunAppliedSize,
   AgentMuxRunAttachment,
@@ -391,7 +394,7 @@ export type AgentMuxAgentMessageSubmission = {
 
 export type AgentMuxAgentMessageInput = AgentMuxAgentMessageSubmission & { agentSessionId: string }
 
-export type AgentMuxAgentInteractionInput = {
+export type AgentMuxAgentInteractionInput = AgentMuxInteractionOperationIntent & {
   agentSessionId: string
   expectedRun: AgentMuxRunRef
   response: AgentMuxInteractionResponse
@@ -538,22 +541,12 @@ function terminalInitialPromptReadinessIdentity(
     .digest('base64url')
 }
 
-function agentInteractionOperationIdentity(
-  session: AgentMuxAgentSession,
-  requestId: string,
-  responseDigest: string,
-  data: string
-): string {
-  return createHash('sha256')
-    .update(JSON.stringify([
-      'agentmux-agent-interaction-v1',
-      session.agentSessionId,
-      session.run.runId,
-      requestId,
-      responseDigest,
-      data
-    ]))
-    .digest('base64url')
+function interactionReceiptPatch(session: AgentMuxStoredAgentSession, operationId: string,
+  patch: Partial<AgentMuxInteractionOperationReceipt>): AgentMuxStoredAgentSession {
+  const original = session.interactionOperations?.[operationId]
+  if (!original) return session
+  return { ...session, interactionOperations: { ...session.interactionOperations,
+    [operationId]: { ...original, ...patch } } }
 }
 
 function digestInteractionResponse(response: AgentMuxInteractionResponse): string {
@@ -5942,7 +5935,65 @@ export class AgentMuxClient {
     await this.messageQueue.recordDelivery(envelope.messageId, 'delivered')
   }
 
-  async respondAgentInteraction(input: AgentMuxAgentInteractionInput, context?: AgentInputCallContext): Promise<void> {
+  /** Read the exact original response without dispatching or requiring its Run to remain current. */
+  async inspectAgentInteractionOperation(input: { agentSessionId: string; operationId: string }): Promise<AgentMuxInteractionOperationReceipt | null> {
+    let session: AgentMuxStoredAgentSession | null = null
+    await this.registry.readMetadata(input.agentSessionId, value => { session = value })
+    if (!session) throw new AgentMuxError('The original Agent Session is unavailable.', 'UNKNOWN_AGENT_SESSION')
+    const current = session as AgentMuxStoredAgentSession
+    const receipt = current.interactionOperations?.[input.operationId]
+    if (!receipt) return null
+    const pending = current.pendingInteraction
+    const original = pending && [pending.request, ...(pending.additionalRequests ?? [])].find(request =>
+      isDeepStrictEqual(agentInteractionRequestTarget(request), agentInteractionRequestTarget(receipt.expectedRequest)))
+    const hook = original?.kind === 'permission' ? original.permissionHook?.response : undefined
+    const response = pending?.response?.operationId === input.operationId ? pending.response : undefined
+    return structuredClone({ ...receipt,
+      ...(hook?.delivery === 'connection-written' ? { delivery: 'hook-written' as const } : {}),
+      ...(response ? { inputByteRange: response.inputByteRange,
+        delivery: response.acknowledged ? 'bytes-accepted' as const : 'unknown' as const } : {}),
+      ...(original && pending?.nativeCompleted ? { nativeCompleted: pending.nativeCompleted } : {}) })
+  }
+
+  async respondAgentInteraction(input: AgentMuxAgentInteractionInput, context?: AgentInputCallContext): Promise<AgentMuxInteractionOperationReceipt> {
+    if (typeof input.operationId !== 'string' || !input.operationId || Buffer.byteLength(input.operationId) > 512 || /[\0\r\n]/u.test(input.operationId)) {
+      throw new AgentMuxError('A stable interaction operation ID is required.', 'INVALID_AGENT_INTERACTION_RESPONSE')
+    }
+    input = { ...input, expectedRequest: normalizeAgentInteractionRequest(input.expectedRequest) }
+    const expected = agentInteractionRequestTarget(input.expectedRequest)
+    const response = normalizeAgentInteractionResponse(expected, input.response)
+    if (!isDeepStrictEqual(response, input.response)) throw new AgentMuxError('The interaction response contains unknown fields.', 'INVALID_AGENT_INTERACTION_RESPONSE')
+    const original = await this.inspectAgentInteractionOperation(input)
+    if (original) {
+      if (!sameRun(original.run, input.expectedRun) || !isDeepStrictEqual(agentInteractionRequestTarget(original.expectedRequest), expected) ||
+          !isDeepStrictEqual(original.response, response)) throw new AgentMuxError('The original response operation has different content.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
+      // Only an explicit same-intent caller may join the original recoverable input operation.
+      // Inspection and reconnection never turn unknown into a new input attempt.
+      if (!['saved', 'unknown'].includes(original.delivery) || original.nativeCompleted || expected.evidence.source === 'acp' && original.delivery === 'unknown') return original
+    }
+    const requested = await this.registry.resolveMetadata(input.agentSessionId, 'local', () => context?.requestSignal?.throwIfAborted())
+    await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, current => {
+      const request = [current.pendingInteraction?.request, ...(current.pendingInteraction?.additionalRequests ?? [])].find(candidate => candidate?.id === response.requestId)
+      if (!request || request.agentSessionId !== input.agentSessionId || !isDeepStrictEqual(agentInteractionRequestTarget(request), expected) ||
+          !sameNativeHandle(current.nativeHandle, requested.nativeHandle)) throw new AgentMuxError('The exact original interaction request changed.', 'UNKNOWN_AGENT_INTERACTION')
+      const competing = Object.values(current.interactionOperations ?? {}).find(receipt => sameRun(receipt.run, input.expectedRun) &&
+        isDeepStrictEqual(agentInteractionRequestTarget(receipt.expectedRequest), expected) && receipt.operationId !== input.operationId)
+      if (competing) throw new AgentMuxError('The original request already has another response operation.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
+      const prior = current.interactionOperations?.[input.operationId]
+      if (prior) {
+        if (!isDeepStrictEqual(prior.response, response) || !isDeepStrictEqual(agentInteractionRequestTarget(prior.expectedRequest), expected)) throw new AgentMuxError('The original response operation has different content.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
+        return current
+      }
+      return { ...current, interactionOperations: { ...current.interactionOperations, [input.operationId]: {
+        operationId: input.operationId, agentSessionId: input.agentSessionId, run: input.expectedRun,
+        expectedRequest: structuredClone(expected), response: structuredClone(response),
+        ...(current.nativeHandle ? { nativeHandle: current.nativeHandle } : {}), delivery: 'saved', nativeAdoption: 'unknown' } }, updatedAt: Date.now() }
+    })
+    await this.dispatchAgentInteraction(input, context)
+    return (await this.inspectAgentInteractionOperation(input))!
+  }
+
+  private async dispatchAgentInteraction(input: AgentMuxAgentInteractionInput, context?: AgentInputCallContext): Promise<void> {
     const requestedSession = await this.registry.resolveMetadata(input.agentSessionId, 'local', () => context?.requestSignal?.throwIfAborted())
     if (!sameRun(requestedSession.run, input.expectedRun)) {
       throw new AgentMuxError(
@@ -5955,7 +6006,7 @@ export class AgentMuxClient {
     const hookRequest = [pending?.request, ...(pending?.additionalRequests ?? [])].find(request =>
       request?.id === input.response.requestId && request.kind === 'permission' && request.permissionHook)
     if (hookRequest?.kind === 'permission' && hookRequest.permissionHook) {
-      await this.respondPermissionHook(canonical, hookRequest, input.response, context)
+      await this.respondPermissionHook(canonical, hookRequest, input.response, input.operationId, context)
       return
     }
     await this.connect()
@@ -5977,7 +6028,9 @@ export class AgentMuxClient {
       }
       await context?.assertCurrent?.()
       assertOriginalResponseTarget()
+      await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, current => interactionReceiptPatch(current, input.operationId, { delivery: 'unknown' }))
       await this.acp.respondPermission(input.agentSessionId, pending.request.id, response.decision)
+      await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, current => interactionReceiptPatch(current, input.operationId, { delivery: 'acp-acknowledged' }))
       return
     }
     await this.assertNativeInteractionSource(requestedSession)
@@ -5987,12 +6040,7 @@ export class AgentMuxClient {
       throw new AgentMuxError('Provider interaction response bytes cannot be empty.', 'INVALID_AGENT_PROVIDER')
     }
     const responseDigest = digestInteractionResponse(response)
-    const operationId = agentInteractionOperationIdentity(
-      requestedSession,
-      pending.request.id,
-      responseDigest,
-      plan.data
-    )
+    const operationId = input.operationId
     this.cancelPromptRenderObservation(requestedSession, 'interaction-response')
     const deadline = Date.now() + 10_000
     const renderObservation = new AbortController()
@@ -6069,7 +6117,10 @@ export class AgentMuxClient {
       const request = update(pending.request)
       const additionalRequests = pending.additionalRequests?.map(update)
       if (!found) throw new AgentMuxError('The original permission callback does not match this request.', 'UNKNOWN_AGENT_INTERACTION')
-      return { ...current, pendingInteraction: { ...pending, request, ...(additionalRequests ? { additionalRequests } : {}) }, updatedAt: Date.now() }
+      const next = { ...current, pendingInteraction: { ...pending, request, ...(additionalRequests ? { additionalRequests } : {}) }, updatedAt: Date.now() }
+      const hookResponse = [request, ...(additionalRequests ?? [])].find(candidate => candidate.kind === 'permission' && candidate.permissionHook?.receiptId === receiptId)
+      const response = hookResponse?.kind === 'permission' ? hookResponse.permissionHook?.response : undefined
+      return response ? interactionReceiptPatch(next, response.operationId, { delivery: response.delivery === 'connection-written' ? 'hook-written' : response.delivery }) : next
     })
     this.publishSession(next)
     return next
@@ -6077,13 +6128,12 @@ export class AgentMuxClient {
 
   private async respondPermissionHook(session: AgentMuxStoredAgentSession,
     request: Extract<AgentMuxInteractionRequest, { kind: 'permission' }>,
-    input: AgentMuxInteractionResponse, context?: AgentInputCallContext): Promise<void> {
+    input: AgentMuxInteractionResponse, operationId: string, context?: AgentInputCallContext): Promise<void> {
     context?.requestSignal?.throwIfAborted()
     const value = normalizeAgentInteractionResponse(request, input)
     if (value.kind !== 'permission' || !request.permissionHook) throw new AgentMuxError('Permission Hook response kind changed.', 'INVALID_AGENT_INTERACTION_RESPONSE')
     const receiptId = request.permissionHook.receiptId
     const responseDigest = digestInteractionResponse(value)
-    const operationId = agentInteractionOperationIdentity(session, request.id, responseDigest, 'permission-hook')
     const contribution = this.providers.get(session.providerId).hook.permissionDecision
     const output = value.decision.outcome === 'cancelled' ? null : contribution?.outputs[value.decision.optionId]
     if (output === undefined) throw new AgentMuxError('The Provider does not declare this Hook decision.', 'AGENT_INTERACTION_UNSUPPORTED')
@@ -6455,12 +6505,7 @@ export class AgentMuxClient {
           pending.request,
           normalized,
           digestInteractionResponse(normalized),
-          agentInteractionOperationIdentity(
-            current,
-            pending.request.id,
-            digestInteractionResponse(normalized),
-            plan.data
-          ),
+          response.operationId,
           plan.data
         )
       }
@@ -7588,7 +7633,13 @@ export class AgentMuxClient {
       if (current.pendingInteraction.request.id !== requestId) {
         throw new AgentMuxError('Agent interaction changed before settlement.', 'UNKNOWN_AGENT_INTERACTION')
       }
-      const next = { ...current, updatedAt: Date.now() }
+      const completion = current.pendingInteraction.nativeCompleted
+      let next = { ...current, updatedAt: Date.now() }
+      if (completion) for (const receipt of Object.values(current.interactionOperations ?? {})) {
+        if (sameRun(receipt.run, current.run) && isDeepStrictEqual(agentInteractionRequestTarget(receipt.expectedRequest), agentInteractionRequestTarget(current.pendingInteraction.request))) {
+          next = interactionReceiptPatch(next, receipt.operationId, { nativeCompleted: completion })
+        }
+      }
       const [request, ...additionalRequests] = current.pendingInteraction.additionalRequests ?? []
       if (request) next.pendingInteraction = { request, ...(additionalRequests.length ? { additionalRequests } : {}) }
       else delete next.pendingInteraction
@@ -7753,6 +7804,7 @@ export class AgentMuxClient {
       }
       await assertCurrent?.()
       if (canApply) assertTargetFrame(run, this.requireAgentSession(session.agentSessionId))
+      current = await this.updateExactAgentSession(session.agentSessionId, session.run, stored => interactionReceiptPatch(stored, operationId, { delivery: 'unknown', inputByteRange: state!.inputByteRange }))
       const accepted = await this.kernel.input(session.run.runId, {
         ownerInstanceId: this.kernel.identity().daemonInstanceId,
         operationId: state.operationId,
@@ -7777,6 +7829,7 @@ export class AgentMuxClient {
         (stored) => {
           // A subsequent native request can arrive while this accepted Input awaits its ACK.
           // Record the cursor, but never settle or overwrite that newer request.
+          stored = interactionReceiptPatch(stored, operationId, { delivery: 'bytes-accepted', inputByteRange: state!.inputByteRange })
           if (stored.pendingInteraction?.request.id !== request.id) return stored
           const responseState = stored.pendingInteraction.response
           if (!responseState) {
@@ -8477,6 +8530,11 @@ export class AgentMuxClient {
         pending.request.id === completedRequestId && pending.request.agentSessionId === current.agentSessionId &&
         pending.request.evidence.source === 'native-hook' && pending.request.evidence.run?.runId === current.run.runId &&
         pending.request.nativeToolCallId === completion.nativeToolCallId) {
+        for (const operation of Object.values(current.interactionOperations ?? {})) {
+          if (sameRun(operation.run, current.run) && isDeepStrictEqual(agentInteractionRequestTarget(operation.expectedRequest), agentInteractionRequestTarget(pending.request))) {
+            next.interactionOperations = interactionReceiptPatch(next, operation.operationId, { nativeCompleted: structuredClone(completion.evidence) }).interactionOperations!
+          }
+        }
         const completed = { ...pending, nativeCompleted: structuredClone(completion.evidence) }
         if (pending.response && !agentInteractionResponseSettled(completed)) next.pendingInteraction = completed
         else {

@@ -1,5 +1,13 @@
 import type { AgentMuxInteractionRequest, AgentMuxPendingInteraction } from './types.js'
 
+/** Mutable dispatch observations never change the original request's semantic identity. */
+export function agentInteractionRequestTarget(request: AgentMuxInteractionRequest): AgentMuxInteractionRequest {
+  const { responseUnavailableReason: _reason, ...target } = request
+  if (target.kind !== 'permission' || !target.permissionHook) return target
+  const { response: _response, closed: _closed, nativeTurnEnded: _ended, ...hook } = target.permissionHook
+  return { ...target, permissionHook: hook }
+}
+
 /** The original Hook owner correlated completion to this request's native invocation. */
 function hasNativeCompletion(pending: AgentMuxPendingInteraction): boolean {
   return pending.nativeCompleted?.source === 'native-hook' &&

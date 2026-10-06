@@ -37,6 +37,7 @@ import type {
   AgentMuxEvidence,
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
+  AgentMuxInteractionOperationReceipt,
   AgentMuxPendingInteraction,
   AgentMuxRunRef,
   AgentMuxStoredAgentSession,
@@ -829,7 +830,7 @@ function interactionEvidence(value: unknown): AgentMuxEvidence {
   return evidence
 }
 
-function interactionRequest(value: unknown): AgentMuxInteractionRequest {
+export function normalizeAgentInteractionRequest(value: unknown): AgentMuxInteractionRequest {
   const source = record(value, 'pendingInteraction.request')
   const base = {
     id: string(source.id, 'pendingInteraction.request.id'),
@@ -958,7 +959,7 @@ function interactionRequest(value: unknown): AgentMuxInteractionRequest {
 
 function pendingInteraction(value: unknown): AgentMuxPendingInteraction {
   const source = record(value, 'pendingInteraction')
-  const request = interactionRequest(source.request)
+  const request = normalizeAgentInteractionRequest(source.request)
   const nativeCompleted = source.nativeCompleted === undefined ? undefined : interactionEvidence(source.nativeCompleted)
   if (nativeCompleted && (request.evidence.source !== 'native-hook' || !request.nativeToolCallId ||
       nativeCompleted.source !== 'native-hook' || nativeCompleted.run?.runId !== request.evidence.run?.runId)) {
@@ -971,7 +972,7 @@ function pendingInteraction(value: unknown): AgentMuxPendingInteraction {
   if (source.additionalRequests !== undefined && !Array.isArray(source.additionalRequests)) {
     throw new AgentMuxError('Additional native requests must be an array.', 'INVALID_AGENT_SESSION_STORE')
   }
-  const additionalRequests = (source.additionalRequests ?? []).map(interactionRequest)
+  const additionalRequests = (source.additionalRequests ?? []).map(normalizeAgentInteractionRequest)
   if (additionalRequests.some(other => other.agentSessionId !== request.agentSessionId ||
       other.evidence.source !== 'native-hook' || other.evidence.run?.runId !== request.evidence.run?.runId) ||
       new Set([request.id, ...additionalRequests.map(other => other.id)]).size !== additionalRequests.length + 1) {
@@ -1506,9 +1507,35 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
   return session
 }
 
+export function normalizeInteractionOperationReceipt(value: unknown): AgentMuxInteractionOperationReceipt {
+  const source = record(value, 'interaction operation')
+  const expectedRequest = normalizeAgentInteractionRequest(source.expectedRequest)
+  const run = runRef(source.run), agentSessionId = string(source.agentSessionId, 'interaction Session')
+  if (Object.keys(source).some(key => !['operationId', 'agentSessionId', 'run', 'expectedRequest', 'response', 'delivery', 'inputByteRange', 'nativeAdoption', 'nativeHandle', 'nativeCompleted'].includes(key)) || expectedRequest.agentSessionId !== agentSessionId || expectedRequest.evidence.run?.runId !== run.runId) throw new AgentMuxError('Interaction operation target mismatch.', 'INVALID_AGENT_SESSION_STORE')
+  const delivery = source.delivery
+  if (!['saved', 'unknown', 'bytes-accepted', 'hook-written', 'acp-acknowledged'].includes(String(delivery)) ||
+      source.nativeAdoption !== 'unknown') throw new AgentMuxError('Invalid interaction operation facts.', 'INVALID_AGENT_SESSION_STORE')
+  const range = source.inputByteRange === undefined ? undefined : record(source.inputByteRange, 'interaction byte range')
+  const inputByteRange = range && { startByte: timestamp(range.startByte, 'interaction start byte'), endByte: timestamp(range.endByte, 'interaction end byte') }
+  if (inputByteRange && inputByteRange.endByte <= inputByteRange.startByte) throw new AgentMuxError('Invalid interaction byte range.', 'INVALID_AGENT_SESSION_STORE')
+  const nativeCompleted = source.nativeCompleted === undefined ? undefined : interactionEvidence(source.nativeCompleted)
+  if (nativeCompleted && (nativeCompleted.source !== 'native-hook' || nativeCompleted.run?.runId !== run.runId) || delivery === 'bytes-accepted' && !inputByteRange || delivery === 'hook-written' && (expectedRequest.kind !== 'permission' || !expectedRequest.permissionHook) || delivery === 'acp-acknowledged' && expectedRequest.evidence.source !== 'acp') throw new AgentMuxError('Interaction operation receipt mismatch.', 'INVALID_AGENT_SESSION_STORE')
+  return { operationId: string(source.operationId, 'interaction operation id'), agentSessionId, run,
+    expectedRequest, response: interactionResponse(source.response, expectedRequest),
+    delivery: delivery as AgentMuxInteractionOperationReceipt['delivery'], nativeAdoption: 'unknown',
+    ...(inputByteRange ? { inputByteRange } : {}),
+    ...(source.nativeHandle === undefined ? {} : { nativeHandle: nativeHandle(source.nativeHandle) }),
+    ...(nativeCompleted === undefined ? {} : { nativeCompleted }) }
+}
+
 export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgentSession {
   const source = record(value, 'Agent Session')
   return { ...normalizeAgentSession(source),
+    ...(source.interactionOperations === undefined ? {} : { interactionOperations: Object.fromEntries(Object.entries(record(source.interactionOperations, 'interaction operations')).map(([id, receipt]) => {
+      const normalized = normalizeInteractionOperationReceipt(receipt)
+      if (id !== normalized.operationId || normalized.agentSessionId !== source.agentSessionId) throw new AgentMuxError('Interaction operation identity mismatch.', 'INVALID_AGENT_SESSION_STORE')
+      return [id, normalized]
+    })) }),
     hookBindingId: string(source.hookBindingId, 'hookBindingId'),
     hookToken: string(source.hookToken, 'hookToken'),
     ...(source.capabilityHash === undefined ? {} : { capabilityHash: string(source.capabilityHash, 'capabilityHash') }),

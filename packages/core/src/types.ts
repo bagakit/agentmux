@@ -1350,6 +1350,9 @@ export type AgentHookIngressObservation = {
 /** This is the complete persistent semantic/control record. It deliberately has no
  * PTY, process, replay, terminal snapshot, terminal output bytes or ephemeral Hook observation. */
 export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'nativeHandlePersistence'> & {
+  /** Original response operation index. Retained after the live request settles; never broadcast. */
+  interactionOperations?: Record<string, AgentMuxInteractionOperationReceipt>
+
   hookBindingId: string
   hookToken: string
   /** Agent 说话凭证的 sha256。raw 只在受管进程的 env 里，Core 侧只留 hash。 */
@@ -1501,6 +1504,24 @@ export type AgentMuxInteractionResponse =
       requestId: string
       outcome: 'cancelled'
     }
+
+/** Caller-owned identity and the exact typed request shown when the intent was composed. */
+export type AgentMuxInteractionOperationIntent = {
+  operationId: string
+  expectedRequest: AgentMuxInteractionRequest
+}
+
+/** Original semantic response facts; transport acceptance never claims Native adoption. */
+export type AgentMuxInteractionOperationReceipt = AgentMuxInteractionOperationIntent & {
+  agentSessionId: string
+  run: AgentMuxRunRef
+  nativeHandle?: AgentNativeSessionHandle
+  response: AgentMuxInteractionResponse
+  delivery: 'saved' | 'unknown' | 'bytes-accepted' | 'hook-written' | 'acp-acknowledged'
+  inputByteRange?: { startByte: number; endByte: number }
+  nativeAdoption: 'unknown'
+  nativeCompleted?: AgentMuxEvidence
+}
 
 export type AgentMuxInteractionInputPlan = {
   data: string
