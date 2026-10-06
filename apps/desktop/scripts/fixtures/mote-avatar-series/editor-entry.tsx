@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { useEffect, useState } from 'react'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { SpaceIconPicker } from '../../../src/renderer/src/components/SpaceIconPicker'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { PMO_TEAMS_TOPIC_ID } from '../../../src/shared/scratch-topics'
@@ -22,6 +23,7 @@ const target = (topicId = PMO_TEAMS_TOPIC_ID) => {
   return original
 }
 function Scene() {
+  useEffect(() => mountThemeRuntime(window, { appAppearance: 'dark' }), [])
   const [current, setCurrent] = useState<SpaceIconTarget | null>(null)
   const [ready, setReady] = useState(false)
   const [pickerMounted, setPickerMounted] = useState(true)
@@ -33,7 +35,7 @@ function Scene() {
     return () => { live = false; release() }
   }, [])
   Object.assign(window, { seriesEditorFixture: {
-    theme: (light: boolean) => { document.documentElement.dataset.appearance = light ? 'light' : 'dark' },
+    theme: (light: boolean) => { updateThemeSelection({ appAppearance: light ? 'light' : 'dark' }) },
     replaceTarget: (topicId: string) => setCurrent(target(topicId)),
     mountPicker: (mounted: boolean) => setPickerMounted(mounted),
     keptRequest: (original: MoteAvatarTarget) => readMoteAvatarSaveDraft(original),

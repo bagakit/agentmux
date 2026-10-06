@@ -1,10 +1,10 @@
 const { app, BrowserWindow, Menu, ipcMain, nativeImage } = require('electron')
-const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict'), { createHash } = require('node:crypto')
+const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict'), { createHash, randomUUID } = require('node:crypto')
 const [html, directory, originalBuiltin, scope = 'full'] = process.argv.slice(2)
 app.setPath('userData', path.join(directory, 'userData'))
 app.setPath('sessionData', path.join(directory, 'userData'))
 app.setPath('home', path.join(directory, 'private-home'))
-const result = { passed: false, scope, pid: process.pid, images: [], operations: [], sourceCalls: [], readCalls: [], saveCalls: [], pngReads: [], publications: [], requestStorage: [], flushRequests: [], errors: [], writes: 0 }
+const result = { passed: false, scope, pid: process.pid, images: [], operations: [], sourceCalls: [], readCalls: [], saveCalls: [], seedCalls: [], pngReads: [], publications: [], requestStorage: [], flushRequests: [], errors: [], writes: 0 }
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 const sha = value => createHash('sha256').update(value).digest('hex')
 app.whenReady().then(async () => {
@@ -18,6 +18,20 @@ app.whenReady().then(async () => {
     await fs.cp(originalBuiltin, builtinRoot, { recursive: true })
     await fs.mkdir(path.join(userRoot, 'personal'), { recursive: true })
     await fs.copyFile(path.join(builtinRoot, 'geometry/owl.png'), path.join(userRoot, 'personal/own.png'))
+    // Existing face editing probes now use a real declared user collection. The
+    // original bundled declaration remains unchanged for saved-choice recovery.
+    const geometry = JSON.parse(await fs.readFile(path.join(builtinRoot, 'geometry/series.json'), 'utf8'))
+    const originalFace = geometry.entries.find(entry => entry.definition.kind === 'face2d')
+    assert.ok(originalFace, 'The actual original bundled face declaration is required')
+    const presetRoot = path.join(userRoot, 'fixture-presets')
+    await fs.mkdir(presetRoot, { recursive: true })
+    await fs.copyFile(path.join(builtinRoot, 'geometry/owl.png'), path.join(presetRoot, 'portrait.png'))
+    const userDeclaration = { schema: 'agentmux.avatar-series.v1', title: 'Personal presets', entries: [
+      { id: 'quiet', title: 'Quiet · Your preset', definition: structuredClone(originalFace.definition) },
+      { id: 'portrait', title: 'Owl · Your image', definition: { kind: 'image', file: 'portrait.png' } }
+    ] }
+    await fs.writeFile(path.join(presetRoot, 'series.json'), JSON.stringify(userDeclaration))
+    result.userDeclaration = { path: path.join(presetRoot, 'series.json'), sha256: sha(JSON.stringify(userDeclaration)), declaration: userDeclaration }
     const store = new ConfigStore(path.join(directory, 'config.json'))
     let config = scope === 'durable-reopen' ? await store.get() : await store.save({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: '__scratch__', hostId: 'local', path: path.join(app.getPath('home'), '.agentmux/scratch'), name: 'Private Motes', kind: 'folder' }] })
     const workspace = config.workspaces.find(value => value.id === '__scratch__')
@@ -47,7 +61,7 @@ app.whenReady().then(async () => {
       }
     }
     const sources = new MoteAvatarSeriesOwner({ userRoot, builtinRoot })
-    const control = new MoteAvatarControl(sources, ['durable', 'durable-reopen', 'request-label-delta'].includes(scope) ? createMoteAvatarWriter(owner, sources, topics, store) : undefined)
+    const control = new MoteAvatarControl(sources, ['durable', 'durable-reopen', 'request-label-delta', 'face-entry-delta'].includes(scope) ? createMoteAvatarWriter(owner, sources, topics, store) : undefined)
     ipcMain.handle('moteAvatars:list', async () => {
       const value = await control.call('space.mote.avatar.list', {})
       result.sourceCalls.push({ method: 'list', roots: value.roots, series: value.series.map(item => ({ origin: item.origin, seriesId: item.seriesId, entries: item.entries.map(entry => entry.entryId) })) })
@@ -154,6 +168,11 @@ app.whenReady().then(async () => {
       await pause(100); result.operations.push({ action: 'select-element-change', selector, value, boundary: 'Actual controlled production select change event; source replies remain original Native owner data.' })
       assert.equal(await read(`document.querySelector(${JSON.stringify(selector)}).value`), value)
     }
+    const selectFacePreset = async () => {
+      await select('select[aria-label="Avatar series"]', JSON.stringify(['user', 'fixture-presets']))
+      await click('[data-series-origin=user][data-series-id=fixture-presets][data-series-entry=quiet]')
+    }
+    const selectGeometry = () => select('select[aria-label="Avatar series"]', JSON.stringify(['builtin', 'geometry']))
     const range = async (selector, fraction) => {
       const at = await read(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});n.scrollIntoView({block:'center'});const r=n.getBoundingClientRect();return {x:r.x+6+(r.width-12)*${fraction},y:r.y+r.height/2}})()`)
       for (const type of ['mouseDown', 'mouseUp']) win.webContents.sendInputEvent({ type, x: Math.round(at.x), y: Math.round(at.y), button: 'left', clickCount: 1 })
@@ -199,6 +218,144 @@ app.whenReady().then(async () => {
     }
     await wait('!!window.seriesEditorFixture && window.seriesEditorFixture.facts().ready')
     console.log('editor-main: fixture mounted', await read('typeof window.seriesGPUFacts'))
+    if (scope === 'face-entry-delta') {
+      await wait('document.querySelectorAll("[data-semantic-icon-sprite]").length===1')
+      result.themeFacts = await read(`({spriteCount:document.querySelectorAll('[data-semantic-icon-sprite]').length,
+        unresolvedSemanticUses:[...document.querySelectorAll('svg.semantic-icon use')].filter(node=>!document.getElementById(node.getAttribute('href').slice(1))).map(node=>node.getAttribute('href')),
+        nativeSelectImage:getComputedStyle(document.documentElement).getPropertyValue('--native-select-open-image')})`)
+      assert.equal(result.themeFacts.spriteCount, 1)
+      assert.deepEqual(result.themeFacts.unresolvedSemanticUses, [], 'Actual theme icons must resolve through the original shared sprite')
+      assert.ok(result.themeFacts.nativeSelectImage.includes('data:image/svg+xml'), 'The original theme must project its native select icon')
+      result.facePixelFacts = []
+      const assertFacePixels = async name => {
+        await ready(); await settleSurface()
+        const rect = await read(`(()=>{const node=document.querySelector('.mote-series__face > svg'),r=node.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}})()`)
+        assert.ok(rect.width > 0 && rect.height > 0, 'The original center face preview must be actually visible')
+        const bounds = { x: Math.floor(rect.x), y: Math.floor(rect.y), width: Math.ceil(rect.x + rect.width) - Math.floor(rect.x), height: Math.ceil(rect.y + rect.height) - Math.floor(rect.y) }
+        const center = (await win.webContents.capturePage(bounds)).resize({ width: 256, height: 256, quality: 'best' }).toBitmap()
+        const exported = nativeImage.createFromDataURL(await png()).resize({ width: 256, height: 256, quality: 'best' }).toBitmap()
+        const masks = (pixels, area) => {
+          const coordinates = new Set(), box = { left: 256, top: 256, right: -1, bottom: -1 }
+          for (let y = area.top; y < area.bottom; y++) for (let x = area.left; x < area.right; x++) {
+            const index = (y * 256 + x) * 4
+            if (pixels[index + 3] > 220 && Math.max(pixels[index], pixels[index + 1], pixels[index + 2]) < 105) {
+              coordinates.add(y * 256 + x); box.left = Math.min(box.left, x); box.top = Math.min(box.top, y); box.right = Math.max(box.right, x); box.bottom = Math.max(box.bottom, y)
+            }
+          }
+          return { coordinates, count: coordinates.size, box }
+        }
+        const parts = [
+          { part: 'brows', left: 64, right: 192, top: 88, bottom: 124 },
+          { part: 'eyes', left: 64, right: 192, top: 120, bottom: 164 },
+          { part: 'mouth', left: 96, right: 160, top: 168, bottom: 204 }
+        ].map(area => {
+          const preview = masks(center, area), frame = masks(exported, area)
+          const overlap = [...preview.coordinates].filter(value => frame.coordinates.has(value)).length
+          const dice = preview.count + frame.count ? overlap * 2 / (preview.count + frame.count) : 0
+          const boxDifference = Math.max(...['left', 'top', 'right', 'bottom'].map(key => Math.abs(preview.box[key] - frame.box[key])))
+          return { part: area.part, centerInkPixels: preview.count, exportInkPixels: frame.count,
+            centerBounds: preview.box, exportBounds: frame.box, overlapDice: dice, boxDifference,
+            geometryMatched: preview.count > 32 && frame.count > 32 && boxDifference <= 3 && dice >= 0.7 }
+        })
+        result.facePixelFacts.push({ name, originalCenterRect: rect, capturedRect: bounds, normalizedBitmapSize: 256, parts })
+        assert.ok(parts.every(part => part.geometryMatched), 'Exported face PNG must retain the center preview eyebrow, eye and mouth ink geometry')
+      }
+      const capturePicker = async name => {
+        await wait('document.querySelector(".space-icon-picker")?.dataset.avatarBaselineReady==="true"')
+        await read('document.querySelector(".space-icon-picker").scrollTop=0')
+        const settled = await settleSurface()
+        await fs.writeFile(path.join(directory, name + '.png'), (await win.webContents.capturePage()).toPNG())
+        result.images.push(name + '.png')
+        result.operations.push({ action: 'capture-face-entry-product', name, settled,
+          facts: await read('({target:seriesEditorFixture.facts().currentTarget,styles:[...document.querySelectorAll("[data-avatar-source]")].map(n=>({id:n.dataset.avatarSource,selected:n.getAttribute("aria-pressed"),disabled:n.disabled})),entries:[...document.querySelectorAll("[data-series-entry]")].map(n=>({origin:n.dataset.seriesOrigin,seriesId:n.dataset.seriesId,entryId:n.dataset.seriesEntry,selected:n.getAttribute("aria-pressed")})),gpu:seriesGPUFacts()})') })
+      }
+      const entries = () => read('[...document.querySelectorAll("[data-series-entry]")].map(n=>({origin:n.dataset.seriesOrigin,seriesId:n.dataset.seriesId,entryId:n.dataset.seriesEntry,selected:n.getAttribute("aria-pressed")}))')
+      const assertNoGuiWrites = () => {
+        assert.equal(result.saveCalls.length, 0, 'Opening, switching styles and Cancel must not send GUI Save')
+        assert.equal(result.writes, 0, 'Opening, switching styles and Cancel must not write configuration')
+        assert.equal(result.flushRequests.length, 0, 'The readonly editor choices must not request a save flush')
+      }
+      await read('seriesEditorFixture.replaceTarget("launcher:analyst")')
+      await wait('document.querySelector(".space-icon-picker")?.dataset.avatarBaselineReady==="true"')
+      const freshBaseline = await control.call('space.mote.avatar.read', { target: targets['launcher:analyst'].avatarTarget })
+      assert.equal(freshBaseline.choice, null)
+      assert.equal(await read('document.querySelector("[data-avatar-source=face]").getAttribute("aria-pressed")'), 'true')
+      assert.equal(await read('document.querySelector("[data-mote-face-part=eyes][data-mote-face-value=wink]").disabled'), false)
+      await click('[data-mote-face-part=eyes][data-mote-face-value=wink]')
+      assert.equal(await read('document.querySelector("[data-mote-face-part=eyes][data-mote-face-value=wink]").getAttribute("aria-pressed")'), 'true')
+      await capturePicker('face-entry-fresh-make-a-face')
+      await click('[data-avatar-source=series]')
+      await wait('document.querySelectorAll(".mote-series__select option").length>1 && !document.querySelector(".mote-series__refresh").disabled')
+      const rawCatalog = await control.call('space.mote.avatar.list', {})
+      for (const series of rawCatalog.series.filter(value => value.origin === 'builtin')) {
+        await select('select[aria-label="Avatar series"]', JSON.stringify([series.origin, series.seriesId]))
+        const actual = (await entries()).map(value => value.entryId)
+        const expected = series.entries.filter(value => value.definition.kind !== 'face2d').map(value => value.entryId)
+        assert.deepEqual(actual, expected, 'Fresh Series must hide bundled face2d duplicates while retaining image and GLB choices')
+      }
+      assert.ok(rawCatalog.series.some(series => series.origin === 'builtin' && series.entries.some(entry => entry.definition.kind === 'face2d')), 'The original Native source catalog must retain its bundled face declaration')
+      await selectGeometry()
+      await capturePicker('face-entry-fresh-series-curated')
+      await selectFacePreset(); await ready()
+      await select('select[aria-label="Series face Eyes"]', 'wink'); await ready()
+      await assertFacePixels('user-preset')
+      const userFaceFrame = await png()
+      const userPrepared = result.sourceCalls.findLast(call => call.method === 'preview' && call.source?.origin === 'user' && call.source?.seriesId === 'fixture-presets' && call.kind === 'face2d')
+      assert.ok(userPrepared, 'The real declared user face must be prepared by the original Native source owner')
+      assert.deepEqual((await entries()).map(value => value.entryId), ['quiet', 'portrait'], 'A mixed user face/image series must remain complete')
+      await capture('face-entry-user-preset-mixed-series')
+      await click('[data-series-origin=user][data-series-id=fixture-presets][data-series-entry=portrait]'); await ready()
+      assert.notEqual(await png(), userFaceFrame)
+      assert.equal(await read('document.querySelector(".mote-series__preview").dataset.seriesPreviewKind'), 'image')
+      await click('[data-avatar-source=face]'); await click('[data-avatar-source=series]'); await ready()
+      await key('Escape'); await wait('!document.querySelector(".space-icon-picker")')
+      assert.deepEqual(await control.call('space.mote.avatar.read', { target: targets['launcher:analyst'].avatarTarget }), freshBaseline)
+      assertNoGuiWrites()
+
+      // A prior saved bundled choice is seeded through the same production
+      // writer, using this product's genuine 256 PNG and matching face params.
+      // This fixture seed is recorded separately from GUI save consumption.
+      const source = { origin: 'builtin', seriesId: 'geometry', entryId: originalFace.id }
+      const prepared = await control.call('space.mote.avatar.preview', { source })
+      assert.deepEqual(prepared.definition, userDeclaration.entries[0].definition)
+      const parameters = { kind: 'face2d', face: { ...prepared.definition.face, eyes: 'wink' } }
+      const original = await control.call('space.mote.avatar.read', { target: targets['launcher:leader'].avatarTarget })
+      const input = { target: original.target, operationId: randomUUID(), beforeRevision: original.revision,
+        source: prepared.source, definition: prepared.definition, parameters, pngDataUrl: userFaceFrame }
+      const saved = await control.call('space.mote.avatar.save', input)
+      result.seedCalls.push({ input, value: saved, producer: 'Actual production Series face renderer; actual production native writer seed, outside GUI Save' })
+      assert.equal(saved.state, 'saved'); assert.equal(saved.operation.durability, 'confirmed')
+      const confirmed = await control.call('space.mote.avatar.read', { target: original.target, operationId: input.operationId })
+      assert.deepEqual(confirmed.choice.source, prepared.source)
+      assert.deepEqual(confirmed.choice.definition, prepared.definition)
+      assert.deepEqual(confirmed.choice.parameters, parameters)
+      assert.deepEqual(nativeImage.createFromDataURL(confirmed.image.dataUrl).getSize(), { width: 256, height: 256 })
+      assert.equal(sha(nativeImage.createFromDataURL(confirmed.image.dataUrl).toBitmap()), sha(nativeImage.createFromDataURL(userFaceFrame).toBitmap()))
+      await click('#open-avatar'); await ready()
+      await wait('!document.querySelector(".mote-series__refresh").disabled')
+      assert.equal(await read('document.querySelector("[data-avatar-source=series]").getAttribute("aria-pressed")'), 'true')
+      const exactSaved = (await entries()).find(entry => entry.origin === 'builtin' && entry.seriesId === prepared.source.seriesId && entry.entryId === prepared.source.entryId)
+      assert.ok(exactSaved && exactSaved.selected === 'true', 'The exact saved bundled face entry must remain visible and selected after reopening')
+      assert.equal(await read(`document.querySelector(${JSON.stringify('select[aria-label="Series face Eyes"]')}).value`), 'wink')
+      assert.ok(result.sourceCalls.some(call => call.method === 'preview' && call.input.expectedRevision === prepared.source.revision && call.source?.origin === 'builtin' && call.source.entryId === originalFace.id))
+      assert.equal(sha(nativeImage.createFromDataURL(await png()).toBitmap()), sha(nativeImage.createFromDataURL(confirmed.image.dataUrl).toBitmap()))
+      await assertFacePixels('saved-bundled-preset')
+      await capture('face-entry-saved-bundled-preset-reopened')
+      await click('[data-avatar-source=face]'); await click('[data-avatar-source=series]'); await ready()
+      await key('Escape'); await wait('!document.querySelector(".space-icon-picker")')
+      const afterCancel = await control.call('space.mote.avatar.read', { target: original.target })
+      assert.deepEqual(afterCancel.choice, confirmed.choice)
+      assert.equal(afterCancel.revision, confirmed.revision)
+      assert.equal(afterCancel.image.dataUrl, confirmed.image.dataUrl)
+      assert.equal(result.seedCalls.length, 1); assert.equal(result.publications.length, 1)
+      assertNoGuiWrites()
+      result.faceEntry = { freshChoice: freshBaseline.choice, saved: confirmed,
+        originalCatalog: rawCatalog, guiSaveCalls: result.saveCalls.length, guiConfigWrites: result.writes,
+        seedCalls: result.seedCalls.length, sameSavedAfterCancel: true }
+      result.operations.push({ action: 'fresh-curation-user-mixed-and-exact-native-saved-choice-preserved-with-zero-gui-writes' })
+      result.passed = true
+      return
+    }
     if (scope === 'request-label-delta') {
       await read('seriesEditorFixture.replaceTarget("launcher:blank")'); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarBaselineReady==="true"')
       assert.equal(await read('document.querySelector("[data-avatar-source=face]").getAttribute("aria-pressed")'), 'true')
@@ -248,7 +405,7 @@ app.whenReady().then(async () => {
     result.firstFrame = { sha256: sha(firstImage.toPNG()), bytes: firstImage.toPNG().length }
     assert.deepEqual(await read('[...document.querySelectorAll(".mote-series__sizes img")].map(n=>n.getBoundingClientRect().width)'), [24, 34, 48, 104])
     if (scope === 'request-label-delta') {
-      await click('[data-series-entry=quiet]'); await ready(); await select('select[aria-label="Series face Eyes"]', 'wink'); await ready()
+      await selectFacePreset(); await ready(); await select('select[aria-label="Series face Eyes"]', 'wink'); await ready()
       await click('.space-icon-picker__save'); await wait('!document.querySelector(".space-icon-picker")')
       const original = targets['launcher:leader'].avatarTarget
       const keyName = 'agentmux.mote-avatar-save-draft.v1:' + JSON.stringify([original.workspaceId, original.topicId, original.objectKey])
@@ -305,7 +462,7 @@ app.whenReady().then(async () => {
       await read('seriesEditorFixture.replaceTarget("launcher:analyst")'); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarBaselineReady==="true"')
       await click('[data-avatar-source=series]'); await wait('document.querySelectorAll(".mote-series__select option").length>1')
       await select('select[aria-label="Avatar series"]', JSON.stringify(['builtin', 'geometry']))
-      await click('[data-series-entry=quiet]'); await ready()
+      await selectFacePreset(); await ready()
       loseAckOnce = true
       const retryStart = result.saveCalls.length, beforeRetryPublication = result.publications.length
       await click('.space-icon-picker__save'); await wait('document.querySelector(".space-icon-picker")?.dataset.avatarSaveState==="unknown"')
@@ -356,7 +513,7 @@ app.whenReady().then(async () => {
       assert.equal(await read('document.querySelector(".mote-series")?.dataset.seriesTarget'), targets['launcher:analyst'].key)
       result.operations.push({ action: 'late-original-baseline-cannot-populate-replaced-target' })
       await click('[data-avatar-source=series]'); await wait('document.querySelectorAll(".mote-series__select option").length>1')
-      await select('select[aria-label="Avatar series"]', JSON.stringify(['builtin', 'geometry'])); await click('[data-series-entry=quiet]'); await ready()
+      await select('select[aria-label="Avatar series"]', JSON.stringify(['builtin', 'geometry'])); await selectFacePreset(); await ready()
       holdSaveKey = targets['launcher:analyst'].key
       await click('.space-icon-picker__save')
       for (let index = 0; index < 200 && !heldSaves.length; index++) await pause(30)
@@ -474,7 +631,7 @@ app.whenReady().then(async () => {
       return
     }
     win.setContentSize(1040, 900)
-    await click('[data-series-entry=quiet]'); await ready(); const face = await png(); assert.notEqual(face, first)
+    await selectFacePreset(); await ready(); const face = await png(); assert.notEqual(face, first)
     await select('select[aria-label="Series face Eyes"]', 'round'); await ready(); assert.notEqual(await png(), face); await capture('editor-face-dark')
     await read('window.holdNextAvatarDecode=true')
     await select('select[aria-label="Series face Eyes"]', 'oval'); await wait('typeof window.releaseAvatarDecode==="function"')
@@ -482,10 +639,10 @@ app.whenReady().then(async () => {
     await read('window.releaseAvatarDecode()'); await pause(150)
     await sameFrame(latestFace, 'A late original SVG decode must not replace newer parameters')
     result.operations.push({ action: 'late-original-svg-decode-retains-newer-parameters', image: sha(latestFace), boundary: 'The original native SVG image decode callback was held and then delivered; no pixels or draft were fabricated.' })
-    await click('[data-series-entry=owl]'); await ready(); const image = await png(); assert.notEqual(image, face)
+    await selectGeometry(); await click('[data-series-entry=owl]'); await ready(); const image = await png(); assert.notEqual(image, face)
     await range('[aria-label="Series image zoom"]', 0.5); await ready(); assert.notEqual(await png(), image); await capture('editor-image-dark')
     hold = true; await click('[data-series-entry=owl]'); await waitHeldSource()
-    await click('[data-series-entry=quiet]'); await ready(); const newer = await png()
+    await selectFacePreset(); await ready(); const newer = await png()
     hold = false; releases.splice(0).forEach(resolve => resolve()); await pause(200)
     await sameFrame(newer, 'A late actual native source must not replace the newer draft'); assert.equal(await read('document.querySelector(".mote-series__preview").dataset.seriesPreviewKind'), 'face2d')
     result.operations.push({ action: 'late-original-native-source-retained-newer-draft', image: sha(newer) })
@@ -533,7 +690,7 @@ app.whenReady().then(async () => {
     assert.equal(await read('document.querySelector(".mote-series__preview").dataset.seriesPreviewKind'), 'empty', 'A different original Mote must receive an empty editor rather than the old draft')
     assert.equal(await png(), undefined)
     await select('select[aria-label="Avatar series"]', JSON.stringify(['builtin', 'geometry']))
-    await click('[data-series-entry=quiet]'); await ready(); const newTargetFrame = await png()
+    await selectFacePreset(); await ready(); const newTargetFrame = await png()
     hold = false; releases.splice(0).forEach(resolve => resolve()); await pause(200)
     await sameFrame(newTargetFrame, 'A late source for the old target must not populate the new target')
     result.operations.push({ action: 'replaced-original-target-fences-old-source-and-draft', target: await read('seriesEditorFixture.facts().currentTarget'), image: sha(newTargetFrame) })
