@@ -209,8 +209,9 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
       timeFormatter={time.clock}
       {...(message.recordedAt === undefined || !Number.isFinite(message.recordedAt) ? {} : { createdAt: message.recordedAt })}
       workspaceRoot={recipient?.workspacePath ?? workspaceRoot ?? ''} readPastedImage={readPastedImage} /></div>
+    <footer className="recent-focus__navigation">
     {agent ? <button type="button" className="recent-focus__sender-link" disabled={!sender} onClick={() => navigate(sender)}>View sender<ThemeActionOpenExternalIcon size={12} aria-hidden="true" /></button> : null}
     <button type="button" disabled={!recipient && !onReveal} onClick={() => { void reveal() }}>Return to Context</button>
-    {navigationFeedback ? <p className={navigationFeedback.kind === 'pending' ? 'recent-focus__input-coverage' : 'recent-focus__input-error'} role="status">{navigationFeedback.message}</p> : null}</> : null}
+    {navigationFeedback ? <p className={navigationFeedback.kind === 'pending' ? 'recent-focus__input-coverage' : 'recent-focus__input-error'} role="status">{navigationFeedback.message}</p> : null}</footer></> : null}
   </div></WindowOverlayPortal>
 }
