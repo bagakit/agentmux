@@ -3,6 +3,12 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 
 const ThemeObjectInboxIcon = semanticIconComponent('object.inbox')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+
+export function MailboxSourceNotice({ title, message, action, onAction }: { title: string; message: string; action: string; onAction(): void }) {
+  return <div className="composer-mailbox__source-notice"><details><summary>{title}</summary><p>{message}</p><p>Existing records are kept. {action} to read this same source again.</p></details>
+    <button type="button" className="composer-tool" onClick={onAction} title={action} aria-label={action}><ThemeActionRefreshIcon size={14} aria-hidden="true" /></button></div>
+}
 
 
 /** The list only reads a bounded original prefix. Full content belongs to the selected record. */

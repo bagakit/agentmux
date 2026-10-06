@@ -1,0 +1,10 @@
+.mailbox-collaboration { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.mailbox-collaboration__heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.mailbox-collaboration p, .mailbox-collaboration h3 { margin: var(--sp-2) 0; }
+.mailbox-collaboration h3 { font-size: var(--fs-meta); font-weight: 620; }
+.mailbox-collaboration__hint { color: var(--text-3); }
+.mailbox-collaboration__message, .mailbox-collaboration__diagnostics { margin-top: var(--sp-3); min-width: 0; }
+.mailbox-collaboration__message > summary { cursor: pointer; color: var(--text-2); }
+.mailbox-collaboration__message > summary span + span { margin-left: var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
+.mailbox-collaboration .composer-tool { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.mailbox-collaboration .composer-mailbox__row-head strong { white-space: normal; overflow-wrap: anywhere; }
