@@ -396,6 +396,7 @@ describe('custom Toolkit owner admission and terminal facts', () => {
     expect(await f.custom.get('quota')).toMatchObject({ state: 'unknown', reason: expect.stringContaining(rejection.message),
       admission: { executionId: started.admission!.executionId }, latestConfirmed: first.latestConfirmed })
     expect(f.port.remove).toHaveBeenCalledOnce(); expect(f.port.stop).toHaveBeenCalledOnce()
+    expect(f.port.attach).toHaveBeenCalledTimes(3) // prior execution, original live execution, recovered observation
     f.final('natural_tail_ACK'); f.exit(); await flush()
     expect(await f.custom.get('quota')).toMatchObject({ state: 'succeeded', admission: null,
       latestConfirmed: { executionId: started.admission!.executionId, state: 'succeeded', text: 'natural_tail_ACK' } })
@@ -412,6 +413,7 @@ describe('custom Toolkit owner admission and terminal facts', () => {
     expect(value).toMatchObject({ state: 'unknown', admission: { executionId: started.admission!.executionId }, latestConfirmed: null })
     expect(value.reason).toContain('stop-submission-failed'); expect(value.reason).toContain('final-replay-failed')
     expect(f.port.remove).not.toHaveBeenCalled(); expect(f.port.stop).toHaveBeenCalledOnce()
+    expect(f.port.attach).toHaveBeenCalledOnce()
   })
   it('does not label naturally completed output stopped when disposing after failed confirmation', async () => {
     const f = fixture('natural_ACK')
@@ -708,6 +710,129 @@ describe('custom Toolkit owner admission and terminal facts', () => {
     expect(f.port.create).toHaveBeenCalledOnce()
   })
 
+})
+
+describe('rejected Toolkit Stop observation boundaries', () => {
+  const scriptSnapshot = (value: Awaited<ReturnType<CustomToolkitOwner['get']>>) => {
+    expect(value.kind).toBe('script')
+    if (value.kind !== 'script') throw new Error('Expected the original script snapshot')
+    return value
+  }
+  it.each(['unavailable', 'gap'] as const)('keeps the original Stop error and admission after %s reattachment', async kind => {
+    const f = fixture('', 'running'), started = scriptSnapshot(await f.custom.run(tool.id, f.input(), new AbortController().signal))
+    const rejection = new Error('original-stop-refused'), attach = f.port.attach
+    f.port.stop = vi.fn(async () => { throw rejection })
+    f.port.attach = vi.fn(async (...args: Parameters<ToolkitRunPort['attach']>) => {
+      if (kind === 'unavailable') throw new Error('original-observation-unavailable')
+      return { ...await attach(...args), gap: { firstAvailableByte: 1, requestedAfterByte: 0 } } as any
+    })
+    await expect(f.custom.stop(tool.id, started.admission!.executionId)).rejects.toBe(rejection)
+    const value = await f.custom.get(tool.id)
+    expect(value).toMatchObject({ state: 'unknown', admission: { executionId: started.admission!.executionId,
+      invocationId: started.admission!.invocationId, run: started.admission!.run, definition: started.admission!.definition }, latestConfirmed: null })
+    expect(value.reason).toContain(rejection.message)
+    expect(value.reason).toContain(kind === 'unavailable' ? 'original-observation-unavailable' : 'Gap')
+    expect(f.port.attach).toHaveBeenCalledOnce(); expect(f.port.create).toHaveBeenCalledOnce(); expect(f.port.stop).toHaveBeenCalledOnce()
+    expect(f.port.remove).not.toHaveBeenCalled()
+  })
+  it('does not restore observation from a replay with a Gap', async () => {
+    const f = fixture('', 'running'), started = scriptSnapshot(await f.custom.run(tool.id, f.input(), new AbortController().signal))
+    const rejection = new Error('original-stop-refused'), replay = f.port.replay
+    f.port.stop = vi.fn(async () => { throw rejection })
+    f.port.replay = vi.fn(async (...args: Parameters<ToolkitRunPort['replay']>) => ({ ...await replay(...args), gap: { firstAvailableByte: 1, requestedAfterByte: 0 } } as any))
+    await expect(f.custom.stop(tool.id, started.admission!.executionId)).rejects.toBe(rejection)
+    expect(await f.custom.get(tool.id)).toMatchObject({ state: 'unknown', admission: { executionId: started.admission!.executionId }, latestConfirmed: null })
+    expect(f.port.attach).toHaveBeenCalledOnce(); expect(f.port.remove).not.toHaveBeenCalled()
+  })
+  it('preserves the prior confirmed result and admission if later natural-result saving fails', async () => {
+    const f = fixture('prior_ACK'), first = scriptSnapshot(await f.custom.run(tool.id, f.input(), new AbortController().signal))
+    f.begin()
+    const started = scriptSnapshot(await f.custom.run(tool.id, f.input(first.latestConfirmed!.executionId), new AbortController().signal))
+    const rejection = new Error('original-stop-refused'), save = f.storage.save.getMockImplementation()!
+    f.port.stop = vi.fn(async () => { throw rejection })
+    await expect(f.custom.stop(tool.id, started.admission!.executionId)).rejects.toBe(rejection)
+    f.storage.save.mockImplementation(async (id, value: any) => {
+      if (value.latestConfirmed?.executionId === started.admission!.executionId) throw new Error('original-result-save-unconfirmed')
+      return await save(id, value)
+    })
+    f.final('later_original_ACK'); f.exit(); await flush()
+    expect(await f.custom.get(tool.id)).toMatchObject({ state: 'unknown', admission: { executionId: started.admission!.executionId,
+      run: started.admission!.run, text: 'later_original_ACK' }, latestConfirmed: first.latestConfirmed })
+    expect(f.receipts.get(tool.id)).toMatchObject({ admission: { executionId: started.admission!.executionId }, latestConfirmed: first.latestConfirmed })
+    expect(f.port.create).toHaveBeenCalledTimes(2); expect(f.port.stop).toHaveBeenCalledOnce(); expect(f.port.remove).toHaveBeenCalledOnce()
+  })
+  it.each(['replay', 'attach'] as const)('does not borrow a replacement execution after a held %s returns', async held => {
+    const f = fixture('', 'running'), started = scriptSnapshot(await f.custom.run(tool.id, f.input(), new AbortController().signal))
+    const rejection = new Error('original-stop-refused'), gate = deferred(), operation = f.port[held]
+    f.port.stop = vi.fn(async () => { throw rejection })
+    const pending = vi.fn(async (...args: any[]) => { await gate.promise; return await (operation as any)(...args) })
+    f.port[held] = pending
+    const stopping = f.custom.stop(tool.id, started.admission!.executionId)
+    // Attach counts include only this controlled held operation, after initial startup.
+    await vi.waitFor(() => expect(pending).toHaveBeenCalledOnce())
+    const original = (f.custom as any).tools.get(tool.id)
+    // Controlled owner replacement exercises the asynchronous fencing boundary;
+    // it does not assert that ordinary writes can bypass admission integrity.
+    original.admission = { ...structuredClone(started.admission!), executionId: 'replacement-execution', text: '',
+      run: { hostId: 'local', runId: 'replacement-run' } }
+    original.live = (f.custom as any).execution(original, original.admission)
+    const replacement = await f.custom.get(tool.id)
+    f.final('old_target_ACK'); f.exit()
+    gate.release()
+    await expect(stopping).rejects.toBe(rejection)
+    expect(await f.custom.get(tool.id)).toMatchObject({ admission: { executionId: 'replacement-execution', run: { runId: 'replacement-run' }, text: '' }, latestConfirmed: null })
+    expect(await f.custom.get(tool.id)).toEqual(replacement)
+    expect(f.port.release).not.toHaveBeenCalled(); expect(f.port.remove).not.toHaveBeenCalled(); expect(f.port.create).toHaveBeenCalledOnce()
+  })
+  it('releases only its newly acquired original observation when the owner closes during attach', async () => {
+    const f = fixture('', 'running'), started = scriptSnapshot(await f.custom.run(tool.id, f.input(), new AbortController().signal))
+    const rejection = new Error('original-stop-refused'), gate = deferred(), attach = f.port.attach
+    f.port.stop = vi.fn(async () => { throw rejection })
+    f.port.attach = vi.fn(async (...args: Parameters<ToolkitRunPort['attach']>) => { await gate.promise; return await attach(...args) })
+    const stopping = f.custom.stop(tool.id, started.admission!.executionId)
+    await vi.waitFor(() => expect(f.port.attach).toHaveBeenCalledOnce())
+    await f.custom.dispose()
+    f.final('late_closed_owner_ACK')
+    gate.release()
+    await expect(stopping).rejects.toBe(rejection)
+    expect(f.port.release).toHaveBeenCalledExactlyOnceWith({ runId: 'exact-tool-run' })
+    expect(f.port.create).toHaveBeenCalledOnce(); expect(f.port.stop).toHaveBeenCalledOnce(); expect(f.port.remove).not.toHaveBeenCalled()
+    expect(await f.custom.get(tool.id)).toMatchObject({ state: 'unknown', admission: { executionId: started.admission!.executionId, run: started.admission!.run, text: '' }, latestConfirmed: null })
+  })
+  it('fences a replacement owner while reattachment waits for a terminal-hint replay', async () => {
+    const f = fixture('', 'running'), started = scriptSnapshot(await f.custom.run(tool.id, f.input(), new AbortController().signal))
+    const rejection = new Error('original-stop-refused'), gate = deferred(), replay = f.port.replay, attach = f.port.attach
+    let reads = 0
+    f.port.stop = vi.fn(async () => { throw rejection })
+    f.port.replay = vi.fn(async (...args: Parameters<ToolkitRunPort['replay']>) => { if (++reads === 2) await gate.promise; return await replay(...args) })
+    f.port.attach = vi.fn(async (...args: Parameters<ToolkitRunPort['attach']>) => { const result = await attach(...args); f.exit(); return result })
+    const stopping = f.custom.stop(tool.id, started.admission!.executionId)
+    await vi.waitFor(() => expect(reads).toBe(2))
+    const original = (f.custom as any).tools.get(tool.id)
+    original.admission = { ...structuredClone(started.admission!), executionId: 'replacement-execution', text: '', run: { hostId: 'local', runId: 'replacement-run' } }
+    original.live = (f.custom as any).execution(original, original.admission)
+    const replacement = await f.custom.get(tool.id)
+    f.final('old_terminal_hint_ACK'); gate.release()
+    await expect(stopping).rejects.toBe(rejection)
+    expect(await f.custom.get(tool.id)).toEqual(replacement)
+    expect(f.port.release).not.toHaveBeenCalled(); expect(f.port.remove).not.toHaveBeenCalled()
+  })
+  it('does not confirm an old terminal result after its Stop decision outlives the captured execution', async () => {
+    const f = fixture('', 'running'), started = scriptSnapshot(await f.custom.run(tool.id, f.input(), new AbortController().signal))
+    const rejection = new Error('original-stop-refused'), gate = deferred()
+    f.port.stop = vi.fn(async () => { f.final('old_terminal_ACK'); f.exit(); await gate.promise; throw rejection })
+    const stopping = f.custom.stop(tool.id, started.admission!.executionId)
+    await flush()
+    expect(f.port.replay).toHaveBeenCalledOnce(); expect(f.storage.save).toHaveBeenCalledTimes(2)
+    const original = (f.custom as any).tools.get(tool.id)
+    original.admission = { ...structuredClone(started.admission!), executionId: 'replacement-execution', text: '', run: { hostId: 'local', runId: 'replacement-run' } }
+    original.live = (f.custom as any).execution(original, original.admission)
+    const replacement = await f.custom.get(tool.id)
+    gate.release()
+    await expect(stopping).rejects.toBe(rejection)
+    expect(await f.custom.get(tool.id)).toEqual(replacement)
+    expect(f.port.remove).not.toHaveBeenCalled(); expect(f.storage.save).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('saved Toolkit actions share captured admission and Raw execution', () => {
