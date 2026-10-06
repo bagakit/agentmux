@@ -197,9 +197,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   }
   const [laneMetrics, setLaneMetrics] = useState<FocusLaneMetrics>({ width: 0, padding: 4, gap: 2, cardGap: 2 })
   const hasBoardLanes = boardLanes.length > 0 || recentProjects.length > 0
+  const hasBoardCards = boardLanes.length > 0
   useLayoutEffect(() => {
     const rows = boardRowsRef.current
-    if (!visible || !hasBoardLanes || !rows || typeof ResizeObserver === 'undefined') return
+    if (!visible || !hasBoardCards || !rows || typeof ResizeObserver === 'undefined') return
     const measure = () => {
       const groups = rows.querySelector<HTMLElement>('.focus-project-lanes__groups')
       if (!groups || rows.clientWidth <= 0) return
@@ -212,7 +213,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     const observer = new ResizeObserver(measure)
     observer.observe(rows)
     return () => observer.disconnect()
-  }, [visible, hasBoardLanes])
+  }, [visible, hasBoardCards])
   const matchingGroups = groupFocusContexts(matching)
   const neutralSummary = focusNeutralGroupSummary(matchingGroups.idle)
   const bucketMeta = { attention: { label: 'Attention', icon: ThemeObjectInboxIcon }, working: { label: 'Working', icon: ThemeStatusWorkingIcon }, results: { label: 'Results', icon: ThemeStatusCompletedIcon }, idle: { label: neutralSummary.label, icon: ThemeStatusNeutralIcon } }
