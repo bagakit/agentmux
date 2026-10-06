@@ -712,6 +712,7 @@ export class AgentMuxRpcService {
         throw new AgentMuxError('Activity append requires an authenticated original Agent, person or device.', 'CONTROL_PERMISSION_DENIED')
       }
       if (request.operation === 'agent.rename' || request.operation === 'space.rename') {
+        nameContext.source = request.nameSource === 'derived' ? 'derived' : 'explicit-edit'
         const agentOwner = request.operation === 'agent.rename' ? await this.owner(request.agentSessionId) : null
         const target = request.operation === 'agent.rename' ? { kind: 'agent-session', id: request.agentSessionId } : { kind: 'tab', id: request.tabId }
         const state = await this.spatial.readForLayout()
@@ -724,7 +725,7 @@ export class AgentMuxRpcService {
           targetHostId: agentOwner?.hostId ?? region?.execution?.hostId ?? null,
           targetCwd: agentOwner?.session.workspacePath ?? region?.execution?.cwd ?? null })
         const changed = await this.spatial.mutateDisplayLabel({ target, operationId: request.requestId,
-          value: request.name?.trim() || null, expectedNameRevision: request.expectedNameRevision, source: 'manual' }, nameContext)
+          value: request.name?.trim() || null, expectedNameRevision: request.expectedNameRevision, source: request.nameSource ?? 'manual' }, nameContext)
         const report = { override: changed.label?.value ?? null, changed: changed.changed,
           nameRevision: changed.label?.nameRevision ?? 0, record: changed.record,
           outcome: !changed.applied || changed.diskDurability !== 'confirmed' ? 'partial' as const : changed.changed ? 'renamed' as const : 'unchanged' as const,
@@ -1023,12 +1024,12 @@ export class AgentMuxRpcService {
           status = await client.statusAgent(session.agentSessionId)
           if (status.session.run.runId !== session.run.runId) throw new AgentMuxError('Session changed during inspection.', 'STALE_AGENT_SESSION')
         } catch (error) { status = null; issues.push(unavailable(error)) }
-        let displayName: { override: string | null; nameRevision: number | null; availability: 'observed' | 'unavailable' } = { override: null, nameRevision: null, availability: 'unavailable' }
+        let displayName: import('./public-rpc.js').AgentMuxRpcAgentInspection['displayName'] = { override: null, source: null, nameRevision: null, availability: 'unavailable' }
         try {
           const state = await this.spatial.readForLayout()
           if (!state) throw new AgentMuxError('The name owner is unavailable; original names are retained.', 'SPATIAL_STATE_ABSENT')
           const label = displayLabel(state.graph, { kind: 'agent-session', id: session.agentSessionId })
-          displayName = { override: label?.value ?? null, nameRevision: label?.nameRevision ?? 0, availability: 'observed' }
+          displayName = { override: label?.value ?? null, source: label?.source ?? null, nameRevision: label?.nameRevision ?? 0, availability: 'observed' }
         } catch (error) { issues.push(unavailable(error)) }
         result = { routeHostId, session, status, displayName, unavailable: issues }; break
       }

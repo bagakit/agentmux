@@ -264,9 +264,9 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'open.file'; path: string; zoneId: string; spaceId?: string; displayWorkspaceId?: string; groupId?: string;
       /** Exact existing Tab and anchor Region; all three fields require the exact display occurrence. */
       tabId?: string; regionId?: string; split?: SplitDirection; focus: boolean }
-  | { operation: 'agent.rename'; agentSessionId: string; name: string | null; expectedNameRevision: number }
+  | { operation: 'agent.rename'; agentSessionId: string; name: string | null; expectedNameRevision: number; nameSource?: 'derived' }
   | { operation: 'agent.inspect'; agentSessionId: string }
-  | { operation: 'space.rename'; tabId: string; name: string | null; expectedNameRevision: number }
+  | { operation: 'space.rename'; tabId: string; name: string | null; expectedNameRevision: number; nameSource?: 'derived' }
   | { operation: 'space.ls'; target: AgentMuxSpaceSelector; presentation?: boolean }
   | { operation: 'space.inspect'; presentation?: boolean; target: AgentMuxSpaceSelector | { requestId: string } }
   | { operation: 'agent.open'; content:
