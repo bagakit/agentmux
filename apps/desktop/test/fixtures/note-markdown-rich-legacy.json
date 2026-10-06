@@ -1,0 +1,744 @@
+{
+  "schema": "agentmux.note.v1",
+  "noteId": "old Note/中文 #α%--same",
+  "content": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "heading",
+        "attrs": {
+          "blockId": "heading/#%--中文",
+          "provenance": {
+            "created": {
+              "actor": {
+                "kind": "agent",
+                "id": "8Q3nV5mExactResearchSession"
+              },
+              "at": 1000
+            },
+            "lastEdited": {
+              "actor": {
+                "kind": "user",
+                "id": "original-person"
+              },
+              "at": 2000
+            }
+          },
+          "level": 2
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "中文标题与 "
+          },
+          {
+            "type": "noteLink",
+            "attrs": {
+              "referenceId": "heading-link--1",
+              "text": "Original target",
+              "target": {
+                "noteId": "original-target"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "attrs": {
+          "blockId": "paragraph--marks",
+          "provenance": {
+            "created": {
+              "actor": {
+                "kind": "agent",
+                "id": "8Q3nV5mExactResearchSession"
+              },
+              "at": 1000
+            },
+            "lastEdited": {
+              "actor": {
+                "kind": "user",
+                "id": "original-person"
+              },
+              "at": 2000
+            }
+          }
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "plain **literal** "
+          },
+          {
+            "type": "text",
+            "text": "bold",
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "text",
+            "text": "italic",
+            "marks": [
+              {
+                "type": "italic"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "text",
+            "text": "both",
+            "marks": [
+              {
+                "type": "bold"
+              },
+              {
+                "type": "italic"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "text",
+            "text": "strike",
+            "marks": [
+              {
+                "type": "strike"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "text",
+            "text": "underline < & >",
+            "marks": [
+              {
+                "type": "underline"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "text",
+            "text": "`inline` [[not a link]] ^literal",
+            "marks": [
+              {
+                "type": "code"
+              }
+            ]
+          },
+          {
+            "type": "hardBreak"
+          },
+          {
+            "type": "text",
+            "text": "after hard break; soft LF follows\nnext text line with trailing spaces  "
+          },
+          {
+            "type": "text",
+            "text": " rare link ",
+            "marks": [
+              {
+                "type": "link",
+                "attrs": {
+                  "href": "https://example.test/a?q=one&two=%23",
+                  "target": "_self",
+                  "rel": "author noopener",
+                  "class": "original-class",
+                  "title": "Original \"title\" & <detail>"
+                }
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": "quoted [[still link mark text]]",
+            "marks": [
+              {
+                "type": "link",
+                "attrs": {
+                  "href": "https://example.test/raw"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "attrs": {
+          "blockId": "paragraph-links",
+          "provenance": {
+            "created": {
+              "actor": {
+                "kind": "agent",
+                "id": "8Q3nV5mExactResearchSession"
+              },
+              "at": 1000
+            },
+            "lastEdited": {
+              "actor": {
+                "kind": "user",
+                "id": "original-person"
+              },
+              "at": 2000
+            }
+          }
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Two same labels, different original occurrences: "
+          },
+          {
+            "type": "noteLink",
+            "attrs": {
+              "referenceId": "reference--one/#%",
+              "text": "same display",
+              "target": {
+                "noteId": "original-target",
+                "blockId": "target block/#%--中文"
+              }
+            }
+          },
+          {
+            "type": "text",
+            "text": " / "
+          },
+          {
+            "type": "noteLink",
+            "attrs": {
+              "referenceId": "reference--two",
+              "text": "same display",
+              "target": {
+                "noteId": "original-target",
+                "blockId": "target block/#%--中文"
+              }
+            }
+          },
+          {
+            "type": "text",
+            "text": " / "
+          },
+          {
+            "type": "noteLink",
+            "attrs": {
+              "referenceId": "reference-page",
+              "text": "whole page",
+              "target": {
+                "noteId": "original-target"
+              }
+            }
+          },
+          {
+            "type": "hardBreak"
+          },
+          {
+            "type": "noteLink",
+            "attrs": {
+              "referenceId": "unbound--occurrence",
+              "text": "Same title #^original-block",
+              "target": null
+            }
+          },
+          {
+            "type": "text",
+            "text": " and raw [[Same title]] and [[中文页面 #标题]]"
+          }
+        ]
+      },
+      {
+        "type": "orderedList",
+        "attrs": {
+          "start": 7,
+          "type": "a"
+        },
+        "content": [
+          {
+            "type": "listItem",
+            "attrs": {
+              "blockId": "ordered-item--one",
+              "provenance": {
+                "created": {
+                  "actor": {
+                    "kind": "agent",
+                    "id": "8Q3nV5mExactResearchSession"
+                  },
+                  "at": 1000
+                },
+                "lastEdited": {
+                  "actor": {
+                    "kind": "user",
+                    "id": "original-person"
+                  },
+                  "at": 2000
+                }
+              }
+            },
+            "content": [
+              {
+                "type": "paragraph",
+                "attrs": {
+                  "blockId": "ordered-first--paragraph",
+                  "provenance": {
+                    "created": {
+                      "actor": {
+                        "kind": "agent",
+                        "id": "8Q3nV5mExactResearchSession"
+                      },
+                      "at": 1000
+                    },
+                    "lastEdited": {
+                      "actor": {
+                        "kind": "user",
+                        "id": "original-person"
+                      },
+                      "at": 2000
+                    }
+                  }
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "first paragraph ID differs from list item"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "attrs": {
+                  "blockId": "ordered-second--paragraph",
+                  "provenance": {
+                    "created": {
+                      "actor": {
+                        "kind": "agent",
+                        "id": "8Q3nV5mExactResearchSession"
+                      },
+                      "at": 1000
+                    },
+                    "lastEdited": {
+                      "actor": {
+                        "kind": "user",
+                        "id": "original-person"
+                      },
+                      "at": 2000
+                    }
+                  }
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "second paragraph in same item"
+                  }
+                ]
+              },
+              {
+                "type": "bulletList",
+                "content": [
+                  {
+                    "type": "listItem",
+                    "attrs": {
+                      "blockId": "nested-item",
+                      "provenance": {
+                        "created": {
+                          "actor": {
+                            "kind": "agent",
+                            "id": "8Q3nV5mExactResearchSession"
+                          },
+                          "at": 1000
+                        },
+                        "lastEdited": {
+                          "actor": {
+                            "kind": "user",
+                            "id": "original-person"
+                          },
+                          "at": 2000
+                        }
+                      }
+                    },
+                    "content": [
+                      {
+                        "type": "paragraph",
+                        "attrs": {
+                          "blockId": "nested-first-paragraph",
+                          "provenance": {
+                            "created": {
+                              "actor": {
+                                "kind": "agent",
+                                "id": "8Q3nV5mExactResearchSession"
+                              },
+                              "at": 1000
+                            },
+                            "lastEdited": {
+                              "actor": {
+                                "kind": "user",
+                                "id": "original-person"
+                              },
+                              "at": 2000
+                            }
+                          }
+                        },
+                        "content": [
+                          {
+                            "type": "text",
+                            "text": "nested bullet"
+                          },
+                          {
+                            "type": "hardBreak"
+                          },
+                          {
+                            "type": "text",
+                            "text": "second line"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "attrs": {
+              "blockId": "ordered-item--two",
+              "provenance": {
+                "created": {
+                  "actor": {
+                    "kind": "agent",
+                    "id": "8Q3nV5mExactResearchSession"
+                  },
+                  "at": 1000
+                },
+                "lastEdited": {
+                  "actor": {
+                    "kind": "user",
+                    "id": "original-person"
+                  },
+                  "at": 2000
+                }
+              }
+            },
+            "content": [
+              {
+                "type": "paragraph",
+                "attrs": {
+                  "blockId": "ordered-two-paragraph",
+                  "provenance": {
+                    "created": {
+                      "actor": {
+                        "kind": "agent",
+                        "id": "8Q3nV5mExactResearchSession"
+                      },
+                      "at": 1000
+                    },
+                    "lastEdited": {
+                      "actor": {
+                        "kind": "user",
+                        "id": "original-person"
+                      },
+                      "at": 2000
+                    }
+                  }
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "second ordered item"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "blockquote",
+        "attrs": {
+          "blockId": "quote-parent",
+          "provenance": {
+            "created": {
+              "actor": {
+                "kind": "agent",
+                "id": "8Q3nV5mExactResearchSession"
+              },
+              "at": 1000
+            },
+            "lastEdited": {
+              "actor": {
+                "kind": "user",
+                "id": "original-person"
+              },
+              "at": 2000
+            }
+          }
+        },
+        "content": [
+          {
+            "type": "paragraph",
+            "attrs": {
+              "blockId": "quote-child",
+              "provenance": {
+                "created": {
+                  "actor": {
+                    "kind": "agent",
+                    "id": "8Q3nV5mExactResearchSession"
+                  },
+                  "at": 1000
+                },
+                "lastEdited": {
+                  "actor": {
+                    "kind": "user",
+                    "id": "original-person"
+                  },
+                  "at": 2000
+                }
+              }
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "quote parent and paragraph both have stable identities"
+              }
+            ]
+          },
+          {
+            "type": "blockquote",
+            "attrs": {
+              "blockId": "quote-nested",
+              "provenance": {
+                "created": {
+                  "actor": {
+                    "kind": "agent",
+                    "id": "8Q3nV5mExactResearchSession"
+                  },
+                  "at": 1000
+                },
+                "lastEdited": {
+                  "actor": {
+                    "kind": "user",
+                    "id": "original-person"
+                  },
+                  "at": 2000
+                }
+              }
+            },
+            "content": [
+              {
+                "type": "paragraph",
+                "attrs": {
+                  "blockId": "quote-nested-child",
+                  "provenance": {
+                    "created": {
+                      "actor": {
+                        "kind": "agent",
+                        "id": "8Q3nV5mExactResearchSession"
+                      },
+                      "at": 1000
+                    },
+                    "lastEdited": {
+                      "actor": {
+                        "kind": "user",
+                        "id": "original-person"
+                      },
+                      "at": 2000
+                    }
+                  }
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "nested quote"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "codeBlock",
+        "attrs": {
+          "blockId": "code--original",
+          "provenance": {
+            "created": {
+              "actor": {
+                "kind": "agent",
+                "id": "8Q3nV5mExactResearchSession"
+              },
+              "at": 1000
+            },
+            "lastEdited": {
+              "actor": {
+                "kind": "user",
+                "id": "original-person"
+              },
+              "at": 2000
+            }
+          },
+          "language": "js"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "const text = \"[[not a wiki]] ^not-a-block\";\n```\n~~~\n\n"
+          }
+        ]
+      },
+      {
+        "type": "horizontalRule",
+        "attrs": {
+          "blockId": "rule--original",
+          "provenance": {
+            "created": {
+              "actor": {
+                "kind": "agent",
+                "id": "8Q3nV5mExactResearchSession"
+              },
+              "at": 1000
+            },
+            "lastEdited": {
+              "actor": {
+                "kind": "user",
+                "id": "original-person"
+              },
+              "at": 2000
+            }
+          }
+        }
+      },
+      {
+        "type": "paragraph",
+        "attrs": {
+          "blockId": "empty--original",
+          "provenance": {
+            "created": {
+              "actor": {
+                "kind": "agent",
+                "id": "8Q3nV5mExactResearchSession"
+              },
+              "at": 1000
+            },
+            "lastEdited": {
+              "actor": {
+                "kind": "user",
+                "id": "original-person"
+              },
+              "at": 2000
+            }
+          }
+        },
+        "content": []
+      },
+      {
+        "type": "blockReference",
+        "attrs": {
+          "blockId": "reference-source-block",
+          "provenance": {
+            "created": {
+              "actor": {
+                "kind": "agent",
+                "id": "8Q3nV5mExactResearchSession"
+              },
+              "at": 1000
+            },
+            "lastEdited": {
+              "actor": {
+                "kind": "user",
+                "id": "original-person"
+              },
+              "at": 2000
+            }
+          },
+          "referenceId": "structural-reference--original",
+          "target": {
+            "noteId": "original-target",
+            "blockId": "target block/#%--中文"
+          },
+          "mode": "reference"
+        }
+      },
+      {
+        "type": "blockReference",
+        "attrs": {
+          "blockId": "embed-source-block",
+          "provenance": {
+            "created": {
+              "actor": {
+                "kind": "agent",
+                "id": "8Q3nV5mExactResearchSession"
+              },
+              "at": 1000
+            },
+            "lastEdited": {
+              "actor": {
+                "kind": "user",
+                "id": "original-person"
+              },
+              "at": 2000
+            }
+          },
+          "referenceId": "structural-embed--original",
+          "target": {
+            "noteId": "original-target",
+            "blockId": "target block/#%--中文"
+          },
+          "mode": "embed"
+        }
+      },
+      {
+        "type": "paragraph",
+        "attrs": {
+          "blockId": "historical-unknown"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Historical missing provenance remains unknown."
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "attrs": {
+          "blockId": "partial-authorship",
+          "provenance": {
+            "created": {
+              "actor": {
+                "kind": "agent",
+                "id": "8Q3nV5mExactResearchSession"
+              },
+              "at": 1000
+            },
+            "lastEdited": null
+          }
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Known creator, unknown last editor."
+          }
+        ]
+      }
+    ]
+  }
+}
