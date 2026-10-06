@@ -1,3 +1,4 @@
+import { notificationEventRows, notificationTrigger, toggleNotificationCenter } from './helpers/notification-center'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -14,7 +15,6 @@ import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
-import { TransientErrorNotice } from '../src/renderer/src/components/TransientErrorNotice'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { desktopSpatialGraph, desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../src/renderer/src/lib/workbench-session-subscriptions'
@@ -35,11 +35,7 @@ const unknownEvent = (): RuntimeEvent => ({ type: 'core', hostId: 'local', event
   type: 'agent-status', agentSessionId: 'unrelated-event', state: 'working',
   evidence: { source: 'native-hook', observedAt: 1 }
 } })
-function Notices() {
-  const state = useAppStore()
-  return <TransientErrorNotice error={state.error} dismissed={state.errorDismissed} lastError={state.lastError}
-    summary={state.errorNoticeContext?.summary} onDismiss={state.dismissError} onReopen={state.reopenError} kind={state.errorNoticeContext?.kind ?? 'indeterminate'} />
-}
+function Notices() { return <GlobalSystemNotices /> }
 let root: Root, element: HTMLDivElement, dispose: (() => void) | undefined, releasePending: (() => void) | undefined
 let spatialDirectory: string, spatial: AgentMuxSpatialStateStore
 function setHistorySources(sources: AgentSessionHistoryDescriptor[], warnings: RuntimeEndpointWarning[] = []) {
@@ -49,6 +45,7 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   useAppStore.setState(initial, true)
   vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
+  vi.spyOn(api.sessions, 'notifyInputOccupation').mockResolvedValue(undefined)
   vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig)
   vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
@@ -91,17 +88,18 @@ async function missingReferencesFixture(catalogue: AgentSessionHistoryDescriptor
   let finish!: (snapshot: RuntimeSnapshot) => void
   const deferred = new Promise<RuntimeSnapshot>(resolve => { finish = resolve })
   releasePending = () => finish(unrelated)
-  vi.spyOn(api.sessions, 'snapshot').mockResolvedValueOnce(unrelated).mockReturnValue(deferred)
+  const snapshot = vi.spyOn(api.sessions, 'snapshot').mockResolvedValueOnce(unrelated).mockReturnValue(deferred)
   const recover = vi.spyOn(api.sessions, 'recover')
   await act(async () => { root.render(<Notices />); dispose = await useAppStore.getState().initialize() })
+  await act(async () => { await vi.waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2)) })
   return { tabs, recover, settle: async () => { await act(async () => { finish(unrelated); await new Promise(done => setTimeout(done, 0)) }) } }
 }
 
 it('classifies original closed history before counting missing Runtime references and settles a removed reference', async () => {
   const f = await missingReferencesFixture([{ agentSessionId: ids[0]!, hostId: 'local', state: 'retired' }])
   expect(useAppStore.getState().error).toContain('1 saved Session reference(s) have no current Runtime facts')
-  expect((element.querySelector('.error-notice__summary')?.textContent ?? '')).toContain('1 saved Session')
-  expect(element.querySelector('.error-notice__original')?.textContent).toContain('no current Runtime facts')
+  expect((element.querySelector('.notification-item[data-notice-id="current"] .notification-item__title')?.textContent ?? '')).toContain('1 saved Session')
+  expect(element.querySelector('.notification-item[data-notice-id="current"] .notification-item__original')?.textContent).toContain('no current Runtime facts')
   expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot?.sessionIds).toEqual([ids[1]])
   expect(useAppStore.getState().tabs).toEqual(f.tabs)
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(['healthy-neighbor'])
@@ -134,9 +132,9 @@ it('settles retained closed references from their own later Core catalogue witho
   expect(useAppStore.getState().error).toContain('Unrelated Provider discovery failure')
   expect(useAppStore.getState().error).not.toContain('no current Runtime facts')
   expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toBeUndefined()
-  expect((element.querySelector('.error-notice__summary')?.textContent ?? '')).toContain('Startup checks')
-  expect((element.querySelector('.error-notice__summary')?.textContent ?? '')).not.toContain('saved Session')
-  expect(element.querySelector('.error-notice__original')?.textContent).toContain('Unrelated Provider discovery failure')
+  expect((element.querySelector('.notification-item[data-notice-id="current"] .notification-item__title')?.textContent ?? '')).toContain('Startup checks')
+  expect((element.querySelector('.notification-item[data-notice-id="current"] .notification-item__title')?.textContent ?? '')).not.toContain('saved Session')
+  expect(element.querySelector('.notification-item[data-notice-id="current"] .notification-item__original')?.textContent).toContain('Unrelated Provider discovery failure')
   expect(useAppStore.getState().tabs).toEqual(f.tabs)
   expect(f.recover).not.toHaveBeenCalled()
 })
@@ -191,21 +189,30 @@ async function fixture(bufferedEvent = false, overflow?: 'complete' | 'partial',
     ? complete() : { ...complete(), sessions: complete().sessions.slice(0, 1) })
   snapshot.mockReturnValue(pending)
   await act(async () => { root.render(<Notices />); dispose = await useAppStore.getState().initialize() })
+  // Startup publishes the durable workface before its optional Runtime observation.
+  // Wait for the original cut, including its bounded retry, before resolving the deferred next cut.
+  if (!options.initialSnapshot || options.initialSnapshot instanceof Error || options.initialSnapshot.sessions.length === 0) {
+    await act(async () => { await vi.waitFor(() => expect(snapshot.mock.calls.length).toBeGreaterThanOrEqual(overflow === 'partial' ? 3 : 2)) })
+  } else await act(async () => { await new Promise(done => setTimeout(done, 0)) })
   expect(useAppStore.getState().loading).toBe(false)
   if (overflow === 'complete') {
     expect(useAppStore.getState().errorNoticeContext).toBeNull()
-    expect(element.querySelector('.error-notice')).toBeNull()
+    expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   } else if (!useAppStore.getState().errorNoticeContext?.startupSessionSnapshot && options.initialSnapshot && !(options.initialSnapshot instanceof Error) && options.initialSnapshot.sessions.length > 0) {
-    if (useAppStore.getState().error) expect(element.querySelector('.error-notice')!.textContent).toContain('Provider catalog lookup did not complete')
-    else expect(element.querySelector('.error-notice')).toBeNull()
+    if (useAppStore.getState().error) expect(element.querySelector('.notification-item[data-notice-id="current"]')!.textContent).toContain('Provider catalog lookup did not complete')
+    else expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   } else {
-    expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot?.sessionIds).toEqual(ids)
-    expect(element.querySelectorAll('.error-notice')).toHaveLength(1)
-    expect(element.querySelector('.error-notice')!.textContent).toContain(options.initialSnapshot instanceof Error
-      ? 'Runtime Session snapshot did not complete' : 'Runtime Session snapshot returned no Session facts')
+    expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot?.sessionIds).toEqual(overflow === 'partial' ? [ids[1]] : ids)
+    expect(element.querySelectorAll('.notification-item[data-notice-id="current"]')).toHaveLength(1)
+    expect(element.querySelector('.notification-item[data-notice-id="current"] .notification-item__original')!.textContent).toContain(useAppStore.getState().error)
   }
   const warning = useAppStore.getState().error!
   const settle = async (result: RuntimeSnapshot | Error) => {
+    // A complete first cut can finish the optional reader. Request another canonical cut
+    // through the original Runtime event consumer before resolving its deferred receipt.
+    if (options.initialSnapshot && !(options.initialSnapshot instanceof Error) && options.initialSnapshot.sessions.length > 0 && snapshot.mock.calls.length < 2) {
+      await act(async () => { listener(unknownEvent()) })
+    }
     await act(async () => { result instanceof Error ? reject(result) : resolve(result); await new Promise(done => setTimeout(done, 0)) })
   }
   const retained = () => {
@@ -226,7 +233,7 @@ it('startup observation shrinks an initially empty cut to the remaining exact or
   await f.settle({ ...complete(), sessions: complete().sessions.slice(0, 1) })
   expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot?.sessionIds,
     'A partial canonical cut must reduce the original unknown count').toEqual([ids[1]])
-  expect(element.querySelector('.error-notice__summary')?.textContent).toContain('1 saved Session')
+  expect(element.querySelector('.notification-item[data-notice-id="current"] .notification-item__title')?.textContent).toContain('1 saved Session')
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual([ids[0]])
   f.retained()
 })
@@ -235,7 +242,7 @@ it('startup observation confirms exact pending identities without inventing a ru
   const f = await fixture()
   await f.settle({ ...empty(), recoveryCandidates: candidates() })
   expect(useAppStore.getState().error, 'Known pending Session identity is not a Runtime observation failure').toBeNull()
-  expect(element.querySelector('.error-notice')).toBeNull()
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
   expect(useAppStore.getState().sessions.every(session => session.processState !== 'running')).toBe(true)
   expect(useAppStore.getState().sessions.flatMap(session => session.kind === 'agent' ? [session.capabilities] : [])).toEqual(candidates().map(session => session.capabilities))
@@ -251,8 +258,8 @@ it('startup observation automatically re-reads the original Provider catalog and
   await f.settle(complete())
   expect(providers).toHaveBeenCalledTimes(2)
   expect(useAppStore.getState().providerCatalog, 'The complete actual catalog and its capabilities must survive retry').toEqual(catalog)
-  expect(useAppStore.getState().error).toContain('Independent Demand failure')
-  expect(useAppStore.getState().error).not.toContain('Provider catalog lookup')
+  expect(useAppStore.getState().error).toBeNull()
+  expect(notificationEventRows(element).map(row => row.textContent).join('\n')).toContain('Independent Demand failure')
   expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toBeUndefined()
   f.retained()
 })
@@ -279,9 +286,9 @@ it('startup observation rechecks quiet successful empty cuts until exact origina
 it('startup observation yields finitely for quiet persistent unknown facts then preserves the original surface', async () => {
   const f = await fixture()
   await f.settle(empty())
-  await vi.waitFor(() => expect(f.snapshot).toHaveBeenCalledTimes(5))
+  await vi.waitFor(() => expect(f.snapshot).toHaveBeenCalledTimes(4))
   await new Promise(done => setTimeout(done, 100))
-  expect(f.snapshot).toHaveBeenCalledTimes(5)
+  expect(f.snapshot).toHaveBeenCalledTimes(4)
   expect(useAppStore.getState().error).toBe(f.warning)
   f.retained()
 })
@@ -309,12 +316,14 @@ it('startup observation retains Provider retry after Runtime facts settle but pr
   await f.settle(complete())
   expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toBeUndefined()
   expect(useAppStore.getState().errorNoticeContext?.startupProviderCatalog).toBeDefined()
+  const originalContext = useAppStore.getState().errorNoticeContext
   await act(async () => useAppStore.getState().reportError('Later original document save failed', { kind: 'process-degraded' }))
-  const later = useAppStore.getState().errorNoticeContext
+  expect(useAppStore.getState().errorNoticeContext).toBe(originalContext)
   providers.mockImplementation(providerCatalogReader(new AgentProviderRegistry().catalog()))
   await new Promise(done => setTimeout(done, 100))
-  expect(useAppStore.getState().error).toBe('Later original document save failed')
-  expect(useAppStore.getState().errorNoticeContext).toBe(later)
+  expect(useAppStore.getState().error).toBeNull()
+  expect(useAppStore.getState().errorNoticeContext).toBeNull()
+  expect(notificationEventRows(element).map(row => row.textContent).join('\n')).toContain('Later original document save failed')
   f.retained()
 })
 it('startup observation cancels an outstanding Provider retry with the original reader', async () => {
@@ -331,7 +340,7 @@ it('startup observation cancels an outstanding Provider retry with the original 
 it('startup observation retries a rejected Runtime observation finitely and recovers on its own connection event', async () => {
   const f = await fixture(false, undefined, { initialSnapshot: new Error('Initial Runtime RPC ended') })
   await f.settle(new Error('Runtime remains unavailable'))
-  await vi.waitFor(() => expect(f.snapshot).toHaveBeenCalledTimes(5))
+  await vi.waitFor(() => expect(f.snapshot).toHaveBeenCalledTimes(4))
   expect(useAppStore.getState().error).toContain('Initial Runtime RPC ended')
   const reads = f.snapshot.mock.calls.length
   await new Promise(done => setTimeout(done, 100))
@@ -347,7 +356,7 @@ it('startup observation retries a Provider-only failure without manufacturing a 
   const f = await fixture(false, undefined, { initialSnapshot: complete() })
   expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toBeUndefined()
   await f.settle(complete())
-  expect(useAppStore.getState().providerCatalog).toEqual(catalog)
+  await act(async () => { await vi.waitFor(() => expect(useAppStore.getState().providerCatalog).toEqual(catalog)) })
   expect(useAppStore.getState().error).toBeNull()
   f.retained()
 })
@@ -397,7 +406,7 @@ it('startup observation reads partial Provider diagnostics after publishing the 
     step: 'Reading Provider catalog', code: 'PROVIDER_READ_FAILED', message: 'Other Host catalog did not complete', recovery: 'Read this catalog again' }
   await f.settle({ ...complete(), runtimeEndpointWarnings: [warning] })
   expect(useAppStore.getState().runtimeEndpointWarnings, 'A partial successful catalog must expose its exact failed Host diagnostic').toEqual([warning])
-  await act(async () => root.render(<><Notices /><GlobalSystemNotices /></>))
+  await act(async () => root.render(<Notices />))
   expect(element.textContent, 'The actual service window must consume this observation').toContain('Other Host: Reading Provider catalog')
   expect(useAppStore.getState().providerCatalog).toEqual(catalog)
   expect(providers).toHaveBeenCalledTimes(1)
@@ -422,7 +431,7 @@ it('startup observation metadata notice cannot hide a separate Session connectio
     step: 'Reading Provider catalog', code: 'PROVIDER_READ_FAILED', message: 'Catalog owner did not answer', recovery: 'Read the catalog again' }
   useAppStore.setState({ runtimeEndpointWarnings: [warning], sessions: [{ ...complete().sessions[0]!,
     status: { state: 'disconnected', source: 'run-process', observedAt: 10, detail: 'Actual Session connection is unconfirmed' } }] })
-  await act(async () => root.render(<><Notices /><GlobalSystemNotices /></>))
+  await act(async () => root.render(<Notices />))
   expect(element.textContent, 'A metadata warning must not hide the original Session connection notice').toContain('Reconnecting to this Agent')
   expect(useAppStore.getState().sessions[0]!.status.detail).toBe('Actual Session connection is unconfirmed')
   expect(element.textContent).toContain('Reading Provider catalog')
@@ -459,7 +468,7 @@ it('startup observation preserves a partial Provider query cut across quiet snap
     'A snapshot without a metadata warning must not erase an unresolved producer cut').toEqual([warning])
   providers.mockImplementation(providerCatalogReader(catalog))
   await act(async () => { f.restore(); await new Promise(done => setTimeout(done, 0)) })
-  expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([])
+  await act(async () => { await vi.waitFor(() => expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([])) })
   f.retained()
 })
 it('startup observation re-reads retained History after restore even when original Runtime facts were complete', async () => {
@@ -497,7 +506,7 @@ it.each([false, true])('startup observation metadata diagnosis preserves explici
     expect(useAppStore.getState().agentSteerQueues[ids[0]!]![0]!.operationId).toBe('original-explicit')
   } else {
     expect(submit, 'A failed metadata observation must not take an existing healthy input capability').toHaveBeenCalledExactlyOnceWith(
-      complete().sessions[0]!.control, 'Actual original input', 'original-explicit', condition, { allowUncertainTurn: true }, false, undefined, undefined, undefined)
+      complete().sessions[0]!.control, 'Actual original input', 'original-explicit', condition, { allowUncertainTurn: true }, false, undefined, undefined, undefined, undefined, undefined)
   }
   f.retained()
 })
@@ -505,20 +514,20 @@ it('initialization publishes complete overflow facts before the background diagn
   const f = await fixture(false, 'complete')
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
   expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null, errorNoticeContext: null })
-  expect(element.querySelector('.error-notice__reopen')).toBeNull()
-  expect(f.snapshot).toHaveBeenCalledTimes(3)
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
+  expect(f.snapshot).toHaveBeenCalledTimes(2)
   f.retained()
 })
-it('partial overflow keeps the original scope until later complete facts arrive', async () => {
+it('partial overflow keeps the remaining original identity until later complete facts arrive', async () => {
   const f = await fixture(false, 'partial')
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual([ids[0]])
-  expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toEqual({ sessionIds: ids, remainingMessage: null })
-  expect(f.warning).not.toContain('saved Session reference(s) have no current Runtime facts')
+  expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toEqual({ sessionIds: [ids[1]], remainingMessage: null })
+  expect(f.warning).toContain('1 saved Session reference(s) have no current Runtime facts')
   await f.settle(complete())
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
   expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null, errorNoticeContext: null })
-  expect(element.querySelector('.error-notice')).toBeNull()
-  expect(element.querySelector('.error-notice__reopen')).toBeNull()
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   expect(f.snapshot).toHaveBeenCalledTimes(3)
   f.retained()
 })
@@ -527,8 +536,8 @@ it.each([false, true])('settles only the adopted complete original facts (buffer
   await f.settle(complete())
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
   expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null, errorNoticeContext: null })
-  expect(element.querySelector('.error-notice')).toBeNull()
-  expect(element.querySelector('.error-notice__reopen')).toBeNull()
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   f.retained()
 })
 it.each(['empty', 'unavailable-host', 'rejected', 'invalid-timeline'] as const)('keeps unresolved %s facts visible', async mode => {
@@ -545,8 +554,8 @@ it.each(['empty', 'unavailable-host', 'rejected', 'invalid-timeline'] as const)(
   await f.settle(snapshot)
   expect(useAppStore.getState().error).toBe(f.warning)
   expect(useAppStore.getState().lastError).toBe(f.warning)
-  expect(element.querySelectorAll('.error-notice')).toHaveLength(1)
-  expect(element.querySelector('.error-notice')!.textContent).toContain(f.warning)
+  expect(element.querySelectorAll('.notification-item[data-notice-id="current"]')).toHaveLength(1)
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')!.textContent).toContain(f.warning)
   f.retained()
 })
 it('settles observed original Session facts while keeping unverified Native ownership as its separate notice', async () => {
@@ -555,7 +564,7 @@ it('settles observed original Session facts while keeping unverified Native owne
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
   expect(useAppStore.getState().runtimeOwnershipWarnings).toEqual(['local'])
   expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null, errorNoticeContext: null })
-  expect(element.querySelector('.error-notice')).toBeNull()
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   f.retained()
 })
 it('keeps same-ID facts from a foreign Host from settling the original saved Session notice', async () => {
@@ -565,7 +574,7 @@ it('keeps same-ID facts from a foreign Host from settling the original saved Ses
     control: { ...session.control, hostId: 'foreign-host' } })) })
   expect(useAppStore.getState().error, 'Another Host cannot confirm the original same-ID Session facts').toBe(f.warning)
   expect(useAppStore.getState().lastError).toBe(f.warning)
-  expect(element.querySelectorAll('.error-notice')).toHaveLength(1)
+  expect(element.querySelectorAll('.notification-item[data-notice-id="current"]')).toHaveLength(1)
   expect(useAppStore.getState().sessions.every(session => !ids.includes(session.id) || session.control.hostId === 'local'),
     'A foreign same-ID Session must never lend its input control to the original Region').toBe(true)
   expect(recover).not.toHaveBeenCalled()
@@ -616,7 +625,7 @@ it('settles the original execution Host facts after a cross-Host display move', 
   await f.settle(complete())
   expect(useAppStore.getState().sessions.map(session => session.hostId)).toEqual(['local', 'local'])
   expect(useAppStore.getState(), 'Display placement cannot replace the original execution Host').toMatchObject({ error: null, lastError: null, errorNoticeContext: null })
-  expect(element.querySelector('.error-notice')).toBeNull()
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   expect(recover).not.toHaveBeenCalled()
   f.retained()
 })
@@ -624,7 +633,7 @@ it.each(['absent', 'missing-execution'] as const)('keeps original execution Host
   const f = await fixture(false, undefined, { spatial: mode })
   await f.settle(complete())
   expect(useAppStore.getState().error).toBe(f.warning)
-  expect(element.querySelectorAll('.error-notice')).toHaveLength(1)
+  expect(element.querySelectorAll('.notification-item[data-notice-id="current"]')).toHaveLength(1)
   f.retained()
 })
 it('does not let an unrelated Host warning hold this resolved notice', async () => {
@@ -633,62 +642,63 @@ it('does not let an unrelated Host warning hold this resolved notice', async () 
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
   expect(useAppStore.getState().runtimeOwnershipWarnings).toEqual(['unrelated-host'])
   expect(useAppStore.getState().error).toBeNull()
-  expect(element.querySelector('.error-notice')).toBeNull()
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   f.retained()
 })
-it.each([false, true])('keeps other startup text and its dismissal (dismissed: %s)', async dismissed => {
+it.each([false, true])('keeps remaining startup issues after acknowledging the original notice (acknowledged: %s)', async dismissed => {
   vi.mocked(api.providers.list).mockRejectedValue(new Error('Provider discovery unavailable'))
   vi.mocked(api.demands.list).mockRejectedValue(new Error('Demand filesystem unavailable'))
   const f = await fixture()
   const remainder = useAppStore.getState().errorNoticeContext!.startupSessionSnapshot!.remainingMessage
   expect(remainder).toContain('Provider discovery unavailable')
-  expect(remainder).toContain('Demand filesystem unavailable')
-  if (dismissed) await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Dismiss error"]')!.click())
+  expect(notificationEventRows(element).map(row => row.textContent).join('\n')).toContain('Demand filesystem unavailable')
+  if (dismissed) { await toggleNotificationCenter(element, 'open'); await toggleNotificationCenter(element, 'closed') }
   await f.settle(complete())
-  expect(useAppStore.getState()).toMatchObject({ error: remainder, lastError: remainder, errorDismissed: dismissed })
-  expect(element.querySelector('.error-notice') === null).toBe(dismissed)
-  if (dismissed) {
-    expect(element.querySelector('.error-notice__reopen')).not.toBeNull()
-    await act(async () => element.querySelector<HTMLButtonElement>('.error-notice__reopen')!.click())
-  }
-  expect(element.querySelector('.error-notice')!.textContent).toContain(remainder)
-  expect(element.querySelector('.error-notice')!.textContent).not.toContain('returned no Session facts')
+  expect(useAppStore.getState()).toMatchObject({ error: remainder, lastError: remainder, errorDismissed: false })
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')).not.toBeNull()
+  expect(notificationTrigger(element).getAttribute('aria-expanded')).toBe('false')
+  await toggleNotificationCenter(element, 'open')
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')!.textContent).toContain(remainder)
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')!.textContent).not.toContain('returned no Session facts')
   f.retained()
 })
-it.each(['same-text', 'different-text'] as const)('does not let the old read clear a later %s error', async mode => {
+it.each(['same-text', 'different-text'] as const)('settles the original startup owner without clearing a later %s event', async mode => {
   const f = await fixture()
+  const originalContext = useAppStore.getState().errorNoticeContext
   const message = mode === 'same-text' ? f.warning : 'Later document save failed'
   await act(async () => useAppStore.getState().reportError(new Error(message), { kind: 'process-degraded' }))
-  const laterContext = useAppStore.getState().errorNoticeContext
-  expect(laterContext).toEqual({ kind: 'process-degraded' })
+  expect(useAppStore.getState().errorNoticeContext).toBe(originalContext)
+  expect(useAppStore.getState()).toMatchObject({ error: f.warning, lastError: f.warning })
+  expect(useAppStore.getState().notificationEvents[0]?.context).toEqual({ kind: 'process-degraded' })
   await f.settle(complete())
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
-  expect(useAppStore.getState().errorNoticeContext).toBe(laterContext)
-  expect(useAppStore.getState()).toMatchObject({ error: message, lastError: message })
-  expect(element.querySelector('.error-notice')!.textContent).toContain(message)
+  expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null, errorNoticeContext: null })
+  expect(notificationEventRows(element)).toHaveLength(1)
+  expect(notificationEventRows(element)[0]!.textContent).toContain(message)
   f.retained()
 })
-it('removes the resolved last notice after the user dismissed it', async () => {
+it('removes a current issue only after its owner confirms resolution', async () => {
   const f = await fixture()
-  await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Dismiss error"]')!.click())
-  expect(element.querySelector('.error-notice__reopen')).not.toBeNull()
+  await toggleNotificationCenter(element, 'open'); await toggleNotificationCenter(element, 'closed')
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')).not.toBeNull()
   await f.settle(complete())
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
   expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null })
-  expect(element.querySelector('.error-notice__reopen')).toBeNull()
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   f.retained()
 })
-it.each([false, true])('a dismissed startup notice cannot swallow a later ordinary same-text error (explicit kind: %s)', async explicitKind => {
+it.each([false, true])('an acknowledged startup notice cannot swallow a later ordinary same-text error (explicit kind: %s)', async explicitKind => {
   const f = await fixture()
-  await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Dismiss error"]')!.click())
-  expect(element.querySelector('.error-notice__reopen')).not.toBeNull()
+  await toggleNotificationCenter(element, 'open'); await toggleNotificationCenter(element, 'closed')
+  expect(element.querySelector('.notification-item[data-notice-id="current"]')).not.toBeNull()
+  const originalContext = useAppStore.getState().errorNoticeContext
   await act(async () => useAppStore.getState().reportError(new Error(f.warning), explicitKind ? { kind: 'indeterminate' } : undefined))
-  expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toBeUndefined()
-  expect(element.querySelectorAll('.error-notice')).toHaveLength(1)
+  expect(useAppStore.getState().errorNoticeContext).toBe(originalContext)
+  expect(notificationEventRows(element)).toHaveLength(1)
   await f.settle(complete())
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
-  expect(useAppStore.getState()).toMatchObject({ error: f.warning, lastError: f.warning, errorDismissed: false })
-  expect(element.querySelector('.error-notice')!.textContent).toContain(f.warning)
+  expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
+  expect(notificationEventRows(element)[0]!.textContent).toContain(f.warning)
   f.retained()
 })
 
