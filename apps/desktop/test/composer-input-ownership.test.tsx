@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, createRef } from 'react'
+import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
+import type { Editor } from '@tiptap/core'
 import { expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
@@ -50,4 +52,35 @@ it.each(['send', 'queue'] as const)('IME confirmation through the real editor ne
   await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
   expect(action === 'send' ? submit : queue).toHaveBeenCalledOnce()
   expect(action === 'send' ? queue : submit).not.toHaveBeenCalled()
+})
+
+
+it('whole-draft history fill is one undoable edit and preserves adjacent typed edits', async () => {
+  const insertion=createRef<ComposerInsertionHandle>()
+  function OwnedComposer(){
+    const value=useAppStore(state=>state.agentComposerDrafts['agent-1']??'')
+    return <AgentComposer insertionRef={insertion} value={value} onChange={next=>useAppStore.getState().setAgentComposerDraft('agent-1',next)} disabled={false} placeholder="Message" />
+  }
+  await dom.render(<OwnedComposer />)
+  const element=dom.container.querySelector<HTMLElement & {editor:Editor}>('.tiptap')!
+  element.focus()
+  await act(async()=>{element.editor.commands.insertContent(' typed before')})
+  const before=dom.draft()
+  await act(async()=>{insertion.current!.replace('selected history first\nselected history last')})
+  expect(dom.draft()).toBe('selected history first\nselected history last')
+  await act(async()=>{element.editor.commands.insertContent(' typed after')})
+  await act(async()=>{expect(element.editor.commands.undo()).toBe(true)})
+  expect(dom.draft()).toBe('selected history first\nselected history last')
+  await act(async()=>{expect(element.editor.commands.undo()).toBe(true)})
+  expect(dom.draft()).toBe(before)
+  await act(async()=>{expect(element.editor.commands.undo()).toBe(true)})
+  expect(dom.draft()).toBe('Keep my draft')
+  await act(async()=>{expect(element.editor.commands.redo()).toBe(true)})
+  expect(dom.draft()).toBe(before)
+  await act(async()=>{expect(element.editor.commands.redo()).toBe(true)})
+  expect(dom.draft()).toBe('selected history first\nselected history last')
+  const original=insertion.current!
+  await dom.render(null)
+  expect(()=>original.replace('late history fill')).toThrow('The message editor is unavailable')
+  expect(dom.draft()).toBe('selected history first\nselected history last')
 })
