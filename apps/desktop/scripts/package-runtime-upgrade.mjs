@@ -1,5 +1,5 @@
 import { parseDesktopClientObservation } from '../src/shared/client-observation.ts'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -38,21 +38,184 @@ async function artifact(app) {
   return runtimeArtifact(join(app, coreRelative))
 }
 
-// The full artifact digest binds its static CodeDirectory. The kernel retains
-// this code identity after unlink; it is not a hash of a missing mapped file.
+// Security.framework supplies the selected architecture's CodeDirectory hash.
+// CF Create/Copy owners are released independently; dictionary values are borrowed.
+const STATIC_CODE_IDENTITY_SOURCE = String.raw`
+import ctypes,json,sys
+cf=ctypes.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
+sec=ctypes.CDLL('/System/Library/Frameworks/Security.framework/Security')
+ptr=ctypes.c_void_p; index=ctypes.c_long
+def function(lib,name,result,arguments):
+ value=getattr(lib,name); value.restype=result; value.argtypes=arguments; return value
+url_create=function(cf,'CFURLCreateFromFileSystemRepresentation',ptr,[ptr,ctypes.POINTER(ctypes.c_uint8),index,ctypes.c_ubyte])
+string_create=function(cf,'CFStringCreateWithCString',ptr,[ptr,ctypes.c_char_p,ctypes.c_uint32])
+dictionary_create=function(cf,'CFDictionaryCreate',ptr,[ptr,ctypes.POINTER(ptr),ctypes.POINTER(ptr),index,ptr,ptr])
+dictionary_value=function(cf,'CFDictionaryGetValue',ptr,[ptr,ptr])
+type_id=function(cf,'CFGetTypeID',ctypes.c_ulong,[ptr])
+dictionary_type=function(cf,'CFDictionaryGetTypeID',ctypes.c_ulong,[])
+data_type=function(cf,'CFDataGetTypeID',ctypes.c_ulong,[])
+data_length=function(cf,'CFDataGetLength',index,[ptr])
+data_bytes=function(cf,'CFDataGetBytePtr',ctypes.POINTER(ctypes.c_uint8),[ptr])
+release=function(cf,'CFRelease',None,[ptr])
+create_code=function(sec,'SecStaticCodeCreateWithPathAndAttributes',ctypes.c_int32,[ptr,ctypes.c_uint32,ptr,ctypes.POINTER(ptr)])
+check_code=function(sec,'SecStaticCodeCheckValidity',ctypes.c_int32,[ptr,ctypes.c_uint32,ptr])
+copy_info=function(sec,'SecCodeCopySigningInformation',ctypes.c_int32,[ptr,ctypes.c_uint32,ctypes.POINTER(ptr)])
+arch_key=ptr.in_dll(sec,'kSecCodeAttributeArchitecture').value
+unique_key=ptr.in_dll(sec,'kSecCodeInfoUnique').value
+owners=[]; cleanup=[]; calls=[]; result=None; primary=None
+def own(name,value):
+ if not value:raise RuntimeError(name+' returned no object')
+ owners.append((name,value)); return value
+def status(name,value):
+ calls.append({'api':name,'status':value})
+ if value!=0:raise RuntimeError(name+' OSStatus='+str(value))
+try:
+ architecture=sys.argv[1]; encoded=b'/dev/fd/3'
+ buffer=(ctypes.c_uint8*len(encoded)).from_buffer_copy(encoded)
+ url=own('file-url',url_create(None,buffer,len(encoded),False))
+ arch=own('architecture-string',string_create(None,architecture.encode('ascii'),0x08000100))
+ keys,values=(ptr*1)(arch_key),(ptr*1)(arch)
+ attributes=own('architecture-attributes',dictionary_create(None,keys,values,1,None,None))
+ static=ptr()
+ status('SecStaticCodeCreateWithPathAndAttributes',create_code(url,0,attributes,ctypes.byref(static)))
+ own('static-code',static.value)
+ status('SecStaticCodeCheckValidity',check_code(static,0,None))
+ info=ptr()
+ status('SecCodeCopySigningInformation',copy_info(static,0,ctypes.byref(info)))
+ own('signing-information',info.value)
+ if type_id(info)!=dictionary_type():raise RuntimeError('Signing information is not a CFDictionary')
+ digest=dictionary_value(info,unique_key)
+ if not digest or type_id(digest)!=data_type():raise RuntimeError('kSecCodeInfoUnique is not CFData')
+ size=data_length(digest)
+ if size!=20:raise RuntimeError('Code identity length is not the current kernel CDHASH width: '+str(size))
+ raw=data_bytes(digest)
+ if not raw:raise RuntimeError('CFData returned no bytes')
+ result={'kind':'security-static-code','architecture':architecture,'dictionaryKey':'kSecCodeInfoUnique',
+  'dataType':'CFData','byteLength':size,'cdHash':ctypes.string_at(raw,size).hex(),'valid':True}
+except Exception as error:
+ primary={'name':type(error).__name__,'message':str(error)}
+finally:
+ for name,value in reversed(owners):
+  try:
+   release(value); cleanup.append({'owner':name,'released':True})
+  except Exception as error:
+   cleanup.append({'owner':name,'released':False,'error':{'name':type(error).__name__,'message':str(error)}})
+print(json.dumps({'result':result,'primary':primary,'calls':calls,'cleanup':cleanup}))
+`
+
+async function staticCodeRead(image, architecture) {
+  const child = spawn('/usr/bin/python3', ['-I', '-c', STATIC_CODE_IDENTITY_SOURCE, architecture],
+    { stdio: ['ignore', 'pipe', 'pipe', image.fd] })
+  const receipt = { originalPid: child.pid ?? null, exitConfirmed: false, code: null, signal: null,
+    interruption: null, signals: [], errors: [], observerCleanup: [] }
+  let stdout = '', stderr = '', timer, grace, unknown, settled = false
+  return new Promise((resolve) => {
+    const finish = () => {
+      if (settled) return
+      settled = true; clearTimeout(timer); clearTimeout(grace); clearTimeout(unknown)
+      for (const [owner, release] of [
+        ['reader-observer', () => {
+          child.off('exit', onExit); child.off('close', finish); child.off('error', onError)
+          // An ended observation must not leave an unhandled EventEmitter error.
+          // This callback retains no observation or other resource owner.
+          child.on('error', () => {})
+        }],
+        ['reader-stdout', () => { child.stdout.off('data', onStdout); child.stdout.destroy() }],
+        ['reader-stderr', () => { child.stderr.off('data', onStderr); child.stderr.destroy() }],
+        ['reader-handle', () => child.unref()]
+      ]) {
+        try { release(); receipt.observerCleanup.push({ owner, released: true }) }
+        catch (cause) {
+          receipt.observerCleanup.push({ owner, released: false })
+          receipt.errors.push(Object.assign(new Error(`Original ${owner} release failed.`, { cause }), { owner }))
+        }
+      }
+      resolve({ ...receipt, errors: [...receipt.errors], signals: receipt.signals.map(entry => ({ ...entry })),
+        observerCleanup: [...receipt.observerCleanup], stdout, stderr })
+    }
+    const signal = (name) => {
+      if (receipt.exitConfirmed || settled) return
+      const entry = { name, accepted: null }; receipt.signals.push(entry)
+      try { entry.accepted = child.kill(name) }
+      catch (error) { entry.accepted = false; receipt.errors.push(error) }
+    }
+    const stop = (reason) => {
+      if (settled || receipt.interruption) return
+      if (receipt.exitConfirmed) { receipt.interruption = reason; finish(); return }
+      receipt.interruption = reason; signal('SIGTERM')
+      grace = setTimeout(() => { signal('SIGKILL'); unknown = setTimeout(finish, 1_000) }, 1_000)
+    }
+    // Observe the original ChildProcess before any cancellation can run. Neither
+    // accepted signals nor a JSON response confirm this reader's actual exit.
+    const onExit = (code, signal) => { receipt.exitConfirmed = true; receipt.code = code; receipt.signal = signal }
+    const onError = (error) => {
+      receipt.errors.push(error)
+      // Spawn failure has no original process. Errors after a PID was assigned
+      // do not prove exit; stop only this reader and await its real receipt.
+      if (receipt.originalPid === null) finish()
+      else stop('reader-error')
+    }
+    const onStdout = (bytes) => {
+      if (Buffer.byteLength(stdout) + bytes.length > 16384) stop('output-limit')
+      else stdout += bytes
+    }
+    const onStderr = (bytes) => {
+      if (Buffer.byteLength(stderr) + bytes.length > 16384) stop('output-limit')
+      else stderr += bytes
+    }
+    child.once('exit', onExit)
+    child.once('close', finish)
+    child.on('error', onError)
+    child.stdout.on('data', onStdout)
+    child.stderr.on('data', onStderr)
+    timer = setTimeout(() => stop('timeout'), 5_000)
+  })
+}
+
+// The full digest and regular-file identity bind the original open image before
+// and after CF reads its inherited FD. The reader may change the shared offset.
 async function artifactCodeIdentity(path, expectedSHA) {
-  const before = await lstat(path, { bigint: true })
-  const result = await exec('/usr/bin/codesign', ['--display', '--verbose=4', '--arch',
-    process.arch === 'x64' ? 'x86_64' : process.arch, path], { timeout: 5_000, maxBuffer: 16384 })
-  const cdHash = /^CDHash=([a-f0-9]{40})$/m.exec(result.stderr)?.[1]
-  const image = await open(path, 'r')
+  const image = await open(path, 'r'), cleanup = []
+  let primary, cdHash
   try {
-    const metadata = await image.stat({ bigint: true })
-    const after = await lstat(path, { bigint: true })
-    fail(before.isFile() && metadata.dev === before.dev && metadata.ino === before.ino &&
-      after.dev === before.dev && after.ino === before.ino && hash(await image.readFile()) === expectedSHA && cdHash,
-      'The Runtime artifact changed while its code identity was being read.')
-  } finally { await image.close() }
+    const before = await image.stat({ bigint: true })
+    const check = async () => {
+      const digest = createHash('sha256')
+      for await (const bytes of image.createReadStream({ start: 0, autoClose: false })) digest.update(bytes)
+      const metadata = await image.stat({ bigint: true }), named = await lstat(path, { bigint: true })
+      fail(before.isFile() && metadata.isFile() && named.isFile() && metadata.dev === before.dev && metadata.ino === before.ino &&
+        typeof before.mtimeNs === 'bigint' && typeof before.ctimeNs === 'bigint' && metadata.size === before.size &&
+        metadata.mtimeNs === before.mtimeNs && metadata.ctimeNs === before.ctimeNs &&
+        named.dev === before.dev && named.ino === before.ino && digest.digest('hex') === expectedSHA,
+        'The Runtime artifact changed while its code identity was being read.')
+    }
+    await check()
+    const architecture = process.arch === 'x64' ? 'x86_64' : process.arch
+    const reader = await staticCodeRead(image, architecture)
+    if (!reader.exitConfirmed || reader.code !== 0 || reader.signal !== null || reader.interruption !== null || reader.errors.length)
+      throw Object.assign(new Error('The original static code reader did not confirm a natural successful exit.',
+        { cause: reader.errors[0] }), { reader })
+    const observation = JSON.parse(reader.stdout)
+    if (observation.primary) primary = Object.assign(new Error(observation.primary.message), { detail: observation, reader })
+    for (const entry of observation.cleanup ?? []) if (entry.released !== true)
+      cleanup.push(Object.assign(new Error(entry.error?.message ?? 'CF owner release is unconfirmed.'), { owner: entry.owner }))
+    if (primary) throw primary
+    const identity = observation.result
+    fail(identity?.kind === 'security-static-code' && identity.architecture === architecture && identity.valid === true &&
+      identity.dictionaryKey === 'kSecCodeInfoUnique' && identity.dataType === 'CFData' && identity.byteLength === 20 &&
+      /^[a-f0-9]{40}$/.test(identity.cdHash) &&
+      JSON.stringify(observation.calls) === JSON.stringify(['SecStaticCodeCreateWithPathAndAttributes', 'SecStaticCodeCheckValidity',
+        'SecCodeCopySigningInformation'].map(api => ({ api, status: 0 }))) &&
+      JSON.stringify(observation.cleanup?.map(entry => entry.owner)) === JSON.stringify(['signing-information', 'static-code',
+        'architecture-attributes', 'architecture-string', 'file-url']), 'The Runtime static code identity is unconfirmed.')
+    await check()
+    cdHash = identity.cdHash
+  } catch (error) { primary = error }
+  try { await image.close() } catch (cause) {
+    cleanup.push(Object.assign(new Error(cause.message, { cause }), { owner: 'artifact-file' }))
+  }
+  if (primary || cleanup.length) throw new AggregateError([...(primary ? [primary] : []), ...cleanup],
+    primary?.message ?? 'Runtime static code observation cleanup is unconfirmed.', { cause: primary })
   return cdHash
 }
 
