@@ -558,7 +558,7 @@ await codexFirst.writeAgent({ agentSessionId: codex.agentSessionId, expectedRun:
 assert.equal(codexFirst.agentSession(codex.agentSessionId).pendingInteraction.request.id, initialInteraction.id)
 await codexFirst.respondAgentInteraction({
   agentSessionId: codex.agentSessionId,
-  expectedRun: codex.run,
+  expectedRun: codex.run, operationId: 'packed-response', expectedRequest: initialInteraction,
   response: {
     kind: 'permission',
     requestId: initialInteraction.id,

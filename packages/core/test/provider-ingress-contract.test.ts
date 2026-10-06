@@ -1,3 +1,4 @@
+import { withInteractionOperation } from './fixtures/interaction-client.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -594,9 +595,9 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
     } }
     await inner.registry.update(AGENT_SESSION_ID, { runId: RUN_ID }, current => ({ ...current,
       pendingInteraction: pending, updatedAt: Math.max(current.updatedAt, 200) }))
-    const answer = fixture.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID,
+    const answer = fixture.client.respondAgentInteraction(withInteractionOperation(fixture.client, { agentSessionId: AGENT_SESSION_ID,
       expectedRun: { runId: RUN_ID }, response: { kind: 'permission', requestId: pending.request.id,
-        decision: { outcome: 'selected', optionId: 'allow-once' } } }).then(() => null, error => error)
+        decision: { outcome: 'selected', optionId: 'allow-once' } } })).then(() => null, error => error)
     try { await vi.waitFor(() => expect(observation.aborted).toBe(true)) }
     finally { release(); await Promise.all([prompt, answer]) }
     expect(await prompt).toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
@@ -629,9 +630,9 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
         .rejects.toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
       const originalClaim = ((await fixture.store.load())[0] as AgentMuxStoredAgentSession).promptCompletionAdmission
       expect(fixture.writes).toEqual(['original payload'])
-      await fixture.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID,
+      await fixture.client.respondAgentInteraction(withInteractionOperation(fixture.client, { agentSessionId: AGENT_SESSION_ID,
         expectedRun: { runId: RUN_ID }, response: { kind: 'permission', requestId: pending.request.id,
-          decision: { outcome: 'selected', optionId: 'allow-once' } } })
+          decision: { outcome: 'selected', optionId: 'allow-once' } } }))
       expect(fixture.writes).toEqual(['original payload', '1'])
       await completeTypedAnswer(fixture.client)
       let rejectedSubmit = 0

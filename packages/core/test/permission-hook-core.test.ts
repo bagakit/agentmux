@@ -1,3 +1,4 @@
+import { withInteractionOperation } from './fixtures/interaction-client.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
@@ -59,7 +60,7 @@ it('uses the original callback without a pane, terminal bytes or nonexistent too
   const h = await fixture(), { pending } = await h.open('original')
   try {
     expect(h.read('original')).not.toHaveProperty('nativeToolCallId')
-    await h.client.respondAgentInteraction(h.input('original'))
+    await h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input('original')))
     expect(await (await pending).json()).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } })
     await expect.poll(() => {
       const request = h.read('original')
@@ -70,7 +71,7 @@ it('uses the original callback without a pane, terminal bytes or nonexistent too
     expect(h.read('original')).not.toHaveProperty('inputByteRange')
     expect(h.inner.kernel.input).not.toHaveBeenCalled()
     // A same-response read cannot invoke another callback or repeat input.
-    await h.client.respondAgentInteraction(h.input('original'))
+    await h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input('original')))
     expect(h.inner.kernel.input).not.toHaveBeenCalled()
   } finally { await h.close() }
 })
@@ -79,7 +80,7 @@ it('rechecks the current author after saving and releases the original callback 
   const h = await fixture(), { pending } = await h.open('revoked')
   let checks = 0
   try {
-    const result = await h.client.respondAgentInteraction(h.input('revoked'), { assertCurrent: async () => {
+    const result = await h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input('revoked')), { assertCurrent: async () => {
       checks++
       const current = h.read('revoked')
       if (current?.kind === 'permission' && current.permissionHook?.response?.delivery === 'unknown') throw new AgentMuxError('Original author revoked.', 'CONTROL_PERMISSION_DENIED')
@@ -97,12 +98,12 @@ it('rechecks the current author after saving and releases the original callback 
 it('rejects another Run, callback or choice while preserving the original native waiter', async () => {
   const h = await fixture(), { pending } = await h.open('original')
   try {
-    await expect(h.client.respondAgentInteraction({ ...h.input('original'), expectedRun: { runId: 'different' } })).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
-    await expect(h.client.respondAgentInteraction(h.input('different'))).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
-    await expect(h.client.respondAgentInteraction({ ...h.input('original'), response: { ...h.input('original').response,
-      decision: { outcome: 'selected', optionId: 'allow-always' } } })).rejects.toMatchObject({ code: 'INVALID_AGENT_INTERACTION_RESPONSE' })
+    await expect(h.client.respondAgentInteraction(withInteractionOperation(h.client, { ...h.input('original'), expectedRun: { runId: 'different' } }))).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+    await expect(h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input('different')))).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
+    await expect(h.client.respondAgentInteraction(withInteractionOperation(h.client, { ...h.input('original'), response: { ...h.input('original').response,
+      decision: { outcome: 'selected', optionId: 'allow-always' } } }))).rejects.toMatchObject({ code: 'INVALID_AGENT_INTERACTION_RESPONSE' })
     expect(h.server.hasPermissionCallback('recipient', 'run-recipient', 'original')).toBe(true)
-    await h.client.respondAgentInteraction({ ...h.input('original'), response: { ...h.input('original').response, decision: { outcome: 'selected', optionId: 'reject-once' } } })
+    await h.client.respondAgentInteraction(withInteractionOperation(h.client, { ...h.input('original'), response: { ...h.input('original').response, decision: { outcome: 'selected', optionId: 'reject-once' } } }))
     expect(await (await pending).json()).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny' } } })
     expect(h.inner.kernel.input).not.toHaveBeenCalled()
   } finally { await h.close() }
@@ -139,7 +140,9 @@ it('the existing Hosted SDK answers the same callback through actual Unix RPC an
     const connect = vi.spyOn(h.client, 'connect').mockRejectedValue(new Error('Runtime observation unavailable'))
     const status = vi.fn(async () => { throw new Error('Runtime observation unavailable') })
     h.inner.kernel.status = status
-    await hosted.respondAgentInteraction(h.input('hosted'))
+    await hosted.respondAgentInteraction(withInteractionOperation(h.client, h.input('hosted')))
+    expect(await hosted.inspectAgentInteractionOperation({ agentSessionId: 'recipient', operationId: 'response-hosted' }))
+      .toMatchObject({ delivery: 'hook-written', nativeAdoption: 'unknown' })
     expect(status).not.toHaveBeenCalled()
     expect(await (await pending).json()).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } })
     await expect(owner.call('runtime.invoke', { consumerId: 'malformed', fence: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner' },
@@ -157,7 +160,7 @@ it('retains an attempted terminal receipt and never replays it into the still-op
       operationId: 'original-terminal-attempt', inputByteRange: { startByte: 0, endByte: 1 }, acknowledged: false }
     await h.store.compareAndSwapMetadata(previous, { ...previous, pendingInteraction: { ...previous.pendingInteraction!, response } })
     await h.inner.registry.load('local')
-    const result = await h.client.respondAgentInteraction(h.input('terminal-original')).then(() => null, error => error)
+    const result = await h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input('terminal-original'))).then(() => null, error => error)
     expect(result).toMatchObject({ code: 'AGENT_INTERACTION_UNCONFIRMED' })
     expect(h.client.agentSession('recipient').pendingInteraction?.response).toEqual(response)
     expect(h.server.hasPermissionCallback('recipient', 'run-recipient', 'terminal-original')).toBe(true)
@@ -181,7 +184,7 @@ it.each(['allow', 'abstain'])('the original managed command uses the Server Prov
     }).toBeTruthy()
     const request = h.client.agentSession('recipient').pendingInteraction!.request
     expect(request.kind === 'permission' && request.permissionHook?.receiptId).toBe(request.id)
-    if (mode === 'allow') await h.client.respondAgentInteraction(h.input(request.id))
+    if (mode === 'allow') await h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input(request.id)))
     else await h.binding.close()
     const [code, signal] = await closed
     expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: '' })
@@ -194,8 +197,8 @@ it.each(['allow', 'abstain'])('the original managed command uses the Server Prov
 it('normalizes a legal differently ordered SDK permission DTO before its durable digest claim', async () => {
   const h = await fixture(), { pending } = await h.open('ordered')
   try {
-    const result = await h.client.respondAgentInteraction({ agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' },
-      response: { requestId: 'ordered', kind: 'permission', decision: { optionId: 'allow-once', outcome: 'selected' } } }).then(() => null, error => error)
+    const result = await h.client.respondAgentInteraction(withInteractionOperation(h.client, { agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' },
+      response: { requestId: 'ordered', kind: 'permission', decision: { optionId: 'allow-once', outcome: 'selected' } } })).then(() => null, error => error)
     expect(result).toBeNull()
     expect(await (await pending).json()).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } })
     const saved = (await h.store.readMetadata('recipient'))!.pendingInteraction!.request
@@ -229,7 +232,7 @@ it('a new original callback never inherits the primary request terminal tuple in
     expect(projected.response).toEqual(response)
     expect(agentInteractionActiveRequest(projected)?.id).toBe('new-hook')
     expect(agentInteractionResponseUnavailableReason(projected)).toBeUndefined()
-    await h.client.respondAgentInteraction(h.input('new-hook'))
+    await h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input('new-hook')))
     expect(await (await pending).json()).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } })
     expect(h.client.agentSession('recipient').pendingInteraction?.response).toEqual(response)
     await h.observe({ recordId: 'wrong-turn-end', nativeTurnId: 'foreign-turn', state: 'done' })
@@ -252,12 +255,12 @@ it('concurrent callers share the original response and a rejected non-owner cann
   const original = vi.spyOn(h.server, 'respondPermission')
   try {
     // A caller with no decision ownership cannot abstain on behalf of another author.
-    const rejected = await h.client.respondAgentInteraction(h.input('concurrent'), { assertCurrent: async () => {
+    const rejected = await h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input('concurrent')), { assertCurrent: async () => {
       throw new AgentMuxError('No current authority.', 'CONTROL_PERMISSION_DENIED')
     } }).then(() => null, error => error)
     expect(rejected).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
     expect(h.server.hasPermissionCallback('recipient', 'run-recipient', 'concurrent')).toBe(true)
-    const results = await Promise.allSettled([h.client.respondAgentInteraction(h.input('concurrent')), h.client.respondAgentInteraction(h.input('concurrent'))])
+    const results = await Promise.allSettled([h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input('concurrent'))), h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input('concurrent')))])
     expect(results.filter(result => result.status === 'fulfilled').length).toBeGreaterThan(0)
     for (const result of results) if (result.status === 'rejected') expect(result.reason).toMatchObject({ code: 'AGENT_INTERACTION_UNCONFIRMED' })
     expect(await (await pending).json()).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } })
@@ -273,7 +276,7 @@ it('a still-open original callback stays answerable while Runtime observation is
   const status = vi.fn(async () => { throw new Error('Runtime observation is unavailable') })
   h.inner.kernel.status = status; h.inner.kernel.isConnected = () => false
   try {
-    const result = await h.client.respondAgentInteraction(h.input('runtime-observation-lost')).then(() => null, error => error)
+    const result = await h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input('runtime-observation-lost'))).then(() => null, error => error)
     expect(result).toBeNull()
     expect(await (await pending).json()).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } })
     expect(status).not.toHaveBeenCalled()

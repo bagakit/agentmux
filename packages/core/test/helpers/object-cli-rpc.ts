@@ -82,6 +82,8 @@ export function objectCliSeed(method: string, input: string): string[] {
   const ids = { agent: 'SID', region: 'R', zone: 'Z', space: 'S', goal: 'G' }
   const fixed: Record<string, string[]> = {
     'connection.ls': [], 'connection.inspect': ['--connection', 'connection-a'], 'connection.configure': ['--input', '-'], 'connection.test': ['--connection', 'connection-a'],
+    'agent.interaction.respond': ['--input', '-'],
+    'agent.interaction.inspect': ['--session', 'SID', '--operation-id', 'RESPONSE'],
     whoami: [], 'agent.ls': [], 'agent.inspect': ['--session', ids.agent],
     'agent.native.confirm': ['--input', '-'],
     'agent.native.history': ['--input', '-'],

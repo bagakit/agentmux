@@ -1,3 +1,4 @@
+import { withInteractionOperation } from './fixtures/interaction-client.js'
 import { fixtureEpoch as _liveTailFixtureEpoch } from "./helpers/fixture-values.js"
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
@@ -90,7 +91,7 @@ async function connectedClient(pending?: AgentMuxInteractionRequest, providerId:
 }> {
   const store = new AgentMuxMemoryAgentSessionStore()
   const original = storedSession(pending, providerId)
-  if (nativeSessionId) original.nativeHandle = { kind: 'provider', providerId, sessionId: nativeSessionId }
+  original.nativeHandle = { kind: 'provider', providerId, sessionId: nativeSessionId ?? 'lifecycle-native' }
   await store.compareAndSwap(null, original)
   const client = new AgentMuxClient({ store })
   const state = client as unknown as Internals
@@ -109,6 +110,7 @@ async function connectedClient(pending?: AgentMuxInteractionRequest, providerId:
   ;(client as unknown as { connected: boolean }).connected = true
   // Explicit synthetic native target contribution for lifecycle units only.
   const provider = client.providers.get(providerId)
+  provider.discoverNativeSession = async () => ({ handle: client.agentSession(AGENT_SESSION_ID).nativeHandle as import('../src/types.js').AgentNativeSessionHandle & { kind: 'provider' }, assertCurrent: async () => {} })
   provider.prepareInteractionResponse = async (context, request, response) => ({
     plan: provider.planInteractionResponse(request, response),
     target: { agentSessionId: context.agentSessionId, run: context.run, requestId: request.id,
@@ -127,7 +129,7 @@ async function completeNativeRequest(client: AgentMuxClient): Promise<void> {
   await (client as unknown as { acceptHookEvent(envelope: import('../src/types.js').NativeHookEnvelope, signal: AbortSignal): Promise<void> }).acceptHookEvent({
     receiptId: 'lifecycle-completed-' + request.id, agentSessionId: AGENT_SESSION_ID,
     providerId: client.agentSession(AGENT_SESSION_ID).providerId, runId: RUN_ID,
-    payload: { hook_event_name: 'PostToolUse', tool_name: request.kind === 'question' ? 'request_user_input' : 'exec_command',
+    payload: { session_id: client.agentSession(AGENT_SESSION_ID).nativeHandle?.sessionId, hook_event_name: 'PostToolUse', tool_name: request.kind === 'question' ? 'request_user_input' : 'exec_command',
       tool_call_id: request.nativeToolCallId }
   }, new AbortController().signal)
 }
@@ -166,11 +168,11 @@ describe('respondAgentInteraction: the answer must bind to this Session/Run/requ
   it('answers the pending request and clears it, writing the provider byte (positive control)', async () => {
     const { client, writes } = await connectedClient(permission('rcpt-1'))
 
-    await client.respondAgentInteraction({
+    await client.respondAgentInteraction(withInteractionOperation(client, {
       agentSessionId: AGENT_SESSION_ID,
       expectedRun: { runId: RUN_ID },
       response: { kind: 'permission', requestId: 'rcpt-1', decision: { outcome: 'selected', optionId: 'allow-once' } }
-    })
+    }))
 
     // codex 的 allow-once 解析成 '1'（provider 私有知识，client 从不生成字节）。这条正向控制在，
     // 是为了让下面两条不会被一个「永远抛」的实现骗过：真闸门放行合法回答。
@@ -183,11 +185,11 @@ describe('respondAgentInteraction: the answer must bind to this Session/Run/requ
   it('refuses an answer aimed at a stale Run — a prior turn cannot answer for the current one', async () => {
     const { client, writes } = await connectedClient(permission('rcpt-1'))
 
-    const error = await client.respondAgentInteraction({
+    const error = await client.respondAgentInteraction(withInteractionOperation(client, {
       agentSessionId: AGENT_SESSION_ID,
       expectedRun: { runId: 'a-different-run' },
       response: { kind: 'permission', requestId: 'rcpt-1', decision: { outcome: 'selected', optionId: 'allow-once' } }
-    }).then(() => null, (caught: unknown) => caught)
+    })).then(() => null, (caught: unknown) => caught)
 
     expect(error, 'a stale-Run answer was accepted').toBeInstanceOf(AgentMuxError)
     expect((error as AgentMuxError).code).toBe('STALE_AGENT_SESSION')
@@ -201,11 +203,11 @@ describe('respondAgentInteraction: the answer must bind to this Session/Run/requ
   it('refuses an answer when nothing is pending — an unknown request is not answerable', async () => {
     const { client, writes } = await connectedClient(/* no pending interaction */)
 
-    const error = await client.respondAgentInteraction({
+    const error = await client.respondAgentInteraction(withInteractionOperation(client, {
       agentSessionId: AGENT_SESSION_ID,
       expectedRun: { runId: RUN_ID },
       response: { kind: 'permission', requestId: 'rcpt-1', decision: { outcome: 'selected', optionId: 'allow-once' } }
-    }).then(() => null, (caught: unknown) => caught)
+    })).then(() => null, (caught: unknown) => caught)
 
     expect(error, 'an answer with no pending interaction was accepted').toBeInstanceOf(AgentMuxError)
     expect((error as AgentMuxError).code).toBe('UNKNOWN_AGENT_INTERACTION')
@@ -219,11 +221,11 @@ describe('respondAgentInteraction: the answer must bind to this Session/Run/requ
     // response/request 配对校验，故删掉 Client 闸门并不必然导致错误字节写入。
     const { client, writes } = await connectedClient(permission('rcpt-2'))
 
-    const error = await client.respondAgentInteraction({
+    const error = await client.respondAgentInteraction(withInteractionOperation(client, {
       agentSessionId: AGENT_SESSION_ID,
       expectedRun: { runId: RUN_ID },
       response: { kind: 'permission', requestId: 'rcpt-1', decision: { outcome: 'selected', optionId: 'allow-once' } }
-    }).then(() => null, (caught: unknown) => caught)
+    })).then(() => null, (caught: unknown) => caught)
 
     expect(error, 'an answer for a superseded request was accepted').toBeInstanceOf(AgentMuxError)
     expect((error as AgentMuxError).code).toBe('UNKNOWN_AGENT_INTERACTION')
@@ -243,8 +245,8 @@ describe('typed response settlement and recoverable input disposition', () => {
   it('cancels the exact request with the Provider cancellation plan, without selecting a grant', async () => {
     const { client, writes } = await connectedClient(permission('cancel-1'))
     try {
-      await client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID },
-        response: { kind: 'permission', requestId: 'cancel-1', decision: { outcome: 'cancelled' } } })
+      await client.respondAgentInteraction(withInteractionOperation(client, { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID },
+        response: { kind: 'permission', requestId: 'cancel-1', decision: { outcome: 'cancelled' } } }))
       expect(writes).toEqual(['\u001b'])
       await completeNativeRequest(client)
       expect(client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
@@ -255,13 +257,13 @@ describe('typed response settlement and recoverable input disposition', () => {
     const { client, writes } = await connectedClient(permission('parallel-1'))
     const input = { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('parallel-1') }
     try {
-      const outcomes = await Promise.allSettled([client.respondAgentInteraction(input), client.respondAgentInteraction(input)])
+      const outcomes = await Promise.allSettled([client.respondAgentInteraction(withInteractionOperation(client, input)), client.respondAgentInteraction(withInteractionOperation(client, input))])
       expect(outcomes[0]!.status).toBe('fulfilled')
       expect(outcomes[1]!.status).toBe('fulfilled')
       expect(writes).toEqual(['\u001b'])
       await completeNativeRequest(client)
       expect(client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
-      await expect(client.respondAgentInteraction(input)).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
+      expect(await client.respondAgentInteraction(withInteractionOperation(client, input))).toMatchObject({ nativeCompleted: { source: 'native-hook' } })
       expect(writes).toEqual(['\u001b'])
     } finally { await client.dispose() }
   })
@@ -275,11 +277,11 @@ describe('typed response settlement and recoverable input disposition', () => {
     ;(second as unknown as { connected: boolean }).connected = true
     const input = { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('shared-1') }
     try {
-      await h.client.respondAgentInteraction(input)
+      await h.client.respondAgentInteraction(withInteractionOperation(h.client, input))
       await completeNativeRequest(h.client)
-      await expect(second.respondAgentInteraction(input)).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
+      expect(await second.respondAgentInteraction(withInteractionOperation(second, input))).toMatchObject({ nativeCompleted: { source: 'native-hook' } })
       expect(h.writes).toEqual(['\u001b'])
-      expect(second.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
+      expect((await h.store.readMetadata(AGENT_SESSION_ID))!.pendingInteraction).toBeUndefined()
     } finally { await second.dispose(); await h.client.dispose() }
   })
 
@@ -289,8 +291,8 @@ describe('typed response settlement and recoverable input disposition', () => {
       const saved = await loadAgentSessions(h.store)
       expect(saved).toHaveLength(1)
       await h.store.compareAndSwap(saved[0]!, storedSession(permission('new-request')))
-      await expect(h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID,
-        expectedRun: { runId: RUN_ID }, response: answer('old-request') }))
+      await expect(h.client.respondAgentInteraction(withInteractionOperation(h.client, { agentSessionId: AGENT_SESSION_ID,
+        expectedRun: { runId: RUN_ID }, response: answer('old-request') })))
         .rejects.toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
       expect(h.writes).toEqual([])
       expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction?.request.id).toBe('new-request')
@@ -308,7 +310,7 @@ describe('typed response settlement and recoverable input disposition', () => {
       const response: AgentMuxInteractionResponse = outcome === 'cancelled'
         ? { kind: 'question', requestId: request.id, outcome }
         : { kind: 'question', requestId: request.id, outcome, answers: [{ questionId: 'choice-1', optionId: 'second' }] }
-      await h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response })
+      await h.client.respondAgentInteraction(withInteractionOperation(h.client, { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response }))
       expect(h.writes).toEqual([outcome === 'cancelled' ? '\u001b' : '2'])
       await completeNativeRequest(h.client)
       expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
@@ -333,7 +335,7 @@ describe('typed response settlement and recoverable input disposition', () => {
     }
     const input = { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('recover-1') }
     try {
-      await expect(h.client.respondAgentInteraction(input)).rejects.toMatchObject({ code: 'PRIVATE_INPUT_FAILURE' })
+      await expect(h.client.respondAgentInteraction(withInteractionOperation(h.client, input))).rejects.toMatchObject({ code: 'PRIVATE_INPUT_FAILURE' })
       const claim = h.client.agentSession(AGENT_SESSION_ID).pendingInteraction!.response!
       expect(claim).toMatchObject({ value: answer('recover-1'), acknowledged: false, inputByteRange: { startByte: 0, endByte: 1 } })
       expect(claim.operationId.length).toBeGreaterThan(0)
@@ -341,10 +343,10 @@ describe('typed response settlement and recoverable input disposition', () => {
       const recorded = await loadAgentSessions(h.store)
       expect(recorded).toHaveLength(1)
       expect(recorded[0]!.pendingInteraction!.response).toEqual(claim)
-      await expect(h.client.respondAgentInteraction({ ...input, response: answer('recover-1', 'allow-once') }))
+      await expect(h.client.respondAgentInteraction(withInteractionOperation(h.client, { ...input, response: answer('recover-1', 'allow-once') })))
         .rejects.toMatchObject({ code: 'AGENT_INTERACTION_RESPONSE_CONFLICT' })
       expect(calls).toHaveLength(1)
-      await h.client.respondAgentInteraction(input)
+      await h.client.respondAgentInteraction(withInteractionOperation(h.client, input))
       expect(calls).toHaveLength(2)
       expect(calls[1]).toEqual(calls[0])
       expect(h.writes).toEqual(['\u001b'])
@@ -364,7 +366,7 @@ describe('native input keeps one durable, unconfirmed request owner', () => {
     try {
       await h.client.writeAgent(nativeWrite('terminal-protocol'))
       expect((await loadAgentSessions(h.store))[0]!.pendingInteraction).toEqual({ request: permission('protocol-pending') })
-      await h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('protocol-pending') })
+      await h.client.respondAgentInteraction(withInteractionOperation(h.client, { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('protocol-pending') }))
       expect(h.writes).toEqual(['\u001b', '\u001b'])
     } finally { await h.client.dispose() }
   })
@@ -387,7 +389,7 @@ describe('native input keeps one durable, unconfirmed request owner', () => {
       const recorded = (await loadAgentSessions(h.store))[0]!.pendingInteraction!
       expect(recorded).toMatchObject({ request: permission('native-shared'), nativeInput: { delivery: 'accepted' } })
       expect(recorded.nativeInput!.operationId.length).toBeGreaterThan(0)
-      await expect(second.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('native-shared', 'allow-once') }))
+      await expect(second.respondAgentInteraction(withInteractionOperation(second, { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('native-shared', 'allow-once') })))
         .rejects.toMatchObject({ code: 'AGENT_INTERACTION_UNCONFIRMED' })
       await h.client.writeAgent({ ...nativeWrite(), data: 'z' })
       expect(h.writes).toEqual(['\u001b', 'z'])
@@ -411,7 +413,7 @@ describe('native input keeps one durable, unconfirmed request owner', () => {
       expect(pending.request.id).toBe('native-failure')
       expect(pending.response).toBeUndefined()
       h.state.kernel.input = original
-      const respond = () => h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('native-failure') })
+      const respond = () => h.client.respondAgentInteraction(withInteractionOperation(h.client, { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('native-failure') }))
       if (disposition === 'not_applied') {
         expect(pending.nativeInput).toBeUndefined()
         await respond()
@@ -439,8 +441,8 @@ describe('native input keeps one durable, unconfirmed request owner', () => {
     const h = await connectedClient(permission('store-failure'))
     const events: import('../src/types.js').AgentMuxClientEvent[] = []
     h.client.onEvent(event => events.push(event))
-    const original = h.store.compareAndSwap.bind(h.store)
-    h.store.compareAndSwap = async () => { throw new Error('Private Store unavailable') }
+    const original = h.store.compareAndSwapMetadata.bind(h.store)
+    h.store.compareAndSwapMetadata = async () => { throw new Error('Private Store unavailable') }
     try {
       expect(await h.client.writeAgent(nativeWrite())).toMatchObject({ acceptedThroughByte: 1 })
       expect(h.writes).toEqual(['\u001b'])
@@ -448,7 +450,7 @@ describe('native input keeps one durable, unconfirmed request owner', () => {
       expect(notices.length).toBeGreaterThan(0)
       expect(notices[0]).toMatchObject({ code: 'AGENT_NATIVE_INPUT_PERSIST_FAILED' })
       expect(notices[0]).not.toHaveProperty('agentSessionId')
-    } finally { h.store.compareAndSwap = original; await h.client.dispose() }
+    } finally { h.store.compareAndSwapMetadata = original; await h.client.dispose() }
   })
 })
 
@@ -458,7 +460,7 @@ describe('native takeover during typed recovery', () => {
     const originalInput = h.state.kernel.input as (runId: string, input: unknown) => Promise<unknown>
     try {
       h.state.kernel.input = async () => { throw new AgentMuxError('Private typed write was not applied', 'PRIVATE_INPUT_FAILURE', 'not_applied') }
-      await expect(h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('takeover') }))
+      await expect(h.client.respondAgentInteraction(withInteractionOperation(h.client, { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('takeover') })))
         .rejects.toMatchObject({ detail: 'not_applied' })
       const claim = structuredClone(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction!.response)
       h.state.kernel.input = async (runId: string, input: unknown) => {
@@ -526,7 +528,7 @@ describe('typed response claims after another Core legally advances the same Run
       const before = h.cursor()
       const plan = new AgentProviderRegistry().get(providerId)
         .planInteractionResponse(permission('cross-core-reply'), h.input.response)
-      await h.client.respondAgentInteraction(h.input)
+      await h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input))
       expect(h.calls.map(call => call.expectedByte)).toEqual([0, 4, before])
       expect(h.calls.at(-1)!.data).toBe(plan.data)
       expect(h.cursor()).toBe(before + Buffer.byteLength(plan.data))
@@ -539,7 +541,7 @@ describe('typed response claims after another Core legally advances the same Run
     const h = await twoCoreReplyFixture()
     try {
       h.state.kernel.status = async () => runProjection(null)
-      await expect(h.client.respondAgentInteraction(h.input)).rejects.toMatchObject({ code: 'CTXMUX_INPUT_CURSOR_MISSING' })
+      await expect(h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input))).rejects.toMatchObject({ code: 'CTXMUX_INPUT_CURSOR_MISSING' })
       expect(h.calls).toHaveLength(2)
       expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toEqual({ request: permission('cross-core-reply') })
       expect(h.cursor()).toBe(8)
@@ -556,17 +558,17 @@ describe('typed response claims after another Core legally advances the same Run
         if (loseResponse) { loseResponse = false; throw new AgentMuxError('Response receipt lost.', 'PRIVATE_INPUT_FAILURE', 'unknown') }
         return receipt
       }
-      await expect(h.client.respondAgentInteraction(h.input)).rejects.toMatchObject({ code: 'PRIVATE_INPUT_FAILURE', detail: 'unknown' })
+      await expect(h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input))).rejects.toMatchObject({ code: 'PRIVATE_INPUT_FAILURE', detail: 'unknown' })
       const claim = structuredClone(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction!.response!)
       expect(claim.inputByteRange).toEqual({ startByte: 8, endByte: 9 })
       const originalCall = structuredClone(h.calls.at(-1)!)
       await h.protocol(h.second)
       expect((await loadAgentSessions(h.store))[0]!.pendingInteraction!.response).toEqual(claim)
       if (missingCursor) h.state.kernel.status = async () => runProjection(null)
-      await expect(h.client.respondAgentInteraction({ ...h.input, response: answer('cross-core-reply', 'allow-once') }))
+      await expect(h.client.respondAgentInteraction(withInteractionOperation(h.client, { ...h.input, response: answer('cross-core-reply', 'allow-once') })))
         .rejects.toMatchObject({ code: 'AGENT_INTERACTION_RESPONSE_CONFLICT' })
       expect(h.calls).toHaveLength(4)
-      await h.client.respondAgentInteraction(h.input)
+      await h.client.respondAgentInteraction(withInteractionOperation(h.client, h.input))
       expect(h.calls).toHaveLength(5)
       expect(h.calls.at(-1)).toEqual(originalCall)
       expect(h.cursor()).toBe(13)
@@ -638,8 +640,8 @@ it('rechecks the original current author after native verification and claim, im
   const h = await connectedClient(permission('current-author'))
   let checks = 0
   try {
-    const result = await h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID },
-      response: { kind: 'permission', requestId: 'current-author', decision: { outcome: 'selected', optionId: 'allow-once' } } },
+    const result = await h.client.respondAgentInteraction(withInteractionOperation(h.client, { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID },
+      response: { kind: 'permission', requestId: 'current-author', decision: { outcome: 'selected', optionId: 'allow-once' } } }),
       { assertCurrent: async () => {
         checks++
         if (h.client.agentSession(AGENT_SESSION_ID).pendingInteraction?.response?.operationId) throw new AgentMuxError('The original author was revoked during native verification.', 'CONTROL_PERMISSION_DENIED')
@@ -657,8 +659,8 @@ it('resolves one exact durable request before reconnecting the original cold ter
   const registry = Reflect.get(h.client, 'registry') as { sessions: Map<string, unknown> }
   registry.sessions.clear()
   try {
-    const result = await h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID },
-      response: { kind: 'permission', requestId: 'cold-exact', decision: { outcome: 'selected', optionId: 'allow-once' } } }).then(() => null, error => error)
+    const result = await h.client.respondAgentInteraction(withInteractionOperation(h.client, { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID },
+      response: { kind: 'permission', requestId: 'cold-exact', decision: { outcome: 'selected', optionId: 'allow-once' } } })).then(() => null, error => error)
     expect(result).toBeNull()
     expect(h.writes).toHaveLength(1)
     expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction?.response?.acknowledged).toBe(true)
@@ -685,10 +687,10 @@ it.each(['connect', 'author'])('does not apply an old ACP choice to a replacemen
   }
   vi.spyOn(h.client, 'connect').mockImplementation(async () => { if (phase === 'connect') await replace() })
   try {
-    const result = await h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID },
-      response: { kind: 'permission', requestId: request.id, decision: { outcome: 'selected', optionId: 'allow-once' } } },
+    const result = await h.client.respondAgentInteraction(withInteractionOperation(h.client, { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID },
+      response: { kind: 'permission', requestId: request.id, decision: { outcome: 'selected', optionId: 'allow-once' } } }),
       { assertCurrent: async () => { if (phase === 'author') await replace() } }).then(() => null, error => error)
-    expect(result).toMatchObject({ code: 'STALE_AGENT_SESSION' })
+    expect(result).toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
     expect(respond).not.toHaveBeenCalled()
     expect(h.writes).toEqual([])
   } finally { vi.restoreAllMocks(); await h.client.dispose() }

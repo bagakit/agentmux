@@ -1,3 +1,4 @@
+import { withInteractionOperation } from '../../../packages/core/test/fixtures/interaction-client.js'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -112,7 +113,7 @@ it('a failed answer stays on the exact card and retries without a window-level e
   useAppStore.setState({ sessions: [session], error: null })
   const respond = vi.spyOn(api.sessions, 'respondInteraction').mockRejectedValueOnce(new Error('Connection receipt unavailable')).mockResolvedValueOnce(undefined)
   await dom.render(<AgentInteractionCard request={session.pendingInteraction}
-    onRespond={response => useAppStore.getState().respondInteraction(session.id, response)} />)
+    onRespond={(response, intent) => useAppStore.getState().respondInteraction(session.id, response, intent)} />)
   await dom.click('.agent-interaction__actions button.is-primary')
   expect(dom.container.querySelector('.agent-interaction__error')?.textContent).toContain('Connection receipt unavailable')
   expect(useAppStore.getState().error).toBeNull()
@@ -218,8 +219,8 @@ it('a nonempty public Core publication clears both mounted cards without inventi
         linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'group' }} /></>)
     expect(dom.container.querySelectorAll('[data-request-id="permission-1"]')).toHaveLength(2)
     expect(summarizeAgentAttention(useAppStore.getState().sessions).needsYou).toBe(1)
-    await act(async () => client.respondAgentInteraction({ agentSessionId: 'agent-1', expectedRun: session.control.run,
-      response: { kind: 'permission', requestId: 'permission-1', decision: { outcome: 'selected', optionId: 'allow-once' } } }))
+    await act(async () => client.respondAgentInteraction(withInteractionOperation(client, { agentSessionId: 'agent-1', expectedRun: session.control.run,
+      response: { kind: 'permission', requestId: 'permission-1', decision: { outcome: 'selected', optionId: 'allow-once' } } })))
     expect(published).toContain('agent-session')
     expect(writes).toEqual(['1'])
     expect(client.agentSession('agent-1').pendingInteraction).toBeUndefined()

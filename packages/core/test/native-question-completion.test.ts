@@ -1,3 +1,4 @@
+import { withInteractionOperation } from './fixtures/interaction-client.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -249,9 +250,9 @@ describe('native successful question completion owns only an exact unclaimed que
     h.pauseAck(async () => { entered(); await waiting })
     try {
       expect(await h.feed('PreToolUse')).toBe(204)
-      answering = h.client.respondAgentInteraction({ agentSessionId, expectedRun: { runId }, response: {
+      answering = h.client.respondAgentInteraction(withInteractionOperation(h.client, { agentSessionId, expectedRun: { runId }, response: {
         kind: 'question', requestId: 'receipt-1', outcome: 'answered', answers: [{ questionId: 'question-1', optionId: 'option-1' }]
-      } })
+      } }))
       await admitted
       const original = (await h.stored()).pendingInteraction
       expect(original!.response).toMatchObject({ acknowledged: false, inputByteRange: { startByte: 0, endByte: 1 } })
@@ -266,7 +267,7 @@ describe('native successful question completion owns only an exact unclaimed que
       await expect(answering).resolves.toBeUndefined()
       expect((await h.stored()).pendingInteraction).toEqual(next)
       expect(h.writes).toEqual(['1'])
-      await expect(h.client.respondAgentInteraction({ agentSessionId, expectedRun: { runId }, response: { kind: 'question', requestId: 'receipt-1', outcome: 'cancelled' } })).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
+      await expect(h.client.respondAgentInteraction(withInteractionOperation(h.client, { agentSessionId, expectedRun: { runId }, response: { kind: 'question', requestId: 'receipt-1', outcome: 'cancelled' } }))).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
       expect(h.writes).toEqual(['1'])
     } finally { releaseAck(); await answering?.catch(() => {}); await h.close() }
   })
@@ -280,7 +281,7 @@ describe('native successful question completion owns only an exact unclaimed que
       const pending = (await h.stored()).pendingInteraction!
       expect(pending.request.id).toBe('receipt-1')
       expect(pending.additionalRequests).toMatchObject([{ id: 'receipt-2', nativeToolCallId: 'call-2' }])
-      await expect(h.client.respondAgentInteraction({ agentSessionId, expectedRun: { runId }, response: { kind: 'question', requestId: 'receipt-1', outcome: 'cancelled' } }))
+      await expect(h.client.respondAgentInteraction(withInteractionOperation(h.client, { agentSessionId, expectedRun: { runId }, response: { kind: 'question', requestId: 'receipt-1', outcome: 'cancelled' } })))
         .rejects.toMatchObject({ code: 'AGENT_INTERACTION_UNCONFIRMED' })
       expect(h.writes).toEqual([])
       expect(await h.feed('PostToolUse')).toBe(204)
@@ -288,7 +289,7 @@ describe('native successful question completion owns only an exact unclaimed que
       expect((await h.stored()).pendingInteraction!.additionalRequests).toBeUndefined()
       expect(await h.feed('PostToolUse')).toBe(204)
       expect((await h.stored()).pendingInteraction?.request.id).toBe('receipt-2')
-      await h.client.respondAgentInteraction({ agentSessionId, expectedRun: { runId }, response: { kind: 'question', requestId: 'receipt-2', outcome: 'cancelled' } })
+      await h.client.respondAgentInteraction(withInteractionOperation(h.client, { agentSessionId, expectedRun: { runId }, response: { kind: 'question', requestId: 'receipt-2', outcome: 'cancelled' } }))
       expect(h.writes).toEqual(['\x1b'])
     } finally { await h.close() }
   })

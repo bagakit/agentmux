@@ -1,3 +1,4 @@
+import { withInteractionOperation } from '../../../packages/core/test/fixtures/interaction-client.js'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, type ReactNode } from 'react'
@@ -241,9 +242,9 @@ it('the original typed ACK cannot clear the newer mounted request after exact na
     return { run: run(), appliedByteRange: { startByte: operation.expectedByte, endByte: acceptedInputBytes } }
   }
   await act(async () => {
-    answer = client.respondAgentInteraction({ agentSessionId: AGENT_ID, expectedRun: { runId: RUN_ID },
+    answer = client.respondAgentInteraction(withInteractionOperation(client, { agentSessionId: AGENT_ID, expectedRun: { runId: RUN_ID },
       response: { kind: 'question', requestId: 'claimed-pre', outcome: 'answered',
-        answers: [{ questionId: 'question-1', optionId: 'option-1' }] } })
+        answers: [{ questionId: 'question-1', optionId: 'option-1' }] } }))
     await inputEntered
   })
   const claim = structuredClone(client.agentSession(AGENT_ID).pendingInteraction?.response)

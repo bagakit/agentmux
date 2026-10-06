@@ -1,3 +1,4 @@
+import { permission } from '../../../packages/core/test/fixtures/interaction-client.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { api } from '../src/renderer/src/lib/api'
@@ -13,7 +14,7 @@ describe('queued steer delivery', () => {
     vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (_c, prompt) => { calls.push(prompt) })
     useAppStore.getState().enqueueAgentSteer('s', 'first')
     useAppStore.getState().enqueueAgentSteer('s', 'second')
-    await useAppStore.getState().respondInteraction('s', { requestId: 'q', response: { kind: 'permission', decision: 'allow' } } as never)
+    await useAppStore.getState().respondInteraction('s', { kind: 'permission', requestId: 'q', decision: { outcome: 'selected', optionId: 'allow-once' } }, { operationId: 'queued-response', expectedRequest: permission('q') })
     expect(calls).toEqual(['response', 'first', 'second'])
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
   })
@@ -23,7 +24,7 @@ describe('queued steer delivery', () => {
     vi.spyOn(api.sessions, 'respondInteraction').mockResolvedValue(undefined)
     vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('busy'))
     useAppStore.getState().enqueueAgentSteer('s', 'retry me')
-    await useAppStore.getState().respondInteraction('s', { requestId: 'q', response: { kind: 'permission', decision: 'allow' } } as never)
+    await useAppStore.getState().respondInteraction('s', { kind: 'permission', requestId: 'q', decision: { outcome: 'selected', optionId: 'allow-once' } }, { operationId: 'queued-response', expectedRequest: permission('q') })
     // `deferred`, not `failed`: the session's processState is 'running', so the Agent is alive and this
     // rejection is our own step not completing. Asserting `failed` here pinned the inverse — a live
     // Agent's message judged terminal, which also head-of-line-blocked everything behind it.
