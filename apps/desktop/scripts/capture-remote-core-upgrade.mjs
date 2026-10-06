@@ -13,7 +13,7 @@ await mkdir(evidence, { recursive: true })
 const privateRoot = await mkdtemp(join(tmpdir(), 'agentmux-remote-upgrade-visual-'))
 const inputs = new Map()
 try {
-  await build({ configFile: false, root: fixture, base: './', logLevel: 'warn', define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
+  await build({ configFile: false, root: fixture, base: './', logLevel: 'warn', worker: { format: 'es' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
     resolve: { alias: [{ find: /^@agentmux\/client-ui\/note\/(.+)$/u, replacement: resolve(root, 'packages/client-ui/src/note') + '/$1.ts' }, ...aliases] }, plugins: [{ name: 'owned-dependencies', enforce: 'pre', resolveId(source, importer) {
       if (builtinModules.includes(source) || source.startsWith('node:')) return
       return installedDependency(source, importer)

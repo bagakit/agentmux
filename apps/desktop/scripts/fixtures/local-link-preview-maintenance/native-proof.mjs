@@ -93,7 +93,7 @@ export async function runNative({ root, evidence, lane }) {
     assert.ok(styleAliases.length > 0, 'Owning shared styles must be present')
     const loaded = {}, styles = {}, alias = [...styleAliases, ...sourceAliases]
     const isRendererSource = file => file.startsWith(desktop + '/src/') || file.startsWith(shared + '/')
-    await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias }, plugins: [{ name: 'preview-owning-production-identity', enforce: 'pre',
+    await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' }, resolve: { alias }, plugins: [{ name: 'preview-owning-production-identity', enforce: 'pre',
       transform(bytes, id) { if (isRendererSource(id) && !id.includes('?')) loaded[id.slice(root.length + 1)] = sha(bytes) },
       async generateBundle() { for (const file of this.getWatchFiles()) if (isRendererSource(file) && file.endsWith('.css')) styles[file.slice(root.length + 1)] = sha(await readFile(file)) } }],
       define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' }, build: { outDir, emptyOutDir: true } })
