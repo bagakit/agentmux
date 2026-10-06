@@ -32,7 +32,11 @@ export type DemandDelegationReportInput = {
   authorAgentSessionId: string
   grounding: DemandGroundingProposal
 }
-export type DemandDelegationReport = DemandDelegationReportInput & { submittedAt: number }
+export type DemandDelegationReport = DemandDelegationReportInput & {
+  submittedAt: number
+  /** Restored from Main-verified original Core evidence, with its actual restorer. */
+  recovery?: { collector: DemandDelegationCollector; recoveredAt: number }
+}
 /** Admitted by the host transport, never taken from a report business payload. */
 export type DemandDelegationCollector = { kind: 'agent' | 'user' | 'device'; id: string }
 export type DemandDelegationCollectionInput = { operationId: string; replyMessageId: string }
@@ -41,6 +45,17 @@ export type DemandDelegationCollection = DemandDelegationCollectionInput & {
   collectedAt: number
   groundingSubmissionId?: string
 }
+/** One frozen responsibility notice reference; Core owns its original input. */
+export type DemandDelegationAttentionInput = {
+  operationId: string
+  intentId: string
+  hostId: string
+  supervisorAgentSessionId: string
+  supervisorRunId: string
+  occurrenceAt: number
+  agentMuxNote: string
+}
+export type DemandDelegationAttention = DemandDelegationAttentionInput & { preparedAt: number; attemptedAt?: number }
 export type DemandDelegation = DemandDelegationIntent & {
   preparedAt: number
   /** Owner-captured standards retain the meaning of late, old-version reports. */
@@ -49,6 +64,7 @@ export type DemandDelegation = DemandDelegationIntent & {
   linkedAt?: number
   report?: DemandDelegationReport
   collection?: DemandDelegationCollection
+  attention?: DemandDelegationAttention
 }
 
 function record(value: unknown, label: string, allowed: readonly string[], optional: readonly string[] = []): Record<string, unknown> {
@@ -107,11 +123,22 @@ export function parseDemandDelegationCollectionInput(value: unknown): DemandDele
   const data = record(value, 'delegation.collection', ['operationId', 'replyMessageId'])
   return { operationId: identity(data.operationId, 'collection.operationId'), replyMessageId: identity(data.replyMessageId, 'collection.replyMessageId') }
 }
+const attentionKeys = ['operationId', 'intentId', 'hostId', 'supervisorAgentSessionId', 'supervisorRunId', 'occurrenceAt', 'agentMuxNote']
+export function parseDemandDelegationAttentionInput(value: unknown): DemandDelegationAttentionInput {
+  const data = record(value, 'delegation.attention', attentionKeys)
+  if (typeof data.agentMuxNote !== 'string' || !data.agentMuxNote.trim() || data.agentMuxNote.includes('\0')) throw new Error('attention.agentMuxNote must be a nonempty frozen platform note')
+  return { operationId: identity(data.operationId, 'attention.operationId'), intentId: identity(data.intentId, 'attention.intentId'), hostId: identity(data.hostId, 'attention.hostId'),
+    supervisorAgentSessionId: identity(data.supervisorAgentSessionId, 'attention.supervisorAgentSessionId'), supervisorRunId: identity(data.supervisorRunId, 'attention.supervisorRunId'),
+    occurrenceAt: positive(data.occurrenceAt, 'attention.occurrenceAt'), agentMuxNote: data.agentMuxNote }
+}
+export function sameDemandDelegationAttention(left: DemandDelegationAttentionInput, right: DemandDelegationAttentionInput): boolean {
+  return attentionKeys.every(key => left[key as keyof DemandDelegationAttentionInput] === right[key as keyof DemandDelegationAttentionInput])
+}
 export function sameDemandDelegationIntent(left: DemandDelegationIntent, right: DemandDelegationIntent): boolean {
   return intentKeys.every(key => JSON.stringify(left[key as keyof DemandDelegationIntent]) === JSON.stringify(right[key as keyof DemandDelegationIntent]))
 }
 export function parseDemandDelegation(value: unknown): DemandDelegation {
-  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'report', 'collection'], ['context', 'requestText', 'linkedAt', 'report', 'collection'])
+  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'report', 'collection', 'attention'], ['context', 'requestText', 'linkedAt', 'report', 'collection', 'attention'])
   const intent = parseDemandDelegationIntent(Object.fromEntries(intentKeys.filter(key => data[key] !== undefined).map(key => [key, data[key]])))
   if (!Array.isArray(data.capturedCriteria)) throw new Error('delegation.capturedCriteria must be an array')
   const capturedCriteria = data.capturedCriteria.map(value => {
@@ -123,9 +150,11 @@ export function parseDemandDelegation(value: unknown): DemandDelegation {
     capturedCriteria.some(item => !intent.criterionIds.includes(item.id))) throw new Error('delegation captured standards differ from its original criteria')
   let report: DemandDelegationReport | undefined
   if (data.report !== undefined) {
-    const item = record(data.report, 'delegation.report', ['operationId', 'replyMessageId', 'authorAgentSessionId', 'grounding', 'submittedAt'])
+    const item = record(data.report, 'delegation.report', ['operationId', 'replyMessageId', 'authorAgentSessionId', 'grounding', 'submittedAt', 'recovery'], ['recovery'])
+    const recovery = item.recovery === undefined ? undefined : record(item.recovery, 'report.recovery', ['collector', 'recoveredAt'])
     report = { ...parseDemandDelegationReportInput({ operationId: item.operationId, replyMessageId: item.replyMessageId, authorAgentSessionId: item.authorAgentSessionId, grounding: item.grounding }),
-      submittedAt: positive(item.submittedAt, 'report.submittedAt') }
+      submittedAt: positive(item.submittedAt, 'report.submittedAt'),
+      ...(recovery === undefined ? {} : { recovery: { collector: parseDemandDelegationCollector(recovery.collector), recoveredAt: positive(recovery.recoveredAt, 'report.recovery.recoveredAt') } }) }
     validateDemandDelegationReport(intent, report)
     if (data.linkedAt === undefined) throw new Error('delegation report lacks its original dispatch association')
   }
@@ -137,9 +166,16 @@ export function parseDemandDelegation(value: unknown): DemandDelegation {
       ...(item.groundingSubmissionId === undefined ? {} : { groundingSubmissionId: identity(item.groundingSubmissionId, 'collection.groundingSubmissionId') }) }
     if (!report || collection.replyMessageId !== report.replyMessageId) throw new Error('delegation collection lacks its original report')
   }
+  let attention: DemandDelegationAttention | undefined
+  if (data.attention !== undefined) {
+    const item = record(data.attention, 'delegation.attention', [...attentionKeys, 'preparedAt', 'attemptedAt'], ['attemptedAt'])
+    attention = { ...parseDemandDelegationAttentionInput(Object.fromEntries(attentionKeys.map(key => [key, item[key]]))), preparedAt: positive(item.preparedAt, 'attention.preparedAt'),
+      ...(item.attemptedAt === undefined ? {} : { attemptedAt: positive(item.attemptedAt, 'attention.attemptedAt') }) }
+    if (attention.hostId !== intent.hostId || data.linkedAt === undefined) throw new Error('delegation attention lacks its original linked Host')
+  }
   return { ...intent, capturedCriteria, preparedAt: positive(data.preparedAt, 'delegation.preparedAt'),
     ...(data.linkedAt === undefined ? {} : { linkedAt: positive(data.linkedAt, 'delegation.linkedAt') }),
-    ...(report === undefined ? {} : { report }), ...(collection === undefined ? {} : { collection }) }
+    ...(report === undefined ? {} : { report }), ...(collection === undefined ? {} : { collection }), ...(attention === undefined ? {} : { attention }) }
 }
 export function validateDemandDelegationReport(intent: DemandDelegationIntent, report: DemandDelegationReportInput): void {
   const checks = report.grounding.checks
@@ -157,5 +193,8 @@ export function parseDemandDelegations(value: unknown): DemandDelegation[] {
     if (new Set(reports.map(select)).size !== reports.length) throw new Error('delegation reports contain duplicate original identities')
   const collections = result.flatMap(item => item.collection ? [item.collection.operationId] : [])
   if (new Set(collections).size !== collections.length) throw new Error('delegation collections contain duplicate operations')
+  const attention = result.flatMap(item => item.attention ? [item.attention] : [])
+  for (const select of [(item: DemandDelegationAttention) => item.operationId, (item: DemandDelegationAttention) => item.intentId])
+    if (new Set(attention.map(select)).size !== attention.length) throw new Error('delegation attention contains duplicate original identities')
   return result
 }

@@ -1,6 +1,7 @@
 import { parseDemandDispatchIntent, parseDemandDispatches, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent } from './dispatch.js'
 import { parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
-  type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type DemandDelegationCollectionInput, type DemandDelegationCollector } from './delegations.js'
+  parseDemandDelegationAttentionInput, sameDemandDelegationAttention,
+  type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type DemandDelegationCollectionInput, type DemandDelegationCollector, type DemandDelegationAttentionInput } from './delegations.js'
 import { parseDemandParticipations, parseDemandCreationOrigin, parseDemandParticipationSource, type DemandParticipationSource } from './collaboration.js'
 import { appendDemandContentReferences, parseDemandContentReferences } from './content-references.js'
 import { randomUUID } from 'node:crypto'
@@ -480,20 +481,36 @@ export class DemandStore {
   /** Core verifies replyTo/thread/author; Demand verifies the frozen business scope. */
   async submitDelegationReport(id: string, delegationOperationId: string, input: DemandDelegationReportInput, actorSessionId: string): Promise<DemandReceipt> {
     const report = parseDemandDelegationReportInput(input)
-    return this.mutate('delegation.report', snapshot => {
+    return this.recordDelegationReport(id, delegationOperationId, report, { worker: actorSessionId })
+  }
+
+  /** Main must verify the original structured Core reply before calling this owner. */
+  async recoverDelegationReport(id: string, delegationOperationId: string, input: DemandDelegationReportInput, admittedCollector: DemandDelegationCollector): Promise<DemandReceipt> {
+    const report = parseDemandDelegationReportInput(input), collector = parseDemandDelegationCollector(admittedCollector)
+    return this.recordDelegationReport(id, delegationOperationId, report, { collector })
+  }
+
+  private async recordDelegationReport(id: string, delegationOperationId: string, report: DemandDelegationReportInput,
+    author: { worker: string } | { collector: DemandDelegationCollector }): Promise<DemandReceipt> {
+    return this.mutate('collector' in author ? 'delegation.report-recover' : 'delegation.report', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath), entry = this.findDelegation(demand, delegationOperationId)
-      if (actorSessionId !== entry.workerAgentSessionId || actorSessionId !== report.authorAgentSessionId) this.rejectDelegation('Only the original authenticated worker can report this delegation.')
+      if ('worker' in author) {
+        const actorSessionId = author.worker
+        if (actorSessionId !== entry.workerAgentSessionId || actorSessionId !== report.authorAgentSessionId) this.rejectDelegation('Only the original authenticated worker can report this delegation.')
+      } else if (author.collector.kind === 'agent' && author.collector.id !== entry.ownerAgentSessionId && author.collector.id !== demand.supervisorSessionId)
+        this.rejectDelegation('Only the original owner, current Supervisor or an admitted person/device can recover the verified original report.')
       try { validateDemandDelegationReport(entry, report) } catch (error) { this.rejectDelegation(error instanceof Error ? error.message : String(error)) }
       const previous = snapshot.demands.flatMap(item => (item.delegations ?? []).map(delegation => ({ goalId: item.id, delegation })))
         .find(item => item.delegation.report?.operationId === report.operationId || item.delegation.report?.replyMessageId === report.replyMessageId)
       if (previous && (previous.goalId !== id || previous.delegation.operationId !== delegationOperationId)) this.rejectDelegation('The original report identity belongs to another delegation. Inspect its original source.')
       if (entry.report) {
-        const { submittedAt: _time, ...original } = entry.report
+        const { submittedAt: _time, recovery: _recovery, ...original } = entry.report
         if (JSON.stringify(original) !== JSON.stringify(report)) this.rejectDelegation('The original worker report is frozen. A duplicate or late report cannot replace its evidence or collection.')
         return { unchanged: demand }
       }
       if (entry.linkedAt === undefined) this.rejectDelegation('The original Core dispatch association is not confirmed. Inspect it before recording its reply.')
-      entry.report = { ...report, submittedAt: Date.now() }
+      const submittedAt = Date.now()
+      entry.report = { ...report, submittedAt, ...('collector' in author ? { recovery: { collector: author.collector, recoveredAt: submittedAt } } : {}) }
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       validateNewDemand(demand, this.storePath)
       return demand
@@ -537,6 +554,39 @@ export class DemandStore {
       validateNewDemand(demand, this.storePath)
       return demand
     }, undefined, request.operationId)
+  }
+
+  /** Trusted Main captures one exact existing Supervisor input, never a new queue. */
+  async prepareDelegationAttention(id: string, delegationOperationId: string, input: DemandDelegationAttentionInput): Promise<DemandReceipt> {
+    const attention = parseDemandDelegationAttentionInput(input)
+    return this.mutate('delegation.attention-prepare', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath), entry = this.findDelegation(demand, delegationOperationId)
+      const previous = snapshot.demands.flatMap(item => (item.delegations ?? []).map(delegation => ({ goalId: item.id, delegation })))
+        .find(item => item.delegation.attention?.operationId === attention.operationId || item.delegation.attention?.intentId === attention.intentId)
+      if (previous && (previous.goalId !== id || previous.delegation.operationId !== delegationOperationId)) this.rejectDelegation('The original attention input belongs to another delegation. Inspect that exact reference.')
+      if (entry.attention) {
+        if (!sameDemandDelegationAttention(entry.attention, attention)) this.rejectDelegation('The original attention input is frozen. It cannot silently move to another Supervisor, Run or note.')
+        return { unchanged: demand }
+      }
+      if (!entry.linkedAt || attention.hostId !== entry.hostId || attention.supervisorAgentSessionId !== demand.supervisorSessionId || entry.collection)
+        this.rejectDelegation('A new attention reference needs the original linked Host, exact current Supervisor and work awaiting collection.')
+      entry.attention = { ...attention, preparedAt: Date.now() }
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      validateNewDemand(demand, this.storePath)
+      return demand
+    }, undefined, attention.operationId)
+  }
+
+  /** Persist before the one actual Core submission; uncertainty is inspected, not resent. */
+  async markDelegationAttentionAttempt(id: string, delegationOperationId: string, operationId: string): Promise<DemandReceipt> {
+    return this.mutate('delegation.attention-attempt', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath), entry = this.findDelegation(demand, delegationOperationId)
+      if (!entry.attention || entry.attention.operationId !== operationId) this.rejectDelegation('An attention attempt must refer to the exact original prepared input.')
+      if (entry.attention.attemptedAt !== undefined) return { unchanged: demand }
+      entry.attention.attemptedAt = Date.now()
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      return demand
+    }, undefined, operationId)
   }
 
   private rejectDelegation(message: string): never {
