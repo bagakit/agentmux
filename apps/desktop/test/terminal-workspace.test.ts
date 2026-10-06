@@ -22,7 +22,7 @@ it('discovers and persists Workspace pairing through the real public settings se
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
   try {
     const discovery = await rpc.call('settings.inspect', { target: 'appearance.terminalTheme' })
-    expect(discovery).toMatchObject({ entries: [{ enum: ['graphite', 'catppuccin-mocha', 'workspace'], value: 'graphite' }] })
+    expect(discovery).toMatchObject({ entries: [{ enum: ['graphite', 'catppuccin-mocha', 'workspace', 'dracula', 'nord', 'gruvbox-dark', 'solarized-dark', 'solarized-light'], value: 'graphite' }] })
     const output = await runCompiledObjectCli(['settings', 'set', 'appearance.terminalTheme', 'workspace'], objectCliEnvironment(directory), '')
     expect(output.code, output.stderr).toBe(0)
     expect(JSON.parse(output.stdout)).toMatchObject({ ok: true, result: { entry: { value: 'workspace' } } })
