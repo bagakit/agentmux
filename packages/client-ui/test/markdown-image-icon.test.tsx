@@ -9,7 +9,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 it('uses themed image semantics for all controlled fallback branches while preserving user labels and the original file action', async () => {
   const host = document.createElement('div'); document.body.append(host)
   const root = createRoot(host), open = vi.fn()
-  updateIconSprite(document, GRAPHITE_THEME)
+  updateIconSprite(document, GRAPHITE_THEME, GRAPHITE_THEME.variants.dark.colors.text)
   try {
     await act(async () => root.render(<>
       <AgentMarkdown content="![Read only user alt](https://example.invalid/image.png)" readOnly />
@@ -20,7 +20,7 @@ it('uses themed image semantics for all controlled fallback branches while prese
     expect(icons).toHaveLength(3)
     expect(host.textContent).toContain('Read only user alt'); expect(host.textContent).toContain('Local user alt'); expect(host.textContent).toContain('Unavailable user alt')
     const before = document.getElementById(semanticIconHref('object.image').slice(1))!.innerHTML
-    updateIconSprite(document, { ...GRAPHITE_THEME, icons: { 'object.image': { kind: 'paths', paths: [{ d: 'M3 3 L21 3 L12 21 Z' }] } } })
+    updateIconSprite(document, { ...GRAPHITE_THEME, icons: { 'object.image': { kind: 'paths', paths: [{ d: 'M3 3 L21 3 L12 21 Z' }] } } }, GRAPHITE_THEME.variants.dark.colors.text)
     expect(document.getElementById(semanticIconHref('object.image').slice(1))!.innerHTML).not.toBe(before)
     expect([...host.querySelectorAll('[data-semantic-icon="object.image"]')]).toEqual(icons)
     expect(icons.every(icon => icon.querySelector('use')?.getAttribute('href') === semanticIconHref('object.image'))).toBe(true)
