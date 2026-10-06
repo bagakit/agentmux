@@ -201,6 +201,33 @@ HTTP 默认关闭；启动服务时显式提供 `http: { host, port, token }`，
 
 JSON-RPC `id` 只匹配通信。`operationId` 记录原业务操作；没有完整回执时先查询原操作。订阅断开只释放对应 reader，保持 Agent、Run 与桌面的原观察连接。完整命令、资源与展示分离和远程参数见[公开 CLI 指南](../../docs/guides/agentmux-cli-object-control.md)。
 
+### 外部投递观察与原操作重试
+
+`@agentmux/core/connections` 导出纯 `ConnectionDelivery` 合同与严格解析器。
+宿主通过原 `AgentMuxRpcServiceOptions.connections.delivery` 注入
+`ConnectionDeliveryPort`，公共 CLI 与 `connectAgentMuxRpc` 所得 Client 的 typed `call()` 共同消费该 owner。
+未注入时仅这个入口明确不可用，不创建连接器、传输或新的 Agent Runtime。
+准确字段与结果见 [delivery 合同](src/connection-delivery-contract.ts)及
+[严格解析](src/connection-delivery-codec.ts)。
+
+```sh
+amux connection delivery inspect --operation-id original-delivery
+amux connection delivery ls --connection original-connection --binding original-binding --binding-revision 3 --limit 30
+amux connection delivery retry --operation-id original-delivery
+```
+
+查询只读原 operation、受众、来源引用、fragment、队列状态和安全平台回执，
+不暴露正文、prepared wire、凭证或原始诊断。列表返回 `next` 原 operation ID；
+续页保同一 Connection 与 Binding 修订并传 `--after`，不按 ID 字面顺序猜位置。
+queue 的 superseded／cancelled 与原平台 receipt 分开，不能把未知当未执行。
+列表可附当前 Binding 范围的 worker `observation`，没有 delivery 时也可查 source Gap；
+它是当前进程服务窗，不代表平台 ACK、送达、原生采用或 Agent 健康结论。
+
+retry 是准确 Host 对已确认 not-applied 的原 operation 执行一次明确重试，
+保原身份和受众；未知先 inspect，不换 ID 重放。当前授权由原 Host owner 复核，
+操作者及其有效性来自可信 user／device 运输上下文，不能在参数中冒充。
+这份公共接缝不实现平台发送或另存投递事实；实际传输仍由宿主接入并独立验收。
+
 ## Diagnostic Evidence
 
 通用强类型机制为 `@agentmux/diagnostic-evidence`，Core 领域类型从 `@agentmux/core/diagnostic-evidence` 导入。沿既有公共 RPC 调用 `system.diagnostics.inspect`，CLI 使用 `amux system diagnostics inspect --list` 发现本服务组装的 reader，再以准确 Host/logId 或原 Toolkit executionId 查询。默认安全摘要，`--include-raw` 显式读取实际保留原件；查询不启采样或恢复执行。
