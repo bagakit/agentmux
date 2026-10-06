@@ -54,6 +54,7 @@ import { inspectDesktopClient } from './client-observation.js'
 import { inspectMoteContext, moteContextEvidencePort } from './mote-context-observation.js'
 import { observeClientRpcSnapshot } from './rpc-client-observations.js'
 import { SessionHistoryObservationOwners } from './session-history-observation.js'
+import { SessionHistoryReadOwners } from './session-history-read.js'
 import { createResourceMetricsPort, observeRendererResources } from './resource-usage-control.js'
 import { ToolkitOwner } from './toolkit-owner.js'
 import { performanceLaunch } from './toolkit-asset.js'
@@ -1361,6 +1362,16 @@ export async function registerIpc(args: {
   handle('sessions:historyPage', async (session: import('../shared/contracts.js').SessionHistoryReference, options?: SessionHistoryPageOptions) => (
     args.runtime.sessionHistoryPage(session, options, config)
   ))
+  const historyReads = new SessionHistoryReadOwners()
+  handleWithEvent('sessions:readHistory', (event, token: string, reference: import('../shared/contracts.js').SessionHistoryReference,
+    options: Omit<import('@agentmux/core').AgentSessionHistoryReadInput, 'hostId' | 'agentSessionId'>) => {
+    requireTrustedSender('sessions:readHistory', event)
+    return sessionInputOperationResult(() => historyReads.read(event.sender, token, signal => args.runtime.readSessionHistory(reference, options, signal)))
+  })
+  handleWithEvent('sessions:cancelHistoryRead', (event, token: string) => {
+    requireTrustedSender('sessions:cancelHistoryRead', event)
+    historyReads.cancel(event.sender.id, token)
+  })
   handle('sessions:historyResource', async (session: import('../shared/contracts.js').SessionHistoryReference, input: import('@agentmux/core').AgentSessionHistoryResourceRequest) =>
     args.runtime.sessionHistoryResource(session, input, config))
   const historyObservations = new SessionHistoryObservationOwners((reference, listener, signal) =>
@@ -1989,6 +2000,7 @@ export async function registerIpc(args: {
       { owner: 'control-server', dispose: () => control.stop() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },
+      { owner: 'history-reads', dispose: () => historyReads.dispose() },
       { owner: 'resource-observation', dispose: () => releaseResourceObservation() },
       { owner: 'notifier', dispose: () => notifier.dispose() },
       { owner: 'browser-native-input', dispose: () => { browsers.onNativeInput = undefined } },
