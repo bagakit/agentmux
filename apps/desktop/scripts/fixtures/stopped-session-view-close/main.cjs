@@ -36,7 +36,7 @@ async function revealTargetClose() {
 async function frame(width, scene) {
  await evaluate('(async()=>{await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame)})()'); await delay(100)
  const png = (await win.webContents.capturePage()).toPNG(), name = `${width}-${scene}.png`; assert.ok(png.length > 0); await fs.writeFile(path.join(evidence, name), png)
- result.frames.push({ width, scene, file: name, bytes: png.length, sha256: createHash('sha256').update(png).digest('hex'), facts: await evaluate('stoppedViewClose.facts()'), dialog: await evaluate('document.querySelector("[role=dialog]")?.textContent??null'), notice: await evaluate('document.querySelector(".error-notice")?.textContent??null') })
+ result.frames.push({ width, scene, file: name, bytes: png.length, sha256: createHash('sha256').update(png).digest('hex'), facts: await evaluate('stoppedViewClose.facts()'), dialog: await evaluate('document.querySelector("[role=dialog]")?.textContent??null'), notice: await evaluate('document.querySelector(".notification-item[data-event-id] .notification-item__original")?.innerText??null') })
 }
 function retained(facts, expected, restored = false) {
  assert.deepEqual(facts.drafts, expected.expectedDrafts); assert.deepEqual(facts.queue, { [expected.stoppedId]: [restored ? expected.restoredUnknownInput : expected.unknownInput] }); assert.deepEqual(facts.submissions, [])
@@ -65,7 +65,10 @@ app.whenReady().then(async () => { try {
    assert.equal(await evaluate(`${byText('Keep Session & Close')}.disabled`),false)
    await frame(width,'unknown-close-choice')
    await click(byText('Cancel')); await wait('!document.querySelector("[role=dialog]")')
-   await wait('document.querySelector(".error-notice")?.textContent.includes("close result is unknown")'); await frame(width,'unknown-service-window')
+   await click(`document.querySelector('.global-system-notices__trigger')`)
+   await wait('Boolean(document.querySelector(".notification-item[data-event-id] .notification-item__details > summary"))')
+   await click(`document.querySelector('.notification-item[data-event-id] .notification-item__details > summary')`)
+   await wait('document.querySelector(".notification-item[data-event-id] .notification-item__original")?.innerText.includes("close result is unknown")'); await frame(width,'unknown-service-window')
    await evaluate("document.querySelectorAll(':popover-open').forEach(p=>p.hidePopover())")
    await revealTargetClose(); await click(targetX); await wait('Boolean(document.querySelector("[role=dialog]"))'); await click(byText('Keep Session & Close'))
    await wait('!stoppedViewClose.facts().tabs[stoppedViewClose.target]'); await wait('!document.querySelector("[role=dialog]")')

@@ -55,7 +55,7 @@ try{
   const buildResult=await build({entryPoints:[join(fixture,'entry.mjs')],outfile:join(out,'app.js'),bundle:true,platform:'browser',format:'esm',target:'es2022',jsx:'automatic',metafile:true,plugins:[observe],logLevel:'silent',
     define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},loader:{'.png':'file','.svg':'file','.woff2':'file','.woff':'file','.ttf':'file'}})
   receipt.metafile=buildResult.metafile;receipt.inputs=Object.fromEntries([...inputs].map(([path,sha])=>[relative(root,path),sha]));receipt.transformations=transformations
-  for(const suffix of ['GlobalFocusSurface.tsx','WorkspaceWorkbench.tsx','StableWorkbenchView.tsx','workbench-projection.ts','AttentionRequestPanel.tsx','focus-context.ts','session-state.ts','session-events.ts','TransientErrorNotice.tsx','store.ts'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Nonempty actual module '+suffix)
+  for(const suffix of ['GlobalFocusSurface.tsx','WorkspaceWorkbench.tsx','StableWorkbenchView.tsx','workbench-projection.ts','AttentionRequestPanel.tsx','focus-context.ts','session-state.ts','session-events.ts','GlobalSystemNotices.tsx','NotificationItem.tsx','store.ts'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Nonempty actual module '+suffix)
   const html=join(out,'index.html');await writeFile(html,'<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="./app.css"><div id="root"></div><script type="module" src="./app.js"></script></html>')
   receipt.compiled={renderer:hash(await readFile(join(out,'app.js'))),css:hash(await readFile(join(out,'app.css')))}
   await cp(out,join(evidence,'compiled'),{recursive:true});receipt.compiledArtifacts={renderer:'compiled/app.js',css:'compiled/app.css'}

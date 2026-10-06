@@ -58,7 +58,7 @@ app.whenReady().then(async () => {
     await pause(120)
     proof.visualGeometry ??= []
     proof.visualGeometry.push(await win.webContents.executeJavaScript(`(() => {
-     const selectors=['.composer-pending__cards','.composer-pending__card[data-selected="true"] pre','.composer-pending__card[data-selected="true"] .composer-pending__send','.composer-pending__card[data-selected="true"] .composer-pending__retry button','.composer-pending__card[data-selected="true"] [aria-label="复制完整诊断"]','.error-notice__details','.error-notice [aria-label="复制完整诊断"]'];
+     const selectors=['.composer-pending__cards','.composer-pending__card[data-selected="true"] pre','.composer-pending__card[data-selected="true"] .composer-pending__send','.composer-pending__card[data-selected="true"] .composer-pending__retry button','.composer-pending__card[data-selected="true"] [aria-label="复制完整诊断"]','.notification-item[data-event-id] .notification-item__details','.notification-item[data-event-id] .notification-item__original > button'];
      return {name:${JSON.stringify(name)},suffix:${JSON.stringify(suffix)},width:innerWidth,height:innerHeight,nodes:selectors.map(selector=>{
       const node=document.querySelector(selector);if(!node)return{selector,exists:false};
       const rect=node.getBoundingClientRect(),x=(rect.left+rect.right)/2,y=(rect.top+rect.bottom)/2,hit=document.elementFromPoint(x,y);
@@ -401,24 +401,30 @@ app.whenReady().then(async () => {
   assert.equal(cleanupEvent.evidence.run.runId, runId); assert.equal(cleanupEvent.failure.logId, 'DgN5g3T2pYk7')
   assert.deepEqual((await entries()).find(row => row.operationId === cleanupEntry.operationId).inputStopReceipt, cleanupStopped)
   assert.equal(dispatches.length, nativeCountBeforeQueue)
-  await win.webContents.executeJavaScript(`document.querySelector('.error-notice__details').open = true`)
-  const completeNotice = await win.webContents.executeJavaScript(`document.querySelector('.error-notice__original').textContent`)
+  await clickVisible('.global-system-notices__trigger')
+  await eventual(() => win.webContents.executeJavaScript(`Boolean(document.querySelector('.notification-item[data-event-id] .notification-item__details > summary'))`), Boolean)
+  await clickVisible('.notification-item[data-event-id] .notification-item__details > summary')
+  const completeNotice = await win.webContents.executeJavaScript(`document.querySelector('.notification-item[data-event-id] .notification-item__original > p').innerText`)
+  proof.cleanupNoticeEventId = await win.webContents.executeJavaScript(`document.querySelector('.notification-item[data-event-id]').dataset.eventId`)
   assert.equal(completeNotice, cleanupIssue.error)
   const noticeCopies = [], originalClipboardWrite = clipboard.writeText
   try {
    clipboard.writeText = value => noticeCopies.push(value)
-   await win.webContents.executeJavaScript(`document.querySelector('.error-notice [aria-label="复制完整诊断"]').click()`)
+   await win.webContents.executeJavaScript(`document.querySelector('.notification-item[data-event-id] .notification-item__original > button').scrollIntoView({block:'nearest'})`)
+   await clickVisible('.notification-item[data-event-id] .notification-item__original > button')
    await eventual(async () => noticeCopies, values => values.length === 1)
    assert.equal(noticeCopies[0], completeNotice)
-   await eventual(() => win.webContents.executeJavaScript(`document.querySelector('.error-notice [aria-label="复制完整诊断"]').textContent.trim()`), value => value === '已复制')
+   await eventual(() => win.webContents.executeJavaScript(`document.querySelector('.notification-item[data-event-id] .notification-item__original > span[role="status"]').textContent.trim()`), value => value === 'Copied')
    clipboard.writeText = () => { throw new Error('Private clipboard write unconfirmed') }
-   await win.webContents.executeJavaScript(`document.querySelector('.error-notice [aria-label="复制完整诊断"]').click()`)
-   await eventual(() => win.webContents.executeJavaScript(`document.querySelector('.error-notice [aria-label="复制完整诊断"]').textContent.trim()`), value => value === '复制失败，请重试')
-   assert.equal(await win.webContents.executeJavaScript(`document.querySelector('.error-notice__original').textContent`), completeNotice)
+   await win.webContents.executeJavaScript(`document.querySelector('.notification-item[data-event-id] .notification-item__original > button').scrollIntoView({block:'nearest'})`)
+   await clickVisible('.notification-item[data-event-id] .notification-item__original > button')
+   await eventual(() => win.webContents.executeJavaScript(`document.querySelector('.notification-item[data-event-id] .notification-item__original > span[role="status"]').textContent.trim()`), value => value.startsWith('Copy failed:'))
+   assert.equal(await win.webContents.executeJavaScript(`document.querySelector('.notification-item[data-event-id] .notification-item__original > p').innerText`), completeNotice)
   } finally { clipboard.writeText = originalClipboardWrite }
+  await win.webContents.executeJavaScript(`document.querySelector('.global-system-notices__details').scrollTop = 0`)
   await capture('original-Run-cleanup-diagnostic')
-  await win.webContents.executeJavaScript(`const details=document.querySelector('.error-notice__details');details.scrollTop=details.scrollHeight`)
-  await capture('original-Run-cleanup-diagnostic-tail', `const details=document.querySelector('.error-notice__details');details.scrollTop=details.scrollHeight`)
+  await win.webContents.executeJavaScript(`const details=document.querySelector('.global-system-notices__details');details.scrollTop=details.scrollHeight`)
+  await capture('original-Run-cleanup-diagnostic-tail', `const details=document.querySelector('.global-system-notices__details');details.scrollTop=details.scrollHeight`)
   provider.prepareNativePromptInput = originalPrepare
   proof.cases.push({ name: 'actual-original-Core-cleanup-event-after-Stop-and-Run-replacement-Notice-full-copy', event: cleanupEvent,
    notice: cleanupIssue, copied: noticeCopies, stopped: cleanupStopped, newRunDispatches: 0,

@@ -37,7 +37,10 @@ app.whenReady().then(async () => {
       for (const mode of ['refusal', 'ready', 'unknown']) {
         await read(`window.remoteUpgradePreview.setMode(${JSON.stringify(mode)})`)
         const before = await read('window.remoteUpgradePreview.calls.filter(call=>call==="check").length')
-        await click('.remote-core-upgrade-notices button')
+        await click('.global-system-notices__trigger')
+        await until('document.querySelector(".global-system-notices__details")?.matches(":popover-open")')
+        const hostNotice = `.notification-item[data-notice-id='${JSON.stringify(['build', 'Connecting to Runtime'])}']`
+        await click(hostNotice + ' .notification-item__action')
         await until('document.querySelector("[data-resource-editor=build]")?.checkVisibility()')
         await until(`window.remoteUpgradePreview.calls.filter(call=>call==="check").length === ${before + 1}`)
         if (mode === 'refusal') await capture('checking-' + width)
