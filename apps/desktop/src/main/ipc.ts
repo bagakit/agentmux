@@ -158,6 +158,7 @@ import { ExternalBrowserBridge } from './browser-external-bridge.js'
 import { ExternalBrowserOwner } from './browser-external-owner.js'
 import { BrowserViewManager } from './browser-view-manager.js'
 import { NativeOverlaySurfaces } from './native-overlay-surfaces.js'
+import { installNativeOverlayFocus } from './native-overlay-focus.js'
 import type { NativeOverlayRegion } from '../shared/native-overlay.js'
 import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE } from './browser-operation-journal.js'
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
@@ -395,6 +396,7 @@ export async function registerIpc(args: {
   }
   const nativeChrome = new NativeOverlaySurfaces(args.window, browsers, warnNativeChrome,
     input => { if (!args.window.webContents.isDestroyed()) args.window.webContents.send(NATIVE_BROWSER_INPUT_CHANNEL, input) })
+  const disposeNativeOverlayFocus = installNativeOverlayFocus(args.window, nativeChrome)
   browsers.onNativeVisibilityChange = visibility => {
     if (!args.window.webContents.isDestroyed()) args.window.webContents.send(NATIVE_BROWSER_VISIBILITY_CHANNEL, visibility)
   }
@@ -2027,7 +2029,7 @@ export async function registerIpc(args: {
       { owner: 'resource-observation', dispose: () => releaseResourceObservation() },
       { owner: 'notifier', dispose: () => notifier.dispose() },
       { owner: 'browser-native-input', dispose: () => { browsers.onNativeInput = undefined } },
-      { owner: 'native-chrome', dispose: () => nativeChrome.dispose() },
+      { owner: 'native-chrome', dispose: () => { disposeNativeOverlayFocus(); nativeChrome.dispose() } },
       { owner: 'external-browsers', dispose: () => externalBrowsers.dispose() },
       { owner: 'browsers', dispose: () => browsers.dispose() },
       { owner: 'browser-input-history', dispose: () => browserInputHistory.flush() },

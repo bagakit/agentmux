@@ -166,6 +166,12 @@ export class NativeOverlaySurfaces {
       .map(projection => projection.view.webContents.getOSProcessId()).filter(pid => pid > 0))]
   }
 
+  hasFocusedProjection(): boolean {
+    return !this.disposed && !this.window.isDestroyed() && this.window.isFocused() &&
+      [...this.projections.values()].some(projection => this.current(projection) && projection.view.getVisible() &&
+        this.window.contentView.children.includes(projection.view) && projection.view.webContents.isFocused())
+  }
+
   private async paint(projection: Projection): Promise<void> {
     const revision = ++projection.revision
     projection.paintStage = 'Chrome document'
