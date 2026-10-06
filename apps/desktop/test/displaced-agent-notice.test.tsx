@@ -1,3 +1,6 @@
+import { currentNotificationRows } from './helpers/notification-center'
+import { providerCatalogReader, historySourcesReader } from './helpers/startup-observation-api-fixture'
+import { composerConfig } from './helpers/composer-dom-fixture'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
@@ -44,6 +47,7 @@ import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystem
 
 beforeEach(() => vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true))
 const initialState = useAppStore.getState()
+const displacementRow = (element: ParentNode, id: string) => currentNotificationRows(element).find(row => row.dataset.noticeId === id)
 
 const config: AppConfig = {
   version: 9,
@@ -163,11 +167,11 @@ describe('T-005 第二半：真实错位 → 记账 + 可发现 + 持续告示 +
     } })
     await act(async () => useAppStore.getState().applyEvent(removal('unrelated-run')))
     expect(useAppStore.getState().displacedAgentSessionIds).toContain(id)
-    expect(element.querySelector('.global-system-notices__action')).not.toBeNull()
+    expect(displacementRow(element, id)?.querySelector('.notification-item__action')).not.toBeNull()
     await act(async () => useAppStore.getState().applyEvent(removal(session.control.run.runId)))
     expect(useAppStore.getState().sessions.find((item) => item.id === id)).toBeUndefined()
     expect(useAppStore.getState().displacedAgentSessionIds).not.toContain(id)
-    expect(element.querySelector('.global-system-notices__action')).toBeNull()
+    expect(displacementRow(element, id)).toBeUndefined()
   })
 
   it('does not clear displacement when the requested Tab Group cannot accept a placement', async () => {
@@ -176,7 +180,7 @@ describe('T-005 第二半：真实错位 → 记账 + 可发现 + 持续告示 +
     expect(useAppStore.getState().displacedAgentSessionIds).toContain(id)
     expect(useAppStore.getState().error).toContain('Tab Group is no longer available')
     const element = await mount(<GlobalSystemNotices />)
-    expect(element.querySelector('.global-system-notices__action')).not.toBeNull()
+    expect(displacementRow(element, id)?.querySelector('.notification-item__action')).not.toBeNull()
   })
 
   it('告示从选择器渲染出来（真实 render），点「找回」落到那个 session，随后自愈消失', async () => {
@@ -186,13 +190,13 @@ describe('T-005 第二半：真实错位 → 记账 + 可发现 + 持续告示 +
     const element = await mount(<GlobalSystemNotices />)
 
     // 告示在场，且说的是这个 Agent、进程还在跑（文案来自 displacedAgentStepOutcome，经选择器过滤）。
-    const notice = element.querySelector('.service-window')
+    const notice = displacementRow(element, id)?.querySelector('.service-window')
     expect(notice, '错位告示没有渲染出来——选择器返回空或组件没接上').not.toBeNull()
     expect(notice?.textContent).toContain('Builder')
     expect(notice?.textContent).toContain('still running')
 
     // 点「找回」：只凭 session id 重新解析落点（selectSession），绝不复用失效的 plan.regionId/旧 tabId。
-    const action = element.querySelector<HTMLButtonElement>('.global-system-notices__action')!
+    const action = displacementRow(element, id)!.querySelector<HTMLButtonElement>('.notification-item__action')!
     expect(action, '没有找回入口——告示不可操作').not.toBeNull()
     await act(async () => { action.click() })
 
@@ -210,7 +214,7 @@ describe('T-005 第二半：真实错位 → 记账 + 可发现 + 持续告示 +
     expect(useAppStore.getState().sessions.find((session) => session.id === id)).toBeDefined()
 
     // 自愈：重新拿回一格后，选择器把它从告示里去掉，DOM 上不再有服务窗。
-    expect(element.querySelector('.service-window'), '重新安放后告示没有自愈消失').toBeNull()
+    expect(displacementRow(element, id), '重新安放后告示没有自愈消失').toBeUndefined()
   })
 })
 
@@ -219,7 +223,9 @@ describe('T-005 第二半：告示真的挂在窗口上（不在会消失的 Reg
 
   it('App 主壳里挂出了错位告示——删掉 App.tsx 那行渲染，这条红', async () => {
     vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
-    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig)
+    vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
+    vi.spyOn(api.sessions, 'historySources').mockImplementation(historySourcesReader())
     vi.spyOn(api.sessions, 'snapshot').mockResolvedValue(emptySnapshot())
 
     const element = await mount(<App />)
@@ -239,7 +245,7 @@ describe('T-005 第二半：告示真的挂在窗口上（不在会消失的 Reg
     const mainShell = element.querySelector('main.main-shell')
     expect(mainShell, '主壳没挂出来').not.toBeNull()
     // 告示挂在窗口底部统一系统入口，独立于任何可关闭的 Region/Tab。
-    expect(element.querySelector('footer.window-status-bar .global-system-notices__item'), '错位告示没有挂在窗口锚点上').not.toBeNull()
+    expect(element.querySelector('footer.window-status-bar .notification-item[data-notice-id]'), '错位告示没有挂在窗口锚点上').not.toBeNull()
     expect(element.querySelector('footer.window-status-bar')?.textContent).toContain('Runner')
   })
 })
