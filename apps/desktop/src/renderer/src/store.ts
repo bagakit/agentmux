@@ -1150,7 +1150,7 @@ type AppState = {
      * （见 lib/display-name.ts 的优先级链）。名字在这里写而不由调用方写，是因为 sessionId
      * 与 tabId 都在本函数内部生成，从不出参。
      */
-    names?: { agentName?: string | undefined; tabName?: string | undefined },
+    names?: { agentName?: string | undefined; tabName?: string | undefined; nameSource?: 'derived' },
     agentMuxNote?: string,
     pmo?: { intent: GoalPmoIntent; onCreated: (result: AgentLaunchResult) => void }
   ): Promise<void>
@@ -2932,7 +2932,7 @@ function applyNameAcknowledgement(saved: import('@agentmux/core/spatial-graph').
     ...(ack ? { nameAcknowledgementRevision: saved.revision } : {}) })
 }
 async function commitDisplayName(target: AgentMuxNameTarget, value: string | null,
-  source: 'manual' | 'launch', expectedNameRevision = currentDisplayNameRevision(target.kind, target.id)):
+  source: 'manual' | 'launch' | 'derived', expectedNameRevision = currentDisplayNameRevision(target.kind, target.id)):
   Promise<AgentMuxDisplayLabelResult> {
   // A new target needs registration; an existing name does not depend on unrelated layout writes.
   const operationId = crypto.randomUUID()
@@ -3367,6 +3367,8 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
   const workspace = state.config?.workspaces.find((item) => item.id === SCRATCH_WORKSPACE_ID)
   if (!workspace) throw new Error('Scratch workspace is unavailable')
   const body = userRequest ?? ''
+  const discussionName = `${demand.title.trim() || 'New goal'} · PMO`
+  const discussionNames = { agentName: discussionName, tabName: discussionName, nameSource: 'derived' as const }
   const intent: GoalPmoIntent = { goalId: demandId, ...(options?.creationOperationId === undefined ? {} : { creationOperationId: options.creationOperationId }) }
   let receiptSessionId: string | null = null
   const done = (tabId: string, agentSessionId: string | null = receiptSessionId): string => { options?.onReceipt?.({ tabId, agentSessionId }); return tabId }
@@ -3516,7 +3518,7 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
       await get().launchAgent(executorId, body, groupId, {
         tabId: mappedTab.id,
         regionId: mappedTab.layout.activeRegionId
-      }, undefined, { tabName: `PMO · ${demand.title}` }, note, { intent, onCreated: launchedReceipt })
+      }, undefined, discussionNames, note, { intent, onCreated: launchedReceipt })
     } else await get().openScratchTopic(PMO_TEAMS_TOPIC_ID, workspace.id, { reveal: false, tabId: mappedTab.id })
     focusPmoTabSession(mappedTab.id)
     return done(mappedTab.id)
@@ -3524,7 +3526,7 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
 
   const current = get()
   const currentLayout = current.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
-  const tab = { ...newLauncherTab(workspace.id, PMO_TEAMS_TOPIC_ID), name: `PMO · ${demand.title}` }
+  const tab = newLauncherTab(workspace.id, PMO_TEAMS_TOPIC_ID)
   pmoTabId = tab.id
   const nextLayout = addTabPlacement(currentLayout, currentLayout.activeGroupId, tab.id)
   if (!nextLayout) throw new Error('The Scratch Tab Group is no longer available')
@@ -3536,6 +3538,10 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
     agentComposerDrafts: { ...next.agentComposerDrafts, [tab.layout.activeRegionId]: body },
     agentComposerNotes: { ...next.agentComposerNotes, [tab.layout.activeRegionId]: note }
   }))
+  // A generated title has its original owner and provenance even if preparation fails.
+  // Naming is independent of starting the requested discussion and never gates it.
+  void commitDisplayName({ kind: 'tab', id: tab.id }, discussionName, 'derived', 0)
+    .catch(error => get().reportWorkbenchSaveFailure(error))
   let preparedTopic: ScratchTopicSnapshot
   try { preparedTopic = await api.scratch.ensureTopic(workspace.id, PMO_TEAMS_TOPIC_ID) }
   catch (cause) {
@@ -3553,10 +3559,11 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
     get().reportError(new Error(choice.issue ?? 'The primary Mote Agent configuration is unconfirmed. This Goal, dedicated Tab and request are kept; choose an Agent and Start agent here.'), { kind: 'indeterminate' })
     return done(tab.id)
   }
+  // The new Tab already has its own name operation; launching writes only the new Session name.
   await get().launchAgent(executorId, body, currentLayout.activeGroupId, {
     tabId: tab.id,
     regionId: tab.layout.activeRegionId
-  }, undefined, { tabName: `PMO · ${demand.title}` }, note, { intent, onCreated: launchedReceipt })
+  }, undefined, { ...discussionNames, tabName: undefined }, note, { intent, onCreated: launchedReceipt })
   focusPmoTabSession(tab.id)
   return done(tab.id)
 }
@@ -6399,13 +6406,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ? { summary: 'Current goal in the user’s words', criteria: [{ id: 'criterion-1', text: 'Observable success condition' }], openQuestions: [] }
       : { alignmentRevision: demand.alignment?.revision ?? 1, summary: 'Observed results', checks: [{ criterionId: demand.alignment?.criteria[0]?.id ?? 'criterion-1', outcome: 'unknown', evidence: [], note: 'State what remains unverified.' }] }
     const prompt = [
-      `You are Mote for existing Goal ${demand.id}. This is a new user request for ${mode === 'grill' ? 'Grill: align the goal' : 'Grounding: align the results'}.`,
+      `You coordinate delivery and closeout for existing Goal ${demand.id}. Current request: ${mode === 'grill' ? 'Grill: align the goal' : 'Grounding: align the results'}.`,
       ...(!demand.alignment && !demand.description.trim() ? ['This is an existing undefined Goal draft. Its placeholder title is not the user’s intent. Ask what they want to achieve and update this same Goal ID; do not invent an outcome, success criteria or human approval.'] : []),
       'Preserve the user’s original intent. Do not create another Goal, invent requirements, or overwrite description with your summary.',
+      'Inspect this same Goal for its current Supervisor, assignees and criteria. Keep its delivery and naming responsibilities from the coordination guide. This request asks for discussion or inspection; continue execution only within authorization the user actually gave.',
       mode === 'grill'
         ? 'Discuss only choices that change the goal. Propose a readable summary, stable success criterion IDs, and actual unresolved questions. The person confirms the goal in Goals.'
         : 'Inspect the actual work and report every current criterion with met/gap/unknown, locatable evidence references and concrete gaps. A reference is not proof by itself. The person accepts results in Goals; never claim their acceptance.',
-      `Current durable Goal facts:\n${JSON.stringify({ id: demand.id, title: demand.title, description: demand.description, projectId: demand.projectId, sessionIds: demand.sessionIds, alignment: demand.alignment, grounding: demand.grounding }, null, 2)}`,
+      `Current durable Goal facts:\n${JSON.stringify({ id: demand.id, title: demand.title, description: demand.description, projectId: demand.projectId, sessionIds: demand.sessionIds, supervisorSessionId: demand.supervisorSessionId, assigneeSessionIds: demand.assigneeSessionIds, alignment: demand.alignment, grounding: demand.grounding }, null, 2)}`,
       'Read the current Goal before submitting. Use the public CLI below; replace the example with your actual proposal, not its placeholder content. Owner generates revision/submission IDs and acknowledgement timestamps.',
       `"$AGENTMUX_CLI" goal inspect --goal ${quote(demand.id)}`,
       `"$AGENTMUX_CLI" goal update --goal ${quote(demand.id)} --${mode === 'grill' ? 'alignment' : 'grounding'} ${quote(JSON.stringify(proposal))}`
@@ -8302,9 +8310,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       })
       // 名字与草稿同一时机落地：Agent 已经挂上，两个 id 才真正指向一个存在的东西。失败路径不写，
       // 否则会留下一个指向已消失 session 的孤儿名字。留空即不写，显示名交还派生链。
-      if (requestedNames.agentName) await commitDisplayName({ kind: 'agent-session', id: sessionId }, requestedNames.agentName, 'launch', 0)
+      if (requestedNames.agentName) await commitDisplayName({ kind: 'agent-session', id: sessionId }, requestedNames.agentName, names?.nameSource ?? 'launch', 0)
         .catch(error => get().reportWorkbenchSaveFailure(error))
-      if (requestedNames.tabName) await commitDisplayName({ kind: 'tab', id: tabId }, requestedNames.tabName, 'launch', requestedTabNameRevision)
+      if (requestedNames.tabName) await commitDisplayName({ kind: 'tab', id: tabId }, requestedNames.tabName, names?.nameSource ?? 'launch', requestedTabNameRevision)
         .catch(error => get().reportWorkbenchSaveFailure(error))
       if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
       if (priorFailure && get().errorNoticeContext === priorFailure) {
