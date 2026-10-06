@@ -202,6 +202,8 @@ type NativeParams = GoalDelegationParamsMap & MoteAvatarParameterMap & TopicPara
   'agent.native.history': import('./public-rpc-native-history.js').AgentMuxRpcNativeHistoryParams
   'agent.native.history.resource': import('./public-rpc-native-history.js').AgentMuxRpcNativeHistoryResourceParams
   'agent.context': import('./agent-context.js').AgentContextParams
+  'agent.interaction.respond': import('./client.js').AgentMuxAgentInteractionInput
+  'agent.interaction.inspect': { agentSessionId: string; operationId: string }
   'agent.question.reply': Omit<import('./client.js').AgentMuxSessionQuestionReplyInput, 'authorHuman' | 'sourceDevice' | 'signal' | 'commandOverride' | 'args' | 'env'>
   'agent.history.resource': import('./session-history-resource.js').AgentSessionHistoryResourceParams
   'agent.conversation.checkpoint': import('./conversation.js').ConversationRef
@@ -265,6 +267,8 @@ type NativeResult = GoalDelegationResultMap & MoteAvatarResultMap & TopicResultM
   'agent.native.history': import('./public-rpc-native-history.js').AgentMuxRpcNativeHistoryResult
   'agent.native.history.resource': import('./public-rpc-native-history.js').AgentMuxRpcNativeHistoryResourceResult
   'agent.context': import('./agent-context.js').AgentContextPage
+  'agent.interaction.respond': import('./types.js').AgentMuxInteractionOperationReceipt
+  'agent.interaction.inspect': { receipt: import('./types.js').AgentMuxInteractionOperationReceipt | null }
   'agent.question.reply': import('./types.js').AgentSessionQuestionReplyReceipt
   'agent.history.resource': import('./session-history-resource.js').AgentSessionHistoryResourceResult
   'agent.conversation.checkpoint': import('./conversation-changes.js').ConversationCheckpointPage
@@ -334,7 +338,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'settings.appearance.watch': 'long',
   'notebook.ls': 'short', 'notebook.inspect': 'long', 'notebook.graph': 'long', 'notebook.resolve': 'long', 'notebook.apply': 'long',
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
-  whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.resource': 'long', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
+  whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',
   'agent.input.inspect': 'short', 'agent.input.stop': 'short', 'agent.input.rejoin': 'long', 'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
   'system.diagnostics.inspect': 'short',

@@ -41,7 +41,7 @@ import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } f
 import { parseSessionHistoryResourceResult, type AgentSessionHistoryResourceParams } from './session-history-resource.js'
 import { parseHostedBootstrap } from './hosted-value.js'
 import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
-import { normalizeAgentSession } from './agent-session-store.js'
+import { normalizeInteractionOperationReceipt, normalizeAgentSession } from './agent-session-store.js'
 import { agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
 import { validateAgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import { agentPromptInputId, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey } from './agent-prompt-condition.js'
@@ -386,6 +386,14 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'runtime.bootstrap': parseRpcHostedBootstrap(p); break
       case 'runtime.invoke': record(p, ['value']); if (!Object.hasOwn(p, 'value')) fail(); break
       case 'runtime.release-consumer': record(p, ['released']); bool(p.released); break
+      case 'agent.interaction.respond': case 'agent.interaction.inspect': {
+        const raw = method === 'agent.interaction.inspect' ? record(p, ['receipt']).receipt : p
+        if (raw === null && method === 'agent.interaction.inspect') break
+        const receipt = normalizeInteractionOperationReceipt(raw)
+        if (!isDeepStrictEqual(raw, receipt) || !rpcSessionTargetMatches(input.agentSessionId, receipt.agentSessionId) || receipt.operationId !== input.operationId) fail()
+        if (method === 'agent.interaction.respond' && (!isDeepStrictEqual(receipt.run, input.expectedRun) || !isDeepStrictEqual(receipt.response, input.response))) fail()
+        break
+      }
       case 'agent.question.reply': {
         record(p, ['agentSessionId', 'source', 'recordId', 'questionIds', 'operationId', 'outcome'])
         const source = record(p.source, ['providerId', 'nativeSessionId']), expected = record(input.source)
