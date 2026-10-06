@@ -65,27 +65,26 @@ function neutral() {
     ?? [...node.querySelectorAll<HTMLElement>('.focus-context-group[data-bucket="idle"]')].find(group => group.querySelector('.focus-context'))
   expect(found).not.toBeUndefined(); expect(found).not.toBeNull(); return found!
 }
-it('public bare running renders Activity unknown with an exact Unknown count and a usable original Agent entry', async () => {
+it('public bare running explains unconfirmed activity with an exact Unknown count and a usable original Agent entry', async () => {
   const h = await open('bare-ui'), status = await h.client.statusAgent('bare-ui')
   await mount([status])
   expect(status.observation.semantic).toBe('unknown')
   expect(row('bare-ui').dataset.activity).toBe('unknown')
-  expect(row('bare-ui').getAttribute('aria-label')).toContain('Activity unknown')
+  expect(row('bare-ui').getAttribute('aria-label')).toContain('Activity not confirmed')
   expect(neutral().getAttribute('aria-label')).toBe('Activity unknown')
-  expect(neutral().querySelector('header')!.getAttribute('aria-label')).toBe('Idle 0 · Activity unknown 1 · Recovery 0')
+  expect(node.querySelector('[aria-label="Idle 0 · Activity unknown 1 · Recovery 0"]')).not.toBeNull()
   expect(row('bare-ui').disabled).toBe(false); row('bare-ui').focus(); expect(document.activeElement).toBe(row('bare-ui'))
   expect(useAppStore.getState().sessions[0]!.control.run).toEqual(status.session.run)
 })
 it('persisted stale working reaches the actual neutral lane without a false Working spinner or completed result', async () => {
-  const h = await open('stale-ui', 'grok')
-  vi.mocked(Date.now).mockReturnValue(NOW - 25 * 60_000); await h.hook('session_start', 'ui-stale-working', { eventName: 'session_start' })
-  vi.mocked(Date.now).mockReturnValue(NOW)
+  const h = await activityCertaintyClient('stale-ui', 'grok', { semanticStatus: { state: 'working', source: 'native-hook', observedAt: NOW - 25 * 60_000 } })
+  opened.push(h)
   const status = await h.client.statusAgent('stale-ui'); await mount([status])
   expect(status.observation.semantic).toBe('unknown'); expect(row('stale-ui').dataset.bucket).toBe('idle')
   expect(row('stale-ui').dataset.activity).toBe('unknown')
-  expect(row('stale-ui').getAttribute('aria-label')).toContain('Activity unknown')
+  expect(row('stale-ui').getAttribute('aria-label')).toContain('Activity signal expired')
   expect(row('stale-ui').querySelector('.status--working')).toBeNull()
-  expect(neutral().querySelector('header')!.getAttribute('aria-label')).toBe('Idle 0 · Activity unknown 1 · Recovery 0')
+  expect(node.querySelector('[aria-label="Idle 0 · Activity unknown 1 · Recovery 0"]')).not.toBeNull()
   expect((await h.sessions())[0]!.semanticStatus?.state).toBe('working')
 })
 it('mixed confirmed Idle and unknown share one original group but retain separately readable counts', async () => {
