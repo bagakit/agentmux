@@ -1,0 +1,25 @@
+.input-history { display: grid; gap: 10px; min-width: 0; font-size: 12px; }
+.input-history__search { display: flex; gap: 6px; }
+.input-history__search input { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid var(--line-soft); border-radius: 7px; color: inherit; background: var(--surface-1); font: inherit; }
+.input-history button { color: inherit; background: transparent; border: 1px solid var(--line-soft); border-radius: 6px; padding: 5px 8px; font: inherit; cursor: pointer; }
+.input-history button:hover { background: var(--surface-3); }
+.input-history button:disabled { opacity: .55; cursor: default; }
+.input-history__coverage, .input-history__meta, .input-history__notice, .input-history__empty, .input-history__sources, .input-history__local > p { color: var(--text-3); font-size: 11px; margin: 0; line-height: 1.5; }
+.input-history__records { display: grid; gap: 10px; list-style: none; padding: 0; margin: 0; }
+.input-history__records > li { padding: 0 0 10px; border-bottom: 1px solid var(--line-soft); min-width: 0; }
+.input-history__excerpt { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+.input-history__meta { display: flex; flex-wrap: wrap; gap: 3px 8px; }
+.input-history__actions { display: flex; gap: 6px; margin-top: 7px; }
+.input-history details { margin-top: 6px; }
+.input-history summary { cursor: pointer; color: var(--text-3); font-size: 11px; }
+.input-history__sources { display: grid; gap: 6px; }
+.input-history__local > div { padding: 6px 0; overflow-wrap: anywhere; }
+.input-history__local > div p { margin: 0 0 5px; white-space: pre-wrap; }
+
+/* A recorded-message reader keeps its existing navigation in narrow history rows. */
+.input-history .log-turn__actions { flex-wrap: wrap; min-width: 0; }
+.input-history .composer-mailbox__navigation-feedback { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
+.input-history .log-turn__head { grid-template-columns: minmax(0, 1fr) auto auto; }
+.input-history .log-turn__head > .log-turn__actions { grid-column: 1 / -1; grid-row: 2; margin-left: 0; }
+.input-history .log-turn__head .conversation-input-details__toggle { grid-column: 3; }
+.input-history .log-turn__head .conversation-input-details__body { grid-row: 3; }

@@ -17,6 +17,7 @@ import type { AgentSessionControl } from '../../../shared/contracts'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { MailboxEmpty, MailboxRecordRow, MailboxTime } from './MailboxReading'
 import { ConversationMessage, type ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
+import type { ConversationHistoryResourceReader } from '@agentmux/client-ui/components/ConversationResourceImage'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 import { speakerOf } from '../lib/conversation-speaker'
 import type { ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
@@ -69,12 +70,13 @@ function useMessageFingerprints(items: readonly MailboxDisplayItem[]) {
   return result?.signature === signature ? result.values : undefined
 }
 
-function MessageHistory({ mailboxOrigin, items, incoming, selectedKey, onOpen, onCopy, reading, sessionId, renderNavigation }: {
+function MessageHistory({ mailboxOrigin, items, incoming, selectedKey, onOpen, onCopy, reading, sessionId, renderNavigation, historyResourceReader }: {
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
   items: readonly MailboxDisplayItem[]; incoming: boolean; selectedKey: string | null
   onOpen: (key: string, event: MouseEvent<HTMLButtonElement>) => void
   onCopy?: ((text: string) => Promise<boolean>) | undefined
   reading?: ConversationReadingProps | undefined; sessionId?: string | undefined
+  historyResourceReader?: ConversationHistoryResourceReader | undefined
   renderNavigation: (item: MailboxDisplayItem) => ReactNode
 }) {
   // Only the current reading page mounts. Rows read bounded prefixes, never full Markdown.
@@ -99,6 +101,7 @@ function MessageHistory({ mailboxOrigin, items, incoming, selectedKey, onOpen, o
         ? {} : { copyText: selected.content ?? '' })}
       {...(time(selected) === undefined ? {} : { createdAt: time(selected)! })}
       {...(isUserMessage(selected) ? { inputSource: selected.source } : {})}
+      {...(isUserMessage(selected) && selected.source.kind === 'native' ? { nativeResourceRecord: { source: { providerId: selected.source.providerId, nativeSessionId: selected.source.nativeSessionId }, recordId: selected.source.recordId, ...(selected.turnId ? { turnId: selected.turnId } : {}) }, ...(historyResourceReader ? { readHistoryResource: historyResourceReader } : {}) } : {})}
       {...(onCopy ? { onCopy } : {})}
       messageActions={renderNavigation(selected)}
       messageDetails={<><dl className="composer-mailbox__record-facts">
@@ -126,11 +129,14 @@ function SourceNotice({ title, message, action, onAction }: { title: string; mes
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueuedToDraft, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false, noticePresentation }: {
+export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueuedToDraft, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false, noticePresentation, inputHistory, historyResourceReader, onHistoryVisible }: {
   children?: (mailbox: ReactNode, pending: ReactNode) => ReactNode
   /** Presentation of an existing notice, shared by this mailbox and its right dock. */
   noticePresentation?: { id: string; content: ReactNode } | undefined
   pendingInteraction?: boolean
+  inputHistory?: (readMessage: (message: AgentSessionUserMessage) => ReactNode) => ReactNode
+  historyResourceReader?: ConversationHistoryResourceReader
+  onHistoryVisible?(visible: boolean): void
   onRevealMessage?: RevealMailboxMessage | undefined
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
   reading?: ConversationReadingProps | undefined
@@ -190,6 +196,8 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     return () => document.removeEventListener('keydown', dismissPreview, true)
   }, [open])
   const [folder, setFolder] = useState<Folder>('inbox')
+  useEffect(() => { onHistoryVisible?.(open && visible && folder === 'outbox'); return () => onHistoryVisible?.(false) },
+    [open, visible, folder, onHistoryVisible])
   const folders: readonly Folder[] = progressSession ? [...FOLDERS, 'progress'] : FOLDERS
   const folderLabels = { inbox: 'Inbox', outbox: 'Outbox', system: 'Notices', progress: 'Progress' }
   const folderIcons = { inbox: ThemeObjectInboxIcon, outbox: ThemeActionSendIcon, system: ThemeObjectNotificationsIcon, progress: ThemeActionRepeatIcon }
@@ -262,7 +270,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     windowFrozen
   } = useSessionUserMessages(effectiveControl, { enabled: open && visible })
 
-  const effectiveUserMessages = propUserMessages ?? hookUserMessages
+  const effectiveUserMessages = inputHistory && folder === 'inbox' ? hookUserMessages : propUserMessages ?? hookUserMessages
 
   const mailboxSessionId = effectiveControl?.agentSessionId ?? timeline?.agentSessionId
   const messages = useMemo(() => timeline && timeline.agentSessionId === mailboxSessionId ? timeline.items.filter((item) => item.agentSessionId === mailboxSessionId &&
@@ -452,12 +460,16 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
             }} /> : null}
           <section className="composer-mailbox__history" aria-label="Input history">
             {!selectedMessage ? <h3>History</h3> : null}
+            {inputHistory && !selectedMessage && observationError ? <SourceNotice title="Automatic native updates are unavailable" message={observationError.message} action="Refresh source" onAction={() => void refresh()} /> : null}
+            {inputHistory && !selectedMessage && windowFrozen ? <SourceNotice title="The native source changed" message="This reading window is kept." action="Read latest records" onAction={() => void refresh()} /> : null}
+            {inputHistory && !selectedMessage ? inputHistory(message => <MessageHistory mailboxOrigin={mailboxOrigin} items={[message]} incoming={false} selectedKey={messageKey(message)} onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={mailboxSessionId} renderNavigation={renderNavigation} historyResourceReader={historyResourceReader} />) : <>
             {historyError && !historyError.message.includes('unavailable in the web preview') ? <SourceNotice title="Failed to read native conversation history" message={historyError.message} action="Retry" onAction={() => void refresh()} /> : null}
             {observationError ? <SourceNotice title="Automatic native updates are unavailable" message={observationError.message} action="Refresh source" onAction={() => void refresh()} /> : null}
             {windowFrozen ? <SourceNotice title="The native source changed" message="This bounded reading window is kept." action="Read latest records" onAction={() => void refresh()} /> : null}
             <MessageHistory mailboxOrigin={mailboxOrigin} items={sent} incoming={false} selectedKey={detail ? wanted : null} onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} renderNavigation={renderNavigation} />
             {!selectedMessage && hasMore ? <div className="composer-mailbox__boundary"><span>Earlier native messages available.</span>
               <button type="button" className="composer-tool" onClick={() => void loadEarlier()}>Load earlier messages</button></div> : null}
+            </>}
           </section>
         </> : null}
       </div>

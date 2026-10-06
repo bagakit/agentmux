@@ -5,6 +5,7 @@
 @import './workflow-status.css';
 @import './interaction.css';
 @import './composer.css';
+@import './input-history.css';
 @import './inline-rename-field.css';
 @import './conversation-message.css';
 @import './conversation-resource-text.css';
