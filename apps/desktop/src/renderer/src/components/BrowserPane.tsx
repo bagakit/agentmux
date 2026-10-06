@@ -67,6 +67,8 @@ import { BrowserToolsPanel } from './BrowserToolsPanel'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { BrowserWorkfaceBoundary, type BrowserWorkfaceAddressDraft } from './BrowserWorkfaceBoundary'
 
+const ThemeActionAddAnnotationIcon = semanticIconComponent('action.add-annotation')
+const ThemeStatusSavedIcon = semanticIconComponent('status.saved')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
@@ -952,7 +954,7 @@ function BrowserPaneContent({
             <footer>
               <button className="small-button" type="button" onClick={cancelElementSelection}>Cancel</button>
               <button className="small-button" type="button" onClick={() => void copyElementContext()}><ThemeActionCopyIcon size={12} /> Copy context</button>
-              <button className="primary-button" type="button" onClick={addElementAnnotation}><ThemeStatusSelectedIcon size={12} /> Add annotation</button>
+              <button className="primary-button" type="button" onClick={addElementAnnotation}><ThemeActionAddAnnotationIcon size={12} /> Add annotation</button>
             </footer>
           </section>
         ) : tab.appLinkPrompt ? (
@@ -1186,7 +1188,7 @@ function BrowserPaneContent({
         {regionCloseButton}
       </form>
       {currentBookmark ? <p className="browser-bookmark-result" role="status">
-        <ThemeStatusSelectedIcon size={12} aria-hidden="true" /><span>Saved</span>
+        <ThemeStatusSavedIcon size={12} aria-hidden="true" /><span>Saved</span>
         <code title={currentBookmark.path}>{currentBookmark.path}</code>
         <button type="button" className="small-button" disabled={busy} onClick={openSavedBookmark}>Open bookmark</button>
       </p> : null}
