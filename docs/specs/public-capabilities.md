@@ -50,6 +50,13 @@
 
 ### 文件资源的读取、修改与发现
 
+Note 使用同一 `file.read/write/create`，经 Main 的 [NoteFileWriter](../../apps/desktop/src/main/note-file-writer.ts)
+读写原 `.note.md`。正文、稳定块／引用和可信作者的边界见 [Note Markdown](note-markdown.md)。
+`notebook.inspect --content`／`notebook.content` 经 [NotebookObservationOwner](../../apps/desktop/src/main/notebook-observation-owner.ts)
+观察同一已保存正文与修订绑定元数据；`notebook.graph/resolve` 从正文派生关系。
+[NotebookStore](../../packages/core/src/notebook-store.ts) 是 SQLite 目录、关注、操作历史和块归因的原 owner。
+`notebook.inspect` 同时公开原 NotesStorage 的 `resourceChanges` 与 `conversionIssues`，供消费者确认同一 Note 的位置及部分转换问题。
+
 原 Zone 文件的已保存正文与原修订保存沿[文件类型与严格 codec](../../packages/core/src/public-rpc-files.ts)公开。`file read`／`file write` CLI → 公共服务 → Main 注入的 [FileReadOwner](../../apps/desktop/src/main/file-read-owner.ts) 解析准确 Zone／资源，再委托原 [WorkspaceFiles](../../apps/desktop/src/main/workspace-files.ts)；结果保留完整原 revision、Host／Workspace／Zone 与原读取状态；观察未知不冒文件不存在，也不另建 Memory 存储。`file.write` 只保存已有文本文件，要求完整原 revision；`written`／`conflict`／`error`／`unknown` 保真，未知先读同一文件核对，不自动再写。
 
 缺失目标的正文创建沿同一文件 owner 提供 `file.create`，CLI 为 `file create --input FILE|-`；先由 `file.read` 确认目标映射，提交完整原资源、Zone 相对路径、正文与明确的 `expectedRevision:null`。Main 确认映射后委托 `WorkspaceFiles.write` 的排他创建，不覆盖已存在文件；普通文本和 Note 使用同一通用能力，不新增正文 owner。结果沿原 `written`／`conflict`／`error`／`unknown` 与完整资源／revision 表达，未知先读同一准确目标对账，不自动换名或重发。既有 `file.write` 的完整 revision 要求保持。

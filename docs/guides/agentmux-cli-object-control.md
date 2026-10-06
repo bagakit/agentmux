@@ -112,6 +112,12 @@ amux file write --zone '<zone-id>' --path 'saved.md' --resource '<原 file read 
 
 它委托原 Files 的 revision-aware 保存，不创建新文件或新 Note 身份。`written` 返回新修订，`conflict` 保留观察到的修订；`error` 与 `unknown` 不冒保存成功。未知回执先读取同一资源核对，保留草稿，不自动重复写入。
 
+Note 也是这条文件链路：先用 `amux notebook inspect --note NOTE_ID --content` 取得原资源与已保存 Markdown，
+再按上面的准确 Zone 映射读取、编辑 `.note.md`。保存时保留 Note ID、块锚点和引用身份，采用回执中的 canonical content／revision，
+同时保护后来输入。`noteProvenance` 来自原 SQLite 元数据；外部修改或元数据失败会如实 `unconfirmed`。
+正文已 `written` 时，不为重试作者记账再写一遍。语法、图谱、关注和一次转换见 [Note 文件格式与存储](../specs/note-markdown.md)；
+当前执行版本的 `amux --skill` 提供相同的 Agent 操作指引。
+
 日历提醒使用显式 JSON，沿原 Session／调度 owner 执行：
 
 ```sh
