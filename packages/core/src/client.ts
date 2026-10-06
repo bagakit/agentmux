@@ -3263,10 +3263,11 @@ export class AgentMuxClient {
 
   async statusAgent(agentSessionId: string): Promise<AgentMuxAgentRuntimeStatus> {
     this.requireConnected()
-    const sessions = (await this.readAgentSessions()).filter(candidate => candidate.hostId === 'local')
-    let session = sessions.find(candidate => candidate.agentSessionId === agentSessionId)
-    if (!session) throw new AgentMuxError('Agent Session is unknown.', 'UNKNOWN_AGENT_SESSION')
-    const run = await this.requireCurrentAgentRun(session, sessions)
+    const durable = await this.currentStoredAgentSession(agentSessionId)
+    // The SessionStore enforces durable Run uniqueness; this exact refresh also
+    // checks the original registry bindings before observing that one Run.
+    let session: AgentMuxAgentSession = await this.registry.refresh(agentSessionId, durable.run)
+    const run = await this.requireCurrentAgentRun(session)
     if (run.state.type === 'running') {
       await this.ensureNativeStatusObservation(session)
       session = this.projectSession(this.requireAgentSession(agentSessionId))
