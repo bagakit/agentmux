@@ -87,6 +87,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'drawing.select': { label: 'Select drawing', glyph: 'mouse-pointer-2' },
   'drawing.crop': { label: 'Crop screenshot', glyph: 'crop' },
   'drawing.pixelate': { label: 'Pixelate image region', glyph: 'grid-3x3' },
+  'drawing.cover': { label: 'Cover image region', glyph: 'redaction-block' },
   'drawing.note': { label: 'Numbered annotation', glyph: 'hash' },
   'action.move-up': { label: 'Move earlier', glyph: 'arrow-up' },
   'action.move-down': { label: 'Move later', glyph: 'arrow-down' },
