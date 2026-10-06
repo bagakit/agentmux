@@ -20,6 +20,7 @@ import { focusLaneOrigins } from '../lib/focus-lane-origin'
 import { readSurveyPresentation } from '../lib/mobile-presentation'
 import type { FocusLaneCounts, FocusLaneMetrics } from '../lib/focus-lane-layout'
 import { FocusToolbar } from './FocusToolbar'
+import { FocusSourceStatus } from './FocusSourceStatus'
 import * as FilterMenu from './HoverDropdownMenu'
 import { RecentFocusTimeline } from './RecentFocusTimeline'
 import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
@@ -148,7 +149,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     window.addEventListener('blur', stop)
     return () => { window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); window.removeEventListener('blur', stop) }
   }, [])
-  const { facts, errors: hierarchyErrors } = useFocusHierarchy(laneContexts, config)
+  const { facts, errors: hierarchyErrors, refresh: refreshHierarchy } = useFocusHierarchy(laneContexts, config)
   const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs, Date.now(), topicSnapshots), [laneContexts, config, facts, tabs, topicSnapshots])
   const boardRowsRef = useRef<HTMLDivElement>(null)
   const orderedLanes = useFocusProjectOrder(allLanes, visible, boardRowsRef)
@@ -290,13 +291,13 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
               </FilterMenu.RadioGroup>
             </FilterMenu.Content></FilterMenu.Portal>
           </FilterMenu.Root>
+          <FocusSourceStatus sourceError={catalogue.error} loading={catalogue.loading} laneErrors={hierarchyErrors}
+            onRetrySources={catalogue.refresh} onRetryLanes={refreshHierarchy} visible={visible} />
         </div>
       </div>
     </FocusToolbar>
     <div ref={focusLayoutRef} className="global-focus-layout">
       <div className="global-board-main global-focus-main">
-      {hierarchyErrors.length ? <p className="focus-hierarchy-warning" role="status" title={hierarchyErrors.join('\n')}>Some lane details could not load. Contexts remain available.</p> : null}
-      {catalogue.error ? <p className="focus-hierarchy-warning" role="status" title={catalogue.error}>Project status could not be checked. Recent projects remain available; retry sources in conversation records.</p> : null}
       {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => {
         const id = pmoAttention[0]!
         const current = useAppStore.getState()

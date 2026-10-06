@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceBranchesSnapshot } from '../../../shared/contracts'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
@@ -30,7 +30,15 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
   const revisions = useAppStore(useShallow(state => scopes.map(workspace => state.workspaceFileRevisions[workspace.id] ?? 0)))
   const signature = JSON.stringify(scopes.map((scope, index) => [scope.id, scope.path, scope.branch, revisions[index]]))
   const requests = useRef(new Map<string, Promise<Snapshot>>())
+  const failedRequests = useRef(new Set<string>())
+  const [retrySequence, retry] = useState(0)
   const [errors, setErrors] = useState<string[]>([])
+  const refresh = useCallback(() => {
+    for (const key of failedRequests.current) requests.current.delete(key)
+    failedRequests.current.clear()
+    if (scratchScope && scratchError) void useAppStore.getState().refreshScratchTopics(scratchScope.id, true)
+    retry(value => value + 1)
+  }, [scratchScope?.id, scratchError])
   useEffect(() => {
     let active = true
     const jobs = scopes.map((scope, index) => {
@@ -40,7 +48,10 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
       let job = requests.current.get(key)
       if (!job) {
         job = api.workspaces.listBranches(scope.id).then(branches => ({ id: scope.id, branches }))
-          .catch(cause => ({ id: scope.id, error: `${scope.name}: ${presentError(cause)}` }))
+          .catch(cause => {
+            if (requests.current.get(key) === job) failedRequests.current.add(key)
+            return { id: scope.id, error: `${scope.name}: ${presentError(cause)}` }
+          })
         requests.current.set(key, job)
       }
       return job
@@ -58,10 +69,12 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
         return { topics, worktrees }
       })
       const keys = new Set(scopes.map((scope, index) => JSON.stringify([scope.id, scope.path, scope.branch, revisions[index]])))
-      for (const key of requests.current.keys()) if (!keys.has(key)) requests.current.delete(key)
+      for (const key of requests.current.keys()) if (!keys.has(key)) {
+        requests.current.delete(key); failedRequests.current.delete(key)
+      }
     })
     return () => { active = false }
     // Immutable signature includes each owned scope and its revision; byte/state changes don't query again.
-  }, [signature, scratchTopics, scratchError])
-  return { facts, errors }
+  }, [signature, scratchTopics, scratchError, retrySequence])
+  return { facts, errors, refresh }
 }
