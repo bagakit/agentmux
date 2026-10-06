@@ -35,6 +35,7 @@ export type DemandRecord = {
   updatedAt: number
   source: 'default-topic' | 'session'
   decisionLog?: AgentMuxDemandDecision[]
+  delegations?: import('@agentmux/demand').DemandDelegation[]
   dispatches?: import('@agentmux/demand').DemandDispatch[]
   activities?: DemandActivity[]
   decisions?: DemandDecision[]
