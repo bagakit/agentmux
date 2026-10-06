@@ -97,15 +97,16 @@ export function goalDelegationReportBody(goalId: string, operationId: string, re
 export function assertGoalDelegationSource(saved: DemandDelegation, message: DurableAgentMuxMessage): void {
   const envelope = message.envelope
   if (envelope.operationId !== saved.operationId || envelope.messageId !== saved.sourceMessageId ||
-    envelope.sender.kind !== 'agent-session' || envelope.senderSessionId !== saved.ownerAgentSessionId || envelope.senderRunId !== saved.ownerRunId ||
-    envelope.recipientSessionId !== saved.workerAgentSessionId || envelope.recipientRunId !== saved.workerRunId ||
+    envelope.sender.kind !== 'agent-session' || envelope.sender.agentSessionId !== saved.ownerAgentSessionId || envelope.senderSessionId !== saved.ownerAgentSessionId || envelope.senderRunId !== saved.ownerRunId ||
+    envelope.recipient.kind !== 'agent-session' || envelope.recipient.agentSessionId !== saved.workerAgentSessionId || envelope.recipientSessionId !== saved.workerAgentSessionId || envelope.recipientRunId !== saved.workerRunId ||
     envelope.threadId !== saved.threadId || envelope.replyTo !== null || envelope.body !== saved.text)
     throw new AgentMuxError('The original Core source differs from the frozen Goal intent. The Agent remains available.', 'CONTROL_REQUEST_CONFLICT')
 }
 export function assertGoalDelegationReply(saved: DemandDelegation, report: DemandDelegationReportInput, message: DurableAgentMuxMessage, body: string): void {
   const envelope = message.envelope
   if (envelope.operationId !== report.operationId || envelope.messageId !== report.replyMessageId || envelope.sender.kind !== 'agent-session' ||
-    envelope.senderSessionId !== saved.workerAgentSessionId || envelope.recipientSessionId !== saved.ownerAgentSessionId ||
+    envelope.sender.agentSessionId !== saved.workerAgentSessionId || envelope.senderSessionId !== saved.workerAgentSessionId ||
+    envelope.recipient.kind !== 'agent-session' || envelope.recipient.agentSessionId !== saved.ownerAgentSessionId || envelope.recipientSessionId !== saved.ownerAgentSessionId ||
     envelope.replyTo !== saved.sourceMessageId || envelope.threadId !== saved.threadId || envelope.body !== body)
     throw new AgentMuxError('The actual worker reply differs from this original report. No result was collected or accepted.', 'CONTROL_REQUEST_CONFLICT')
 }
