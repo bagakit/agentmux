@@ -1,3 +1,4 @@
+import { isConnectionDeliveryMethod, parseConnectionDeliveryParams } from './connection-delivery-codec.js'
 import { isRoomBindingMethod, parseRoomBindingParams } from './room-binding-codec.js'
 import { parseConversationRef, parseConversationCheckpointPage, parseConversationChangesInput, parseConversationChangesPage } from './conversation-changes.js'
 import { createAgentMuxSearchReader, type AgentMuxSearchReadContext } from './search-reader.js'
@@ -391,6 +392,15 @@ export class AgentMuxRpcService {
       if (!this.ports.connections) throw new AgentMuxError('The connection owner is not enabled on this Host. Existing Agent capabilities remain available.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       const owner = this.ports.connections
+      if (isConnectionDeliveryMethod(method)) {
+        const delivery = owner.delivery
+        if (!delivery) throw new AgentMuxError('Delivery inspection is not enabled on this Host. Existing Agents and connections remain available.', 'CONTROL_UNAVAILABLE')
+        const retryContext = { actor: { kind: context.principal.kind as 'user' | 'device', id: context.principal.id }, assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.() } }
+        const result = method === 'connection.delivery.inspect' ? await delivery.inspect(parseConnectionDeliveryParams(method, params))
+          : method === 'connection.delivery.ls' ? await delivery.list(parseConnectionDeliveryParams(method, params))
+          : await delivery.retry(parseConnectionDeliveryParams(method, params), retryContext)
+        return parseConnectionResult(method, result, input) as AgentMuxRpcResult<M>
+      }
       if (isRoomBindingMethod(method)) {
         const bindings = owner.bindings
         if (!bindings) throw new AgentMuxError('Room bindings are not enabled on this Host. Existing Agents and connections remain available.', 'CONTROL_UNAVAILABLE')
