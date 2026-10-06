@@ -232,13 +232,15 @@
 /* The image is the same durable @path token, rendered by the shared conversation image viewer. */
 .composer-image { position: relative; display: inline-flex; align-items: center; max-width: 100%; padding-inline-end: 12px; margin-inline-end: 8px; vertical-align: middle; line-height: inherit; }
 .composer-image__preview { min-width: 1lh; overflow-wrap: anywhere; }
-.composer-image__preview:has(.md-conversation-image) { display: inline-flex; }
+.composer-image__preview:has(.md-conversation-image) { display: inline-flex; min-width: 0; }
 .composer-image:has(.md-conversation-image__reference) { align-items: flex-start; padding-inline-end: 20px; }
 .composer-image .md-conversation-image { vertical-align: middle; }
 .composer-image .md-conversation-image__thumb { width: auto; height: auto; max-height: 1lh; max-width: min(10em, 100%); object-fit: contain; }
 .composer-image__remove, .composer-file__remove { position: absolute; top: -2px; right: 4px; display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; padding: 0; border: 1px solid var(--line-soft); border-radius: 50%; color: var(--text-2); background: var(--surface-2); font: inherit; opacity: 1; cursor: pointer; }
 .composer-image__remove > svg, .composer-file__remove > svg { width: 8px; height: 8px; }
 .composer-image__remove::before, .composer-file__remove::before { content: ''; position: absolute; top: 2px; height: 1lh; inset-inline: 0 -12px; }
+.composer-image__remove { right: 0; }
+.composer-image__remove::before { inset-inline-end: -8px; }
 .composer-image__remove:hover, .composer-file__remove:hover { color: var(--text); background: var(--surface-3); }
 .composer-image__remove:focus-visible, .composer-file__remove:focus-visible { color: var(--text); outline: 1px solid var(--focus-line); outline-offset: -1px; }
 @media (hover: hover) and (pointer: fine) {
