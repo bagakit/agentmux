@@ -8,7 +8,7 @@ import { arrangeNoteCanvas } from '../src/renderer/src/lib/note-canvas-layout-en
 function fixture(): NotebookGraphSnapshot {
   const catalog = emptyNotebookState()
   for (const id of ['root', 'left', 'shared', 'right', 'closed']) catalog.pages[id] = { noteId: id, notebookId: id === 'closed' ? 'other' : 'default', title: id, parentNoteId: null, createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1), sources: [], topics: [], resource: { hostId: 'local', workspaceId: 'notes', workspacePath: _tailRefreshFixturePath("notes"), path: id + '.note.json' } }
-  const reference = (from: string, to: string, suffix = '') => ({ source: { noteId: from, blockId: from + suffix }, sourceResource: catalog.pages[from]!.resource, target: { noteId: to, blockId: to + suffix }, referenceId: from + to + suffix, mode: 'reference' as const, resolution: to === 'outside' ? 'unknown' as const : 'resolved' as const })
+  const reference = (from: string, to: string, suffix = '') => ({ source: { noteId: from, blockId: from + suffix }, sourceResource: catalog.pages[from]!.resource, target: { kind: 'block' as const, noteId: to, blockId: to + suffix }, occurrence: { kind: 'stored' as const, referenceId: from + to + suffix }, mode: 'reference' as const, resolution: to === 'outside' ? 'unknown' as const : 'resolved' as const })
   return { catalog, graph: { catalogRevision: 0, scope: { kind: 'catalog' }, scannedScope: 'catalog', completeness: 'partial', duplicateNoteIds: [], observations: [], hierarchy: [{ parentNoteId: 'root', noteId: 'left' }], references: [reference('root', 'right'), reference('left', 'shared'), reference('right', 'shared'), reference('shared', 'root'), reference('closed', 'root'), reference('root', 'outside'), reference('root', 'root'), reference('root', 'right', 'second')] } }
 }
 it('projects one-hop incoming, outgoing, hierarchy, external and cyclic context without inventing resources', () => {
@@ -18,6 +18,21 @@ it('projects one-hop incoming, outgoing, hierarchy, external and cyclic context 
   expect(graph.notes.find(note => note.id === 'outside')!.page).toBeUndefined()
   expect(graph.relationships.find(edge => edge.source === 'root' && edge.target === 'right')!.references.map(reference => reference.source.blockId)).toEqual(['root', 'rootsecond'])
   expect(graph.relationships.some(edge => edge.source === 'root' && edge.target === 'root')).toBe(true)
+})
+it('projects page and block links as real edges, retaining unbound occurrences only on their original source', () => {
+  const f = fixture(), resource = f.catalog.pages.root!.resource
+  f.graph.references.push(
+    { source: { noteId: 'root', blockId: 'words' }, sourceResource: resource, target: { kind: 'page', noteId: 'right' }, occurrence: { kind: 'stored', referenceId: 'page-link' }, mode: 'link', resolution: 'resolved' },
+    { source: { noteId: 'root', blockId: 'words' }, sourceResource: resource, target: { kind: 'block', noteId: 'right', blockId: 'heading' }, occurrence: { kind: 'stored', referenceId: 'heading-link' }, mode: 'link', resolution: 'resolved' },
+    { source: { noteId: 'root', blockId: 'words' }, sourceResource: resource, target: { kind: 'unbound', text: 'Still undecided #Heading' }, occurrence: { kind: 'text', revision: 'original-revision', from: 3, to: 33 }, mode: 'link', resolution: 'unbound' },
+  )
+  const result = projectNoteCanvas(f, { kind: 'note', noteId: 'root' }, ['root'])
+  expect(result.relationships.filter(edge => edge.source === 'root' && edge.target === 'right').map(edge => edge.kind)).toEqual(['reference', 'link'])
+  expect(result.relationships.find(edge => edge.kind === 'link')?.references.map(ref => ref.target)).toEqual([{ kind: 'page', noteId: 'right' }, { kind: 'block', noteId: 'right', blockId: 'heading' }])
+  expect(result.unbound).toHaveLength(1)
+  expect(result.notes.find(note => note.id === 'root')?.unbound).toEqual(result.unbound)
+  expect(result.notes.every(note => note.id !== 'Still undecided #Heading')).toBe(true)
+  expect(projectNoteCanvas(f, { kind: 'note', noteId: 'right' }, []).unbound).toEqual([])
 })
 it('collapses only unreachable context, keeping shared nodes and cycles reached by another expanded path', () => {
   const f = fixture(); f.graph.references = f.graph.references.filter(edge => edge.source.noteId !== 'shared')

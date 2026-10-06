@@ -14,6 +14,7 @@ import { createPreloadNotebookObservation } from '../src/preload/notebook-observ
 import { createRendererNotebookObservation } from '../src/renderer/src/lib/notebook-observation-api'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { NoteCanvas } from '../src/renderer/src/components/NoteCanvas'
+import { NoteLinksPanel } from '../src/renderer/src/components/NoteLinksPanel'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { noteCanvasScopeKey } from '../src/renderer/src/lib/note-canvas-state'
@@ -24,7 +25,16 @@ const dom = composerDOM(), scope = { kind: 'note', noteId: 'target' } as const
 let directory: string, store: AgentMuxNotebookStore
 const body = (id: string, text: string, references = false) => JSON.stringify({ schema: 'agentmux.note.v1', noteId: id, content: { type: 'doc', content: [
   { type: 'paragraph', attrs: { blockId: id + '-block', provenance: { created: { actor: { kind: 'agent', id: 'ExactResearchSession' }, at: _tailRefreshFixtureEpoch(0, 1) }, lastEdited: { actor: { kind: 'agent', id: 'ExactResearchSession' }, at: _tailRefreshFixtureEpoch(0, 1) } } }, content: [{ type: 'text', text }] },
-  ...references ? [0, 1, 2].map(index => ({ type: 'blockReference', attrs: { blockId: 'source-reference-' + index, referenceId: 'original-reference-' + index, mode: index === 2 ? 'embed' : 'reference', target: { noteId: 'target', blockId: 'target-block' } } })) : []
+  ...references ? [
+    ...[0, 1, 2].map(index => ({ type: 'blockReference', attrs: { blockId: 'source-reference-' + index, referenceId: 'original-reference-' + index, mode: index === 2 ? 'embed' : 'reference', target: { noteId: 'target', blockId: 'target-block' } } })),
+    { type: 'paragraph', attrs: { blockId: 'source-inline' }, content: [
+      { type: 'text', text: 'Original closed source links to ' },
+      { type: 'noteLink', attrs: { referenceId: 'page-link', text: 'Original target', target: { noteId: 'target' } } },
+      { type: 'text', text: ' and ' },
+      { type: 'noteLink', attrs: { referenceId: 'heading-link', text: 'Original target #Heading', target: { noteId: 'target', blockId: 'target-block' } } },
+      { type: 'text', text: ' plus [[Unconfirmed page]]' },
+    ] },
+  ] : []
 ] } })
 beforeEach(async () => {
   installNoteCanvasGeometry()
@@ -40,11 +50,13 @@ beforeEach(async () => {
   const observation = createRendererNotebookObservation(createPreloadNotebookObservation(async (channel, input) => {
     if (channel === 'notebook:graph') return structuredClone(await services.requests.graph(sender, input))
     if (channel === 'notebook:content') return structuredClone(await services.requests.content(sender, input))
+    if (channel === 'notebook:resolve') return structuredClone(await services.requests.resolve(sender, input))
     if (channel === 'notebook:cancelObservation') return services.requests.cancel(sender, input)
     throw new Error('Unexpected channel')
   }))
   vi.spyOn(api.notebooks, 'graph').mockImplementation(observation.graph)
   vi.spyOn(api.notebooks, 'content').mockImplementation(observation.content)
+  vi.spyOn(api.notebooks, 'resolve').mockImplementation(observation.resolve)
   vi.spyOn(api.notebooks, 'onChange').mockImplementation(listener => store.subscribe(listener))
   useAppStore.setState({ noteCanvasLayouts: {}, noteCanvasSaveIssues: {}, documents: {}, dirtyDocuments: {} })
 })
@@ -59,7 +71,7 @@ it('renders incoming closed-file relationships through the original Main/preload
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Inspect 2 block references"]')).not.toBeNull())
   await dom.click('[aria-label="Inspect 2 block references"]')
   const occurrences = dom.container.querySelectorAll('.note-canvas-inspector li')
-  expect(occurrences).toHaveLength(2); expect(occurrences[1]!.textContent).toContain('Reference'); expect(dom.container.querySelector('[aria-label="Inspect 1 block embed"]')).not.toBeNull()
+  expect(occurrences).toHaveLength(2); expect(occurrences[1]!.textContent).toContain('Block reference'); expect(dom.container.querySelector('[aria-label="Inspect 1 block embed"]')).not.toBeNull()
   await act(async () => occurrences[1]!.querySelector<HTMLButtonElement>('.note-canvas-inspector-actions button')!.click())
   expect(open).toHaveBeenLastCalledWith((await store.read()).pages['closed-source'], 'source-reference-1')
   await act(async () => occurrences[0]!.querySelectorAll<HTMLButtonElement>('.note-canvas-inspector-actions button')[1]!.click())
@@ -137,11 +149,81 @@ it('keeps a missing target explicit and inspects its registered original without
   await dom.render(<NoteCanvas scope={scope} onOpen={open} />); await ready()
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Inspect 2 block references"]')).not.toBeNull())
   await dom.click('[aria-label="Inspect 2 block references"]')
-  expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('Target block missing.')
+  expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('Target missing.')
   expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).not.toContain('Open target block')
   const original = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-canvas-inspector-actions button')].find(button => button.textContent === 'Inspect registered original')!
   await act(async () => original.click())
   expect(open).toHaveBeenLastCalledWith((await store.read()).pages.target, undefined)
+})
+
+it('exposes exact page/block links and raw queries from the original saved graph without fabricating target nodes', async () => {
+  const open = vi.fn()
+  await dom.render(<NoteCanvas scope={scope} onOpen={open} />); await ready()
+  await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Inspect 2 links"]')).not.toBeNull())
+  await dom.click('[aria-label="Inspect 2 links"]')
+  expect(dom.container.querySelectorAll('.note-canvas-edge-link')).toHaveLength(1)
+  expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('Page link')
+  const targetPage = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-canvas-inspector-actions button')].find(button => button.textContent === 'Open target page')!
+  await act(async () => targetPage.click())
+  expect(open).toHaveBeenLastCalledWith((await store.read()).pages.target, undefined)
+  const targetBlock = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-canvas-inspector-actions button')].find(button => button.textContent === 'Open target block')!
+  await act(async () => targetBlock.click())
+  expect(open).toHaveBeenLastCalledWith((await store.read()).pages.target, 'target-block')
+  await dom.click('[aria-label="Inspect 1 unbound links in Original closed-source"]')
+  expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('[[Unconfirmed page]]')
+  expect(dom.container.querySelectorAll('.note-canvas-title[data-note-id]')).toHaveLength(2)
+  expect(dom.container.querySelector('.note-canvas-caption')?.textContent).toContain('1 visible unbound links')
+  expect(api.notebooks.content).not.toHaveBeenCalled()
+})
+
+it('lazily discovers closed original backlinks and reads actual source text only after explicit source expansion', async () => {
+  const open = vi.fn()
+  await dom.render(<NoteLinksPanel noteId="target" selectedBlockId="target-block" onOpen={open} />)
+  expect(api.notebooks.graph).not.toHaveBeenCalled(); expect(api.notebooks.content).not.toHaveBeenCalled()
+  await dom.click('.note-links-toggle')
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-links-source-toggle')?.textContent).toContain('Original closed-source'))
+  expect(dom.container.textContent).toContain('5 incoming · 0 outgoing')
+  expect(dom.container.textContent).toContain('1 written link query elsewhere has no confirmed destination')
+  expect(api.notebooks.content).not.toHaveBeenCalled()
+  await dom.click('.note-links-source-toggle')
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('Original closed source links to'))
+  expect(dom.container.querySelectorAll('.note-links-occurrence')).toHaveLength(5)
+  expect(dom.container.querySelectorAll('.note-links-block')).toHaveLength(4)
+  expect([...dom.container.querySelectorAll('.note-links-excerpt')].filter(item => item.textContent?.includes('Original closed source links to'))).toHaveLength(1)
+  const toPage = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-links-actions button')].find(button => button.textContent === 'Open target page')!
+  await act(async () => toPage.click())
+  expect(open).toHaveBeenLastCalledWith((await store.read()).pages.target, undefined)
+  const exactSource = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-links-actions button')].filter(button => button.textContent === 'Open source block').at(-1)!
+  await act(async () => exactSource.click())
+  expect(open).toHaveBeenLastCalledWith((await store.read()).pages['closed-source'], 'source-inline')
+  const only = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-links-controls button')].find(button => button.textContent === 'Selected block only')!
+  await act(async () => only.click())
+  expect(dom.container.querySelectorAll('.note-links-occurrence')).toHaveLength(4)
+  expect(dom.container.textContent).not.toContain('Page link')
+  expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
+  expect(api.notebooks.content).toHaveBeenCalledTimes(1)
+})
+
+it('retains source occurrence evidence on a newer original and on failed refresh, then cancels hidden source reads', async () => {
+  await dom.render(<NoteLinksPanel noteId="target" onOpen={() => {}} />)
+  await dom.click('.note-links-toggle')
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-links-source-toggle')).not.toBeNull())
+  await writeFile(join(directory, 'closed-source.note.json'), body('closed-source', 'New unrelated revision'))
+  await dom.click('.note-links-source-toggle')
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('The saved source changed after this graph'))
+  expect(dom.container.querySelectorAll('.note-links-occurrence')).toHaveLength(5)
+  expect(dom.container.querySelector('.note-links-excerpt')).toBeNull()
+  vi.mocked(api.notebooks.graph).mockRejectedValueOnce(new Error('Original catalog reader unavailable'))
+  await dom.click('[aria-label="Refresh saved links"]')
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('Original catalog reader unavailable'))
+  expect(dom.container.querySelectorAll('.note-links-occurrence')).toHaveLength(5)
+  let pending: AbortSignal | undefined
+  vi.mocked(api.notebooks.content).mockImplementationOnce((_id, options) => new Promise((_resolve, reject) => { pending = options!.signal; pending!.addEventListener('abort', () => reject(pending!.reason), { once: true }) }))
+  await dom.click('.note-links-source-toggle'); await dom.click('.note-links-source-toggle')
+  expect(pending?.aborted).toBe(false)
+  await dom.render(<NoteLinksPanel noteId="target" active={false} onOpen={() => {}} />)
+  expect(pending?.aborted).toBe(true)
+  expect(dom.container.querySelectorAll('.note-links-occurrence')).toHaveLength(5)
 })
 
 it('does not revive a cancelled Arrange when a later original graph adds another related Note', async () => {

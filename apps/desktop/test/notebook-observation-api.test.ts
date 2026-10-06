@@ -98,7 +98,7 @@ describe('Note graph original owner through Renderer, preload and scoped Main ob
   })
   it('ends a reader on owner navigation/destruction and never cancels a sibling observation',async()=>{
     const state=emptyNotebookState(),signals=new Map<string,AbortSignal>(),entered=deferred<void>()
-    const owner:NotebookObservationPort={graph:async()=>{throw new Error('No graph requested')},content:async(_state,noteId,options)=>{
+    const owner:NotebookObservationPort={resolve:vi.fn(),graph:async()=>{throw new Error('No graph requested')},content:async(_state,noteId,options)=>{
       const signal=options!.signal!;signals.set(noteId,signal);if(signals.size===2)entered.resolve()
       await new Promise<void>((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));throw new Error('Unreachable')
     }}
@@ -112,7 +112,7 @@ describe('Note graph original owner through Renderer, preload and scoped Main ob
   })
   it('cancels a pending catalog read before invoking the original scanner, and rejects duplicate active request IDs',async()=>{
     const captured=deferred<ReturnType<typeof emptyNotebookState>>(),entered=deferred<void>(),graph=vi.fn()
-    const requests=new NotebookObservationRequests({read:()=>{entered.resolve();return captured.promise}},{graph,content:vi.fn()}),sender=new Sender()
+    const requests=new NotebookObservationRequests({read:()=>{entered.resolve();return captured.promise}},{resolve:vi.fn(),graph,content:vi.fn()}),sender=new Sender()
     const pending=requests.graph(sender,{requestId:'original',params:{}});const result=pending.catch(e=>e);await entered.promise
     await expect(requests.graph(sender,{requestId:'original',params:{}})).rejects.toMatchObject({code:'INVALID_CONTROL_REQUEST'})
     requests.cancel(sender,'original');captured.resolve(emptyNotebookState());expect((await result).name).toBe('AbortError');expect(graph).not.toHaveBeenCalled();expect(sender.listenerCount('destroyed')).toBe(0)
@@ -121,7 +121,7 @@ describe('Note graph original owner through Renderer, preload and scoped Main ob
     const f=await fixture(),read=vi.spyOn(f.services.owner,'graph'),untrusted=gui(f.services.requests,new Sender(),new Sender())
     await expect(untrusted.api.graph({})).rejects.toThrow('Untrusted original Note graph observation sender');expect(read).not.toHaveBeenCalled()
     const good=await gui(f.services.requests).api.graph({}),content=await f.services.owner.content(good.catalog,'target')
-    const base:NotebookObservationPreloadApi={graph:async()=>({...good,graph:{...good.graph,catalogRevision:good.graph.catalogRevision+1}}),content:async()=>({...content,noteId:'different'}),cancelObservation:async()=>{}}
+    const base:NotebookObservationPreloadApi={resolve:vi.fn(),graph:async()=>({...good,graph:{...good.graph,catalogRevision:good.graph.catalogRevision+1}}),content:async()=>({...content,noteId:'different'}),cancelObservation:async()=>{}}
     await expect(createRendererNotebookObservation(base).graph({})).rejects.toMatchObject({code:'CONTROL_PROTOCOL_ERROR'})
     await expect(createRendererNotebookObservation(base).content('target')).rejects.toMatchObject({code:'CONTROL_PROTOCOL_ERROR'})
     f.services.owner.content=async()=>({...content,resource:{...content.resource,path:'another.note.json'}})
