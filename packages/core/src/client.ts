@@ -5650,7 +5650,8 @@ export class AgentMuxClient {
     }
     const provider = this.providers.get(session.providerId)
     const condition = admissionIntent.kind === 'exact-condition' ? admissionIntent.condition : admissionIntent
-    const ordinaryPlan = provider.planPromptInput(outbound, input.execution === undefined ? undefined : { execution: input.execution })
+    const ordinaryPlan = provider.planPromptInput(outbound,
+      admissionIntent.kind === 'manual-actor' || input.execution === undefined ? undefined : { execution: input.execution })
     const protocolInput: AgentPromptProtocolInputBoundary = { invalid: false }
     let releasePreparationObservation: ((next?: AbortController) => void) | undefined
     let preparationStarted = false
@@ -5660,7 +5661,7 @@ export class AgentMuxClient {
       const strategy = provider.catalog.capabilities.promptExecution?.immediate
       const preparationMs = 40_000
       const deadline = Date.now() + preparationMs
-      transportQualification = input.execution === 'immediate' && strategy === 'interrupt-before-input'
+      transportQualification = admissionIntent.kind !== 'manual-actor' && input.execution === 'immediate' && strategy === 'interrupt-before-input'
         ? await this.observeAgentInputPreparation(session, preparationMs, async signal => {
         const run = await this.requireCurrentAgentRun(session)
         return await this.promptSubmission.qualifyInputTransport(session, run, operationId, outbound, signal,
