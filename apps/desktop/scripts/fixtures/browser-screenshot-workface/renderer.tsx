@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client'
-import { mountThemeRuntime } from '@agentmux/client-ui/theme'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { BrowserPane } from '../../../src/renderer/src/components/BrowserPane'
 import { useNativeOverlayChrome } from '../../../src/renderer/src/hooks/useNativeOverlayChrome'
@@ -21,6 +21,7 @@ for (const type of ['pointerdown', 'pointermove', 'pointerup', 'click', 'keydown
   }, true)
 }
 let holdNextEncoding = false, heldEncoding: (() => void) | undefined, encoded = 0
+let referencePixels: Uint8ClampedArray | undefined
 const nativeToBlob = HTMLCanvasElement.prototype.toBlob
 HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
   const held = holdNextEncoding; holdNextEncoding = false
@@ -53,15 +54,50 @@ root.render(<Fixture />)
       copying: !![...document.querySelectorAll('button')].find(button => button.textContent?.includes('Copying')),
       cancelDisabled: [...(editor?.querySelectorAll('button') ?? [])].find(button => button.textContent?.includes('Cancel'))?.disabled,
       events: events.slice(), errors: errors.slice(), warning, encoded, encodingHeld: !!heldEncoding,
+      appearance: document.documentElement.dataset.appearance,
+      activeElement: document.activeElement?.getAttribute('aria-label'),
       overlay: rendererPerformance.snapshot().overlay }
   },
   inkPixels() {
     const canvas = document.querySelector('.browser-screenshot-editor canvas') as HTMLCanvasElement
     if (!canvas || canvas.width <= 0 || canvas.height <= 0) throw new Error('The actual screenshot canvas is absent')
     const pixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data
-    let count = 0; for (let i = 3; i < pixels.length; i += 4) if (pixels[i] > 0) count++
-    return { count, width: canvas.width, height: canvas.height }
+    let count = 0, changed = 0, left = canvas.width, top = canvas.height, right = 0, bottom = 0
+    for (let i = 0; i < pixels.length; i += 4) {
+      // The source page is deliberately blue/white. Alpha is never an ink oracle: the
+      // actual Editor paints the captured page as its base, so every source pixel is opaque.
+      if (pixels[i]! > 180 && pixels[i + 1]! < 120 && pixels[i + 2]! < 130 && pixels[i + 3]! > 200) {
+        count++; const x = (i / 4) % canvas.width, y = Math.floor(i / 4 / canvas.width)
+        left = Math.min(left, x); top = Math.min(top, y); right = Math.max(right, x); bottom = Math.max(bottom, y)
+      }
+      if (referencePixels && (Math.abs(pixels[i]! - referencePixels[i]!) > 12 || Math.abs(pixels[i + 1]! - referencePixels[i + 1]!) > 12 || Math.abs(pixels[i + 2]! - referencePixels[i + 2]!) > 12)) changed++
+    }
+    return { count, changed, width: canvas.width, height: canvas.height, redBounds: count ? { x: left, y: top, width: right - left + 1, height: bottom - top + 1 } : null }
   },
+  rememberPixels() {
+    const canvas = document.querySelector('.browser-screenshot-editor canvas') as HTMLCanvasElement
+    if (!canvas || canvas.width <= 0 || canvas.height <= 0) throw new Error('Actual base Canvas is absent')
+    referencePixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data
+    return { width: canvas.width, height: canvas.height }
+  },
+  patchStats(rect: { x: number; y: number; width: number; height: number }) {
+    const canvas = document.querySelector('.browser-screenshot-editor canvas') as HTMLCanvasElement, bounds = canvas.getBoundingClientRect()
+    const sx = canvas.width / bounds.width, sy = canvas.height / bounds.height
+    const x = Math.floor(rect.x * sx), y = Math.floor(rect.y * sy), width = Math.floor(rect.width * sx), height = Math.floor(rect.height * sy)
+    if (width < 10 || height < 10) throw new Error('The actual pixelation source patch is nonempty')
+    const data = canvas.getContext('2d')!.getImageData(x, y, width, height).data
+    let transitions = 0, adjacent = 0, opaque = 0
+    for (let row = 0; row < height; row++) for (let col = 0; col < width; col++) {
+      const at = (row * width + col) * 4
+      if (data[at + 3]! > 200) opaque++
+      if (col === 0) continue
+      adjacent++
+      if (Math.abs(data[at]! - data[at - 4]!) + Math.abs(data[at + 1]! - data[at - 3]!) + Math.abs(data[at + 2]! - data[at - 2]!) > 60) transitions++
+    }
+    return { transitions, adjacent, opaque, width, height }
+  },
+  field(name: string) { return document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${name}"]`)?.value },
+  appearance(mode: 'light' | 'dark') { return updateThemeSelection({ appAppearance: mode }) },
   holdEncoding() { holdNextEncoding = true },
   releaseEncoding() { if (!heldEncoding) throw new Error('No actual PNG encoding is held'); heldEncoding() },
   dispose() { root.unmount(); theme() }

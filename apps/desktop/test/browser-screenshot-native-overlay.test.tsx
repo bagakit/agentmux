@@ -72,7 +72,7 @@ it('the screenshot editor uses its original stage DOM without native bitmap proj
   canvas.setPointerCapture = vi.fn()
   await act(async () => canvas.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 1, clientX: 25, clientY: 30 })))
   await act(async () => canvas.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1, clientX: 35, clientY: 40 })))
-  await act(async () => canvas.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 })))
+  await act(async () => canvas.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: 35, clientY: 40 })))
   const buttons = [...editor!.querySelectorAll<HTMLButtonElement>('button')]
   const copy = buttons.find(button => button.textContent?.includes('Copy PNG'))!
   expect(copy.disabled).toBe(false)

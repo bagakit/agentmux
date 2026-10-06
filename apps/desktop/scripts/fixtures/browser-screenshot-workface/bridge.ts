@@ -20,7 +20,7 @@ export const api = {
     onNativeOverlayWarning: (listener: unknown) => bridge.subscribe('warning', listener),
     onNativeBrowserInput: (listener: unknown) => bridge.subscribe('input', listener),
     writeClipboardImage: (image: unknown) => bridge.call('privateClipboard', image),
-    writeClipboardText: async () => {}, openExternal: async () => {}
+    writeClipboardText: (text: string) => bridge.call('privateClipboardText', text), openExternal: async () => {}
   }
 }
 const listeners = new Set<(state: any, previous: any) => void>()

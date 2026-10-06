@@ -19,7 +19,7 @@ const fixture = vi.hoisted(() => ({
 vi.mock('../src/renderer/src/store', () => ({
   useAppStore: Object.assign(
     (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
-    { getState: () => fixture.state, setState: vi.fn() }
+    { getState: () => fixture.state, setState: vi.fn(), subscribe: () => () => {} }
   )
 }))
 // Raster output and PNG encoding have native proof. Keep the real Pane, Editor, input handlers,
@@ -27,7 +27,10 @@ vi.mock('../src/renderer/src/store', () => ({
 vi.mock('../src/renderer/src/components/browser-screenshot/canvas-render', () => ({
   renderCommittedLayer: fixture.committed, renderScreenshotScene: fixture.paint
 }))
-vi.mock('../src/renderer/src/components/browser-screenshot/compose', () => ({ composeScreenshot: fixture.compose }))
+vi.mock('../src/renderer/src/components/browser-screenshot/compose', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/renderer/src/components/browser-screenshot/compose')>(),
+  composeScreenshot: fixture.compose
+}))
 vi.mock('../src/renderer/src/lib/browser-stage-geometry', () => ({
   observeBrowserStageGeometry(_stage: HTMLElement, update: () => void, active: boolean) {
     if (active) update()
@@ -49,7 +52,8 @@ const page = {
 const image: BrowserPng = {
   mimeType: 'image/png', dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1
 }
-const capture: BrowserScreenshotCapture = { browserId: page.browserId, navigationId: page.navigationId, image }
+const capture: BrowserScreenshotCapture = { browserId: page.browserId, navigationId: page.navigationId, image,
+  source: { url: page.url, title: page.title, viewport: { width: 400, height: 300, deviceScaleFactor: 1 }, viewportWarning: null } }
 const pageBounds = { x: 80, y: 120, width: 400, height: 300 }
 
 function deferred<T>() {
@@ -64,6 +68,7 @@ let container: HTMLDivElement, root: ReturnType<typeof createClientUiRoot>
 let frames: Map<number, FrameRequestCallback>, nextFrame: number
 let bounds: ReturnType<typeof vi.spyOn<typeof api.browser, 'setBounds'>>
 let clipboard: ReturnType<typeof vi.spyOn<typeof api.ui, 'writeClipboardImage'>>
+let clipboardText: ReturnType<typeof vi.spyOn<typeof api.ui, 'writeClipboardText'>>
 let captureScreenshot: ReturnType<typeof vi.spyOn<typeof api.browser, 'captureScreenshot'>>
 let release: ReturnType<typeof vi.spyOn<typeof api.browser, 'release'>>
 let restore: ReturnType<typeof vi.spyOn<typeof api.browser, 'restore'>>
@@ -87,6 +92,7 @@ beforeEach(() => {
     }
     return rect(0, 0, 400, 300)
   })
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
   fixture.state.config = {
     version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local fixture' }],
     executors: {}, workspaces: [], appearance: { terminalTheme: 'graphite' },
@@ -95,6 +101,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   bounds = vi.spyOn(api.browser, 'setBounds').mockResolvedValue(undefined)
   clipboard = vi.spyOn(api.ui, 'writeClipboardImage').mockResolvedValue(undefined)
+  clipboardText = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   captureScreenshot = vi.spyOn(api.browser, 'captureScreenshot').mockResolvedValue(capture)
   vi.spyOn(api.browser, 'setAnnotationMarkers').mockResolvedValue(undefined)
   vi.spyOn(api.browser, 'cancelElementSelection').mockResolvedValue(undefined)
@@ -119,8 +126,8 @@ async function flushFrames() {
     for (const [, callback] of pending) callback(16)
   })
 }
-async function mount(snapshot = page) {
-  await act(async () => root.render(<BrowserPane tab={snapshot} visible />))
+async function mount(snapshot = page, visible = true) {
+  await act(async () => root.render(<BrowserPane tab={snapshot} visible={visible} />))
   await flushFrames()
   expect(container.querySelector('[data-native-browser-stage]')).not.toBeNull()
 }
@@ -166,8 +173,228 @@ function originalPageKept() {
   expect(release).not.toHaveBeenCalled(); expect(restore).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled()
   expect(fixture.state.reportError).not.toHaveBeenCalled()
 }
+function pointerInput(opened: HTMLElement) {
+  const canvas = opened.querySelector('canvas')!
+  canvas.setPointerCapture = vi.fn()
+  return (type: string, x: number, y: number) => canvas.dispatchEvent(new PointerEvent(type, {
+    bubbles: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, pointerId: 1, clientX: x, clientY: y
+  }))
+}
+async function copyInput(opened: HTMLElement) {
+  const previous = fixture.compose.mock.calls.length
+  await act(async () => button(opened, 'Copy PNG').click())
+  expect(fixture.compose.mock.calls.length).toBe(previous + 1)
+  expect(editor()).toBe(opened)
+  expect(button(opened, 'Copy PNG').disabled).toBe(false)
+  return fixture.compose.mock.lastCall![0]
+}
 
 describe('original Browser screenshot workface', () => {
+  it('keeps the same numbered object and unblurred note draft while its Pane is hidden, then copies context and cancels after showing it', async () => {
+    await mount(); const opened = await openScreenshot(), pointer = pointerInput(opened)
+    await act(async () => {
+      button(opened, 'Numbered note').click()
+    })
+    await act(async () => {
+      pointer('pointerdown', 40, 50); pointer('pointermove', 130, 120); pointer('pointerup', 130, 120)
+    })
+    const note = fixture.committed.mock.lastCall![1][0]
+    expect(note).toMatchObject({ kind: 'note', number: 1, note: '' })
+    const draft = 'Original note draft before blur'
+    const field = opened.querySelector<HTMLTextAreaElement>('[aria-label="Note text"]')!
+    expect(field).not.toBeNull()
+    await act(async () => {
+      field.focus()
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, draft)
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(document.activeElement).toBe(field)
+    expect(field.value).toBe(draft)
+    expect(fixture.committed.mock.lastCall![1][0]).toMatchObject({ id: note.id, note: '' })
+    expect(fixture.compose).not.toHaveBeenCalled()
+
+    await mount(page, false)
+    expect(editor()).toBe(opened)
+    expect(opened.style.display).toBe('none')
+    expect(opened.querySelector('[aria-label="Note text"]')).toBe(field)
+    expect(field.value).toBe(draft)
+    const inactiveEscape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    await act(async () => window.dispatchEvent(inactiveEscape))
+    expect(inactiveEscape.defaultPrevented).toBe(false)
+    expect(editor()).toBe(opened)
+    expect(clipboard).not.toHaveBeenCalled(); expect(clipboardText).not.toHaveBeenCalled()
+
+    await mount(page, true)
+    expect(editor()).toBe(opened)
+    expect(opened.style.display).toBe('')
+    expect(opened.querySelector('[aria-label="Note text"]')).toBe(field)
+    expect(field.value).toBe(draft)
+    await act(async () => button(opened, 'Copy context').click())
+    expect(fixture.compose).toHaveBeenCalledTimes(1)
+    expect(fixture.compose.mock.lastCall![0].shapes).toEqual([expect.objectContaining({ id: note.id, kind: 'note', number: 1, note: draft })])
+    expect(clipboardText).toHaveBeenCalledTimes(1)
+    const text = clipboardText.mock.lastCall![0], context = JSON.parse(text.slice(text.indexOf('{')))
+    expect(context.annotations).toEqual([expect.objectContaining({ id: note.id, kind: 'note', number: 1, note: draft })])
+    expect(editor()).toBe(opened); expect(captureScreenshot).toHaveBeenCalledTimes(1)
+    await cancel('Cancel')
+    expect(container.querySelector('[aria-label="Screenshot editor"]')).toBeNull()
+    expect(bounds).toHaveBeenLastCalledWith(page.browserId, pageBounds)
+    originalPageKept()
+  })
+
+  it('leaves Escape and drafts with an external input or textarea, while Escape from its actual Canvas cancels the editor', async () => {
+    await mount(); const opened = await openScreenshot()
+    const external = document.createElement('div'); document.body.append(external)
+    try {
+      for (const tag of ['input', 'textarea'] as const) {
+        const field = document.createElement(tag), draft = 'External ' + tag + ' draft'
+        external.append(field); field.value = draft
+        await act(async () => { field.focus(); field.setSelectionRange(1, 5) })
+        expect(document.activeElement).toBe(field)
+        const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+        await act(async () => field.dispatchEvent(event))
+        expect(event.defaultPrevented).toBe(false)
+        expect(field.value).toBe(draft)
+        expect(field.selectionStart).toBe(1); expect(field.selectionEnd).toBe(5)
+        expect(editor()).toBe(opened)
+        expect(bounds).toHaveBeenLastCalledWith(page.browserId, null)
+      }
+      const canvas = opened.querySelector('canvas')!
+      const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      await act(async () => { canvas.focus(); expect(document.activeElement).toBe(canvas); canvas.dispatchEvent(event) })
+      await flushFrames()
+      expect(event.defaultPrevented).toBe(true)
+      expect(container.querySelector('[aria-label="Screenshot editor"]')).toBeNull()
+      expect(bounds).toHaveBeenLastCalledWith(page.browserId, pageBounds)
+      expect(captureScreenshot).toHaveBeenCalledTimes(1)
+      expect(clipboard).not.toHaveBeenCalled(); expect(clipboardText).not.toHaveBeenCalled()
+      originalPageKept()
+    } finally { external.remove() }
+  })
+
+  it('successful PNG copy preserves the actual Editor, allows a second explicit copy, then Cancel restores the page', async () => {
+    await mount(); const opened = await openScreenshot()
+    await copyInput(opened); await copyInput(opened)
+    expect(clipboard.mock.calls).toEqual([[image], [image]])
+    expect(captureScreenshot).toHaveBeenCalledTimes(1)
+    expect(bounds).toHaveBeenLastCalledWith(page.browserId, null)
+    await cancel('Cancel')
+    expect(bounds).toHaveBeenLastCalledWith(page.browserId, pageBounds)
+    originalPageKept()
+  })
+
+  it('keeps screenshot editing and context copy available when the exact captured viewport is unknown', async () => {
+    captureScreenshot.mockResolvedValueOnce({ ...capture, source: { ...capture.source, viewport: null, viewportWarning: 'Viewport observation unavailable' } })
+    await mount(); const opened = await openScreenshot()
+    await act(async () => button(opened, 'Copy context').click())
+    expect(clipboardText).toHaveBeenCalledTimes(1)
+    const text = clipboardText.mock.calls[0]![0], context = JSON.parse(text.slice(text.indexOf('{')))
+    expect(context.source).toEqual({ ...capture.source, viewport: null, viewportWarning: 'Viewport observation unavailable' })
+    expect(editor()).toBe(opened)
+    expect(button(opened, 'Copy PNG').disabled).toBe(false)
+    await cancel('Cancel'); originalPageKept()
+  })
+
+  it.each(['Copy PNG', 'Copy context'] as const)('%s keeps a late clipboard rejection scoped to its cancelled Editor', async kind => {
+    const waiting = deferred<void>(), sink = kind === 'Copy PNG' ? clipboard : clipboardText
+    sink.mockReturnValueOnce(waiting.promise)
+    await mount(); const opened = await openScreenshot()
+    await act(async () => button(opened, kind).click())
+    expect(sink).toHaveBeenCalledTimes(1)
+    expect(button(opened, 'Cancel').disabled).toBe(false)
+    await cancel('Cancel'); const next = await openScreenshot()
+    await act(async () => waiting.reject(new Error('Old clipboard write failed after Cancel')))
+    expect(fixture.state.reportError).not.toHaveBeenCalled()
+    expect(editor()).toBe(next); expect(button(next, 'Copy PNG').disabled).toBe(false)
+    await cancel('Cancel'); originalPageKept()
+  })
+
+  it('actual Crop and Pixelate omit a hidden or covered note from the copied context', async () => {
+    await mount(); const opened = await openScreenshot(), pointer = pointerInput(opened)
+    const drag = async (x: number, y: number, toX: number, toY: number) => act(async () => {
+      pointer('pointerdown', x, y); pointer('pointermove', toX, toY); pointer('pointerup', toX, toY)
+    })
+    await act(async () => button(opened, 'Numbered note').click()); await drag(40, 40, 110, 100)
+    const field = opened.querySelector<HTMLTextAreaElement>('[aria-label="Note text"]')!
+    expect(field).not.toBeNull()
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'Private original note')
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const copyContext = async () => {
+      const before = clipboardText.mock.calls.length
+      await act(async () => button(opened, 'Copy context').click())
+      expect(clipboardText.mock.calls.length).toBe(before + 1)
+      const text = clipboardText.mock.lastCall![0]
+      return { text, receipt: JSON.parse(text.slice(text.indexOf('{'))) }
+    }
+    const visible = await copyContext()
+    expect(visible.receipt.annotations).toEqual([expect.objectContaining({ kind: 'note', number: 1, note: 'Private original note' })])
+    await act(async () => button(opened, 'Crop').click()); await drag(200, 150, 380, 280)
+    const cropped = await copyContext()
+    expect(cropped.receipt.crop).toEqual({ x: 200, y: 150, width: 180, height: 130 })
+    expect(cropped.receipt.annotations).toEqual([]); expect(cropped.text).not.toContain('Private original note')
+    await act(async () => button(opened, 'Undo').click())
+    await act(async () => button(opened, 'Pixelate').click()); await drag(20, 20, 135, 115)
+    const masked = await copyContext()
+    expect(masked.receipt.annotations).toEqual([expect.objectContaining({ kind: 'pixelate' })])
+    expect(masked.text).not.toContain('Private original note')
+    await cancel('Cancel'); originalPageKept()
+  })
+
+  it('real Select, Delete, Erase, Crop, Pixelate and editable numbered-note controls feed copy and context consumers', async () => {
+    await mount(); const opened = await openScreenshot(), pointer = pointerInput(opened)
+    const drag = async (from: { x: number; y: number }, to: { x: number; y: number }) => {
+      await act(async () => {
+        pointer('pointerdown', from.x, from.y); pointer('pointermove', to.x, to.y); pointer('pointerup', to.x, to.y)
+      })
+    }
+    await drag({ x: 30, y: 40 }, { x: 90, y: 70 })
+    const original = (await copyInput(opened)).shapes[0]
+    expect(original).toMatchObject({ kind: 'pen', points: [{ x: 30, y: 40 }, { x: 90, y: 70 }] })
+    await act(async () => button(opened, 'Select').click())
+    await drag({ x: 30, y: 40 }, { x: 50, y: 70 })
+    const moved = (await copyInput(opened)).shapes[0]
+    expect(moved).toMatchObject({ id: original.id, kind: 'pen', points: [{ x: 50, y: 70 }, { x: 110, y: 100 }] })
+    expect(button(opened, 'Delete selected').disabled).toBe(false)
+    await act(async () => button(opened, 'Delete selected').click())
+    expect((await copyInput(opened)).shapes).toEqual([])
+    await act(async () => button(opened, 'Undo').click())
+    expect((await copyInput(opened)).shapes).toEqual([moved])
+    await act(async () => button(opened, 'Erase').click())
+    await drag({ x: 50, y: 70 }, { x: 50, y: 70 })
+    expect((await copyInput(opened)).shapes).toEqual([])
+    await act(async () => button(opened, 'Undo').click())
+    expect((await copyInput(opened)).shapes).toEqual([moved])
+    await act(async () => button(opened, 'Crop').click())
+    await drag({ x: 20, y: 20 }, { x: 300, y: 220 })
+    expect((await copyInput(opened)).crop).toEqual({ x: 20, y: 20, width: 280, height: 200 })
+    await act(async () => button(opened, 'Undo').click())
+    expect((await copyInput(opened)).crop).toBeNull()
+    await act(async () => button(opened, 'Pixelate').click())
+    await drag({ x: 140, y: 100 }, { x: 240, y: 180 })
+    expect((await copyInput(opened)).shapes).toEqual([moved, expect.objectContaining({ kind: 'pixelate', from: { x: 140, y: 100 }, to: { x: 240, y: 180 } })])
+    await act(async () => button(opened, 'Numbered note').click())
+    await drag({ x: 40, y: 150 }, { x: 130, y: 230 })
+    const noteField = opened.querySelector<HTMLInputElement | HTMLTextAreaElement>('[aria-label="Note text"]')
+    expect(noteField).not.toBeNull()
+    await act(async () => {
+      const prototype = noteField instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+      Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(noteField, 'Check original control')
+      noteField!.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect((await copyInput(opened)).shapes).toEqual([moved, expect.objectContaining({ kind: 'pixelate' }), expect.objectContaining({ kind: 'note', number: 1, note: 'Check original control' })])
+    await act(async () => button(opened, 'Copy context').click())
+    expect(clipboardText).toHaveBeenCalledTimes(1)
+    expect(clipboardText.mock.calls[0]![0]).toContain('Check original control')
+    expect(clipboardText.mock.calls[0]![0]).toContain(page.url)
+    await act(async () => button(opened, 'Delete selected').click())
+    await act(async () => button(opened, 'Copy context').click())
+    expect(clipboardText).toHaveBeenCalledTimes(2)
+    expect(clipboardText.mock.lastCall![0]).not.toContain('Check original control')
+    await cancel('Cancel'); originalPageKept()
+  })
+
   it.each(['Cancel', 'Escape'] as const)('%s exits the real editor and restores the same Browser bounds', async method => {
     await mount()
     expect(bounds).toHaveBeenLastCalledWith(page.browserId, pageBounds)
@@ -188,11 +415,13 @@ describe('original Browser screenshot workface', () => {
     originalPageKept()
   })
 
-  it.each(['Cancel', 'Escape'] as const)('%s during PNG composition keeps late output out of the clipboard and a new editor', async method => {
+  it.each([
+    ['Copy PNG', 'Cancel'], ['Copy PNG', 'Escape'], ['Copy context', 'Cancel'], ['Copy context', 'Escape']
+  ] as const)('%s with %s during composition keeps late output out of the clipboard and a new editor', async (kind, method) => {
     const waiting = deferred<BrowserPng>()
     fixture.compose.mockReturnValueOnce(waiting.promise)
     await mount(); const opened = await openScreenshot()
-    await act(async () => button(opened, 'Copy PNG').click())
+    await act(async () => button(opened, kind).click())
     expect(fixture.compose).toHaveBeenCalledTimes(1)
     const composed = fixture.compose.mock.calls[0]![0]
     expect(composed.image).toBe(opened.querySelector('img'))
@@ -206,6 +435,7 @@ describe('original Browser screenshot workface', () => {
     expect(next).not.toBe(opened)
     await act(async () => waiting.resolve(image))
     expect(clipboard).not.toHaveBeenCalled()
+    expect(clipboardText).not.toHaveBeenCalled()
     expect(editor()).toBe(next)
     expect(button(next, 'Copy PNG').disabled).toBe(false)
     expect(bounds).toHaveBeenLastCalledWith(page.browserId, null)

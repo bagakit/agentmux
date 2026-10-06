@@ -99,42 +99,42 @@ it('keeps the real palette, width, text size, drawing history, Copy and Cancel h
   canvas.setPointerCapture = vi.fn()
   await act(async () => canvas.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 1, clientX: 20, clientY: 25 })))
   await act(async () => canvas.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1, clientX: 45, clientY: 25 })))
-  await act(async () => canvas.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 })))
+  await act(async () => canvas.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: 45, clientY: 25 })))
   expect(button(editor, 'Undo').disabled).toBe(false)
   await act(async () => button(editor, 'Undo').click())
   expect(button(editor, 'Redo').disabled).toBe(false)
   await act(async () => button(editor, 'Redo').click())
   await act(async () => editor.querySelector('img')!.dispatchEvent(new Event('load')))
   await act(async () => button(editor, 'Copy PNG').click())
-  expect(props.onComplete).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ displayWidth: 160, displayHeight: 120, shapes: [expect.objectContaining({ color: selected, width: 8, points: [{ x: 20, y: 25 }, { x: 45, y: 25 }] })] }))
+  expect(props.onComplete).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ displayWidth: 400, displayHeight: 300, crop: null, shapes: [expect.objectContaining({ color: selected, width: 20, points: [{ x: 50, y: 62.5 }, { x: 112.5, y: 62.5 }] })] }))
   await act(async () => button(editor, 'Text').click())
   expect([...editor.querySelector<HTMLSelectElement>('select[aria-label="Text size"]')!.options].map(o => Number(o.value))).toEqual([...SCREENSHOT_FONT_SIZES])
   await act(async () => button(editor, 'Cancel').click())
   expect(props.onCancel).toHaveBeenCalledTimes(1)
 })
 
-it('reserves Canvas space and allows the actual control groups to wrap without compressing the palette', async () => {
+it('keeps completion actions and relevant parameters outside the independent canvas area', async () => {
   const { editor } = await mount()
   const sheet = document.styleSheets[0]!
   const rules = [...sheet.cssRules].filter(r => r.cssText.includes('browser-screenshot-toolbar'))
   expect(rules.length).toBeGreaterThan(0)
   const toolbar = editor.querySelector<HTMLElement>('[role=toolbar]')!
   const tools = toolbar.querySelector<HTMLElement>('.browser-screenshot-toolbar__tools')!
-  const colors = tools.querySelector<HTMLElement>('.browser-screenshot-toolbar__colors')!
+  const properties = editor.querySelector<HTMLElement>('.browser-screenshot-editor__properties')!
+  const colors = properties.querySelector<HTMLElement>('.browser-screenshot-toolbar__colors')!
   expect(getComputedStyle(editor).display).toBe('flex')
   expect(getComputedStyle(editor).flexDirection).toBe('column')
   expect(getComputedStyle(toolbar).position).toBe('relative')
   expect(getComputedStyle(toolbar).flexWrap).toBe('wrap')
-  expect(getComputedStyle(toolbar).maxHeight).toBe('50%')
-  expect(getComputedStyle(toolbar).overflow).toBe('auto')
+  expect(properties.closest('.browser-screenshot-editor__canvas-area')).toBeNull()
   expect(getComputedStyle(tools).flexWrap).toBe('wrap')
   expect(getComputedStyle(colors).flexShrink).toBe('0')
   expect(getComputedStyle(colors).maxWidth).toBe('100%')
   expect(getComputedStyle(colors).flexWrap).toBe('wrap')
-  const actions = toolbar.querySelector<HTMLElement>('.browser-screenshot-toolbar__actions')!
+  const actions = editor.querySelector<HTMLElement>('.browser-screenshot-toolbar__actions')!
   expect(getComputedStyle(actions).flexWrap).toBe('wrap')
   expect(getComputedStyle(actions).maxWidth).toBe('100%')
-  expect(getComputedStyle(toolbar.querySelector('select')!).flexShrink).toBe('0')
+  expect(getComputedStyle(properties.querySelector('select')!).flexShrink).toBe('0')
 })
 
 it('retains one toolbar and the complete actions without a repeated instructional sentence', async () => {
