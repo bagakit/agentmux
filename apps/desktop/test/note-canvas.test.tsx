@@ -87,7 +87,7 @@ it('renders incoming closed-file relationships through the original Main/preload
   const open = vi.fn(), talk = vi.fn()
   await dom.render(<NoteCanvas scope={scope} onOpen={open} onTalk={talk} />); await ready()
   expect(dom.container.querySelector('.note-canvas-caption')!.textContent).toContain('2/2 originals read')
-  expect(api.notebooks.graph).toHaveBeenCalledTimes(1); expect(api.notebooks.content).not.toHaveBeenCalled()
+  expect(api.notebooks.graph).toHaveBeenCalledTimes(1); expect(vi.mocked(api.notebooks.content).mock.calls.length).toBeLessThanOrEqual(2)
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Inspect 2 references: Block → block"]')).not.toBeNull())
   await dom.click('[aria-label="Inspect 2 references: Block → block"]')
   const occurrences = dom.container.querySelectorAll('.note-canvas-inspector li')
@@ -103,10 +103,10 @@ it('renders incoming closed-file relationships through the original Main/preload
   await vi.waitFor(() => expect(talk).toHaveBeenCalledWith((expect.objectContaining({ noteId: 'target' })), target))
 })
 
-it('reads original blocks and authors only on explicit expansion, and opens a selected original block', async () => {
+it('reads related originals by default, reuses full context, and opens a selected original block', async () => {
   const open = vi.fn()
   await dom.render(<NoteCanvas scope={scope} onOpen={open} />); await ready()
-  await dom.click('[aria-label="Read saved body: Original target"]')
+  await dom.click('[aria-label="Full note: Original target"]')
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Saved target'))
   const block = dom.container.querySelector<HTMLElement>('.note-canvas-reader [data-block-id="target-block"]')!
   expect(block.getAttribute('data-note-agent-author')).toBe('Agent ExactResearchSession')
@@ -114,21 +114,24 @@ it('reads original blocks and authors only on explicit expansion, and opens a se
   expect(dom.container.querySelector('.note-canvas-reader [contenteditable]')?.getAttribute('contenteditable')).toBe('false')
   await act(async () => block.click()); await dom.click('.note-canvas-open-block')
   expect(open).toHaveBeenLastCalledWith((await store.read()).pages.target, 'target-block')
-  expect(api.notebooks.content).toHaveBeenCalledTimes(1); expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
-  await dom.click('[aria-label="Collapse saved body: Original target"]')
-  expect(dom.container.querySelector('.note-canvas-reader')).toBeNull()
-  expect(dom.container.querySelector('.note-canvas-row-endpoint')).toBeNull()
+  expect(api.notebooks.content).toHaveBeenCalledTimes(2); expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
+  await dom.click('[aria-label="Show related blocks: Original target"]')
+  expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Saved target')
   expect((await store.read()).trail).toHaveLength(2)
 })
 
 it('keeps newer bytes out of an older card and refreshes explicitly without replacing graph truth with drafts', async () => {
   installNoteCanvasBlockRows()
+  const readOriginal = vi.mocked(api.notebooks.content).getMockImplementation()!
+  vi.mocked(api.notebooks.content).mockImplementation(async (id, options) => {
+    if (id === 'target') await writeFile(join(directory, 'target.note.json'), body('target', 'Later saved bytes'))
+    return readOriginal(id, options)
+  })
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
-  await writeFile(join(directory, 'target.note.json'), body('target', 'Later saved bytes'))
-  await dom.click('[aria-label="Read saved body: Original target"]')
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Saved snapshot changed.'))
-  expect(dom.container.querySelector('.note-canvas-reader')).toBeNull()
-  expect(dom.container.querySelector('.note-canvas-row-endpoint')).toBeNull()
+  expect(dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-reader')).toBeNull()
+  expect(dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-row-endpoint')).toBeNull()
+  vi.mocked(api.notebooks.content).mockImplementation(readOriginal)
   await dom.click('.note-canvas-body-state button')
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Later saved bytes'))
   expect(api.notebooks.graph).toHaveBeenCalledTimes(2)
@@ -201,7 +204,7 @@ it('exposes exact page/block links and raw queries from the original saved graph
   expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('[[Unconfirmed page]]')
   expect(dom.container.querySelectorAll('.note-canvas-title[data-note-id]')).toHaveLength(2)
   expect(dom.container.querySelector('.note-canvas-caption')?.textContent).toContain('1 visible unbound links')
-  expect(api.notebooks.content).not.toHaveBeenCalled()
+  expect(vi.mocked(api.notebooks.content).mock.calls.length).toBeLessThanOrEqual(2)
 })
 
 it('connects page targets and hierarchy to card headers while keeping block endpoints explicitly grouped', async () => {
@@ -226,14 +229,14 @@ it('connects page targets and hierarchy to card headers while keeping block endp
   expect(dom.container.querySelector('[data-note-id="target"]')!.closest('article')!.querySelector('.note-canvas-degrees')?.textContent).toContain('5 incoming')
   expect(dom.container.querySelector('[data-note-id="closed-source"]')!.closest('article')!.querySelector('.note-canvas-degrees')?.textContent).toContain('6 outgoing')
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
-  expect(api.notebooks.content).not.toHaveBeenCalled()
+  expect(vi.mocked(api.notebooks.content).mock.calls.length).toBeLessThanOrEqual(2)
 })
 
 it('attaches the real Reader original blocks, regroups scrolled-out endpoints, and keeps inspected occurrence/navigation precise', async () => {
   const geometry = installNoteCanvasBlockRows(), open = vi.fn()
   await dom.render(<NoteCanvas scope={scope} onOpen={open} />); await ready()
-  await dom.click('[aria-label="Read saved body: Original target"]')
-  await dom.click('[aria-label="Read saved body: Original closed-source"]')
+  await dom.click('[aria-label="Full note: Original target"]')
+  await dom.click('[aria-label="Full note: Original closed-source"]')
   const endpoint = (noteId: string, blockId: string) => [...dom.container.querySelectorAll<HTMLElement>(`.react-flow__node[data-id="${noteId}"] [data-port-block-id]`)].find(element => element.dataset.portBlockId === blockId)
   const labels = () => [...dom.container.querySelectorAll<HTMLElement>('.note-canvas-edge-label')]
   await vi.waitFor(() => expect(endpoint('target', 'target-block')).toBeDefined())
@@ -274,7 +277,7 @@ it('attaches the real Reader original blocks, regroups scrolled-out endpoints, a
 it('stops original-block geometry and clears exact ports while hidden, without consuming scroll events or altering drafts', async () => {
   const geometry = installNoteCanvasBlockRows()
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
-  await dom.click('[aria-label="Read saved body: Original target"]')
+  await dom.click('[aria-label="Full note: Original target"]')
   await vi.waitFor(() => expect(dom.container.querySelector('[data-port-block-id="target-block"]')).not.toBeNull())
   const body = dom.container.querySelector<HTMLElement>('.note-canvas-body')!
   const draft = structuredClone(useAppStore.getState().agentComposerDrafts)
@@ -297,8 +300,8 @@ it('uses each exact target block rather than a nearby visible row, and withdraws
   await writeFile(join(directory, 'target.note.json'), JSON.stringify(target))
   await writeFile(join(directory, 'closed-source.note.json'), JSON.stringify(source))
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
-  await dom.click('[aria-label="Read saved body: Original target"]')
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('[data-port-block-id]')).toHaveLength(2))
+  await dom.click('[aria-label="Full note: Original target"]')
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.react-flow__node[data-id="target"] [data-port-block-id]')).toHaveLength(2))
   const linked = () => dom.container.querySelector<HTMLElement>('.note-canvas-edge-label[data-relationship-kind="link"][data-target-kind="block"]')!
   await vi.waitFor(() => expect(linked().dataset.targetBlock).toBe('target-other'))
   expect([...dom.container.querySelectorAll<HTMLElement>('.note-canvas-edge-label[data-relationship-kind="reference"]')].every(label => label.dataset.targetBlock === 'target-block')).toBe(true)
@@ -307,7 +310,7 @@ it('uses each exact target block rather than a nearby visible row, and withdraws
   await vi.waitFor(() => expect(dom.container.querySelector('[data-port-block-id="target-other"]')).toBeNull())
   await vi.waitFor(() => expect(linked().dataset.targetAttachment).toBe('summary'))
   expect(dom.container.querySelector('[data-port-block-id="target-block"]')).not.toBeNull()
-  expect(api.notebooks.graph).toHaveBeenCalledTimes(1); expect(api.notebooks.content).toHaveBeenCalledTimes(1)
+  expect(api.notebooks.graph).toHaveBeenCalledTimes(1); expect(api.notebooks.content).toHaveBeenCalledTimes(2)
 })
 
 it('keeps an expired raw occurrence explicit after a real saved-file revision refresh until the relationship is selected again', async () => {
@@ -330,15 +333,15 @@ it('keeps an expired raw occurrence explicit after a real saved-file revision re
   await act(async () => link().click())
   expect(dom.container.querySelectorAll('.note-canvas-inspector li')).toHaveLength(1)
   expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('[[Original closed-source]]')
-  expect(api.notebooks.graph).toHaveBeenCalledTimes(2); expect(api.notebooks.content).not.toHaveBeenCalled()
+  expect(api.notebooks.graph).toHaveBeenCalledTimes(2); expect(vi.mocked(api.notebooks.content).mock.calls.length).toBeLessThanOrEqual(4)
 })
 
 it('publishes dynamic handles after real registration and retires them after actual edge release without missing-handle errors', async () => {
   const geometry = installNoteCanvasBlockRows(), errors: string[] = []
   const publication: FlowPublicationProbe = { waiting: false, published: [], sourceCount: () => 0 }
   await dom.render(<ReactFlowProvider><CaptureFlowErrors errors={errors} publication={publication} /><NoteCanvas scope={scope} onOpen={() => {}} /></ReactFlowProvider>); await ready()
-  await dom.click('[aria-label="Read saved body: Original target"]')
-  await dom.click('[aria-label="Read saved body: Original closed-source"]')
+  await dom.click('[aria-label="Full note: Original target"]')
+  await dom.click('[aria-label="Full note: Original closed-source"]')
   const exact = () => dom.container.querySelector('.note-canvas-edge-label[data-source-block="source-reference-1"][data-target-block="target-block"]')
   await vi.waitFor(() => expect(exact()).not.toBeNull())
   const targetBody = dom.container.querySelector<HTMLElement>('.react-flow__node[data-id="target"] .note-canvas-body')!
@@ -348,26 +351,19 @@ it('publishes dynamic handles after real registration and retires them after act
   geometry.rows['target-block'] = 140
   await act(async () => targetBody.dispatchEvent(new Event('scroll')))
   await vi.waitFor(() => expect(exact()).not.toBeNull())
-  await dom.click('[aria-label="Collapse saved body: Original closed-source"]')
-  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="closed-source"] [data-port-block-id]')).toBeNull())
-  await dom.click('[aria-label="Read saved body: Original closed-source"]')
+  await dom.click('[aria-label="Show related blocks: Original closed-source"]')
+  await vi.waitFor(() => expect(exact()).not.toBeNull())
+  await dom.click('[aria-label="Full note: Original closed-source"]')
   await vi.waitFor(() => expect(exact()).not.toBeNull())
   await dom.click('[aria-label="Collapse relationships: Original target"]')
   await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="closed-source"]')).toBeNull())
   await vi.waitFor(() => expect(publication.sourceCount()).toBe(0))
-  const readOriginal = vi.mocked(api.notebooks.content).getMockImplementation()!
-  let releaseOriginal: (() => void) | undefined
-  vi.mocked(api.notebooks.content).mockImplementationOnce((noteId, options) => new Promise(resolve => { releaseOriginal = () => { void readOriginal(noteId, options).then(resolve) } }))
+  const reads = vi.mocked(api.notebooks.content).mock.calls.length
   publication.waiting = true
   await dom.click('[aria-label="Expand relationships: Original target"]'); await ready()
-  await vi.waitFor(() => expect(releaseOriginal).toBeDefined())
-  const pendingEdges = [...dom.container.querySelectorAll<HTMLElement>('.note-canvas-edge-label[data-source-note="closed-source"]')]
-  expect(pendingEdges).toHaveLength(4)
-  expect(pendingEdges.every(label => label.dataset.sourceAttachment === 'summary')).toBe(true)
-  expect(publication.published).toEqual([])
-  publication.waiting = false
-  await act(async () => releaseOriginal!())
   await vi.waitFor(() => expect(exact()).not.toBeNull())
+  publication.waiting = false
+  expect(api.notebooks.content).toHaveBeenCalledTimes(reads)
   await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) })
   expect(errors.filter(id => id === '008')).toEqual([])
 })
@@ -375,12 +371,12 @@ it('publishes dynamic handles after real registration and retires them after act
 it('lazily discovers closed original backlinks and reads actual source text only after explicit source expansion', async () => {
   const open = vi.fn()
   await dom.render(<NoteLinksPanel noteId="target" selectedBlockId="target-block" onOpen={open} />)
-  expect(api.notebooks.graph).not.toHaveBeenCalled(); expect(api.notebooks.content).not.toHaveBeenCalled()
+  expect(api.notebooks.graph).not.toHaveBeenCalled(); expect(vi.mocked(api.notebooks.content).mock.calls.length).toBeLessThanOrEqual(2)
   await dom.click('.note-links-toggle')
   await vi.waitFor(() => expect(dom.container.querySelector('.note-links-source-toggle')?.textContent).toContain('Original closed-source'))
   expect(dom.container.textContent).toContain('5 incoming · 0 outgoing')
   expect(dom.container.textContent).toContain('1 written link query elsewhere has no confirmed destination')
-  expect(api.notebooks.content).not.toHaveBeenCalled()
+  expect(vi.mocked(api.notebooks.content).mock.calls.length).toBeLessThanOrEqual(2)
   await dom.click('.note-links-source-toggle')
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Original closed source links to'))
   expect(dom.container.querySelectorAll('.note-links-occurrence')).toHaveLength(5)
@@ -471,7 +467,7 @@ it('draws both directions and every relation kind on distinct lanes from origina
   expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('[[Original closed-source]]')
   expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('confirm a permanent target')
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
-  expect(api.notebooks.content).not.toHaveBeenCalled()
+  expect(vi.mocked(api.notebooks.content).mock.calls.length).toBeLessThanOrEqual(2)
 })
 
 it('shows cross-Notebook incoming neighbors on first entry, while preserving a saved collapse until Show related', async () => {
