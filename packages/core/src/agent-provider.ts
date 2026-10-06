@@ -1,5 +1,6 @@
 import type { AgentPromptPreparationWaitReason } from './prompt-preparation.js'
 import { AgentMuxError } from './errors.js'
+import { deliveryFailure, type DeliveryFailure } from './delivery-attempt.js'
 import {
   cloneLaunchOptions,
   describeLaunchOptions,
@@ -122,6 +123,12 @@ export type AgentProviderNativePromptInput = Readonly<{
 }>
 export type AgentNativeInputPreparationPhase = 'native-target' | 'native-peer' | 'native-protocol' | 'native-initialize' | 'native-source' | 'native-thread' | 'native-turn'
 
+/** High-level qualification uses the one Provider protocol owner. Unknown is not Ready. */
+export type AgentProviderInputEnvironment =
+  | { state: 'native-ready'; input: AgentProviderNativePromptInput }
+  | { state: 'unconfirmed'; mechanism: 'unconfirmed' | 'unavailable'; phase: AgentNativeInputPreparationPhase;
+      reason: 'original-target-unconfirmed' | 'original-protocol-unconfirmed'; wake: 'explicit-rejoin'; failure: DeliveryFailure }
+
 /** Ephemeral qualification from the existing screen owner, never a second input journal. */
 export type AgentInteractionTargetFrame = Readonly<{
   run: Readonly<AgentMuxRunRef>
@@ -195,6 +202,7 @@ export type AgentProvider = {
   /** High-level machine qualification for declared Native immediate messages; default/launch contracts remain separate. No TTY fallback. */
   prepareNativePromptInput?(context: AgentProviderPromptExecutionContext & { signal: AbortSignal;
     onPreparationPhase?(phase: AgentNativeInputPreparationPhase): void }): Promise<AgentProviderNativePromptInput>
+  qualifyNativeInputEnvironment?(context: AgentProviderPromptExecutionContext & { signal: AbortSignal; onPreparationPhase?: (phase: AgentNativeInputPreparationPhase) => void }): Promise<AgentProviderInputEnvironment>
   /** Provider owns native terminal decoding; unavailable refuses only this immediate operation. */
   inspectPromptExecution?(screen: AgentTerminalScreenSnapshot, strategy?: NonNullable<AgentCatalogEntry['capabilities']['promptExecution']>['immediate']): AgentPromptExecutionContext
   /** Complete current composer reason only; this observation never authorizes input. */
@@ -413,6 +421,21 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
     ...(definition.inspectPromptExecution ? { inspectPromptExecution: definition.inspectPromptExecution } : {}),
     ...(definition.prepareNativePromptInput ? { prepareNativePromptInput: definition.prepareNativePromptInput } : {}),
+    ...(definition.prepareNativePromptInput ? { async qualifyNativeInputEnvironment(context: AgentProviderPromptExecutionContext & { signal: AbortSignal; onPreparationPhase?: (phase: AgentNativeInputPreparationPhase) => void }): Promise<AgentProviderInputEnvironment> {
+      let phase: AgentNativeInputPreparationPhase = 'native-target'
+      try {
+        return { state: 'native-ready', input: await this.prepareNativePromptInput!({ ...context,
+          onPreparationPhase: value => { phase = value; context.onPreparationPhase?.(value) } }) }
+      } catch (error) {
+        if (context.signal.aborted && error === context.signal.reason) throw error
+        if (!(error instanceof AgentMuxError)) throw error
+        // The diagnostic code is retained for inspection only. It grants no
+        // capability and cannot turn a missing mechanism into temporary busy.
+        return { state: 'unconfirmed', mechanism: 'unconfirmed', phase,
+          reason: phase === 'native-target' ? 'original-target-unconfirmed' : 'original-protocol-unconfirmed',
+          wake: 'explicit-rejoin', failure: deliveryFailure(error) }
+      }
+    } } : {}),
     ...(definition.inspectPromptPreparationWait ? { inspectPromptPreparationWait: definition.inspectPromptPreparationWait } : {}),
     ...(definition.verifyPromptExecutionTransport ? { verifyPromptExecutionTransport: definition.verifyPromptExecutionTransport } : {}),
     ...(definition.preparePromptExecutionTransport ? { preparePromptExecutionTransport: definition.preparePromptExecutionTransport } : {}),

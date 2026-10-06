@@ -24,9 +24,24 @@ export type ProcessRunner = (
   options?: RunCommandOptions
 ) => Promise<CommandResult>
 
+/** Only this original producer, after its own ChildProcess close (or before
+ * launch), can confirm cancellation. Codes and a later aborted signal cannot. */
+class ConfirmedProcessCancellation extends AgentMuxError {
+  readonly signal!: AbortSignal
+  constructor(signal: AbortSignal, message: string) {
+    const cancellation = agentMuxCancellationError(message, 'COMMAND_ABORTED', signal.reason)
+    super(cancellation.message, cancellation.code, cancellation.detail)
+    Object.defineProperty(this, 'cause', { value: signal.reason })
+    Object.defineProperty(this, 'signal', { value: signal })
+  }
+}
+export function isConfirmedProcessCancellation(error: unknown, signal: AbortSignal): boolean {
+  return error instanceof ConfirmedProcessCancellation && error.signal === signal && error.cause === signal.reason
+}
+
 export const runProcess: ProcessRunner = async (command, args, options = {}) => {
   if (options.signal?.aborted) {
-    throw agentMuxCancellationError('Command was cancelled before launch.', 'COMMAND_ABORTED', options.signal.reason)
+    throw new ConfirmedProcessCancellation(options.signal, 'Command was cancelled before launch.')
   }
   const environment = { ...process.env }
   for (const [name, value] of Object.entries(options.env ?? {})) {
@@ -45,6 +60,9 @@ export const runProcess: ProcessRunner = async (command, args, options = {}) => 
     let outputBytes = 0
     let settled = false
     let timeout: NodeJS.Timeout | undefined
+    let cancellation: AgentMuxError | undefined
+    let kill: NodeJS.Timeout | undefined
+    let closeDeadline: NodeJS.Timeout | undefined
 
     const finishError = (error: Error): void => {
       if (settled) return
@@ -64,12 +82,30 @@ export const runProcess: ProcessRunner = async (command, args, options = {}) => 
       }
       target.push(chunk)
     }
-    const abort = (): void => finishError(agentMuxCancellationError('Command was cancelled.', 'COMMAND_ABORTED', options.signal?.reason))
+    const abort = (): void => {
+      if (settled) return
+      settled = true
+      if (timeout) clearTimeout(timeout)
+      options.signal!.removeEventListener('abort', abort)
+      cancellation = agentMuxCancellationError('Command was cancelled.', 'COMMAND_ABORTED', options.signal!.reason)
+      child.kill('SIGTERM')
+      kill = setTimeout(() => child.kill('SIGKILL'), 500)
+      closeDeadline = setTimeout(() => {
+        const error = new AgentMuxError('The cancelled command exit is unconfirmed.', 'COMMAND_EXIT_UNCONFIRMED')
+        Object.defineProperty(error, 'cause', { value: cancellation })
+        reject(error)
+      }, 1_500)
+    }
 
     child.once('error', finishError)
     child.stdout.on('data', (chunk) => accept(stdout, chunk))
     child.stderr.on('data', (chunk) => accept(stderr, chunk))
     child.once('close', (code) => {
+      if (cancellation) {
+        clearTimeout(kill); clearTimeout(closeDeadline)
+        reject(new ConfirmedProcessCancellation(options.signal!, cancellation.message))
+        return
+      }
       if (settled) return
       settled = true
       if (timeout) clearTimeout(timeout)
@@ -81,6 +117,7 @@ export const runProcess: ProcessRunner = async (command, args, options = {}) => 
       })
     })
     options.signal?.addEventListener('abort', abort, { once: true })
+    if (options.signal?.aborted) abort()
     if (options.timeoutMs !== undefined) {
       timeout = setTimeout(() => {
         finishError(new AgentMuxError('Command timed out.', 'COMMAND_TIMEOUT'))

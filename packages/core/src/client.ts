@@ -59,6 +59,9 @@ import {
   type AgentMuxMessageEnvelope
 } from './agent-global-message-queue.js'
 import { renderAgentMuxMessageEnvelope } from './agent-message-render.js'
+import { agentInputJournalKey, validateAgentInputWaitRef,
+  type AgentInputJournalIntent, type AgentInputSelector, type AgentInputSubmissionReceipt,
+  type AgentInputWaitRef, type AgentInputWaitStopReceipt, type AgentInputSavedEnvironment } from './agent-input-wait.js'
 import { answerAsk, cancelAsk, type AgentAsk } from './agent-ask.js'
 import {
   AGENT_TERMINAL_CAPABILITY_PERSIST_FAILED,
@@ -863,6 +866,15 @@ export class AgentMuxClient {
   private readonly deliveryAttempts: DeliveryAttemptStore
   private readonly store: AgentMuxAgentSessionStore
   private readonly messageQueue: DurableAgentMuxMessageQueue
+  /** Only the original live caller context; credentials are never journaled. */
+  private readonly inputWaitingContexts = new Map<string, {
+    ref: AgentInputWaitRef; input: AgentMuxAgentPromptInput; producer: 'prompt' | 'message';
+    authorAgentSessionId?: string; authority?: import('./prompt-submission.js').AgentPromptInputAuthority;
+    controller: AbortController; runtimeWake: boolean; requested: boolean; active: boolean; sequence: number
+  }>()
+  private readonly inputWaitingRecipients = new Map<string, { pending: Promise<void>; again: boolean }>()
+  private inputWaitingDisposed = false
+  private readonly inputWaitingUnsubscribe: () => void
   private readonly publisher = new AgentMuxClientEventPublisher()
   private readonly acp: AgentMuxAcpBridge
   private readonly hookServer: AgentHookServer
@@ -994,6 +1006,15 @@ export class AgentMuxClient {
       (options.store !== undefined || Boolean(process.env.AGENTMUX_AGENT_SESSION_STORE?.trim()))
       ? this.store.path : null
     this.messageQueue = new DurableAgentMuxMessageQueue(defaultAgentMuxMessageQueuePath(adoptedFileStore))
+    // Own the listener before any first save; initial admission also schedules a
+    // check, so restoration cannot be lost between saving and subscription.
+    this.inputWaitingUnsubscribe = this.publisher.onStatusEvent(event => {
+      if (event.type !== 'connection-state' || event.state !== 'restored' || this.inputWaitingDisposed) return
+      const recipients = new Set([...this.inputWaitingContexts.values()].filter(value => value.runtimeWake)
+        .map(value => value.ref.key.agentSessionId))
+      for (const value of this.inputWaitingContexts.values()) if (value.runtimeWake) value.requested = true
+      for (const recipient of recipients) void this.scheduleInputWaiting(recipient)
+    })
     this.registry = new AgentMuxAgentSessionRegistry(this.store, (session, error) => {
       if (error) this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
         code: error.code,
@@ -1074,6 +1095,11 @@ export class AgentMuxClient {
       agentInputCursors: this.agentInputCursors,
       screenEvidence: this.screenEvidence,
       requireAgentSession: (agentSessionId) => this.requireAgentSession(agentSessionId),
+      assertUncontrolledInput: async key => {
+        if (await this.messageQueue.inspectInput({ key })) throw new AgentMuxError(
+          'The original controlled input requires its original journal gate and intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      },
+      withUncontrolledInputClaim: (key, claim) => this.messageQueue.withUncontrolledInputClaim(key, claim),
       assertAgentRun: (session, run) => { this.assertAgentRun(session, run) },
       updateExactAgentSession: (agentSessionId, expectedRun, update, futureIntentId, author) =>
         this.updateExactAgentSession(agentSessionId, expectedRun, update, futureIntentId, author)
@@ -1769,6 +1795,13 @@ export class AgentMuxClient {
   }
 
   async dispose(): Promise<void> {
+    this.inputWaitingDisposed = true
+    this.inputWaitingUnsubscribe()
+    for (const value of this.inputWaitingContexts.values()) value.controller.abort()
+    this.inputWaitingContexts.clear()
+    // Release pre-gate observers, then let an already authorized operation
+    // settle through its original bounded Native owner before disposing it.
+    await Promise.allSettled([...this.inputWaitingRecipients.values()].map(value => value.pending))
     this.cancelReconnect()
     this.reopensDisposed = true
     this.providerReadsDisposed = true
@@ -4932,9 +4965,32 @@ export class AgentMuxClient {
       : input.terminalData, 'user', 'paste', readInputObservationField(input))
   }
 
-  async submitAgentPrompt(input: AgentMuxAgentPromptInput): Promise<void> {
+  async submitAgentPrompt(input: AgentMuxAgentPromptInput): Promise<void | AgentInputSubmissionReceipt> {
     input = { ...input, expectedRun: { ...input.expectedRun },
       ...(input.admissionIntent ? { admissionIntent: { ...input.admissionIntent } } : {}) } as AgentMuxAgentPromptInput
+    if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use submitAgentMessage.', 'MESSAGE_ENVELOPE_REQUIRED')
+    if (input.admissionIntent?.kind === 'manual-actor') {
+      this.validateControlledPrompt(input)
+      const key = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId }
+      const session = await this.currentStoredAgentSession(input.agentSessionId)
+      if (!sameRun(session.run, input.expectedRun)) throw new AgentMuxError('The original input Run changed before saving.', 'STALE_AGENT_SESSION')
+      const saved = await this.messageQueue.inspectInput({ key })
+      // A legacy claim has no new gate. Preserve its original read/join contract;
+      // absence of a journal row cannot prove that it was never dispatched.
+      if (saved || !await this.inspectAgentPromptSubmission(key)) {
+        const intent: AgentInputJournalIntent = { key, admissionIntent: { kind: 'manual-actor', expectedRun: input.expectedRun }, execution: 'immediate',
+          environment: this.inputSavedEnvironment(session), source: { kind: 'prompt', prompt: input.prompt,
+            ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: input.agentMuxNote }),
+            ...(input.authorHuman === undefined ? {} : { authorHuman: input.authorHuman }),
+            sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api'),
+            ...(input.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(input.sourceDevice) }) } }
+        const original = await this.messageQueue.savePromptInput(intent, async () => !await this.inspectAgentPromptSubmission(key))
+        if (original) return await this.acceptInputWaiting(original.control.ref, input, 'prompt')
+      }
+    }
+    const exactKey = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId }
+    if (await this.messageQueue.inspectInput({ key: exactKey })) throw new AgentMuxError(
+      'The original controlled input has another admission intent. An exact caller condition cannot replace it.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     await this.submitPromptInternal(input, undefined, undefined, false, () => {
       if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use submitAgentMessage.', 'MESSAGE_ENVELOPE_REQUIRED')
     })
@@ -4946,6 +5002,291 @@ export class AgentMuxClient {
     const original = await this.store.readPromptAdmission(key.agentSessionId, key.expectedRun, agentPromptInputId(key))
     if (original?.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, key)) throw new AgentMuxError('The input key names another original producer.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     return original
+  }
+
+  private validateControlledPrompt(input: AgentMuxAgentPromptInput): void {
+    if (input.admissionIntent?.kind !== 'manual-actor' || Object.keys(input.admissionIntent).some(k => k !== 'kind') ||
+        Object.hasOwn(input, 'afterSubmissionId') || input.execution !== 'immediate' || input.expectedCompletionId !== undefined ||
+        input.expectedFutureIntent !== undefined || input.expectedInputByte !== undefined || input.preparationRetry !== undefined) throw new AgentMuxError(
+      'Controlled waiting cannot change an exact, automatic or request input intent.', 'INVALID_AGENT_PROMPT')
+    safeId(input.operationId, 'Agent prompt operation id')
+    if (typeof input.prompt !== 'string' || !input.prompt.trim() && !input.agentMuxNote?.trim()) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
+    assertAgentPromptSize(composeAgentPrompt(input.prompt, input.agentMuxNote).text)
+  }
+
+  private inputSavedEnvironment(session: Pick<AgentMuxAgentSession, 'providerId' | 'executorId' | 'nativeHandle' | 'nativeBinding'>): AgentInputSavedEnvironment {
+    return { providerId: session.providerId, executorId: session.executorId,
+      ...(session.nativeHandle ? { nativeHandle: structuredClone(session.nativeHandle) } : {}),
+      ...(session.nativeBinding ? { nativeBinding: { source: session.nativeBinding.source, run: { ...session.nativeBinding.run } } } : {}) }
+  }
+
+  /** Same original journal/key selector. Inspect never constructs a new waiting generation. */
+  async inspectAgentInput(selector: AgentInputSelector, caller?: { agentSessionId: string; capability: string }): Promise<AgentInputSubmissionReceipt | null> {
+    const saved = await this.messageQueue.inspectInput(selector)
+    if (!saved) return null
+    if (caller) {
+      if (caller.agentSessionId === saved.intent.key.agentSessionId) await this.authorizeAgentCaller(caller.capability, caller.agentSessionId)
+      else await this.assertInputWaitingAuthor(saved.intent, caller)
+    }
+    const admission = await this.inspectAgentPromptSubmission(saved.intent.key)
+    const native = admission?.admission
+    const linked = native?.transport === 'native' && native.inputDispatch && saved.control.state === 'dispatch-authorized' &&
+      isDeepStrictEqual(native.inputDispatch.ref, saved.control.ref) && native.inputDispatch.gateId === saved.control.gateId
+    const status = native?.transport === 'native' && linked ? native.native.outcome === 'admitted' && native.acknowledged ? 'admitted'
+      : native.native.outcome === 'not-applied' && native.notApplied ? 'not-applied' : 'unknown'
+      : admission || saved.control.state === 'dispatch-authorized' ? 'unknown'
+      : saved.control.state === 'stopped-before-dispatch' ? 'stopped' : 'waiting'
+    const receipt: AgentInputSubmissionReceipt = { key: saved.intent.key, ref: saved.control.ref, control: saved.control,
+      persistence: 'confirmed', status, admission, observation: saved.control.state !== 'enabled' || admission ? 'closed'
+        : this.inputWaitingContexts.has(agentInputJournalKey(saved.intent.key)) ? 'owned' : 'rejoin-needed',
+      ...(saved.intent.source.kind === 'message' ? { originalControlOperationId: saved.intent.source.originalControlOperationId } : {}) }
+    return receipt
+  }
+
+  private async assertInputWaitingAuthor(intent: AgentInputJournalIntent, caller?: { agentSessionId: string; capability: string }): Promise<void> {
+    if (intent.source.kind === 'prompt') {
+      if (caller) throw new AgentMuxError('An Agent cannot take ownership of a local prompt producer.', 'MESSAGE_SENDER_MISMATCH')
+      return
+    }
+    const original = await this.messageQueue.readByOperationId(intent.source.originalControlOperationId)
+    if (!original || original.envelope.messageId !== intent.source.messageId) throw new AgentMuxError('Original input author is unconfirmed.', 'AGENT_INPUT_NOT_FOUND')
+    const sender = original.envelope.sender
+    if (sender.kind === 'human') {
+      if (caller) throw new AgentMuxError('An Agent cannot acquire the local original input author.', 'MESSAGE_SENDER_MISMATCH')
+      return
+    }
+    if (!caller) throw new AgentMuxError('The original Agent author needs its current capability.', 'AGENT_CAPABILITY_INVALID')
+    const authorized = await this.authorizeAgentCaller(caller.capability, caller.agentSessionId)
+    if (authorized.agentSessionId !== sender.agentSessionId || original.envelope.senderSessionId !== authorized.agentSessionId) {
+      throw new AgentMuxError('Input control belongs to its original Agent author.', 'MESSAGE_SENDER_MISMATCH')
+    }
+    // Reading/stopping the immutable original input does not address today's
+    // recipient Run. Rejoining still verifies the original envelope/Run before
+    // creating an observer, and dispatch retains its fresh author CAS.
+  }
+
+  async stopAgentInputWaiting(input: { ref: AgentInputWaitRef; cancelOperationId: string; caller?: { agentSessionId: string; capability: string } }): Promise<AgentInputWaitStopReceipt> {
+    const ref = validateAgentInputWaitRef(input.ref), saved = await this.messageQueue.inspectInput({ key: ref.key })
+    if (!saved) throw new AgentMuxError('The original input has no controlled waiting contract.', 'AGENT_INPUT_NOT_FOUND')
+    // A trusted local SDK/Host may stop observation without impersonating its
+    // Agent author. Managed callers still prove the original author capability.
+    if (input.caller) await this.assertInputWaitingAuthor(saved.intent, input.caller)
+    const admission = await this.inspectAgentPromptSubmission(ref.key)
+    const native = admission?.admission
+    const settled = native?.transport === 'native' && native.inputDispatch && isDeepStrictEqual(native.inputDispatch.ref, ref) &&
+      native.inputDispatch.gateId === saved.control.gateId && (native.native.outcome === 'admitted' && native.acknowledged === true || native.native.outcome === 'not-applied' && native.notApplied === true)
+    const receipt = await this.messageQueue.stopInputWaiting(ref, input.cancelOperationId, Boolean(settled), admission !== null)
+    const waiting = this.inputWaitingContexts.get(agentInputJournalKey(ref.key))
+    if (waiting && isDeepStrictEqual(waiting.ref, ref) && receipt.outcome !== 'stale-generation') {
+      waiting.controller.abort()
+      this.inputWaitingContexts.delete(agentInputJournalKey(ref.key))
+    }
+    const projection = await this.inspectAgentInput({ key: ref.key })
+    if (projection) this.publisher.publish({ type: 'agent-input', receipt: projection })
+    return receipt
+  }
+
+  async rejoinAgentInputWaiting(input: { ref: AgentInputWaitRef; caller?: { agentSessionId: string; capability: string } }): Promise<AgentInputSubmissionReceipt> {
+    const ref = validateAgentInputWaitRef(input.ref), saved = await this.messageQueue.inspectInput({ key: ref.key })
+    if (!saved) throw new AgentMuxError('The original input has no controlled waiting contract.', 'AGENT_INPUT_NOT_FOUND')
+    await this.assertInputWaitingAuthor(saved.intent, input.caller)
+    const prior = await this.inspectAgentPromptSubmission(ref.key)
+    if (prior || saved.control.state === 'dispatch-authorized') return (await this.inspectAgentInput({ key: ref.key }))!
+    const active = this.inputWaitingContexts.get(agentInputJournalKey(ref.key))
+    if (active?.active && isDeepStrictEqual(active.ref, ref)) return (await this.inspectAgentInput({ key: ref.key }))!
+    const prompt = await this.inputWaitingPrompt(saved.intent, input.caller)
+    const next = await this.messageQueue.reenableInputWaiting(ref)
+    const previous = this.inputWaitingContexts.get(agentInputJournalKey(ref.key))
+    if (previous) { previous.controller.abort(); this.inputWaitingContexts.delete(agentInputJournalKey(ref.key)) }
+    return await this.acceptInputWaiting(next, prompt.input, saved.intent.key.kind,
+      prompt.authorAgentSessionId, prompt.authority)
+  }
+
+  private async inputWaitingPrompt(intent: AgentInputJournalIntent, caller?: { agentSessionId: string; capability: string }): Promise<{
+    input: AgentMuxAgentPromptInput; authorAgentSessionId?: string; authority?: import('./prompt-submission.js').AgentPromptInputAuthority
+  }> {
+    const source = intent.source
+    if (source.kind === 'prompt') {
+      const { kind: _producer, ...content } = source
+      return { input: { ...content, agentSessionId: intent.key.agentSessionId, expectedRun: intent.key.expectedRun,
+        operationId: agentPromptInputId(intent.key), admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' } }
+    }
+    const original = await this.messageQueue.readByOperationId(source.originalControlOperationId)
+    if (!original) throw new AgentMuxError('Original message input is unknown.', 'AGENT_INPUT_NOT_FOUND')
+    const envelope = original.envelope
+    let authority: import('./prompt-submission.js').AgentPromptInputAuthority | undefined
+    if (envelope.sender.kind === 'agent-session') {
+      if (!caller) throw new AgentMuxError('The original Agent author needs its current capability.', 'AGENT_CAPABILITY_INVALID')
+      const author = { capability: caller.capability, callerAgentSessionId: caller.agentSessionId, senderAgentSessionId: envelope.sender.agentSessionId,
+        senderSessionId: envelope.senderSessionId, senderRunId: envelope.senderRunId, recipientSessionId: envelope.recipientSessionId, recipientRunId: envelope.recipientRunId }
+      const binding = await this.messageAuthorBinding(author)
+      authority = { binding, assertCurrent: async () => {
+        await this.messageAuthorBinding(author)
+        const sender = await this.currentStoredAgentSession(binding.agentSessionId), run = await this.requireCurrentAgentRun(sender)
+        if (run.state.type !== 'running') throw new AgentMuxError('The original author Run is not running.', 'AGENT_CAPABILITY_STALE_RUN')
+      } }
+    }
+    return { input: { agentSessionId: intent.key.agentSessionId, expectedRun: intent.key.expectedRun, operationId: agentPromptInputId(intent.key),
+      prompt: renderAgentMuxMessageEnvelope(envelope), admissionIntent: { kind: 'manual-actor' }, execution: 'immediate',
+      ...(envelope.sender.kind === 'human' ? { authorHuman: true } : {}),
+      ...(original.sourceChannel ? { sourceChannel: original.sourceChannel } : {}), ...(original.sourceDevice ? { sourceDevice: original.sourceDevice } : {}) },
+      ...(envelope.sender.kind === 'agent-session' ? { authorAgentSessionId: envelope.sender.agentSessionId } : {}), ...(authority ? { authority } : {}) }
+  }
+
+  private async acceptInputWaiting(ref: AgentInputWaitRef, input: AgentMuxAgentPromptInput, producer: 'prompt' | 'message',
+    authorAgentSessionId?: string, authority?: import('./prompt-submission.js').AgentPromptInputAuthority): Promise<AgentInputSubmissionReceipt> {
+    const saved = await this.messageQueue.inspectInput({ key: ref.key })
+    if (!saved) throw new AgentMuxError('Original input persistence is unconfirmed.', 'AGENT_INPUT_NOT_FOUND')
+    if (saved.control.state === 'enabled' && !await this.inspectAgentPromptSubmission(ref.key) && !this.inputWaitingDisposed) {
+      const id = agentInputJournalKey(ref.key)
+      if (!this.inputWaitingContexts.has(id)) {
+        const controller = new AbortController(), context = { ref: saved.control.ref, input, producer,
+          controller, runtimeWake: true, requested: true, active: false, sequence: saved.sequence,
+          ...(authorAgentSessionId ? { authorAgentSessionId } : {}), ...(authority ? { authority } : {}) }
+        this.inputWaitingContexts.set(id, context)
+        controller.signal.addEventListener('abort', () => {
+          if (this.inputWaitingContexts.get(id) === context) this.inputWaitingContexts.delete(id)
+        }, { once: true })
+        if (input.signal?.aborted) controller.abort(input.signal.reason)
+        else input.signal?.addEventListener('abort', () => controller.abort(input.signal!.reason), { once: true, signal: controller.signal })
+      }
+      // The durable firstsave ACK does not wait for Native qualification or a
+      // prior input's network reply. The original Core owner continues observing.
+      void this.scheduleInputWaiting(ref.key.agentSessionId)
+    }
+    const receipt = (await this.inspectAgentInput({ key: ref.key }))!
+    this.publisher.publish({ type: 'agent-input', receipt })
+    return receipt
+  }
+
+  private scheduleInputWaiting(recipient: string): Promise<void> {
+    const running = this.inputWaitingRecipients.get(recipient)
+    if (running) { running.again = true; return running.pending }
+    const state = { again: false, pending: Promise.resolve() }
+    state.pending = Promise.resolve().then(async () => {
+      do {
+        state.again = false
+        const relevant = [...this.inputWaitingContexts.values()].filter(value => value.ref.key.agentSessionId === recipient && value.requested)
+          .sort((a, b) => a.sequence - b.sequence)
+        for (const context of relevant) {
+          context.requested = false
+          if (!context.controller.signal.aborted) {
+            context.active = true
+            try { await this.advanceInputWaiting(context) } finally { context.active = false }
+          }
+        }
+      } while (state.again && !this.inputWaitingDisposed)
+    }).catch(error => {
+      this.publisher.publish({ type: 'agent-error', agentSessionId: recipient, code: 'AGENT_INPUT_WAIT_OBSERVATION_UNCONFIRMED',
+        message: error instanceof Error ? error.message : String(error), failure: deliveryFailure(error), evidence: { source: 'agentmux', observedAt: Date.now() } })
+    }).finally(() => { if (this.inputWaitingRecipients.get(recipient) === state) this.inputWaitingRecipients.delete(recipient) })
+    this.inputWaitingRecipients.set(recipient, state)
+    return state.pending
+  }
+
+  private async advanceInputWaiting(context: {
+    ref: AgentInputWaitRef; input: AgentMuxAgentPromptInput; producer: 'prompt' | 'message'; authorAgentSessionId?: string;
+    authority?: import('./prompt-submission.js').AgentPromptInputAuthority; controller: AbortController; runtimeWake: boolean; requested: boolean
+  }): Promise<void> {
+    const key = context.ref.key, saved = await this.messageQueue.inspectInput({ key })
+    if (!saved || !isDeepStrictEqual(saved.control.ref, context.ref) || saved.control.state !== 'enabled' ||
+        await this.inspectAgentPromptSubmission(key)) return
+    const waiting = async (reason: import('./agent-input-wait.js').AgentInputWaitReason) => {
+      context.runtimeWake = reason.wake === 'runtime-restored'
+      if (!context.runtimeWake) context.requested = false
+      const recorded = await this.messageQueue.recordInputWaiting(context.ref, reason)
+      const failure = reason.phase === 'native-environment' ? reason.observation?.failure : reason.failure
+      if (!recorded && failure) this.publisher.publish({ type: 'agent-error', agentSessionId: key.agentSessionId,
+        code: 'AGENT_INPUT_WAIT_OBSERVATION_UNCONFIRMED', message: failure.message, failure,
+        evidence: { source: 'agentmux', observedAt: Date.now(), run: key.expectedRun } })
+      // No event can advance this observation. Keep the durable waiting ref,
+      // and release its credentials until an explicitly authorized rejoin.
+      if (!context.runtimeWake) release()
+    }
+    const release = () => { if (this.inputWaitingContexts.get(agentInputJournalKey(key)) === context) this.inputWaitingContexts.delete(agentInputJournalKey(key)) }
+    if (!this.connected || !this.kernel.isConnected()) {
+      await waiting({ phase: 'runtime', reason: 'runtime-unavailable', wake: 'runtime-restored' })
+    } else {
+      let prepared: import('./agent-provider.js').AgentProviderNativePromptInput | undefined
+      let targetChanged = false
+      let dispatchDeclined = false
+      let preparationPhase: import('./agent-provider.js').AgentNativeInputPreparationPhase | 'input-coordination' = 'native-target'
+      try {
+        const assertTarget = (value: AgentMuxAgentSession) => {
+          const expected = saved.intent.environment, observed = this.inputSavedEnvironment(value)
+          const previous = expected.nativeHandle, current = observed.nativeHandle
+          const knownSourceChanged = previous && current && (previous.kind !== current.kind || previous.sessionId !== current.sessionId ||
+            previous.kind === 'provider' && current.kind === 'provider' && (previous.providerId !== current.providerId ||
+              previous.transcriptPath !== undefined && current.transcriptPath !== undefined && previous.transcriptPath !== current.transcriptPath) ||
+            previous.kind === 'acp' && current.kind === 'acp' && previous.adapterId !== current.adapterId)
+          targetChanged = !sameRun(value.run, key.expectedRun) || expected.providerId !== observed.providerId || expected.executorId !== observed.executorId ||
+            Boolean(knownSourceChanged) || Boolean(expected.nativeBinding && observed.nativeBinding && !isDeepStrictEqual(expected.nativeBinding, observed.nativeBinding)) ||
+            value.nativeSourceObservation?.state === 'changed' && sameRun(value.nativeSourceObservation.run, key.expectedRun)
+          if (targetChanged || !isDeepStrictEqual(observed, expected)) {
+            throw new AgentMuxError(targetChanged ? 'The original saved input environment changed; its target will not follow current metadata.'
+              : 'The original saved source is still unconfirmed; later observations cannot select a conversation for this input.',
+              targetChanged ? 'AGENT_PROMPT_SOURCE_CHANGED' : 'AGENT_NATIVE_INPUT_UNCONFIRMED')
+          }
+        }
+        assertTarget(await this.currentStoredAgentSession(key.agentSessionId))
+        const current = await this.registry.refresh(key.agentSessionId, key.expectedRun)
+        assertTarget(current)
+        try { await context.authority?.assertCurrent() } catch (error) {
+          await waiting({ phase: 'authorization', reason: 'author-authorization-needed', wake: 'explicit-rejoin', failure: deliveryFailure(error) })
+          const receipt = await this.inspectAgentInput({ key })
+          if (receipt) this.publisher.publish({ type: 'agent-input', receipt })
+          return
+        }
+        const run = await this.requireCurrentAgentRun(current), provider = this.providers.get(current.providerId)
+        const environment = provider.qualifyNativeInputEnvironment ? await provider.qualifyNativeInputEnvironment({ args: run.args, workspacePath: current.workspacePath,
+          ...(run.pid === null ? {} : { processId: run.pid }), ...(current.nativeHandle ? { nativeHandle: current.nativeHandle } : {}),
+          onPreparationPhase: phase => { preparationPhase = phase },
+          signal: AbortSignal.any([context.controller.signal, AbortSignal.timeout(40_000)]) }) : undefined
+        if (!environment || environment.state === 'unconfirmed') {
+          await waiting(context.controller.signal.aborted
+            ? { phase: 'observer', reason: 'observer-stopped', wake: 'explicit-rejoin',
+                failure: environment?.failure ?? deliveryFailure(context.controller.signal.reason), observation: { phase: environment?.phase ?? preparationPhase } }
+            : { phase: 'native-environment', reason: 'original-environment-unconfirmed', wake: 'explicit-rejoin',
+                mechanism: environment?.mechanism ?? 'unavailable', ...(environment ? { observation: { phase: environment.phase, failure: environment.failure } } : {}) })
+        } else {
+          prepared = environment.input
+          preparationPhase = 'input-coordination'
+          await this.submitPromptInternal({ ...context.input, signal: context.controller.signal }, context.authorAgentSessionId, assertTarget, false, undefined, context.authority, context.producer,
+            { prepared, authorizeDispatch: async () => {
+              const link = await this.messageQueue.authorizeInputDispatch(context.ref, context.controller.signal)
+              dispatchDeclined = link === null
+              return link
+            } })
+          if (key.kind === 'message') await this.messageQueue.recordDelivery(key.messageId, 'delivered')
+          release()
+        }
+      } catch (error) {
+        const admission = await this.inspectAgentPromptSubmission(key), controlled = await this.messageQueue.inspectInput({ key })
+        if (admission || controlled?.control.state !== 'enabled') {
+          release()
+          // The original stop/gate/Native outcome remains unchanged. An
+          // additional preparation/cleanup failure is still observable; only
+          // this exact caller's expected abort reason is already accounted for.
+          if (!dispatchDeclined && (!context.controller.signal.aborted || error !== context.controller.signal.reason)) this.publisher.publish({
+            type: 'agent-error', agentSessionId: key.agentSessionId, code: 'AGENT_INPUT_WAIT_OBSERVATION_UNCONFIRMED',
+            message: error instanceof Error ? error.message : String(error), failure: deliveryFailure(error),
+            evidence: { source: 'agentmux', observedAt: Date.now(), run: key.expectedRun } })
+        }
+        else await waiting(context.controller.signal.aborted
+          ? { phase: 'observer', reason: 'observer-stopped', wake: 'explicit-rejoin', failure: deliveryFailure(error), observation: { phase: preparationPhase } }
+          : !this.connected || !this.kernel.isConnected()
+          ? { phase: 'runtime', reason: 'runtime-unavailable', wake: 'runtime-restored', failure: deliveryFailure(error) }
+          : error instanceof AgentMuxError ? { phase: 'native-environment', reason: targetChanged ? 'original-target-changed' : 'original-environment-unconfirmed', wake: 'explicit-rejoin', mechanism: 'unconfirmed',
+            observation: { phase: preparationPhase, failure: deliveryFailure(error) } }
+          : { phase: 'service', reason: 'observation-failed', wake: 'explicit-rejoin', failure: deliveryFailure(error), observation: { phase: preparationPhase } })
+      } finally { if (prepared) try { await prepared.close() } catch (error) {
+        this.publisher.publish({ type: 'agent-error', agentSessionId: key.agentSessionId, code: 'AGENT_NATIVE_INPUT_CLEANUP_UNCONFIRMED',
+          message: error instanceof Error ? error.message : String(error), evidence: { source: 'agentmux', observedAt: Date.now(), run: key.expectedRun },
+          failure: deliveryFailure(error) })
+      } }
+    }
+    const receipt = await this.inspectAgentInput({ key })
+    if (receipt) this.publisher.publish({ type: 'agent-input', receipt })
   }
 
   /** Read the original failed invocation, including while its Agent or Runtime is unavailable. */
@@ -5050,7 +5391,8 @@ export class AgentMuxClient {
 
   private async submitPromptInternal(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string,
     assertSession?: (session: AgentMuxAgentSession) => void, questionReply = false, assertInput?: () => void,
-    authority?: import('./prompt-submission.js').AgentPromptInputAuthority, producer: 'prompt' | 'message' = 'prompt'): Promise<void> {
+    authority?: import('./prompt-submission.js').AgentPromptInputAuthority, producer: 'prompt' | 'message' = 'prompt',
+    nativeControl?: { prepared: import('./agent-provider.js').AgentProviderNativePromptInput; authorizeDispatch(): Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> }): Promise<void> {
     const startedAt = Date.now()
     const id = (value: unknown): string | null => typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\0\r\n]/u.test(value) ? value : null
     let sourceDevice: import('./types.js').AgentOperationDevice | undefined
@@ -5066,7 +5408,7 @@ export class AgentMuxClient {
     let stage = 'validation'
     try {
       assertInput?.()
-      await this.performPromptSubmission(input, authorAgentSessionId, assertSession, questionReply, value => { stage = value }, authority, producer)
+      await this.performPromptSubmission(input, authorAgentSessionId, assertSession, questionReply, value => { stage = value }, authority, producer, nativeControl)
     } catch (error) {
       // All observations below come from this invocation's failure boundary. Missing
       // projections stay missing; they do not authorize replay of the logical message.
@@ -5102,7 +5444,8 @@ export class AgentMuxClient {
 
   private async performPromptSubmission(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string,
     assertSession?: (session: AgentMuxAgentSession) => void, questionReply = false, stage: (value: string) => void = () => {},
-    authority?: import('./prompt-submission.js').AgentPromptInputAuthority, producer: 'prompt' | 'message' = 'prompt'): Promise<void> {
+    authority?: import('./prompt-submission.js').AgentPromptInputAuthority, producer: 'prompt' | 'message' = 'prompt',
+    nativeControl?: { prepared: import('./agent-provider.js').AgentProviderNativePromptInput; authorizeDispatch(): Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> }): Promise<void> {
     stage('connection')
     this.requireConnected()
     stage('validation')
@@ -5165,10 +5508,10 @@ export class AgentMuxClient {
       if (input.expectedCompletionId !== undefined || input.expectedFutureIntent !== undefined || input.preparationRetry !== undefined) {
         throw new AgentMuxError('The requested Native admission contract is unavailable. This submission attempt has ended before dispatch; the original Session and terminal remain available. Keep the original caller input.', 'AGENT_NATIVE_INPUT_WAITING', JSON.stringify({ phase: 'native-intent', reason: 'automatic-admission-unavailable' }))
       }
-      let prepared: import('./agent-provider.js').AgentProviderNativePromptInput | undefined
+      let prepared: import('./agent-provider.js').AgentProviderNativePromptInput | undefined = nativeControl?.prepared
       try {
         const original = await this.store.readPromptAdmission(session.agentSessionId, expectedRun, operationId)
-        if (!original) {
+        if (!original && !prepared) {
           stage('native-input-environment')
           const run = await this.requireCurrentAgentRun(session)
           const preparationSignal = input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(40_000)]) : AbortSignal.timeout(40_000)
@@ -5196,11 +5539,11 @@ export class AgentMuxClient {
         const delivered = await this.promptSubmission.submitNativeInputPlan(session, currentRun,
           operationId, outbound, admissionIntent, message, input.execution ?? 'default', prepared, input.signal, assertSession, authority,
           producer === 'prompt' ? { kind: producer, agentSessionId: session.agentSessionId, expectedRun, submissionId: operationId }
-            : { kind: producer, agentSessionId: session.agentSessionId, expectedRun, messageId: operationId })
+            : { kind: producer, agentSessionId: session.agentSessionId, expectedRun, messageId: operationId }, nativeControl?.authorizeDispatch)
         stage('receipt')
         await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered)
       } finally {
-        if (prepared) try { await prepared.close() } catch (error) {
+        if (prepared && !nativeControl) try { await prepared.close() } catch (error) {
           // Cleanup cannot revoke an admitted Native message or close the healthy Agent.
           this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId, code: 'AGENT_NATIVE_INPUT_CLEANUP_UNCONFIRMED',
             message: error instanceof Error ? error.message : String(error), evidence: { source: 'user', observedAt: Date.now(), run: session.run } })
@@ -5320,15 +5663,15 @@ export class AgentMuxClient {
   }
 
   /** The one public A2A input owner: authenticated identity, durable intent, then source plus body. */
-  async submitAgentMessage(input: AgentMuxAgentMessageInput): Promise<void> {
+  async submitAgentMessage(input: AgentMuxAgentMessageInput): Promise<void | AgentInputSubmissionReceipt> {
     input = { ...input, ...(input.caller ? { caller: { ...input.caller } } : {}) }
-    this.requireConnected()
     const envelope = validateAgentMuxMessageEnvelope(input.envelope)
     const admissionIntent: AgentPromptAdmissionIntent = input.admissionIntent === undefined
       ? { kind: 'exact-condition', condition: validateAgentPromptCondition(input.condition) }
       : validateAgentPromptAdmissionIntent(input.admissionIntent)
     if (admissionIntent.kind === 'manual-actor' && (Object.hasOwn(input, 'condition') || input.execution !== 'immediate')) throw new AgentMuxError('Manual message input cannot replace a caller condition.', 'INVALID_AGENT_PROMPT')
     const expectedRun = admissionIntent.kind === 'exact-condition' ? admissionIntent.condition.expectedRun : admissionIntent.expectedRun
+    if (admissionIntent.kind === 'exact-condition') this.requireConnected()
     const sourceChannel = normalizeMessageChannel(input.sourceChannel ?? 'agent-message')
     const sourceDevice = input.sourceDevice === undefined ? undefined : normalizeOperationDevice(input.sourceDevice)
     if (envelope.recipient.kind !== 'agent-session' || envelope.recipient.agentSessionId !== input.agentSessionId ||
@@ -5354,13 +5697,24 @@ export class AgentMuxClient {
     } else if (input.caller || envelope.senderSessionId !== null || envelope.senderRunId !== null) {
       throw new AgentMuxError('Local ingress cannot claim an Agent author.', 'MESSAGE_SENDER_MISMATCH')
     }
+    const recipient = await this.currentStoredAgentSession(input.agentSessionId)
+    if (!sameRun(recipient.run, expectedRun)) throw new AgentMuxError('The original message Run changed before saving.', 'STALE_AGENT_SESSION')
+    const key = { kind: 'message' as const, agentSessionId: input.agentSessionId, expectedRun, messageId: envelope.messageId }
+    const originalAdmission = admissionIntent.kind === 'manual-actor' ? await this.inspectAgentPromptSubmission(key) : undefined
     const queued = await this.messageQueue.append({ ...envelope,
       sourceChannel, ...(sourceDevice ? { sourceDevice } : {}),
       ...(admissionIntent.kind === 'manual-actor' ? { admissionIntent } : {}),
-      ...(input.execution === undefined ? {} : { execution: input.execution }) })
+      ...(input.execution === undefined ? {} : { execution: input.execution }) },
+      admissionIntent.kind === 'manual-actor' && !originalAdmission ? { inputEnvironment: this.inputSavedEnvironment(recipient),
+        originalClaimAbsent: async () => !await this.inspectAgentPromptSubmission(key) } : undefined)
     if (admissionIntent.kind === 'exact-condition' && queued.promptCondition &&
         !isDeepStrictEqual(queued.promptCondition, admissionIntent.condition)) throw new AgentMuxError(
       'The caller condition conflicts with the original saved message condition.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    if (queued.input) {
+      if (admissionIntent.kind !== 'manual-actor') throw new AgentMuxError('The caller condition cannot replace the original controlled manual input.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      const original = await this.inputWaitingPrompt(queued.input.intent, input.caller)
+      return await this.acceptInputWaiting(queued.input.control.ref, original.input, 'message', original.authorAgentSessionId, original.authority)
+    }
     if (['delivered', 'accepted', 'replied'].includes(queued.delivery.state)) return
     if (queued.delivery.state !== 'queued') throw new AgentMuxError('This message has a final delivery outcome.', 'AGENT_DELIVERY_STATE_INVALID')
     const originalIntent: AgentPromptAdmissionIntent = queued.admissionIntent ?? {
@@ -5368,6 +5722,7 @@ export class AgentMuxClient {
         if (admissionIntent.kind !== 'exact-condition') throw new AgentMuxError('The original message intent is unconfirmed.', 'AGENT_PROMPT_OPERATION_CONFLICT')
         return admissionIntent.condition
       }) }
+    this.requireConnected()
     const promptInput = { agentSessionId: input.agentSessionId,
       operationId: envelope.messageId, prompt: renderAgentMuxMessageEnvelope(envelope), allowUncertainTurn: true,
       ...(envelope.sender.kind === 'human' ? { authorHuman: true } : {}),

@@ -16,7 +16,10 @@ import {
   agentPromptPredecessor,
   agentPromptNotApplied,
   validateAgentPromptCondition,
+  validateAgentPromptInputBinding,
   type AgentPromptCondition,
+  type AgentPromptInputBinding,
+  type AgentInputSubmissionReceipt,
   type AgentPromptExecution,
   type AgentMessageChannel,
   type AgentSessionQuestionReplyReceipt,
@@ -1728,14 +1731,24 @@ export class RuntimeController {
     control: Extract<SessionControl, { kind: 'agent' }>,
     prompt: string,
     operationId: string,
-    condition: AgentPromptCondition,
+    condition: AgentPromptInputBinding,
     automation?: { completionId?: string; futureIntent?: { intentId: string; occurrenceAt: number }; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
     choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence },
     authorHuman?: boolean,
     agentMuxNote?: string,
     sourceChannel: AgentMessageChannel = 'message-tool'
-  ): Promise<void> {
-    const capturedCondition = validateAgentPromptCondition(condition)
+  ): Promise<void | AgentInputSubmissionReceipt> {
+    const capturedCondition = validateAgentPromptInputBinding(condition)
+    if ('admissionIntent' in capturedCondition) {
+      if (automation || choice?.execution !== 'immediate' || choice.preparationRetry || choice.allowUncertainTurn) throw new AgentMuxError(
+        'The original automatic or conditional prompt cannot become a new manual input.', 'INVALID_AGENT_PROMPT')
+      if (control.run.runId !== capturedCondition.expectedRun.runId) throw new AgentMuxError('Prompt intent targets another Run.', 'STALE_AGENT_SESSION')
+      return await this.trackHostLifecycleOperation(control.hostId, async () => await this.configuredClient(control.hostId).submitAgentPrompt({
+        agentSessionId: control.agentSessionId, ...capturedCondition, execution: 'immediate', operationId, prompt,
+        ...(agentMuxNote === undefined ? {} : { agentMuxNote }), sourceChannel,
+        ...(authorHuman === true ? { authorHuman: true } : {})
+      }))
+    }
     await this.trackHostLifecycleOperation(control.hostId, async () => {
       const client = await observeProgressRead(automation?.signal, () => this.connectedClient(control.hostId))
       if (control.run.runId !== capturedCondition.expectedRun.runId) {
@@ -1806,14 +1819,31 @@ export class RuntimeController {
     })
   }
 
-  async submitMessage(control: AgentSessionControl, message: AgentMuxAgentMessageSubmission): Promise<void> {
-    await this.trackHostLifecycleOperation(control.hostId, async () => {
-      const client = await this.connectedClient(control.hostId)
+  async submitMessage(control: AgentSessionControl, message: AgentMuxAgentMessageSubmission): Promise<void | AgentInputSubmissionReceipt> {
+    return await this.trackHostLifecycleOperation(control.hostId, async () => {
+      const client = message.admissionIntent ? this.configuredClient(control.hostId) : await this.connectedClient(control.hostId)
       if (control.run.runId !== (message.admissionIntent?.expectedRun ?? message.condition!.expectedRun).runId) {
         throw new AgentMuxError('Message intent targets another Run.', 'STALE_AGENT_SESSION')
       }
-      await client.submitAgentMessage({ ...message, agentSessionId: control.agentSessionId })
+      return await client.submitAgentMessage({ ...message, agentSessionId: control.agentSessionId })
     })
+  }
+
+  private assertInputControl(control: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey): void {
+    if (control.agentSessionId !== key.agentSessionId || control.run.runId !== key.expectedRun.runId) throw new AgentMuxError(
+      'The original input control names another Session or Run.', 'STALE_AGENT_SESSION')
+  }
+  async inspectInput(control: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey) {
+    this.assertInputControl(control, key)
+    return await this.configuredClient(control.hostId).inspectAgentInput({ key })
+  }
+  async stopInputWaiting(control: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef, cancelOperationId: string) {
+    this.assertInputControl(control, ref.key)
+    return await this.configuredClient(control.hostId).stopAgentInputWaiting({ ref, cancelOperationId })
+  }
+  async rejoinInputWaiting(control: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef) {
+    this.assertInputControl(control, ref.key)
+    return await this.trackHostLifecycleOperation(control.hostId, async () => await this.configuredClient(control.hostId).rejoinAgentInputWaiting({ ref }))
   }
 
   private progressInputObserver: ((control: AgentSessionControl, signal?: AbortSignal) => Promise<boolean>) | undefined
@@ -2280,20 +2310,24 @@ export class RuntimeController {
   }
 
   private async connectedClient(hostId: string, scope: 'runtime' | 'session' = 'session'): Promise<AgentMuxClient> {
+    const client = this.configuredClient(hostId)
+    try {
+      if (scope === 'runtime') await client.connectRuntime()
+      else await client.connect()
+    } catch (error) {
+      this.endpointWarnings.set(hostId, endpointWarning(hostId, 'Connecting to Runtime', error))
+      throw error
+    }
+    return client
+  }
+
+  /** Durable semantic intake does not require the original Runtime connection. */
+  private configuredClient(hostId: string): AgentMuxClient {
     if (this.hostReconfigurationReservations.has(hostId)) {
       throw new Error(`Runtime host is being reconfigured: ${hostId}`)
     }
     const host = this.hosts.get(hostId)
     if (!host) throw new Error(`Runtime host is not configured: ${hostId}`)
-    try {
-      if (scope === 'runtime') await host.client.connectRuntime()
-      else {
-        await host.client.connect()
-      }
-    } catch (error) {
-      this.endpointWarnings.set(hostId, endpointWarning(hostId, 'Connecting to Runtime', error))
-      throw error
-    }
     return host.client
   }
 

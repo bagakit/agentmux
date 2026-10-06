@@ -39,7 +39,7 @@ import type { AgentMuxNameContext } from '@agentmux/core/control'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
 import { sessionLaunchResult } from '../shared/session-launch-result.js'
-import { sessionInputWriteResult } from '../shared/session-input-result.js'
+import { sessionInputWriteResult, sessionInputOperationResult } from '../shared/session-input-result.js'
 import { sessionObservationResult } from '../shared/session-observation-result.js'
 import { sessionAgentLaunchResult } from '../shared/session-agent-launch-result.js'
 import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
@@ -1435,7 +1435,7 @@ export async function registerIpc(args: {
     session: AgentSessionControl,
     prompt: string,
     operationId: string,
-    condition: AgentPromptCondition,
+    condition: import('@agentmux/core').AgentPromptInputBinding,
     choice?: Parameters<RuntimeController['submitPrompt']>[5],
     authorHuman?: boolean,
     agentMuxNote?: string,
@@ -1445,6 +1445,12 @@ export async function registerIpc(args: {
     goalDispatch?: GoalDispatchReference
   ): Promise<SessionInputWriteResult> => sessionInputWriteResult(async () => {
     let effectiveAuthorHuman = false
+    if ('admissionIntent' in condition) {
+      assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+      if (goalContinuation || goalPmo || goalDispatch) throw new AgentMuxError('The original Goal input cannot become a new manual message.', 'CONTROL_REQUEST_CONFLICT')
+      pauseUserProgress(session, 'Paused for your message.')
+      return await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, authorHuman, agentMuxNote, sourceChannel)
+    }
     if (goalPmo) {
       assertManualPromptSenderTrusted(event.sender, args.window.webContents)
       await pmoGoal(goalPmo)
@@ -1461,7 +1467,7 @@ export async function registerIpc(args: {
         assertManualPromptSenderTrusted(event.sender, args.window.webContents)
         if (!args.progressLoops || typeof goalContinuation.goalId !== 'string' || typeof goalContinuation.loopId !== 'string') throw new AgentMuxError('The original Goal input owner is unavailable.', 'CONTROL_UNAVAILABLE')
         await args.progressLoops.submitGoalInitial({ hostId: session.hostId, agentSessionId: session.agentSessionId }, goalContinuation.goalId, goalContinuation.loopId, operationId, prompt, condition,
-          (isCurrent, signal) => args.runtime.submitPrompt(session, prompt, operationId, condition, { isCurrent, signal }, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel))
+          async (isCurrent, signal) => { await args.runtime.submitPrompt(session, prompt, operationId, condition, { isCurrent, signal }, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel) })
       } else {
         pauseUserProgress(session, 'Paused for your message.')
         await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel)
@@ -1485,8 +1491,21 @@ export async function registerIpc(args: {
     return await args.runtime.replyQuestion(session, input, config)
   })
   handle('sessions:submitMessage', async (session: AgentSessionControl, message: Parameters<RuntimeController['submitMessage']>[1]) => sessionInputWriteResult(async () => {
-    await args.runtime.submitMessage(session, message)
+    const receipt = await args.runtime.submitMessage(session, message)
     pauseUserProgress(session, 'Paused for your message.')
+    return receipt
+  }))
+  handleWithEvent('sessions:inspectInput', async (event, session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey) => sessionInputOperationResult(async () => {
+    assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    return await args.runtime.inspectInput(session, key)
+  }))
+  handleWithEvent('sessions:stopInputWaiting', async (event, session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef, cancelOperationId: string) => sessionInputOperationResult(async () => {
+    assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    return await args.runtime.stopInputWaiting(session, ref, cancelOperationId)
+  }))
+  handleWithEvent('sessions:rejoinInputWaiting', async (event, session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef) => sessionInputOperationResult(async () => {
+    assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    return await args.runtime.rejoinInputWaiting(session, ref)
   }))
   handle('sessions:respondInteraction', async (
     session: AgentSessionControl,

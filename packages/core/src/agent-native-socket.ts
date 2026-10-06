@@ -6,7 +6,7 @@ import { AgentMuxError } from './errors.js'
 import { deliveryFailure, type DeliveryFailure } from './delivery-attempt.js'
 import { openNativeProcessImage } from './agent-native-process.js'
 import { resolveCoreBinPath } from './runtime-paths.js'
-import { runProcess } from './process-runner.js'
+import { isConfirmedProcessCancellation, runProcess } from './process-runner.js'
 
 export type NativeSocketBinding = Readonly<{
   schema: 1; runPid: number; tuiPid: number; peerPid: number; uid: number
@@ -161,7 +161,8 @@ export async function openNativeSocketChannel(runPid: number, endpoint: string, 
   child.once('error', () => fail(failure('native-peer', 'observer-start')))
   child.stdin.on('error', () => fail(failure('native-rpc', 'request-write')))
   const closed = new Promise<void>(resolve => child.once('close', () => { fail(failure('native-rpc', 'connection-closed')); resolve() }))
-  const abort = () => { fail(failure('native-peer', 'observation-cancelled')); child.kill('SIGTERM') }
+  let abortFailure: AgentMuxError | undefined
+  const abort = () => { abortFailure ??= failure('native-peer', 'observation-cancelled'); fail(abortFailure); child.kill('SIGTERM') }
   signal.addEventListener('abort', abort, { once: true })
   const close = async () => {
     signal.removeEventListener('abort', abort)
@@ -174,7 +175,9 @@ export async function openNativeSocketChannel(runPid: number, endpoint: string, 
     })]) } finally { clearTimeout(term); clearTimeout(kill); clearTimeout(deadline) }
   }
   try {
-    await ready; signal.throwIfAborted()
+    await ready
+    if (protocolFailure) throw protocolFailure
+    signal.throwIfAborted()
     const current = observed!
     const tui = await openNativeProcessImage(current.tuiPid, signal)
     const imageIdentity = tui.identity
@@ -221,7 +224,14 @@ export async function openNativeSocketChannel(runPid: number, endpoint: string, 
         }
       }, close }
   } catch (error) {
-    try { await close() } catch (cleanup) { throw nativeInputCleanupFailure(error, cleanup) }
-    throw error
+    // Freeze the already recorded transport failure before close can produce
+    // its own later EOF. An OS await abort cannot replace that earlier cause.
+    const primary = protocolFailure !== undefined && protocolFailure !== abortFailure ? protocolFailure : error
+    try { await close() } catch (cleanup) { throw nativeInputCleanupFailure(primary, cleanup) }
+    // Only this exact observer cancellation, after its original helper exited,
+    // may become the caller's original reason. A prior failure stays original.
+    if (signal.aborted && (abortFailure !== undefined && primary === abortFailure || primary === signal.reason ||
+        isConfirmedProcessCancellation(primary, signal))) throw signal.reason
+    throw primary
   }
 }

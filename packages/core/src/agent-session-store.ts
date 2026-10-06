@@ -1,6 +1,7 @@
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
+import { validateAgentInputControlId, validateAgentInputWaitRef } from './agent-input-wait.js'
 import { validateAgentPromptAdmissionIntent, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { parseAgentForkSource } from './agent-fork.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
@@ -1359,6 +1360,13 @@ export function normalizePromptCompletionAdmission(value: unknown): NonNullable<
   })()
   return {
     ...(admission.inputKey === undefined ? {} : { inputKey: validateAgentPromptInputKey(admission.inputKey) }),
+    ...(admission.inputDispatch === undefined ? {} : { inputDispatch: (() => {
+      const dispatch = record(admission.inputDispatch, 'original input dispatch gate')
+      const ref = validateAgentInputWaitRef(dispatch.ref), key = validateAgentPromptInputKey(admission.inputKey)
+      if (admission.transport !== 'native' || !isDeepStrictEqual(ref.key, key)) throw new AgentMuxError(
+        'Original dispatch gate does not name this Native input.', 'INVALID_AGENT_SESSION_STORE')
+      return { ref, gateId: validateAgentInputControlId(dispatch.gateId) }
+    })() }),
     ...(admission.submissionId === undefined ? {} : { submissionId: string(admission.submissionId, 'promptCompletionAdmission.submissionId') }),
     ...(admission.completionId === undefined ? {} : { completionId: string(admission.completionId, 'promptCompletionAdmission.completionId') }),
     ...(admission.outputCursorBytes === undefined ? {} : { outputCursorBytes: timestamp(admission.outputCursorBytes, 'prompt admission output boundary') }),

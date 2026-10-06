@@ -245,7 +245,9 @@ export function errorIdentity(message: string): string {
 
 /** The unabridged text of a caught value, before any framing is stripped. Never lossy. */
 function rawText(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause)
+  if (cause instanceof Error) return cause.message
+  const message = typeof cause === 'object' && cause !== null ? (cause as Record<string, unknown>).message : undefined
+  return typeof message === 'string' && message.length > 0 ? message : String(cause)
 }
 
 /** A string field off a caught value, only when it is actually a non-empty string. */

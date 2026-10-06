@@ -29,6 +29,20 @@ const schema = `
   CREATE INDEX dispatch_order ON dispatch_events(source_message_id, event_sequence);
 `
 
+/** Internal projections in the original validated journal/writer transaction. */
+export const inputControlJournalSchema = `
+  CREATE TABLE IF NOT EXISTS input_intents (
+    input_id TEXT PRIMARY KEY, recipient_id TEXT NOT NULL,
+    intent_sequence INTEGER NOT NULL UNIQUE, control_sequence INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS input_recipient_order ON input_intents(recipient_id, intent_sequence);
+  CREATE TABLE IF NOT EXISTS input_stops (
+    input_id TEXT NOT NULL, generation INTEGER NOT NULL,
+    cancel_operation_id TEXT NOT NULL, sequence INTEGER NOT NULL UNIQUE,
+    PRIMARY KEY(input_id, generation, cancel_operation_id)
+  );
+`
+
 export function configureMessageJournal(db: DatabaseSync): void {
   // DELETE + EXTRA keeps SQLite's atomic rollback protocol and its directory-sync ACK.
   // No synchronous busy wait may occupy the terminal/Hook event loop.
@@ -160,6 +174,7 @@ export async function openMessageJournal(
     configureMessageJournal(db)
     db.exec('BEGIN IMMEDIATE')
     db.exec(schema)
+    db.exec(inputControlJournalSchema)
     db.prepare('INSERT INTO metadata VALUES (?, ?)').run(incarnation, sourceHash)
     if (archive) for await (const record of legacyRecords(archive)) importRecord(db, record)
     db.exec('COMMIT')

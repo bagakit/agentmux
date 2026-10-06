@@ -1,5 +1,8 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { serviceNoticeAriaLive } from '../lib/service-window-notice'
+import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { useEffect, useRef, useState } from 'react'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 const ThemeActionDismissIcon = semanticIconComponent('action.dismiss')
@@ -47,6 +50,19 @@ export function TransientErrorNotice({
   kind?: Parameters<typeof serviceNoticeAriaLive>[0]
 }) {
   const ariaLive = serviceNoticeAriaLive(kind)
+  const [copy, setCopy] = useState<{ text: string; state: 'copying' | 'copied' | 'failed'; failure?: string } | null>(null)
+  const generation = useRef(0), currentError = useRef(error)
+  if (currentError.current !== error) { currentError.current = error; ++generation.current }
+  useEffect(() => () => { ++generation.current }, [])
+  async function copyDiagnostic(text: string) {
+    const action = ++generation.current
+    setCopy({ text, state: 'copying' })
+    let failure: unknown
+    const accepted = await copyTextToClipboard(text, cause => { failure = cause })
+    if (generation.current === action) setCopy({ text, state: accepted ? 'copied' : 'failed',
+      ...(failure === undefined ? {} : { failure: presentError(failure) }) })
+  }
+  const copied = copy?.text === error ? copy : null
   if (error && !dismissed) {
     return (
       <aside className="error-notice" data-volume={ariaLive} role={ariaLive === 'assertive' ? 'alert' : 'status'} aria-live={ariaLive}>
@@ -56,6 +72,10 @@ export function TransientErrorNotice({
             <span className="error-notice__summary">{summary}</span>
             <details className="service-window__details error-notice__details">
               <summary>Details</summary>
+              <button className="small-button" type="button" aria-label="复制完整诊断" disabled={copied?.state === 'copying'} onClick={() => void copyDiagnostic(error)}>
+                {copied?.state === 'copied' ? '已复制' : copied?.state === 'failed' ? '复制失败，请重试' : copied?.state === 'copying' ? '复制中…' : '复制完整诊断'}
+              </button>
+              {copied?.failure ? <p role="status">{copied.failure}</p> : null}
               <div className="error-notice__original">{error}</div>
             </details>
           </div>

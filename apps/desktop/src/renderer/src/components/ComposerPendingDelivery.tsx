@@ -2,7 +2,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject, type ReactNode } from 'react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import { queuedMessageState, type ComposerQueuedMessage, type ArchiveQueuedMessage, type MoveQueuedMessageToDraft } from './ComposerOutbox'
+import { queuedMessageState, queuedInputFailure, QueuedDeliveryFailure, type ComposerQueuedMessage, type ArchiveQueuedMessage, type MoveQueuedMessageToDraft } from './ComposerOutbox'
 import { ComposerQueuedMessageEditor, type EditQueuedMessage } from './ComposerQueuedMessageEditor'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 import { observeTerminalInputGeometry, readTerminalInputOverlapTop } from '../lib/terminal-view-observation'
@@ -318,7 +318,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
             const canSend = !conditionChanged && entry.id !== editingId && !state.busy && Boolean(onSend)
             const Icon = state.busy ? ThemeStatusLoadingIcon : entry.unconfirmed ? ThemeStatusUnknownIcon : !entry.deliverable || entry.error || entry.status === 'failed' ? ThemeStatusWarningIcon : ThemeObjectScheduleIcon
             const editing = entry.id === editingId && Boolean(onEdit)
-            const explained = !editing && Boolean(entry.preparationWait || entry.unconfirmed || entry.error || entry.status === 'failed' || !entry.deliverable || pendingInteraction)
+            const explained = !editing && Boolean(entry.inputReceipt || entry.preparationWait || entry.unconfirmed || entry.error || entry.status === 'failed' || !entry.deliverable || pendingInteraction)
             const copied = copyResult?.id === entry.id && copyResult.text === entry.text ? copyResult.state : 'idle'
             return <li key={entry.id} className="composer-pending__card" data-operation-id={entry.id}
               data-queue-index={index} style={{ '--queue-depth': Math.min(4, Math.abs(index - currentIndex)) } as CSSProperties} data-selected={entry.id === selected?.id} data-busy={state.busy} data-editing={editing} data-explained={explained}
@@ -331,9 +331,10 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
                 if (surfaceRef.current?.contains(document.activeElement)) listRef.current?.querySelector<HTMLElement>('[data-selected="true"]')?.focus()
               }} /> : <button type="button" className="composer-pending__preview" aria-label="编辑这条待发消息" disabled={!entry.editable || !onEdit || Boolean(editingId)}
                 onClick={() => { setSelectedId(entry.id); setEditingId(entry.id); setCopyResult(null) }}>{entry.text.replace(/\s+/g, ' ').trim()}</button>}
-              {entry.preparationWait ? <p className="composer-pending__retry" role="status"><span className="composer-pending__sr-only">{state.label}</span>
-                {entry.preparationWait.state === 'waiting' && onCancelPreparation ? <button type="button" className="composer-tool" onClick={() => onCancelPreparation(entry.id)}>停止等待</button> : null}
+              {entry.preparationWait || entry.inputReceipt ? <p className="composer-pending__retry" role="status"><span className="composer-pending__sr-only">{state.label}</span>
+                {(entry.preparationWait?.state === 'waiting' || entry.inputReceipt?.status === 'waiting') && onCancelPreparation ? <button type="button" className="composer-tool" onClick={() => onCancelPreparation(entry.id)}>停止等待</button> : null}
               </p> : null}
+              {entry.id === selected?.id && queuedInputFailure(entry) ? <QueuedDeliveryFailure entry={entry} copy={onCopy} /> : null}
               <div className="composer-pending__actions">
                 {entry.id === selected?.id ? <button key="archive" type="button" className="composer-tool composer-pending__archive" aria-label="归档这条待发消息" title="归档原条目，保留原文和投递记录" disabled={Boolean(editingId) || state.busy || !onArchive} onClick={() => { void onArchive?.(entry.id, entry.text, true) }}><ThemeActionArchiveIcon size={12} aria-hidden="true" /></button> : null}
                 {conditionChanged && onMoveToDraft ? <button type="button" className="composer-tool composer-pending__recover" disabled={Boolean(editingId) || state.busy} title="保留原投递记录，将正文追加到当前草稿；不会立即发送" onClick={() => { void onMoveToDraft(entry.id, entry.text) }}>移至草稿</button> : null}

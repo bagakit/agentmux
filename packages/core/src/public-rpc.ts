@@ -204,7 +204,9 @@ type NativeParams = MoteAvatarParameterMap & TopicParameterMap & HostSettingsPar
   'agent.role.ls': { workspacePath?: string }
   'agent.role.register': { role: string; providerId?: string }
   'agent.role.resolve': { role: string; workspacePath?: string }
-  'agent.input.inspect': { key: import('./agent-prompt-condition.js').AgentPromptInputKey }
+  'agent.input.inspect': import('./agent-input-wait.js').AgentInputSelector
+  'agent.input.stop': { ref: import('./agent-input-wait.js').AgentInputWaitRef; cancelOperationId: string }
+  'agent.input.rejoin': { ref: import('./agent-input-wait.js').AgentInputWaitRef }
   'agent.send': { target: AgentMuxMessageTarget; text: string; operationId: string;
     execution?: AgentPromptExecution; sourceChannel?: import('./types.js').AgentMessageChannel;
     messageId?: string; threadId?: string; correlationId?: string; replyTo?: string }
@@ -255,8 +257,10 @@ type NativeResult = MoteAvatarResultMap & TopicResultMap & HostSettingsResultMap
   'agent.role.ls': { bindings: AgentRoleBinding[] }
   'agent.role.register': { binding: AgentRoleBinding }
   'agent.role.resolve': { binding: AgentRoleBinding }
-  'agent.input.inspect': { record: Awaited<ReturnType<AgentMuxClient['inspectAgentPromptSubmission']>> }
-  'agent.send': AgentMuxMessageReceipt & { agentSessionId?: string }
+  'agent.input.inspect': { record: Awaited<ReturnType<AgentMuxClient['inspectAgentPromptSubmission']>>; input?: import('./agent-input-wait.js').AgentInputSubmissionReceipt | null }
+  'agent.input.stop': import('./agent-input-wait.js').AgentInputWaitStopReceipt
+  'agent.input.rejoin': import('./agent-input-wait.js').AgentInputSubmissionReceipt
+  'agent.send': AgentMuxMessageReceipt & { agentSessionId?: string; inputReceipt?: import('./agent-input-wait.js').AgentInputSubmissionReceipt }
   'agent.discuss': { threadId: string; delivery: string; targetAgentSessionId: string }
   'agent.handoff': ReturnType<AgentMuxClient['handOff']>
   'agent.output': AgentMuxRpcOutputInitial & { replay: AgentMuxRpcOutputBytes[] }
@@ -306,7 +310,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.history.resource': 'long', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',
-  'agent.input.inspect': 'short', 'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
+  'agent.input.inspect': 'short', 'agent.input.stop': 'short', 'agent.input.rejoin': 'long', 'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
   'system.diagnostics.inspect': 'short',
   'message.delivery.inspect': 'short', 'message.delivery.report': 'long',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
