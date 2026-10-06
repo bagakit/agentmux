@@ -42,7 +42,10 @@ export function groupFocusContexts(rows: readonly FocusContext[]): Record<FocusB
 type Inputs = { sessions: readonly SessionSnapshot[]; timelines: Record<string, AgentTimelineSnapshot>; agentNames: Record<string, string>; config: AppConfig | null; scratchTopicSnapshots: Record<string, ScratchTopicsSnapshot> }
 function activityEntryTime(session: SessionSnapshot): number | undefined {
   const activity = session.kind === 'agent' ? session.semanticStatus : undefined
-  return activity && isAgentActivityStatusSource(activity.source) ? activity.stateEnteredAt : undefined
+  if (!activity || !isAgentActivityStatusSource(activity.source)) return undefined
+  const now = Date.now()
+  const held = [activity.stateEnteredAt, activity.aggregateActivityAt].filter((at): at is number => at !== undefined && Number.isFinite(at) && at > 0 && at <= now)
+  return held.length ? Math.max(...held) : undefined
 }
 /** Held task timestamps only; visits, output bytes and repeated observations are absent. */
 export function focusLastTaskActivityAt(items: readonly AgentTimelineItem[], enteredAt?: number, now = Date.now()): number | null {

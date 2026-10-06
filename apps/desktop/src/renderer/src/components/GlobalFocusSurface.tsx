@@ -15,6 +15,7 @@ import { SessionObservationRegions } from './SessionObservationRegions'
 import { AgentTopologySummary } from './AgentTopologySummary'
 import { FocusProjectLanes, FocusRetainedProjects } from './FocusProjectLanes'
 import { FocusLaneGroups } from './FocusLaneGroups'
+import { useFocusProjectOrder } from '../lib/use-focus-project-order'
 import type { FocusLaneCounts, FocusLaneMetrics } from '../lib/focus-lane-layout'
 import { FocusToolbar } from './FocusToolbar'
 import * as FilterMenu from './HoverDropdownMenu'
@@ -146,7 +147,9 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     return () => { window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); window.removeEventListener('blur', stop) }
   }, [])
   const { facts, errors: hierarchyErrors } = useFocusHierarchy(laneContexts, config)
-  const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs, Date.now(), topicSnapshots, executionHistory), [laneContexts, config, facts, tabs, topicSnapshots, executionHistory])
+  const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs, Date.now(), topicSnapshots), [laneContexts, config, facts, tabs, topicSnapshots])
+  const boardRowsRef = useRef<HTMLDivElement>(null)
+  const orderedLanes = useFocusProjectOrder(allLanes, visible, boardRowsRef)
   const retainedProjects = useMemo(() => deriveRetainedFocusProjects(executionHistory, allLanes, {
     timelines, sources: catalogue.sources, sourcesAvailable: catalogue.available
   }), [executionHistory, allLanes, timelines, catalogue.sources, catalogue.available])
@@ -166,7 +169,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const filtered = matching.filter(row => bucketFilter === 'all' || row.bucket === bucketFilter)
   const selected = executionRows.find(row => row.id === shownSessionId)
   const filteredIds = new Set(filtered.map(row => row.id))
-  const focusProjectLanes = allLanes.filter(lane => lane.contextIds.some(id => filteredIds.has(id)))
+  const focusProjectLanes = orderedLanes.filter(lane => lane.contextIds.some(id => filteredIds.has(id)))
   const rowsByLane = new Map<string, typeof filtered>()
   for (const row of filtered) {
     const lane = laneByContext.get(row.id)
@@ -184,7 +187,6 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     const at = Math.max(item.lastFocusedAt ?? 0, item.lastActivityAt ?? 0)
     if (at > 0) setHistoryWindowRequest(current => ({ at, sequence: (current?.sequence ?? 0) + 1 }))
   }
-  const boardRowsRef = useRef<HTMLDivElement>(null)
   const [laneMetrics, setLaneMetrics] = useState<FocusLaneMetrics>({ width: 0, padding: 4, gap: 2, cardGap: 2 })
   const hasBoardLanes = boardLanes.length > 0 || recentProjects.length > 0
   useLayoutEffect(() => {
@@ -315,7 +317,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       {executionRows.length === 0 && retainedProjects.length === 0 ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">
           <WorkbenchPresentationContext.Provider value={{ active: visible, retainedRegionId: null }}><div className="focus-project-board__live" data-empty={!hasBoardLanes || undefined}>
-            {hasBoardLanes ? <FocusProjectLanes lanes={boardLanes} recentProjects={recentProjects} onRead={readProjectHistory} selectedProjectKey={project} currentLaneId={currentLaneId} onSelect={setProject} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
+            {hasBoardLanes ? <FocusProjectLanes visible={visible} lanes={boardLanes} recentProjects={recentProjects} onRead={readProjectHistory} selectedProjectKey={project} currentLaneId={currentLaneId} onSelect={setProject} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
             {filtered.length === 0 && filteredRetainedProjects.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
           </div></WorkbenchPresentationContext.Provider>
           <FocusRetainedProjects projects={pastProjects} total={retainedProjects.filter(item => !item.recent).length} onRead={readProjectHistory} />

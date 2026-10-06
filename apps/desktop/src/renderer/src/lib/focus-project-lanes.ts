@@ -33,7 +33,9 @@ export type FocusProjectLane = {
   projectWorkspaceId: string | null; summary: string | null
   objectKind?: 'topic' | 'mote' | 'unknown'; objectIconKey?: string
   activeAgentIds: string[]; contextIds: string[]
+  lastActivityAt?: number | null
 }
+const activityKey = (lane: FocusProjectLane) => lane.topicId ? lane.id : focusProjectKey(lane.hostId, lane.projectId)
 /** Preserve the last observed branch/path association when Git confirms its checkout was removed. */
 export function retainedWorktreeFacts(previous: readonly FocusWorktreeFact[], snapshot: WorkspaceBranchesSnapshot): FocusWorktreeFact[] {
   if (snapshot.kind !== 'git-repository') return [...previous]
@@ -43,18 +45,14 @@ export function retainedWorktreeFacts(previous: readonly FocusWorktreeFact[], sn
   return [...other, ...known.filter(fact => !current.some(item => item.path === fact.path)).map(fact => ({ ...fact, removed: true })), ...current]
 }
 /** Project/checkout/Topic are held ownership facts, never a guess from Agent liveness. */
-export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: AppConfig | null = null, facts: FocusHierarchyFacts = EMPTY_FOCUS_HIERARCHY, tabs: Readonly<Record<string, WorkbenchTab>> = {}, now = Date.now(), topicSnapshots?: Readonly<Record<string, ScratchTopicsSnapshot>>, visits: readonly AgentFocusHistoryEntry[] = []): FocusProjectLane[] {
+export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: AppConfig | null = null, facts: FocusHierarchyFacts = EMPTY_FOCUS_HIERARCHY, tabs: Readonly<Record<string, WorkbenchTab>> = {}, now = Date.now(), topicSnapshots?: Readonly<Record<string, ScratchTopicsSnapshot>>): FocusProjectLane[] {
   const tabWorkspace = new Map<string, string>()
   for (const tab of Object.values(tabs)) for (const region of Object.values(tab.regions)) if ('sessionId' in region) tabWorkspace.set(region.sessionId, tab.workspaceId)
   const lanes = new Map<string, FocusProjectLane>()
   const priorities = new Map<string, number>()
   const projectRoots = focusProjectRoots(config)
-  const recentActivityMs = resolveFocusRecentActivityHours(config?.focus?.recentActivityHours) * 60 * 60 * 1000
-  const focusedAt = new Map<string, number>()
-  for (const visit of visits) if (visit.identity?.kind === 'agent' && Number.isSafeInteger(visit.focusedAt) && visit.focusedAt > 0 && visit.focusedAt <= now) {
-    const key = JSON.stringify([visit.identity.hostId, visit.sessionId])
-    focusedAt.set(key, Math.max(focusedAt.get(key) ?? 0, visit.focusedAt))
-  }
+  const activity = new Map<string, number>()
+  const recentActivityMs = resolveFocusRecentActivityHours(config?.focus?.recentActivityHours) * 3_600_000
   for (const row of rows) {
     const workspace = row.workspace
     const checkout = facts.worktrees.find(item => item.path === row.workspacePath && item.hostId === row.hostId)
@@ -80,12 +78,16 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     if (row.liveAgent) lane.activeAgentIds.push(row.id)
     lane.contextIds.push(row.id)
     lanes.set(id, lane)
-    const lastUsedAt = Math.max(row.lastActivityAt ?? 0, focusedAt.get(JSON.stringify([row.hostId, row.id])) ?? 0)
-    const priority = row.bucket === 'attention' ? 0 : row.bucket === 'working' ? 1
-      : lastUsedAt > 0 ? (now - lastUsedAt <= recentActivityMs ? 2 : 3) : 4
-    priorities.set(id, Math.min(priorities.get(id) ?? priority, priority))
+    const key = activityKey(lane)
+    const at = row.lastActivityAt
+    if (at != null && Number.isFinite(at) && at > 0 && at <= now) activity.set(key, Math.max(activity.get(key) ?? 0, at))
+    const priority = row.bucket === 'attention' ? 0 : row.bucket === 'working' ? 1 : at != null && at > 0 && at <= now
+      ? now - at <= recentActivityMs ? 2 : 3 : 4
+    priorities.set(key, Math.min(priorities.get(key) ?? priority, priority))
   }
-  return [...lanes.values()].sort((a, b) => priorities.get(a.id)! - priorities.get(b.id)!)
+  for (const lane of lanes.values()) lane.lastActivityAt = activity.get(activityKey(lane)) ?? null
+  return [...lanes.values()].sort((a, b) => priorities.get(activityKey(a))! - priorities.get(activityKey(b))!
+    || (priorities.get(activityKey(a))! < 3 ? (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0) : 0))
 }
 
 /** Display identity is a Host/Project pair, independent of a checkout or view. */
