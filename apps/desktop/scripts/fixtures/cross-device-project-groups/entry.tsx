@@ -12,8 +12,8 @@ import { createWorkbenchTab, addWorkbenchRegion } from '../../../src/renderer/sr
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { workspaceProjectId } from '../../../src/renderer/src/lib/workspace-projects'
 import localProjectImage from '../../../resources/icon-128.png'
-import remoteProjectImage from '../../../src/renderer/src/assets/agent-icons/gemini.png'
-import archiveProjectImage from '../../../src/renderer/src/assets/agent-icons/hermes.png'
+import remoteProjectImage from '../../../../../packages/client-ui/src/assets/agent-icons/gemini.png'
+import archiveProjectImage from '../../../../../packages/client-ui/src/assets/agent-icons/hermes.png'
 import '../../../src/renderer/src/styles/index.css'
 
 type Boundary = {
@@ -38,7 +38,7 @@ api.spatial = {
   onChange: listener => window.projectGroupsBoundary.onSpatialChange(listener)
 }
 api.ui.requestStorageFlush = () => request('flush')
-api.providers.list = async () => []
+api.providers.list = (async (options?: { observation: true }) => options ? { catalog: [], warnings: [] } : []) as typeof api.providers.list
 api.demands.list = async () => []
 api.scratch.listTopics = async () => []
 api.sessions.snapshot = async () => ({ sessions: [], recoveryCandidates: [], timelines: {}, localHome: _hygiene_fixturePath("Users/private-proof") })

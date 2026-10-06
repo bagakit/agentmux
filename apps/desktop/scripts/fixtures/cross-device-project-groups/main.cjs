@@ -4,7 +4,7 @@ const path = require('node:path')
 const { createHash } = require('node:crypto')
 const { pathToFileURL } = require('node:url')
 const { app, BrowserWindow, ipcMain } = require('electron')
-const [html, privateRoot, phase, preload, evidence, inputPath, coreSpatialPath] = process.argv.slice(2)
+const [html, privateRoot, phase, preload, evidence, inputPath, coreSpatialPath, scenarioPath] = process.argv.slice(2)
 assert.ok(html && privateRoot && ['seed', 'restore'].includes(phase) && preload && evidence && inputPath && coreSpatialPath)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
@@ -77,7 +77,7 @@ app.whenReady().then(async () => {
     })
     win = new BrowserWindow({ width: 1280, height: 860, useContentSize: true, show: true,
       webPreferences: { preload, contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
-    win.webContents.on('console-message', (_event, _level, message) => process.stderr.write(`project-groups:console:${message}\n`))
+    win.webContents.on('console-message', event => process.stderr.write(`project-groups:console:${event.message}\n`))
     win.webContents.on('render-process-gone', (_event, details) => process.stderr.write(`project-groups:renderer-gone:${JSON.stringify(details)}\n`))
     const read = expression => win.webContents.executeJavaScript(expression)
     const exists = selector => read(`Boolean(document.querySelector(${JSON.stringify(selector)}))`)
@@ -141,6 +141,13 @@ app.whenReady().then(async () => {
     await until('window.projectGroupsState().mainSurface === "workbench" && window.projectGroupsState().visibleRegions.length > 0')
     await fileReady()
     result.initialState = await state(); result.originalDurable = await flush()
+    if (scenarioPath) {
+      await require(scenarioPath)({ win, read, until, click, dispatch, capture, flush, phase, result, input, evidence })
+      result.finalState = await state(); result.finalDurable = await flush()
+      assert.equal(result.runtimeCalls.length, 0, 'The additional spatial-only scene cannot invoke Runtime or file writes')
+      result.passed = true
+      return
+    }
     assert.equal(result.initialState.projectGroups.some(one => one.groupId === retainedGroupId && one.projectIds.includes(unknownProjectId)), true)
     const originalTopology = topology(result.originalDurable.graph)
     const checkPreserved = async label => {
@@ -258,6 +265,7 @@ app.whenReady().then(async () => {
   } catch (error) {
     result.failure = { name: error.name, message: error.message, stack: error.stack }
     if (win && !win.isDestroyed()) {
+      await fs.writeFile(path.join(evidence, `failure-${phase}.png`), (await win.webContents.capturePage()).toPNG())
       try { result.failureState = await win.webContents.executeJavaScript('window.projectGroupsState?.() ?? null') }
       catch (observationError) { result.failureObservationError = observationError.message }
     }
