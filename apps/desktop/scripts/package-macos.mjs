@@ -923,7 +923,7 @@ export async function installApplication(appPath, { intent = installIntent, home
   const previousScope = await scopedProcesses(currentPath)
   let running = previousScope.serving
   try {
-    if (previouslyInstalled && intent === 'full') {
+    if (previouslyInstalled) {
       semanticHost = await prepareSemanticHostReload(currentPath, next)
       // A semantic worker may still be parented by the GUI. Its explicit
       // namespace owner above, rather than general Node classification, owns exit.
@@ -948,7 +948,7 @@ export async function installApplication(appPath, { intent = installIntent, home
       ? await quit(destination, previousScope.processes.filter(row => running.includes(row.pid)), semanticHost)
       : { wasRunning: false, pids: [] }
     try {
-      if (!semanticHost && previouslyInstalled && intent === 'full') {
+      if (!semanticHost && previouslyInstalled) {
         semanticHost = await prepareSemanticHostReload(currentPath, next)
       }
       await stopSemanticHostForInstall(semanticHost)
