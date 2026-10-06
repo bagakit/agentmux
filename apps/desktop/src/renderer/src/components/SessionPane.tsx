@@ -145,6 +145,10 @@ export function SessionPane({
   const session = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
   const currentConversationActions = useAgentCurrentForkControls({ session: session?.kind === 'agent' ? session : null, linkOrigin: mailboxOrigin, readOnly })
   const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.pendingAgentLaunches[sessionId])
+  const pendingTerminal = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => {
+    const surface = linkOrigin.tabId && linkOrigin.regionId ? state.tabs[linkOrigin.tabId]?.regions[linkOrigin.regionId] : undefined
+    return surface?.kind === 'terminal' && surface.phase === 'launching' && surface.sessionId === sessionId
+  })
   const recoveryCandidate = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
   const nameMetadata = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => sessionNameMetadataFor(state.sessionNameMetadata, sessionId, [
     linkOrigin.tabId && linkOrigin.regionId ? agentRegionExecution({tabId: linkOrigin.tabId, regionId: linkOrigin.regionId, agentSessionId: sessionId})?.hostId : undefined,
@@ -830,6 +834,7 @@ export function SessionPane({
   if (!session || !terminalThemeId) {
     const connectingSurface = <SessionConnectingSurface key={`connecting:${sessionId}`}
           phase={pendingLaunch ? 'launch' : recoveryCandidate && !unobservedIdentity ? 'restore' : 'connect'}
+          unknownTerminalCreation={!session && pendingTerminal}
           surfaceKind={surfaceKind}
           request={pendingLaunch?.request}
           executor={connectingExecutor}
