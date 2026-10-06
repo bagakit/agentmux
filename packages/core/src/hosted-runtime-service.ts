@@ -16,7 +16,7 @@ const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'clientPerformanceDiagnostics', 'respondAgentInteraction',
   'listHostExecutors', 'configureHostExecutor',
   'readDeliveryAttempt', 'inspectAgentPromptSubmission', 'inspectAgentInput', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId',
-  'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
+  'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'checkDeliveries', 'ackDeliveryBatch',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff', 'readMessage', 'readDispatch', 'listDispatches'
 ])
@@ -250,7 +250,7 @@ export class AgentMuxHostedRuntimeService {
       invocation.args[0] = { ...prompt, ...(prompt.admissionIntent?.kind !== 'manual-actor' && context.signal ? { signal: context.signal } : {}) }
     }
     if (context.signal && invocation.method === 'replySessionQuestion') invocation.args[0] = { ...invocation.args[0], signal: context.signal }
-    if (context.signal && (invocation.method === 'sessionHistoryPage' || invocation.method === 'sessionHistoryResource')) invocation.args[1] = { ...invocation.args[1], signal: context.signal }
+    if (context.signal && (invocation.method === 'sessionHistoryPage' || invocation.method === 'sessionHistoryResource' || invocation.method === 'conversationCheckpoint' || invocation.method === 'readConversationChanges')) invocation.args[1] = { ...invocation.args[1], signal: context.signal }
     if (context.signal && invocation.method === 'readAgentSessionHistory') invocation.args[1] = { signal: context.signal }
     if (context.signal && (invocation.method === 'readNativeAgentHistory' || invocation.method === 'readHostNativeAgentHistory' ||
       invocation.method === 'readNativeAgentHistoryResource' || invocation.method === 'readHostNativeAgentHistoryResource')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }

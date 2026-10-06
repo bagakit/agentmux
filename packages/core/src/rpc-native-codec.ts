@@ -1,3 +1,4 @@
+import { parseConversationCheckpointPage, parseConversationChangesPage, parseConversationWatchOpening } from './conversation-changes.js'
 import { parseConversationReadPage } from './conversation.js'
 import { parsePromptSubmissionRecord } from './prompt-submission-record.js'
 import { parseAgentInputSubmissionReceipt as inputReceipt } from './agent-input-receipt-codec.js'
@@ -394,6 +395,9 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'agent.history.resource': return parseSessionHistoryResourceResult(value, input as AgentSessionHistoryResourceParams)
+      case 'agent.conversation.checkpoint': return parseConversationCheckpointPage(value, input as import('./conversation.js').ConversationRef)
+      case 'agent.conversation.changes': return parseConversationChangesPage(value, input as import('./conversation-changes.js').ConversationChangesInput)
+      case 'agent.conversation.watch': return parseConversationWatchOpening(value, input as import('./conversation.js').ConversationRef)
       case 'agent.conversation.inspect': return parseConversationReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.history': return parseAgentSessionHistoryReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.inspect': case 'whoami': {

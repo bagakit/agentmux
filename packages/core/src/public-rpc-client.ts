@@ -1,3 +1,4 @@
+import { parseConversationWatchOpening, parseConversationObservation, type ConversationWatchOpening } from './conversation-changes.js'
 import { parseAppearanceObservation } from './public-rpc-settings-observation.js'
 import { validateDeliveryLogId } from './delivery-attempt.js'
 import { homedir } from 'node:os'
@@ -162,6 +163,7 @@ function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: 
     } else if (typeof p.transferId !== 'string' || !p.transferId) throw new AgentMuxError('Runtime opening lacks its snapshot transfer identity.', 'CONTROL_PROTOCOL_ERROR')
     return p
   }
+  if (method === 'agent.conversation.watch') return parseConversationWatchOpening(p, params as import('./conversation.js').ConversationRef)
   if (method === 'settings.appearance.watch') { rpcRecord(p, ['observation'], 'CONTROL_PROTOCOL_ERROR'); return { observation: parseAppearanceObservation(p.observation) } }
   if (method === 'system.metrics.watch') return { observation: parseMetricsObservation(p.observation) }
   if (method === 'toolkit.watch') {
@@ -221,6 +223,7 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
     method === 'runtime.attachment-watch' || method === 'runtime.replay-watch') && event.type === 'snapshot') {
     return { ...event, data: parseHostedTransferChunk(event.data) }
   }
+  if (method === 'agent.conversation.watch' && event.type === 'snapshot') return { ...event, data: parseConversationObservation(event.data, initial as ConversationWatchOpening) }
   if (method === 'settings.appearance.watch' && event.type === 'snapshot') {
     const observation = parseAppearanceObservation(event.data, appearancePrevious)
     return { ...event, data: observation }
