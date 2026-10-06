@@ -21,6 +21,7 @@ import { parseAgentContextParams } from './agent-context.js'
 import { parseConnectionOffer } from '@agentmux/relay/offer'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
+import { parseNotebookGraph, parseNoteContentObservation, parseNotebookObservationParams } from './notebook-observation.js'
 import { inspectNotebook, notebookFingerprint, parseNotebookState } from './notebook-catalog.js'
 import { isTopicMethod, parseTopicParams, parseTopicResult } from './public-rpc-topics.js'
 import { isFileMethod, parseFileCreateParams, parseFileCreateResult, parseFileWriteParams, parseFileWriteResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult } from './public-rpc-files.js'
@@ -540,13 +541,18 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'notebook.inspect': {
-        record(p, ['state', 'notebook', 'pages', 'trail', 'recordedOperation', 'storageOperation'])
+        record(p, ['state', 'notebook', 'pages', 'trail', 'recordedOperation', 'storageOperation', 'content'])
         const state = parseNotebookState(p.state)
-        const { storageOperation, ...knowledge } = p
+        const { storageOperation, content, ...knowledge } = p
+        const observationInput = parseNotebookObservationParams(input, true)
+        if (observationInput.content === true) { const body = parseNoteContentObservation(content); const page = state.pages[observationInput.noteId!]; if (!page || body.noteId !== page.noteId || notebookFingerprint(body.resource) !== notebookFingerprint(page.resource)) fail() }
+        else if (content !== undefined) fail()
         if (notebookFingerprint(knowledge) !== notebookFingerprint(inspectNotebook(state, input))) fail()
         if (storageOperation !== undefined && storageOperation !== null) { const original = parseNotesStorageOperation(storageOperation); if (input.operationId !== undefined && original.operationId !== input.operationId) fail() }
         break
       }
+
+      case 'notebook.graph': { parseNotebookGraph(p, parseNotebookObservationParams(input)); break }
 
       case 'space.state':
       case 'name.confirm':
