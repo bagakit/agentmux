@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, editor, fixture, mount, mounted } from './conversation-fixture'
+import { openTreeSession, button, click, editor, fixture, mount, mounted } from './conversation-fixture'
 const connection = { state: 'connected' as const, message: '已连接 Mac' }
 const catalog = { spaces: [{ spaceId: 'space', kind: 'folder', name: 'Actual Space', hostId: 'host-original', directoryPath: fixturePath("unrelated"), projectId: null }],
   zones: [], tabs: [{ tabId: 'tab', zoneId: 'zone', workspaceId: 'workspace', name: 'Original Agent', regionIds: ['region'] }],
@@ -35,7 +35,7 @@ describe('mobile production workspace navigation', () => {
     expect(f.disposeHistory).toHaveBeenCalled()
     expect(f.submit).not.toHaveBeenCalled()
   })
-  it('shows authoritative project and Agent name separately from provider and opens the original Mote directly', async () => {
+  it('shows authoritative project and Agent name separately from provider and opens original Mote Tabs and explicitly selects its original Session', async () => {
     localStorage.setItem('agentmux-mobile-home', 'focus')
     const f = fixture()
     Object.assign(f.client.agentSession('session-original'), { semanticStatus: { state: 'working' } })
@@ -57,10 +57,10 @@ describe('mobile production workspace navigation', () => {
     expect(row.textContent).toContain('codex')
     expect(row.textContent).not.toContain(fixturePath("workspace"))
     await click(button(view.element.querySelector('.mobile-navigation') as HTMLElement, 'Mote'))
-    await click(view.element.querySelector<HTMLButtonElement>('.mobile-spatial-panel > .mobile-session-list button')!)
+    await openTreeSession(view.element)
     expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
     expect(view.element.querySelector('.mobile-mote-heading strong')).toBeNull()
-    expect(view.element.querySelector('.mobile-mote-heading')?.getAttribute('aria-label')).toContain('Original Mote')
+    expect(view.element.querySelector('.mobile-mote-heading')?.getAttribute('aria-label')).toContain('Chosen Agent')
     expect(view.element.querySelector('.mobile-mote-heading .mote-face')).not.toBeNull()
     const input = editor(view.element)
     await click(button(view.element, '手机设置与连接'))
@@ -130,7 +130,7 @@ it('shows a presentation owner failure in a mounted directory without taking awa
   f.client.forwardRpc = vi.fn().mockResolvedValue({ catalog: failed })
   const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform()} />)
   expect(view.element.textContent).toContain('appearance owner unavailable')
-  expect(button(view.element, '刷新原呈现')).toBeDefined()
+  expect(button(view.element, '刷新原目录与呈现')).toBeDefined()
   await click([...view.element.querySelectorAll<HTMLButtonElement>('.mobile-session-list button')].find(value => value.textContent?.includes('Actual Space'))!)
   await click(view.element.querySelector<HTMLButtonElement>('.mobile-spatial-tab .mobile-session-list button')!)
   expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')

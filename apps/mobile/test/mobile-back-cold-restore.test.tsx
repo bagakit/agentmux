@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { DEVICE_WORKFACE_KEY, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, fixture, mount, mounted } from './conversation-fixture'
+import { openTreeSession, button, click, fixture, mount, mounted } from './conversation-fixture'
 
 afterEach(async () => {
   for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }
@@ -38,7 +38,7 @@ describe('original Space cold Back boundary', () => {
     const app = () => <MobileApp client={f.client} connection={connection} platform={createBrowserPlatform()} />
     const original = await mount(app())
     await click(button(original.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
-    await click(original.element.querySelector('.mobile-spatial-panel > .mobile-session-list button')!)
+    await click(original.element.querySelector('.mobile-space-row')!)
     await click(original.element.querySelector('.mobile-spatial-tab button')!)
     await vi.waitFor(() => expect(original.element.querySelector('.mobile-region-content h1')?.textContent).toBe('Original cold Space file'))
     const record = getDeviceWorkface().snapshot().record
