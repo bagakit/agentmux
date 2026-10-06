@@ -1,17 +1,17 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
-const source = readFileSync(join(packageRoot, 'src/components/ConversationImage.tsx'), 'utf8')
+const source = ['ConversationImage', 'ConversationImageViewport'].map(name => readFileSync(join(packageRoot, `src/components/${name}.tsx`), 'utf8')).join('\n')
 const classes = [...source.matchAll(/className="([^"]+)"/g)].flatMap(match => match[1]!.split(/\s+/))
 const read = (path: string) => readFileSync(join(packageRoot, path), 'utf8')
 function sharedCss(path: string): string {
   const css = read(path)
   return css.replace(/@import\s+'([^']+)'\s*;/g, (_all, specifier: string) => {
-    expect(specifier.startsWith('./'), 'shared stylesheet imports must remain package-owned').toBe(true)
+    expect(specifier.startsWith('.') && resolve(packageRoot, dirname(path), specifier).startsWith(resolve(packageRoot, 'src') + '/'), 'shared stylesheet imports must remain package-owned').toBe(true)
     return sharedCss(join(dirname(path), specifier))
   })
 }
