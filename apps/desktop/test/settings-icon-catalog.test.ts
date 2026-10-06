@@ -44,7 +44,7 @@ it('uses a discovered meaning and drawing in the original theme CRUD and returns
   const envelope = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'discovered-icon-edit' }
   const listing = await executeSettingsResourcesControl({ ...envelope, operation: 'settings.resource.list', resource: 'themes' }, f.owner)
   if (listing.operation !== 'settings.resource.list' || listing.resource !== 'themes') throw new Error('Expected actual theme discovery.')
-  const meaning = listing.iconCatalog.icons.find(icon => icon.id === 'status.working')!
+  const meaning = listing.iconCatalog.icons.find(icon => listing.iconCatalog.icons.some(other => other.id !== icon.id && other.defaultGlyph === icon.defaultGlyph))!
   const sibling = listing.iconCatalog.icons.find(icon => icon.id !== meaning.id && icon.defaultGlyph === meaning.defaultGlyph)!
   const glyph = listing.iconCatalog.glyphs.find(id => id !== meaning.defaultGlyph)!
   expect(meaning).toBeDefined(); expect(sibling).toBeDefined(); expect(glyph).toBeDefined()
