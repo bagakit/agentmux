@@ -26,7 +26,7 @@
 .prompt-editor__heading { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-5); color: var(--text-3); font-size: var(--fs-meta); }
 .prompt-editor__back { display: none; }
 .prompt-editor__status { display: inline-flex; align-items: center; gap: var(--sp-2); margin-left: auto; padding: var(--sp-1) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-3); font-size: var(--fs-meta); }
-.prompt-editor__status::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+.prompt-editor__status > svg { flex: none; }
 .prompt-editor__status[data-prompt-status='unsaved'] { color: var(--amber-text); border-color: var(--amber-line); background: var(--amber-bg); }
 .prompt-editor__status[data-prompt-status='invalid'] { color: var(--red-text); border-color: var(--red-line); background: var(--red-bg); }
 .prompt-editor__name input { padding: var(--sp-3) 0; border-color: transparent; border-radius: 0; background: transparent; font: 600 var(--fs-title)/1.5 var(--font-sans); }
