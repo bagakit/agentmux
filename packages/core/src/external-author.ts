@@ -19,6 +19,11 @@ export type AgentExternalInputIntent = {
   agentSessionId: string; expectedRun: { runId: string }; operationId: string; messageId: string; body: string
 }
 
+/** Original Host-owned claim/current-authority reader. Never serialized or inferred from a wire author. */
+export interface AgentExternalInputAuthorityPort {
+  assertCurrent(author: AgentExternalMessageAuthor, intent: AgentExternalInputIntent): void | Promise<void>
+}
+
 export function parseAgentExternalMessageAuthor(value: unknown): AgentExternalMessageAuthor {
   const p = rpcRecord(value, ['kind', 'connectionId', 'actor', 'externalConversationId', 'externalMessageId', 'bindingId', 'bindingRevision', 'grantId', 'grantRevision'], 'INVALID_EXTERNAL_AUTHOR')
   const fail = (): never => { throw new AgentMuxError('External attribution is malformed.', 'INVALID_EXTERNAL_AUTHOR') }

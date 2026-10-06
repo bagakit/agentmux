@@ -6,6 +6,7 @@ import type { AgentMuxClientEvent, AgentMuxRunAttachment, AgentMuxRunRef } from 
 import { AgentMuxError } from './errors.js'
 import { parseAgentMuxCreationTrustInput } from './agent-creation-admission.js'
 import { rpcString } from './rpc-business-codec.js'
+import { parseAgentExternalMessageAuthor, type AgentExternalInputAuthorityPort } from './external-author.js'
 import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_RUNTIME_METHODS, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHostedRuntimeMethod, type AgentMuxHostedBootstrap, type AgentMuxHostedInvocation,
   type AgentMuxHostedMethod, type AgentMuxHostedStreamEvent, type AgentMuxHostedTransferChunk,
   type AgentMuxRuntimeOwnerIdentity, type AgentMuxRuntimeFence, type AgentMuxHostedAttachmentTarget } from './hosted-client-contract.js'
@@ -138,7 +139,8 @@ export class AgentMuxHostedRuntimeService {
   private endpointState?: Extract<AgentMuxClientEvent, { type: 'control-endpoint-state' }>
   private connection: Extract<AgentMuxClientEvent, { type: 'connection-state' }> | null = null
   constructor(readonly client: AgentMuxClient, private readonly storePath: string | null,
-    private readonly identity: () => AgentMuxRuntimeOwnerIdentity, private readonly shutdown?: () => void | Promise<void>) {
+    private readonly identity: () => AgentMuxRuntimeOwnerIdentity, private readonly shutdown?: () => void | Promise<void>,
+    private readonly externalInputAuthority?: AgentExternalInputAuthorityPort) {
     this.unsubscribe = client.onEvent(event => {
       if (event.type === 'connection-state' && event.observationOrigin?.boundary === 'core-ctxmux') this.connection = structuredClone(event)
       this.publish(event)
@@ -147,6 +149,19 @@ export class AgentMuxHostedRuntimeService {
   publishControlEndpointState(state: AgentMuxControlEndpointState): void {
     this.endpointState = { ...state, type: 'control-endpoint-state', evidence: { source: 'agentmux', observedAt: Date.now() } }
     this.publish(this.endpointState)
+  }
+  private async externalAuthor(invocation: AgentMuxHostedInvocation): Promise<import('./agent-input-wait.js').AgentInputCallContext['externalAuthor']> {
+    if (!this.externalInputAuthority) return undefined
+    let author: import('./agent-global-message-queue.js').AgentMuxMessageEnvelope['sender'] | undefined
+    if (invocation.method === 'submitAgentMessage') author = invocation.args[0]?.envelope?.sender
+    else if (invocation.method === 'rejoinAgentInputWaiting' && invocation.args[0]?.ref?.key?.kind === 'message') {
+      // The original Core journal supplies retained attribution. Local input does not borrow connector authority.
+      const receipt = await this.client.inspectAgentInput({ key: invocation.args[0].ref.key })
+      if (receipt?.originalControlOperationId) author = (await this.client.readMessage({ operationId: receipt.originalControlOperationId }))?.envelope.sender
+    }
+    if (author?.kind !== 'external') return undefined
+    const identity = parseAgentExternalMessageAuthor(author), port = this.externalInputAuthority
+    return { identity, assertCurrent: intent => port.assertCurrent(structuredClone(identity), structuredClone(intent)) }
   }
   private owner(expectedRuntimeId?: unknown): AgentMuxRuntimeOwnerIdentity {
     if (this.disposed) throw new AgentMuxError('The original semantic owner is unavailable.', 'RUNTIME_UNAVAILABLE')
@@ -304,9 +319,11 @@ export class AgentMuxHostedRuntimeService {
       value = attached.value
     } else {
       const operation = this.client[invocation.method] as (...args: unknown[]) => unknown
+      const externalAuthor = controlledInput ? await this.externalAuthor(invocation) : undefined
       value = await operation.apply(this.client, controlledInput ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),
-        ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {})
+        ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}),
+        ...(externalAuthor ? { externalAuthor } : {})
       } satisfies import('./agent-input-wait.js').AgentInputCallContext] : invocation.args)
     }
     } catch (error) { await recordActivity('unknown'); throw error }

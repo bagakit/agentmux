@@ -22,6 +22,8 @@ export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   http?: AgentMuxRpcHttpOptions
   /** Existing client-owned business ports mounted on this one public endpoint. */
   service?: Omit<AgentMuxRpcServiceOptions, 'coreClients' | 'hostedRuntime' | 'endpoint'>
+  /** Borrow the original external input owner; the semantic Host never duplicates its grants or journal. */
+  externalInputAuthority?: import('./external-author.js').AgentExternalInputAuthorityPort
 }
 export type AgentMuxHeadlessRuntime = {
   readonly client: AgentMuxClient
@@ -85,7 +87,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
         path: join(stateDirectory, 'host-executors.json'), runtimeId, catalog: () => client!.catalog()
       }),
       creationAuthority: options.creationAuthority ?? new AgentMuxCreationAuthority({ stateDirectory, runtimeId }) })
-    hosted = new AgentMuxHostedRuntimeService(client, storePath, ownerIdentity, stop)
+    hosted = new AgentMuxHostedRuntimeService(client, storePath, ownerIdentity, stop, options.externalInputAuthority)
     server = new AgentMuxControlServer({ ...options.service, socketPath, ...(options.http ? { http: options.http } : {}),
       deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts'), { clientJournal: true }) },
       diagnosticCoreAuthority: options.service?.diagnosticCoreAuthority ?? (() => ({ authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, status: 'verified', causeCode: null })),
