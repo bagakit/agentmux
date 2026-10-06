@@ -1,6 +1,6 @@
 .pmo-teams-topic-floating { position: fixed; inset: auto; margin: 0; width: min(720px, calc(100vw - 16px)); height: min(520px, calc(100vh - 48px)); padding: 10px 10px 0 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--text-2) 36%, var(--line)); border-radius: var(--radius); background: var(--surface-1); color: var(--text); box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface-3) 70%, transparent), 0 4px 12px var(--scrim-1), 0 20px 48px var(--scrim-2); }
 .pmo-teams-topic-floating__resize { position: absolute; top: 0; right: 0; width: 10px; height: 10px; cursor: nesw-resize; touch-action: none; color: var(--text-3); }
-.pmo-teams-topic-floating__resize::after { content: ''; position: absolute; top: 3px; right: 3px; width: 4px; height: 4px; border-top: 1px solid currentColor; border-right: 1px solid currentColor; }
+.pmo-teams-topic-floating__resize::after { content: ''; position: absolute; top: 3px; right: 3px; width: 4px; height: 4px; background: currentColor; mask: var(--native-window-resize-mask) center / contain no-repeat; }
 .pmo-teams-topic-floating__resize:hover, .pmo-teams-topic-floating__resize:focus-visible { color: var(--text); background: var(--surface-3); }
 .pmo-teams-topic-floating__resize:focus-visible { outline: 1px solid var(--green-2); outline-offset: -1px; }
 .pmo-teams-topic-floating:popover-open { display: flex; flex-direction: row; }

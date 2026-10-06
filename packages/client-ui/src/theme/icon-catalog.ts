@@ -16,6 +16,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'control.key-down': { label: 'Down arrow key', glyph: 'arrow-down' },
   'control.key-left': { label: 'Left arrow key', glyph: 'arrow-left' },
   'control.key-right': { label: 'Right arrow key', glyph: 'arrow-right' },
+  'layout.resize-window': { label: 'Resize floating window', glyph: 'resize-corner' },
   'status.toolkit-idle': { label: 'Tool not run yet', glyph: 'status-dot' },
   'status.toolkit-disabled': { label: 'Tool hidden; new runs disabled', glyph: 'status-dot' },
   'status.toolkit-pending': { label: 'Tool starting saved version', glyph: 'status-dot' },

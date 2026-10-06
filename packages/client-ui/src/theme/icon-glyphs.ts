@@ -3,6 +3,7 @@
  * Data only: no library React components, handlers, URLs or active SVG. */
 export const ICON_GLYPHS = {
   "status-dot": [["circle",{"cx":"12","cy":"12","r":"10","fill":"currentColor","stroke":"none"}]],
+  "resize-corner": [["path",{"d":"M0 0H24V24H18V6H0Z","fill":"currentColor","stroke":"none"}]],
   "workflow-progress": [["circle",{"cx":"12","cy":"12","r":"8.25","opacity":".16"}],["circle",{"cx":"12","cy":"12","r":"8.25","pathLength":"100","stroke-dasharray":"30 70"}]],
   "arrow-up-down": [["path",{"d":"m21 16-4 4-4-4"}],["path",{"d":"M17 20V4"}],["path",{"d":"m3 8 4-4 4 4"}],["path",{"d":"M7 4v16"}]],
   "mote-mark": [["path", {"d": "M7.1 3.8c1.6-1.6 4.5-2 6.5-.9l5 2.8c1.6.9 2.5 2.7 2.1 4.6l-.9 5.2c-.3 1.6-1.4 2.9-2.9 3.5l-4.5 2c-1.9.9-3.8.4-5.1-1.1l-3.6-4.2c-1.1-1.3-1.3-3.1-.7-4.7l2.2-5.1c.4-.8 1.1-1.5 1.9-2.1Zm8.2 2.9c-4.4 1.4-6.7 4.8-5.2 7.9.7 1.4 2 2.3 3.7 2.7-1.5-1.9-2.2-3.4-1.6-5.2.5-1.9 2-3.7 3.1-5.4Z", "fill": "currentColor", "fill-rule": "evenodd"}]],

@@ -2,12 +2,13 @@ import { SEMANTIC_ICON_IDS, type SemanticIconId, type IconShape } from './icon-c
 import { iconShapes } from './icon-assets.js'
 import { themeColorSchema, type ThemeValue } from './schema.js'
 
-/** Browser-native widgets consume these semantic masks while retaining their original DOM state. */
+/** CSS and native widgets consume these semantic masks while retaining their original DOM state. */
 const NATIVE_ICON_PROJECTIONS = {
   '--native-checkbox-mask': 'control.checkbox-checked',
   '--native-radio-mask': 'control.radio-checked',
   '--native-disclosure-mask': 'navigation.disclosure',
   '--native-select-open-mask': 'control.select-open',
+  '--native-window-resize-mask': 'layout.resize-window',
   '--native-connection-connected-mask': 'status.connection-connected',
   '--native-connection-unconfirmed-mask': 'status.connection-unconfirmed',
   '--native-presence-unknown-mask': 'status.presence-unknown',
