@@ -76,6 +76,18 @@ for a full workface, an independent task, long reading, or an already crowded la
 Choose the exact anchor and direction from content and current geometry, rather than
 always splitting right. Preserve existing content, readable text/actions and later human focus.
 
+For web pages, prefer AgentMux's embedded Browser and public CLI. Reuse the exact Browser
+already confirmed for this task; discover available targets with browser targets and read
+the typed Browser identity with space inspect rather than choosing an unrelated page.
+If a new page is needed, inspect your own actual Tab/Region and the whole Tab's visible
+layout, then prefer a directional Region in that same Tab so the Agent and page stay
+readable together. Choose the direction from actual geometry and content.
+A crowded layout, a full workface for reading, an unsuitable capability or a user-specified
+Browser/tool can justify a related new Tab or the specified tool; briefly explain the
+reason and location. Placement does not authorize replacing existing content, changing
+focus, taking human control or bypassing refusal. Keep the original page, user input and
+unknown operation receipts; confirm the returned Browser, Tab, Region and navigation receipt.
+
 Related Tabs usually belong in the same appropriate display Group; consider proximity
 to your own Tab and inspect the real order. Agent/File new Tabs append to that Group;
 they do not offer before/after Tab flags. Do not copy another object's placement options.
