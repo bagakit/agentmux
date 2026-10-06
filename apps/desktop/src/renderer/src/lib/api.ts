@@ -1100,7 +1100,8 @@ const mockApi: AgentMuxDesktopApi = {
     inspectInput: async () => { throw new Error('Original durable input inspection requires the Desktop Runtime.') },
     stopInputWaiting: async () => { throw new Error('Original durable waiting control requires the Desktop Runtime.') },
     rejoinInputWaiting: async () => { throw new Error('Original durable waiting control requires the Desktop Runtime.') },
-    respondInteraction: async (control, response) => {
+    inspectInteraction: async () => null,
+    respondInteraction: async (control, response, intent) => {
       const session = mockSnapshot.sessions.find((item) => item.id === control.agentSessionId)
       if (!session || session.kind !== 'agent') throw new Error(`Session not found: ${control.agentSessionId}`)
       if (!session.pendingInteraction || session.pendingInteraction.id !== response.requestId) {
@@ -1108,6 +1109,7 @@ const mockApi: AgentMuxDesktopApi = {
       }
       delete session.pendingInteraction
       session.updatedAt = Date.now()
+      return { ...intent, agentSessionId: control.agentSessionId, run: control.run, response, delivery: 'bytes-accepted', nativeAdoption: 'unknown' }
     },
     // The browser preview carries no posture-capable Provider session (only codex + claude, which declare
     // no addressable in-band control), so no preview session ever renders the control to drive. Honor the

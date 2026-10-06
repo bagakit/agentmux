@@ -1940,15 +1940,20 @@ export class RuntimeController {
 
   async respondInteraction(
     control: Extract<SessionControl, { kind: 'agent' }>,
-    response: AgentMuxInteractionResponse
-  ): Promise<void> {
-    await this.trackHostLifecycleOperation(control.hostId, async () => {
-      await this.configuredClient(control.hostId).respondAgentInteraction({
+    response: AgentMuxInteractionResponse,
+    intent: import('@agentmux/core').AgentMuxInteractionOperationIntent
+  ): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt> {
+    return await this.trackHostLifecycleOperation(control.hostId, async () => {
+      return await this.configuredClient(control.hostId).respondAgentInteraction({
         agentSessionId: control.agentSessionId,
         expectedRun: control.run,
-        response
+        response, ...intent
       })
     })
+  }
+
+  async inspectInteraction(control: Extract<SessionControl, { kind: 'agent' }>, operationId: string): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt | null> {
+    return await this.configuredClient(control.hostId).inspectAgentInteractionOperation({ agentSessionId: control.agentSessionId, operationId })
   }
 
   async setPosture(

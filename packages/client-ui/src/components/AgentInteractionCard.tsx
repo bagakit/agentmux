@@ -1,8 +1,11 @@
 import { SemanticIcon } from '../theme/icons.js'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { agentInteractionRequestTarget } from '@agentmux/core/agent-interaction-state'
 import type {
   AgentMuxInteractionRequest,
-  AgentMuxInteractionResponse
+  AgentMuxInteractionResponse,
+  AgentMuxInteractionOperationIntent,
+  AgentMuxInteractionOperationReceipt
 } from '@agentmux/core'
 import { isAffirmative, permissionPlan, permissionTierClassName, questionPlan } from '../lib/agent-interaction-plan.js'
 import { AgentQuestionChoices } from './AgentQuestionChoices.js'
@@ -16,6 +19,7 @@ export function AgentInteractionCard({
   responseUnavailableReason,
   sourceNotice,
   onOpenTerminal,
+  onInspect,
   onRespond
 }: {
   request: AgentMuxInteractionRequest
@@ -24,10 +28,18 @@ export function AgentInteractionCard({
   responseUnavailableReason?: string | undefined
   sourceNotice?: string | undefined
   onOpenTerminal?(): void
-  onRespond(response: AgentMuxInteractionResponse): Promise<void>
+  onInspect?(operationId: string): Promise<AgentMuxInteractionOperationReceipt | null>
+  onRespond(response: AgentMuxInteractionResponse, intent: AgentMuxInteractionOperationIntent): Promise<void | AgentMuxInteractionOperationReceipt>
 }) {
   const [phase, setPhase] = useState<'idle' | 'sending' | 'awaiting'>('idle')
   const submission = useRef(false)
+  const operation = useRef<AgentMuxInteractionOperationIntent | null>(null)
+  const [receipt, setReceipt] = useState<AgentMuxInteractionOperationReceipt | null>(null)
+  const requestKey = JSON.stringify(agentInteractionRequestTarget(request))
+  useEffect(() => {
+    operation.current = null; submission.current = false
+    setPhase('idle'); setReceipt(null); setSelectedOption(null); setFailure(null)
+  }, [requestKey])
   const [selectedOption, setSelectedOption] = useState<string | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const unavailable = readOnly || disabled || phase !== 'idle' || Boolean(responseUnavailableReason)
@@ -40,7 +52,11 @@ export function AgentInteractionCard({
       : response.outcome === 'answered' ? response.answers[0]?.optionId ?? null : null)
     setFailure(null)
     try {
-      await onRespond(response)
+      operation.current ??= { operationId: crypto.randomUUID(), expectedRequest: structuredClone(request) }
+      const original = operation.current
+      const result = await onRespond(response, original)
+      if (operation.current !== original) return
+      if (result) setReceipt(result)
       setPhase('awaiting')
     } catch (error) {
       setFailure(presentError(error))
@@ -52,11 +68,20 @@ export function AgentInteractionCard({
   const reason = responseUnavailableReason ?? (request.kind === 'question' ? request.responseUnavailableReason : undefined)
   const status = readOnly ? 'Read-only · Answer in the original Session'
     : phase === 'sending' ? 'Sending answer…'
-    : phase === 'awaiting' ? 'Answer sent · Waiting for confirmation'
+    : phase === 'awaiting' ? receipt?.nativeCompleted ? 'Original request completed'
+      : receipt?.delivery === 'unknown' ? 'Delivery unknown · Check the original operation'
+      : receipt?.delivery === 'saved' ? 'Answer saved · Dispatch not confirmed'
+      : 'Answer sent · Waiting for confirmation'
     : reason ? 'Confirmation pending'
     : disabled ? 'Answer unavailable · Check this Session'
     : 'Needs your answer'
-  const requestStatus = <p className="agent-interaction__status" role="status" aria-live="polite">{status}</p>
+  const requestStatus = <div>
+    <p className="agent-interaction__status" role="status" aria-live="polite">{status}</p>
+    {onInspect && operation.current && (receipt?.delivery === 'unknown' || receipt?.delivery === 'saved') ?
+      <button type="button" onClick={() => { const original = operation.current!; void onInspect(original.operationId).then(value => {
+        if (value && operation.current === original) setReceipt(value)
+      }).catch(error => setFailure(presentError(error))) }}>Check original response</button> : null}
+  </div>
 
   if (reason) return (
     <section className="agent-interaction agent-interaction--native" aria-label="Agent interaction needs native confirmation" data-request-id={request.id}>
