@@ -1,11 +1,17 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import { AlertTriangle, SlidersHorizontal, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import type { LaunchOption, LaunchOptionSelection } from '@agentmux/core'
 import type { LauncherNames } from '../lib/launcher-name-draft'
+
+const ThemeStatusNamedIcon = semanticIconComponent('status.named')
+const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
 
 /** Provider DESCRIBE choices only. Native selects keep even large declarations compact and keyboard usable. */
 export function LaunchRefine({ options, selection, expanded, active, onToggle, onSelect, onReset, disabled, names, onNameChange }: {
@@ -55,16 +61,16 @@ export function LaunchRefine({ options, selection, expanded, active, onToggle, o
   return <Dialog.Root modal={false} open={expanded && active} onOpenChange={open => { if (open !== expanded) onToggle() }}>
     <Dialog.Trigger asChild><button type="button" className="launch-refine__toggle" ref={trigger} disabled={disabled || !active}
       aria-label="Launch options" title={[...chosen.map(choice => choice.label), ...(unavailable.length ? ['Saved choices need review'] : [])].join(' · ') || 'Launch options and optional names'}>
-      <SlidersHorizontal size={13} /><span>Options</span>
+      <ThemeActionAdjustIcon size={13} /><span>Options</span>
       {selectionCount ? <span className="launch-refine__count" data-tier={selectedTier} data-unconfirmed={unavailable.length ? true : undefined} aria-label={`${selectionCount} options set${selectedTier === 'safe' ? '' : ` · ${selectedTier}`}${unavailable.length ? ` · ${unavailable.length} saved choices need review` : ''}`}>
-        {selectedTier !== 'safe' || unavailable.length ? <AlertTriangle size={11} /> : null}{selectionCount}{selectedTier !== 'safe' || unavailable.length ? <span>{selectedTier === 'danger' ? 'Risk' : selectedTier === 'caution' ? 'Caution' : 'Review'}</span> : null}
+        {selectedTier !== 'safe' || unavailable.length ? <ThemeStatusWarningIcon size={11} /> : null}{selectionCount}{selectedTier !== 'safe' || unavailable.length ? <span>{selectedTier === 'danger' ? 'Risk' : selectedTier === 'caution' ? 'Caution' : 'Review'}</span> : null}
       </span> : null}
       {chosen.length ? <span className="launch-refine__summary">{chosen.map(choice => <span key={choice.optionId} data-tier={choice.tier ?? 'safe'}>{choice.label}</span>)}</span> : null}
-      {names?.agentName || names?.tabName ? <i className="launch-refine__named" aria-label="Custom names set" /> : null}
+      {names?.agentName || names?.tabName ? <ThemeStatusNamedIcon size={4} className="launch-refine__named" role="img" aria-hidden="false" aria-label="Custom names set" /> : null}
     </button></Dialog.Trigger>
     {active ? <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><Dialog.Content ref={setContent} className="launch-refine__panel" inert={!expanded} style={{ visibility: 'hidden' }}
       onEscapeKeyDown={() => trigger.current?.focus()} onCloseAutoFocus={event => event.preventDefault()}>
-      <header><Dialog.Title>Launch options</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close launch options" onClick={() => trigger.current?.focus()}><X size={14} /></Dialog.Close></header>
+      <header><Dialog.Title>Launch options</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close launch options" onClick={() => trigger.current?.focus()}><ThemeActionCloseIcon size={14} /></Dialog.Close></header>
       <Dialog.Description>Choices apply to this launch. Unset values use the Agent’s defaults.</Dialog.Description>
       {unavailable.length ? <p className="launch-refine__notice" role="status">Saved choices are no longer listed: {unavailable.map(({ label, choiceId }) => `${label}: ${choiceId}`).join(' · ')}. They are retained until you choose another value or use Agent defaults.</p> : null}
       {selectionCount && onReset ? <button type="button" className="small-button launch-refine__reset" disabled={disabled} onClick={onReset}>Use Agent defaults</button> : null}

@@ -1,4 +1,4 @@
-import { Check, ChevronDown, LoaderCircle } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
@@ -15,6 +15,12 @@ import { tabGroupForTab } from '../lib/workbench-tabs'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
+
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeStatusAcceptedIcon = semanticIconComponent('status.accepted')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+
 
 function LauncherMoteAvatar({ mote, topicId }: { mote?: ScratchTopicSnapshot | undefined; topicId: string }) {
   const workspace = useAppStore(state => state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID))
@@ -114,9 +120,9 @@ export function LauncherMoteAction({ workspace, prompt, sourceTabId, sourceRegio
   if (sourceIsTarget) return null
   return <div className="launcher-mote">
     <div className="launcher-mote__actions"><button type="button" className="launcher-mote__create" disabled={disabled || pending} title={`${hasDraft ? 'Send a creation request to' : 'Open'} ${moteName}; both unsent drafts are kept`} onClick={() => { void createWithMote() }}>
-      {pending ? <LoaderCircle className="spin" size={13} /> : submitted ? <Check size={13} /> : <LauncherMoteAvatar mote={selectedMote} topicId={topicId} />}<span>{pending ? 'Submitting…' : submitted ? `Request ${submission}` : 'Create with Mote'}</span>
+      {pending ? <ThemeStatusLoadingIcon className="spin" size={13} /> : submitted ? <ThemeStatusAcceptedIcon size={13} /> : <LauncherMoteAvatar mote={selectedMote} topicId={topicId} />}<span>{pending ? 'Submitting…' : submitted ? `Request ${submission}` : 'Create with Mote'}</span>
     </button>
-    {availableMotes.length > 1 || !availableMotes.some(mote => mote.id === topicId) ? <DropdownMenu.Root><DropdownMenu.Trigger className="launcher-mote__target" aria-label={`Choose Mote: ${moteName}`} title={moteName} disabled={pending}><span>{moteName}</span><ChevronDown size={12} /></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="start">{availableMotes.map(mote => <DropdownMenu.Item key={mote.id} className="tab-context-menu__item" onSelect={() => selectMote(mote.id)}><LauncherMoteAvatar mote={mote} topicId={mote.id} /><span>{mote.title}</span>{mote.id === topicId ? <span aria-label="Selected Mote">✓</span> : null}</DropdownMenu.Item>)}{availableMotes.length === 0 ? <DropdownMenu.Item className="tab-context-menu__item" disabled>No active Motes</DropdownMenu.Item> : null}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root> : <span className="launcher-mote__target" title={moteName}>{moteName}</span>}</div>
+    {availableMotes.length > 1 || !availableMotes.some(mote => mote.id === topicId) ? <DropdownMenu.Root><DropdownMenu.Trigger className="launcher-mote__target" aria-label={`Choose Mote: ${moteName}`} title={moteName} disabled={pending}><span>{moteName}</span><ThemeNavigationDownIcon size={12} /></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="start">{availableMotes.map(mote => <DropdownMenu.Item key={mote.id} className="tab-context-menu__item" onSelect={() => selectMote(mote.id)}><LauncherMoteAvatar mote={mote} topicId={mote.id} /><span>{mote.title}</span>{mote.id === topicId ? <span aria-label="Selected Mote"><ThemeStatusSelectedIcon size={12} /></span> : null}</DropdownMenu.Item>)}{availableMotes.length === 0 ? <DropdownMenu.Item className="tab-context-menu__item" disabled>No active Motes</DropdownMenu.Item> : null}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root> : <span className="launcher-mote__target" title={moteName}>{moteName}</span>}</div>
     {selectedMote?.moteArchive?.state === 'archived' ? <div className="launcher-mote__archive" role="status">
       <span>Archived · You can still create with this Mote.</span>
       <button type="button" className="small-button" disabled={archive.pending === topicId} onClick={() => void archive.change(selectedMote, false)}>Restore Mote</button>
