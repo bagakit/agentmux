@@ -347,7 +347,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
         </> : sheet === 'actions' ? <>
           <Dialog.Description id="mobile-sheet-description">{sessionTitle ?? '原 Agent'} · {objectIdentity?.project ?? '项目未确认'}</Dialog.Description>
           <button className="mobile-menu-row" onClick={() => { setShowGoalWork(value => !value); setSheet(null) }}><ThemeObjectGoalIcon size={18} /><span>{showGoalWork ? '返回原对话' : '目标与结果'}</span></button>
-          <button className="mobile-menu-row" onClick={() => { setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' })); setSheet(null) }}><ThemeObjectTerminalIcon size={18} /><span>{workface.panel === 'terminal' ? '查看对话' : '查看终端'}</span></button>
+          <button className="mobile-menu-row" onClick={() => { setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' })); setSheet(null) }}>{workface.panel === 'terminal' ? <ThemeObjectConversationIcon size={18} /> : <ThemeObjectTerminalIcon size={18} />}<span>{workface.panel === 'terminal' ? '查看对话' : '查看终端'}</span></button>
           <button className="mobile-menu-row" onClick={() => { closeSession(); setSheet(null) }}><ThemeNavigationBackIcon size={18} /><span>返回 {pageName}</span></button>
         </> : <>
           <Dialog.Description id="mobile-sheet-description">连接同一私网里的 Mac。Agent 与会话由 Mac 管理。</Dialog.Description>
