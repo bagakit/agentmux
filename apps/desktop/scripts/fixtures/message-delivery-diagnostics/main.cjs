@@ -36,7 +36,7 @@ app.whenReady().then(async () => {
     await win.loadFile(html); win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await waitFor('Boolean(window.deliveryDiagnostics)')
-    const kinds = ['preparation', 'unknown', 'legacy', 'compaction', 'first-wait', 'exhausted']
+    const kinds = ['preparation', 'unknown', 'legacy', 'compaction', 'first-wait', 'exhausted', 'observer']
     assert.ok(!only || kinds.includes(only), 'Only a named owning scene can be recaptured')
     for (const width of [640, 320]) for (const kind of only ? [only] : kinds) {
       result.stage = `${width}-${kind}`
@@ -63,15 +63,19 @@ app.whenReady().then(async () => {
       await waitFor(`Boolean(${diagnostic})`)
       const before = await evaluate('deliveryDiagnostics.facts()')
       const displayed = await evaluate(`${diagnostic}.querySelector('.message-delivery-failure__heading').textContent`)
-      assert.equal(displayed.trim(), kind === 'unknown' || kind === 'legacy' ? '发送结果待核实' : kind === 'compaction' || kind === 'exhausted' ? '正在整理上下文' : '本次准备未完成')
+      assert.equal(displayed.trim(), kind === 'observer' ? '已保存 · 等待确认' : kind === 'unknown' || kind === 'legacy' ? '发送结果待核实' : kind === 'compaction' || kind === 'exhausted' ? '正在整理上下文' : '本次准备未完成')
+      if (kind === 'observer') {
+        assert.equal(await evaluate(`${diagnostic}.dataset.kind`), 'saved-waiting')
+        assert.equal(await evaluate(`${diagnostic}.querySelector('[role="alert"]')`), null)
+      }
       assert.equal(await evaluate(`${diagnostic}.querySelector('details').open`), false)
       const style = await evaluate(`(()=>{const s=getComputedStyle(${diagnostic}),b=getComputedStyle(${diagnostic}.querySelector('[aria-label="复制完整诊断"]'));return{padding:s.padding,border:b.borderTopWidth,fontSize:b.fontSize,minHeight:b.minHeight}})()`)
-      assert.equal(style.padding, '10px 12px', 'Actual product diagnostic CSS is loaded')
+      assert.equal(style.padding, '7px 9px', 'Actual compact product diagnostic CSS is loaded')
       assert.equal(style.border, '0px'); assert.equal(style.minHeight, '26px')
       if (kind === 'compaction') assert.match(await evaluate(`${mailbox}.textContent`), /2\/3/)
       if (kind === 'exhausted') assert.match(await evaluate(`${mailbox}.textContent`), /3 次/)
       await capture(width, `${kind}-summary`)
-      if (kind === 'preparation') {
+      if (kind === 'preparation' || kind === 'observer') {
         await evaluate(`${diagnostic}.querySelector('summary').focus()`); await key('Enter', 'Enter', 13)
         await waitFor(`${diagnostic}.querySelector('details').open`)
         await capture(width, `${kind}-details`)
@@ -84,7 +88,12 @@ app.whenReady().then(async () => {
         await waitFor(`${diagnostic}.querySelector('[data-copy-state="copied"]')`)
         const report = await evaluate('deliveryDiagnostics.facts().copies.at(-1)')
         for (const fact of [seeded.logId, seeded.operationId, seeded.report.record.agentSessionId, seeded.report.record.expectedRunId, 'preclaimObservation']) assert.ok(report.includes(fact), 'Copied complete original diagnostic: ' + fact)
-        await fs.writeFile(path.join(evidence, `${width}-copied-report.txt`), report)
+        if (kind === 'observer') {
+          assert.ok(report.includes(JSON.stringify(seeded.inputReceipt, null, 2)), 'Copy keeps the complete original Core receipt')
+          assert.ok(report.includes('This operation was aborted'))
+          assert.ok(!report.includes('输入结果未知'))
+        }
+        await fs.writeFile(path.join(evidence, `${width}-${kind}-copied-report.txt`), report)
         await capture(width, `${kind}-copied`)
       }
       const after = await evaluate('deliveryDiagnostics.facts()')
@@ -93,7 +102,7 @@ app.whenReady().then(async () => {
       result.events.push({ width, kind, seeded, displayed, identitiesAndDraftsUnchanged: true })
       await click(`${mailbox}.querySelector('[aria-label="Close mailbox"]')`)
     }
-    assert.equal(result.frames.length, only ? only === 'preparation' ? 8 : 2 : 18)
+    assert.equal(result.frames.length, only ? only === 'preparation' || only === 'observer' ? 8 : 2 : 26)
     result.passed = true
   } catch (error) {
     result.failure = { name: error.name, message: error.message, stack: error.stack, stage: result.stage }

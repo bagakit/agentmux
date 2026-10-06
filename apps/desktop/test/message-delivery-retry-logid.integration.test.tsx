@@ -1,9 +1,11 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { ClientDeliveryDiagnostics } from '@agentmux/client-ui/delivery-diagnostics'
 import type { DeliveryAttempt, DeliveryAttemptLookup } from '@agentmux/core/delivery-attempt'
+import type { AgentInputSubmissionReceipt } from '@agentmux/core'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { useAppStore, type AgentSteerQueueEntry } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
@@ -79,6 +81,35 @@ beforeEach(() => {
     reporterRecords.set(record.logId, structuredClone(record))
     return inspectReported(record.logId)
   })
+})
+
+it('carries the Core waiting and stop receipts through Composer, Outbox and complete diagnostic copy without sending', async () => {
+  const key = { kind: 'prompt' as const, agentSessionId: sid, expectedRun: { ...condition.expectedRun }, submissionId: originalOp }
+  const ref = { key, waitGeneration: 1 }
+  const inputReceipt: AgentInputSubmissionReceipt = { key, ref, persistence: 'confirmed', status: 'waiting', observation: 'rejoin-needed', admission: null,
+    control: { ref, state: 'enabled', at: _reshape_fixtureEpoch(0, 0, 1), waiting: { phase: 'observer', reason: 'observer-stopped', wake: 'explicit-rejoin',
+      failure: { name: 'AbortError', message: 'This operation was aborted' }, observation: { phase: 'native-peer' } } } }
+  const submit = vi.spyOn(api.sessions, 'submitPrompt'), copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
+  useAppStore.setState({ agentSteerQueues: { [sid]: [entry(originalOp, { inputReceipt })] } })
+  const before = structuredClone(original()), draft = dom.draft()
+  await dom.render(<AgentSessionComposer sessionId={sid} />)
+  await showMailbox()
+  const diagnostic = row().querySelector('.message-delivery-failure')!
+  expect(diagnostic.getAttribute('data-kind')).toBe('saved-waiting')
+  expect(diagnostic.querySelector('.message-delivery-failure__heading')!.textContent).toBe('已保存 · 等待确认')
+  expect(diagnostic.querySelector('[role="alert"]')).toBeNull()
+  await click(action(diagnostic, '复制完整诊断'))
+  expect(copy.mock.calls[0]![0]).toContain(JSON.stringify(inputReceipt, null, 2))
+  expect(copy.mock.calls[0]![0]).toContain('This operation was aborted')
+  expect(copy.mock.calls[0]![0]).not.toContain('输入结果未知')
+  const inputStopReceipt = { ref, cancelOperationId: 'original-stop', outcome: 'stopped-before-dispatch' as const, at: _reshape_fixtureEpoch(0, 0, 2) }
+  await act(async () => useAppStore.setState({ agentSteerQueues: { [sid]: [{ ...before, inputStopReceipt }] } }))
+  expect(row().querySelector('.message-delivery-failure')!.getAttribute('data-kind')).toBe('stopped')
+  await click(action(row().querySelector('.message-delivery-failure')!, '复制完整诊断'))
+  expect(copy.mock.calls[1]![0]).toContain(JSON.stringify(inputStopReceipt, null, 2))
+  expect(original()).toEqual({ ...before, inputStopReceipt })
+  expect(dom.draft()).toBe(draft)
+  expect(submit).not.toHaveBeenCalled()
 })
 afterEach(async () => {
   for (const release of releases.splice(0)) release()
@@ -240,7 +271,7 @@ it('keeps only the actual in-flight message busy, and a second explicit choice n
 
 it.each(['card', 'mailbox'] as const)('sends a never-dispatched old-Run message through the current same Session from %s', async surface => {
   const reaction = { code: 'continue', replySource: { kind: 'captured' as const, agentSessionId: sid, recordId: 'original-record' } }
-  const stale = entry(originalOp, { runId: 'old-run', promptCondition: null, enqueuedAt: 100, reaction })
+  const stale = entry(originalOp, { runId: 'old-run', promptCondition: null, enqueuedAt: _reshape_fixtureEpoch(0, 0, 100), reaction })
   const neighbor = entry('neighbor')
   const draft = 'Keep the separate current composer draft'
   useAppStore.setState({ agentSteerQueues: { [sid]: [neighbor, stale] }, agentComposerDrafts: { [sid]: draft } })
@@ -255,7 +286,7 @@ it.each(['card', 'mailbox'] as const)('sends a never-dispatched old-Run message 
   expect(submit.mock.calls[0]!.slice(0, 4)).toEqual([
     composerSession().control, body, originalOp, { expectedRun: composerSession().control.run, afterSubmissionId: null }
   ])
-  expect(dispatched).toMatchObject({ operationId: originalOp, text: body, runId: 'run-agent-1', enqueuedAt: 100,
+  expect(dispatched).toMatchObject({ operationId: originalOp, text: body, runId: 'run-agent-1', enqueuedAt: _reshape_fixtureEpoch(0, 0, 100),
     reaction, execution: 'immediate', sourceChannel: 'message-tool' })
   expect(queue()).toEqual([neighbor])
   expect(useAppStore.getState().agentComposerDrafts[sid]).toBe(draft)
@@ -360,7 +391,7 @@ it('preserves the draft and all original queue records when admission refuses tw
   await settled(() => expect(api.sessions.recordDeliveryFailure).toHaveBeenCalledTimes(1))
   const firstRecord = (api.sessions.recordDeliveryFailure as ReturnType<typeof vi.fn>).mock.calls[0]![0] as DeliveryAttempt
   expect(firstRecord.stage).toBe('queue-admission')
-  expect(dom.container.textContent).toContain(firstRecord.logId)
+  expect(document.querySelector('.composer-feedback .message-delivery-failure pre')?.textContent).toContain(firstRecord.logId)
   expect(queue()).toEqual(full)
   expect(dom.draft()).toBe('New intent cannot displace the original full queue')
   expect(submit).not.toHaveBeenCalled()
@@ -410,19 +441,37 @@ it('releases the admission diagnostic when a synchronous subscriber removes the 
 })
 
 
-it('consumes native steer for a fresh manual draft and the original mounted pending action', async () => {
+it('keeps native manual input on the original Core key and rejoins from the mounted pending action', async () => {
  const session = composerSession()
  session.capabilities.promptExecution = {immediate: 'native-steer'}
  useAppStore.setState({sessions: [session], agentSteerQueues: {}, agentComposerDrafts: {[sid]: body + '\nNative steer choice'}})
  vi.mocked(api.sessions.refresh).mockResolvedValue(session)
- const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValueOnce(refusal('native steer controlled refusal')).mockResolvedValue()
+ let receipt: AgentInputSubmissionReceipt | null = null
+ const inspect = vi.spyOn(api.sessions, 'inspectInput').mockImplementation(async () => receipt)
+ const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (_control, _text, submissionId) => {
+   const key = { kind: 'prompt' as const, agentSessionId: sid, expectedRun: { ...condition.expectedRun }, submissionId }, ref = { key, waitGeneration: 1 }
+   return receipt = { key, ref, persistence: 'confirmed', status: 'waiting', observation: 'rejoin-needed', admission: null,
+     control: { ref, state: 'enabled', at: _reshape_fixtureEpoch(0, 0, 1), waiting: { phase: 'observer', reason: 'observer-stopped', wake: 'explicit-rejoin',
+       failure: { name: 'AbortError', message: 'Original observer ended' } } } }
+ })
+ const rejoin = vi.spyOn(api.sessions, 'rejoinInputWaiting').mockImplementation(async (_control, ref) => {
+   const next = { ...ref, waitGeneration: ref.waitGeneration + 1 }
+   return { ...receipt!, ref: next, observation: 'owned', control: { ref: next, state: 'enabled', at: _reshape_fixtureEpoch(0, 0, 2) } }
+ })
  await dom.render(<AgentSessionComposer sessionId={sid} />)
  await click(action(dom.container, 'Send'))
  await settled(() => expect(submit).toHaveBeenCalledOnce())
  const first = structuredClone(queue()[0]!)
- expect(first.execution).toBe('immediate')
+ expect(first.directInputBinding).toEqual({ expectedRun: condition.expectedRun, admissionIntent: { kind: 'manual-actor' } })
  expect(submit.mock.calls[0]![4]).toMatchObject({execution: 'immediate'})
+ expect(submit.mock.calls[0]![3]).toEqual({ expectedRun: condition.expectedRun, admissionIntent: { kind: 'manual-actor' } })
+ expect(submit.mock.calls[0]![1]).toBe(body + '\nNative steer choice')
+ expect(first.inputReceipt?.key).toMatchObject({ kind: 'prompt', submissionId: first.operationId })
  await click(action(card(first.operationId), '立即发送这条待发消息'))
- await settled(() => expect(submit).toHaveBeenCalledTimes(2))
- expect(submit.mock.calls[1]!.slice(0,5)).toEqual(submit.mock.calls[0]!.slice(0,5))
+ await settled(() => expect(rejoin).toHaveBeenCalledOnce())
+ expect(rejoin.mock.calls[0]).toEqual([session.control, first.inputReceipt!.ref])
+ expect(inspect).toHaveBeenCalledTimes(2)
+ expect(submit).toHaveBeenCalledOnce()
+ expect(queue()[0]?.operationId).toBe(first.operationId)
+ expect(queue()[0]?.inputReceipt?.ref.waitGeneration).toBe(2)
 })
