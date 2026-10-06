@@ -1,3 +1,4 @@
+import { createRendererNotebookObservation } from './notebook-observation-api'
 import { serializeThemeFile } from '@agentmux/client-ui/theme'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { unwrapSessionInputWriteResult, unwrapSessionInputOperationResult } from '../../../shared/session-input-result'
@@ -371,6 +372,8 @@ const mockApi: AgentMuxDesktopApi = {
   },
   topics: { call: async () => { throw new Error('The original Topic filesystem owner is unavailable in the web preview. Open the Desktop to read or save Topic content.') } },
   notebooks: {
+    graph: async () => { throw new Error('The original Host Note graph reader is unavailable in web preview. Open Desktop or retry this same observation after reconnecting.') },
+    content: async () => { throw new Error('The original Host Note reader is unavailable in web preview. Original content is retained; reconnect the Host before retrying.') },
     actor: async () => ({ kind: 'user', id: 'web-preview-user' }),
     read: async () => structuredClone(mockNotebookState),
     apply: async input => {
@@ -1429,6 +1432,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
   const preload: AgentMuxPreloadApi = window.agentmux
   return {
     ...preload,
+    notebooks: { ...preload.notebooks, ...createRendererNotebookObservation(preload.notebooks) },
     scratch: { ...preload.scratch, listTopics: async workspaceId => {
       const result = await preload.scratch.listTopics(workspaceId)
       // Normalize only after the real bridge. Array custom fields are dropped

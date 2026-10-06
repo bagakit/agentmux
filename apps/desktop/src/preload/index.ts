@@ -1,3 +1,4 @@
+import { createPreloadNotebookObservation } from './notebook-observation'
 import { readInputObservation } from '@agentmux/core/control'
 import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from '../shared/browser-result-artifact'
 import type { BrowserTaskAssetRunInput, BrowserTaskContent, BrowserTaskBatchInput } from '../shared/browser-task-assets'
@@ -113,6 +114,7 @@ const api: AgentMuxPreloadApi = {
     onChange: listener => { const receive = (_event: unknown, snapshot: import('@agentmux/core/notebook-store').NotesStorageSnapshot) => listener(snapshot); ipcRenderer.on('notesStorage:changed', receive); return () => ipcRenderer.removeListener('notesStorage:changed', receive) }
   },
   notebooks: {
+    ...createPreloadNotebookObservation((channel, ...values) => ipcRenderer.invoke(channel, ...values)),
     actor: () => ipcRenderer.invoke('notebook:actor'),
     read: () => ipcRenderer.invoke('notebook:read'),
     apply: input => ipcRenderer.invoke('notebook:apply', input),

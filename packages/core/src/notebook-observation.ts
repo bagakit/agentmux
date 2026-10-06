@@ -1,4 +1,5 @@
 import { AgentMuxError } from './errors.js'
+export { AgentMuxError } from './errors.js'
 import type { NotebookState, NoteResource } from './notebook-catalog.js'
 
 /** Original file observations, never another Note body or relationship store. */

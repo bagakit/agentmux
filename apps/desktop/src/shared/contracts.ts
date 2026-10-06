@@ -1570,7 +1570,7 @@ export type AgentMuxDesktopApi = {
   /** Fixed-size synchronous V8-isolate observation; no process dump or object scan. */
   readRendererMemory(): import('@agentmux/core/control').RendererMemorySnapshot
   git: import('./git-contracts').GitProjectIdentityApi
-  notebooks: import('@agentmux/core/notebook-catalog').NotebookApi
+  notebooks: import('@agentmux/core/notebook-catalog').NotebookApi & import('./notebook-observation').NotebookObservationApi
   notesStorage: import('@agentmux/core/notebook-store').NotesStorageApi
   spatial: {
     read(): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null>
@@ -1986,7 +1986,8 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks'> & {
+  notebooks: import('@agentmux/core/notebook-catalog').NotebookApi & import('./notebook-observation').NotebookObservationPreloadApi
   scratch: Omit<AgentMuxDesktopApi['scratch'], 'listTopics'> & {
     listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicListResponse>
   }
