@@ -255,6 +255,14 @@ export class DeviceAuthority {
     await save
   }
 
+  /** Recheck the exact authenticated key; this never registers a key or borrows a Reader. */
+  async assertCurrentKey(device: Pick<TrustedDevice, 'deviceId' | 'createdAt'>, publicKey: string): Promise<void> {
+    if (this.diskUnconfirmed && !await this.reconcileDisk()) throw new AgentMuxError(
+      'The original device authority storage is unconfirmed; the saved input remains waiting.', 'CONTROL_UNAVAILABLE')
+    const current = this.state.devices.find(value => value.deviceId === device.deviceId)
+    if (!current || current.createdAt !== device.createdAt || current.credentialHash !== digest(publicKey) || current.revokedAt !== undefined) throw denied()
+  }
+
   /** A continuing request/stream observes revocation without affecting any other device or Run. */
   observe(device: TrustedDevice, info?: Pick<DeviceConnection, 'address' | 'userAgent'>): { signal: AbortSignal; dispose(): void } {
     const record = this.state.devices.find(value => value.deviceId === device.deviceId && value.revokedAt === undefined)

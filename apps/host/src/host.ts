@@ -99,9 +99,12 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
           onState: state => { mobileState = { state, message: state === 'connected' ? '手机连接已就绪' : state === 'starting' ? '正在连接，自动重试中' : '连接中断，自动重连中；原会话保留。' } },
           attachSocket: async (socket, metadata) => {
             if (!metadata?.peerPublicKeyB64) throw new AgentMuxError('Encrypted peer identity is unavailable.', 'CONTROL_PERMISSION_DENIED')
-            const device = await owner.authorizeKey(metadata.peerPublicKeyB64)
+            const publicKey = metadata.peerPublicKeyB64
+            const device = await owner.authorizeKey(publicKey)
+            const author = { deviceId: device.deviceId, createdAt: device.createdAt }
             const observation = owner.observe(device, local?.connectionInfo(metadata.relayConnectionId))
-            const frames = originalServer.openAuthenticatedFrames({ authorization: { principal: { kind: 'device', id: `${owner.hostId}:${device.deviceId}` }, signal: observation.signal },
+            const frames = originalServer.openAuthenticatedFrames({ authorization: { principal: { kind: 'device', id: `${owner.hostId}:${device.deviceId}` }, signal: observation.signal,
+              assertCurrent: () => owner.assertCurrentKey(author, publicKey) },
               send: async frame => { await socket.send(JSON.stringify(frame)) }, close: () => socket.close() })
             let queue = Promise.resolve(), queuedBytes = 0, queuedCount = 0
             socket.on('message', data => {

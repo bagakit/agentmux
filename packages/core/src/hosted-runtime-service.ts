@@ -23,6 +23,7 @@ const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
 const RUNTIME_METHODS = new Set<AgentMuxHostedMethod>(AGENTMUX_HOSTED_RUNTIME_METHODS)
 type Emit = (event: AgentMuxHostedStreamEvent) => void | Promise<void>
 type Context = { principal?: import('./public-rpc.js').AgentMuxRpcPrincipal; caller?: unknown; sourceDevice?: undefined | import('./types.js').AgentOperationDevice;
+  assertCurrent?(): void | Promise<void>;
   recordDeviceOperation?: (source: import('./types.js').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string) => Promise<void>; signal?: AbortSignal; afterResponse?: Array<() => void | Promise<void>> }
 type Reader = { enqueue(chunks: AgentMuxHostedTransferChunk[], metadata?: AgentMuxClientEvent): void; fail(error: unknown): void;
   start(): Promise<void>; close(): void;
@@ -216,7 +217,7 @@ export class AgentMuxHostedRuntimeService {
     if (method === 'runtime.bootstrap') return await observe(this.bootstrap(), context.signal)
     if (method === 'runtime.release-consumer') return { released: await this.releaseConsumer(id) }
     if (method !== 'runtime.invoke') throw new AgentMuxError('Unknown hosted public method.', 'RPC_METHOD_NOT_FOUND')
-    const input = record(decodeHostedValue(sanitizeHostedInputInvocation(p.invocation)))
+    const input = record(decodeHostedValue(sanitizeHostedInputInvocation(p.invocation)), ['method', 'args'])
     if (typeof input.method !== 'string' || !(AGENTMUX_HOSTED_METHODS as readonly string[]).includes(input.method) || !Array.isArray(input.args) || input.args.length > 12) {
       throw new AgentMuxError('The method is outside the finite SDK surface.', 'INVALID_CONTROL_REQUEST')
     }
@@ -230,6 +231,8 @@ export class AgentMuxHostedRuntimeService {
         { kind: 'user', id: rpcString(context.principal.id, 'Transport principal') })) }
     }
     const invocation = input as unknown as AgentMuxHostedInvocation
+    const controlledInput = invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'rejoinAgentInputWaiting'
+    if (controlledInput && invocation.args.length !== 1) throw new AgentMuxError('Input call context is supplied only by the original Host, never by wire arguments.', 'INVALID_CONTROL_REQUEST')
     const attachment = invocation.method === 'reattachAgent' || invocation.method === 'attachTerminal' || invocation.method === 'refreshRunAttachment'
     // Direct attachment invocations borrow an existing exact event destination;
     // an unattached invocation must not manufacture a consumer with no owner.
@@ -241,7 +244,11 @@ export class AgentMuxHostedRuntimeService {
       (invocation.args[0] as { admissionIntent?: { kind?: string } } | undefined)?.admissionIntent?.kind === 'manual-actor')) await observe(this.client.connect(), context.signal)
     context.signal?.throwIfAborted(); this.assertFence(p.fence)
     if (attachment && this.consumers.get(id) !== original) throw new AgentMuxError('Attachment observation changed while reconnecting its original Core.', 'CONTROL_CANCELLED')
-    if (context.signal && (invocation.method === 'submitAgentPrompt' || invocation.method === 'replySessionQuestion')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }
+    if (invocation.method === 'submitAgentPrompt') {
+      const { signal: _wireSignal, ...prompt } = invocation.args[0]
+      invocation.args[0] = { ...prompt, ...(prompt.admissionIntent?.kind !== 'manual-actor' && context.signal ? { signal: context.signal } : {}) }
+    }
+    if (context.signal && invocation.method === 'replySessionQuestion') invocation.args[0] = { ...invocation.args[0], signal: context.signal }
     if (context.signal && (invocation.method === 'sessionHistoryPage' || invocation.method === 'sessionHistoryResource')) invocation.args[1] = { ...invocation.args[1], signal: context.signal }
     if (context.signal && (invocation.method === 'readNativeAgentHistory' || invocation.method === 'readHostNativeAgentHistory' ||
       invocation.method === 'readNativeAgentHistoryResource' || invocation.method === 'readHostNativeAgentHistoryResource')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }
@@ -285,7 +292,10 @@ export class AgentMuxHostedRuntimeService {
       value = attached.value
     } else {
       const operation = this.client[invocation.method] as (...args: unknown[]) => unknown
-      value = await operation.apply(this.client, invocation.args)
+      value = await operation.apply(this.client, controlledInput ? [...invocation.args, {
+        ...(context.signal ? { requestSignal: context.signal } : {}),
+        ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {})
+      } satisfies import('./agent-input-wait.js').AgentInputCallContext] : invocation.args)
     }
     } catch (error) { await recordActivity('unknown'); throw error }
     if (invocation.method === 'sessionHistoryResource') {

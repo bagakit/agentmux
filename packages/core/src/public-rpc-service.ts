@@ -37,7 +37,7 @@ import { readAgentRoleBindings, registerAgentRole, resolveAgentRole } from './ag
 import { DurableAgentMuxMessageQueue, appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDelivery,
   recordGlobalMessageDeliveryIssue } from './agent-global-message-queue.js'
 import { agentPromptCondition, validateAgentPromptCondition, validateAgentPromptInputKey } from './agent-prompt-condition.js'
-import { validateAgentInputControlId, validateAgentInputWaitRef, type AgentInputSubmissionReceipt } from './agent-input-wait.js'
+import { validateAgentInputControlId, validateAgentInputWaitRef, type AgentInputSubmissionReceipt, type AgentInputCallContext } from './agent-input-wait.js'
 import { diagnoseAgentMux } from './doctor.js'
 import { agentSessionMatches } from './rpc-agent-filter.js'
 import { OrderedSessionOutputFollow, type FollowOutput } from './session-output-follow.js'
@@ -119,6 +119,8 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
     handlers: AgentMuxRpcSubscriptionOptions<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcSubscription>
 }
 export type AgentMuxRpcCallContext = { caller?: AgentMuxRpcCredentials; signal?: AbortSignal; principal?: AgentMuxRpcPrincipal;
+  /** Only the actual Host/transport supplies this current author restriction. */
+  assertCurrent?(): void | Promise<void>;
   runtimeFence?: AgentMuxRuntimeFence; afterResponse?: Array<() => void | Promise<void>>;
   /** Actual receiving hop, supplied only by the transport owner. */
   transport?: 'unix' | 'http' | 'relay' }
@@ -280,6 +282,17 @@ export class AgentMuxRpcService {
     if (!caller) throw new AgentMuxError('This method requires an authenticated managed Agent.', 'MANAGED_AGENT_CONTEXT_REQUIRED')
     return caller
   }
+  private inputCallContext(context: AgentMuxRpcCallContext): AgentInputCallContext {
+    const assertCurrent = context.assertCurrent ?? (context.principal?.kind === 'device' ? () => {
+      throw new AgentMuxError('The original Host device authorization is unconfirmed; the saved input remains waiting.', 'CONTROL_UNAVAILABLE')
+    } : undefined)
+    return { ...(context.signal ? { requestSignal: context.signal } : {}), ...(assertCurrent ? { assertCurrent } : {}) }
+  }
+  private async inputForwardContext(context: AgentMuxRpcCallContext): Promise<AgentMuxRpcCallContext> {
+    await this.inputCallContext(context).assertCurrent?.()
+    const { assertCurrent: _localRestriction, ...forwarded } = context
+    return forwarded
+  }
   private async execute(request: AgentMuxControlRequest, context?: AgentMuxNameContext): Promise<AgentMuxControlResult> {
     if (!this.ports.execute && ['space.ls','space.inspect','space.bind','space.unbind'].includes(request.operation)) {
       const state = await this.spatial.readForLayout()
@@ -323,9 +336,11 @@ export class AgentMuxRpcService {
     }
     if (Object.hasOwn(AGENTMUX_HOSTED_RPC_METHODS, method)) {
       const hosted = await this.hosted(method, params, context)
+      const inputContext = this.inputCallContext(context)
       return await hosted.owner.call(method, hosted.params, {
         ...(context.principal ? { principal: context.principal } : {}),
         ...(context.signal ? { signal: context.signal } : {}),
+        ...(inputContext.assertCurrent ? { assertCurrent: inputContext.assertCurrent } : {}),
         ...(this.ports.operationSource?.(context) ? { sourceDevice: this.ports.operationSource!(context) } : {}),
         ...(this.ports.recordDeviceOperation ? { recordDeviceOperation: this.ports.recordDeviceOperation } : {}),
         ...(context.afterResponse ? { afterResponse: context.afterResponse } : {})
@@ -1089,10 +1104,11 @@ export class AgentMuxRpcService {
         if (caller && caller.client !== scope.client) throw new AgentMuxError('Input control cannot cross semantic owners.', 'CONTROL_PERMISSION_DENIED')
         if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError(
           'Stopping or rejoining input requires a transport-approved user/device or its authenticated Agent author.', 'CONTROL_PERMISSION_DENIED')
-        if (scope.client.forwardRpc) return await scope.client.forwardRpc(method, p as AgentMuxRpcParams<typeof method>, context) as AgentMuxRpcResult<M>
+        if (scope.client.forwardRpc) return await scope.client.forwardRpc(method, p as AgentMuxRpcParams<typeof method>,
+          await this.inputForwardContext(context)) as AgentMuxRpcResult<M>
         const author = caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}
         result = method === 'agent.input.stop' ? await scope.client.stopAgentInputWaiting({ ref, cancelOperationId: validateAgentInputControlId(p.cancelOperationId), ...author })
-          : await scope.client.rejoinAgentInputWaiting({ ref, ...author })
+          : await scope.client.rejoinAgentInputWaiting({ ref, ...author }, this.inputCallContext(context))
         break
       }
       case 'agent.send': result = await this.send(p, caller, context); break
@@ -1264,7 +1280,7 @@ export class AgentMuxRpcService {
       // Resolve presentation exactly once. The original remote owner alone queues
       // the envelope and admits input against its current Session and Run.
       return await recipientOwner.client.forwardRpc('agent.send', { ...p,
-        operationId, text, target: { kind: 'agent-session', agentSessionId: recipientId } }, context)
+        operationId, text, target: { kind: 'agent-session', agentSessionId: recipientId } }, await this.inputForwardContext(context))
     }
     const durable = (await recipientOwner.client.readAgentSessions()).find(session => session.agentSessionId === recipientId)
     if (!durable) throw new AgentMuxError('Recipient Session is no longer retained.', 'UNKNOWN_AGENT_SESSION')
@@ -1299,7 +1315,7 @@ export class AgentMuxRpcService {
       // Renderer roundtrip must not append a second producer before that owner.
       const inputReceipt = await recipientOwner.client.submitAgentMessage({ agentSessionId: recipientId,
         envelope: { ...envelope, messageId, schema: 'agentmux.a2a.v1' }, admissionIntent: { kind: 'manual-actor', expectedRun: { ...recipient.run } }, execution: 'immediate',
-        sourceChannel, ...(sourceDevice ? { sourceDevice } : {}), ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) })
+        sourceChannel, ...(sourceDevice ? { sourceDevice } : {}), ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) }, this.inputCallContext(context))
       const { input: _internal, ...saved } = await appendGlobalMessage({ ...envelope, messageId, execution, sourceChannel,
         ...(sourceDevice ? { sourceDevice } : {}) }, queuePath, { admissionIntent: { kind: 'manual-actor', expectedRun: { ...recipient.run } } })
       const currentReceipt = inputReceipt ? await recipientOwner.client.inspectAgentInput({ key: inputReceipt.key },
@@ -1331,7 +1347,7 @@ export class AgentMuxRpcService {
       if (!this.ports.execute) inputReceipt = await recipientOwner.client.submitAgentMessage({
         agentSessionId: recipientId, envelope: queued.envelope, ...admission,
         execution, ...(queued.sourceChannel ? { sourceChannel: queued.sourceChannel } : {}), ...(queued.sourceDevice ? { sourceDevice: queued.sourceDevice } : {}),
-        ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) } as Parameters<AgentMuxClient['submitAgentMessage']>[0])
+        ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) } as Parameters<AgentMuxClient['submitAgentMessage']>[0], this.inputCallContext(context))
       else {
         const sent = await this.execute(this.request('send', { requestId: operationId,
         target: { kind: 'agent-session', agentSessionId: queued.envelope.recipientSessionId! }, text,
