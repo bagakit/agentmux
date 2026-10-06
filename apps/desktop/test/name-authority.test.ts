@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, mkdir, writeFile, symlink } from 'node:fs/promises'
@@ -80,7 +81,7 @@ function change(owner: AgentMuxSpatialStateStore, operationId: string, value: st
   source: 'manual' | 'launch' | 'derived' = 'manual') {
   return owner.mutateDisplayLabel({ target, operationId, value, expectedNameRevision: revision, source }, source === 'manual' ? ui : launcher)
 }
-async function appFixture() {
+async function appFixture(startup?: { observation: 'watch' | 'ack'; cleared?: boolean }) {
   const directory = await mkdtemp(join(tmpdir(), 'amux-name-client-')); directories.push(directory)
   const owner = new AgentMuxSpatialStateStore(join(directory, 'spatial.json'))
   const config: AppConfig = { version: 9, hosts: [{ id: 'private-host', kind: 'local', label: 'Private' }],
@@ -92,7 +93,19 @@ async function appFixture() {
   const work = { config, sessions: [], tabs: { [launcher.id]: launcher }, layouts: { 'private-workspace': createWorkspaceLayout('private-group', [launcher.id]) },
     spaceZoneBindings: {}, spatialRequests: {} }
   await owner.commit({ expectedRevision: 0, graph: desktopSpatialGraph(work, []) })
+  if (startup?.cleared) await owner.mutateDisplayLabel({ target: { kind: 'agent-session', id: 'legacy-session' },
+    operationId: 'original-manual-clear', value: null, source: 'manual', expectedNameRevision: 0 }, ui)
+  const baseline = startup ? await owner.readForLayout() : null
+  let observed: Awaited<ReturnType<typeof owner.readForLayout>> = null
+  if (startup) {
+    await owner.retainDisplayLabels([{ target: { kind: 'agent-session', id: 'unrelated-session' }, value: 'Unrelated saved name' }])
+    observed = startup.observation === 'ack'
+      ? (await owner.mutateDisplayLabel({ target: { kind: 'agent-session', id: 'unrelated-session' },
+        operationId: 'unrelated-name-ack', value: 'Unrelated new name', source: 'manual', expectedNameRevision: 1 }, ui)).state
+      : await owner.readForLayout()
+  }
   vi.spyOn(api.spatial, 'read').mockImplementation(() => owner.readForLayout())
+  if (startup) vi.mocked(api.spatial.read).mockResolvedValueOnce(startup.observation === 'ack' ? await owner.readForLayout() : baseline)
   vi.spyOn(api.spatial, 'commit').mockImplementation(input => owner.commit(input))
   vi.spyOn(api.spatial, 'renameLabel').mockImplementation(input => {
     if (directoryFault.directory === directory) directoryFault.operationId = input.operationId
@@ -100,13 +113,19 @@ async function appFixture() {
   })
   vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => owner.retainDisplayLabels(values))
   vi.spyOn(api.spatial, 'confirmNameCommit').mockImplementation(operationId => owner.confirmNameCommit(operationId))
-  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => owner.subscribe(listener))
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => {
+    // A commit between the first read and subscription, or its same-revision
+    // producer ACK, can arrive while initialize awaits bootstrap.
+    if (observed) queueMicrotask(() => listener(observed!))
+    return owner.subscribe(listener)
+  })
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
   const snapshot = await api.sessions.snapshot()
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ ...snapshot, sessions: [], recoveryCandidates: [] })
   useAppStore.setState({ ...work, activeWorkspaceId: 'private-workspace', agentNames: { 'legacy-session': 'Preserved original alias' },
+    surveyExplorationNames: startup ? { 'legacy-zone': 'Original exploration' } : {},
     nameLabels: {}, nameAuthorityRevision: 0, loading: false, error: null,
-    restoredWorkbench: { tabs: work.tabs, layouts: work.layouts } })
+    restoredWorkbench: { tabs: startup ? { [launcher.id]: { ...launcher, name: 'Original saved tab' } } : work.tabs, layouts: work.layouts } })
   disposeClients.push(await useAppStore.getState().initialize())
   // Finish the real client's initial topology save before arming a name fault
   // or capturing the revision used by the watch-before-ACK ordering assertion.
@@ -114,6 +133,47 @@ async function appFixture() {
   return { owner, launcher, directory }
 }
 describe('name authority at its durable boundary and real projection consumers', () => {
+  it.each(['watch', 'ack'] as const)('retains hydrated names before the startup %s replaces their projection', async observation => {
+    const { owner, launcher } = await appFixture({ observation })
+    const state = useAppStore.getState(), saved = (await owner.read())!
+    expect(state.agentNames['legacy-session']).toBe('Preserved original alias')
+    expect(state.surveyExplorationNames['legacy-zone']).toBe('Original exploration')
+    expect(state.tabs[launcher.id]?.name).toBe('Original saved tab')
+    expect(displayLabel(saved.graph, { kind: 'agent-session', id: 'legacy-session' })).toMatchObject({ value: 'Preserved original alias', source: 'retained' })
+    expect(displayLabel(saved.graph, { kind: 'zone', id: 'legacy-zone' })?.value).toBe('Original exploration')
+    expect(displayLabel(saved.graph, { kind: 'tab', id: launcher.id })?.value).toBe('Original saved tab')
+    expect(saved.graph.tabs.find(tab => tab.tabId === launcher.id)?.name).toBe('Original saved tab')
+    expect(displayLabel(saved.graph, { kind: 'agent-session', id: 'unrelated-session' })?.value).toBe(observation === 'ack' ? 'Unrelated new name' : 'Unrelated saved name')
+    expect(useAppStore.persist.getOptions().partialize!(state)).not.toHaveProperty('agentNames')
+  })
+  it('preserves an authoritative manual clear over the captured old startup alias', async () => {
+    const { owner } = await appFixture({ observation: 'watch', cleared: true })
+    expect(useAppStore.getState().agentNames['legacy-session']).toBeUndefined()
+    expect(displayLabel((await owner.read())!.graph, { kind: 'agent-session', id: 'legacy-session' })).toMatchObject({
+      value: null, source: 'manual', nameRevision: 1, operationId: 'original-manual-clear' })
+    expect((await owner.queryNameChanges({ target: { kind: 'agent-session', id: 'legacy-session' } })).records.map(record => record.id)).toEqual(['original-manual-clear'])
+  })
+  it('retains the existing durable Tab name instead of an older client handoff', async () => {
+    const owner = await fixture(), original = (await owner.read())!
+    original.graph.tabs[0]!.name = 'Original durable tab'
+    const other = new AgentMuxSpatialStateStore(join(await mkdtemp(join(tmpdir(), 'amux-original-tab-')), 'spatial.json'))
+    directories.push(resolve(other.path, '..'))
+    await other.commit({ expectedRevision: 0, graph: original.graph })
+    const saved = await other.retainDisplayLabels([{ target: { kind: 'tab', id: 'private-tab' }, value: 'Stale client tab' }])
+    expect(saved.graph.tabs[0]?.name).toBe('Original durable tab')
+    expect(displayLabel(saved.graph, { kind: 'tab', id: 'private-tab' })?.value).toBe('Original durable tab')
+    expect((await other.queryNameChanges({ target: { kind: 'tab', id: 'private-tab' } })).records).toEqual([])
+    const layout = structuredClone(saved.graph)
+    layout.resources['region:private-region'] = { unsentDraft: 'Later layout save' }
+    await other.commit({ expectedRevision: saved.revision, graph: layout })
+    const server = new AgentMuxControlServer({ spatialState: other, socketPath: other.path + '.sock' })
+    await server.start()
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    try {
+      const inspected = await rpc.call('space.inspect', { target: { tabId: 'private-tab' } })
+      expect(inspected.catalog.tabs.find(tab => tab.tabId === 'private-tab')?.name).toBe('Original durable tab')
+    } finally { await rpc.dispose(); await server.stop() }
+  })
   it('protects later manual set and clear against delayed launch and derived writers without touching the original Run', async () => {
     const owner = await fixture(), original = (await owner.read())!.graph.regions
     const manual = await change(owner, 'manual-set', 'Chosen name', 0)
@@ -298,8 +358,8 @@ describe('name authority at its durable boundary and real projection consumers',
     expect(await useAppStore.getState().renameAgent(captured.agentSessionId!, null, 0)).toBe(true)
     expect(await useAppStore.getState().renameTab(launcher.id, null, 0)).toBe(true)
     const session: Extract<SessionSnapshot, { kind: 'agent' }> = { id: captured.agentSessionId!, kind: 'agent', providerId: 'codex', executorId: 'private',
-      hostId: 'private-host', workspacePath: directory, label: 'Private', createdAt: 1, updatedAt: 1, processState: 'running',
-      status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0,
+      hostId: 'private-host', workspacePath: directory, label: 'Private', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), processState: 'running',
+      status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, latestOutputBytes: 0,
       capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
       control: { kind: 'agent', hostId: 'private-host', agentSessionId: captured.agentSessionId!, run: { runId: 'private-created-run' } } }
     release({ created: agentCreationFixture(session), projectionFailures: [], session, timeline: { agentSessionId: session.id, revision: 0, items: [] } })
