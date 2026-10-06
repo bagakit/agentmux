@@ -770,6 +770,12 @@ export class AgentMuxRpcService {
     const fields = NATIVE_FIELDS[method as keyof typeof NATIVE_FIELDS]
     if (!fields) throw new AgentMuxError('Unknown RPC method.', 'RPC_METHOD_NOT_FOUND')
     rpcRecord(p, fields)
+    const needsNoteReader = method === 'notebook.graph' || method === 'notebook.resolve' || method === 'notebook.inspect' && p.content === true
+    if (needsNoteReader && !this.ports.notebookObservation && this.ports.forwardControl) {
+      // Core keeps its original durable catalog available independently of Desktop.
+      // Saved bodies and relationships borrow the original Host file reader.
+      return parseRpcNativeResult(method, await this.ports.forwardControl(method, p as AgentMuxRpcParams<M>, context), p, context.caller) as AgentMuxRpcResult<M>
+    }
     switch (method) {
       case 'notebook.ls': result = {state:await this.notebooks.read()}; break
       case 'notebook.inspect': {

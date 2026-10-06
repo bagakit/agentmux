@@ -54,8 +54,12 @@ it does not infer a complete graph from currently open files. Results include ca
 per-file revisions/statuses, hierarchy, exact source block/resource and tagged page/block/unbound targets,
 resolution and duplicateNoteIds. Per-file revisions are not a cross-file atomic snapshot.
 Occurrences are stored {kind:"stored",referenceId} or derived {kind:"text",revision,from,to}.
-Old saved plain [[...]] text is unbound evidence until explicit saving allocates a persistent ID;
-reading or graph inspection never rewrites that source or silently binds it. Text positions use
+Graph queries from old plain [[...]] text or saved target:null links reuse the same original
+file observations to confirm a unique page or block, without another read or a save. Such edges
+include query with the exact written inner text: resolved means confirmed for this observation,
+not bound in the file. Ambiguous/missing/unknown queries retain their text and state. Existing
+bound targets are checked by ID and never looked up again by label. Reading or graph inspection
+never rewrites a source, changes referenceIds or allocates a persistent ID. Text positions use
 the source block's inline PM offsets (UTF16 text, inline atoms count one), valid only at its revision.
 completeness partial/unknown and missing/ambiguous targets must remain visible; an empty
 edge list with unread sources does not prove no links. No second body or relationship store exists.
