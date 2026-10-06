@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
-import { lstat, mkdir, mkdtemp, open, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { createServer as createNetServer, type Socket } from 'node:net'
+import { chmod, lstat, mkdir, mkdtemp, open, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -87,6 +88,15 @@ it.runIf(Boolean(binary))('real original Native/TUI atomically starts idle manua
     } else { response.writeHead(200, { 'content-type': 'application/json' }); response.end('{"data":[]}') }
   })
   model.listen(0, '127.0.0.1'); await once(model, 'listening')
+  // Same original Run group also holds this real same-UID public foreign UDS.
+  // It must not be selected or manufacture ambiguity before Native qualification.
+  const foreignEndpoint = join(root, 'foreign.sock'), foreignConnections = new Set<Socket>()
+  const foreign = createNetServer(socket => { foreignConnections.add(socket); socket.on('close', () => foreignConnections.delete(socket)) })
+  foreign.listen(foreignEndpoint); await once(foreign, 'listening'); await chmod(foreignEndpoint, 0o666)
+  const closeForeign = async () => {
+    for (const socket of foreignConnections) socket.destroy()
+    await new Promise<void>((resolve, reject) => foreign.close(error => error ? reject(error) : resolve()))
+  }
   const port = (model.address() as import('node:net').AddressInfo).port
   const config = ['-c', 'model="private-model"', '-c', 'model_provider="private"', '-c', 'approval_policy="never"', '-c', 'sandbox_mode="read-only"',
     '-c', 'features.hooks=false', '-c', 'features.plugins=false', '-c', 'features.memories=false', '-c', 'features.chronicle=false',
@@ -94,9 +104,10 @@ it.runIf(Boolean(binary))('real original Native/TUI atomically starts idle manua
     '-c', `projects={${JSON.stringify(workspace)}={trust_level="trusted"}}`]
   const endpoint = join(root, 'native.sock'), wrapper = join(root, 'original-cli.mjs')
   await writeFile(wrapper, `#!/usr/bin/env node
-import {spawn,spawnSync} from 'node:child_process';import {existsSync,appendFileSync} from 'node:fs';
+import {spawn,spawnSync} from 'node:child_process';import {existsSync,appendFileSync} from 'node:fs';import {connect} from 'node:net';
 const binary=${JSON.stringify(binary)},root=${JSON.stringify(root)},endpoint=${JSON.stringify(endpoint)},args=process.argv.slice(2);
 if(args.includes('--version')){const r=spawnSync(binary,['--version'],{stdio:'inherit'});process.exit(r.status??1)}
+const foreign=connect(${JSON.stringify(foreignEndpoint)});await new Promise((resolve,reject)=>{foreign.once('connect',resolve);foreign.once('error',reject)});
 const env={...process.env,HOME:${JSON.stringify(home)},CODEX_HOME:${JSON.stringify(nativeHome)}};
 const backend=spawn(binary,['app-server','--listen','unix://'+endpoint,...${JSON.stringify(config)}],{env,stdio:['ignore','ignore','pipe']});
 backend.stderr.on('data',b=>appendFileSync(root+'/backend.log',b));
@@ -125,7 +136,9 @@ tui.on('close',()=>{backend.kill('SIGTERM');process.exit()});
     prepareNativePromptInput: async (context: Parameters<NonNullable<typeof builtin.prepareNativePromptInput>>[0]) => {
       const start = performance.now(), phases: { phase: string; durationMs: number }[] = []
       let previous = start, current = 'entry'
-      try { const prepared = await builtin.prepareNativePromptInput!({ ...context, onPreparationPhase: phase => {
+      // Remove only the advertised selector at this test boundary. The original
+      // Native backend/TUI exists unchanged; this does not prove default launch.
+      try { const prepared = await builtin.prepareNativePromptInput!({ ...context, args: [], onPreparationPhase: phase => {
         const now = performance.now(); phases.push({ phase: current, durationMs: now - previous }); current = phase; previous = now
         context.onPreparationPhase?.(phase); if (phase === 'native-protocol') notifyProtocol?.()
       } }); let checks = 0
@@ -159,7 +172,7 @@ tui.on('close',()=>{backend.kill('SIGTERM');process.exit()});
   let client: AgentMuxClient
   try { client = new AgentMuxClient({ providers: [provider, senderProvider], store }) }
   catch (error) {
-    await closePrivateFixture(root, rootIdentity, daemon, daemonClosed, [{ owner: 'original-loopback-model', close: async () => {
+    await closePrivateFixture(root, rootIdentity, daemon, daemonClosed, [{ owner: 'original-foreign-uds', close: closeForeign }, { owner: 'original-loopback-model', close: async () => {
       for (const stream of streams) stream.destroy(); model.closeAllConnections()
       await new Promise<void>((resolve, reject) => model.close(error => error ? reject(error) : resolve()))
     } }], { error })
@@ -448,6 +461,7 @@ setInterval(()=>{},1000);process.on('SIGTERM',()=>process.exit());\n`)
     await client.writeAgent({ agentSessionId: session.agentSessionId, expectedRun: original, source: 'terminal-protocol', data: '\x1b[I' })
     expect((await client.statusAgent(session.agentSessionId)).run.acceptedInputBytes).toBe(lostRaw + 3)
     console.log(JSON.stringify({ schema: 'agentmux.native-steer-proof.v1', run: original, pids, binding: channel.binding, nativePlan: admission.native!.plan,
+      endpointCandidateProof: { providerContextArgs: [], foreignEndpoint, foreignMode: 0o666, originalNativeActorQualified: true },
       nativeOutcome: admission.native!.outcome, clientId: delivered.messageId, consumedOnce: true, draftKept: true, ttyBytesUnchanged: true,
     invalidThreadErrorCode: stale.error?.code, invalidParamsErrorCode: invalid.error?.code, internalErrorCode: internal.error?.code,
     idleAdmissions: [{ inputId: 'native-sdk-idle', turnId: sdkAdmission.native?.turnId }, { inputId: idleMessage.messageId, turnId: idleAdmission.native?.turnId }], ambiguityProof, authorProof,
@@ -466,6 +480,7 @@ setInterval(()=>{},1000);process.on('SIGTERM',()=>process.exit());\n`)
       { owner: 'original-native-run', close: async () => { if (session) await client.stopAgent(session.agentSessionId, session.run) } },
       { owner: 'original-sdk-disposal', close: async () => await client.dispose() },
       { owner: 'original-terminal-consumer', close: () => terminal.dispose() },
+      { owner: 'original-foreign-uds', close: closeForeign },
       { owner: 'original-loopback-model', close: async () => {
         for (const stream of streams) stream.destroy(); model.closeAllConnections()
         await new Promise<void>((resolve, reject) => model.close(error => error ? reject(error) : resolve()))
