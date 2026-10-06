@@ -1,12 +1,13 @@
 .image-annotation-editor { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; overflow: hidden; pointer-events: auto; background: var(--surface-0); isolation: isolate; container: screenshot-editor / size; font-size: var(--fs-small); }
 .image-annotation-editor__header { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 42px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface-1); }
-.image-annotation-editor__title { display: flex; align-items: baseline; gap: 8px; margin-right: auto; white-space: nowrap; }
+.image-annotation-editor__title { display: grid; grid-template-columns: max-content max-content; align-items: baseline; column-gap: 8px; flex: 1 1 135px; min-width: 0; margin-right: auto; white-space: nowrap; }
 .image-annotation-editor__title strong { color: var(--text); font-weight: 600; }
 .image-annotation-editor__title small { color: var(--text-3); font-size: 10px; font-variant-numeric: tabular-nums; }
-.image-annotation-editor__status { display: inline-flex; align-items: center; gap: 4px; color: var(--green-text); font-size: 11px; }
-.image-annotation-toolbar { flex: none; position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 5px 10px; border-bottom: 1px solid var(--line-soft); }
+.image-annotation-editor__status { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; height: 15px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-3); font-size: 10px; }
+.image-annotation-editor__status--success { color: var(--green-text); }
+.image-annotation-toolbar { flex: none; position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 3px; padding: 5px 10px; border-bottom: 1px solid var(--line-soft); }
 .image-annotation-toolbar__tools, .image-annotation-toolbar__history, .image-annotation-toolbar__actions, .image-annotation-toolbar__colors { display: flex; align-items: center; gap: 3px; min-width: 0; }
-.image-annotation-toolbar__tools { flex-wrap: wrap; }
+.image-annotation-toolbar__tools { display: contents; }
 .image-annotation-toolbar__history { margin-left: auto; border-left: 1px solid var(--line); padding-left: 8px; }
 .image-annotation-toolbar__actions { flex: none; flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
 .image-annotation-editor button { position: relative; display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 5px; min-width: 30px; height: 30px; padding: 0 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text-2); font: inherit; font-size: 11px; cursor: pointer; }
@@ -55,6 +56,7 @@
 .image-annotation-editor__note-actions label { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-3); font-size: 10px; }
 .image-annotation-editor__note-actions select { min-width: 0; max-width: 120px; height: 25px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-0); color: var(--text); font: inherit; }
 .image-annotation-editor__note-actions button { margin-left: auto; height: 25px; border-color: var(--line); }
+.image-annotation-original-menu { max-width: calc(100vw - 16px); }
 @container screenshot-editor (max-width: 580px) {
   .image-annotation-editor__title small { display: none; }
   .image-annotation-editor__header { gap: 5px; padding-inline: 7px; }
