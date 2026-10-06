@@ -12,8 +12,11 @@ const ThemeAppearanceThemeIcon = semanticIconComponent('appearance.theme')
 
 async function saveAppearance(appearance: AppearanceConfig, expected: AppearanceConfig): Promise<void> {
   const current = useAppStore.getState().config
-  if (!current) return
-  await api.config.save({ ...current, appearance }, { ...current, appearance: expected })
+  if (!current) throw new Error('Settings have not been loaded. Your appearance draft is retained; retry after loading completes.')
+  const committed = await api.config.save({ ...current, appearance }, { ...current, appearance: expected })
+  // A retry can acknowledge a commit whose original change event was lost. A later
+  // publication always wins over this receipt; never replace a newer observation.
+  if (useAppStore.getState().config === current) useAppStore.getState().setConfig(committed)
 }
 
 export const appearanceSettingsModule = {
