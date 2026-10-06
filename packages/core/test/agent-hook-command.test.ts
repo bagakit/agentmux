@@ -1,10 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Readable } from 'node:stream'
+import { Readable, PassThrough } from 'node:stream'
+import { EventEmitter } from 'node:events'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { hookResponseFor, resolveHookProvider, runAgentHookCommand } from '../src/agent-hook-command.js'
 import { BUILT_IN_AGENT_PROVIDERS } from '../src/agent-provider.js'
+
+// The observer worker now asks the owner for mode on its first HTTP request. Keep these
+// existing payload/retry unit tests on their controlled observation port; real HTTP mode,
+// no-retry decision/unknown, and stdout are exercised by permission-hook-callback/core.
+vi.mock('node:http', async importOriginal => ({
+  ...await importOriginal<typeof import('node:http')>(),
+  request: (url: string, options: { headers: Record<string, string> }, receive: (response: PassThrough) => void) => {
+    const request = new EventEmitter() as EventEmitter & { end(body: string): void; destroy(error: Error): void }
+    request.destroy = error => { request.emit('error', error) }
+    request.end = body => { void (async () => {
+      try {
+        const result = await fetch(url, { method: 'POST', headers: options.headers, body })
+        const response = Object.assign(new PassThrough(), { statusCode: result.status ?? (result.ok ? 204 : 503),
+          headers: { 'x-agentmux-hook-mode': 'observer', 'retry-after': result.headers?.get('retry-after') } })
+        receive(response)
+        if (!response.destroyed) response.end()
+      } catch (error) { request.emit('error', error) }
+    })() }
+    return request
+  }
+}))
 
 describe('agent hook command response contract', () => {
   it('gates Antigravity: PreToolUse defers with "ask", Stop clears, other events emit {}', () => {
@@ -421,7 +443,7 @@ describe('POST 失败后真的重投一次', () => {
     expect(stderr, '重试成功后仍写 stderr = 每次瞬时 503 都在日志里假报一次丢事件').toEqual([])
   })
 
-  it('首次连接层抛出（含 2s 超时 abort）后重投——两种失败形状都要触发重试', async () => {
+  it('首次连接失败且 mode 未知时保留无决定，不重新创建可能已采用的 callback', async () => {
     // 与上一条走实现里的**另一条**分支：fetch reject 时 response 压根没被赋上。
     hookEnv()
     const { bodies, stderr } = captureHookPost([{ throws: true }])
@@ -429,8 +451,9 @@ describe('POST 失败后真的重投一次', () => {
 
     await runAgentHookCommand()
 
-    expect(bodies, 'fetch reject 同样必须重投').toHaveLength(2)
-    expect(stderr).toEqual([])
+    expect(bodies, 'unknown mode cannot recreate the original callback').toHaveLength(1)
+    expect(stderr).toHaveLength(1)
+    expect(stderr[0]).toContain('fetch failed')
   })
 
   it('两次都失败时放弃，并把最后那个错误响亮写进 stderr（不静默、也不无限重投）', async () => {

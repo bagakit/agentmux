@@ -1,5 +1,6 @@
+import { fixtureEpoch as _liveTailFixtureEpoch } from "./helpers/fixture-values.js"
 import { fixturePath } from './helpers/fixture-values.js'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { AgentMuxMemoryAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
@@ -40,7 +41,7 @@ function storedSession(pending?: AgentMuxInteractionRequest, providerId: 'codex'
 }
 
 /** 一个 native-hook 的 permission request，绑在本 Session 的当前 Run 上。 */
-function permission(id: string): AgentMuxInteractionRequest {
+function permission(id: string): Extract<AgentMuxInteractionRequest, { kind: 'permission' }> {
   return {
     kind: 'permission',
     id,
@@ -53,7 +54,7 @@ function permission(id: string): AgentMuxInteractionRequest {
       { id: 'reject-once', label: 'Reject', kind: 'reject-once' }
     ],
     evidence: { source: 'native-hook', observedAt: 1, run: { runId: RUN_ID }, hookReceiptId: id }
-  } as AgentMuxInteractionRequest
+  }
 }
 
 function runProjection(acceptedInputBytes: number | null) {
@@ -631,4 +632,64 @@ describe('Claude terminal takeover completion', () => {
       expect(h.writes).toEqual([])
     } finally { await h.client.dispose() }
   })
+})
+
+it('rechecks the original current author after native verification and claim, immediately before terminal input', async () => {
+  const h = await connectedClient(permission('current-author'))
+  let checks = 0
+  try {
+    const result = await h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID },
+      response: { kind: 'permission', requestId: 'current-author', decision: { outcome: 'selected', optionId: 'allow-once' } } },
+      { assertCurrent: async () => {
+        checks++
+        if (h.client.agentSession(AGENT_SESSION_ID).pendingInteraction?.response?.operationId) throw new AgentMuxError('The original author was revoked during native verification.', 'CONTROL_PERMISSION_DENIED')
+      } }).then(() => null, error => error)
+    expect(result).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+    expect(checks).toBeGreaterThan(0)
+    expect(h.writes).toEqual([])
+    expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction?.response?.acknowledged).toBe(false)
+  } finally { await h.client.dispose() }
+})
+
+
+it('resolves one exact durable request before reconnecting the original cold terminal response consumer', async () => {
+  const h = await connectedClient(permission('cold-exact'))
+  const registry = Reflect.get(h.client, 'registry') as { sessions: Map<string, unknown> }
+  registry.sessions.clear()
+  try {
+    const result = await h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID },
+      response: { kind: 'permission', requestId: 'cold-exact', decision: { outcome: 'selected', optionId: 'allow-once' } } }).then(() => null, error => error)
+    expect(result).toBeNull()
+    expect(h.writes).toHaveLength(1)
+    expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction?.response?.acknowledged).toBe(true)
+  } finally { await h.client.dispose() }
+})
+
+
+it.each(['connect', 'author'])('does not apply an old ACP choice to a replacement original binding across %s', async phase => {
+  const { nativeToolCallId: _unused, ...original } = permission('reused-request-id')
+  const request = { ...original, evidence: { source: 'acp' as const, run: { runId: RUN_ID }, observedAt: _liveTailFixtureEpoch(0, 0, 1), acpAdapterId: 'original-adapter', acpSessionId: 'original-session' } }
+  const h = await connectedClient(request)
+  const before = (await h.store.readMetadata(AGENT_SESSION_ID))!
+  await h.store.compareAndSwapMetadata(before, { ...before, nativeHandle: { kind: 'acp', adapterId: 'original-adapter', sessionId: 'original-session' } })
+  await h.state.registry.load('local')
+  const acp = Reflect.get(h.client, 'acp') as { respondPermission: (...args: unknown[]) => Promise<void> }
+  const respond = vi.spyOn(acp, 'respondPermission').mockResolvedValue()
+  const replace = async () => {
+    const previous = (await h.store.readMetadata(AGENT_SESSION_ID))!
+    const run = { runId: phase === 'connect' ? 'replacement-run' : RUN_ID }
+    await h.store.compareAndSwapMetadata(previous, { ...previous, run,
+      nativeHandle: { kind: 'acp', adapterId: 'replacement-adapter', sessionId: 'replacement-session' },
+      pendingInteraction: { request: { ...request, evidence: { ...request.evidence, run, acpSessionId: 'replacement-session' } } } })
+    await h.state.registry.load('local')
+  }
+  vi.spyOn(h.client, 'connect').mockImplementation(async () => { if (phase === 'connect') await replace() })
+  try {
+    const result = await h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID },
+      response: { kind: 'permission', requestId: request.id, decision: { outcome: 'selected', optionId: 'allow-once' } } },
+      { assertCurrent: async () => { if (phase === 'author') await replace() } }).then(() => null, error => error)
+    expect(result).toMatchObject({ code: 'STALE_AGENT_SESSION' })
+    expect(respond).not.toHaveBeenCalled()
+    expect(h.writes).toEqual([])
+  } finally { vi.restoreAllMocks(); await h.client.dispose() }
 })
