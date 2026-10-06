@@ -11,6 +11,8 @@ import {
   type HighlightShape,
   type PenShape,
   type RectShape,
+  type NoteShape,
+  type PixelateShape,
   type ScreenshotShape,
   type TextShape
 } from './drawing-model'
@@ -30,6 +32,8 @@ export function drawScreenshotShape(context: CanvasRenderingContext2D, shape: Sc
     case 'rect': drawRect(context, shape); break
     case 'ellipse': drawEllipse(context, shape); break
     case 'text': drawText(context, shape); break
+    case 'note': drawNote(context, shape); break
+    case 'pixelate': drawPixelate(context, shape); break
   }
   context.restore()
 }
@@ -118,4 +122,43 @@ function drawText(context: CanvasRenderingContext2D, shape: TextShape): void {
     : 'rgba(255,255,255,0.85)'
   context.strokeText(shape.text, shape.at.x, shape.at.y)
   context.fillText(shape.text, shape.at.x, shape.at.y)
+}
+
+function drawNote(context: CanvasRenderingContext2D, shape: NoteShape): void {
+  const box = normalizeRect(shape.from, shape.to)
+  context.lineWidth = shape.width
+  if (box.width > shape.radius && box.height > shape.radius) context.strokeRect(box.x, box.y, box.width, box.height)
+  context.beginPath()
+  context.arc(shape.from.x, shape.from.y, shape.radius, 0, Math.PI * 2)
+  context.fill()
+  context.strokeStyle = '#ffffff'
+  context.lineWidth = Math.max(1, shape.radius / 8)
+  context.stroke()
+  context.fillStyle = shape.color.toLowerCase() === '#ffffff' ? '#111827' : '#ffffff'
+  context.font = `700 ${shape.radius * 1.15}px ${SCREENSHOT_TEXT_FONT}`
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  context.fillText(String(shape.number), shape.from.x, shape.from.y)
+}
+
+/** Sample the already painted image, then draw the blocks without interpolation.
+ * The same renderer is used for preview and final PNG; no underlying pixels are exported. */
+function drawPixelate(context: CanvasRenderingContext2D, shape: PixelateShape): void {
+  const rect = normalizeRect(shape.from, shape.to)
+  if (rect.width <= 0 || rect.height <= 0) return
+  const transform = context.getTransform()
+  const x = Math.max(0, Math.floor(rect.x * transform.a + transform.e))
+  const y = Math.max(0, Math.floor(rect.y * transform.d + transform.f))
+  const right = Math.min(context.canvas.width, Math.ceil((rect.x + rect.width) * transform.a + transform.e))
+  const bottom = Math.min(context.canvas.height, Math.ceil((rect.y + rect.height) * transform.d + transform.f))
+  if (right <= x || bottom <= y) return
+  const sample = document.createElement('canvas')
+  sample.width = Math.max(1, Math.ceil((right - x) / (shape.blockSize * transform.a)))
+  sample.height = Math.max(1, Math.ceil((bottom - y) / (shape.blockSize * transform.d)))
+  const small = sample.getContext('2d')
+  if (!small) throw new Error('Screenshot pixelation requires a 2D canvas')
+  small.drawImage(context.canvas, x, y, right - x, bottom - y, 0, 0, sample.width, sample.height)
+  context.imageSmoothingEnabled = false
+  context.drawImage(sample, 0, 0, sample.width, sample.height,
+    (x - transform.e) / transform.a, (y - transform.f) / transform.d, (right - x) / transform.a, (bottom - y) / transform.d)
 }
