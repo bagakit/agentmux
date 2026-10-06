@@ -132,6 +132,31 @@ describe('standalone image annotation editing consumers', () => {
     await click('Undo'); expect((await output()).shapes).toEqual([note])
   })
 
+  it('keeps an existing edge text editor inside the viewport at actual size and high zoom without changing its image coordinates or font', async () => {
+    const text: ScreenshotShape = { id: 'edge-text', kind: 'text', color: '#ffffff', fontSize: 18, at: { x: 390, y: 285 }, text: 'Text near the original edge' }
+    const { editor, pointer, click, output } = await mount([text])
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+    await click('Select'); await act(async () => { pointer('pointerdown', 395, 290); pointer('pointerup', 395, 290) })
+    await click('Actual image size')
+    for (const zoomed of [false, true]) {
+      if (zoomed) for (let count = 0; count < 6; count++) await click('Zoom in')
+      await click('Edit text')
+      const field = editor.querySelector<HTMLInputElement>('[aria-label="Screenshot text"]')!
+      const box = { left: parseFloat(field.style.left), top: parseFloat(field.style.top), width: parseFloat(field.style.width), height: parseFloat(field.style.height) }
+      // happy-dom has no CSS layout. Consume the production-assigned UI geometry here;
+      // the native fixture separately checks the actual browser rectangle and scrolling.
+      expect(box.width).toBe(280); expect(box.height).toBeGreaterThan(0)
+      expect(box.left).toBeGreaterThanOrEqual(0); expect(box.top).toBeGreaterThanOrEqual(0)
+      expect(box.left + box.width, 'the actual input width stays within its viewport').toBeLessThanOrEqual(400)
+      expect(box.top + box.height, 'the actual input height stays within its viewport').toBeLessThanOrEqual(300)
+      expect(parseFloat(field.style.fontSize)).toBeLessThanOrEqual(32)
+      expect(field.style.color, 'the editing control uses readable theme text while the annotation stays white').toBe('var(--text)')
+      expect(document.activeElement).toBe(field); expect(focus).toHaveBeenLastCalledWith({ preventScroll: true })
+      await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))); await frame()
+      expect((await output()).shapes, 'UI clamping must preserve the original object and font in output').toEqual([text])
+    }
+  })
+
   it('discards a resize on pointer cancellation and a pan on Escape without closing the editor or altering the object', async () => {
     const { canvas, pointer, click, output, props } = await mount([rectangle])
     await click('Select'); await act(async () => { pointer('pointerdown', 40, 50); pointer('pointerup', 40, 50) })
