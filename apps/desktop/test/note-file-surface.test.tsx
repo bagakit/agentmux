@@ -34,6 +34,7 @@ import { NotebookObservationOwner } from '../src/main/notebook-observation-owner
 import { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 import { AgentMuxControlServer, type ExecutionHost } from '@agentmux/core'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
+import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 const dom = composerDOM(), birth = directoryIdentity('local', _hygiene_fixturePath("repo")), zoneId = homeZoneId(birth)
 const original = { ...createWorkbenchTab('mixed-original', { kind: 'launcher', workspaceId: 'workspace', regionId: 'mixed-launcher' }), space: { spaceId: birth, zoneId } }
 const sourceRegion: FileWorkbenchSurface = { kind: 'file', regionId: 'mixed-file', workspaceId: 'workspace', path: 'source.note.json' }
@@ -433,4 +434,129 @@ it('publishes a Note handle only while its actual view is mounted and republishe
   await act(async () => originalEditor.mount(contentHost))
   expect(published.handle?.editor).toBe(originalEditor)
   expect(published.handle?.focusBlock('source-block', false)).toBe(true)
+})
+
+it('reveals an explicitly opened late original block inside the File viewport while passive restore preserves scroll and the unsaved editor', async () => {
+  const note = { ...source, content: { type: 'doc', content: [
+    ...Array.from({ length: 50 }, (_, i) => ({ type: 'paragraph', attrs: { blockId: 'context-' + i }, content: [{ type: 'text', text: 'Original context ' + i }] })),
+    { type: 'blockquote', attrs: { blockId: 'folded-original' }, content: [
+      { type: 'paragraph', attrs: { blockId: 'first-child' }, content: [{ type: 'text', text: 'Parent context remains' }] },
+      { type: 'paragraph', attrs: { blockId: 'tail-block' }, content: [{ type: 'text', text: 'Exact late original with unsaved context' }] },
+    ] },
+  ] } }
+  const target = { noteId: source.noteId, blockId: 'tail-block' }, key = noteBlockSelectionKey(display())
+  useAppStore.setState(state => ({ documents: { ...state.documents, [sourceKey]: { ...state.documents[sourceKey]!, content: JSON.stringify(note) } }, dirtyDocuments: { [sourceKey]: true }, noteBlockSelections: { [key]: target } }))
+  dom.container.classList.add('test-original-note-scroll')
+  const viewport = dom.container
+  // Browser geometry only: the real ProseMirror scrollIntoView walks this original File viewport.
+  const rectangle = (element: Element) => element.closest('[hidden]') || element.getAttribute('data-block-id') === 'tail-block' && element.closest('.note-block--folded') ? new DOMRect(0, 0, 0, 0) : element === viewport ? new DOMRect(0, 0, 800, 400)
+    : element.getAttribute('data-block-id') === 'tail-block' ? new DOMRect(10, 2400 - viewport.scrollTop, 780, 30) : new DOMRect(0, 0, 800, 6000)
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: HTMLElement) { return rectangle(this) })
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function(this: HTMLElement) { return this === viewport ? 400 : this.dataset.blockId === 'tail-block' ? 30 : 6000 })
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function(this: HTMLElement) { return this === viewport ? 400 : this.dataset.blockId === 'tail-block' ? 30 : 6000 })
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800)
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(800)
+  // happy-dom has no layout scroll operation: implement only native geometric scrolling, not Note lookup.
+  vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function(this: HTMLElement) {
+    const box = this.getBoundingClientRect(), screen = viewport.getBoundingClientRect()
+    viewport.scrollTop += box.top - screen.top - (screen.height - box.height) / 2
+  })
+  const rangeRect = (range: Range) => rectangle(range.startContainer.nodeType === 1 ? range.startContainer as Element : range.startContainer.parentElement!)
+  vi.spyOn(Range.prototype, 'getBoundingClientRect').mockImplementation(function(this: Range) { return rangeRect(this) })
+  vi.spyOn(Range.prototype, 'getClientRects').mockImplementation(function(this: Range) { const rect = rangeRect(this); return Object.assign([rect], { item: () => rect }) as unknown as DOMRectList })
+  const originalDocument = useAppStore.getState().documents[sourceKey], other = document.createElement('input')
+  document.body.append(other); other.focus()
+  await mount()
+  const originalEditor = editor()
+  expect(originalEditor.state.selection.$from.parent.attrs.blockId).toBe('tail-block')
+  expect(viewport.scrollTop).toBe(0)
+  expect(document.activeElement).toBe(other)
+  await dom.click('[aria-label="Fold or unfold nested blocks"]')
+  expect(originalEditor.view.dom.querySelector('.note-block--folded')).not.toBeNull()
+  viewport.hidden = true
+  await act(async () => useAppStore.setState({ documentRevealTargets: { [sourceKey]: { line: 1, noteBlock: target } } }))
+  expect(useAppStore.getState().documentRevealTargets[sourceKey]?.noteBlock).toEqual(target)
+  expect(originalEditor.view.dom.querySelector('.note-block--folded')).not.toBeNull()
+  expect(viewport.scrollTop).toBe(0)
+  await act(async () => { viewport.hidden = false })
+  await vi.waitFor(() => expect(viewport.scrollTop).toBeGreaterThan(1900))
+  expect(originalEditor.view.dom.querySelector('.note-block--folded')).toBeNull()
+  expect(useAppStore.getState().documentRevealTargets[sourceKey]).toBeUndefined()
+  const row = originalEditor.view.dom.querySelector<HTMLElement>('[data-block-id="tail-block"]')!
+  expect(row.getBoundingClientRect().top).toBeGreaterThanOrEqual(0)
+  expect(row.getBoundingClientRect().bottom).toBeLessThanOrEqual(400)
+  expect(editor()).toBe(originalEditor)
+  expect(editor().state.selection.$from.parent.attrs.blockId).toBe('tail-block')
+  expect(useAppStore.getState().documents[sourceKey]).toBe(originalDocument)
+  expect(useAppStore.getState().dirtyDocuments[sourceKey]).toBe(true)
+  expect(api.files.write).not.toHaveBeenCalled()
+  other.remove()
+})
+
+it.each(['different-note', 'whole-page', 'external-block', 'graph-view'] as const)('keeps a hidden Graph block request from overriding the later %s navigation intent', async later => {
+  installNoteCanvasGeometry()
+  const note = newNoteDocument('Original first block ', source.noteId, 'source-block')
+  note.content.content![0]!.content!.push(
+    { type: 'noteLink', attrs: { referenceId: 'local-tail', text: 'Exact original tail', target: { noteId: note.noteId, blockId: 'tail-block' } } },
+    { type: 'noteLink', attrs: { referenceId: 'local-page', text: 'Whole original page', target: { noteId: note.noteId } } },
+  )
+  note.content.content!.push({ type: 'paragraph', attrs: { blockId: 'tail-block' }, content: [{ type: 'text', text: 'Original late target' }] })
+  const saved = { path: sourceRegion.path, revision: 'source-revision', content: JSON.stringify(note) }
+  useAppStore.setState(state => ({ documents: { ...state.documents, [sourceKey]: saved }, dirtyDocuments: { [sourceKey]: true }, noteCanvasLayouts: {} }))
+  const workspace = composerConfig.workspaces.find(workspace => workspace.id === 'workspace')!, catalog = emptyNotebookState()
+  const page: NotebookPage = { noteId: note.noteId, title: 'Original Note', notebookId: 'quick-notes', parentNoteId: null,
+    resource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path: saved.path }, workface: { zoneId, workspaceId: workspace.id }, sources: [], topics: [], createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1) }
+  catalog.pages[page.noteId] = page
+  useNotebookLibrary.setState({ state: catalog })
+  const observation = { status: 'read' as const, noteId: note.noteId, actualNoteId: note.noteId, revision: saved.revision, resource: page.resource, blockIds: ['source-block', 'tail-block'] }
+  vi.spyOn(api.notebooks, 'graph').mockResolvedValue({ catalog, graph: { catalogRevision: catalog.revision, scope: { kind: 'catalog' }, scannedScope: 'catalog', completeness: 'complete', hierarchy: [], references: [], observations: [observation], duplicateNoteIds: [] } })
+  vi.spyOn(api.notebooks, 'content').mockResolvedValue({ ...observation, content: saved.content })
+  vi.spyOn(api.notebooks, 'onChange').mockImplementation(() => () => {})
+  const viewport = dom.container
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: HTMLElement) {
+    return this.closest('[hidden]') ? new DOMRect(0, 0, 0, 0) : new DOMRect(0, 0, 900, 600)
+  })
+  const scrolled: string[] = []
+  vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function(this: HTMLElement) { scrolled.push(this.dataset.blockId ?? '') })
+  await mount()
+  async function graphLink(text: string) {
+    await dom.click('[aria-label="Graph view"]')
+    await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-title[data-note-id="source-note"]')).not.toBeNull())
+    if (dom.container.querySelector('[aria-label="Full note: Original Note"]')) await dom.click('[aria-label="Full note: Original Note"]')
+    else if (dom.container.querySelector('.note-canvas-body-state button')) await dom.click('.note-canvas-body-state button')
+    await vi.waitFor(() => expect([...dom.container.querySelectorAll('.note-canvas-reader [data-note-inline-link]')].some(element => element.textContent?.includes(text)), dom.container.textContent ?? '').toBe(true))
+    const link = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-canvas-reader [data-note-inline-link]')].find(element => element.textContent?.includes(text))!
+    await act(async () => { viewport.hidden = true; link.click() })
+    await vi.waitFor(() => expect(dom.container.querySelector('.note-association-canvas')).toBeNull())
+  }
+  await graphLink('Exact original tail')
+  expect(dom.container.textContent).toContain('selected original block has not been revealed yet')
+  expect(scrolled).toEqual([])
+  if (later === 'different-note') {
+    const replacement = { ...note, noteId: 'replacement-note' }
+    await act(async () => useAppStore.setState(state => ({ documents: { ...state.documents, [sourceKey]: { ...saved, content: JSON.stringify(replacement) } } })))
+  } else if (later === 'whole-page') {
+    await graphLink('Whole original page')
+  } else {
+    await act(async () => {
+      useAppStore.setState({ documentRevealTargets: { [sourceKey]: { line: 1, noteBlock: { noteId: note.noteId, blockId: later === 'graph-view' ? 'not-yet-present' : 'source-block' } } } })
+    })
+    if (later === 'graph-view') {
+      await act(async () => { viewport.hidden = false })
+      await dom.click('[aria-label="Graph view"]')
+      await vi.waitFor(() => expect(dom.container.querySelector('.note-association-canvas')).not.toBeNull())
+    }
+  }
+  await act(async () => { viewport.hidden = false })
+  if (later === 'external-block') await vi.waitFor(() => expect(useAppStore.getState().documentRevealTargets[sourceKey]).toBeUndefined())
+  await act(async () => {})
+  expect(scrolled).toEqual(later === 'external-block' ? ['source-block'] : [])
+  if (later === 'graph-view') {
+    expect(dom.container.querySelector('.note-association-canvas')).not.toBeNull()
+    expect(useAppStore.getState().documentRevealTargets[sourceKey]?.noteBlock).toEqual({ noteId: note.noteId, blockId: 'not-yet-present' })
+  }
+  if (later === 'different-note') expect(dom.container.textContent).toContain('belongs to a different Note or file location')
+  expect(editor().state.selection.$from.parent.attrs.blockId).toBe('source-block')
+  expect(useAppStore.getState().dirtyDocuments[sourceKey]).toBe(true)
+  expect(api.files.write).not.toHaveBeenCalled()
 })
