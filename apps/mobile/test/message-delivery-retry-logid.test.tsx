@@ -41,6 +41,15 @@ function consumer() {
   return { ...f, options, clipboard, report, replaceRuntime: (value: string) => { runtimeId = value } }
 }
 async function settled(check: () => void) { await act(async () => { await vi.waitFor(check) }) }
+async function replaceDraft(element: HTMLElement, text: string) {
+  await act(async () => {
+    const node = editor(element); node.focus()
+    const range = document.createRange(); range.selectNodeContents(node)
+    window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
+  })
+  await paste(element, text)
+  expect(editor(element).textContent).toBe(text)
+}
 beforeEach(async () => { localStorage.clear(); remoteRecords.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => {
   for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }
@@ -288,7 +297,7 @@ it('keeps a legacy unknown retry reachable but never fabricates its missing orig
 })
 
 
-it('refuses distinct draft Send in the same Session and only an explicit original-request action retries the unknown input', async () => {
+it('sends a distinct explicit draft while retaining the original unknown input for exact retry and cold reading', async () => {
   const f = consumer()
   f.submit.mockRejectedValueOnce(Object.assign(new Error('original ACK unavailable'), { code: 'TRANSPORT_LOST',
     controlFailure: { disposition: 'unknown', confirmedInputBytes: 9 } })).mockResolvedValue(undefined)
@@ -296,27 +305,82 @@ it('refuses distinct draft Send in the same Session and only an explicit origina
   await paste(view.element, body); await click(button(view.element, 'Send'))
   await settled(() => expect(storedAttempt().phase).toBe('unknown'))
   const original = structuredClone(storedAttempt()), firstRecord = log(original.logId!).record
-  await act(async () => {
-    const node = editor(view.element); node.focus()
-    const range = document.createRange(); range.selectNodeContents(node)
-    window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
-  })
-  await paste(view.element, 'Distinct current Session draft')
-  expect(editor(view.element).textContent).toBe('Distinct current Session draft')
+  await replaceDraft(view.element, 'Distinct current Session draft')
   await click(button(view.element, 'Send'))
-  await settled(() => expect(storedAttempt().logId).not.toBe(original.logId))
-  expect(f.submit).toHaveBeenCalledOnce()
-  expect(storedAttempt()).toMatchObject({ operationId: original.operationId, draft: original.draft,
-    request: original.request, runId: original.runId, phase: 'unknown' })
-  expect(log(storedAttempt().logId!).record).toMatchObject({ operationId: null, stage: 'editor-validation',
-    error: { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' } })
-  expect(view.element.textContent).toContain('当前正文已不同。本次未发送')
-  expect(editor(view.element).textContent).toBe('Distinct current Session draft')
-  expect(log(original.logId!).record).toEqual(firstRecord)
-  await click(button(view.element, '重试原请求'))
   await settled(() => expect(storedAttempt().phase).toBe('confirmed'))
-  expect(f.submit.mock.calls.map(call => call[0])).toEqual([f.submit.mock.calls[0]![0], f.submit.mock.calls[0]![0]])
-  expect(editor(view.element).textContent).toBe('Distinct current Session draft')
+  expect(f.submit).toHaveBeenCalledTimes(2)
+  expect(f.submit.mock.calls[1]![0]).toMatchObject({ prompt: 'Distinct current Session draft',
+    expectedRun: original.request!.condition.expectedRun, authorHuman: true })
+  expect(f.submit.mock.calls[1]![0].operationId).not.toBe(original.operationId)
+  const retainedKey = JSON.stringify(['retained-prompt', 'session-original', original.operationId])
+  const saved = () => getDeviceWorkface().snapshot().record.conversation.attempts.find(([key]) => key === retainedKey)![1]
+  expect(saved()).toEqual(original)
+  expect(log(original.logId!).record).toEqual(firstRecord)
+  const beforeRemount = mounted.pop()!
+  await act(async () => beforeRemount.root.unmount()); beforeRemount.element.remove()
+  const cold = new DeviceWorkfaceStore(() => localStorage).snapshot()
+  expect(cold.record.conversation.attempts.find(([key]) => key === retainedKey)![1]).toEqual(original)
+  const restored = await mount(<MobileConversationSurface {...f.options} />)
+  expect(f.submit).toHaveBeenCalledTimes(2)
+  await paste(restored.element, 'Keep this neighboring draft')
+  const history = restored.element.querySelector<HTMLElement>('[data-retained="true"]')!
+  expect(history.textContent).toContain(original.operationId)
+  await click(button(history, '复制原正文'))
+  expect(f.clipboard).toHaveBeenLastCalledWith(original.draft)
+  await click(button(history, '重试这条原请求'))
+  await settled(() => expect(saved().phase).toBe('confirmed'))
+  expect(f.submit).toHaveBeenCalledTimes(3)
+  expect(f.submit.mock.calls[2]).toEqual(f.submit.mock.calls[0])
+  expect(editor(restored.element).textContent).toBe('Keep this neighboring draft')
+  expect(storedAttempt().operationId).toBe(f.submit.mock.calls[1]![0].operationId)
+})
+
+it('retains a legacy unknown with no original condition without blocking a distinct current message', async () => {
+  const original = { operationId: 'legacy-original-operation', runId: 'run-original', draft: body, phase: 'unknown' as const }
+  getDeviceWorkface().updateConversation({ version: 1, drafts: [[draftKey, 'A new explicit message']], responses: [], attempts: [[draftKey, original]] })
+  const f = consumer(), view = await mount(<MobileConversationSurface {...f.options} />)
+  await click(button(view.element, 'Send'))
+  await settled(() => expect(storedAttempt().phase).toBe('confirmed'))
+  expect(f.submit).toHaveBeenCalledOnce()
+  expect(f.submit.mock.calls[0]![0].prompt).toBe('A new explicit message')
+  const key = JSON.stringify(['retained-prompt', 'session-original', original.operationId])
+  expect(getDeviceWorkface().snapshot().record.conversation.attempts.find(([id]) => id === key)![1]).toEqual(original)
+  await click(button(view.element.querySelector<HTMLElement>('[data-retained="true"]')!, '重试这条原请求'))
+  expect(f.submit).toHaveBeenCalledOnce()
+  expect(getDeviceWorkface().snapshot().record.conversation.attempts.find(([id]) => id === key)![1]).not.toHaveProperty('request')
+})
+
+it('never gives an unresolved identical input a new identity after a neighboring message became active', async () => {
+  const f = consumer()
+  f.submit.mockRejectedValueOnce(Object.assign(new Error('original partial ACK unknown'), { code: 'TRANSPORT_LOST',
+    controlFailure: { disposition: 'unknown', confirmedInputBytes: 9 } })).mockResolvedValue(undefined)
+  const view = await mount(<MobileConversationSurface {...f.options} />)
+  await paste(view.element, body); await click(button(view.element, 'Send'))
+  await settled(() => expect(storedAttempt().phase).toBe('unknown'))
+  const originalInput = structuredClone(f.submit.mock.calls[0]![0])
+  await replaceDraft(view.element, 'Independent neighbor'); await click(button(view.element, 'Send'))
+  await settled(() => expect(storedAttempt().phase).toBe('confirmed'))
+  await paste(view.element, body); await click(button(view.element, 'Send'))
+  expect(f.submit).toHaveBeenCalledTimes(3)
+  expect(f.submit.mock.calls[2]![0]).toEqual(originalInput)
+  expect(storedAttempt().operationId).toBe(f.submit.mock.calls[1]![0].operationId)
+})
+
+it('still lets Core reject the independent message without settling or replaying the original unknown', async () => {
+  const f = consumer()
+  f.submit.mockRejectedValueOnce(Object.assign(new Error('original ACK unknown'), { code: 'TRANSPORT_LOST',
+    controlFailure: { disposition: 'unknown', confirmedInputBytes: 9 } }))
+    .mockRejectedValueOnce(Object.assign(new Error('current Core permission refused'), { code: 'CONTROL_FORBIDDEN' }))
+  const view = await mount(<MobileConversationSurface {...f.options} />)
+  await paste(view.element, body); await click(button(view.element, 'Send'))
+  await settled(() => expect(storedAttempt().phase).toBe('unknown'))
+  const original = structuredClone(storedAttempt())
+  await replaceDraft(view.element, 'New message still needs current Core permission'); await click(button(view.element, 'Send'))
+  await settled(() => expect(storedAttempt().phase).toBe('rejected'))
+  expect(f.submit).toHaveBeenCalledTimes(2)
+  expect(storedAttempt().operationId).not.toBe(original.operationId)
+  expect(getDeviceWorkface().snapshot().record.conversation.attempts.find(([key]) => key === JSON.stringify(['retained-prompt', 'session-original', original.operationId]))![1]).toEqual(original)
+  expect(editor(view.element).textContent).toBe('New message still needs current Core permission')
 })
 
 it('reopens an offline plain Enter intent and binds its first condition without upgrading the original execution choice', async () => {
