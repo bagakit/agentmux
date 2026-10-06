@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, type ReactNode, type SVGProps } from 'react'
 import type { MoteFace as MoteFaceChoice } from '../lib/mote-face.js'
 
 export type MoteExpression = 'identity' | 'sleep' | 'idle' | 'thinking' | 'tool' | 'starting' | 'waiting' | 'error' | 'unknown' | 'stopped'
@@ -16,15 +16,87 @@ const eyebrows = {
   angled: ['M18 25L26 28', 'M38 28L46 25']
 } as const
 
+type Bounds = readonly [left: number, top: number, right: number, bottom: number]
+type Origin = readonly [x: number, y: number]
+// Neutral geometric bounds of the drawing parts below, in the 64-unit model.
+// These exclude stroke inflation, as SVG fill-box does. Keep real line bounds
+// with zero height. Part changes must update the Native geometry comparison.
+const shapeBounds = {
+  round: [9, 17, 55, 58], soft: [9, 17, 55, 58], square: [9, 17, 55, 58],
+  slim: [13, 14, 51, 60], diamond: [11, 14, 53, 61]
+} satisfies Record<MoteFaceChoice['shape'], Bounds>
+const accessoryBounds = {
+  none: null, tuft: [24, 9, 41.6, 23], antenna: [29, 3, 35, 17],
+  swept: [9.407407, 9.55, 54, 30.235294], curls: [7, 6, 57, 29], glasses: [10, 30, 54, 42],
+  ears: [6.117647, 10, 57.882353, 25], horns: [9.076923, 6, 54.923077, 23], beard: [14, 44, 50, 60.5]
+} satisfies Record<MoteFaceChoice['accessory'], Bounds | null>
+const eyeBounds = {
+  round: [18.8, 31.5, 45.2, 38.5], oval: [19.5, 30.5, 44.5, 39.5], spark: [17, 30, 47, 41],
+  calm: [18, 35, 46, 36.5], lashes: [16, 29, 48, 38.5], wink: [18.8, 31.5, 46, 38.5]
+} satisfies Record<MoteFaceChoice['eyes'], Bounds>
+const browBounds = {
+  soft: [18, 27, 46, 28], straight: [18, 27, 46, 27], curious: [18, 24.2, 46, 28],
+  bold: [17, 26.5, 47, 28], arched: [18, 24.727273, 46, 28], angled: [18, 25, 46, 28]
+} satisfies Record<MoteFaceChoice['brows'], Bounds>
+const mouthBounds = {
+  smile: [27, 44, 37, 46.5], small: [29, 45, 35, 46], grin: [26, 44, 38, 50],
+  cat: [25, 45, 39, 47.5], smirk: [27, 43, 38, 47.5], tooth: [27, 44, 37, 49]
+} satisfies Record<MoteFaceChoice['mouth'], Bounds>
+const noseBounds = {
+  none: null, button: [30, 40, 34, 41], bridge: [30, 35, 34, 41], round: [29.2, 38, 34.8, 42]
+} satisfies Record<NonNullable<MoteFaceChoice['nose']>, Bounds | null>
+const markingBounds = {
+  none: null, freckles: [15.2, 39.2, 48.8, 42.8], blush: [12, 39.5, 52, 44.5], scar: [41, 23, 44, 30]
+} satisfies Record<NonNullable<MoteFaceChoice['marking']>, Bounds | null>
+const sleepEyeBounds: Bounds = [18, 35, 46, 36.5]
+const sleepMouthBounds: Bounds = [29.5, 43, 34.5, 47]
+const uncertainMouthBounds: Bounds = [28, 46, 36, 46]
+
+function unionBounds(first: Bounds, ...parts: Array<Bounds | null>): Bounds {
+  let [left, top, right, bottom] = first
+  for (const part of parts) {
+    if (part === null) continue
+    left = Math.min(left, part[0]); top = Math.min(top, part[1])
+    right = Math.max(right, part[2]); bottom = Math.max(bottom, part[3])
+  }
+  return [left, top, right, bottom]
+}
+function center([left, top, right, bottom]: Bounds): Origin {
+  return [(left + right) / 2, (top + bottom) / 2]
+}
+
+// The outer SVG remains the shared logical slot. HTML owns only articulation;
+// static SVG leaves keep vector paint and its order without SVG group animation.
+function Articulation({ children }: { children: ReactNode }) {
+  return <foreignObject className="mote-face__articulation" x="0" y="0" width="64" height="64">
+    <div className="mote-face__model">{children}</div>
+  </foreignObject>
+}
+function Bone({ className, origin, children }: { className: string; origin: Origin; children: ReactNode }) {
+  return <div className={`mote-face__bone ${className}`} style={{ transformOrigin: `${origin[0]}px ${origin[1]}px` }}>{children}</div>
+}
+type DrawingProps = Pick<SVGProps<SVGSVGElement>, 'fill' | 'stroke' | 'strokeWidth' | 'strokeLinecap'> & { children: ReactNode }
+function Drawing({ children, ...paint }: DrawingProps) {
+  return <svg className="mote-face__drawing" viewBox="0 0 64 64" width="64" height="64" style={{ width: 64, height: 64 }} aria-hidden="true" {...paint}>{children}</svg>
+}
+
 /** Product illustration made from fixed parts; state never edits the saved choice. */
 export const MoteFace = memo(function MoteFace({ face, expression = 'identity' }: { face: MoteFaceChoice; expression?: MoteExpression | undefined }) {
   const [skin, shade, ink] = palettes[face.palette]
   const sleepy = expression === 'sleep', uncertain = expression === 'unknown' || expression === 'error'
+  const eyes = sleepy ? sleepEyeBounds : eyeBounds[face.eyes]
+  const mouth = sleepy ? sleepMouthBounds : uncertain ? uncertainMouthBounds : mouthBounds[face.mouth]
+  const headOrigin = center(unionBounds(shapeBounds[face.shape],
+    [14, 45, 51, 59], [13, 39, 19, 45], [45, 39, 51, 45], accessoryBounds[face.accessory],
+    eyes, browBounds[face.brows], mouth, noseBounds[face.nose ?? 'none'], markingBounds[face.marking ?? 'none']))
+  const browOrigin = center(browBounds[face.brows]), eyeOrigin = center(eyes)
+  const gazeOrigin = center(eyeBounds[face.eyes]), mouthOrigin = center(mouth)
   return <svg className="mote-face" viewBox="0 0 64 64" aria-hidden="true" data-mote-face-shape={face.shape} data-mote-face-palette={face.palette}
     data-mote-face-eyes={face.eyes} data-mote-face-brows={face.brows} data-mote-face-mouth={face.mouth} data-mote-face-accessory={face.accessory}
     data-mote-face-nose={face.nose} data-mote-face-marking={face.marking}>
     <circle cx="32" cy="32" r="31" fill={shade} opacity=".2" />
-    <g className="mote-face__neck"><g className="mote-face__gesture-head"><g className="mote-face__head">
+    <Articulation><Bone className="mote-face__neck" origin={[32, 52]}><Bone className="mote-face__gesture-head" origin={headOrigin}><Bone className="mote-face__head" origin={headOrigin}>
+      <Drawing>
       {face.accessory === 'antenna' ? <g stroke={ink} strokeWidth="2" strokeLinecap="round"><path d="M32 17V8" /><circle cx="32" cy="6" r="3" fill={shade} /></g> : null}
       {face.accessory === 'ears' ? <path d="M12 25Q2 14 9 10L23 22M41 22L55 10Q62 14 52 25" fill={skin} stroke={shade} strokeWidth="2" /> : null}
       {face.accessory === 'horns' ? <path d="M14 23Q6 17 11 6Q14 17 24 18M40 18Q50 17 53 6Q58 17 50 23" fill={shade} /> : null}
@@ -35,34 +107,44 @@ export const MoteFace = memo(function MoteFace({ face, expression = 'identity' }
       {face.accessory === 'tuft' ? <path d="M24 19 Q24 9 34 9 Q29 15 37 17 Q40 14 41 12 Q44 22 32 23" fill={shade} /> : null}
       {face.accessory === 'swept' ? <path d="M10 30Q6 11 29 10Q47 7 54 24Q41 19 38 17Q28 32 10 30" fill={shade} /> : null}
       {face.accessory === 'curls' ? <g fill={shade}><circle cx="14" cy="22" r="7" /><circle cx="21" cy="16" r="7" /><circle cx="32" cy="14" r="8" /><circle cx="43" cy="16" r="7" /><circle cx="50" cy="22" r="7" /></g> : null}
-      <g className="mote-face__brow-follow"><g className="mote-face__gesture-brows"><g className="mote-face__brows" fill="none" stroke={ink} strokeWidth={face.brows === 'bold' ? 3.5 : 2} strokeLinecap="round">
+      </Drawing>
+      <Bone className="mote-face__brow-follow" origin={browOrigin}><Bone className="mote-face__gesture-brows" origin={browOrigin}><Bone className="mote-face__brows" origin={browOrigin}>
+        <Drawing fill="none" stroke={ink} strokeWidth={face.brows === 'bold' ? 3.5 : 2} strokeLinecap="round">
         <path d={eyebrows[face.brows][0]} /><path d={eyebrows[face.brows][1]} />
-      </g></g>
-      </g><g className="mote-face__gesture-eyes"><g className="mote-face__eyes" fill={ink}>
-        {sleepy ? <g className="mote-face__sleep-eyes" fill="none" stroke={ink} strokeWidth="2" strokeLinecap="round"><path d="M18 35Q22 38 26 35M38 35Q42 38 46 35" /></g> : null}
-          <g className="mote-face__awake-eyes"><g className="mote-face__gaze-follow"><g className="mote-face__gesture-gaze"><g className="mote-face__gaze">
+        </Drawing>
+      </Bone></Bone></Bone>
+      <Bone className="mote-face__gesture-eyes" origin={eyeOrigin}><Bone className="mote-face__eyes" origin={eyeOrigin}>
+        {sleepy ? <Drawing fill="none" stroke={ink} strokeWidth="2" strokeLinecap="round"><g className="mote-face__sleep-eyes"><path d="M18 35Q22 38 26 35M38 35Q42 38 46 35" /></g></Drawing> : null}
+          <Bone className="mote-face__awake-eyes" origin={gazeOrigin}><Bone className="mote-face__gaze-follow" origin={gazeOrigin}><Bone className="mote-face__gesture-gaze" origin={gazeOrigin}><Bone className="mote-face__gaze" origin={gazeOrigin}>
+            <Drawing fill={ink}>
             {face.eyes === 'spark' ? <><path d="M22 30L24 34L27 35L24 37L22 41L20 37L17 35L20 34Z" /><path d="M42 30L44 34L47 35L44 37L42 41L40 37L37 35L40 34Z" /></> :
               face.eyes === 'calm' ? <path d="M18 35Q22 38 26 35M38 35Q42 38 46 35" fill="none" stroke={ink} strokeWidth="2.5" strokeLinecap="round" /> :
               <><ellipse cx="22" cy="35" rx={face.eyes === 'oval' ? 2.5 : 3.2} ry={face.eyes === 'oval' ? 4.5 : 3.5} />
                 {face.eyes === 'wink' ? <path d="M38 36Q42 32 46 36" fill="none" stroke={ink} strokeWidth="2.5" strokeLinecap="round" /> : <ellipse cx="42" cy="35" rx={face.eyes === 'oval' ? 2.5 : 3.2} ry={face.eyes === 'oval' ? 4.5 : 3.5} />}
                 {face.eyes === 'lashes' ? <path d="M18 33L16 31M21 32L20 29M39 32L38 29M45 33L48 31" fill="none" stroke={ink} strokeWidth="1.8" strokeLinecap="round" /> : null}</>}
             {face.eyes !== 'calm' ? <><circle cx="23" cy="34" r=".8" fill="#fff" />{face.eyes !== 'wink' ? <circle cx="43" cy="34" r=".8" fill="#fff" /> : null}</> : null}
-          </g></g></g></g>
-      </g></g>
+            </Drawing>
+          </Bone></Bone></Bone></Bone>
+      </Bone></Bone>
+      <Drawing>
       {face.accessory === 'glasses' ? <g fill="none" stroke={ink} strokeWidth="1.8"><rect x="14" y="30" width="15" height="12" rx="4" /><rect x="35" y="30" width="15" height="12" rx="4" /><path d="M29 34Q32 32 35 34M10 33H14M50 33H54" /></g> : null}
       {face.nose && face.nose !== 'none' ? <g className="mote-face__nose" fill="none" stroke={ink} strokeWidth="1.6" strokeLinecap="round" opacity=".6">
         {face.nose === 'button' ? <path d="M30 40Q32 42 34 40" /> : face.nose === 'bridge' ? <path d="M32 35L30 41H34" /> : <ellipse cx="32" cy="40" rx="2.8" ry="2" fill={shade} stroke="none" />}
       </g> : null}
-      <g className="mote-face__mouth-follow"><g className="mote-face__gesture-mouth"><g className="mote-face__mouth" fill="none" stroke={ink} strokeWidth="2" strokeLinecap="round">
+      </Drawing>
+      <Bone className="mote-face__mouth-follow" origin={mouthOrigin}><Bone className="mote-face__gesture-mouth" origin={mouthOrigin}><Bone className="mote-face__mouth" origin={mouthOrigin}>
+        <Drawing fill="none" stroke={ink} strokeWidth="2" strokeLinecap="round">
         {sleepy ? <ellipse cx="32" cy="45" rx="2.5" ry="2" /> : uncertain ? <path d="M28 46H36" /> : face.mouth === 'small' ? <path d="M29 45Q32 47 35 45" /> : face.mouth === 'grin' ? <path d="M26 44H38Q37 50 32 50Q27 50 26 44Z" fill="#fff" /> :
           face.mouth === 'cat' ? <path d="M25 45Q28 50 32 45Q36 50 39 45" /> : face.mouth === 'smirk' ? <path d="M27 47Q33 49 38 43" /> : face.mouth === 'tooth' ? <><path d="M27 44Q32 49 37 44" /><path d="M30 46V49H34V46" fill="#fff" strokeWidth="1" /></> : <path d="M27 44Q32 49 37 44" />}
-      </g></g>
-      </g><circle cx="16" cy="42" r="3" fill={shade} opacity=".35" /><circle cx="48" cy="42" r="3" fill={shade} opacity=".35" />
+        </Drawing>
+      </Bone></Bone></Bone>
+      <Drawing><circle cx="16" cy="42" r="3" fill={shade} opacity=".35" /><circle cx="48" cy="42" r="3" fill={shade} opacity=".35" />
       {face.accessory === 'beard' ? <path d="M14 44Q21 50 27 49L32 53L37 49Q43 50 50 44L46 55Q32 66 18 55Z" fill={shade} /> : null}
       {face.marking && face.marking !== 'none' ? <g className="mote-face__marking">
         {face.marking === 'freckles' ? <g fill={ink} opacity=".4"><circle cx="16" cy="40" r=".8" /><circle cx="20" cy="42" r=".8" /><circle cx="24" cy="40" r=".8" /><circle cx="40" cy="40" r=".8" /><circle cx="44" cy="42" r=".8" /><circle cx="48" cy="40" r=".8" /></g> :
           face.marking === 'blush' ? <g fill="#da7887" opacity=".5"><ellipse cx="17" cy="42" rx="5" ry="2.5" /><ellipse cx="47" cy="42" rx="5" ry="2.5" /></g> : <path d="M44 23L41 30M41 25L44 27" fill="none" stroke={shade} strokeWidth="1.8" strokeLinecap="round" />}
       </g> : null}
-    </g></g></g>
+      </Drawing>
+    </Bone></Bone></Bone></Articulation>
   </svg>
 })
