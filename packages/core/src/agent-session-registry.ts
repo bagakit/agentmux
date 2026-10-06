@@ -280,13 +280,19 @@ export class AgentMuxAgentSessionRegistry {
     })
   }
 
-  async claimStaleLifecycles(now = Date.now()): Promise<AgentMuxLifecycleReservation[]> {
-    return await this.store.claimStaleLifecycles({
+  async claimStaleLifecycles(now = Date.now(), target?: { agentSessionId: string; expectedRun: AgentMuxRunRef }): Promise<AgentMuxLifecycleReservation[]> {
+    const claimed = await this.store.claimStaleLifecycles({
       ownerId: this.lifecycleOwnerId,
       ownerPid: process.pid,
       now,
       expiresAt: now + AgentMuxAgentSessionRegistry.lifecycleLeaseMs
-    })
+    }, target)
+    if (target && (claimed.length > 1 || claimed.some(reservation => reservation.kind !== 'stop' ||
+      reservation.agentSessionId !== target.agentSessionId || reservation.expectedRun.runId !== target.expectedRun.runId ||
+      reservation.stopOperation.runId !== target.expectedRun.runId))) {
+      throw new AgentMuxError('Agent Session Store returned another lifecycle for the exact Stop target.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    return claimed
   }
 
   async releaseLifecycle(
