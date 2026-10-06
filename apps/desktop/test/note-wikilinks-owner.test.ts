@@ -116,7 +116,7 @@ it('preserves missing or unavailable target queries as savable unbound occurrenc
   expect((await f.save('[[Research]]')).status).toBe('written')
   let graph = await f.services.owner.graph(await f.store.read(), {}); expect(graph.references[0]!.target).toEqual({ kind: 'unbound', text: 'Research' }); expect(graph.observations[0]!.status).toBe('identity-mismatch')
   await rm(join(f.root, 'target.note.json')); expect((await f.save('[[Research #Decision]]')).status).toBe('written')
-  graph = await f.services.owner.graph(await f.store.read(), { noteId: 'target' }); expect(graph.references[0]!.resolution).toBe('unbound'); expect(graph.completeness).toBe('partial')
+  graph = await f.services.owner.graph(await f.store.read(), { noteId: 'target' }); expect(graph.references[0]!.resolution).toBe('missing'); expect(graph.completeness).toBe('partial')
   expect((await f.services.owner.resolve(await f.store.read(), { mode: 'resolve', text: 'Research', maxBytes: 1 })).mode).toBe('resolve')
   expect(parsed(await readFile(join(f.root, 'source.note.json'), 'utf8')).noteId).toBe('source')
 })
@@ -128,7 +128,7 @@ it('indexes old raw tokens only as revision-bound text evidence with the exact n
     { type: 'paragraph', attrs: { blockId: 'literals' }, content: [{ type: 'text', text: '[[Research]]', marks: [{ type: 'code' }] }, { type: 'text', text: ' \\[[Research]]' }] }]
   const raw = json(note); await writeFile(join(f.root, 'source.note.json'), raw)
   const graph = await f.services.owner.graph(await f.store.read(), { noteId: 'target' }), source = graph.observations.find(o => o.noteId === 'source')!
-  expect(graph.references).toHaveLength(1); expect(graph.references[0]).toMatchObject({ source: { noteId: 'source', blockId: 'inner-block' }, target: { kind: 'unbound', text: 'Research' }, occurrence: { kind: 'text', revision: source.revision, from: 2, to: 14 }, resolution: 'unbound' })
+  expect(graph.references).toHaveLength(1); expect(graph.references[0]).toMatchObject({ source: { noteId: 'source', blockId: 'inner-block' }, target: { kind: 'page', noteId: 'target' }, query: 'Research', occurrence: { kind: 'text', revision: source.revision, from: 2, to: 14 }, resolution: 'resolved' })
   expect(graph.references[0]!.occurrence).not.toHaveProperty('referenceId'); expect(await readFile(join(f.root, 'source.note.json'), 'utf8')).toBe(raw)
   expect(await f.services.owner.graph(await f.store.read(), { noteId: 'target' })).toEqual(graph)
   const bad = structuredClone(graph); (bad.references[0]!.occurrence as { revision: string }).revision = 'another-revision'; expect(() => parseNotebookGraph(bad, { noteId: 'target' })).toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
