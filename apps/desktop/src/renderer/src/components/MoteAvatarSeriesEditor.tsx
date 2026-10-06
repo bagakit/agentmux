@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Box, Check, FileImage, RotateCcw, Smile } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { MOTE_FACE_PARTS, type MoteFace as Face } from '@agentmux/core/mote-face'
 import type { MoteAvatarSeriesCatalog, MoteAvatarSeriesChoice, MoteAvatarSeriesDefinition, MoteAvatarSeriesLocator,
   MoteAvatarSeriesParameters, MoteAvatarSeriesPrepared, MoteAvatarSeriesSource } from '@agentmux/core/mote-avatar-series'
@@ -8,6 +8,14 @@ import { api } from '../lib/api'
 import { createSeriesGlbRenderer, type SeriesGlbRenderer } from '../lib/mote-avatar-series-renderer'
 import { MoteFace } from './MoteFace'
 import '../styles/mote-avatar-series.css'
+
+const ThemeObjectModel3dIcon = semanticIconComponent('object.model-3d')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeFileImageIcon = semanticIconComponent('file.image')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeActionResetOptionsIcon = semanticIconComponent('action.reset-options')
+const ThemeObjectProfileIcon = semanticIconComponent('object.profile')
+const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 
 export type MoteAvatarSeriesDraft = { source: MoteAvatarSeriesSource; definition: MoteAvatarSeriesDefinition;
   parameters: MoteAvatarSeriesParameters; pngDataUrl: string }
@@ -54,8 +62,8 @@ function SeriesEntryThumbnail({ source, entry, visible }: { source: MoteAvatarSe
   }, [visible, locatorKey(source), entry.definition])
   return <span ref={element} className="mote-series__thumbnail" aria-hidden="true" data-preview-state={unavailable ? 'unavailable' : image ? 'ready' : 'metadata'} title={unavailable ? 'Preview unavailable. Select to retry.' : undefined}>
     {image ? <img src={image} alt="" /> : entry.definition.kind === 'face2d' ? <MoteFace face={entry.definition.face} />
-      : entry.definition.kind === 'glb' ? <Box size={21} /> : <FileImage size={21} />}
-    {unavailable ? <span className="mote-series__thumbnail-status">?</span> : null}
+      : entry.definition.kind === 'glb' ? <ThemeObjectModel3dIcon size={21} /> : <ThemeFileImageIcon size={21} />}
+    {unavailable ? <span className="mote-series__thumbnail-status"><ThemeStatusUnknownIcon size={11} /></span> : null}
   </span>
 }
 
@@ -251,7 +259,7 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
         {!selected ? <option value={selectedSeries}>{initialChoice ? initialChoice.source.seriesId : 'Choose a series'}</option> : null}
         {catalog?.series.map(value => <option key={seriesKey(value)} value={seriesKey(value)}>{value.title}{value.origin === 'user' ? ' · Your collection' : ''}</option>)}
       </select></label>
-      <button type="button" className="small-button mote-series__refresh" aria-label="Refresh avatar series" disabled={disabled || catalogLoading} onClick={() => void loadCatalog()}><RotateCcw size={12} />Refresh</button>
+      <button type="button" className="small-button mote-series__refresh" aria-label="Refresh avatar series" disabled={disabled || catalogLoading} onClick={() => void loadCatalog()}><ThemeActionRefreshIcon size={12} />Refresh</button>
       {catalogLoading ? <p className="mote-series__status" role="status">Loading series…</p> : null}
       {selected ? <div className="mote-series__entries" role="group" aria-label="Series appearances">{selected.entries.map(entry => {
         const source = { origin: selected.origin, seriesId: selected.seriesId, entryId: entry.entryId }
@@ -262,7 +270,7 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
           onClick={() => void prepareSource(source)}>
           <SeriesEntryThumbnail source={source} entry={entry} visible={visible} />
           <span><strong>{entry.title}</strong><small>{pending === locatorKey(source) ? 'Loading…' : entry.definition.kind === 'glb' ? '3D' : entry.definition.kind === 'face2d' ? 'Face' : 'Image'}</small></span>
-          {active ? <Check size={13} className="mote-series__check" aria-hidden="true" /> : null}
+          {active ? <ThemeStatusSelectedIcon size={13} className="mote-series__check" aria-hidden="true" /> : null}
         </button>
       })}</div> : !catalogLoading && catalog ? <p className="mote-series__status">No series yet. Add PNG or JPG images to your avatar folder.</p> : null}
     </div>
@@ -290,11 +298,11 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
                 }
               }} onPointerUp={() => { pointer.current = null }} onPointerCancel={() => { pointer.current = null }} />
             {parameters?.kind === 'face2d' ? <div ref={face} className="mote-series__face" role="img" aria-label="Current series face preview"><MoteFace face={parameters.face} /></div> : null}
-          </> : png ? <img src={png} alt="Your saved series avatar" /> : <div className="mote-series__empty"><Smile size={30} /><span>Choose a character</span></div>}
+          </> : png ? <img src={png} alt="Your saved series avatar" /> : <div className="mote-series__empty"><ThemeObjectProfileIcon size={30} /><span>Choose a character</span></div>}
         </div>
         <div className="mote-series__preview-note"><span>{preparing ? 'Preparing source…' : rendering ? 'Preparing preview…' : parameters?.kind === 'glb' ? 'Drag to turn' : parameters?.kind === 'image' ? 'Drag to position' : 'Your draft'}</span>
           {parameters && prepared ? <button type="button" className="small-button" disabled={controlsDisabled} aria-label="Reset series adjustments"
-            onClick={() => changeParameters(initialChoice && locatorKey(initialChoice.source) === locatorKey(prepared.source) && initialChoice.source.revision === prepared.source.revision ? structuredClone(initialChoice.parameters) : initialParameters(prepared.definition))}><RotateCcw size={12} />Reset</button> : null}</div>
+            onClick={() => changeParameters(initialChoice && locatorKey(initialChoice.source) === locatorKey(prepared.source) && initialChoice.source.revision === prepared.source.revision ? structuredClone(initialChoice.parameters) : initialParameters(prepared.definition))}><ThemeActionResetOptionsIcon size={12} />Reset</button> : null}</div>
         <div className="mote-series__sizes" aria-label="Actual avatar sizes">{[24, 34, 48, 104].map(size => <figure key={size}>
           <div className="mote-series__size-slot">{png ? <img src={png} alt={`${size} pixel avatar`} width={size} height={size} /> : <span style={{ width: size, height: size }} />}</div><figcaption>{size} px</figcaption>
         </figure>)}</div>
