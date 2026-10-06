@@ -4,7 +4,8 @@ import { EventEmitter } from 'node:events'
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { act } from 'react'
+import { act, useLayoutEffect } from 'react'
+import { ReactFlowProvider, useStoreApi } from '@xyflow/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { LocalExecutionHost } from '@agentmux/core'
 import { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
@@ -20,6 +21,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { noteCanvasScopeKey } from '../src/renderer/src/lib/note-canvas-state'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
+import { installNoteCanvasBlockRows } from './helpers/note-canvas-block-dom'
 
 const dom = composerDOM(), scope = { kind: 'note', noteId: 'target' } as const
 let directory: string, store: AgentMuxNotebookStore
@@ -62,6 +64,24 @@ beforeEach(async () => {
 })
 afterEach(async () => { await rm(directory, { recursive: true, force: true }) })
 async function ready() { await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-title[data-note-id]')).toHaveLength(2)) }
+type FlowPublicationProbe = { waiting: boolean; published: string[]; sourceCount(): number }
+function CaptureFlowErrors({ errors, publication }: { errors: string[]; publication?: FlowPublicationProbe }) {
+  const store = useStoreApi()
+  useLayoutEffect(() => {
+    const original = store.getState().onError
+    store.setState({ onError: (id, message) => { errors.push(id); original?.(id, message) } })
+    if (publication) publication.sourceCount = () => store.getState().edges.filter(edge => edge.source === 'closed-source').length
+    const unsubscribe = store.subscribe(state => {
+      if (!publication?.waiting) return
+      for (const edge of state.edges) {
+        const relationship = edge.data?.relationship as { sourceBlockId?: string } | undefined
+        if (edge.source === 'closed-source' && relationship?.sourceBlockId) publication.published.push(relationship.sourceBlockId)
+      }
+    })
+    return () => { unsubscribe(); store.setState({ onError: original }) }
+  }, [store, errors, publication])
+  return null
+}
 
 it('renders incoming closed-file relationships through the original Main/preload/Renderer owner and opens exact bundled blocks', async () => {
   const open = vi.fn(), talk = vi.fn()
@@ -97,15 +117,18 @@ it('reads original blocks and authors only on explicit expansion, and opens a se
   expect(api.notebooks.content).toHaveBeenCalledTimes(1); expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
   await dom.click('[aria-label="Collapse saved body: Original target"]')
   expect(dom.container.querySelector('.note-canvas-reader')).toBeNull()
+  expect(dom.container.querySelector('.note-canvas-row-endpoint')).toBeNull()
   expect((await store.read()).trail).toHaveLength(2)
 })
 
 it('keeps newer bytes out of an older card and refreshes explicitly without replacing graph truth with drafts', async () => {
+  installNoteCanvasBlockRows()
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
   await writeFile(join(directory, 'target.note.json'), body('target', 'Later saved bytes'))
   await dom.click('[aria-label="Read saved body: Original target"]')
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Saved snapshot changed.'))
   expect(dom.container.querySelector('.note-canvas-reader')).toBeNull()
+  expect(dom.container.querySelector('.note-canvas-row-endpoint')).toBeNull()
   await dom.click('.note-canvas-body-state button')
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Later saved bytes'))
   expect(api.notebooks.graph).toHaveBeenCalledTimes(2)
@@ -204,6 +227,149 @@ it('connects page targets and hierarchy to card headers while keeping block endp
   expect(dom.container.querySelector('[data-note-id="closed-source"]')!.closest('article')!.querySelector('.note-canvas-degrees')?.textContent).toContain('6 outgoing')
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
   expect(api.notebooks.content).not.toHaveBeenCalled()
+})
+
+it('attaches the real Reader original blocks, regroups scrolled-out endpoints, and keeps inspected occurrence/navigation precise', async () => {
+  const geometry = installNoteCanvasBlockRows(), open = vi.fn()
+  await dom.render(<NoteCanvas scope={scope} onOpen={open} />); await ready()
+  await dom.click('[aria-label="Read saved body: Original target"]')
+  await dom.click('[aria-label="Read saved body: Original closed-source"]')
+  const endpoint = (noteId: string, blockId: string) => [...dom.container.querySelectorAll<HTMLElement>(`.react-flow__node[data-id="${noteId}"] [data-port-block-id]`)].find(element => element.dataset.portBlockId === blockId)
+  const labels = () => [...dom.container.querySelectorAll<HTMLElement>('.note-canvas-edge-label')]
+  await vi.waitFor(() => expect(endpoint('target', 'target-block')).toBeDefined())
+  await vi.waitFor(() => expect(labels().filter(label => label.dataset.relationshipKind === 'reference').map(label => label.dataset.sourceBlock)).toEqual(['source-reference-0', 'source-reference-1']))
+  expect(dom.container.querySelector('.note-canvas-reader .mobile-note-reference[data-block-id="source-reference-0"]')).not.toBeNull()
+  expect(labels().filter(label => label.dataset.targetKind === 'block').every(label => label.dataset.targetBlock === 'target-block')).toBe(true)
+  const page = labels().find(label => label.dataset.targetKind === 'page')!
+  expect(page.dataset.sourceBlock).toBe('source-inline'); expect(page.dataset.targetAttachment).toBe('page')
+  expect(page.dataset.targetHandle).toMatch(/^page-in-/)
+  const second = labels().find(label => label.dataset.sourceBlock === 'source-reference-1')!
+  await act(async () => second.click())
+  expect(dom.container.querySelectorAll('.note-canvas-inspector li')).toHaveLength(1)
+  expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('source-reference-1')
+  const layout = structuredClone(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(scope)])
+  geometry.rows['source-reference-1'] = -100
+  const sourceBody = dom.container.querySelector<HTMLElement>('.react-flow__node[data-id="closed-source"] .note-canvas-body')!
+  const enumerateOriginal = vi.spyOn(sourceBody.querySelector('.mobile-note-body')!, 'querySelectorAll')
+  await act(async () => sourceBody.dispatchEvent(new Event('scroll')))
+  await vi.waitFor(() => expect(endpoint('closed-source', 'source-reference-1')).toBeUndefined())
+  await vi.waitFor(() => expect(labels().some(label => label.dataset.relationshipKind === 'reference' && label.dataset.sourceAttachment === 'summary')).toBe(true))
+  expect(dom.container.querySelectorAll('.note-canvas-inspector li')).toHaveLength(1)
+  await dom.click('.note-canvas-inspector-actions button')
+  expect(open).toHaveBeenLastCalledWith((await store.read()).pages['closed-source'], 'source-reference-1')
+  geometry.scale = 2; geometry.rows['target-block'] = 180
+  const targetBody = dom.container.querySelector<HTMLElement>('.react-flow__node[data-id="target"] .note-canvas-body')!
+  await act(async () => targetBody.dispatchEvent(new Event('scroll')))
+  await vi.waitFor(() => expect(endpoint('target', 'target-block')?.style.top).toBe('195px'))
+  geometry.rows['target-block'] = 500
+  await act(async () => targetBody.dispatchEvent(new Event('scroll')))
+  await vi.waitFor(() => expect(endpoint('target', 'target-block')).toBeUndefined())
+  await vi.waitFor(() => expect(labels().filter(label => label.dataset.targetKind === 'block').every(label => label.dataset.targetAttachment === 'summary')).toBe(true))
+  expect(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(scope)]).toEqual(layout)
+  expect(api.notebooks.graph).toHaveBeenCalledTimes(1); expect(api.notebooks.content).toHaveBeenCalledTimes(2)
+  expect(enumerateOriginal).not.toHaveBeenCalled()
+  expect(dom.container.querySelector('[data-note-id="target"]')!.closest('article')!.querySelector('.note-canvas-degrees')?.textContent).toContain('5 incoming')
+})
+
+it('stops original-block geometry and clears exact ports while hidden, without consuming scroll events or altering drafts', async () => {
+  const geometry = installNoteCanvasBlockRows()
+  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
+  await dom.click('[aria-label="Read saved body: Original target"]')
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-port-block-id="target-block"]')).not.toBeNull())
+  const body = dom.container.querySelector<HTMLElement>('.note-canvas-body')!
+  const draft = structuredClone(useAppStore.getState().agentComposerDrafts)
+  await dom.render(<NoteCanvas scope={scope} active={false} onOpen={() => {}} />)
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-row-endpoint')).toBeNull())
+  await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) })
+  const reads = geometry.reads, contentReads = vi.mocked(api.notebooks.content).mock.calls.length
+  await act(async () => { body.dispatchEvent(new Event('scroll')); await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) })
+  expect(geometry.reads).toBe(reads)
+  expect(api.notebooks.content).toHaveBeenCalledTimes(contentReads)
+  expect(useAppStore.getState().agentComposerDrafts).toEqual(draft)
+})
+
+it('uses each exact target block rather than a nearby visible row, and withdraws only a duplicated DOM target', async () => {
+  const geometry = installNoteCanvasBlockRows(); geometry.rows['target-other'] = 230
+  const target = JSON.parse(body('target', 'First original block'))
+  target.content.content.push({ type: 'heading', attrs: { level: 2, blockId: 'target-other' }, content: [{ type: 'text', text: 'Second original block' }] })
+  const source = JSON.parse(body('closed-source', 'Original source', true))
+  source.content.content.find((block: any) => block.attrs.blockId === 'source-inline').content.find((inline: any) => inline.attrs?.referenceId === 'heading-link').attrs.target.blockId = 'target-other'
+  await writeFile(join(directory, 'target.note.json'), JSON.stringify(target))
+  await writeFile(join(directory, 'closed-source.note.json'), JSON.stringify(source))
+  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
+  await dom.click('[aria-label="Read saved body: Original target"]')
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('[data-port-block-id]')).toHaveLength(2))
+  const linked = () => dom.container.querySelector<HTMLElement>('.note-canvas-edge-label[data-relationship-kind="link"][data-target-kind="block"]')!
+  await vi.waitFor(() => expect(linked().dataset.targetBlock).toBe('target-other'))
+  expect([...dom.container.querySelectorAll<HTMLElement>('.note-canvas-edge-label[data-relationship-kind="reference"]')].every(label => label.dataset.targetBlock === 'target-block')).toBe(true)
+  const original = dom.container.querySelector('.note-canvas-reader .mobile-note-body')!, row = original.querySelector<HTMLElement>('[data-block-id="target-other"]')!
+  await act(async () => original.append(row.cloneNode(true)))
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-port-block-id="target-other"]')).toBeNull())
+  await vi.waitFor(() => expect(linked().dataset.targetAttachment).toBe('summary'))
+  expect(dom.container.querySelector('[data-port-block-id="target-block"]')).not.toBeNull()
+  expect(api.notebooks.graph).toHaveBeenCalledTimes(1); expect(api.notebooks.content).toHaveBeenCalledTimes(1)
+})
+
+it('keeps an expired raw occurrence explicit after a real saved-file revision refresh until the relationship is selected again', async () => {
+  await writeFile(join(directory, 'target.note.json'), body('target', 'See [[Original closed-source]]'))
+  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
+  const link = () => dom.container.querySelector<HTMLButtonElement>('.note-canvas-edge-label[data-source-note="target"][data-target-kind="page"]')!
+  await vi.waitFor(() => expect(link()).not.toBeNull())
+  await act(async () => link().click())
+  expect(dom.container.querySelectorAll('.note-canvas-inspector li')).toHaveLength(1)
+  await writeFile(join(directory, 'target.note.json'), body('target', 'See [[Original closed-source]] with newer saved context'))
+  await dom.click('[aria-label="Refresh saved graph"]')
+  await vi.waitFor(() => {
+    const status = dom.container.querySelector('.note-canvas-inspector [role="status"]')
+    expect(status).not.toBeNull()
+    expect(status!.textContent).toContain('selected original occurrence is no longer in this saved graph')
+  })
+  expect(link()).not.toBeNull()
+  expect(dom.container.querySelector('.note-canvas-inspector strong')?.textContent).toBe('Selection changed')
+  expect(dom.container.querySelector('.note-canvas-inspector ol')).toBeNull()
+  await act(async () => link().click())
+  expect(dom.container.querySelectorAll('.note-canvas-inspector li')).toHaveLength(1)
+  expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('[[Original closed-source]]')
+  expect(api.notebooks.graph).toHaveBeenCalledTimes(2); expect(api.notebooks.content).not.toHaveBeenCalled()
+})
+
+it('publishes dynamic handles after real registration and retires them after actual edge release without missing-handle errors', async () => {
+  const geometry = installNoteCanvasBlockRows(), errors: string[] = []
+  const publication: FlowPublicationProbe = { waiting: false, published: [], sourceCount: () => 0 }
+  await dom.render(<ReactFlowProvider><CaptureFlowErrors errors={errors} publication={publication} /><NoteCanvas scope={scope} onOpen={() => {}} /></ReactFlowProvider>); await ready()
+  await dom.click('[aria-label="Read saved body: Original target"]')
+  await dom.click('[aria-label="Read saved body: Original closed-source"]')
+  const exact = () => dom.container.querySelector('.note-canvas-edge-label[data-source-block="source-reference-1"][data-target-block="target-block"]')
+  await vi.waitFor(() => expect(exact()).not.toBeNull())
+  const targetBody = dom.container.querySelector<HTMLElement>('.react-flow__node[data-id="target"] .note-canvas-body')!
+  geometry.rows['target-block'] = 800
+  await act(async () => targetBody.dispatchEvent(new Event('scroll')))
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-port-block-id="target-block"]')).toBeNull())
+  geometry.rows['target-block'] = 140
+  await act(async () => targetBody.dispatchEvent(new Event('scroll')))
+  await vi.waitFor(() => expect(exact()).not.toBeNull())
+  await dom.click('[aria-label="Collapse saved body: Original closed-source"]')
+  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="closed-source"] [data-port-block-id]')).toBeNull())
+  await dom.click('[aria-label="Read saved body: Original closed-source"]')
+  await vi.waitFor(() => expect(exact()).not.toBeNull())
+  await dom.click('[aria-label="Collapse relationships: Original target"]')
+  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="closed-source"]')).toBeNull())
+  await vi.waitFor(() => expect(publication.sourceCount()).toBe(0))
+  const readOriginal = vi.mocked(api.notebooks.content).getMockImplementation()!
+  let releaseOriginal: (() => void) | undefined
+  vi.mocked(api.notebooks.content).mockImplementationOnce((noteId, options) => new Promise(resolve => { releaseOriginal = () => { void readOriginal(noteId, options).then(resolve) } }))
+  publication.waiting = true
+  await dom.click('[aria-label="Expand relationships: Original target"]'); await ready()
+  await vi.waitFor(() => expect(releaseOriginal).toBeDefined())
+  const pendingEdges = [...dom.container.querySelectorAll<HTMLElement>('.note-canvas-edge-label[data-source-note="closed-source"]')]
+  expect(pendingEdges).toHaveLength(4)
+  expect(pendingEdges.every(label => label.dataset.sourceAttachment === 'summary')).toBe(true)
+  expect(publication.published).toEqual([])
+  publication.waiting = false
+  await act(async () => releaseOriginal!())
+  await vi.waitFor(() => expect(exact()).not.toBeNull())
+  await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) })
+  expect(errors.filter(id => id === '008')).toEqual([])
 })
 
 it('lazily discovers closed original backlinks and reads actual source text only after explicit source expansion', async () => {

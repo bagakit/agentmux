@@ -2,7 +2,7 @@ import { fixtureEpoch as _tailRefreshFixtureEpoch, fixturePath as _tailRefreshFi
 import { expect, it } from 'vitest'
 import { emptyNotebookState } from '@agentmux/core/notebook-catalog'
 import type { NotebookGraphSnapshot } from '../src/shared/notebook-observation'
-import { projectNoteCanvas, initialCanvasPositions } from '../src/renderer/src/lib/note-canvas-model'
+import { projectNoteCanvas, initialCanvasPositions, attachNoteCanvasRelationships } from '../src/renderer/src/lib/note-canvas-model'
 import { arrangeNoteCanvas } from '../src/renderer/src/lib/note-canvas-layout-engine'
 
 function fixture(): NotebookGraphSnapshot {
@@ -45,6 +45,19 @@ it('collapses only unreachable context, keeping shared nodes and cycles reached 
   expect(projectNoteCanvas(f, scope, ['root', 'right']).notes.some(note => note.id === 'shared')).toBe(true)
   expect(projectNoteCanvas(f, scope, ['root']).notes.some(note => note.id === 'shared')).toBe(false)
   expect(projectNoteCanvas(f, scope, []).notes.map(note => note.id)).toEqual(['root'])
+})
+it('attaches confirmed visible endpoints without losing bundled occurrences or granting an unknown target a block port', () => {
+  const snapshot = fixture(), projection = projectNoteCanvas(snapshot, { kind: 'note', noteId: 'root' }, ['root'])
+  const ports = new Map([['root', new Set(['root', 'rootsecond'])], ['right', new Set(['right'])], ['outside', new Set(['outside'])]])
+  const attached = attachNoteCanvasRelationships(projection.relationships, ports)
+  const right = attached.filter(edge => edge.source === 'root' && edge.target === 'right')
+  expect(right.map(edge => [edge.sourceBlockId, edge.targetBlockId, edge.references.length])).toEqual([['root', 'right', 1], ['rootsecond', undefined, 1]])
+  expect(attached.find(edge => edge.target === 'outside')).toMatchObject({ sourceBlockId: 'root' })
+  expect(attached.find(edge => edge.target === 'outside')?.targetBlockId).toBeUndefined()
+  expect(attached.find(edge => edge.kind === 'hierarchy')?.sourceBlockId).toBeUndefined()
+  expect(attached.flatMap(edge => edge.references)).toEqual(projection.relationships.flatMap(edge => edge.references))
+  expect(new Set(attached.map(edge => edge.id)).size).toBe(attached.length)
+  expect(attachNoteCanvasRelationships(projection.relationships, new Map()).map(({ aggregateId, ...edge }) => edge)).toEqual(projection.relationships)
 })
 it('respects Notebook search/archive seeds until a deliberate relationship expansion crosses the boundary', () => {
   const f = fixture(), scope = { kind: 'notebook', notebookId: 'default' } as const
