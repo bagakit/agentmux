@@ -1,3 +1,5 @@
+import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { EventEmitter } from 'node:events'
@@ -24,7 +26,7 @@ import { installNoteCanvasBlockRows } from './helpers/note-canvas-block-dom'
 
 const dom = composerDOM(), scope = { kind: 'note', noteId: 'target' } as const
 let directory: string, store: AgentMuxNotebookStore
-const body = (id: string, text: string, references = false) => JSON.stringify({ schema: 'agentmux.note.v1', noteId: id, content: { type: 'doc', content: [
+const body = (id: string, text: string, references = false) => serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: id, content: { type: 'doc', content: [
   { type: 'paragraph', attrs: { blockId: id + '-block', provenance: { created: { actor: { kind: 'agent', id: 'ExactResearchSession' }, at: _tailRefreshFixtureEpoch(0, 1) }, lastEdited: { actor: { kind: 'agent', id: 'ExactResearchSession' }, at: _tailRefreshFixtureEpoch(0, 1) } } }, content: [{ type: 'text', text }] },
   ...references ? [
     ...[0, 1, 2].map(index => ({ type: 'blockReference', attrs: { blockId: 'source-reference-' + index, referenceId: 'original-reference-' + index, mode: index === 2 ? 'embed' : 'reference', target: { noteId: 'target', blockId: 'target-block' } } })),
@@ -43,8 +45,8 @@ beforeEach(async () => {
   const workspace = { id: 'notes', hostId: 'local', path: directory, name: 'Notes', kind: 'folder' as const }
   store = new AgentMuxNotebookStore(join(directory, 'notebooks.json'))
   for (const id of ['target', 'closed-source']) {
-    await writeFile(join(directory, id + '.note.json'), body(id, 'Saved ' + id, id !== 'target'))
-    await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'register-' + id, change: { kind: 'register', noteId: id, title: 'Original ' + id, resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.json' } } }, { kind: 'user', id: 'ui-test' })
+    await writeFile(join(directory, id + '.note.md'), body(id, 'Saved ' + id, id !== 'target'))
+    await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'register-' + id, change: { kind: 'register', noteId: id, title: 'Original ' + id, resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.md' } } }, { kind: 'user', id: 'ui-test' })
   }
   const services = createNotebookObservationServices(store, { files: new WorkspaceFiles(() => new LocalExecutionHost()), workspace: () => workspace })
   const sender = Object.assign(new EventEmitter(), { isDestroyed: () => false })
@@ -66,8 +68,8 @@ async function ready() { await vi.waitFor(() => expect(dom.container.querySelect
 const link = (referenceId: string, noteId: string, blockId?: string) => ({ type: 'noteLink', attrs: { referenceId, text: noteId + (blockId ? ' #' + blockId : ''), target: { noteId, ...blockId ? { blockId } : {} } } })
 const paragraph = (blockId: string, text: string) => ({ type: 'paragraph', attrs: { blockId }, content: [{ type: 'text', text }] })
 async function selectedFixture() {
-  await writeFile(join(directory, 'target.note.json'), JSON.stringify({ schema: 'agentmux.note.v1', noteId: 'target', content: { type: 'doc', content: Array.from({ length: 6 }, (_, i) => paragraph('target-' + i, 'Exact target content ' + i)) } }))
-  await writeFile(join(directory, 'closed-source.note.json'), JSON.stringify({ schema: 'agentmux.note.v1', noteId: 'closed-source', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'long-source' }, content: [
+  await writeFile(join(directory, 'target.note.md'), serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'target', content: { type: 'doc', content: Array.from({ length: 6 }, (_, i) => paragraph('target-' + i, 'Exact target content ' + i)) } }))
+  await writeFile(join(directory, 'closed-source.note.md'), serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'closed-source', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'long-source' }, content: [
     { type: 'text', text: 'The original source includes every exact decision: ' },
     ...Array.from({ length: 6 }, (_, i) => link('selected-' + i, 'target', 'target-' + i)),
     { type: 'text', text: ' The final written source sentence remains visible in comparison.' },
@@ -82,8 +84,8 @@ it('selects only the three original default-outside occurrences, compares each t
   const geometry = installNoteCanvasBlockRows()
   Object.assign(geometry.rows, { 'long-source': 130, ...Object.fromEntries(Array.from({ length: 6 }, (_, i) => ['target-' + i, 120 + i * 30])) })
   const open = vi.fn()
-  const draft = { path: 'closed-source.note.json', revision: 'unsaved', content: body('closed-source', 'My unsaved editor must remain') }
-  useAppStore.setState({ documents: { 'notes\0closed-source.note.json': draft }, dirtyDocuments: { 'notes\0closed-source.note.json': true } })
+  const draft = { path: 'closed-source.note.md', revision: 'unsaved', content: body('closed-source', 'My unsaved editor must remain') }
+  useAppStore.setState({ documents: { 'notes\0closed-source.note.md': draft }, dirtyDocuments: { 'notes\0closed-source.note.md': true } })
   await dom.render(<NoteCanvas scope={scope} onOpen={open} />); await ready()
   await vi.waitFor(() => expect(targetCard().querySelector('[data-block-id="target-2"]')).not.toBeNull())
   await vi.waitFor(() => expect(api.notebooks.content).toHaveBeenCalledTimes(2))
@@ -95,7 +97,7 @@ it('selects only the three original default-outside occurrences, compares each t
   await vi.waitFor(() => expect(targetCard().querySelectorAll('[data-note-selected-block]')).toHaveLength(3))
   expect([...targetCard().querySelectorAll<HTMLElement>('[data-note-selected-block]')].map(node => node.dataset.noteSelectedBlock)).toEqual(['target-3', 'target-4', 'target-5'])
   expect(targetCard().querySelector('.mobile-note-body [data-block-id]')?.getAttribute('data-block-id')).toBe('target-3')
-  expect(sourceCard().querySelector('[data-note-selected-block="long-source"]')).not.toBeNull()
+  await vi.waitFor(() => expect(sourceCard().querySelector('[data-note-selected-block="long-source"]')).not.toBeNull())
   const inspector = dom.container.querySelector('.note-canvas-inspector')!
   await vi.waitFor(() => expect(inspector.querySelectorAll('.note-canvas-comparison-to')).toHaveLength(3))
   expect(inspector.querySelectorAll('.note-canvas-comparison-from')).toHaveLength(1)
@@ -110,8 +112,8 @@ it('selects only the three original default-outside occurrences, compares each t
   expect(open).toHaveBeenLastCalledWith((await store.read()).pages.target, 'target-5')
   await act(async () => inspector.querySelector<HTMLButtonElement>('.note-canvas-comparison-from .note-canvas-inspector-actions button')!.click())
   expect(open).toHaveBeenLastCalledWith((await store.read()).pages['closed-source'], 'long-source')
-  expect(useAppStore.getState().documents['notes\0closed-source.note.json']).toEqual(draft)
-  expect(useAppStore.getState().dirtyDocuments['notes\0closed-source.note.json']).toBe(true)
+  expect(useAppStore.getState().documents['notes\0closed-source.note.md']).toEqual(draft)
+  expect(useAppStore.getState().dirtyDocuments['notes\0closed-source.note.md']).toBe(true)
   expect(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(scope)]).toEqual(layout)
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1); expect(api.notebooks.content).toHaveBeenCalledTimes(2)
 })
@@ -131,14 +133,14 @@ it('keeps page targets whole and highlights their header without selecting an ar
 
 it('does not silently rebind a selected stored occurrence when its original reference ID is reused for a new target', async () => {
   await selectedFixture()
-  const original = JSON.parse(await readFile(join(directory, 'closed-source.note.json'), 'utf8'))
-  original.content.content[0].content = [link('same-reference', 'target', 'target-3')]
-  await writeFile(join(directory, 'closed-source.note.json'), JSON.stringify(original))
+  const original = noteFromMarkdown(await readFile(join(directory, 'closed-source.note.md'), 'utf8'))
+  original.content.content![0]!.content = [link('same-reference', 'target', 'target-3')]
+  await writeFile(join(directory, 'closed-source.note.md'), serializeNoteDocument(original))
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
   await dom.click('.note-canvas-edge-label[data-target-kind="block"]')
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-comparison-to')?.textContent).toContain('Exact target content 3'))
-  original.content.content[0].content = [link('same-reference', 'target', 'target-4')]
-  await writeFile(join(directory, 'closed-source.note.json'), JSON.stringify(original))
+  original.content.content![0]!.content = [link('same-reference', 'target', 'target-4')]
+  await writeFile(join(directory, 'closed-source.note.md'), serializeNoteDocument(original))
   await dom.click('[aria-label="Refresh saved graph"]')
   await vi.waitFor(() => { const status = dom.container.querySelector('.note-canvas-inspector [role="status"]'); expect(status).not.toBeNull(); expect(status!.textContent).toContain('selected original occurrence is no longer') })
   expect(dom.container.querySelector('.note-canvas-inspector ol')).toBeNull()
@@ -150,12 +152,12 @@ it('does not silently rebind a selected stored occurrence when its original refe
 it('reports partial expiry and keeps only unchanged original occurrences instead of selecting another aggregate candidate', async () => {
   await selectedFixture()
   const content = { schema: 'agentmux.note.v1', noteId: 'closed-source', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'long-source' }, content: [link('kept', 'target', 'target-3'), link('changed', 'target', 'target-4')] }] } }
-  await writeFile(join(directory, 'closed-source.note.json'), JSON.stringify(content))
+  await writeFile(join(directory, 'closed-source.note.md'), serializeNoteDocument(content as Parameters<typeof serializeNoteDocument>[0]))
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
   await dom.click('.note-canvas-edge-label[data-target-kind="block"]')
   await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-comparison-to')).toHaveLength(2))
-  content.content.content[0]!.content[1] = link('changed', 'target', 'target-5')
-  await writeFile(join(directory, 'closed-source.note.json'), JSON.stringify(content))
+  content.content.content![0]!.content[1] = link('changed', 'target', 'target-5')
+  await writeFile(join(directory, 'closed-source.note.md'), serializeNoteDocument(content as Parameters<typeof serializeNoteDocument>[0]))
   await dom.click('[aria-label="Refresh saved graph"]')
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-inspector [role="status"]')?.textContent).toContain('1 selected occurrence changed or disappeared. 1 unchanged occurrence remain selected.'))
   expect(dom.container.querySelectorAll('.note-canvas-comparison-to')).toHaveLength(1)
@@ -165,10 +167,10 @@ it('reports partial expiry and keeps only unchanged original occurrences instead
 
 it('keeps More for uncovered original roots when selection is a descendant already covered by a displayed parent', async () => {
   const parent = { type: 'listItem', attrs: { blockId: 'parent-item' }, content: [paragraph('selected-child', 'An exact child inside its original item')] }
-  await writeFile(join(directory, 'target.note.json'), JSON.stringify({ schema: 'agentmux.note.v1', noteId: 'target', content: { type: 'doc', content: [
+  await writeFile(join(directory, 'target.note.md'), serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'target', content: { type: 'doc', content: [
     { type: 'orderedList', attrs: { start: 4 }, content: [parent] }, ...Array.from({ length: 3 }, (_, i) => paragraph('other-' + i, 'Other root ' + i)),
   ] } }))
-  await writeFile(join(directory, 'closed-source.note.json'), JSON.stringify({ schema: 'agentmux.note.v1', noteId: 'closed-source', content: { type: 'doc', content: ['selected-child', 'parent-item', 'other-0', 'other-1', 'other-2'].map((id, i) => ({ type: 'paragraph', attrs: { blockId: 'source-' + i }, content: [link('link-' + i, 'target', id)] })) } }))
+  await writeFile(join(directory, 'closed-source.note.md'), serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'closed-source', content: { type: 'doc', content: ['selected-child', 'parent-item', 'other-0', 'other-1', 'other-2'].map((id, i) => ({ type: 'paragraph', attrs: { blockId: 'source-' + i }, content: [link('link-' + i, 'target', id)] })) } }))
   const geometry = installNoteCanvasBlockRows()
   Object.assign(geometry.rows, { 'selected-child': 150, 'parent-item': 140, 'other-0': 200, 'other-1': 230, 'other-2': 260, 'source-0': 130, 'source-1': 180, 'source-2': 230 })
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
@@ -183,3 +185,5 @@ it('keeps More for uncovered original roots when selection is a descendant alrea
   await vi.waitFor(() => expect(targetCard().querySelector('[data-block-id="other-2"]')).not.toBeNull())
   expect(api.notebooks.content).toHaveBeenCalledTimes(2)
 })
+
+function noteFromMarkdown(content:string) { const read=readNoteDocument(content);expect(read.status).toBe('valid');if(read.status!=='valid')throw Error(read.message);return read.note }

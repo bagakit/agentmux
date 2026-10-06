@@ -1,9 +1,13 @@
+const { fixtureEpoch: _newTailFixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { emptyNotebookState } from '@agentmux/core/notebook-catalog'
+import { api } from '../src/renderer/src/lib/api'
+import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 import type { Notebook, NotebookPage } from '@agentmux/core/notebook-catalog'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import type { AppConfig } from '../src/shared/contracts'
@@ -25,7 +29,7 @@ import { resolveOverlayContainer } from '../src/renderer/src/components/WindowOv
 
 const book: Notebook = { notebookId: 'quick-notes', name: 'Notes', createdAt: 1 }
 const page = (id: string): NotebookPage => ({ noteId: id, notebookId: book.notebookId, parentNoteId: null,
-  title: `Note ${id}`, resource: { hostId: 'local', workspaceId: '__notes__', workspacePath: _hygiene_fixturePath("notes"), path: `${id}.note.json` }, createdAt: 1, updatedAt: 2, sources: [], topics: [] })
+  title: `Note ${id}`, resource: { hostId: 'local', workspaceId: '__notes__', workspacePath: _hygiene_fixturePath("notes"), path: `${id}.note.md` }, createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 2), sources: [], topics: [] })
 const a = page('A'), b = page('B')
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }], executors: {
   one: { label: 'First Agent', providerId: 'codex', command: 'first-agent', args: [], env: {}, injectAgentMuxGuide: true },
@@ -60,11 +64,12 @@ async function render(directory: Directory = 'sidebar', initial: NotebookPage | 
 function button(text: string) { const node = [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === text || node.querySelector('strong')?.textContent === text); expect(node, `button ${text}`).toBeDefined(); return node! }
 async function click(node: HTMLElement) { await act(async () => node.click()) }
 async function rightClickB() {
-  const node = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === b.title || node.querySelector('strong')?.textContent?.trim() === b.title)!
-  expect(node).toBeDefined()
-  await act(async () => node.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 60, clientY: 90 })))
+  await vi.waitFor(() => expect([...container.querySelectorAll('button')].some(node => node.textContent?.trim() === b.title || node.querySelector('strong')?.textContent?.trim() === b.title)).toBe(true))
+  const current = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === b.title || node.querySelector('strong')?.textContent?.trim() === b.title)!
+  expect(current).toBeDefined()
+  await act(async () => current.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 60, clientY: 90 })))
   await vi.waitFor(() => expect(document.querySelector('[role="menuitem"]')?.textContent).toBe('Talk with Agent'))
-  return node
+  return current
 }
 async function chooseTalk(keyboard = false) {
   const item = document.querySelector<HTMLElement>('[role="menuitem"]')!
@@ -77,7 +82,11 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   for (const spy of [opened, talked, activated, dismissed, selectedReference, restoredFocus, fixture.talk, fixture.inspect]) spy.mockReset()
   fixture.state = { config, documents: {}, sessions: [], executorDetections: {}, hostExecutorInventories: {}, spatialRequests: {},
-    mainSurface: 'recall', recallNotebookId: book.notebookId, recallNoteId: 'A', recallZoneSelection: null, executeControl: fixture.inspect } as unknown as typeof fixture.state
+    noteCanvasLayouts: {}, noteCanvasSaveIssues: {}, saveNoteCanvasPresentation: vi.fn(async () => undefined), mainSurface: 'recall', recallNotebookId: book.notebookId, recallNoteId: 'A', recallZoneSelection: null, executeControl: fixture.inspect } as unknown as typeof fixture.state
+  installNoteCanvasGeometry()
+  const catalog = emptyNotebookState(); catalog.pages = { A: a, B: b }
+  vi.spyOn(api.notebooks, 'graph').mockResolvedValue({ catalog, graph: { catalogRevision: catalog.revision, scope: { kind: 'catalog' }, scannedScope: 'catalog', completeness: 'unknown', observations: [a,b].map(page => ({ status: 'unknown', noteId: page.noteId, resource: page.resource, message: 'Original not read in this UI fixture' })), duplicateNoteIds: [], references: [], hierarchy: [] } })
+  vi.spyOn(api.notebooks, 'onChange').mockImplementation(() => () => {})
   fixture.talk.mockImplementation(async input => report(input.requestId))
   fixture.inspect.mockResolvedValue({ operation: 'space.inspect', catalog: { spaces: [], zones: [], bindings: [], tabs: [], regions: [], locations: [] }, request: { known: false, report: null } })
   container = document.createElement('div'); document.body.appendChild(container); root = createClientUiRoot(container)

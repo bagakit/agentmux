@@ -1,3 +1,4 @@
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { openNotebookPage } from '../src/renderer/src/lib/recall-notebooks'
@@ -33,7 +34,7 @@ vi.mock('react-resizable-panels', async () => {
 })
 // Native calls are instrumented; the real App, Store, Workbench, Region portal and BrowserPane run.
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: (props: { session: { id: string }; visible?: boolean }) => <div data-terminal-probe={props.session.id} data-visible={props.visible}><textarea defaultValue="Original terminal input" /></div> }))
-vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: (props: { surface: { path: string }; preview?: import('react').ReactNode }) => props.surface.path.endsWith('.note.json') && props.preview ? props.preview : <textarea data-file-probe defaultValue="Original file input" /> }))
+vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: (props: { surface: { path: string }; preview?: import('react').ReactNode }) => props.surface.path.endsWith('.note.md') && props.preview ? props.preview : <textarea data-file-probe defaultValue="Original file input" /> }))
 const observation = vi.hoisted(() => ({
   catalogUnavailable: false,
   recall: [] as Parameters<typeof import('../src/renderer/src/components/GlobalRecallSurface').GlobalRecallSurface>[0][],
@@ -356,19 +357,19 @@ it('distinguishes original saved hierarchy and exact block references while keep
   for (const [id, content] of [[parentId, source], [childId, child]] as const) {
     const original = await files.read(notesWorkspace, pages[id]!.resource.path)
     if (original.status !== 'read') throw new Error('Original Note file not read')
-    await files.write(notesWorkspace, { path: pages[id]!.resource.path, expectedRevision: original.document.revision, content: JSON.stringify(content) })
+    await files.write(notesWorkspace, { path: pages[id]!.resource.path, expectedRevision: original.document.revision, content: serializeNoteDocument(content as Parameters<typeof serializeNoteDocument>[0]) })
   }
   await act(async () => useAppStore.getState().updateDocument(parentRef.tabId, 'Keep original dirty draft', parentRef.regionId))
   const draft = useAppStore.getState().documents[documentKey(NOTES_WORKSPACE_ID, pages[parentId]!.resource.path)]!
   await directory(); await dom.click('[aria-label="Graph view"]')
-  await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Inspect 1 block reference"]')).not.toBeNull())
-  expect(dom.container.querySelector('[aria-label="Inspect parent and subpage relationship"]')).not.toBeNull()
+  await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Inspect 1 reference: Block → block"]')).not.toBeNull())
+  expect(dom.container.querySelector('[aria-label="Inspect parent and subpage relationship: Page → page"]')).not.toBeNull()
   expect(dom.container.querySelector('.note-canvas-caption')?.textContent).toContain('Partial coverage · 2/2 originals read')
-  await dom.click('[aria-label="Inspect 1 block reference"]')
+  await dom.click('[aria-label="Inspect 1 reference: Block → block"]')
   expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('source-block')
   expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('confirmed-target')
   const graphCalls = vi.mocked(api.notebooks.graph).mock.calls.length
-  await act(async () => useAppStore.setState({ documents: { ...useAppStore.getState().documents, foreign: { path: 'duplicate.note.json', content: JSON.stringify(child), revision: 'foreign-draft' } } }))
+  await act(async () => useAppStore.setState({ documents: { ...useAppStore.getState().documents, foreign: { path: 'duplicate.note.md', content: serializeNoteDocument(child as Parameters<typeof serializeNoteDocument>[0]), revision: 'foreign-draft' } } }))
   expect(api.notebooks.graph).toHaveBeenCalledTimes(graphCalls)
   expect(useAppStore.getState().documents[documentKey(NOTES_WORKSPACE_ID, pages[parentId]!.resource.path)]).toBe(draft)
   await dom.click('[aria-label="Close relationship details"]')

@@ -34,6 +34,6 @@ describe('actual existing Note creation owner counterexamples', () => {
     useAppStore.setState({openFile:vi.fn(async()=>true)})
     await useAppStore.getState().createNote('g',{tabId:tab.id,regionId:initialWorkbenchRegionId(tab.id)},'draft')
     console.log(JSON.stringify({case:'retained-home-resource',paths}))
-    expect(paths).toHaveLength(1); expect(paths[0]).toMatch(/^topic--a\/note-.*\.note\.json$/)
+    expect(paths).toHaveLength(1); expect(paths[0]).toMatch(/^topic--a\/note-.*\.note\.md$/)
   })
 })

@@ -10,7 +10,7 @@ import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 
 const dom = composerDOM(), notebook = { notebookId: 'original-book', name: 'Original notebook', createdAt: _tailRefreshFixtureEpoch(0, 0, 1) }
-const pages: NotebookPage[] = [{ noteId: 'original', notebookId: notebook.notebookId, parentNoteId: null, title: 'Original page', resource: { hostId: 'local', workspaceId: 'notes', workspacePath: _tailRefreshFixturePath("notes"), path: 'original.note.json' }, sources: [], topics: [], createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1) }]
+const pages: NotebookPage[] = [{ noteId: 'original', notebookId: notebook.notebookId, parentNoteId: null, title: 'Original page', resource: { hostId: 'local', workspaceId: 'notes', workspacePath: _tailRefreshFixturePath("notes"), path: 'original.note.md' }, sources: [], topics: [], createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1) }]
 async function render(active: boolean) { await dom.render(<div hidden={!active}><NotebookHome notebook={notebook} pages={pages} pending={false} onCreate={() => {}} onOpen={() => {}} query="" onQuery={() => {}} view="graph" active={active} /></div>) }
 beforeEach(() => {
   installNoteCanvasGeometry()
@@ -24,7 +24,7 @@ it('keeps the real canvas DOM and performs no graph or body IO for unrelated Ses
   await render(true)
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-title')).not.toBeNull())
   const canvas = dom.container.querySelector('.react-flow'), input = dom.container.querySelector('input'), home = dom.container.querySelector('.survey-notebook-home')
-  await act(async () => useAppStore.setState({ sessions: [...useAppStore.getState().sessions], documents: { ordinary: { path: 'ordinary.txt', content: 'Unrelated file update', revision: 'new' }, 'notes\0original.note.json': { path: 'original.note.json', content: 'Unsaved draft preserved', revision: 'draft' } }, dirtyDocuments: { 'notes\0original.note.json': true } }))
+  await act(async () => useAppStore.setState({ sessions: [...useAppStore.getState().sessions], documents: { ordinary: { path: 'ordinary.txt', content: 'Unrelated file update', revision: 'new' }, 'notes\0original.note.md': { path: 'original.note.md', content: 'Unsaved draft preserved', revision: 'draft' } }, dirtyDocuments: { 'notes\0original.note.md': true } }))
   await render(true)
   expect(dom.container.querySelector('.react-flow')).toBe(canvas); expect(dom.container.querySelector('input')).toBe(input); expect(dom.container.querySelector('.survey-notebook-home')).toBe(home)
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1); expect(api.notebooks.content).not.toHaveBeenCalled()

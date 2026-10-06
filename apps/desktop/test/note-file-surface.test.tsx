@@ -1,3 +1,5 @@
+import { fileUploadRevision } from '@agentmux/core/files'
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixtureEpoch as _liveTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
@@ -37,9 +39,9 @@ import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/co
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 const dom = composerDOM(), birth = directoryIdentity('local', _hygiene_fixturePath("repo")), zoneId = homeZoneId(birth)
 const original = { ...createWorkbenchTab('mixed-original', { kind: 'launcher', workspaceId: 'workspace', regionId: 'mixed-launcher' }), space: { spaceId: birth, zoneId } }
-const sourceRegion: FileWorkbenchSurface = { kind: 'file', regionId: 'mixed-file', workspaceId: 'workspace', path: 'source.note.json' }
+const sourceRegion: FileWorkbenchSurface = { kind: 'file', regionId: 'mixed-file', workspaceId: 'workspace', path: 'source.note.md' }
 const mixed = addWorkbenchRegion(original, 'mixed-launcher', 'right', sourceRegion)
-const referring: FileWorkbenchSurface = { kind: 'file', regionId: 'referring-file', workspaceId: 'workspace', path: 'referring.note.json' }
+const referring: FileWorkbenchSurface = { kind: 'file', regionId: 'referring-file', workspaceId: 'workspace', path: 'referring.note.md' }
 const referringTab = { ...createWorkbenchTab('referring-tab', referring), space: { spaceId: birth, zoneId } }
 const source = newNoteDocument('Original finding', 'source-note', 'source-block')
 const reference = { schema: NOTE_SCHEMA, noteId: 'referring-note', content: { type: 'doc', content: [{ type: 'blockReference', attrs: { blockId: 'referring-block', referenceId: 'referring-reference', target: { noteId: 'source-note', blockId: 'source-block' }, mode: 'reference' } }] } }
@@ -48,7 +50,7 @@ beforeEach(() => {
   useNotebookLibrary.setState({ state: null, issue: null })
   useAppStore.setState({ config: composerConfig, activeWorkspaceId: 'workspace', mainSurface: 'survey', sessions: [composerSession()], tabs: { [mixed.id]: mixed, [referringTab.id]: referringTab },
     layouts: { workspace: createWorkspaceLayout('original-group', [mixed.id, referringTab.id]) },
-    documents: { [sourceKey]: { path: sourceRegion.path, content: JSON.stringify(source), revision: 'source-revision' }, [referenceKey]: { path: referring.path, content: JSON.stringify(reference), revision: 'referring-revision' } },
+    documents: { [sourceKey]: { path: sourceRegion.path, content: serializeNoteDocument(source), revision: 'source-revision' }, [referenceKey]: { path: referring.path, content: serializeNoteDocument(reference as Parameters<typeof serializeNoteDocument>[0]), revision: 'referring-revision' } },
     dirtyDocuments: {}, savingDocuments: {}, documentIssues: {}, documentGenerations: {}, documentObservationGenerations: {}, documentRevealTargets: {}, noteBlockSelections: {}, noteDirectorySources: {}, workspaceFileRevisions: {}, spaceZoneBindings: {}, scratchTopicSnapshots: {}, spatialRequests: {},
     surveyZoneSelection: { zoneId, selection: [{ tabId: referringTab.id, regionId: referring.regionId }], active: { tabId: referringTab.id, regionId: referring.regionId } },
     regionCaretFocus: null, retainedSpatialFocus: null, error: null, lastError: null, lastActiveFileByWorkspace: {} })
@@ -61,11 +63,11 @@ beforeEach(() => {
 it('uses the original File navigation for an inline exact block while preserving the dirty Survey source and existing mixed Tab', async () => {
   const inline = newNoteDocument('Keep my draft ', reference.noteId, 'referring-block')
   inline.content.content![0]!.content!.push({ type: 'noteLink', attrs: { referenceId: 'inline-original', text: 'An old page title', target: { noteId: source.noteId, blockId: 'source-block' } } })
-  useAppStore.setState(state => ({ documents: { ...state.documents, [referenceKey]: { ...state.documents[referenceKey]!, content: JSON.stringify(inline) } } }))
+  useAppStore.setState(state => ({ documents: { ...state.documents, [referenceKey]: { ...state.documents[referenceKey]!, content: serializeNoteDocument(inline) } } }))
   const book = emptyNotebookState(), resource = composerConfig.workspaces.find(workspace => workspace.id === 'workspace')!
   const page: NotebookPage = { noteId: source.noteId, title: 'Renamed original', notebookId: 'quick-notes', parentNoteId: null, resource: { hostId: resource.hostId, workspaceId: resource.id, workspacePath: resource.path, path: sourceRegion.path }, workface: { zoneId, workspaceId: 'workspace' }, sources: [], topics: [], createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1) }
   book.pages[source.noteId] = page; useNotebookLibrary.setState({ state: book })
-  vi.mocked(api.files.read).mockResolvedValue({ status: 'read', document: { path: sourceRegion.path, content: JSON.stringify(source), revision: 'source-revision' } })
+  vi.mocked(api.files.read).mockResolvedValue({ status: 'read', document: { path: sourceRegion.path, content: serializeNoteDocument(source), revision: 'source-revision' } })
   await mount(referring, referringTab.id)
   await act(async () => editor().commands.insertContentAt(1, 'Unsaved '))
   const before = useAppStore.getState(), document = before.documents[referenceKey], tabs = before.tabs
@@ -83,12 +85,12 @@ it('saves real mounted wiki input through the original File store/writer and rea
   const rootPath = await realpath(await mkdtemp(join(tmpdir(), 'amx-wiki-editor-')))
   const workspace = { id: 'workspace', hostId: 'local', path: rootPath, name: 'Notes', kind: 'folder' as const }
   const files = new WorkspaceFiles(() => ({ id: 'local', kind: 'local' } as ExecutionHost)), store = new AgentMuxNotebookStore(join(rootPath, 'catalog.json'))
-  const owner = new NotebookObservationOwner({ workspace: () => workspace, files }), writer = new NoteFileWriter(files, { state: () => store.read(), owner })
+  const owner = new NotebookObservationOwner({ workspace: () => workspace, files, metadata: store }), writer = new NoteFileWriter(files, { state: () => store.read(), owner }, store)
   const server = new AgentMuxControlServer({ socketPath: join(rootPath, 'control.sock'), coreClients: () => [], notebookStore: store, notebookObservation: owner })
   try {
     const target = newNoteDocument('Target original', 'target-id', 'target-block')
-    for (const [note, title, path] of [[source, 'Source', sourceRegion.path], [target, 'Shared knowledge', 'target.note.json'], [newNoteDocument('Another same-title page', 'other-id', 'other-block'), 'Shared knowledge', 'other.note.json']] as const) {
-      await writeFile(join(rootPath, path), JSON.stringify(note))
+    for (const [note, title, path] of [[source, 'Source', sourceRegion.path], [target, 'Shared knowledge', 'target.note.md'], [newNoteDocument('Another same-title page', 'other-id', 'other-block'), 'Shared knowledge', 'other.note.md']] as const) {
+      await writeFile(join(rootPath, path), serializeNoteDocument(note))
       await store.apply({ operationId: 'register:' + note.noteId, expectedRevision: (await store.read()).revision, change: { kind: 'register', noteId: note.noteId, title, resource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: rootPath, path } } }, { kind: 'user', id: 'test-human' })
     }
     const originalRead = await files.read(workspace, sourceRegion.path); if (originalRead.status !== 'read') throw Error('Original source must read')
@@ -103,7 +105,7 @@ it('saves real mounted wiki input through the original File store/writer and rea
     await act(async () => dom.container.querySelector('[data-note-inline-link]')!.dispatchEvent(new MouseEvent('click', { ctrlKey: true, bubbles: true, cancelable: true })))
     await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-link-lookup .note-link-option')).toHaveLength(2))
     await act(async () => (dom.container.querySelector('.note-link-lookup .note-link-option') as HTMLButtonElement).click())
-    await vi.waitFor(() => { const content = useAppStore.getState().documents[sourceKey]!.content; expect(content).toContain('"noteId": "target-id"') })
+    await vi.waitFor(() => { const content = useAppStore.getState().documents[sourceKey]!.content; expect(readNoteDocument(content)).toMatchObject({status:'valid',note:{content:{content:expect.arrayContaining([expect.objectContaining({content:expect.arrayContaining([expect.objectContaining({type:'noteLink',attrs:expect.objectContaining({target:{noteId:'target-id'}})})])})])}}}) })
     await click('Save')
     await vi.waitFor(() => expect(useAppStore.getState().dirtyDocuments[sourceKey]).toBe(false))
     const canonical = await readFile(join(rootPath, sourceRegion.path), 'utf8'), stored = useAppStore.getState().documents[sourceKey]!
@@ -115,7 +117,8 @@ it('saves real mounted wiki input through the original File store/writer and rea
     const inspected = JSON.parse(result.stdout).result.content
     expect(inspected.content).toBe(canonical); expect(inspected.revision).toBe(stored.revision)
     expect(readNoteDocument(inspected.content).status).toBe('valid')
-    expect(canonical).toContain('target-id'); expect(canonical).toContain('test-human')
+    expect(readNoteDocument(canonical)).toMatchObject({status:'valid',note:{content:{content:expect.arrayContaining([expect.objectContaining({content:expect.arrayContaining([expect.objectContaining({type:'noteLink',attrs:expect.objectContaining({target:{noteId:'target-id'}})})])})])}}})
+    expect(inspected.noteProvenance.blocks['source-block'].lastEdited.actor).toEqual({kind:'user',id:'test-human'})
     const graph = await owner.graph(await store.read(), { noteId: 'target-id' })
     expect(graph.references).toEqual([expect.objectContaining({ mode: 'link', target: { kind: 'page', noteId: 'target-id' }, resolution: 'resolved' })])
   } finally { vi.unstubAllEnvs(); await server.stop(); await files.dispose(); await rm(rootPath, { recursive: true, force: true }) }
@@ -160,7 +163,7 @@ it('connects the real FileSurfaceView to canonical update/save and the original 
 it('uses the original conflict actions and preserves the rich draft rather than saving on a conflicting shortcut', async () => {
   await mount(); await act(async () => editor().commands.insertContentAt(1, 'Unsaved '))
   const raw = useAppStore.getState().documents[sourceKey]!.content
-  await act(async () => useAppStore.setState({ documentIssues: { [sourceKey]: { kind: 'changed', observed: { path: sourceRegion.path, content: JSON.stringify(source), revision: 'external' } } } }))
+  await act(async () => useAppStore.setState({ documentIssues: { [sourceKey]: { kind: 'changed', observed: { path: sourceRegion.path, content: serializeNoteDocument(source), revision: 'external' } } } }))
   expect(dom.container.textContent).toContain('Your draft is preserved')
   expect([...dom.container.querySelectorAll('button')].map(button => button.textContent?.trim())).toContain('Overwrite')
   await act(async () => editor().view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true })))
@@ -168,7 +171,8 @@ it('uses the original conflict actions and preserves the rich draft rather than 
 })
 it('renders per-block Agent authors and a non-blocking unconfirmed save notice while retaining canonical content', async () => {
   const authored = attributeNoteBlocks(null, source, { kind: 'agent', id: 'verified-author' }, _liveTailFixtureEpoch(0, 0, 100))
-  useAppStore.setState({ documents: { ...useAppStore.getState().documents, [sourceKey]: { path: sourceRegion.path, content: JSON.stringify(authored), revision: 'authored-revision' } } })
+  const content = serializeNoteDocument(authored), revision = fileUploadRevision(new TextEncoder().encode(content)), workspace = composerConfig.workspaces.find(workspace => workspace.id === 'workspace')!
+  useAppStore.setState({ documents: { ...useAppStore.getState().documents, [sourceKey]: { path: sourceRegion.path, content, revision, noteProvenance: { status: 'recorded', noteId: source.noteId, resource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path: sourceRegion.path }, revision, blocks: { 'source-block': authored.content.content![0]!.attrs!.provenance } } } } })
   await mount()
   const originalEditor = editor()
   expect(dom.container.querySelector('[data-note-agent-author]')?.getAttribute('data-note-agent-author')).toContain('verified-author')
@@ -176,7 +180,7 @@ it('renders per-block Agent authors and a non-blocking unconfirmed save notice w
   await act(async () => originalEditor.commands.insertContentAt(1, 'Edited '))
   const current = readNoteDocument(useAppStore.getState().documents[sourceKey]!.content)
   if (current.status !== 'valid') throw Error('Draft must remain valid')
-  const canonical = JSON.stringify(attributeNoteBlocks(authored, current.note, undefined, _liveTailFixtureEpoch(0, 0, 200)))
+  const canonical = serializeNoteDocument(attributeNoteBlocks(authored, current.note, undefined, _liveTailFixtureEpoch(0, 0, 200)))
   vi.mocked(api.files.write).mockResolvedValueOnce({ status: 'written', revision: 'canonical-revision', content: canonical, noteAttribution: { status: 'unconfirmed', reason: 'Original actor is unknown' } })
   await click('Save')
   expect(useAppStore.getState().documents[sourceKey]?.content).toBe(canonical)
@@ -272,32 +276,32 @@ it('keeps the exact target when a block disappears while its original position c
   useAppStore.setState({ layouts: { workspace: twoPositions() } }); await mount(referring, referringTab.id)
   const link = dom.container.querySelector<HTMLButtonElement>('.note-reference__source button')
   expect(link).not.toBeNull(); await act(async () => link!.click())
-  await act(async () => useAppStore.getState().updateDocument(mixed.id, JSON.stringify(newNoteDocument('Replacement block', 'source-note', 'replacement-block')), sourceRegion.regionId))
+  await act(async () => useAppStore.getState().updateDocument(mixed.id, serializeNoteDocument(newNoteDocument('Replacement block', 'source-note', 'replacement-block')), sourceRegion.regionId))
   const selection = useAppStore.getState().surveyZoneSelection, tabs = useAppStore.getState().tabs
   const choices = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-source-choices button')]
   expect(choices).toHaveLength(2); await act(async () => choices[1]!.click())
   expect(dom.container.querySelector('.note-surface > .note-knowledge-notice')?.textContent).toContain('no longer confirmed')
   expect(useAppStore.getState().surveyZoneSelection).toBe(selection); expect(useAppStore.getState().tabs).toBe(tabs)
   expect(useAppStore.getState().documentRevealTargets[sourceKey]).toBeUndefined()
-  expect(readNoteDocument(useAppStore.getState().documents[referenceKey]!.content)).toEqual({ status: 'valid', note: reference })
+  expect(readNoteDocument(useAppStore.getState().documents[referenceKey]!.content)).toEqual({ status: 'valid', note: reference, unanchoredBlockCount: 0 })
   expect(api.files.read).not.toHaveBeenCalled(); expect(api.files.write).not.toHaveBeenCalled()
 })
 it('checks its real directory only on explicit refresh and leaves closed Note sources unread without adding Tabs', async () => {
   vi.mocked(api.files.readDirectory).mockResolvedValue([
     { name: sourceRegion.path, path: sourceRegion.path, isDirectory: false, isSymlink: false },
     { name: referring.path, path: referring.path, isDirectory: false, isSymlink: false },
-    { name: 'closed-source.note.json', path: 'closed-source.note.json', isDirectory: false, isSymlink: false }
+    { name: 'closed-source.note.md', path: 'closed-source.note.md', isDirectory: false, isSymlink: false }
   ])
   await mount(); expect(api.files.readDirectory).not.toHaveBeenCalled()
   const before = useAppStore.getState(), tabs = before.tabs, layouts = before.layouts, document = before.documents[sourceKey]
   await click('Refresh directory')
   expect(api.files.readDirectory).toHaveBeenCalledExactlyOnceWith('workspace', '')
   expect(dom.container.querySelector('.note-directory-sources')?.textContent).toContain('2 confirmed in this directory · partial')
-  expect(dom.container.querySelector('.note-directory-sources')?.textContent).toContain('Not yet readclosed-source.note.json')
+  expect(dom.container.querySelector('.note-directory-sources')?.textContent).toContain('Not yet readclosed-source.note.md')
   expect(dom.container.querySelector('.note-backlinks')?.textContent).toContain('Partial scope')
   expect(useAppStore.getState().tabs).toBe(tabs); expect(useAppStore.getState().layouts).toBe(layouts)
   expect(useAppStore.getState().documents[sourceKey]).toBe(document)
-  expect(useAppStore.getState().documents[documentKey('workspace', 'closed-source.note.json')]).toBeUndefined()
+  expect(useAppStore.getState().documents[documentKey('workspace', 'closed-source.note.md')]).toBeUndefined()
   expect(api.files.read).not.toHaveBeenCalled(); expect(api.files.write).not.toHaveBeenCalled()
 })
 it('retains a directory failure beside the original dirty Note without retrying, clearing it, or claiming complete knowledge', async () => {
@@ -320,8 +324,8 @@ it('persists an actual newly split block after the original canonical update wit
   if (read.status !== 'valid') throw new Error(read.message)
   expect(read.note.content.content).toHaveLength(2)
   const second = read.note.content.content![1]!, secondId = second.attrs!.blockId
-  expect(secondId).not.toBe('source-block'); expect(second.content).toEqual([{ type: 'text', text: 'Second finding' }])
-  expect(state.noteBlockSelections[noteBlockSelectionKey(display())]).toEqual({ noteId: 'source-note', blockId: secondId })
+  expect(secondId).toBeNull(); expect(read.unanchoredBlockCount).toBe(1); expect(second.content).toEqual([{ type: 'text', text: 'Second finding' }])
+  expect(state.noteBlockSelections[noteBlockSelectionKey(display())]).toEqual({ noteId: 'source-note', blockId: 'source-block' })
   expect(editor().state.selection.$from.parent.attrs.blockId).toBe(secondId)
   expect(editor().state.selection.$from.parentOffset).toBe('Second finding'.length)
   expect(state.dirtyDocuments[sourceKey]).toBe(true); expect(api.files.write).not.toHaveBeenCalled()
@@ -329,7 +333,7 @@ it('persists an actual newly split block after the original canonical update wit
 it('restores a nonfirst semantic block without taking DOM focus or changing the original draft', async () => {
   const note = { ...source, content: { type: 'doc', content: [...source.content.content!, { type: 'paragraph', attrs: { blockId: 'second-block' }, content: [{ type: 'text', text: 'Unsaved second finding' }] }] } }
   const target = { noteId: source.noteId, blockId: 'second-block' }, key = noteBlockSelectionKey(display())
-  useAppStore.setState(state => ({ documents: { ...state.documents, [sourceKey]: { ...state.documents[sourceKey]!, content: JSON.stringify(note) } }, dirtyDocuments: { [sourceKey]: true }, noteBlockSelections: { [key]: target } }))
+  useAppStore.setState(state => ({ documents: { ...state.documents, [sourceKey]: { ...state.documents[sourceKey]!, content: serializeNoteDocument(note) } }, dirtyDocuments: { [sourceKey]: true }, noteBlockSelections: { [key]: target } }))
   const originalDocument = useAppStore.getState().documents[sourceKey], otherInput = document.createElement('input')
   document.body.append(otherInput); otherInput.focus()
   await mount()
@@ -389,23 +393,23 @@ it('honors a current explicit Region caret request while retaining an unknown sa
   expect(api.files.write).not.toHaveBeenCalled()
 })
 it('opens an explicitly chosen unread directory source through the original File owner in the current Zone', async () => {
-  const path = 'closed-source.note.json', note = newNoteDocument('Previously unread source', 'closed-note', 'closed-block')
+  const path = 'closed-source.note.md', note = newNoteDocument('Previously unread source', 'closed-note', 'closed-block')
   vi.mocked(api.files.readDirectory).mockResolvedValue([{ name: sourceRegion.path, path: sourceRegion.path, isDirectory: false, isSymlink: false }, { name: path, path, isDirectory: false, isSymlink: false }])
-  vi.mocked(api.files.read).mockResolvedValue({ status: 'read', document: { path, content: JSON.stringify(note), revision: 'closed-revision' } })
+  vi.mocked(api.files.read).mockResolvedValue({ status: 'read', document: { path, content: serializeNoteDocument(note), revision: 'closed-revision' } })
   await mount(); await click('Refresh directory')
   expect(api.files.read).not.toHaveBeenCalled(); expect(useAppStore.getState().tabs[fileTabId('workspace', path)]).toBeUndefined()
   const open = dom.container.querySelector<HTMLButtonElement>(`button[aria-label="Open Note source workspace · ${path}"]`)
   expect(open).not.toBeNull(); await act(async () => open!.click())
   expect(api.files.read).toHaveBeenCalledExactlyOnceWith('workspace', path)
   expect(useAppStore.getState().tabs[fileTabId('workspace', path)]?.space).toEqual(mixed.space)
-  expect(useAppStore.getState().documents[documentKey('workspace', path)]?.content).toBe(JSON.stringify(note))
+  expect(useAppStore.getState().documents[documentKey('workspace', path)]?.content).toBe(serializeNoteDocument(note))
   expect(useAppStore.getState().mainSurface).toBe('survey')
   expect(api.files.write).not.toHaveBeenCalled()
 })
 
 it('retains the original selected block through real editor unmount and framework remount', async () => {
   const note = { ...source, content: { type: 'doc', content: [...source.content.content!, { type: 'paragraph', attrs: { blockId: 'remount-block' }, content: [{ type: 'text', text: 'Remount target' }] }] } }
-  useAppStore.setState(state => ({ documents: { ...state.documents, [sourceKey]: { ...state.documents[sourceKey]!, content: JSON.stringify(note) } } }))
+  useAppStore.setState(state => ({ documents: { ...state.documents, [sourceKey]: { ...state.documents[sourceKey]!, content: serializeNoteDocument(note) } } }))
   await mount()
   const originalEditor = editor()
   const originalDocument = useAppStore.getState().documents[sourceKey], target = { noteId: source.noteId, blockId: 'remount-block' }
@@ -445,7 +449,7 @@ it('reveals an explicitly opened late original block inside the File viewport wh
     ] },
   ] } }
   const target = { noteId: source.noteId, blockId: 'tail-block' }, key = noteBlockSelectionKey(display())
-  useAppStore.setState(state => ({ documents: { ...state.documents, [sourceKey]: { ...state.documents[sourceKey]!, content: JSON.stringify(note) } }, dirtyDocuments: { [sourceKey]: true }, noteBlockSelections: { [key]: target } }))
+  useAppStore.setState(state => ({ documents: { ...state.documents, [sourceKey]: { ...state.documents[sourceKey]!, content: serializeNoteDocument(note) } }, dirtyDocuments: { [sourceKey]: true }, noteBlockSelections: { [key]: target } }))
   dom.container.classList.add('test-original-note-scroll')
   const viewport = dom.container
   // Browser geometry only: the real ProseMirror scrollIntoView walks this original File viewport.
@@ -501,7 +505,7 @@ it.each(['different-note', 'whole-page', 'external-block', 'graph-view'] as cons
     { type: 'noteLink', attrs: { referenceId: 'local-page', text: 'Whole original page', target: { noteId: note.noteId } } },
   )
   note.content.content!.push({ type: 'paragraph', attrs: { blockId: 'tail-block' }, content: [{ type: 'text', text: 'Original late target' }] })
-  const saved = { path: sourceRegion.path, revision: 'source-revision', content: JSON.stringify(note) }
+  const saved = { path: sourceRegion.path, revision: 'source-revision', content: serializeNoteDocument(note) }
   useAppStore.setState(state => ({ documents: { ...state.documents, [sourceKey]: saved }, dirtyDocuments: { [sourceKey]: true }, noteCanvasLayouts: {} }))
   const workspace = composerConfig.workspaces.find(workspace => workspace.id === 'workspace')!, catalog = emptyNotebookState()
   const page: NotebookPage = { noteId: note.noteId, title: 'Original Note', notebookId: 'quick-notes', parentNoteId: null,
@@ -534,7 +538,7 @@ it.each(['different-note', 'whole-page', 'external-block', 'graph-view'] as cons
   expect(scrolled).toEqual([])
   if (later === 'different-note') {
     const replacement = { ...note, noteId: 'replacement-note' }
-    await act(async () => useAppStore.setState(state => ({ documents: { ...state.documents, [sourceKey]: { ...saved, content: JSON.stringify(replacement) } } })))
+    await act(async () => useAppStore.setState(state => ({ documents: { ...state.documents, [sourceKey]: { ...saved, content: serializeNoteDocument(replacement) } } })))
   } else if (later === 'whole-page') {
     await graphLink('Whole original page')
   } else {

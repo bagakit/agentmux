@@ -1,3 +1,4 @@
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { afterEach, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
@@ -22,7 +23,7 @@ const layout = { positions: { 'kept-note': { x: 421, y: -73 }, other: { x: -950,
 afterEach(() => { vi.restoreAllMocks(); useAppStore.setState(initial, true) })
 
 it('round trips the real original UI serialization without losing canvas choices, documents or workspaces', () => {
-  const document = { path: 'kept.note.json', revision: 'original', content: 'Unsaved original draft' }
+  const document = { path: 'kept.note.md', revision: 'original', content: 'Unsaved original draft' }
   useAppStore.setState({ config, noteCanvasLayouts: { [key]: layout }, documents: { kept: document }, dirtyDocuments: { kept: true } })
   const serialized = JSON.parse(JSON.stringify(useAppStore.persist.getOptions().partialize!(useAppStore.getState())))
   expect(serialized.noteCanvasLayouts).toEqual({ [key]: layout })
@@ -60,14 +61,14 @@ it('keeps an interactive layout and explicit retry state when original presentat
 })
 
 function seedOriginalNote() {
-  const workspaceId = 'canvas-workspace', path = 'original.note.json', spaceId = directoryIdentity('local', workspacePath), zoneId = homeZoneId(spaceId)
+  const workspaceId = 'canvas-workspace', path = 'original.note.md', spaceId = directoryIdentity('local', workspacePath), zoneId = homeZoneId(spaceId)
   const note = newNoteDocument('Original disk text', scope.noteId, 'original-block')
   const tab = { ...createWorkbenchTab('original-tab', { kind: 'file', regionId: 'original-region', workspaceId, path }), space: { spaceId, zoneId } }
-  const docKey = documentKey(workspaceId, path), document = { path, content: JSON.stringify(note).replace('Original disk text', 'Kept unsaved draft'), revision: 'base' }
+  const docKey = documentKey(workspaceId, path), document = { path, content: serializeNoteDocument(note).replace('Original disk text', 'Kept unsaved draft'), revision: 'base' }
   useAppStore.setState({ config, loading: false, mainSurface: 'recall', activeWorkspaceId: workspaceId, recallNotebookId: 'quick-notes', recallNoteId: scope.noteId,
     recallZoneSelection: null, tabs: { [tab.id]: tab }, layouts: { [workspaceId]: createWorkspaceLayout('original-group', [tab.id]) },
     documents: { [docKey]: document }, dirtyDocuments: { [docKey]: true }, documentRevealTargets: {} })
-  vi.spyOn(api.files, 'read').mockResolvedValue({ status: 'read', document: { path, content: JSON.stringify(note), revision: 'base' } })
+  vi.spyOn(api.files, 'read').mockResolvedValue({ status: 'read', document: { path, content: serializeNoteDocument(note), revision: 'base' } })
   vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
   const page: NotebookPage = { noteId: note.noteId, notebookId: 'quick-notes', parentNoteId: null, title: 'Original Note', createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1), sources: [], topics: [],
     resource: { hostId: 'local', workspaceId, workspacePath, path }, workface: { zoneId, workspaceId } }

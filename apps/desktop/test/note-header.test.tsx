@@ -1,5 +1,6 @@
-// @vitest-environment happy-dom
 import { fixtureEpoch as _newTailFixtureEpoch } from "../../../test/fixture-values.mjs"
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
+// @vitest-environment happy-dom
 import { act } from 'react'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -25,7 +26,7 @@ function Page({ active = true }: { active?: boolean }) {
 }
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'amx-note-header-')); owner = new AgentMuxNotebookStore(join(directory, 'catalog.json'))
-  await owner.apply({ operationId: 'register', expectedRevision: 0, change: { kind: 'register', noteId: 'original', title: 'Original finding', resource: { hostId: 'local', workspaceId: 'workspace', workspacePath: directory, path: 'original.note.json' }, source: { sourceId: 'original-web', title: 'Original web source', url: 'https://example.org/research', recordedAt: _newTailFixtureEpoch(0, 0, 1) } } }, actor)
+  await owner.apply({ operationId: 'register', expectedRevision: 0, change: { kind: 'register', noteId: 'original', title: 'Original finding', resource: { hostId: 'local', workspaceId: 'workspace', workspacePath: directory, path: 'original.note.md' }, source: { sourceId: 'original-web', title: 'Original web source', url: 'https://example.org/research', recordedAt: _newTailFixtureEpoch(0, 0, 1) } } }, actor)
   await owner.apply({ operationId: 'destination', expectedRevision: 1, change: { kind: 'create', notebookId: 'research', name: 'Research' } }, actor)
   vi.spyOn(api.notebooks, 'actor').mockResolvedValue(actor)
   vi.spyOn(api.notebooks, 'read').mockImplementation(() => owner.read())
@@ -92,7 +93,7 @@ it('preserves title commit/cancel and moves the exact original through the same 
   await vi.waitFor(async () => expect((await owner.read()).pages.original!.archivedAt).toBeDefined())
   await choose('Restore page')
   await vi.waitFor(async () => expect((await owner.read()).pages.original!.archivedAt).toBeUndefined())
-  expect((await owner.read()).pages.original!.resource.path).toBe('original.note.json')
+  expect((await owner.read()).pages.original!.resource.path).toBe('original.note.md')
 })
 
 it('opens page options from a real pointer press and returns keyboard dismissal to the same trigger', async () => {
@@ -118,7 +119,7 @@ it('retains the exact saved source and its recovery message through the new menu
 
 it('keeps the grouped reference command wired to real original blocks and the canonical note change', async () => {
   const note = newNoteDocument('Current draft', 'current', 'current-block'), target = newNoteDocument('Exact finding', 'target', 'target-block')
-  const knowledge = noteKnowledge([{ location: { workspaceId: 'workspace', path: 'target.note.json' }, document: { path: 'target.note.json', content: JSON.stringify(target), revision: 'target-r1' } }])
+  const knowledge = noteKnowledge([{ location: { workspaceId: 'workspace', path: 'target.note.md' }, document: { path: 'target.note.md', content: serializeNoteDocument(target), revision: 'target-r1' } }])
   const change = vi.fn()
   await dom.render(<NoteBlockEditor note={note} knowledge={knowledge} onChange={change} onSave={() => {}} onOpen={() => {}} onIssue={() => {}} />)
   const editor = dom.container.querySelector<HTMLElement & { editor: Editor }>('.note-block-content')!.editor
@@ -126,7 +127,7 @@ it('keeps the grouped reference command wired to real original blocks and the ca
   await dom.click('[aria-label="Reference block"]')
   expect(dom.container.querySelector('[aria-label="Choose an original block"]')).not.toBeNull()
   expect(dom.container.querySelector('[role="group"][aria-label="Block references"] [aria-label="Reference block"]')).not.toBeNull()
-  await dom.click('[aria-label="Reference workspace · target.note.json · target-block"]')
+  await dom.click('[aria-label="Reference workspace · target.note.md · target-block"]')
   await vi.waitFor(() => expect(change).toHaveBeenCalled())
   const read = readNoteDocument(change.mock.lastCall![0])
   expect(read.status).toBe('valid')

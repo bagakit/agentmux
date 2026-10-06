@@ -1,3 +1,4 @@
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { expect, it, vi } from 'vitest'
@@ -9,8 +10,8 @@ import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 const dom = composerDOM()
 const paragraph = (blockId: string, text: string) => ({ type: 'paragraph', attrs: { blockId }, content: [{ type: 'text', text }] })
 const reference = (blockId: string, target: string) => ({ type: 'blockReference', attrs: { blockId, referenceId: 'ref-' + blockId, mode: 'reference', target: { noteId: 'original', blockId: target } } })
-const file = (content: unknown[]) => JSON.stringify({ schema: 'agentmux.note.v1', noteId: 'original', content: { type: 'doc', content } })
-const input = (content: string) => [{ location: { workspaceId: 'notes', path: 'original.note.json' }, document: { path: 'original.note.json', revision: 'r1', content } }]
+const file = (content: import('@tiptap/core').JSONContent[]) => serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'original', content: { type: 'doc', content } })
+const input = (content: string) => [{ location: { workspaceId: 'notes', path: 'original.note.md' }, document: { path: 'original.note.md', revision: 'r1', content } }]
 
 it('projects exact ordered items and paragraph sources with original numbering, nested lists and no duplicated original IDs', async () => {
   installNoteCanvasGeometry()
@@ -39,7 +40,7 @@ it('projects exact ordered items and paragraph sources with original numbering, 
 it('keeps complete original knowledge behind a clipped projection and resolves same-file atom chains and cycles honestly', async () => {
   installNoteCanvasGeometry()
   const content = file([paragraph('outside-excerpt', 'Exact original outside the excerpt'), reference('first', 'second'), reference('second', 'outside-excerpt'), reference('cycle', 'cycle')])
-  await dom.render(<NoteReader path="original.note.json" workspaceId="notes" content={content} revision="r1" blockIds={['first', 'cycle']} />)
+  await dom.render(<NoteReader path="original.note.md" workspaceId="notes" content={content} revision="r1" blockIds={['first', 'cycle']} />)
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Exact original outside the excerpt'))
   expect(dom.container.querySelector('.mobile-note-body')!.querySelectorAll(':scope > [data-block-id="outside-excerpt"]')).toHaveLength(0)
   expect(dom.container.textContent).toContain('循环引用')
@@ -51,7 +52,7 @@ it('bounds a long original excerpt independently and offers explicit continuatio
   installNoteCanvasGeometry()
   vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.textContent?.includes('Long original') ? 2000 : 30 })
   const content = file([{ type: 'codeBlock', attrs: { blockId: 'long-code' }, content: [{ type: 'text', text: 'Long original\n'.repeat(150) }] }, paragraph('next-related', 'The next related block remains reachable')])
-  await dom.render(<NoteReader path="original.note.json" workspaceId="notes" content={content} revision="r1" blockIds={['long-code', 'next-related']} />)
+  await dom.render(<NoteReader path="original.note.md" workspaceId="notes" content={content} revision="r1" blockIds={['long-code', 'next-related']} />)
   await vi.waitFor(() => expect(dom.container.querySelector('.note-reader-excerpt-continue')).not.toBeNull())
   const clip = dom.container.querySelector<HTMLElement>('.note-reader-excerpt-clip')!
   expect(clip.style.maxHeight).toBe('112px')
@@ -72,7 +73,7 @@ it('locates an exact selected descendant inside its long original excerpt while 
     return rectangle.call(this)
   })
   const content = file([{ type: 'blockquote', attrs: { blockId: 'long-parent' }, content: [paragraph('before-child', 'A long context before the child'), paragraph('late-child', 'Selected exact descendant')] }, paragraph('unselected', 'Another unrelated excerpt')])
-  await dom.render(<NoteReader path="original.note.json" workspaceId="notes" content={content} revision="r1" blockIds={['long-parent','unselected']} highlightBlockIds={['long-parent','late-child']} />)
+  await dom.render(<NoteReader path="original.note.md" workspaceId="notes" content={content} revision="r1" blockIds={['long-parent','unselected']} highlightBlockIds={['long-parent','late-child']} />)
   const selected = () => dom.container.querySelector('[data-note-selected-block="late-child"]')
   await vi.waitFor(() => expect(selected()).not.toBeNull())
   const clip = selected()!.closest<HTMLElement>('.note-reader-excerpt-clip')!

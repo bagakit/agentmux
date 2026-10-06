@@ -1,3 +1,4 @@
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -20,11 +21,11 @@ import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 
 const dom = composerDOM(), scope = { kind: 'note', noteId: 'original-note' } as const
 const workspace = { id: 'canvas-original', hostId: 'local', path: join(tmpdir(), 'agentmux-canvas-navigation'), name: 'Original notes', kind: 'folder' as const }
-const path = 'original.note.json', docKey = documentKey(workspace.id, path)
+const path = 'original.note.md', docKey = documentKey(workspace.id, path)
 const spaceId = directoryIdentity(workspace.hostId, workspace.path), zoneId = homeZoneId(spaceId)
 const savedNote = newNoteDocument('Saved original body', scope.noteId, 'exact-original-block')
 savedNote.content.content![0]!.content!.push({ type: 'noteLink', attrs: { referenceId: 'self-heading-link', text: 'Original Note #Exact original', target: { noteId: scope.noteId, blockId: 'exact-original-block' } } })
-const saved = { path, revision: 'saved-original', content: JSON.stringify(savedNote) }
+const saved = { path, revision: 'saved-original', content: serializeNoteDocument(savedNote) }
 const draft = { ...saved, content: saved.content.replace('Saved original body', 'Preserved unsaved draft') }
 const notebook = { notebookId: 'canvas-book', name: 'Original notebook', createdAt: _tailRefreshFixtureEpoch(0, 0, 1) }
 const page: NotebookPage = { noteId: scope.noteId, notebookId: notebook.notebookId, parentNoteId: null, title: 'Original Note', createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1), sources: [], topics: [],

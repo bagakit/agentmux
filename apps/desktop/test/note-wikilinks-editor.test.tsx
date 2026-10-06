@@ -1,3 +1,4 @@
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { fixtureEpoch as _tailRefreshFixtureEpoch, fixturePath as _tailRefreshFixturePath } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, useState } from 'react'
@@ -16,7 +17,7 @@ import { emptyNotebookState, type NotebookPage } from '@agentmux/core/notebook-c
 import { scanNoteWikiLinks, type NotebookResolveParams, type NotebookResolveResult } from '@agentmux/core/note-links'
 
 let host: HTMLDivElement, root: Root, latest: string
-const page: NotebookPage = { noteId: 'target', notebookId: 'quick-notes', parentNoteId: null, title: 'Shared knowledge', resource: { hostId: 'local', workspaceId: 'notes', workspacePath: _tailRefreshFixturePath("notes"), path: 'target.note.json' }, createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1), sources: [], topics: [] }
+const page: NotebookPage = { noteId: 'target', notebookId: 'quick-notes', parentNoteId: null, title: 'Shared knowledge', resource: { hostId: 'local', workspaceId: 'notes', workspacePath: _tailRefreshFixturePath("notes"), path: 'target.note.md' }, createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1), sources: [], topics: [] }
 const candidate = { noteId: page.noteId, notebookId: page.notebookId, title: page.title, resource: page.resource }
 const search = (query: string): NotebookResolveResult => ({ mode: 'search', query, catalogRevision: 2, candidates: [candidate], total: 1, truncated: false })
 const lookup = (text: string, blockId?: string): NotebookResolveResult => ({ mode: 'resolve', text, catalogRevision: 2, query: { page: page.title, ...(blockId ? { fragment: { kind: 'block', value: blockId } as const } : {}) }, candidates: [candidate], blocks: [{ blockId: 'decision', text: 'Decision', type: 'heading' }, { blockId: 'finding', text: 'An exact original finding', type: 'paragraph' }], observation: { noteId: page.noteId, actualNoteId: page.noteId, resource: page.resource, status: 'read', revision: 'target-revision', blockIds: ['decision', 'finding'] }, result: { status: 'resolved', target: { noteId: page.noteId, ...(blockId ? { blockId } : {}) } } })
@@ -110,7 +111,7 @@ it('does not apply a completed lookup after the same Note identity changes origi
 })
 
 it('shows same-title candidates separately and only confirms an explicitly chosen identity', async () => {
-  vi.mocked(api.notebooks.resolve).mockImplementation(async params => params.mode === 'search' ? { ...search(params.query), candidates: [candidate, { ...candidate, noteId: 'other', notebookId: 'other-book', resource: { ...candidate.resource, path: 'other.note.json' } }], total: 2 } as NotebookResolveResult : lookup(params.text))
+  vi.mocked(api.notebooks.resolve).mockImplementation(async params => params.mode === 'search' ? { ...search(params.query), candidates: [candidate, { ...candidate, noteId: 'other', notebookId: 'other-book', resource: { ...candidate.resource, path: 'other.note.md' } }], total: 2 } as NotebookResolveResult : lookup(params.text))
   await mount(); await type('[[Shared'); await waitOptions()
   expect(host.querySelectorAll('[role="option"]')).toHaveLength(2)
   expect(vi.mocked(api.notebooks.resolve).mock.calls.filter(([params]) => params.mode === 'resolve')).toHaveLength(0)
@@ -120,13 +121,13 @@ it('shows same-title candidates separately and only confirms an explicitly chose
 it('renders stored and raw links through the real shared reader without minting or mutating source', async () => {
   const raw = newNoteDocument('Raw [[共享页面]] and ', 'reader-note', 'reader-block')
   raw.content.content![0]!.content!.push({ type: 'noteLink', attrs: { referenceId: 'existing-occurrence', text: 'Old title', target: { noteId: 'original-id' } } })
-  const source = JSON.stringify(raw), open = vi.fn()
-  await mount(<NoteReader content={source} workspaceId="notes" path="reader.note.json" revision="saved-revision" onOpenLink={open} />)
+  const source = serializeNoteDocument(raw), open = vi.fn()
+  await mount(<NoteReader content={source} workspaceId="notes" path="reader.note.md" revision="saved-revision" onOpenLink={open} />)
   const literal = host.querySelector<HTMLElement>('[data-note-wiki-text]')!; expect(literal).not.toBeNull()
   await act(async () => literal.click()); expect(open).toHaveBeenLastCalledWith(expect.objectContaining({ text: '共享页面', target: null, rawRange: expect.any(Object) }))
   await act(async () => host.querySelector<HTMLButtonElement>('[data-note-inline-link]')!.click())
   expect(open).toHaveBeenLastCalledWith({ referenceId: 'existing-occurrence', text: 'Old title', target: { noteId: 'original-id' } })
-  expect(JSON.stringify(raw)).toBe(source); expect(api.notebooks.resolve).not.toHaveBeenCalled(); expect(scanNoteWikiLinks('[[共享页面]]')).toHaveLength(1)
+  expect(serializeNoteDocument(raw)).toBe(source); expect(api.notebooks.resolve).not.toHaveBeenCalled(); expect(scanNoteWikiLinks('[[共享页面]]')).toHaveLength(1)
 })
 
 it('opens a bound ID from the actual Canvas snapshot despite an unavailable global catalog, never by its old label', async () => {
@@ -140,7 +141,7 @@ it('opens a bound ID from the actual Canvas snapshot despite an unavailable glob
 
 it('promotes only an explicitly clicked original raw range and stores the chosen same-title target through the real NoteFileView', async () => {
   const note = newNoteDocument('Existing [[Shared knowledge]]', 'raw-source', 'raw-block'), catalog = emptyNotebookState()
-  catalog.pages.target = page; catalog.pages.other = { ...page, noteId: 'other', resource: { ...page.resource, path: 'other.note.json' } }
+  catalog.pages.target = page; catalog.pages.other = { ...page, noteId: 'other', resource: { ...page.resource, path: 'other.note.md' } }
   useNotebookLibrary.setState({ state: catalog })
   vi.mocked(api.notebooks.resolve).mockImplementation(async params => {
     if (params.mode === 'search') return search(params.query)
@@ -149,7 +150,7 @@ it('promotes only an explicitly clicked original raw range and stores the chosen
   })
   const open = vi.fn()
   function OriginalFile() {
-    const [document, setDocument] = useState({ path: 'raw-source.note.json', revision: 'raw-revision', content: JSON.stringify(note) })
+    const [document, setDocument] = useState({ path: 'raw-source.note.md', revision: 'raw-revision', content: serializeNoteDocument(note) })
     return <NoteFileView document={document} resource={{ ...page.resource, path: document.path }} knowledge={noteKnowledge([])} onChange={content => { latest = content; setDocument({ ...document, content }) }} onSave={() => {}} onOpen={() => {}} onOpenPage={open} />
   }
   await mount(<OriginalFile />)

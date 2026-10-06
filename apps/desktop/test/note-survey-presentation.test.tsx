@@ -1,3 +1,4 @@
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -130,7 +131,7 @@ it('collects an explicitly opened valid Note through the original File owner and
   const zone = projection!.catalog.zones.find(zone => zone.zoneId === zoneId)!
   const spaceId = projection!.catalog.bindings.find(binding => binding.zoneId === zoneId)!.spaceId
   const placement = { displayWorkspaceId: 'workspace', space: { spaceId, zoneId }, resource: { hostId: zone.hostId!, path: _hygiene_fixturePath("repo") }, projection }
-  content = JSON.stringify(newNoteDocument('Original Note', 'opened-note', 'opened-block')); path = 'opened.note.json'
+  content = serializeNoteDocument(newNoteDocument('Original Note', 'opened-note', 'opened-block')); path = 'opened.note.md'
   await act(async () => {
     state.setSurveyZoneCollected(zoneId, false)
     expect(await state.openFile(path, 'g', undefined, 'workspace', undefined, placement)).toBe(true)

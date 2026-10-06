@@ -1,3 +1,6 @@
+import { recordMarkdownProvenance } from './helpers/note-markdown-provenance'
+import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { EventEmitter } from 'node:events'
@@ -24,7 +27,7 @@ import { installNoteCanvasBlockRows } from './helpers/note-canvas-block-dom'
 
 const dom = composerDOM(), scope = { kind: 'note', noteId: 'target' } as const
 let directory: string, store: AgentMuxNotebookStore
-const body = (id: string, text: string, references = false) => JSON.stringify({ schema: 'agentmux.note.v1', noteId: id, content: { type: 'doc', content: [
+const body = (id: string, text: string, references = false) => serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: id, content: { type: 'doc', content: [
   { type: 'paragraph', attrs: { blockId: id + '-block', provenance: { created: { actor: { kind: 'agent', id: 'ExactResearchSession' }, at: _tailRefreshFixtureEpoch(0, 1) }, lastEdited: { actor: { kind: 'agent', id: 'ExactResearchSession' }, at: _tailRefreshFixtureEpoch(0, 1) } } }, content: [{ type: 'text', text }] },
   ...references ? [
     ...[0, 1, 2].map(index => ({ type: 'blockReference', attrs: { blockId: 'source-reference-' + index, referenceId: 'original-reference-' + index, mode: index === 2 ? 'embed' : 'reference', target: { noteId: 'target', blockId: 'target-block' } } })),
@@ -43,8 +46,10 @@ beforeEach(async () => {
   const workspace = { id: 'notes', hostId: 'local', path: directory, name: 'Notes', kind: 'folder' as const }
   store = new AgentMuxNotebookStore(join(directory, 'notebooks.json'))
   for (const id of ['target', 'closed-source']) {
-    await writeFile(join(directory, id + '.note.json'), body(id, 'Saved ' + id, id !== 'target'))
-    await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'register-' + id, change: { kind: 'register', noteId: id, title: 'Original ' + id, resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.json' } } }, { kind: 'user', id: 'ui-test' })
+    const content = body(id, 'Saved ' + id, id !== 'target')
+    await writeFile(join(directory, id + '.note.md'), content)
+    await recordMarkdownProvenance(store, { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.md' }, content, { kind: 'agent', id: 'ExactResearchSession' })
+    await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'register-' + id, change: { kind: 'register', noteId: id, title: 'Original ' + id, resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.md' } } }, { kind: 'user', id: 'ui-test' })
   }
   const services = createNotebookObservationServices(store, { files: new WorkspaceFiles(() => new LocalExecutionHost()), workspace: () => workspace })
   const sender = Object.assign(new EventEmitter(), { isDestroyed: () => false })
@@ -65,9 +70,11 @@ afterEach(async () => { await rm(directory, { recursive: true, force: true }) })
 async function ready() { await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-title[data-note-id]')).toHaveLength(2)) }
 it('shows late related original blocks and actual reference/embed content without Read body or a graph rescan', async () => {
   installNoteCanvasBlockRows()
-  const file = JSON.parse(body('target', 'The late decision is searchable'))
-  file.content.content.unshift(...Array.from({ length: 14 }, (_, i) => ({ type: 'paragraph', attrs: { blockId: 'unrelated-' + i }, content: [{ type: 'text', text: 'Unrelated context ' + i }] })))
-  await writeFile(join(directory, 'target.note.json'), JSON.stringify(file))
+  const file = noteFromMarkdown(body('target', 'The late decision is searchable'))
+  file.content.content!.unshift(...Array.from({ length: 14 }, (_, i) => ({ type: 'paragraph', attrs: { blockId: 'unrelated-' + i }, content: [{ type: 'text', text: 'Unrelated context ' + i }] })))
+  const content = serializeNoteDocument(file)
+  await writeFile(join(directory, 'target.note.md'), content)
+  await recordMarkdownProvenance(store, { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: 'target.note.md' }, content, { kind: 'agent', id: 'ExactResearchSession' })
   const open = vi.fn()
   await dom.render(<NoteCanvas scope={scope} onOpen={open} />); await ready()
   await vi.waitFor(() => { const reader = dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-reader'); expect(reader).not.toBeNull(); expect(reader!.textContent).toContain('The late decision is searchable') })
@@ -95,8 +102,8 @@ it('shows late related original blocks and actual reference/embed content withou
 it('bounds default original reads and preserves an explicit continuation beyond the automatic budget', async () => {
   for (let i = 0; i < 6; i++) {
     const id = 'extra-' + i
-    await writeFile(join(directory, id + '.note.json'), body(id, 'Readable related ' + i + ' [[Original target]]'))
-    await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'register-' + id, change: { kind: 'register', noteId: id, title: id, resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.json' } } }, { kind: 'user', id: 'ui-test' })
+    await writeFile(join(directory, id + '.note.md'), body(id, 'Readable related ' + i + ' [[Original target]]'))
+    await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'register-' + id, change: { kind: 'register', noteId: id, title: id, resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.md' } } }, { kind: 'user', id: 'ui-test' })
   }
   const readOriginal = vi.mocked(api.notebooks.content).getMockImplementation()!
   let inFlight = 0, maximum = 0
@@ -120,7 +127,7 @@ it('bounds default original reads and preserves an explicit continuation beyond 
 it('keeps a changed original out of both excerpts and confirmed reference documents until an explicit graph refresh', async () => {
   const readOriginal = vi.mocked(api.notebooks.content).getMockImplementation()!
   vi.mocked(api.notebooks.content).mockImplementation(async (id, options) => {
-    if (id === 'target') await writeFile(join(directory, 'target.note.json'), body('target', 'Later revision is not the graph original'))
+    if (id === 'target') await writeFile(join(directory, 'target.note.md'), body('target', 'Later revision is not the graph original'))
     return readOriginal(id, options)
   })
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
@@ -167,7 +174,7 @@ it('reads only an on-screen needed original, admits a newly viewed note, and reu
 })
 
 it('keeps an oversized original readable through an explicit full-budget continuation without pretending an automatic excerpt was empty', async () => {
-  await writeFile(join(directory, 'target.note.json'), body('target', 'Large original is readable. '.repeat(12000)))
+  await writeFile(join(directory, 'target.note.md'), body('target', 'Large original is readable. '.repeat(12000)))
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
   const target = dom.container.querySelector('.react-flow__node[data-id="target"]')!
   await vi.waitFor(() => expect(target.querySelector('.note-canvas-body-state button')).not.toBeNull())
@@ -199,8 +206,8 @@ it('frames a fresh large graph at a readable zoom around the original focus and 
   vi.stubGlobal('Worker', LayoutWorker)
   for (let i = 0; i < 7; i++) {
     const id = 'wide-' + i
-    await writeFile(join(directory, id + '.note.json'), body(id, 'Related ' + i + ' [[Original target]]'))
-    await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'register-' + id, change: { kind: 'register', noteId: id, title: id, resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.json' } } }, { kind: 'user', id: 'ui-test' })
+    await writeFile(join(directory, id + '.note.md'), body(id, 'Related ' + i + ' [[Original target]]'))
+    await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'register-' + id, change: { kind: 'register', noteId: id, title: id, resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.md' } } }, { kind: 'user', id: 'ui-test' })
   }
   await dom.render(<ReactFlowProvider><ViewportProbe /><NoteCanvas scope={scope} onOpen={() => {}} /></ReactFlowProvider>)
   const viewport = () => JSON.parse(dom.container.querySelector('.actual-flow-viewport')!.textContent!)
@@ -217,11 +224,11 @@ it('frames a fresh large graph at a readable zoom around the original focus and 
 })
 
 it('reads the exact saved source of an unbound query without inventing a destination or borrowing a first paragraph', async () => {
-  await writeFile(join(directory, 'unbound.note.json'), JSON.stringify({ schema: 'agentmux.note.v1', noteId: 'unbound', content: { type: 'doc', content: [
+  await writeFile(join(directory, 'unbound.note.md'), serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'unbound', content: { type: 'doc', content: [
     { type: 'paragraph', attrs: { blockId: 'unrelated' }, content: [{ type: 'text', text: 'Do not use this introduction' }] },
     { type: 'paragraph', attrs: { blockId: 'written-source' }, content: [{ type: 'text', text: 'The unanswered decision: [[Unregistered original]]' }] },
   ] } }))
-  await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'unbound-page', change: { kind: 'register', noteId: 'unbound', title: 'Unbound original', resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: 'unbound.note.json' } } }, { kind: 'user', id: 'ui-test' })
+  await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'unbound-page', change: { kind: 'register', noteId: 'unbound', title: 'Unbound original', resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: 'unbound.note.md' } } }, { kind: 'user', id: 'ui-test' })
   await dom.render(<NoteCanvas scope={{ kind: 'note', noteId: 'unbound' }} onOpen={() => {}} />)
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('The unanswered decision'))
   expect(dom.container.querySelector('.note-canvas-reader')!.textContent).not.toContain('Do not use this introduction')
@@ -247,3 +254,5 @@ it('keeps the direct incoming source beside its root readable on first entry wit
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
   function sourceCardContent() { return dom.container.querySelector('.react-flow__node[data-id="closed-source"] .note-canvas-reader')?.textContent ?? '' }
 })
+
+function noteFromMarkdown(content:string) { const read=readNoteDocument(content);expect(read.status).toBe('valid');if(read.status!=='valid')throw Error(read.message);return read.note }
