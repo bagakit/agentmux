@@ -89,8 +89,90 @@ credentials and unconfirmed checks remain explicit. A late check cannot certify 
 newer configuration revision. Restart retains configuration and operations while
 previous in-memory service observations return to unknown.
 
-This owner does not bind conversations, receive external messages, publish Agent
-output, answer questions or operate permissions. Those capabilities consume their
-original Core identities and their own connector delivery records. Connection
-storage failure remains local to the connection service and does not stop healthy
-Agents or replace their Sessions.
+Connection storage failure remains local to the connection service and does not
+stop healthy Agents or replace their Sessions.
+
+## Room bindings
+
+`RoomBindingHost` borrows a `ConnectionHost`, the original Core spatial read port
+and an exact Host-to-Core checkpoint function. Attach it as `connections.bindings`
+before exposing that connection port through the existing public service. Desktop
+composes these ports from its original spatial owner and original Host clients;
+headless embeddings supply those same ports. The binding owner uses
+`connections.database`, including for synchronous reads joined by later delivery
+transactions. It does not create another semantic Runtime or copy topology.
+
+Public types and strict parsers are exported from `@agentmux/core/connections`;
+their owning definitions are [the binding contract](../core/src/room-binding-contract.ts)
+and [codec](../core/src/room-binding-codec.ts). Administration requires an actual
+transport-approved user or device, never an author identity supplied in JSON.
+
+```sh
+amux agent conversation checkpoint --host local --session original-agent
+amux connection bind --input binding.json
+amux connection binding inspect --operation-id bind-team
+amux connection binding ls --host local --session original-agent
+amux connection binding pause --input pause.json
+amux connection binding relink --input relink.json
+amux connection grant --input grant.json
+```
+
+A new binding input names the exact execution target, current Connection revision,
+original Region and native source. For example:
+
+```json
+{
+  "operationId": "bind-team",
+  "bindingId": "team-binding",
+  "connectionId": "application-connection",
+  "expectedConnectionRevision": 1,
+  "executionHostId": "local",
+  "agentSessionId": "original-agent",
+  "regionAnchor": { "regionId": "original-region" },
+  "externalConversationId": "room/project-alpha",
+  "expectedSource": { "providerId": "provider", "nativeSessionId": "original-native" },
+  "scope": { "input": "mentions-and-replies", "publication": "future-native-user-facing" }
+}
+```
+
+Use the actual source returned by the original conversation checkpoint. The
+initial cut excludes all existing history; binding does not share old questions
+or records. Unsupported or changed sources refuse this new sharing boundary while
+retaining the original Agent and connection. External conversation and actor IDs
+are bounded opaque issuer values; an adapter owns any native syntax restriction.
+
+The owner records the original operation intent before asynchronous Core reads.
+It then rechecks the original spatial revision and exact Region occupant before a
+synchronous transaction saves the immutable binding, current mapping and applied
+operation together. No SQL transaction spans an await, and no cross-database
+atomicity with Core is claimed. A `preparing` receipt confirms intent only. After
+an unconfirmed response, inspect and reconcile the same operation, input and
+transport authority; an applied operation always returns its original saved cut.
+
+The execution route consists only of `executionHostId` and `agentSessionId`.
+`regionAnchor` provides navigation and never resolves a later occupant for
+publication. Another Region for the same Connection and Session reuses the
+existing binding, audience and cut. Each application and external conversation
+has one current mapping. A different audience, occupant or native source needs
+explicit relink with the current Binding revision and a fresh cut. The old
+revision remains readable with `connection binding inspect --binding ID --revision N`.
+
+Pause creates an immutable paused revision for future admission and publication;
+it does not stop the Agent, close its display or rewrite an already dispatched or
+unknown operation. Continuing requires explicit relink, even to the same target
+and audience, so work accumulated while paused does not silently become eligible.
+`readExact`, `readCurrent` and `publicationAuthority` let delivery owners read the
+original audience and current authorization in their existing SQLite transaction.
+An old unknown operation remains available for readonly reconciliation even when
+its binding is no longer current.
+
+A grant names the exact Binding revision, application, external conversation,
+actor `idType` and actor `userId`. Its own revision is separate from the Binding
+revision. `input`, `answer` and `permission` are independent capabilities; neither
+membership nor attribution grants them. Publication authority comes from the
+trusted user or device that authorized this Binding. Grant changes keep immutable
+prior revisions, and a later Binding revision does not inherit old actor grants.
+
+This package's binding owner authorizes boundaries only. Intake, external
+publication and original Core question or permission execution remain separate
+owners; creating or inspecting a binding performs none of those effects.
