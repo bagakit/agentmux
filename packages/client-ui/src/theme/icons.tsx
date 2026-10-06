@@ -20,9 +20,10 @@ export function semanticIconComponent(name: SemanticIconId): SemanticIconCompone
 }
 
 /** Rendering has no media/store/event subscription. The root updates one retained sprite. */
-export function SemanticIcon({ name, size = 14, className, style, strokeWidth, children, ...props }:
+export function SemanticIcon({ name, size = 14, className, style, children, ...props }:
   { name: SemanticIconId; size?: number } & Omit<SVGProps<SVGSVGElement>, 'name'>) {
-  const iconStyle: CSSProperties = { pointerEvents: 'none', overflow: 'hidden', strokeWidth: strokeWidth ?? 'var(--icon-stroke-width, 1.75)', strokeLinecap: 'var(--icon-linecap, round)' as 'round', strokeLinejoin: 'var(--icon-linejoin, round)' as 'round', ...style }
+  // Surfaces own size, color and spacing; the theme owns the pen used by every semantic drawing.
+  const iconStyle: CSSProperties = { ...style, pointerEvents: 'none', overflow: 'hidden', strokeWidth: 'var(--icon-stroke-width, 1.75)', strokeLinecap: 'var(--icon-linecap, round)' as 'round', strokeLinejoin: 'var(--icon-linejoin, round)' as 'round' }
   const glyph = <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
     aria-hidden="true" focusable="false" className={['semantic-icon', name === 'status.working' ? 'semantic-icon--working' : null, className].filter(Boolean).join(' ')}
     data-semantic-icon={name} style={iconStyle} {...props}>{children}<use href={semanticIconHref(name)} /></svg>
