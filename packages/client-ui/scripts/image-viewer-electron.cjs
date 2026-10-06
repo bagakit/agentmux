@@ -59,11 +59,35 @@ app.whenReady().then(async () => {
     }
     win.setContentSize(1280, 900); await settle()
     await click('#draft .md-conversation-image'); await until('!!document.querySelector(".md-conversation-image__full")')
-    await click(control('Zoom in')); await close()
+    await click(control('Zoom in'))
+    if (slice === 'gallery') {
+      await click(control('Next image'))
+      await until('document.querySelector(".md-conversation-image__full")?.alt.endsWith("interface.png")')
+      assert.equal(await read('document.querySelector(".md-conversation-image__position").textContent'), '2 / 2')
+      assert.equal(await read('document.querySelector(".md-conversation-image__zoom").textContent'), '100%')
+    }
+    await close()
     assert.ok(await read('document.querySelector("#draft .tiptap").textContent.includes("Compare")'))
     await click('#native .md-conversation-image'); await until('document.querySelector(".md-conversation-image__title")?.textContent === "Recorded design"')
+    assert.equal(await read("!!document.querySelector('[aria-label=\"Next image\"]')"), false)
     await click(control('Zoom in')); await close()
     result.operations.push({ consumer: 'InlineComposer and ConversationView recorded image', zoomAndDismiss: true })
+    if (slice === 'gallery') {
+      win.setContentSize(390, 900); await settle()
+      await read('window.imageViewerFixture.armFailure()')
+      await click('#message .md-conversation-image'); await click(control('Next image'))
+      await until("!!document.querySelector('[aria-label=\"Retry image\"]')")
+      assert.equal(await read('document.querySelector(".md-conversation-image__position").textContent'), '2 / 2')
+      assert.ok(await read('document.querySelector(".md-conversation-image__state").textContent.includes(window.imageViewerFixture.paths[1])'))
+      await frame('gallery-failure-390.png')
+      await click(control('Retry image'))
+      await until('document.querySelector(".md-conversation-image__full")?.naturalWidth === 1440')
+      assert.equal(await read('document.activeElement === document.querySelector(".md-conversation-image__viewport")'), true)
+      win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Left' }); win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Left' })
+      await until('document.querySelector(".md-conversation-image__position")?.textContent === "1 / 2"')
+      await close(); win.setContentSize(1280, 900); await settle()
+      result.operations.push({ consumer: 'gallery failure, retry and keyboard continuation', originalReference: true, focusRetained: true })
+    }
     // A trusted wheel and pointer drag exercise Chromium's real event and capture path.
     await click('#message .md-conversation-image')
     const center = await read('(() => {const r=document.querySelector(".md-conversation-image__viewport").getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};})()')
