@@ -783,15 +783,15 @@ export async function registerIpc(args: {
   )
   const notebookStore = new AgentMuxNotebookStore(undefined, notesStorageOwner.storage)
   const notebookObservation = createNotebookObservationServices(notebookStore, { files, workspace: id => config.workspaces.find(item => item.id === id) }, () => notesStorageReady)
-  const noteFileWriter = new NoteFileWriter(files, { state: async () => { await notesStorageReady; return notebookStore.read() }, owner: notebookObservation.owner })
-  const publicFiles = new FileReadOwner({ files: { read: files.read.bind(files), listFiles: files.listFiles.bind(files), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
+  const noteFileWriter = new NoteFileWriter(files, { state: async () => { await notesStorageReady; return notebookStore.read() }, owner: notebookObservation.owner }, notebookStore)
+  const publicFiles = new FileReadOwner({ files: { read: noteFileWriter.read.bind(noteFileWriter), listFiles: files.listFiles.bind(files), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
   handleWithEvent('files:createPublic', async (event, input: import('@agentmux/core').FileCreateParams) => { requireTrustedSender('files:createPublic', event); return publicFiles.create(input, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }) })
   handleWithEvent('files:readPublic', async (event, input: import('@agentmux/core').FileReadParams) => {
     requireTrustedSender('files:readPublic', event)
     return await publicFiles.read(input)
   })
-  handle('files:read', async (workspaceId: string, path: string) => await files.read(workspace(config, workspaceId), path))
+  handle('files:read', async (workspaceId: string, path: string) => await noteFileWriter.read(workspace(config, workspaceId), path))
   handle('files:readPreview', async (workspaceId: string, path: string, options?: import('../shared/workspace-file-preview').WorkspaceFilePreviewReadOptions) =>
     await files.readPreview(workspace(config, workspaceId), path, options)
   )

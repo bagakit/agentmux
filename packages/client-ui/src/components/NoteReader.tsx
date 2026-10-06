@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { EditorContent, NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type NodeViewProps, useEditorState } from '@tiptap/react'
+import type { NoteProvenanceSnapshot } from '@agentmux/core/note-provenance'
 import type { FileWriteReceipt, FileReadResult } from '@agentmux/core/files'
 import { Node as TiptapNode, type JSONContent } from '@tiptap/core'
 import { noteContentExtensions, NoteBlockReferenceNode, NoteInlineLinkNode, noteIdentityExtensions } from '../note/note-content-schema.js'
@@ -9,7 +10,7 @@ import { noteReadingSelectionExtension } from '../note/note-reading-selection.js
 import { noteWikiInputExtension } from '../note/note-wiki-input.js'
 import type { NoteInlineLinkAttributes } from '@agentmux/core/note-links'
 import { readNoteDocument, serializeNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../note/note-document.js'
-import { noteKnowledge, projectNoteBlocks, resolveNoteBlock, type NoteKnowledge } from '../note/note-knowledge.js'
+import { noteKnowledge, parseNoteFile, projectNoteBlocks, resolveNoteBlock, type NoteKnowledge, type NoteFileDocument } from '../note/note-knowledge.js'
 import { acknowledgeNoteWrite, type NoteEditState } from '../note/note-edit-state.js'
 import { noteProvenanceAttributes } from '../note/note-provenance.js'
 export type { NoteEditState } from '../note/note-edit-state.js'
@@ -110,7 +111,7 @@ export type NoteEditing = {
   save(content: string, expectedRevision: string): Promise<FileWriteReceipt>
   readCurrent(): Promise<FileReadResult>
 }
-export type NoteReaderProps = { content: string; path: string; workspaceId: string; revision: string | null;
+export type NoteReaderProps = { noteProvenance?: NoteProvenanceSnapshot | undefined; content: string; path: string; workspaceId: string; revision: string | null;
   documents?: Parameters<typeof noteKnowledge>[0] | undefined
   readReference?: ((target: NoteBlockTarget) => void) | undefined
   /** Only the reading projection changes; content remains the complete original Note. */
@@ -123,13 +124,14 @@ export type NoteReaderProps = { content: string; path: string; workspaceId: stri
 }
 const EMPTY_IDS: readonly string[] = []
 const EMPTY_DOCUMENTS: NonNullable<NoteReaderProps['documents']> = []
-export function NoteReader({ content, path, workspaceId, revision, documents = EMPTY_DOCUMENTS, blockIds, highlightBlockIds = EMPTY_IDS, clipBlocks = true, readReference, editing, target, onOpenLink }: NoteReaderProps) {
-  const parsed = useMemo(() => readNoteDocument(content), [content])
+export function NoteReader({ content, path, workspaceId, revision, noteProvenance, documents = EMPTY_DOCUMENTS, blockIds, highlightBlockIds = EMPTY_IDS, clipBlocks = true, readReference, editing, target, onOpenLink }: NoteReaderProps) {
+  const original = useMemo(() => ({ path, content, revision: revision ?? '', ...noteProvenance ? { noteProvenance } : {} }), [path, content, revision, noteProvenance])
+  const parsed = useMemo(() => parseNoteFile(original), [original])
   const body = useRef<HTMLDivElement>(null)
   const [working, setWorking] = useState<{ noteId: string; content: string } | null>(null)
   const workingContent = parsed.status === 'valid' && working?.noteId === parsed.note.noteId ? working.content
     : parsed.status === 'valid' && editing?.initial?.noteId === parsed.note.noteId ? editing.initial.draft : content
-  const knowledge = useMemo(() => noteKnowledge([{ location: { workspaceId, path }, document: { path, content: workingContent, revision: revision ?? '' } }, ...documents]), [workingContent, path, workspaceId, revision, documents])
+  const knowledge = useMemo(() => noteKnowledge([{ location: { workspaceId, path }, document: { ...original, content: workingContent } }, ...documents]), [workingContent, path, workspaceId, original, documents])
   const excerpt = useMemo(() => {
     const source = knowledge.sources.find(source => source.location.workspaceId === workspaceId && source.location.path === path)
     return blockIds && source ? projectNoteBlocks(source, blockIds, highlightBlockIds) : null
@@ -141,13 +143,14 @@ export function NoteReader({ content, path, workspaceId, revision, documents = E
     element?.scrollIntoView?.({ block: 'center' })
   }, [target?.noteId, target?.blockId, block?.status])
   return parsed.status === 'valid' ? <Scope.Provider value={{ knowledge, trail: [], readReference, onOpenLink }}><div ref={body} data-note-id={parsed.note.noteId} data-target-block={block?.status === 'resolved' ? target?.blockId : undefined}>
+    {noteProvenance?.status === 'unconfirmed' && <p role="status">块作者未确认：{noteProvenance.reason} 正文仍可阅读和编辑；重新读取同一原文件可核对元数据。</p>}
     {target && <section aria-label="原块定位" data-block-target-status={block?.status}>
       {block?.status === 'resolved' ? <><strong>引用的原块</strong><p>{block.block.text}</p></> : <p role="status">原块未确认：{block?.message} 原引用保留，仍可阅读完整笔记。</p>}
     </section>}
-    {editing && revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={content} revision={revision} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent highlightBlockIds={highlightBlockIds} content={excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : parsed.note.content} />}
+    {editing && revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={content} revision={revision} original={original} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent highlightBlockIds={highlightBlockIds} content={excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : parsed.note.content} />}
   </div></Scope.Provider> : <><p role="status">原笔记读取问题：{parsed.message}</p><pre>{content}</pre></>
 }
-function EditableNote({ note, content, revision, editing }: { note: NoteDocument; content: string; revision: string; editing: NoteEditing }) {
+function EditableNote({ note, content, revision, editing, original }: { note: NoteDocument; content: string; revision: string; editing: NoteEditing; original: NoteFileDocument }) {
   const alive = useRef(true)
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   const initial = editing.initial?.noteId === note.noteId ? editing.initial : undefined
@@ -171,7 +174,7 @@ function EditableNote({ note, content, revision, editing }: { note: NoteDocument
       catch (error) { unretained.current = true; setNotice(`两份编辑在当前工作面保留，本机保存仍未确认：${String(error)}`) }
     }
   }), [note.noteId])
-  const baseline = useMemo(() => { const read = readNoteDocument(state.draft); return read.status === 'valid' ? read.note.content : note.content }, [opened, externalDraft])
+  const baseline = useMemo(() => { const read = parseNoteFile({ ...original, content: state.draft }); return read.status === 'valid' ? read.note.content : note.content }, [opened, externalDraft, original])
   const persist = (value: NoteEditState) => {
     current.current = value; setState(value)
     try { editing.onDraft(value); unretained.current = false; return true }

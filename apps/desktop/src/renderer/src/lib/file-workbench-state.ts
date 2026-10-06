@@ -383,7 +383,8 @@ export function reduceDocumentWritten(
   expectedRevision: string | null = revision,
   savedObservationGeneration = 0,
   savedContent?: string,
-  noteWriteAttribution?: FileDocument['noteWriteAttribution']
+  noteWriteAttribution?: FileDocument['noteWriteAttribution'],
+  noteProvenance?: FileDocument['noteProvenance']
 ): FileWorkbenchState {
   const key = documentKey(workspaceId, path)
   const document = state.documents[key]
@@ -402,6 +403,7 @@ export function reduceDocumentWritten(
   return {
     ...state,
     documents: { ...state.documents, [key]: { ...document, revision, noteWriteAttribution: noteWriteAttribution ?? document.noteWriteAttribution,
+      ...(noteProvenance ? { noteProvenance } : {}),
       ...(savedContent !== undefined && (state.documentGenerations[key] ?? 0) === savedGeneration && !hasNewerDiskConflict ? { content: savedContent } : {}) } },
     dirtyDocuments: {
       ...state.dirtyDocuments,
@@ -432,7 +434,7 @@ export function reduceDocumentRead(
     if (unknown !== checkedWrite) return state
     if (result.status === 'read' && result.document.content === unknown.attempted.content) {
       return reduceDocumentWritten({ ...state, documentObservationGenerations }, workspaceId, path,
-        unknown.attempted.generation, result.document.revision, unknown.attempted.expectedRevision)
+        unknown.attempted.generation, result.document.revision, unknown.attempted.expectedRevision, 0, undefined, undefined, result.document.noteProvenance)
     }
     if (result.status === 'read' && result.document.revision === unknown.attempted.expectedRevision) {
       return { ...state, documentObservationGenerations, documentIssues: withoutIssue(state.documentIssues, key) }
@@ -487,7 +489,11 @@ export function reduceDocumentRead(
       ...state,
       documentObservationGenerations,
       ...(matchesCurrentContent
-        ? { dirtyDocuments: { ...state.dirtyDocuments, [key]: false } }
+        ? { dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
+          ...(result.document.noteProvenance ? { documents: { ...state.documents, [key]: { ...current,
+            noteProvenance: result.document.noteProvenance,
+            noteWriteAttribution: result.document.noteProvenance.status === 'recorded' ? { status: 'recorded' as const }
+              : { status: 'unconfirmed' as const, reason: result.document.noteProvenance.reason } } } } : {}) }
         : {}),
       ...(clearsIssue ? { documentIssues: withoutIssue(state.documentIssues, key) } : {})
     }

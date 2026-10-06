@@ -6,10 +6,11 @@ import { WORKSPACE_FILE_MAX_BYTES } from '../shared/workspace-file-bytes.js'
 import type { WorkspaceFiles } from './workspace-files.js'
 import { matchingNoteLinkBlocks, normalizeNoteLinkName, parseNotebookResolveParams, parseNotebookResolveResult, parseNoteWikiQuery, type NoteLinkTarget, type NotebookResolveParams, type NotebookResolveResult } from '@agentmux/core/note-links'
 import type { PendingNoteWikiLink } from '@agentmux/client-ui/note/note-wikilinks'
+import type { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 
 /** Exact durable resources, including closed pages, through the original Files owner. */
 export class NotebookObservationOwner implements NotebookObservationPort {
-  constructor(private readonly ports: { workspace(id: string): WorkspaceRecord | undefined; files: Pick<WorkspaceFiles, 'read'> }) {}
+  constructor(private readonly ports: { workspace(id: string): WorkspaceRecord | undefined; files: Pick<WorkspaceFiles, 'read'>; metadata?: Pick<AgentMuxNotebookStore, 'readProvenance'> }) {}
   private async read(page: NotebookPage, options?: { maxBytes?: number; signal?: AbortSignal }): Promise<{ observation: NoteContentObservation; document?: NoteFileDocument }> {
     const base = { noteId: page.noteId, resource: structuredClone(page.resource) }, original = page.resource
     const workspace = this.ports.workspace(original.workspaceId)
@@ -34,7 +35,18 @@ export class NotebookObservationOwner implements NotebookObservationPort {
   async content(state: NotebookState, noteId: string, options?: { maxBytes?: number; signal?: AbortSignal }): Promise<NoteContentObservation> {
     const page = state.pages[noteId]
     if (!page) throw new AgentMuxError('The exact Note is absent from this durable catalog. Refresh the directory without replacing its original file.', 'NOTEBOOK_INPUT_INVALID')
-    return (await this.read(page, options)).observation
+    const observation = (await this.read(page, options)).observation
+    if (observation.status !== 'read') return observation
+    const query = { noteId, resource: observation.resource, revision: observation.revision, blockIds: observation.blockIds }
+    try {
+      if (!this.ports.metadata) throw new Error('The original Note metadata owner is unavailable.')
+      const noteProvenance = await this.ports.metadata.readProvenance(query)
+      options?.signal?.throwIfAborted()
+      return { ...observation, noteProvenance }
+    } catch (error) {
+      options?.signal?.throwIfAborted()
+      return { ...observation, noteProvenance: { noteId, resource: query.resource, revision: query.revision, blocks: Object.fromEntries(query.blockIds.map(id => [id, { created: null, lastEdited: null }])), status: 'unconfirmed', reason: error instanceof Error ? error.message : String(error) } }
+    }
   }
   async resolve(state: NotebookState, params: NotebookResolveParams, options?: { signal?: AbortSignal }): Promise<NotebookResolveResult> {
     const input = parseNotebookResolveParams(params)

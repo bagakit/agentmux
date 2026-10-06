@@ -14,6 +14,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./note-provenance": {
+      "types": "./dist/note-provenance.d.ts",
+      "import": "./dist/note-provenance.js"
+    },
     "./note-format": {
       "types": "./dist/note-format.d.ts",
       "import": "./dist/note-format.js"

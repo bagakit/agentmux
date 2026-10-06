@@ -4,7 +4,10 @@ import { noteContentSchema } from './note-content-schema.js'
 import { indexNoteReferences, noteSemanticText } from './note-wikilinks.js'
 import type { NoteGraphOccurrence, NoteGraphTarget } from '@agentmux/core/notebook-observation'
 import type { NoteLinkTarget } from '@agentmux/core/note-links'
-export type NoteFileDocument = { path: string; content: string; revision: string }
+import type { NoteProvenanceSnapshot } from '@agentmux/core/note-provenance'
+import { fileUploadRevision } from '@agentmux/core/files'
+import { hydrateNoteProvenance } from './note-metadata.js'
+export type NoteFileDocument = { path: string; content: string; revision: string; noteProvenance?: NoteProvenanceSnapshot }
 export type NoteLocation = { workspaceId: string; path: string }
 export type NoteBlock = { blockId: string; content: JSONContent; text: string; list?: { type: string; attrs: Record<string, unknown>; index: number; item?: boolean } }
 export type NoteSource = { location: NoteLocation; note: NoteDocument; revision: string; blocks: ReadonlyMap<string, NoteBlock> }
@@ -22,11 +25,14 @@ export type NoteBlockResolution =
 // A cache of the original immutable document, never another content or identity registry.
 // Two displays of the same document share parsing; a content/revision change replaces that document.
 const parsedDocuments = new WeakMap<NoteFileDocument, NoteDocumentRead>()
-const indexedDocuments = new WeakMap<NoteFileDocument, { blocks: ReadonlyMap<string, NoteBlock>; references: Omit<NoteBacklink, 'source'>[] }>()
+const indexedDocuments = new WeakMap<NoteDocument, { blocks: ReadonlyMap<string, NoteBlock>; references: Omit<NoteBacklink, 'source'>[] }>()
 export function parseNoteFile(document: NoteFileDocument): NoteDocumentRead {
   const cached = parsedDocuments.get(document)
   if (cached) return cached
-  const read = readNoteDocument(document.content)
+  const parsed = readNoteDocument(document.content)
+  const read = parsed.status === 'valid' && document.noteProvenance && document.noteProvenance.resource.path === document.path
+    ? { ...parsed, note: hydrateNoteProvenance(parsed.note, document.noteProvenance, fileUploadRevision(new TextEncoder().encode(document.content))) }
+    : parsed
   parsedDocuments.set(document, read)
   return read
 }
@@ -40,10 +46,10 @@ export function noteKnowledge(documents: readonly { location: NoteLocation; docu
     const key = JSON.stringify([location.workspaceId, location.path])
     if (seen.has(key)) continue
     seen.add(key)
-    const read = parseNoteFile(document)
+    const read = parseNoteFile(document.noteProvenance && document.noteProvenance.resource.workspaceId !== location.workspaceId ? { path: document.path, content: document.content, revision: document.revision } : document)
     if (read.status === 'invalid') { invalid.push({ location, message: read.message }); continue }
     unanchored ||= read.unanchoredBlockCount > 0
-    let indexed = indexedDocuments.get(document)
+    let indexed = indexedDocuments.get(read.note)
     if (!indexed) {
       const blocks = new Map<string, NoteBlock>(), forward: Omit<NoteBacklink, 'source'>[] = []
       const tree = noteContentSchema.nodeFromJSON(read.note.content)
@@ -61,7 +67,7 @@ export function noteKnowledge(documents: readonly { location: NoteLocation; docu
       })
       forward.push(...indexNoteReferences(tree).map(reference => ({ ...reference, occurrence: reference.occurrence.kind === 'text' ? { ...reference.occurrence, revision: document.revision } : reference.occurrence })))
       indexed = { blocks, references: forward }
-      indexedDocuments.set(document, indexed)
+      indexedDocuments.set(read.note, indexed)
     }
     const source: NoteSource = { location, note: read.note, revision: document.revision, blocks: indexed.blocks }
     sources.push(source)

@@ -1,73 +1,93 @@
 /** Shared discovery for every managed Agent, including Agents outside Talk with Agent. */
 export const AGENTMUX_NOTE_GUIDE = `## Notes: read, edit, follow and inspect relationships
-Notes are original .note.json files, organized by the durable Notebook catalog. You can edit
-an authorized Note through file.read and file.write; notebook.apply edits organization,
-sources and your own follow relationship, not the body. No App/page needs to be open.
+Notes are original Markdown .note.md files, organized by the durable Notebook catalog.
+Markdown is the only saved body; the editor tree is in-memory, not another JSON document.
+You can edit an authorized Note through file.read and file.write. notebook.apply changes
+organization, sources and your own follow relationship, not the body. No App/page needs to be open.
 
 Start with amux notebook ls, then amux notebook inspect --note NOTE_ID --content.
-The content observation gives the exact original resource, raw saved JSON and revision;
-missing/unknown/invalid/identity-mismatch is not permission to create a replacement.
-An inspect without --content reads only the directory/history. --max-bytes N is an optional
-per-file byte cap; a refused or unavailable body stays unknown, never an empty Note.
+The content observation gives the exact resource, saved Markdown, revision, stable blockIds
+and noteProvenance from the original SQLite metadata owner. recorded/unconfirmed describes
+metadata for this exact body revision; nullable authors remain unknown. A body with
+unanchoredBlockCount > 0 is readable but its unassigned blocks are not confirmed link targets.
+An inspect without --content reads the directory/history and committed resourceChanges.
+--max-bytes N is an optional per-file byte cap. Missing/unknown/invalid/identity-mismatch
+never authorizes a replacement Note or proves there are no relationships.
 
-The minimal valid body is:
-  {"schema":"agentmux.note.v1","noteId":"stable-note-id","content":{"type":"doc",
-    "content":[{"type":"paragraph","attrs":{"blockId":"stable-block-id"},
-      "content":[{"type":"text","text":"Original text"}]}]}}
-Every semantic block needs a unique persistent blockId. Preserve noteId, existing blockIds,
-referenceIds, marks, provenance and unrelated structure when editing; editing or reordering
-is not copying. A block reference uses type "blockReference" with attrs {blockId,
-referenceId,mode:"reference"|"embed",target:{noteId,blockId}}. Keep exact target IDs,
-never guess a target from a display title, path or quoted source. New blocks/references need new IDs.
-The original file owner records trusted creation/latest-edit attribution at save time.
-Do not self-report an Agent identity in provenance; unknown old authors stay unknown.
+A minimal Note body is:
+    ---
+    schema: agentmux.note.md.v1
+    note-id: stable-note-id
+    ---
 
-Inline wiki syntax [[Page]] and [[Page #heading-or-block]] is accepted in ordinary Note text
-on the same original file.create/write path. Code, escaped syntax and unfinished tokens stay text.
-The writer uses the original catalog and actual target file: only a unique confirmed target binds.
-Repeated titles/headings require explicit selection; unavailable or missing queries remain savable.
-The canonical node is {"type":"noteLink","attrs":{"referenceId":"stable-occurrence-id",
-"text":"Page #Heading","target":{"noteId":"stable-note-id","blockId":"stable-block-id"}}}.
-A page target contains only noteId. An unbound query has target:null. Preserve existing referenceIds
-and targets: renaming a page or heading does not authorize looking up the label and changing IDs.
+    Original text. ^block1
+
+Preserve the note-id, existing block anchors, occurrence IDs and exact bound targets.
+A paragraph or heading has a trailing ^blockID; code, quotation containers and rules use
+a separate ^blockID line after the original block. A list item has its own
+<!--amux-item:itemID--> marker as well as its child paragraph's anchor. Empty paragraphs
+use <!--amux-empty:blockID-->. IDs in markers and note: targets use URI component encoding;
+encode -- inside comment fields too, and decode once. Never derive identity from names or content.
+Ordinary new paragraphs may omit an anchor: reading does not mint IDs; the original writer
+allocates missing stable block IDs only when you explicitly save. Duplicated IDs are ambiguous,
+not permission to pick one copy. A block stays inside its original file when referenced;
+extracting an independent Note is a separate explicit content operation.
+
+Inline [[Page]] and [[Page #heading-or-block]] queries are accepted in ordinary Markdown.
+Code, escaped wiki syntax and unfinished tokens stay literal. The original writer only binds
+a unique confirmed target; repeated names or unavailable targets remain savable unbound queries.
+An already bound inline occurrence is:
+    [Page #Heading](note:targetNote#targetBlock)<!--amux-ref:occurrence1-->
+A page target omits #targetBlock. A saved unbound occurrence is:
+    [[Page #Heading]]<!--amux-ref:occurrence2-->
+Structural reference and embed blocks use leaf directives:
+    ::note-ref{#sourceBlock ref="occurrence3" target="note:targetNote#targetBlock"}
+    ::note-embed{#sourceEmbed ref="occurrence4" target="note:targetNote#targetBlock"}
+These IDs are examples: use unique IDs for genuinely new objects and preserve originals on edits.
+Do not look up an existing binding's display label again after a rename or a name collision.
 Use amux notebook resolve --query TEXT for catalog candidates without reading bodies, then
-amux notebook resolve --link '[[Page #Heading]]' [--note NOTE_ID] [--block BLOCK_ID] to read
-only the selected original. #^BLOCK_ID selects an exact block; bare #text checks headings and IDs
-without choosing the first match. A resolve is read-only: save a chosen stable target through CAS.
+amux notebook resolve --link '[[Page #Heading]]' [--note NOTE_ID] [--block BLOCK_ID].
+#^BLOCK_ID selects an exact block. A heading query cannot grant a fake unique match when
+unanchored headings remain unconfirmed. Resolution is read-only; save the chosen stable target by CAS.
 
-To save: discover the Note workface and exact Zone mapping with notebook inspect and
-space inspect. Run amux file read --zone ZONE --path ZONE_RELATIVE_PATH --host HOST
---workspace WORKSPACE --workspace-path WORKSPACE_PATH. Use its returned resource object
-and revision, not a draft snapshot or a guessed workspace. Then pipe the complete edited
-JSON to amux file write --zone ZONE --path ZONE_RELATIVE_PATH --resource RESOURCE_JSON
---expected-revision REVISION. file.write uses CAS and the same original Files owner.
-A written receipt may return canonical content alongside its revision; use that saved content
-as the baseline because the owner can add trusted attribution. Preserve any newer editor draft.
-A conflict requires reading the original file and merging the intended edit. An unknown write
-requires inspecting that exact original file before deciding another save; do not blindly resend
-or switch to a new file. An editor's unsaved draft is not the saved body and must be coordinated.
+To save, discover the Note workface and exact Zone mapping with notebook inspect and space inspect.
+Run amux file read --zone ZONE --path ZONE_RELATIVE_PATH --host HOST --workspace WORKSPACE
+--workspace-path WORKSPACE_PATH. Use its returned resource and revision, never a guessed workspace.
+Pipe the complete edited Markdown to amux file write --zone ZONE --path ZONE_RELATIVE_PATH
+--resource RESOURCE_JSON --expected-revision REVISION. The original Files owner keeps CAS.
+A written receipt can return canonical content, noteAttribution and noteProvenance. Adopt its
+saved content/revision as the baseline while preserving newer unsaved input. The owner may add
+missing block/occurrence IDs and bind confirmed queries. Authors never come from body declarations.
+Trusted actor identity comes from the authenticated caller; creation/latest-edit records stay
+in the original SQLite metadata. External plain-text edits leave latest authors unconfirmed.
+If the body is written but metadata recording fails, status remains written with attribution
+unconfirmed. Read the same Note/revision to reconcile; do not write the body again merely to retry metadata.
+A conflict requires reading the original and merging. An unknown write requires inspecting
+that exact original before another save; do not blindly resend or switch to a new file.
 
-Use amux notebook graph --note NOTE_ID for incoming/outgoing block references and embeds,
---notebook NOTEBOOK_ID for relationships touching that Notebook, or --all for the catalog.
-Each call explicitly scans the durable catalog to find incoming sources, including closed pages;
-it does not infer a complete graph from currently open files. Results include catalogRevision,
-per-file revisions/statuses, hierarchy, exact source block/resource and tagged page/block/unbound targets,
-resolution and duplicateNoteIds. Per-file revisions are not a cross-file atomic snapshot.
-Occurrences are stored {kind:"stored",referenceId} or derived {kind:"text",revision,from,to}.
-Graph queries from old plain [[...]] text or saved target:null links reuse the same original
-file observations to confirm a unique page or block, without another read or a save. Such edges
-include query with the exact written inner text: resolved means confirmed for this observation,
-not bound in the file. Ambiguous/missing/unknown queries retain their text and state. Existing
-bound targets are checked by ID and never looked up again by label. Reading or graph inspection
-never rewrites a source, changes referenceIds or allocates a persistent ID. Text positions use
-the source block's inline PM offsets (UTF16 text, inline atoms count one), valid only at its revision.
-completeness partial/unknown and missing/ambiguous targets must remain visible; an empty
-edge list with unread sources does not prove no links. No second body or relationship store exists.
+Use amux notebook graph --note NOTE_ID, --notebook NOTEBOOK_ID or --all for saved relationships.
+The original owner scans the durable catalog for incoming sources, including closed pages.
+Results include catalogRevision, per-file status/revision, hierarchy, exact source block/resource,
+tagged page/block/unbound targets, resolution and duplicateNoteIds. They are not an atomic
+cross-file snapshot. Occurrences are stored {kind:"stored",referenceId} or derived
+{kind:"text",revision,from,to}; text positions are source-block inline PM UTF16 offsets,
+not Markdown file byte positions, and are valid only at that exact saved revision.
+Raw wiki and saved unbound queries may be confirmed for one observation without being saved
+as bindings. Such edges retain query and their original occurrence. Existing targets stay by ID.
+Reading never rewrites a source or allocates persistent IDs. Unanchored blocks make the graph
+partial; an empty edge list with unread or unassigned sources does not prove no links.
+Graph/search indexes are derived from Markdown, never a second body or relationship authority.
+
+Existing JSON Notes and the old catalog are explicit one-time conversion inputs. The original
+storage owner keeps backups, exact IDs, authors, followers and committed resourceChanges with
+conversion.sourceRevision/targetRevision. Normal read/write does not keep a JSON body fallback.
+Use the exact committed mapping to locate the same Note after conversion. Preserve old drafts
+and unknown attempted bytes/revisions; never replace their revision and automatically replay them.
 
 Follow yourself using amux notebook apply --revision CATALOG_REVISION --operation-id OP_ID
 --change-json '{"kind":"follow","noteId":"NOTE_ID"}'; use "unfollow" to cancel yourself.
 The authenticated caller is the follower; payloads cannot act for another identity. Query
-followers with notebook ls/inspect. A follow is durable interest, not online presence or a
-notification/message authorization. Preserve the operation ID after an unknown response and
-inspect --operation-id OP_ID before retrying that same logical change.
+followers with notebook ls/inspect. A follow is durable interest, not online presence or
+notification authorization. Preserve the operation ID after an unknown response and inspect
+--operation-id OP_ID before retrying that same logical change.
 `

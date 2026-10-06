@@ -1923,7 +1923,8 @@ async function enqueueFileSave(
           expectedRevision,
           observationGeneration,
           result.content,
-          result.noteAttribution
+          result.noteAttribution,
+          result.noteProvenance
         )
         return isScratchTopicDocument(surface)
           ? {
