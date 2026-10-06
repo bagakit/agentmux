@@ -41,6 +41,7 @@ import { contextOperationKey, type MoteContextFailure, type MoteContextOperation
 import { MoteContextStatus } from './MoteContextStatus'
 
 const ThemeStatusNeutralIcon = semanticIconComponent('status.neutral')
+const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
 const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
@@ -124,7 +125,7 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
         avatarObjectKey={iconTarget?.key} avatarWorkspaceId={iconTarget?.avatarTarget?.workspaceId} avatarTopicId={iconTarget?.avatarTarget?.topicId} />
       <strong>{topic.title}</strong>
     </span><span className="mote-chooser__status">
-      {session ? <StatusDot status={session.status} /> : <span className="mote-chooser__availability" data-mote-availability={restoring ? 'restoring' : 'no-agent'} aria-hidden="true">{restoring ? '?' : <ThemeStatusNeutralIcon size={7} />}</span>}
+      {session ? <StatusDot status={session.status} /> : <span className="mote-chooser__availability" data-mote-availability={restoring ? 'restoring' : 'no-agent'} aria-hidden="true">{restoring ? <ThemeStatusUnknownIcon size={7} /> : <ThemeStatusNeutralIcon size={7} />}</span>}
       <span className="mote-chooser__status-text">{identityStatus}</span>
     </span>
     {selected ? <ThemeStatusSelectedIcon className="mote-chooser__selected" size={10} aria-hidden="true" /> : null}
