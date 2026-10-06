@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '../../core/src/public-rpc-server.js'
 import { AgentMuxRpcService } from '../../core/src/public-rpc-service.js'
-import { parseConnectionParams } from '../../core/src/connections-codec.js'
+import { parseConnectionParams, parseConnectionResult } from '../../core/src/connections-codec.js'
 import type { ConnectionConfig, ConnectionObservation } from '../../core/src/connections-contract.js'
 import { runCompiledObjectCli, objectCliEnvironment } from '../../core/test/helpers/object-cli-rpc.js'
 import { ConnectionHost } from '../src/connection-host.js'
@@ -92,6 +92,16 @@ describe('real public service and compiled CLI', () => {
     const checked = await cli(['test', '--connection', config.connectionId]); expect(checked.code, checked.stdout).toBe(0); expect(JSON.parse(checked.stdout).result.observation).toEqual(observation)
     const leaked = await cli(['configure', '--input', '-'], JSON.stringify({ operationId: 'bad-save', expectedRevision: null, connection: { ...config, secret: 'private-credential' } }))
     expect(leaked.code).not.toBe(0); expect(leaked.stdout + leaked.stderr).not.toContain('private-credential')
+  })
+  it('publishes accurate generated help and rejects responses from another connection', async () => {
+    const { owner, directory } = await host()
+    const saved = await create(owner)
+    const help = await runCompiledObjectCli(['connection', 'configure', '--help'], objectCliEnvironment(directory))
+    expect(help.code).toBe(0); expect(help.stdout).toContain('expectedRevision'); expect(help.stdout).toContain('credential')
+    const skill = await runCompiledObjectCli(['--skill'], objectCliEnvironment(directory))
+    expect(skill.code).toBe(0); expect(skill.stdout).toContain('connection inspect'); expect(skill.stdout).toContain('connection configure')
+    expect(() => parseConnectionResult('connection.test', saved.connection, { connectionId: 'another-connection' })).toThrow()
+    expect(() => parseConnectionResult('connection.ls', { connections: [{ ...saved.connection, secret: 'private-credential' }] }, {})).toThrow()
   })
   it('refuses forged administration and keeps optional connection absence local to that object', async () => {
     const { owner } = await host(), service = new AgentMuxRpcService({ connections: owner })
