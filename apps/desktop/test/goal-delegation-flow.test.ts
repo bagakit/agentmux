@@ -111,9 +111,9 @@ async function fixture() {
       cliReceipts.push({ actor: who, args, exitCode: failure.code, failureReceipt: failure.stderr ? JSON.parse(failure.stderr) : null }); throw error
     }
   }
-  async function goal(who: string, action: 'prepare' | 'delegate' | 'report' | 'collect', input: unknown) {
+  async function goal(who: string, action: 'prepare' | 'bind' | 'delegate' | 'report' | 'collect', input: unknown) {
     const path = join(root, `request-${++sequence}.json`); await fs.writeFile(path, JSON.stringify(input))
-    return await cli(who, ['goal', ...action === 'prepare' ? ['delegation', 'prepare'] : [action], '--input', path])
+    return await cli(who, ['goal', ...action === 'prepare' || action === 'bind' ? ['delegation', action] : [action], '--input', path])
   }
   async function read() { return await cli('owner', ['goal', 'delegations', '--goal', 'goal']) }
   async function proof() { return { goal: await demands.get('goal'), inputs, trace, cliReceipts, stopCalls: stop.mock.calls.length } }
@@ -168,6 +168,43 @@ describe('actual Goal delegation CLI, Main and original Core collaboration', () 
     expect((await f.demands.get('goal'))!).toMatchObject({ status: 'in_progress', supervisorSessionId: 'owner', description: 'Original human intent\nkept verbatim', alignment: { confirmedAt: null } })
     expect(f.stop).not.toHaveBeenCalled()
     await record('two-worker-question-report-collection', await f.proof())
+  }, 30_000)
+
+  it('binds an existing original message after both participants advance Runs without rewriting or replaying input', async () => {
+    const f = await fixture(), a = task()
+    await f.cli('owner', ['agent', 'send', '--to-session', a.workerAgentSessionId, '--text', a.text,
+      '--operation-id', a.operationId, '--message-id', a.sourceMessageId, '--thread', a.threadId, '--expect-run', a.workerRunId])
+    const before = await f.client.readMessage({ operationId: a.operationId }), inputs = structuredClone(f.inputs)
+    expect(before!.envelope.body).toBe(a.text)
+    for (const id of ['owner', 'worker-a']) {
+      const original = (await f.sessions.readMetadata(id))!
+      await f.sessions.compareAndSwapMetadata(original, { ...original, run: { runId: id + '-next-run' }, retiredRuns: [...original.retiredRuns, original.run], updatedAt: _reshape_fixtureEpoch(0, 0, 200) })
+    }
+    const binding = f.goal('owner', 'bind', { goalId: 'goal', intent: a })
+    await expect(binding).resolves.toMatchObject({ ok: true })
+    const bound = (await binding).result.delegations[0]
+    expect(bound).toMatchObject({ ...a, linkedAt: expect.any(Number) })
+    expect(bound.requestText).toBeUndefined(); expect(f.inputs).toEqual(inputs)
+    expect((await f.client.readMessage({ operationId: a.operationId }))!.envelope).toEqual(before!.envelope)
+    await f.goal('owner', 'bind', { goalId: 'goal', intent: a }); expect(f.inputs).toEqual(inputs)
+    expect(f.stop).not.toHaveBeenCalled()
+    await record('existing-original-source-bound-with-retained-runs', await f.proof())
+  }, 30_000)
+
+  it('refuses absent, unreadable or altered original source bindings without creating input or claiming material adoption', async () => {
+    const f = await fixture(), a = task()
+    await expect(f.goal('owner', 'bind', { goalId: 'goal', intent: a })).rejects.toMatchObject({ code: 1 })
+    expect(await f.demands.inspectDelegation('goal', a.operationId)).toBeNull(); expect(f.inputs).toEqual([])
+    await f.cli('owner', ['agent', 'send', '--to-session', a.workerAgentSessionId, '--text', a.text,
+      '--operation-id', a.operationId, '--message-id', a.sourceMessageId, '--thread', a.threadId])
+    const inputs = structuredClone(f.inputs)
+    f.readUnavailable.add('message.read:' + a.operationId)
+    await expect(f.goal('owner', 'bind', { goalId: 'goal', intent: a })).rejects.toMatchObject({ code: 1 })
+    await expect(f.goal('owner', 'bind', { goalId: 'goal', intent: { ...a, text: a.text + ' altered' } })).rejects.toMatchObject({ code: 1 })
+    await expect(f.goal('owner', 'bind', { goalId: 'goal', intent: { ...a, context: [{ kind: 'file', source: 'refs.md', revision: 'claimed', scope: 'original', availability: 'available' }] } })).rejects.toMatchObject({ code: 1 })
+    expect(await f.demands.inspectDelegation('goal', a.operationId)).toBeNull(); expect(f.inputs).toEqual(inputs)
+    await f.goal('owner', 'bind', { goalId: 'goal', intent: a }); expect(f.inputs).toEqual(inputs); expect(f.stop).not.toHaveBeenCalled()
+    await record('existing-source-binding-unknown-retained', await f.proof())
   }, 30_000)
 
   it('retains saved intent after original Core read fails, then submits once only after an exact successful absence read', async () => {
