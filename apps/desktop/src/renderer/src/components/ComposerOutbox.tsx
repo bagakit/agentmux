@@ -32,6 +32,8 @@ export type ComposerQueuedMessage = {
   editable?: boolean
   immediateSend?: boolean
   preparationWait?: PromptPreparationRetryProgress
+  /** The original control binding, including before its first typed receipt arrives. */
+  inputControlled?: boolean
   inputReceipt?: AgentInputSubmissionReceipt
   inputStopReceipt?: AgentInputWaitStopReceipt
   preparing?: boolean
@@ -47,6 +49,8 @@ export type ComposerQueuedMessage = {
 
 /** Labels describe the queue owner's facts, not native CLI rendering or model progress. */
 export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteraction = false) {
+  if (entry.inputReceipt?.status === 'terminal-confirmed') return { label: entry.archived ? '已归档 · 终端输入已确认' : '终端输入已确认',
+    detail: '原终端已确认输入字节；Native 是否采用尚未确认。这不是任务完成回执。归档不撤回输入，不能恢复为待发重投。', busy: false }
   if (entry.inputReceipt && !entry.archived) {
     const input = entry.inputReceipt
     if (entry.inputStopReceipt?.ref.waitGeneration === input.ref.waitGeneration && entry.inputStopReceipt.outcome === 'stopped-before-dispatch') {
@@ -91,6 +95,7 @@ export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteract
 
 /** A retained queue record is not a submission receipt or a conversation position. */
 export function queuedMessageLocation(entry: ComposerQueuedMessage) {
+  if (entry.inputReceipt?.status === 'terminal-confirmed') return '原终端输入字节已确认；Native 采用与回复位置尚未确认'
   if (entry.confirmed) return '原输入已确认，可在 History 读取'
   if (entry.archived) return entry.unconfirmed ? '已归档；此前输入结果待核实' : '已归档；不会自动发送'
   if (entry.preparing) return '准备发送，对话位置暂不可用'
@@ -198,7 +203,7 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
           {ownFailure ? <p role="alert" className="composer-mailbox__risk">{ownFailure}</p> : null}
           {selected ? <MailboxLocationContext sessionId={sessionId} pending>{(_summary,executionDetails) => <article className="composer-outbox__inline" data-record-key={`queue:${entry.id}`}>
             {editingId === entry.id && onEdit ? <ComposerQueuedMessageEditor key={entry.id} entry={entry} onSave={onEdit} onCancel={() => setEditingId(null)} /> : null}
-            {queuedInputFailure(entry) || entry.error || entry.logId || entry.unconfirmed ? <QueuedDeliveryFailure entry={entry} copy={onCopy} /> : !entry.preparationWait && (state.busy || !entry.deliverable || entry.archived) ? <p className={entry.archived && (entry.confirmed || !entry.unconfirmed) ? 'composer-mailbox__record-note' : 'composer-mailbox__risk'} data-kind={state.busy ? 'working' : 'attention'}>{state.detail}</p> : null}
+            {queuedInputFailure(entry) || entry.error || entry.logId || entry.unconfirmed ? <QueuedDeliveryFailure entry={entry} copy={onCopy} /> : !entry.preparationWait && !entry.inputReceipt && (state.busy || !entry.deliverable || entry.archived) ? <p className={entry.archived && (entry.confirmed || !entry.unconfirmed) ? 'composer-mailbox__record-note' : 'composer-mailbox__risk'} data-kind={state.busy ? 'working' : 'attention'}>{state.detail}</p> : null}
             {entry.preparationWait || entry.inputReceipt ? <p className="composer-pending__retry" role="status">{state.detail}</p> : null}
             <ConversationMessage {...reading} compact recordedIdentity messageId={`queue:${entry.id}`} speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} content={entry.text}
               {...(entry.enqueuedAt === undefined ? {} : {createdAt:entry.enqueuedAt})} {...(onCopy ? {onCopy} : {})}

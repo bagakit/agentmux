@@ -34,10 +34,10 @@ export async function sendConversationReaction(sessionId: string, expected: Prom
   const input = promptReactionMessage(selected, source)
   const operationId = crypto.randomUUID()
   const accepted = state.enqueueAgentSteer(sessionId, input.prompt, onRejected, operationId, 'manual', input.agentMuxNote,
-    { reaction: { code: selected.keyword, replySource: source }, sourceChannel: 'reaction' })
+    { reaction: { code: selected.keyword, replySource: source }, sourceChannel: 'reaction', execution: 'immediate' })
   if (!accepted) return false
   // A reaction cannot answer a pending permission or question; it waits in the ordinary queue.
-  void state.flushAgentSteerQueue(sessionId, current.pendingInteraction ? undefined : operationId)
+  void state.flushAgentSteerQueue(sessionId, current.pendingInteraction ? undefined : operationId).catch(onRejected)
   return true
 }
 

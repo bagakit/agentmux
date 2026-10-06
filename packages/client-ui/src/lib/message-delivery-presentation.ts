@@ -29,10 +29,20 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
   const control = fields(failure?.controlFailure)
   const receipt = input.inputReceipt
   // A terminal original-owner receipt resolves prior uncertainty. The old error remains in the report.
+  if (receipt?.status === 'terminal-confirmed') return { kind: 'terminal-confirmed', title: '终端输入已确认',
+    state: '原终端已确认输入字节；Native 是否采用尚未确认。这不是任务完成回执。', action: '请在原对话或终端查看 Agent 后续处理。' }
   if (receipt?.status === 'admitted') return { kind: 'admitted', title: '输入已确认',
     state: '原消息已由 Native 接纳；这不是 Agent 完成任务的回执。', action: '可在原对话查看 Agent 回复。' }
   if (receipt?.status === 'not-applied') return { kind: 'not-applied', title: '原输入未接纳',
     state: 'Core 已确认这条原输入未被接纳，原消息与回执保留。', action: '需要替换时，创建一条明确的新消息。' }
+  const stop = input.inputStopReceipt
+  const key = receipt?.ref.key, stoppedKey = stop?.ref.key
+  const stopped = stop?.outcome === 'stopped-before-dispatch' && receipt && stop.ref.waitGeneration === receipt.ref.waitGeneration &&
+    stoppedKey?.kind === key?.kind && stoppedKey?.agentSessionId === key?.agentSessionId && stoppedKey?.expectedRun.runId === key?.expectedRun.runId &&
+    (key?.kind === 'prompt' ? stoppedKey?.kind === 'prompt' && stoppedKey.submissionId === key.submissionId
+      : key?.kind === 'message' && stoppedKey?.kind === 'message' && stoppedKey.messageId === key.messageId)
+  if (stopped && receipt.admission === null && receipt.control.state !== 'dispatch-authorized') return { kind: 'stopped', title: '已停止等待',
+    state: 'Core 已确认停止这一代等待，原消息保留。', action: '再次发送会重新确认这条原消息。' }
   const unknown = input.inputUnconfirmed || control?.disposition === 'unknown' ||
     typeof control?.confirmedInputBytes === 'number' && control.confirmedInputBytes > 0 ||
     receipt?.status === 'unknown' || receipt && (receipt.admission !== null || receipt.control.state === 'dispatch-authorized')
@@ -45,12 +55,6 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
     state: '这条消息此前是否已输入仍待核实，原消息和操作会保留。',
     action: '先查看原对话与投递记录，避免重复发送。' }
   if (receipt) {
-    const stop = input.inputStopReceipt
-    const key = receipt.ref.key, stoppedKey = stop?.ref.key
-    const stopped = stop?.outcome === 'stopped-before-dispatch' && stop.ref.waitGeneration === receipt.ref.waitGeneration &&
-      stoppedKey?.kind === key.kind && stoppedKey.agentSessionId === key.agentSessionId && stoppedKey.expectedRun.runId === key.expectedRun.runId &&
-      (key.kind === 'prompt' ? stoppedKey.kind === 'prompt' && stoppedKey.submissionId === key.submissionId
-        : stoppedKey.kind === 'message' && stoppedKey.messageId === key.messageId)
     if (receipt.status === 'stopped' || stopped) return { kind: 'stopped', title: '已停止等待',
       state: 'Core 已确认停止这一代等待，原消息保留。', action: '再次发送会重新确认这条原消息。' }
     if (receipt.status === 'waiting' && receipt.control.state === 'enabled' && receipt.admission === null) {
@@ -105,7 +109,7 @@ export function messageDeliveryDiagnosticReport(input: MessageDeliveryDiagnostic
     `原输入: ${receipt ? JSON.stringify(receipt.ref.key) : '未知（未收到 Core 输入回执）'}`,
     `等待代次: ${receipt?.ref.waitGeneration ?? '未知'}`,
     `Core: ${receipt ? `status=${receipt.status}; persistence=${receipt.persistence}; control=${receipt.control.state}; observation=${receipt.observation}` : '未知'}`,
-    `admission: ${receipt ? receipt.admission === null ? 'null（本回执无接纳记录，不代签此前未输入）' : '收到原接纳记录（完整字段见资料）' : '未知'}`]
+    `admission: ${receipt ? receipt.admission === null ? 'null（本回执无输入记录，不代签此前未输入）' : '收到原输入记录（实际层次见 status，完整字段见资料）' : '未知'}`]
   const dispatch = receipt?.admission?.admission
   if (dispatch) lines.push(`admission.admission: ${JSON.stringify({ transport: dispatch.transport,
     nativeOutcome: dispatch.native?.outcome, acknowledged: dispatch.acknowledged, notApplied: dispatch.notApplied,

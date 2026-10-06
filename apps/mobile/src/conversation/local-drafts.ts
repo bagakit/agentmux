@@ -1,5 +1,5 @@
 import type { MobileQuestionReplyAttempt } from './question-replies'
-import type { AgentSessionHistoryQuestionAnswer } from '@agentmux/core'
+import type { AgentInputSubmissionReceipt, AgentInputWaitRef, AgentInputWaitStopReceipt, AgentSessionHistoryQuestionAnswer } from '@agentmux/core'
 import type { AgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { DeviceWorkfaceRecordChangedError, getDeviceWorkface, type ConversationBucket, type ConversationCommit, type ConversationConflict, type ConversationEdit, type ConversationValue, type DraftRecord, type DeviceWorkface } from '../recovery/device-workface'
 
@@ -10,6 +10,11 @@ export type PromptAttempt = {
   phase: 'sending' | 'unknown' | 'rejected' | 'confirmed'
   message: string
   request?: { condition: AgentPromptCondition; execution: 'default' | 'immediate'; explicit: boolean; runtimeId: string | null }
+  /** A new explicit producer, frozen before its first intake. Old exact requests stay exact. */
+  manualInput?: { agentSessionId: string; expectedRun: { runId: string }; runtimeId: string | null;
+    stopIntent?: { ref: AgentInputWaitRef; cancelOperationId: string }; stopReceipt?: AgentInputWaitStopReceipt }
+  /** Live projection only. Cold readers inspect the original Core key instead of restoring authority. */
+  inputReceipt?: AgentInputSubmissionReceipt
   /** Missing means historical/unknown, never permission to construct another input. */
   inputRequested?: boolean
   originalRuntimeId?: string | null
@@ -102,8 +107,9 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
           operationId: intent.operationId, runId: intent.runId,
           // Failed original bodies are retained for explicit retry. Confirmed bodies
           // remain in Core history and are removed from this device-owned intent.
-          draft: intent.phase === 'confirmed' ? '' : intent.draft, phase: intent.phase,
+          draft: intent.phase === 'confirmed' && !intent.manualInput ? '' : intent.draft, phase: intent.phase,
           ...(intent.request ? { request: structuredClone(intent.request) } : {}), ...(intent.logId ? { logId: intent.logId } : {}),
+          ...(intent.manualInput ? { manualInput: structuredClone(intent.manualInput) } : {}),
           ...(intent.inputRequested !== undefined ? { inputRequested: intent.inputRequested } : {}),
           ...(intent.originalRuntimeId !== undefined ? { originalRuntimeId: intent.originalRuntimeId } : {}),
           ...(intent.originalHostId !== undefined ? { originalHostId: intent.originalHostId } : {}),
