@@ -254,3 +254,21 @@ it('old evidence actions and receipts cannot write across selection or hidden ep
   await dom.click('[aria-label="Copy collaboration evidence"]'); expect(JSON.parse(copy.mock.calls.at(-1)![0]).record.dispatch.sourceMessageId).toBe('source-two')
   await clickText('Back to collaboration'); await select(); await act(async () => old()); expect(copy).toHaveBeenCalledTimes(2)
 })
+
+it('keeps collaboration help deliberate without reading, clearing filters or changing the selected record', async () => {
+  await start(); await findLoaded('source-two')
+  const help = dom.container.querySelector<HTMLDetailsElement>('.mailbox-collaboration__help')!
+  expect(help.open).toBe(false)
+  expect(dom.container.querySelector('[role="status"]')?.textContent).toContain('This list only')
+  const lists = vi.mocked(api.sessions.dispatches).mock.calls.length
+  await act(async () => { help.open = true; help.dispatchEvent(new Event('toggle')) })
+  expect(help.textContent).toContain('Other Agent messages remain in Inbox and Outbox')
+  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Find loaded collaboration records"]')!.value).toBe('source-two')
+  expect(dom.container.querySelectorAll('[data-source-message]')).toHaveLength(1)
+  expect(api.sessions.dispatches).toHaveBeenCalledTimes(lists); expect(api.sessions.dispatch).not.toHaveBeenCalled()
+  await select('source-two')
+  const calls = vi.mocked(api.sessions.dispatch).mock.calls.length
+  await act(async () => { help.open = false; help.dispatchEvent(new Event('toggle')) })
+  expect(dom.container.querySelector('[data-dispatch-source="source-two"]')).not.toBeNull()
+  expect(api.sessions.dispatch).toHaveBeenCalledTimes(calls)
+})
