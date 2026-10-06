@@ -193,3 +193,22 @@ it('creates a new Note through the original Store intent and original file write
   expect(bytes).toContain('A new original note');expect(read.note.noteId).toBe(receipt.noteId);expect(read.note.content.content![0]!.attrs?.blockId).toBe(receipt.blockIds[0])
  }finally {useAppStore.setState(before,true);useLauncherState.setState(launchers,true);await f.dispose()}
 })
+it('keeps shared rich input and undo alive when actual pasted reference cannot be serialized',async()=>{
+  const content=serializeNoteDocument(newNoteDocument('Original shared text','shared-paste','shared-block')),draft=vi.fn(),save=vi.fn()
+  await dom.render(<NoteReader content={content} path="shared.note.md" workspaceId="workspace" revision="shared-original" editing={{onDraft:draft,save,readCurrent:vi.fn()}} />)
+  await act(async()=> [...dom.container.querySelectorAll('button')].find(button=>button.textContent==='编辑原笔记')!.click())
+  draft.mockClear()
+  const editor=(dom.container.querySelector('.mobile-note-body[contenteditable="true"]') as HTMLElement&{editor:Editor}).editor
+  const original=editor.getJSON(),transfer=new DataTransfer()
+  transfer.setData('text/html','<div data-note-block-reference="" data-note-target="broken-json" data-note-reference-mode="reference"></div>')
+  transfer.setData('text/plain','Unconfirmed reference')
+  await expect(act(async()=>{editor.view.focus();editor.commands.setTextSelection(editor.state.doc.content.size-1);editor.view.dom.dispatchEvent(new ClipboardEvent('paste',{clipboardData:transfer,bubbles:true,cancelable:true}))})).resolves.toBeUndefined()
+  expect(dom.container.querySelector('.mobile-note-body[contenteditable="true"]')).not.toBeNull()
+  expect(dom.container.textContent).toContain('本次输入尚未保存');expect(dom.container.textContent).toContain('引用目标尚未确认')
+  expect(draft).not.toHaveBeenCalled();expect(save).not.toHaveBeenCalled()
+  await act(async()=>editor.commands.undo())
+  expect(editor.getJSON()).toEqual(original);expect(dom.container.textContent).not.toContain('本次输入尚未保存')
+  await act(async()=>editor.commands.insertContent('Continuing '))
+  expect(draft).toHaveBeenCalled();const next=readNoteDocument(draft.mock.lastCall![0].draft)
+  expect(next.status).toBe('valid');expect(editor.state.doc.textContent).toContain('Continuing ')
+})
