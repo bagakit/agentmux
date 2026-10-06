@@ -51,6 +51,27 @@
 .mote-details__cooperation .mote-details__check { display: flex; flex-direction: row; align-items: flex-start; gap: 7px; line-height: 1.5; }
 .mote-details__check input { flex: 0 0 auto; margin-top: 3px; }
 .mote-details__source { overflow-wrap: anywhere; }
+.mote-memory { border-top: 1px solid var(--line-soft); padding: 10px 0; }
+.mote-memory > summary { display: flex; align-items: center; gap: 7px; min-height: 32px; color: var(--text-2); cursor: pointer; list-style: none; }
+.mote-memory > summary::-webkit-details-marker { display: none; }
+.mote-memory > summary > svg:last-child { margin-inline-start: auto; }
+.mote-memory[open] > summary > svg:last-child { transform: rotate(180deg); }
+.mote-memory > summary:hover, .mote-memory[open] > summary { color: var(--text); }
+.mote-memory > summary:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: var(--radius-sm); }
+.mote-memory__body { padding-top: 6px; min-width: 0; }
+.mote-memory__body > .mote-details__hint { margin: 8px 0; font-size: var(--fs-meta); }
+.mote-memory__body > .mote-details__issue { margin-block: 8px; line-height: 1.6; }
+.mote-memory__prose { margin-block: 12px; }
+.mote-memory__draft { color: var(--amber); }
+.mote-memory__source { margin-block: 8px; color: var(--text-3); font-size: var(--fs-meta); }
+.mote-memory__source > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; }
+.mote-memory__source > summary::-webkit-details-marker { display: none; }
+.mote-memory__source > summary > svg { flex-shrink: 0; }
+.mote-memory__source[open] > summary > svg { transform: rotate(180deg); }
+.mote-memory__source > summary:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: var(--radius-sm); }
+.mote-memory__source dl { margin: 8px 0; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; row-gap: 5px; line-height: 1.6; }
+.mote-memory__source :is(dt, dd) { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.mote-memory__source code { font-size: inherit; white-space: normal; overflow-wrap: anywhere; }
 .mote-cooperation-entry { margin: 12px 0 4px; }
 .mote-cooperation-entry__shortcut { display: block; min-height: 20px; padding-top: 5px; text-align: right; color: var(--text-3); font: var(--fs-micro)/1.5 var(--font-mono); visibility: hidden; }
 .mote-cooperation-entry:focus-within .mote-cooperation-entry__shortcut { visibility: visible; }

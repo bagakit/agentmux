@@ -1,7 +1,7 @@
 import { MoteQuickMode } from './MoteQuickMode'
 import { MOTE_QUICK_MODE_PATH } from '../../../shared/mote-quick-mode'
 import { TOPIC_AGENT_INSTRUCTIONS_PATH, MOTE_MEMORY_PATH } from '../../../shared/topic-agent-instructions'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useShallow } from 'zustand/react/shallow'
 import type { SessionSnapshot } from '../../../shared/contracts'
@@ -26,6 +26,7 @@ import { StatusDot } from './StatusDot'
 import { MoteIdeaControls } from './MoteIdeaControls'
 import { MoteFirstCooperation } from './MoteFirstCooperation'
 import { MoteCurrentWork } from './MoteCurrentWork'
+import { MoteMemory } from './MoteMemory'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
@@ -110,6 +111,8 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; section: MoteSection; profile: ReactNode; active: boolean; onShowIdeas(): void
   onOpenPath(path: string): Promise<unknown>; onCreateNote?: (() => void) | undefined
 }) {
+  const content = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => { if (content.current) content.current.scrollTop = 0 }, [section])
   const tree = useWorkspaceFileTree(scope.workspace.id, NO_EXPANDED_PATHS, scope.rootPath, active)
   const revision = useMoteFileRevision(scope.workspace.id, active)
   const refresh = useRef(tree.refreshTree); refresh.current = tree.refreshTree
@@ -153,7 +156,7 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
     {tree.rootError ? <div role="status" className="mote-details__issue">{tree.rootError}<button type="button" className="small-button" onClick={() => void tree.refreshTree()}>Retry notes</button></div> : null}
     {tree.rootCache?.loading ? <p role="status" className="mote-details__hint">Reading notes…</p> : null}
   </>
-  return <div key={section} className="mote-details__content" role="tabpanel" aria-label={section === 'profile' ? 'Mote profile' : 'Mote ideas'}>
+  return <div ref={content} className="mote-details__content" role="tabpanel" aria-label={section === 'profile' ? 'Mote profile' : 'Mote ideas'}>
     {section === 'profile' ? <>
       <div className="mote-details__profile">{profile}</div>
       <MoteBehaviorSummary scope={scope} active={active} onEdit={() => { behaviorInvoker.current = document.activeElement as HTMLElement; setBehaviorOpen(true) }} onOpenPath={onOpenPath} />
@@ -161,6 +164,9 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
       <MoteCurrentWork scope={scope} reference={reference} active={active} />
       {behaviorOpen ? <MoteBehaviorDialog scope={scope} reference={reference} onOpenPath={onOpenPath}
         onClose={() => setBehaviorOpen(false)} returnFocus={() => behaviorInvoker.current?.isConnected ? behaviorInvoker.current : null} /> : null}
+    </> : null}
+    <div hidden={section !== 'profile'}><MoteMemory scope={scope} active={active && section === 'profile'} onOpenPath={onOpenPath} /></div>
+    {section === 'profile' ? <>
       <div className="mote-details__recent">
         <div className="mote-details__section-actions">{emptyIdeas ? <button type="button" className="mote-details__navigation" aria-label="View ideas and saved materials" onClick={onShowIdeas}><span>Recent ideas<small className="mote-current-work__count">0</small></span><ThemeNavigationForwardIcon size={16} /></button> : <><span>Recent ideas<small className="mote-current-work__count">{recent.length || null}</small></span><MoteBehaviorAction label="View ideas and saved materials" onClick={onShowIdeas}><ThemeNavigationForwardIcon size={16} /></MoteBehaviorAction></>}</div>
         {notesIssue}
