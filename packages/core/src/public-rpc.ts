@@ -185,6 +185,7 @@ type NativeParams = GoalDelegationParamsMap & MoteAvatarParameterMap & TopicPara
   'notebook.ls': Record<string, never>
   'notebook.inspect': { notebookId?: string; noteId?: string; operationId?: string; content?: boolean; maxBytes?: number }
   'notebook.graph': import('./notebook-observation.js').NotebookGraphParams
+  'notebook.resolve': import('./note-links.js').NotebookResolveParams
   'notebook.apply': import('./notebook-catalog.js').NotebookWrite
   'space.state': Record<string, never>
   'space.commit': import('./spatial-state.js').AgentMuxSpatialCommit
@@ -239,6 +240,7 @@ type NativeResult = GoalDelegationResultMap & MoteAvatarResultMap & TopicResultM
   'notebook.ls': { state: import('./notebook-catalog.js').NotebookState }
   'notebook.inspect': { state: import('./notebook-catalog.js').NotebookState; notebook: import('./notebook-catalog.js').Notebook | null; pages: import('./notebook-catalog.js').NotebookPage[]; trail: import('./notebook-catalog.js').NoteTrailEvent[]; recordedOperation: import('./notebook-catalog.js').NotebookState['operations'][string] | null; storageOperation?: import('./notes-storage.js').NotesStorageOperation | null; content?: import('./notebook-observation.js').NoteContentObservation }
   'notebook.graph': import('./notebook-observation.js').NotebookGraph
+  'notebook.resolve': import('./note-links.js').NotebookResolveResult
   'notebook.apply': { state: import('./notebook-catalog.js').NotebookState }
   'space.state': { state: import('./spatial-state.js').AgentMuxSpatialState | null }
   'space.commit': { state: import('./spatial-state.js').AgentMuxSpatialState }
@@ -317,7 +319,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_RPC_HOST_SETTINGS_METHODS,
   ...AGENTMUX_HOSTED_RPC_METHODS,
   'settings.appearance.watch': 'long',
-  'notebook.ls': 'short', 'notebook.inspect': 'long', 'notebook.graph': 'long', 'notebook.apply': 'long',
+  'notebook.ls': 'short', 'notebook.inspect': 'long', 'notebook.graph': 'long', 'notebook.resolve': 'long', 'notebook.apply': 'long',
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.history.resource': 'long', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',

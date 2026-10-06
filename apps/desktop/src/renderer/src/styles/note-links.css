@@ -1,0 +1,40 @@
+.note-links { max-width: var(--note-content-width, 760px); margin: 16px auto 0; padding: 0 var(--sp-8) 18px; color: var(--text-2); font: 12px/1.6 var(--font-sans); }
+.note-links button { font: inherit; cursor: pointer; }
+.note-links button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
+.note-links-toggle { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; width: 100%; border: 0; border-top: 1px solid var(--line-soft); padding: 14px 0 0; background: transparent; color: var(--text-2); text-align: left; }
+.note-links-toggle > strong { font-weight: 550; }
+.note-links-toggle > svg, .note-links-source-toggle > svg { transition: transform 120ms ease; flex: none; color: var(--text-3); }
+.note-links-toggle[aria-expanded="true"] > svg, .note-links-source-toggle[aria-expanded="true"] > svg { transform: rotate(90deg); }
+.note-links-toggle > span { margin-left: auto; color: var(--text-3); font-size: 10px; }
+.note-links-body { padding-top: 12px; }
+.note-links-controls, .note-links-controls > div { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+.note-links-controls button { border: 0; border-radius: 3px; padding: 3px 5px; background: transparent; color: var(--text-3); font-size: 11px; }
+.note-links-controls button:hover { color: var(--text); background: var(--wash-1); }
+.note-links-controls button[aria-pressed="true"] { color: var(--text); background: var(--wash-1); font-weight: 550; }
+.note-links-controls .note-links-refresh { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
+.note-links-scope, .note-links-state, .note-links-origin { color: var(--text-3); font-size: 10px; line-height: 1.7; overflow-wrap: anywhere; }
+.note-links-scope { margin: 7px 0 12px; }
+.note-links-state > button { margin-left: 9px; border: 0; padding: 1px 0; background: transparent; color: var(--blue); font-size: inherit; }
+.note-links-source { border-top: 1px solid var(--line-soft); }
+.note-links-source-toggle { display: flex; align-items: flex-start; gap: 7px; width: 100%; padding: 11px 0; border: 0; background: transparent; color: var(--text); text-align: left; }
+.note-links-source-toggle > svg { margin-top: 4px; }
+.note-links-source-toggle > span { min-width: 0; overflow-wrap: anywhere; }
+.note-links-source-toggle > small { flex: none; margin-left: auto; color: var(--text-3); font-size: 10px; }
+.note-links-source-body { padding: 0 0 12px 19px; }
+.note-links-origin { margin: 0 0 12px; }
+.note-links-block + .note-links-block { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+.note-links ol { list-style: none; margin: 0; padding: 0; }
+.note-links-occurrence { padding: 9px 0 12px; }
+.note-links-occurrence + .note-links-occurrence { border-top: 1px solid var(--line-soft); }
+.note-links-kind { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; font-size: 10px; }
+.note-links-kind strong { font-weight: 550; }
+.note-links-kind [data-resolution] { color: var(--text-3); }
+.note-links-kind [data-resolution="resolved"] { color: var(--green); }
+.note-links-excerpt { margin: 7px 0; color: var(--text-2); line-height: 1.8; overflow-wrap: anywhere; white-space: pre-wrap; }
+.note-links-location { margin: 6px 0; color: var(--text-3); font-size: 10px; overflow-wrap: anywhere; }
+.note-links-location code { font: 9px/1.7 var(--font-mono); }
+.note-links-actions { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.note-links-actions button { border: 0; padding: 2px 0; background: transparent; color: var(--blue); font-size: 10px; }
+.note-links-outgoing { padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.note-links-destination { margin: 0; color: var(--text); font-size: 12px; font-weight: 550; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .note-links-toggle > svg, .note-links-source-toggle > svg { transition: none; } }

@@ -2,14 +2,23 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type NodeViewProps, useEditorState } from '@tiptap/react'
 import type { FileWriteReceipt, FileReadResult } from '@agentmux/core/files'
 import type { JSONContent } from '@tiptap/core'
-import { noteContentExtensions, NoteBlockReferenceNode, noteIdentityExtensions } from '../note/note-content-schema.js'
+import { noteContentExtensions, NoteBlockReferenceNode, NoteInlineLinkNode, noteIdentityExtensions } from '../note/note-content-schema.js'
+import { NoteInlineLink, type NoteLinkOpenRequest } from './NoteInlineLink.js'
+import { noteWikiLiteralExtension } from '../note/note-wiki-view.js'
+import { noteWikiInputExtension } from '../note/note-wiki-input.js'
+import type { NoteInlineLinkAttributes } from '@agentmux/core/note-links'
 import { readNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../note/note-document.js'
 import { noteKnowledge, resolveNoteBlock, type NoteKnowledge } from '../note/note-knowledge.js'
 import { acknowledgeNoteWrite, type NoteEditState } from '../note/note-edit-state.js'
 import { noteProvenanceAttributes } from '../note/note-provenance.js'
 export type { NoteEditState } from '../note/note-edit-state.js'
+export type { NoteLinkOpenRequest } from './NoteInlineLink.js'
 
-const Scope = createContext<{ knowledge: NoteKnowledge; trail: string[]; readReference?: ((target: NoteBlockTarget) => void) | undefined } | null>(null)
+const Scope = createContext<{ knowledge: NoteKnowledge; trail: string[]; readReference?: ((target: NoteBlockTarget) => void) | undefined; onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined } | null>(null)
+function InlineLink({ node, editor }: NodeViewProps) {
+  const scope = useContext(Scope)
+  return <NodeViewWrapper as="span" className="note-inline-link-node" contentEditable={false}><NoteInlineLink link={node.attrs as NoteInlineLinkAttributes} editable={editor.isEditable} onOpen={scope?.onOpenLink} /></NodeViewWrapper>
+}
 function Reference({ node }: NodeViewProps) {
   const scope = useContext(Scope)
   const reference = node.attrs as NoteBlockReference
@@ -27,8 +36,10 @@ function Reference({ node }: NodeViewProps) {
   </NodeViewWrapper>
 }
 function RichContent({ content, onChange }: { content: JSONContent; onChange?: ((value: JSONContent) => void) | undefined }) {
+  const scope = useContext(Scope), open = useRef(scope?.onOpenLink); open.current = scope?.onOpenLink
   const extensions = useMemo(() => noteContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name
-    ? NoteBlockReferenceNode.extend({ addNodeView() { return ReactNodeViewRenderer(Reference) } }) : extension).concat(onChange ? noteIdentityExtensions() : []), [Boolean(onChange)])
+    ? NoteBlockReferenceNode.extend({ addNodeView() { return ReactNodeViewRenderer(Reference) } }) : extension.name === NoteInlineLinkNode.name
+    ? NoteInlineLinkNode.extend({ addNodeView() { return ReactNodeViewRenderer(InlineLink) } }) : extension).concat(onChange ? [...noteIdentityExtensions(), noteWikiInputExtension()] : []).concat([noteWikiLiteralExtension(link => open.current?.(link))]), [Boolean(onChange)])
   const update = useRef(onChange); update.current = onChange
   const editor = useEditor({ extensions, content, editable: Boolean(onChange), onUpdate: ({ editor }) => update.current?.(editor.getJSON()), editorProps: { attributes: { class: 'mobile-note-body', 'aria-label': '原 Note 正文' } } }, [])
   useEffect(() => { if (editor) editor.commands.setContent(content, { emitUpdate: false }) }, [editor, content])
@@ -57,9 +68,10 @@ export type NoteReaderProps = { content: string; path: string; workspaceId: stri
   readReference?: ((target: NoteBlockTarget) => void) | undefined
   editing?: NoteEditing | undefined
   target?: NoteBlockTarget | undefined
+  onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined
 }
 const EMPTY_DOCUMENTS: NonNullable<NoteReaderProps['documents']> = []
-export function NoteReader({ content, path, workspaceId, revision, documents = EMPTY_DOCUMENTS, readReference, editing, target }: NoteReaderProps) {
+export function NoteReader({ content, path, workspaceId, revision, documents = EMPTY_DOCUMENTS, readReference, editing, target, onOpenLink }: NoteReaderProps) {
   const parsed = useMemo(() => readNoteDocument(content), [content])
   const body = useRef<HTMLDivElement>(null)
   const [working, setWorking] = useState<{ noteId: string; content: string } | null>(null)
@@ -72,7 +84,7 @@ export function NoteReader({ content, path, workspaceId, revision, documents = E
     const element = [...body.current?.querySelectorAll<HTMLElement>('[data-block-id]') ?? []].find(element => element.dataset.blockId === target.blockId)
     element?.scrollIntoView?.({ block: 'center' })
   }, [target?.noteId, target?.blockId, block?.status])
-  return parsed.status === 'valid' ? <Scope.Provider value={{ knowledge, trail: [], readReference }}><div ref={body} data-note-id={parsed.note.noteId} data-target-block={block?.status === 'resolved' ? target?.blockId : undefined}>
+  return parsed.status === 'valid' ? <Scope.Provider value={{ knowledge, trail: [], readReference, onOpenLink }}><div ref={body} data-note-id={parsed.note.noteId} data-target-block={block?.status === 'resolved' ? target?.blockId : undefined}>
     {target && <section aria-label="原块定位" data-block-target-status={block?.status}>
       {block?.status === 'resolved' ? <><strong>引用的原块</strong><p>{block.block.text}</p></> : <p role="status">原块未确认：{block?.message} 原引用保留，仍可阅读完整笔记。</p>}
     </section>}

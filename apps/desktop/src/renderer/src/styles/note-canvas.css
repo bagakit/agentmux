@@ -28,7 +28,10 @@
 .react-flow__node.dragging .note-canvas-drag { cursor: grabbing; }
 .note-canvas-book { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--text-3); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
 .note-canvas-book > svg { flex: none; }
+.note-canvas-book > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .note-canvas-book em { margin-left: auto; font-style: normal; color: var(--text-3); font-size: 9px; }
+.note-canvas-unbound { flex: none; border: 0; border-radius: 3px; padding: 2px 4px; margin-left: auto; background: var(--wash-1); color: var(--text-2); font-size: 9px !important; white-space: nowrap; }
+.note-canvas-unbound:hover { color: var(--blue); background: var(--wash-2); }
 .note-canvas-title { display: flex; align-items: flex-start; gap: 8px; width: 100%; margin: 9px 0 0; padding: 0; border: 0; background: transparent; color: var(--text); font-size: 15px !important; font-weight: 550 !important; line-height: 1.45; text-align: left; overflow-wrap: anywhere; }
 .note-canvas-title > svg { flex: none; margin: 4px 0 0 auto; opacity: .4; }
 .note-canvas-title > span { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
@@ -58,16 +61,19 @@
 .note-canvas-open-block { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; padding: 3px 0; border: 0; background: transparent; color: var(--blue); font-size: 10px !important; }
 .note-canvas-body-state { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-block: 10px; font-size: 11px; color: var(--text-3); line-height: 1.6; }
 .note-canvas .note-canvas-edge-reference { stroke: var(--blue); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.note-canvas .note-canvas-edge-link { stroke: var(--blue); stroke-width: 1.8; }
 .note-canvas .note-canvas-edge-embed { stroke: var(--green); stroke-width: 1.8; }
 .note-canvas .note-canvas-edge-hierarchy { stroke: var(--text-3); stroke-width: 1; opacity: .65; }
 .note-canvas-edge-label { position: absolute; pointer-events: all; padding: 3px 6px; border: 1px solid var(--line-soft); border-radius: 4px; background: var(--surface-1); color: var(--text-3); font-size: 9px !important; line-height: 1.4; }
 .note-canvas-edge-label.is-reference { color: var(--blue); }
+.note-canvas-edge-label.is-link { color: var(--blue); }
 .note-canvas-edge-label.is-embed { color: var(--green); }
 .note-canvas-edge-label:hover { background: var(--surface-2); border-color: var(--line); }
 .note-canvas-caption { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: 9px; line-height: 1.5; }
-.note-canvas-legend { display: flex; align-items: center; gap: 6px; }
+.note-canvas-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .note-canvas-legend i { display: inline-block; width: 14px; border-top: 1px solid var(--text-3); }
 .note-canvas-legend i[data-reference] { margin-left: 8px; border-color: var(--blue); border-top-style: dashed; }
+.note-canvas-legend i[data-link] { margin-left: 8px; border-color: var(--blue); border-top-width: 2px; }
 .note-canvas-legend i[data-embed] { margin-left: 8px; border-top: 2px solid var(--green); }
 .note-canvas-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 20px; pointer-events: none; color: var(--text-3); font-size: 12px; text-align: center; }
 .note-canvas-empty strong { color: var(--text-2); font-size: 14px; font-weight: 500; }

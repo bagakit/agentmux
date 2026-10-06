@@ -4,9 +4,9 @@ import type { NotebookGraphSnapshot } from '../../../shared/notebook-observation
 import type { NoteCanvasScope } from './note-canvas-state'
 
 export type CanvasReference = NotebookGraph['references'][number]
-export type CanvasRelationship = { id: string; kind: 'hierarchy' | 'reference' | 'embed'; source: string; target: string; references: CanvasReference[] }
-export type CanvasNote = { id: string; page?: NotebookPage; observation?: NoteContentMetadata; title: string; notebook: string; root: boolean; context: boolean; neighbors: number }
-export type CanvasProjection = { notes: CanvasNote[]; relationships: CanvasRelationship[] }
+export type CanvasRelationship = { id: string; kind: 'hierarchy' | 'reference' | 'embed' | 'link'; source: string; target: string; references: CanvasReference[] }
+export type CanvasNote = { id: string; page?: NotebookPage; observation?: NoteContentMetadata; title: string; notebook: string; root: boolean; context: boolean; neighbors: number; unbound: CanvasReference[] }
+export type CanvasProjection = { notes: CanvasNote[]; relationships: CanvasRelationship[]; unbound: CanvasReference[] }
 const key = (kind: string, from: string, to: string) => JSON.stringify([kind, from, to])
 
 /** A projection of the original observation. It neither reads files nor infers new links. */
@@ -25,7 +25,13 @@ export function projectNoteCanvas(snapshot: NotebookGraphSnapshot, scope: NoteCa
     }
   }
   for (const edge of graph.hierarchy) add('hierarchy', edge.parentNoteId, edge.noteId)
-  for (const reference of graph.references) add(reference.mode, reference.source.noteId, reference.target.noteId, reference)
+  const unbound = new Map<string, CanvasReference[]>()
+  for (const reference of graph.references) {
+    if (reference.target.kind === 'unbound') {
+      const held = unbound.get(reference.source.noteId) ?? []
+      held.push(reference); unbound.set(reference.source.noteId, held)
+    } else add(reference.mode, reference.source.noteId, reference.target.noteId, reference)
+  }
   const seeds = new Set(scope.kind === 'note' ? [scope.noteId] : seedNoteIds ?? Object.values(catalog.pages).filter(page => page.notebookId === scope.notebookId && !page.archivedAt).map(page => page.noteId))
   const visible = new Set(seeds), queue = [...seeds], expansion = new Set(expanded)
   for (let index = 0; index < queue.length; index++) {
@@ -38,9 +44,9 @@ export function projectNoteCanvas(snapshot: NotebookGraphSnapshot, scope: NoteCa
     const page = catalog.pages[id], observation = observations.get(id)
     return { id, ...(page ? { page } : {}), ...(observation ? { observation } : {}), title: page?.title ?? 'Uncatalogued note',
       notebook: page ? catalog.notebooks[page.notebookId]?.name ?? 'Original notebook' : 'Outside this directory',
-      root: scope.kind === 'note' && id === scope.noteId, context: !seeds.has(id), neighbors: adjacent.get(id)?.size ?? 0 }
+      root: scope.kind === 'note' && id === scope.noteId, context: !seeds.has(id), neighbors: adjacent.get(id)?.size ?? 0, unbound: unbound.get(id) ?? [] }
   })
-  return { notes, relationships: [...relationships.values()].filter(edge => visible.has(edge.source) && visible.has(edge.target)) }
+  return { notes, relationships: [...relationships.values()].filter(edge => visible.has(edge.source) && visible.has(edge.target)), unbound: [...unbound.values()].flat().filter(reference => visible.has(reference.source.noteId)) }
 }
 
 /** New nodes get provisional usable positions while the background layout is pending. */

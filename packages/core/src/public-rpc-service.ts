@@ -10,6 +10,7 @@ import { parseDeliveryAttempt, validateDeliveryLogId, type DeliveryAttemptLookup
 import { parseAgentContextParams, readAgentContext, forwardAgentContextParams, forwardAgentContextPage } from './agent-context.js'
 
 import { parseNotebookObservationParams, type NotebookObservationPort } from './notebook-observation.js'
+import { parseNotebookResolveParams } from './note-links.js'
 import { inspectNotebook } from './notebook-catalog.js'
 import { AgentMuxNotebookStore } from './notebook-store.js'
 import { normalizeMessageChannel } from './message-origin.js'
@@ -135,7 +136,7 @@ const NATIVE_FIELDS = {
   'goal.delegation.prepare': ['goalId', 'intent', 'materials'], 'goal.delegation.bind': ['goalId', 'intent'], 'goal.delegate': ['goalId', 'intent', 'materials'],
   'goal.report': ['goalId', 'operationId', 'report'], 'goal.collect': ['goalId', 'operationId', 'collection'], 'goal.delegations': ['goalId'],
   'settings.appearance.watch': [],
-  'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId','content','maxBytes'], 'notebook.graph': ['notebookId','noteId','maxBytes'], 'notebook.apply': ['expectedRevision','operationId','change'],
+  'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId','content','maxBytes'], 'notebook.graph': ['notebookId','noteId','maxBytes'], 'notebook.resolve': ['mode','query','limit','text','select','maxBytes'], 'notebook.apply': ['expectedRevision','operationId','change'],
   'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval','removedProjectGroupIds'],
   'space.resolve': ['tabId','regionId','direction'],
   'name.history': ['target','afterId','limit'],
@@ -782,6 +783,11 @@ export class AgentMuxRpcService {
         const input = parseNotebookObservationParams(p)
         if (!this.ports.notebookObservation) throw new AgentMuxError('The original Host Note graph reader is unavailable. Directory and Agent capabilities remain available; retry this observation when the Host reconnects.', 'CONTROL_UNAVAILABLE')
         result = await this.ports.notebookObservation.graph(await this.notebooks.read(), input, context.signal ? { signal: context.signal } : undefined); break
+      }
+      case 'notebook.resolve': {
+        const input = parseNotebookResolveParams(p)
+        if (!this.ports.notebookObservation) throw new AgentMuxError('The original Host Note resolver is unavailable. Editing and Agents remain available; retry this observation after reconnecting.', 'CONTROL_UNAVAILABLE')
+        result = await this.ports.notebookObservation.resolve(await this.notebooks.read(), input, context.signal ? { signal: context.signal } : undefined); break
       }
       case 'notebook.apply': {
         const actor:import('./notebook-catalog.js').NotebookActor|undefined=caller?{kind:'agent',id:caller.agentSessionId}:context.principal?{kind:context.principal.kind,id:context.principal.id}:undefined

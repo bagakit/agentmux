@@ -373,6 +373,7 @@ const mockApi: AgentMuxDesktopApi = {
   },
   topics: { call: async () => { throw new Error('The original Topic filesystem owner is unavailable in the web preview. Open the Desktop to read or save Topic content.') } },
   notebooks: {
+    resolve: async () => { throw new Error('The original Host Note resolver is unavailable in web preview. Your query and editing remain available; retry after reconnecting.') },
     graph: async () => { throw new Error('The original Host Note graph reader is unavailable in web preview. Open Desktop or retry this same observation after reconnecting.') },
     content: async () => { throw new Error('The original Host Note reader is unavailable in web preview. Original content is retained; reconnect the Host before retrying.') },
     actor: async () => ({ kind: 'user', id: 'web-preview-user' }),

@@ -2,6 +2,8 @@ import type { JSONContent } from '@tiptap/core'
 import { NOTE_BLOCK_TYPES, noteContentSchema } from './note-content-schema.js'
 import { NOTE_SCHEMA } from './note-format.js'
 import { readNoteBlockProvenance } from './note-provenance.js'
+import { parseNoteLinkTarget, parseNoteWikiQuery } from '@agentmux/core/note-links'
+export type { NoteLinkTarget, NoteInlineLinkAttributes } from '@agentmux/core/note-links'
 export type { NoteBlockAuthorship, NoteBlockProvenance } from './note-provenance.js'
 export { NOTE_BLOCK_TYPES } from './note-content-schema.js'
 export { NOTE_SCHEMA, NOTE_FILE_EXTENSION } from './note-format.js'
@@ -44,6 +46,13 @@ export function readNoteDocument(raw: string): NoteDocumentRead {
       if (node.type === 'blockReference') {
         const attrs = node.attrs
         if (!record(attrs) || !identity(attrs.referenceId) || references.has(attrs.referenceId) || !record(attrs.target) || !identity(attrs.target.noteId) || !identity(attrs.target.blockId) || (attrs.mode !== 'reference' && attrs.mode !== 'embed')) throw new Error('A block reference identity or exact target is invalid.')
+        references.add(attrs.referenceId)
+      }
+      if (node.type === 'noteLink') {
+        const attrs = node.attrs
+        if (!record(attrs) || !identity(attrs.referenceId) || references.has(attrs.referenceId) || typeof attrs.text !== 'string' || !attrs.text || /[\0\r\n]/u.test(attrs.text)) throw new Error('An inline Note link identity or text is invalid.')
+        if (attrs.target === null) { if (parseNoteWikiQuery(attrs.text).status !== 'valid') throw new Error('An unbound Note link query is invalid.') }
+        else parseNoteLinkTarget(attrs.target)
         references.add(attrs.referenceId)
       }
       if (node.content !== undefined) {

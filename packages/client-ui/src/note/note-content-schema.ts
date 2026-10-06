@@ -31,10 +31,23 @@ export const NoteBlockReferenceNode = Node.create({
   parseHTML() { return [{ tag: 'div[data-note-block-reference]' }] },
   renderHTML({ HTMLAttributes }) { return ['div', { ...HTMLAttributes, 'data-note-block-reference': '' }] }
 })
+export const NoteInlineLinkNode = Node.create({
+  name: 'noteLink', group: 'inline', inline: true, atom: true,
+  addAttributes() {
+    return {
+      referenceId: { default: null }, text: { default: '' }, target: { default: null }
+    }
+  },
+  parseHTML() { return [{ tag: 'span[data-note-link]', getAttrs: element => {
+    try { return JSON.parse((element as HTMLElement).getAttribute('data-note-link') ?? 'null') } catch { return false }
+  } }] },
+  renderHTML({ node }) { return ['span', { 'data-note-link': JSON.stringify(node.attrs) }, `[[${String(node.attrs.text)}]]`] },
+  renderText({ node }) { return `[[${String(node.attrs.text)}]]` }
+})
 
 /** The parser and rich editor share the installed TipTap node/mark schema. */
 export function noteContentExtensions() {
-  return [StarterKit.configure({ trailingNode: false }), BlockIdentity, NoteBlockReferenceNode]
+  return [StarterKit.configure({ trailingNode: false }), BlockIdentity, NoteBlockReferenceNode, NoteInlineLinkNode]
 }
 export const noteContentSchema: ReturnType<typeof getSchema> = getSchema(noteContentExtensions())
 
@@ -42,6 +55,6 @@ export const noteContentSchema: ReturnType<typeof getSchema> = getSchema(noteCon
 export function noteIdentityExtensions() {
   return [
     UniqueID.extend({ name: 'noteBlockUniqueId' }).configure({ attributeName: 'blockId', types: [...NOTE_BLOCK_TYPES] }),
-    UniqueID.extend({ name: 'noteReferenceUniqueId' }).configure({ attributeName: 'referenceId', types: [NoteBlockReferenceNode.name] })
+    UniqueID.extend({ name: 'noteReferenceUniqueId' }).configure({ attributeName: 'referenceId', types: [NoteBlockReferenceNode.name, NoteInlineLinkNode.name] })
   ]
 }

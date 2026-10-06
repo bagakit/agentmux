@@ -112,3 +112,19 @@
 .notebook-history small { font-size: 10px; color: var(--text-3); }
 .notebook-history-dot { margin-top: 5px; width: 5px; height: 5px; border: 1px solid var(--text-3); border-radius: 50%; flex: none; }
 @container (max-width: 420px) { .notebook-page-heading { padding: var(--sp-5) var(--sp-4) 0; } .notebook-page-actions { gap: 13px; } }
+.note-editor { position: relative; }
+.note-inline-link-node { display: inline; }
+.note-inline-link { display: inline; padding: 0; border: 0; border-radius: 2px; background: transparent; color: var(--green); font: inherit; line-height: inherit; overflow-wrap: anywhere; text-align: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--green) 40%, transparent); text-underline-offset: 3px; cursor: pointer; }
+.note-inline-link--unbound { text-decoration-style: dotted; }
+.note-inline-link:hover { text-decoration-color: currentColor; }
+.note-inline-link:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.note-wiki-completion { position: absolute; z-index: 30; width: min(360px, calc(100% - 24px)); max-width: calc(100% - 24px); max-height: 340px; overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-1); box-shadow: 0 8px 28px #0003; color: var(--text); }
+.note-wiki-completion__heading, .note-link-lookup__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 6px 8px; font-size: var(--fs-meta); }
+.note-wiki-completion__heading span, .note-wiki-completion__help { color: var(--text-3); font-size: var(--fs-meta); }
+.note-wiki-completion__help { margin: 8px 6px 2px; }
+.note-link-option { display: flex; flex-direction: column; gap: 3px; width: 100%; min-width: 0; padding: 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.note-link-option strong { font-size: var(--fs-body); font-weight: 500; overflow-wrap: anywhere; }
+.note-link-option small { font-size: var(--fs-meta); color: var(--text-3); overflow-wrap: anywhere; }
+.note-link-option:hover, .note-link-option[aria-selected="true"] { background: var(--surface-2); }
+.note-link-lookup { padding: 12px 0; margin: 8px 0; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+.note-link-lookup__heading strong { overflow-wrap: anywhere; }

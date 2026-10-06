@@ -1,5 +1,6 @@
 import { AgentMuxError, parseNoteContentObservation, parseNotebookObservationParams } from '@agentmux/core/notebook-observation'
 import { parseNotebookGraphSnapshot, type NotebookObservationApi, type NotebookObservationPreloadApi } from '../../../shared/notebook-observation'
+import { parseNotebookResolveParams, parseNotebookResolveResult } from '@agentmux/core/note-links'
 
 /** Signals and their original cancellation reasons stay in the Renderer world. */
 export function createRendererNotebookObservation(preload: NotebookObservationPreloadApi): NotebookObservationApi {
@@ -16,6 +17,10 @@ export function createRendererNotebookObservation(preload: NotebookObservationPr
     finally { signal?.removeEventListener('abort', cancel) }
   }
   return {
+    resolve: async (params, options) => {
+      const input = parseNotebookResolveParams(params)
+      return parseNotebookResolveResult(await read(requestId => preload.resolve({ requestId, params: input }), options?.signal), input)
+    },
     graph: async (params, options) => {
       const input = parseNotebookObservationParams(params)
       return parseNotebookGraphSnapshot(await read(requestId => preload.graph({ requestId, params: input }), options?.signal), input)

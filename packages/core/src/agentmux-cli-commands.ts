@@ -1,4 +1,5 @@
 import { parseNotebookObservationParams } from './notebook-observation.js'
+import { parseNotebookResolveParams, scanNoteWikiLinks } from './note-links.js'
 import { parseMoteAvatarWriteParams } from './mote-avatar-write.js'
 import { parseMoteAvatarSeriesParams } from './mote-avatar-series.js'
 import { parseDiagnosticEvidenceParams } from './diagnostic-evidence-codec.js'
@@ -171,6 +172,19 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   ...Object.values(AGENTMUX_SCHEDULE_CLI_COMMANDS),
   empty('notebook.ls', 'Read the durable Notebook and Note directory without opening an App or a page.'),
+  command('notebook.resolve', '(--query TEXT [--limit N]|--link "[[Page #heading-or-block]]" [--note ID] [--block ID] [--max-bytes N])', 'Search page candidates without reading bodies, or confirm one wiki query through its exact original file. This observation never saves or creates a Note.',
+    { '--query': 'data', '--limit': 'value', '--link': 'data', '--note': 'data', '--block': 'data', '--max-bytes': 'value' }, f => {
+      const selected = one(f, ['--query', '--link'], 'Resolve')
+      if (selected === '--query') {
+        if (['--note', '--block', '--max-bytes'].some(name => f.values.has(name))) invalid('Page search does not read a selected original.')
+        return parseNotebookResolveParams({ mode: 'search', query: value(f, '--query', true), ...(value(f, '--limit') === undefined ? {} : { limit: Number(value(f, '--limit')) }) })
+      }
+      if (f.values.has('--limit')) invalid('Resolve does not truncate exact matches.')
+      const syntax = value(f, '--link', true)!, token = scanNoteWikiLinks(syntax)[0]
+      if (!token || token.from !== 0 || token.to !== syntax.length) invalid('--link requires exactly one complete [[Page #heading-or-block]] token.')
+      if (f.values.has('--block') && !f.values.has('--note')) invalid('An exact block selection requires its Note ID.')
+      return parseNotebookResolveParams({ mode: 'resolve', text: token!.text, ...(f.values.has('--note') ? { select: { noteId: id(f, '--note'), ...(f.values.has('--block') ? { blockId: id(f, '--block') } : {}) } } : {}), ...(value(f, '--max-bytes') === undefined ? {} : { maxBytes: Number(value(f, '--max-bytes')) }) })
+    }),
   command('notebook.inspect', '(--notebook ID|--note ID|--operation-id ID) [--content] [--max-bytes N]', 'Read the original directory/history; --note ID --content also reads the exact saved Note body and revision.',
     { '--notebook':'data','--note':'data','--content':'boolean','--max-bytes':'value',...OP }, f => { const selected=one(f,['--notebook','--note','--operation-id'],'Inspect'); return parseNotebookObservationParams({[selected==='--notebook'?'notebookId':selected==='--note'?'noteId':'operationId']:id(f,selected), ...(f.booleans.has('--content') ? {content:true} : {}), ...(value(f,'--max-bytes') !== undefined ? {maxBytes:Number(value(f,'--max-bytes',true))} : {})}, true) }),
   command('notebook.graph', '(--all|--notebook ID|--note ID) [--max-bytes N]', 'Derive hierarchy, block references, embeds and incoming sources from the durable catalog and original files; report every unread or ambiguous source.',
