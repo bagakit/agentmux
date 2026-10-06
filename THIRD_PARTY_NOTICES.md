@@ -32,7 +32,7 @@ SOFTWARE.
 
 ## Shotback screenshot crop and pixelation reference
 
-The crop composition and pixelation algorithms in `apps/desktop/src/renderer/src/components/browser-screenshot/compose.ts` and `drawing-renderer.ts` are independently implemented with reference to Shotback commit `df21fa87ced894847c0d5e0d8abc70c391a6ae40`, particularly `src/lib/crop.ts` and `src/lib/annotate.ts`. AgentMux keeps its existing screenshot document, rendering pipeline, and clipboard lifecycle; no Shotback package or complete editor is included.
+The crop composition and pixelation algorithms in `apps/desktop/src/renderer/src/components/browser-screenshot/compose.ts` and `apps/desktop/src/renderer/src/components/image-annotation/drawing-renderer.ts` are independently implemented with reference to Shotback commit `df21fa87ced894847c0d5e0d8abc70c391a6ae40`, particularly `src/lib/crop.ts` and `src/lib/annotate.ts`. AgentMux keeps its existing screenshot document, rendering pipeline, and clipboard lifecycle; no Shotback package or complete editor is included.
 
 Reference: https://github.com/DCCA/shotback/tree/df21fa87ced894847c0d5e0d8abc70c391a6ae40
 
