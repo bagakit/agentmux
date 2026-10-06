@@ -52,9 +52,9 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
     <div className="goal-collaboration__line"><strong>Supervisor</strong><div>{supervisor ? members([supervisor], '') : <span className="goals-caption">Not selected</span>}</div><button type="button" className="goals-button" onClick={() => setRole('supervisor')} aria-label="Choose Goal Supervisor">Choose</button></div>
     {!supervisor && recommended.length ? <div className="goal-collaboration__recommendations"><span className="goals-caption">Recommended</span>{recommended.map(row => <button key={row.id} type="button" className="goals-button" aria-label={`Assign ${row.name} as Supervisor`} title={row.id} onClick={() => void recommend(row.id)}><GoalAgentFace row={row} /><span>{row.name}</span><span className="goal-collaboration__assign">Assign</span></button>)}</div> : null}
     {!supervisor && demand.creationOrigin?.supervisorDefaultPending ? <p className="goals-condition">The original requester is not yet confirmed. You can choose a Supervisor explicitly.</p> : null}
+    </details>
     {creationDrafts.map(draft => <p key={draft.operationId} className="goals-service" role="status">Original Agent creation retained.<button type="button" className="goals-button" onClick={() => setRole(draft.role)}>Check creation and relationship</button></p>)}
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
-    </details>
     <GoalContinuationControl demand={demand} onChooseSupervisor={() => setRole('supervisor')} />
     {demand.sessionIds.length ? <details className="goals-topology" onToggle={event => { if (event.target === event.currentTarget) setArrangementOpen(event.currentTarget.open) }}><summary>Arrangement</summary>{arrangementOpen ? <GoalArrangement sessionIds={related.map(row => row.session?.id ?? row.id)} /> : null}</details> : null}
     {role ? <GoalAgentPicker key={`${demand.id}:${role}`} demand={demand} role={role} onSave={onUpdate} onClose={() => setRole(null)} /> : null}
