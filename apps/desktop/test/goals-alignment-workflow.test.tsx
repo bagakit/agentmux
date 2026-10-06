@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, createElement, Profiler } from 'react'
@@ -11,6 +12,8 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
+import { GRAPHITE_THEME, mountThemeRuntime, previewTheme } from '@agentmux/client-ui/theme'
+import { semanticIconHref } from '@agentmux/client-ui/icons'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { createWorkbenchTab, documentKey, fileTabId } from '../src/renderer/src/lib/workbench-tabs'
@@ -28,9 +31,11 @@ const proposal: DemandAlignmentProposal = { summary: 'Return to the same work af
 function report(outcome: 'met' | 'gap' | 'unknown' = 'met'): DemandGroundingProposal { return { alignmentRevision: 1, summary: 'Workspace restored; both criteria were checked.', checks: [{ criterionId: 'tabs', outcome: 'met', evidence: ['artifacts/restart.log:12'], note: 'The saved tab and split identities match.' }, { criterionId: 'agent', outcome, evidence: ['artifacts/session.log:8'], note: outcome === 'gap' ? 'The draft returned, but automatic resume still needs a retry.' : 'The original Session identity is retained.' }] } }
 const activeTransport = new Set<Promise<unknown>>()
 function transport<T>(request: Promise<T>): Promise<T> { activeTransport.add(request); void request.finally(() => activeTransport.delete(request)).catch(() => {}); return request }
+let disposeTheme: () => void
 let temporaryRoot: string, owner: ReturnType<typeof openDemandStore>, root: Root, container: HTMLDivElement
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  disposeTheme = mountThemeRuntime(window)
   temporaryRoot = await mkdtemp(join(tmpdir(), 'amux-goal-ui-')); owner = openDemandStore({ root: temporaryRoot })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   useAppStore.setState({ ...initial, config, demands: {}, selectedDemandId: null, sessions: [], tabs: {}, layouts: {}, mainSurface: 'board', demandPmoTabIds: {} })
@@ -44,7 +49,7 @@ beforeEach(async () => {
   vi.spyOn(api.demands, 'decision').mockImplementation((id, decision) => transport(owner.addDecision(id, decision)))
   vi.spyOn(api.demands, 'linkSession').mockImplementation((id, session) => transport(owner.linkSession(id, session)))
 })
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); useAppStore.setState(initial, true); await rm(temporaryRoot, { recursive: true, force: true }) })
+afterEach(async () => { await act(async () => root.unmount()); disposeTheme(); container.remove(); vi.restoreAllMocks(); useAppStore.setState(initial, true); await rm(temporaryRoot, { recursive: true, force: true }) })
 async function mount() { await act(async () => root.render(createElement(GlobalBoardSurface))) }
 async function save(alignment?: DemandAlignmentProposal, confirmed = false, grounding?: DemandGroundingProposal) {
   await useAppStore.getState().createDemand({ title: 'Restore my work', description: intent, status: 'in_progress', projectId: workspaceProjectId(config.workspaces[0]!), projectName: 'Repo', sessionIds: ['healthy-run'], source: 'session' })
@@ -89,6 +94,16 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     const submission = (await owner.get('goal'))!.grounding!.submissionId
     expect([...container.querySelectorAll('[data-goal-outcome]')].map(node => node.getAttribute('data-goal-outcome'))).toEqual(['met', 'met'])
     expect(container.textContent).toContain('Agent report · Not accepted yet'); expect(next()).toContain('Results ready for review')
+    expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull()
+    const accept = button('Accept results')
+    expect(accept.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('action.accept-results'))
+    expect([...container.querySelectorAll('[data-goal-outcome="met"] [data-semantic-icon="status.completed"] use')].map(use => use.getAttribute('href'))).toEqual([semanticIconHref('status.completed'), semanticIconHref('status.completed')])
+    const custom = structuredClone(GRAPHITE_THEME); custom.id = 'custom.goal-review'; custom.name = 'Goal review'
+    custom.icons = { 'action.accept-results': { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z' }] }, 'status.completed': { kind: 'paths', paths: [{ d: 'M12 3L21 20H3Z' }] } }
+    await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
+    expect(button('Accept results')).toBe(accept)
+    expect(document.getElementById(semanticIconHref('action.accept-results').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')
+    expect(document.getElementById(semanticIconHref('status.completed').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M12 3L21 20H3Z')
     expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull()
     await click('Accept results'); await eventually(async () => expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeGreaterThan(0))
     expect(api.demands.acceptGrounding).toHaveBeenCalledExactlyOnceWith('goal', 1, submission, false)
@@ -294,7 +309,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
 
   it.each(['confirm', 'accept'] as const)('reads a durable successful %s after a lost receipt without sending a second acknowledgement', async (kind) => {
     await save(proposal, kind === 'accept', kind === 'accept' ? report() : undefined)
-    const healthyRun = { id: 'healthy-run', kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'healthy-run', run: { runId: 'original-healthy-run' } }, processState: 'running', status: { state: 'working', observedAt: 1 } } as SessionSnapshot
+    const healthyRun = { id: 'healthy-run', kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'healthy-run', run: { runId: 'original-healthy-run' } }, processState: 'running', status: { state: 'working', observedAt: _reshape_fixtureEpoch(0, 0, 1) } } as SessionSnapshot
     useAppStore.setState({ sessions: [healthyRun] }); await mount()
     const reviewed = useAppStore.getState().demands.goal!
     if (kind === 'confirm') vi.mocked(api.demands.confirmAlignment).mockImplementationOnce((id, revision) => transport((async () => { await owner.confirmAlignment(id, revision); throw new Error('Receipt lost after the owner committed') })()))
@@ -321,7 +336,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
 
   it('uses the mapped healthy Mote Run for both stages and keeps real deferred input when readiness is unavailable', async () => {
     await save()
-    const session = { id: 'mote-session', kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'mote-session', run: { runId: 'original-run' } }, status: { state: 'working', observedAt: 1 }, processState: 'running', promptSubmissionPredecessor: null } as SessionSnapshot
+    const session = { id: 'mote-session', kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'mote-session', run: { runId: 'original-run' } }, status: { state: 'working', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, processState: 'running', promptSubmissionPredecessor: null } as SessionSnapshot
     const tab = { ...createWorkbenchTab('mote-tab', { regionId: 'mote-region', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: session.id }, 'Mote'), topicId: PMO_TEAMS_TOPIC_ID }
     vi.spyOn(api.scratch, 'readTopic').mockResolvedValue({ id: PMO_TEAMS_TOPIC_ID } as never)
     vi.spyOn(api.sessions, 'refresh').mockResolvedValue(session); vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
@@ -398,7 +413,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     const commits = vi.fn(); await act(async () => root.render(createElement(Profiler, { id: 'goals', onRender: commits }, createElement(GlobalBoardSurface))))
     expect(container.querySelectorAll('[data-goal-criterion-id]')).toHaveLength(2); expect(container.querySelector('[data-demand-id]')?.textContent).toContain('1 linked · waiting')
     const count = commits.mock.calls.length; expect(count).toBeGreaterThan(0)
-    await act(async () => useAppStore.setState({ sessions: [related, { ...unrelated, latestOutputBytes: 99999, updatedAt: 9 }], tabs: {} }))
+    await act(async () => useAppStore.setState({ sessions: [related, { ...unrelated, latestOutputBytes: 99999, updatedAt: _reshape_fixtureEpoch(0, 0, 9) }], tabs: {} }))
     expect(commits.mock.calls.length).toBe(count)
   })
 })
