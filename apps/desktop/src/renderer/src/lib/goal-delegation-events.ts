@@ -1,4 +1,4 @@
-import type { DemandDelegation } from '@agentmux/demand'
+import type { DemandDelegation, DemandDispatch } from '@agentmux/demand'
 import type { RuntimeEvent } from '../../../shared/contracts'
 
 type Registration = { goalId: string; changed(): void }
@@ -22,7 +22,7 @@ export function createGoalDelegationEvents(ports: {
     else if (core.type === 'process-state' || core.type === 'run-removed') notify(runs.get(key(hostId, core.run.runId)) ?? [])
     else if (core.type === 'connection-state') notify(hosts.get(hostId) ?? [])
   }
-  return (goalId: string, delegations: readonly DemandDelegation[], changed: () => void) => {
+  return (goalId: string, delegations: readonly DemandDelegation[], changed: () => void, starts: readonly DemandDispatch[] = []) => {
     const registration: Registration = { goalId, changed }, entries: Array<[Index, string]> = []
     const add = (index: Index, id: string) => {
       const set = index.get(id) ?? new Set(); set.add(registration); index.set(id, set); entries.push([index, id])
@@ -32,6 +32,10 @@ export function createGoalDelegationEvents(ports: {
       add(sources, key(delegation.hostId, delegation.sourceMessageId))
       add(runs, key(delegation.hostId, delegation.workerRunId))
       add(hosts, delegation.hostId)
+    }
+    for (const start of starts) if (start.execution === 'finite') {
+      add(runs, key(start.hostId, start.runId))
+      add(hosts, start.hostId)
     }
     count++
     if (!release) {

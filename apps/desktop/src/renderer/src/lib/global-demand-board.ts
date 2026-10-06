@@ -41,6 +41,7 @@ export type DemandRecord = {
   delegationObservationIssue?: string
   delegationReadCut?: { goalUpdatedAt: number; request: number }
   dispatches?: import('@agentmux/demand').DemandDispatch[]
+  startObservations?: import('@agentmux/demand').GoalStartObservation[]
   activities?: DemandActivity[]
   decisions?: DemandDecision[]
   alignment?: DemandAlignment

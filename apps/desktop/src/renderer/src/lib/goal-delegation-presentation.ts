@@ -28,15 +28,25 @@ export function goalDelegationRows(goal: Pick<DemandRecord, 'delegations' | 'del
     }
     if (report) return { ...original, state: 'report', next: 'Report ready to collect', replyMessageId: report.replyMessageId }
     if (!delegation.linkedAt) return { ...original, state: 'unknown', next: 'Delegation observation unknown' }
-    const awaiting = observation?.communication?.dispatch.originAwaits
-      ? [...observation.communication.dispatch.events].reverse().find(event => event.kind === 'question' || event.kind === 'escalation') : undefined
-    if (awaiting) return { ...original, state: 'question', next: awaiting.kind === 'question' ? 'Question needs a reply' : 'Blocked · Needs follow-up', replyMessageId: awaiting.replyMessageId }
+    const replies = new Set((observation?.communication?.replies ?? []).filter(reply =>
+      reply.envelope.sender.kind === 'agent-session' && reply.envelope.sender.agentSessionId === delegation.ownerAgentSessionId &&
+      reply.envelope.senderSessionId === delegation.ownerAgentSessionId && reply.envelope.recipientSessionId === delegation.workerAgentSessionId &&
+      reply.envelope.threadId === delegation.threadId).map(reply => reply.envelope.replyTo))
+    const questions = observation?.communication?.dispatch.originAwaits
+      ? [...observation.communication.dispatch.events].reverse().filter(event => event.kind === 'question' || event.kind === 'escalation') : []
+    const awaiting = questions.find(event => !replies.has(event.replyMessageId)) ?? questions[0]
     if (observation?.workerRun?.runId === delegation.workerRunId && observation.workerRun.state === 'exited')
       return !observation.communication || issue
         ? { ...original, state: 'unknown', next: 'Agent ended · Check report or continue' }
         : { ...original, state: 'exited', next: 'No report · Continue the original Agent' }
     if (observation?.workerRun?.runId === delegation.workerRunId && observation.workerRun.state === 'interrupted')
       return { ...original, state: 'question', next: 'Interrupted · Continue the original Agent' }
+    if (awaiting) {
+      const answered = replies.has(awaiting.replyMessageId)
+      return { ...original, state: answered && awaiting.kind === 'question' ? 'working' : 'question',
+        next: answered ? awaiting.kind === 'question' ? 'Task owner replied · Awaiting worker' : 'Follow-up sent · Blocker needs verification'
+          : awaiting.kind === 'question' ? 'Question needs a reply' : 'Blocked · Needs follow-up', replyMessageId: awaiting.replyMessageId }
+    }
     if (!observation?.communication || issue || !observation.workerRun || observation.workerRun.runId !== delegation.workerRunId)
       return { ...original, state: 'unknown', next: 'Delegation observation unknown' }
     return { ...original, state: 'working', next: 'Working · No result report' }

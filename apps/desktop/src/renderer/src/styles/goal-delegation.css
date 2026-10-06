@@ -15,3 +15,5 @@
 .goal-delegation__checks > div { display: grid; gap: var(--sp-1); }
 .goal-delegation__checks span { overflow-wrap: anywhere; }
 .goal-delegation .goals-service { padding: 0; font-size: var(--fs-meta); }
+.goal-delegation__identity { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
+.goal-delegation__identity span { color: var(--text-2); }

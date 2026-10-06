@@ -21,7 +21,8 @@ export function applyGoalDelegationResult(result: GoalDelegationResult, request 
     const { delegationObservationIssue: _issue, ...retained } = original
     return { demands: { ...state.demands, [result.goalId]: { ...retained, delegations: result.delegations,
       delegationReadCut: { goalUpdatedAt: result.goalUpdatedAt, request },
-      delegationObservations: result.observations ?? [], ...(result.grounding ? { grounding: result.grounding } : {}) } } }
+      delegationObservations: result.observations ?? [], ...(result.dispatches ? { dispatches: result.dispatches } : {}),
+      ...(result.startObservations ? { startObservations: result.startObservations } : {}), ...(result.grounding ? { grounding: result.grounding } : {}) } } }
   })
 }
 
@@ -50,12 +51,13 @@ export function refreshGoalDelegations(goalId: string): Promise<void> {
 }
 
 export function useGoalDelegationObservation(goal: DemandRecord, active = true): void {
-  const references = JSON.stringify((goal.delegations ?? []).map(item => [item.hostId, item.operationId,
-    item.sourceMessageId, item.workerRunId, item.report?.replyMessageId, item.collection?.operationId]))
+  const references = JSON.stringify([(goal.delegations ?? []).map(item => [item.hostId, item.operationId,
+    item.sourceMessageId, item.workerRunId, item.report?.replyMessageId, item.collection?.operationId]),
+    (goal.dispatches ?? []).filter(start => start.execution === 'finite').map(start => [start.hostId, start.operationId, start.runId])])
   useEffect(() => {
-    if (!active || !goal.delegations?.length) return
+    if (!active || !goal.delegations?.length && !goal.dispatches?.some(start => start.execution === 'finite')) return
     const changed = () => { void refreshGoalDelegations(goal.id) }
-    const release = observe(goal.id, goal.delegations, changed)
+    const release = observe(goal.id, goal.delegations ?? [], changed, goal.dispatches ?? [])
     changed()
     return release
   }, [active, goal.id, references])
