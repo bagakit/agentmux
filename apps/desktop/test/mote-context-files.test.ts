@@ -221,7 +221,7 @@ it('keeps original memory available across actual private client process restart
   expect(two.prompt).toContain('Corrected after process exit.');expect(two.prompt).not.toContain('Original process knowledge.')
 })
 
-it('edits exact Mote memory through shipping CLI and public Files CAS, then loads that saved version', async () => {
+it('corrects and withdraws exact memory through shipping CLI and loads each current version in real new discussions', async () => {
   const { AgentMuxControlServer } = await import('../../../packages/core/src/public-rpc-server')
   const { connectAgentMuxRpc } = await import('../../../packages/core/src/public-rpc-client')
   const { FileReadOwner } = await import('../src/main/file-read-owner'), { WorkspaceFiles } = await import('../src/main/workspace-files')
@@ -240,11 +240,13 @@ it('edits exact Mote memory through shipping CLI and public Files CAS, then load
     expect(original.resource.zonePath).toBe(mote.physicalDirectoryPath)
     const cli=resolve('packages/core/.tmp/mote-memory/cli.mjs')
     await build({entryPoints:['packages/core/src/agentmux.ts'],outfile:cli,platform:'node',format:'esm',packages:'external',bundle:true,logLevel:'silent'})
-    const content=("# Memory\nConfirmed choice with source: original user correction, " + _hygiene_fixtureCivil(10, 12) + ", this Mote only.\n")
+    const preference = 'Preference: start with the conclusion.'
+    const commitment = 'Open commitment: review the original experiment when its result is ready.'
+    const content = '# Memory\n' + preference + '\nSource: explicit user choice, ' + _hygiene_fixtureCivil(10, 12) + ', this Mote only.\n\n' + commitment + '\n'
     const {spawn}=await import('node:child_process')
-    async function save(text:string) {
+    async function save(text:string, expectedRevision = original.result.status === 'read' ? original.result.document.revision : '') {
       return await new Promise<{code:number|null;body:any}>((resolve,reject)=>{
-        const child=spawn(process.execPath,[cli,'file','write','--zone',zone.zoneId,'--path','MEMORY.md','--resource',JSON.stringify(original.resource),'--expected-revision',original.result.status==='read'?original.result.document.revision:''],{env:{...process.env,AGENTMUX_RPC_ENDPOINT:'unix:'+server.path,AGENTMUX_AGENT_SESSION_ID:undefined,AGENTMUX_AGENT_CAPABILITY:undefined,AGENTMUX_ENV:undefined},stdio:['pipe','pipe','pipe']})
+        const child=spawn(process.execPath,[cli,'file','write','--zone',zone.zoneId,'--path','MEMORY.md','--resource',JSON.stringify(original.resource),'--expected-revision',expectedRevision],{env:{...process.env,AGENTMUX_RPC_ENDPOINT:'unix:'+server.path,AGENTMUX_AGENT_SESSION_ID:undefined,AGENTMUX_AGENT_CAPABILITY:undefined,AGENTMUX_ENV:undefined},stdio:['pipe','pipe','pipe']})
         let output='',errors='';child.stdout.on('data',bytes=>output+=bytes);child.stderr.on('data',bytes=>errors+=bytes);child.on('error',reject)
         child.on('close',code=>{try{resolve({code,body:JSON.parse(output)})}catch{reject(Error(errors||output))}});child.stdin.end(text)
       })
@@ -252,8 +254,54 @@ it('edits exact Mote memory through shipping CLI and public Files CAS, then load
     const saved=await save(content);expect(saved.code).toBe(0);expect(saved.body.result.result.status).toBe('written')
     const confirmed=await client.call('file.read',params)
     expect(confirmed.result).toMatchObject({status:'read',document:{content,revision:saved.body.result.result.revision}})
-    expect((await h.owner.prepareAgent(h.workspace,mote.id,{providerId:'codex',sessionId:'public-memory-new'})).prompt).toContain(content)
     const stale=await save('Old revision must not resurrect removed knowledge.');expect(stale.code).toBe(1);expect(stale.body.result.result.status).toBe('conflict')
     expect(await readFile(join(mote.physicalDirectoryPath!,'MEMORY.md'),'utf8')).toBe(content)
+
+    const { injectedContextCore } = await import('./helpers/injected-context-core')
+    const { RuntimeController } = await import('../src/main/runtime-controller')
+    const { DEFAULT_CONFIG } = await import('../src/main/config-store')
+    const coreRoot = join(h.root, 'original-discussions'); await mkdir(coreRoot)
+    const f = await injectedContextCore(coreRoot)
+    const runtime = new RuntimeController(f.store, async () => { throw Error('No unrelated Host') })
+    const config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [h.workspace], executors: {
+      fixture: { providerId: 'claude' as const, label: 'Private context fixture', command: 'private-fixture', args: [], env: {}, injectAgentMuxGuide: false } } }
+    runtime.commit({ hosts: [{ id: 'local', config: config.hosts.find(host => host.id === 'local')!, client: f.core,
+      executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
+    const create = vi.spyOn(f.core, 'createAgentWithDelivery')
+    const launch = async (id: string, body: string) => {
+      const result = await runtime.launchAgent({ hostId: 'local', executorId: 'fixture', workspacePath: h.workspace.path,
+        agentSessionId: id, scratchTopicId: mote.id, createOperationId: 'create-' + id, prompt: 'Continue this original discussion.' }, config)
+      const input = create.mock.calls.at(-1)![0]
+      expect(input.prompt).toBe('Continue this original discussion.')
+      expect(input.agentMuxNote!.split(body)).toHaveLength(2) // Original MEMORY body appears once, at actual launch.
+      expect(input.workspacePath).toBe(mote.physicalDirectoryPath)
+      const timeline = JSON.stringify(await f.core.sessionTimeline(result.created.agentSessionId))
+      expect(timeline).toContain(commitment)
+      return { sid: result.created.agentSessionId, timeline }
+    }
+    try {
+      const first = await launch('memory-before-correction', content)
+      const correction = 'Preference: start with one concrete example.'
+      const corrected = content.replace(preference, correction)
+      const changed = await save(corrected, saved.body.result.result.revision)
+      expect(changed.code).toBe(0); expect(changed.body.result.result.status).toBe('written')
+      const reread = await client.call('file.read', params)
+      expect(reread.result).toMatchObject({ status: 'read', document: { content: corrected, revision: changed.body.result.result.revision } })
+      const second = await launch('memory-after-correction', corrected)
+      expect(second.timeline).toContain(correction); expect(second.timeline).not.toContain(preference)
+      const withdrawn = corrected.replace(correction, 'Withdrawn source: the earlier preference. No recall text.')
+      const removed = await save(withdrawn, changed.body.result.result.revision)
+      expect(removed.code).toBe(0); expect(removed.body.result.result.status).toBe('written')
+      const third = await launch('memory-after-withdrawal', withdrawn)
+      expect(third.timeline).not.toContain(preference); expect(third.timeline).not.toContain(correction)
+      expect(third.timeline).toContain('Withdrawn source: the earlier preference.')
+      expect(new Set([first.sid, second.sid, third.sid]).size).toBe(3)
+      expect(JSON.stringify(await f.core.sessionTimeline(first.sid))).toBe(first.timeline)
+      expect(JSON.stringify(await f.core.sessionTimeline(second.sid))).toBe(second.timeline)
+      expect(create).toHaveBeenCalledTimes(3); expect(f.start).toHaveBeenCalledTimes(3); expect(f.stop).not.toHaveBeenCalled()
+      expect(await readFile(join(mote.physicalDirectoryPath!, 'MEMORY.md'), 'utf8')).toBe(withdrawn)
+      const oldWrite = await save(corrected, changed.body.result.result.revision)
+      expect(oldWrite.code).toBe(1); expect(oldWrite.body.result.result.status).toBe('conflict')
+    } finally { await runtime.dispose(); await f.dispose(); vi.unstubAllEnvs() }
   }finally{await client.dispose();await server.stop()}
-})
+}, 15000)
