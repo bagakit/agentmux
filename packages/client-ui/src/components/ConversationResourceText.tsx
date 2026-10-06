@@ -2,9 +2,9 @@ import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 import { readSessionHistoryTextResource } from '@agentmux/core/session-history-content'
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
-import { useClientUiPlatform } from '../platform.js'
+import { ContentCopyButton } from './ContentCopyButton.js'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown.js'
 import type { ReadPastedImage } from './ConversationImage.js'
 import { ConversationToolTrace } from './ConversationToolTrace.js'
@@ -18,33 +18,29 @@ export function ConversationResourceText({ part, partIndex, record, readResource
   workspaceRoot?: string; homeDir?: string; inputMode?: boolean
   openWorkspaceFile?: OpenWorkspaceFile; readPastedImage?: ReadPastedImage; openHttpLink?: (url: string, event: LinkClickModifiers) => void
 }) {
-  const platform = useClientUiPlatform(), pending = useRef<AbortController | null>(null), generation = useRef(0)
-  const [content, setContent] = useState<AgentSessionHistoryContentPart | null>(null)
-  const [loading, setLoading] = useState(false), [error, setError] = useState<string | null>(null), [copied, setCopied] = useState(false)
+  const pending = useRef<AbortController | null>(null), mounted = useRef(true)
+  const owner = useMemo(() => ({}), [part.reference, part.content?.sha256, partIndex, record.source.providerId, record.source.nativeSessionId, record.recordId, record.turnId, readResource])
+  const latestOwner = useRef(owner); latestOwner.current = owner
+  const [loaded, setLoaded] = useState<{ owner: object; value: AgentSessionHistoryContentPart } | null>(null)
+  const content = loaded?.owner === owner ? loaded.value : null
+  const [reading, setReading] = useState<{ owner: object; loading: boolean; error: string | null } | null>(null)
+  const loading = reading?.owner === owner && reading.loading
+  const error = reading?.owner === owner ? reading.error : null
   useEffect(() => {
-    setContent(null); setLoading(false); setError(null); setCopied(false)
-    return () => { generation.current++; pending.current?.abort(); pending.current = null }
-  }, [part.reference, partIndex, record.source.providerId, record.source.nativeSessionId, record.recordId, record.turnId, readResource])
+    mounted.current = true; setLoaded(null); setReading(null)
+    return () => { mounted.current = false; pending.current?.abort(); pending.current = null }
+  }, [owner])
   async function load() {
+    if (!mounted.current || latestOwner.current !== owner) return
     pending.current?.abort()
     const controller = new AbortController(); pending.current = controller
-    setLoading(true); setError(null)
+    setReading({ owner, loading: true, error: null })
     try {
       const complete = await readSessionHistoryTextResource(part, partIndex, record, readResource, controller.signal)
-      if (!controller.signal.aborted) setContent(complete)
-    } catch (failure) { if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : 'Complete content could not be read. Retry.') }
-    finally { if (!controller.signal.aborted) setLoading(false) }
+      if (!controller.signal.aborted && latestOwner.current === owner) { setLoaded({ owner, value: complete }); setReading({ owner, loading: false, error: null }) }
+    } catch (failure) { if (!controller.signal.aborted && latestOwner.current === owner) setReading({ owner, loading: false, error: failure instanceof Error ? failure.message : 'Complete content could not be read. Retry.' }) }
   }
-  async function copy() {
-    if (!content) return
-    const current = generation.current
-    const text = content.kind === 'text' || content.kind === 'reasoning' ? content.text :
-      content.kind === 'tool-call' ? content.input : content.kind === 'tool-result' ? content.output : content.reference
-    try { const accepted = await platform.copyText(text, failure => {
-      if (current === generation.current) setError(failure instanceof Error ? failure.message : 'Copy failed. Retry.')
-    }); if (current === generation.current) { setCopied(accepted); if (!accepted) setError('Copy failed. Retry.') } }
-    catch (failure) { if (current === generation.current) { setError(failure instanceof Error ? failure.message : 'Copy failed. Retry.'); setCopied(false) } }
-  }
+  const copyableText = content?.kind === 'text' ? content.text : content?.kind === 'resource' ? content.reference : null
   const text = content?.kind === 'text' ? sessionHistoryTextForReading(content) : ''
   const prefix = inputMode && content?.kind === 'text' ? parseAgentMuxMessagePrefix(text) : null
   return <div className="conversation-resource-text">
@@ -53,8 +49,8 @@ export function ConversationResourceText({ part, partIndex, record, readResource
         {loading ? <SemanticIcon name="status.loading" size={13} aria-hidden="true" /> : <SemanticIcon name="file.text" size={13} aria-hidden="true" />}
         {loading ? 'Reading complete content…' : error ? 'Retry complete content' : 'Read complete content'}
         <span>{Math.ceil((part.content?.byteLength ?? 0) / 1024).toLocaleString()} KiB</span>
-      </button> : <button type="button" onClick={() => { void copy() }}><SemanticIcon name="action.copy" size={13} aria-hidden="true" />{copied ? 'Complete content copied' : 'Copy complete content'}</button>}
-      {content ? <button type="button" onClick={() => { pending.current?.abort(); setContent(null); setCopied(false) }}>Close content</button> : null}
+      </button> : copyableText ? <ContentCopyButton text={copyableText} identity={owner} label="Copy complete content" /> : null}
+      {content ? <button type="button" onClick={() => { if (!mounted.current || latestOwner.current !== owner) return; pending.current?.abort(); setLoaded(null) }}>Close content</button> : null}
     </div>
     {error ? <p className="conversation-resource-text__error" role="alert">{error}</p> : null}
     {content?.kind === 'text' ? <div className="log-turn__text">
@@ -63,8 +59,8 @@ export function ConversationResourceText({ part, partIndex, record, readResource
       <AgentMarkdown content={prefix?.body ?? text} inputMode={inputMode} workspaceRoot={workspaceRoot} homeDir={homeDir}
         {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
     </div> :
-      content?.kind === 'tool-call' || content?.kind === 'tool-result' ? <ConversationToolTrace part={content} workspaceRoot={workspaceRoot} /> :
-      content?.kind === 'reasoning' ? <ConversationReasoningTrace part={content} workspaceRoot={workspaceRoot} homeDir={homeDir}
+      content?.kind === 'tool-call' || content?.kind === 'tool-result' ? <ConversationToolTrace copyIdentity={owner} part={content} workspaceRoot={workspaceRoot} /> :
+      content?.kind === 'reasoning' ? <ConversationReasoningTrace copyIdentity={owner} part={content} workspaceRoot={workspaceRoot} homeDir={homeDir}
         {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /> :
       content?.kind === 'resource' ? <div className="log-turn__resource"><span>{content.label ?? content.resourceType}</span><code>{content.reference}</code></div> : null}
   </div>
