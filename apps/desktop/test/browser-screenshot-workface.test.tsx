@@ -548,10 +548,11 @@ describe('original Browser screenshot workface', () => {
       pointer('pointerdown', 25, 30)
       pointer('pointermove', 60, 35); pointer('pointermove', 100, 40); pointer('pointermove', 150, 45)
     })
-    expect(schedule.mock.calls.length - before).toBe(1)
+    expect(schedule.mock.calls.length - before, 'actual continuous samples must share one requested paint frame').toBe(1)
     expect(fixture.paint).not.toHaveBeenCalled(); expect(fixture.committed).not.toHaveBeenCalled()
     await flushFrames()
     expect(fixture.paint).toHaveBeenCalledTimes(1)
+    expect(fixture.committed, 'actual unchanged document must reuse its committed layer during a live stroke').not.toHaveBeenCalled()
     expect(fixture.paint.mock.calls[0]![2]).toMatchObject({ kind: 'pen', points: [{ x: 25, y: 30 }, { x: 60, y: 35 }, { x: 100, y: 40 }, { x: 150, y: 45 }] })
     await act(async () => {
       pointer('pointermove', 190, 50); pointer('pointerup', 190, 50); pointer('pointerup', 190, 50)
