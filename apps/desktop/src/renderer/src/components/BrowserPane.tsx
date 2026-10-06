@@ -423,6 +423,7 @@ function BrowserPaneContent({
           released ||
           restoring ||
           restoreError !== null ||
+          screenshot !== null ||
           elementSelection !== null ||
           navigatorCoversBrowser ||
           __AGENTMUX_WEB_PREVIEW__ ||
@@ -483,7 +484,7 @@ function BrowserPaneContent({
     // yieldToFocusRing **故意不在**这里（#545）：它在焦点切换时变化，若列进来，整条 effect 会拆了
     // 重建——cleanup 那句 `setBounds(null)` 先把原生视图藏起来，重建那次 rAF 下一帧才重新显示，中间
     // 空一帧就是那道闪烁。它改由 ref 读、由下面那条独立 effect 触发重算。其余被 update 读到的值都在。
-  }, [elementSelection, released, restoring, restoreError, toolsOpen, controlPanelOpen, reportError, tab.appLinkPrompt, tab.browserId, tab.error, tab.url, visible, presentations.length])
+  }, [screenshot, elementSelection, released, restoring, restoreError, toolsOpen, controlPanelOpen, reportError, tab.appLinkPrompt, tab.browserId, tab.error, tab.url, visible, presentations.length])
 
   useLayoutEffect(() => {
     // Portal children run before their host moves. Rebind against connected ancestors after that
@@ -913,7 +914,7 @@ function BrowserPaneContent({
       })}
     </> : null
     const connectionUnavailable = released || restoring || restoreError !== null
-    const blocked = connectionUnavailable || elementSelection !== null || Boolean(tab.error) || tab.appLinkPrompt !== null || tab.url === 'about:blank' ||
+    const blocked = connectionUnavailable || screenshot !== null || elementSelection !== null || Boolean(tab.error) || tab.appLinkPrompt !== null || tab.url === 'about:blank' ||
       Boolean((presentation?.target.controlsOpen ?? toolsOpen) && window.innerWidth <= (inSurvey ? 1100 : 900))
     const stageContent = <>
 
@@ -927,7 +928,6 @@ function BrowserPaneContent({
         </div> : screenshot ? (
           visible && !released && !restoring ?
           <ScreenshotEditor
-            anchor={stageRef.current}
             image={screenshot.image}
             busy={screenshotBusy}
             onCancel={cancelScreenshot}
