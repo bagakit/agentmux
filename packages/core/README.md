@@ -288,11 +288,19 @@ await client.dispose()
 ## Notebook 目录 API 与 CLI
 
 知识目录不需要 App。`@agentmux/core/notebook-store` 的 `AgentMuxNotebookStore` 负责
-`notebooks.json`，默认位于 `AGENTMUX_STATE_DIRECTORY` 所指的原状态目录。
+`notebooks.sqlite`，位置跟随原 NotesStorage owner 的实际 Notes 目录，默认是
+`~/.agentmux/notes/notebooks.sqlite`。`AGENTMUX_STATE_DIRECTORY` 决定 locator 与旧目录导入入口，
+Desktop 消费同一目录 owner。旧 JSON 目录只作一次导入输入并保留备份。
 `@agentmux/core/notebook-catalog` 导出 `NotebookState`、`NotebookWrite`、`NotebookChange`
 和严格读取类型。正文由原资源 Host/Workspace 的文件能力持有，目录保存准确引用、
 页面层级、网页来源和真实变化轨迹。[Notebook 行为合同](../../docs/design/behavior/knowledge-workflows.md#recallnotebook-与块知识)
 定义归属和关闭语义；这里列出实际公开调用方式。
+
+Note 正文是原文件 owner 持有的 `.note.md`，格式与稳定块／引用标记见
+[Note Markdown 与元数据](../../docs/specs/note-markdown.md)。`notebook inspect --note ID --content`
+返回已保存 Markdown、revision、块及同 revision 的 `noteProvenance`；`file read/write`
+沿原资源与 CAS 读改正文。作者由可信调用者确认，正文中的身份声明不构成归因。
+`notebook graph`／`notebook resolve` 读同一正文派生关系，不要求打开页面。
 
 ```sh
 amux notebook ls
@@ -318,6 +326,7 @@ amux notebook apply --revision CURRENT_REVISION --operation-id NEW_OPERATION_ID 
 | `source` | `noteId, source` | 追加来源；不覆盖已有来源身份 |
 | `organize` | `noteId, topic` | 记录已确认的 Topic 整理；不是空间关系创建命令 |
 | `relocate` | `noteId, resource` | 记录原文件能力已确认的真实新位置；不是文件移动命令 |
+| `follow` / `unfollow` | `noteId` | 持久关注／取消关注自己；身份来自可信调用者 |
 
 `resource` 为 `{ hostId, workspaceId, workspacePath, path }`，`path` 相对原 Workspace。
 `source` 为 `{ sourceId, url, title, recordedAt, operator?, position? }`；标题未知用 `null`，

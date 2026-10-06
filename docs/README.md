@@ -12,6 +12,7 @@
 | 空间持久化、准确位置与跨视图导航怎样实现 | [空间状态与导航机制](architecture/spatial-state.md) |
 | 项目分层、身份与唯一事实 owner | [系统职责地图](architecture/system-ownership.md) |
 | 公开 API / CLI 的实际合同与接线来源 | [公共能力源码入口](specs/public-capabilities.md) |
+| Note Markdown、稳定块／引用与独立元数据 | [Note 文件格式与存储](specs/note-markdown.md) |
 | Agent 的目标、边界和交付责任 | [AGENTS.md](../AGENTS.md) |
 | Core 公共 API、Provider 与 Session | [Core 接入说明](../packages/core/README.md) |
 | 分屏树代数 / 目标存储 | [Layout](../packages/layout/README.md)、[Demand](../packages/demand/README.md) |
