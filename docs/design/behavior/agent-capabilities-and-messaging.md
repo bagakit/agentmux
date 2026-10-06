@@ -419,9 +419,9 @@ Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／P
 
 ## 按 amux id 搜索 Agent
 
-- 用户原话：「加个功能快速合入 main: 支持按 amux id 搜索 agent」。Focus 的既有上下文搜索与快速切换的既有搜索都应能找到当前入口已提供的 Agent，按 Core 权威 Agent Session ID 检索；Run ID、Provider 原生会话 ID 和普通 Terminal 的身份不是这里的 amux Agent ID。
+- 用户原话：「加个功能快速合入 main: 支持按 amux id 搜索 agent」。快速切换的既有搜索应能找到当前入口已提供的 Agent，按 Core 权威 Agent Session ID 检索；Run ID、Provider 原生会话 ID 和普通 Terminal 的身份不是 amux Agent ID。Focus 的对象链接、其他身份和历史正文范围沿[同一搜索合同](focus-context.md#搜索上下文对象身份与历史正文)，不把其他对象 ID 改称 Agent SID。
 - ID 输入去除首尾空白后按原大小写连续匹配，支持完整 ID、前缀和中间连续片段；不把散落字符的模糊匹配用于 ID。前缀或片段命中多个 Agent 时展示全部匹配，由用户明确选择，不静默猜一个；这是一组现有行的搜索结果，不改变 CLI 唯一前缀寻址的合同。
-- 原名称、上下文、Provider 等已有文本搜索规则与排序保持；快速切换的 ID-only 命中使用中性匹配权重，原注意力、文本质量与观察时间排序不另设 ID 优先级。Focus 原项目、状态与 PMO 可见性边界保持；只添加已有可见 Agent 行的 ID 匹配，不扩展候选集合。
+- 原名称、上下文、Provider 等已有文本搜索规则与排序保持；快速切换的 ID-only 命中使用中性匹配权重，原注意力、文本质量与观察时间排序不另设 ID 优先级。快速切换只添加已有可见 Agent 行的 ID 匹配，不扩展候选集合；Focus 的筛选和对象结果沿同一搜索合同。
 - 选中结果沿原 Focus 或快速切换动作进入同一 Agent 工作面；搜索本身不创建或恢复 Session，不改变原焦点、布局或健康 Run。匹配依现有已加载事实完成，不另建 Core 索引、轮询或第二份身份。
 
 ## Hook 事件与原生记录的生命周期
