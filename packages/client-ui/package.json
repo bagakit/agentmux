@@ -86,7 +86,9 @@
     "remark-math": "6.0.0",
     "highlight.js": "11.12.0",
     "zod": "^4.0.0",
-    "svg-pathdata": "^9.0.0"
+    "svg-pathdata": "^9.0.0",
+    "@xterm/addon-unicode11": "0.10.0-beta.300",
+    "@xterm/xterm": "6.1.0-beta.303"
   },
   "peerDependencies": {
     "react": "^19.2.0",

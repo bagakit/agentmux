@@ -2,6 +2,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { Terminal, type ITheme } from '@xterm/xterm'
+import { activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '@agentmux/client-ui/terminal/unicode'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import type { MobileConnection } from '../conversation/MobileConversationSurface'
@@ -37,6 +38,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
   const gestures = useRef<ReturnType<typeof bindMobileTerminalGestures> | null>(null)
   const [fontSize, setFontSize] = useState(MOBILE_TERMINAL_FONT_DEFAULT)
+  const [renderIssue, setRenderIssue] = useState<string | null>(null)
   useEffect(() => {
     gestures.current?.reset()
     if (canvasSession.current !== agentSessionId) {
@@ -44,11 +46,13 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
       terminal.current?.dispose(); terminal.current = null; setCurrentCanvas(null); canvasSession.current = agentSessionId
     }
     if (!container.current || !agentSessionId || !visible || terminal.current) return
-    const canvas = new Terminal({ cols: 80, rows: 24, scrollback: 10_000, fontSize, lineHeight: 1.15,
+    const canvas = new Terminal({ cols: 80, rows: 24, scrollback: 10_000, fontSize, lineHeight: 1.15, allowProposedApi: true,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', disableStdin: true,
       altClickMovesCursor: false, mouseEventsRequireAlt: true, cursorBlink: false, cursorInactiveStyle: 'none', scrollOnUserInput: false,
       windowOptions: {}, theme: paletteRef.current ?? { background: '#151b1b', foreground: '#dce4e0', selectionBackground: '#bedbba40' } })
     canvas.open(container.current)
+    const unicode = activateTerminalUnicodeWidth(canvas)
+    setRenderIssue(unicode === UNICODE_WIDTH_VERSION ? null : '终端字宽配置尚未生效，部分符号可能错位；原输出与输入继续可用。重新打开终端可复查。')
     if (canvas.textarea) { canvas.textarea.readOnly = true; canvas.textarea.tabIndex = -1; canvas.textarea.inputMode = 'none' }
     // Terminal output cannot read/write the OS clipboard. Copy requires the explicit button below.
     canvas.parser.registerOscHandler(52, () => true)
@@ -169,6 +173,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
     {!agentSessionId && <div className="mobile-terminal-empty"><h2>查看原会话的终端</h2><p>先从会话列表选择一个已授权会话。这里只显示 Mac 持有的输出。</p></div>}
     <div className="mobile-terminal-canvas" ref={container} aria-label="原会话终端输出" />
     <aside className="mobile-terminal-notice" role="status">
+      {renderIssue && <p>{renderIssue}</p>}
       <p>{noticeSummary(!client || !agentSessionId ? connection.message : reading.message)}</p>
       {agentSessionId && <p>{inputState.phase === 'unknown' ? '终端操作回执未确认；原操作不会重发。' : noticeSummary(inputState.message)}</p>}
       {inputState.phase === 'unknown' && <button onClick={() => { control.current?.continueAfterReview() }}>已在原会话核对，继续新输入</button>}
