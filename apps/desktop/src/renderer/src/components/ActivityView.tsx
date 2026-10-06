@@ -331,7 +331,7 @@ function WorkingIndicator(): JSX.Element {
   return (
     <div className="activity-working" role="status" aria-live="polite">
       <span className="activity-working__dots" aria-hidden="true">
-        <i /><i /><i />
+        <SemanticIcon name="status.working" size={12} />
       </span>
       Working…
     </div>

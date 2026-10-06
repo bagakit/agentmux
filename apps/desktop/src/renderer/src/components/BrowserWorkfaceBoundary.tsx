@@ -1,3 +1,4 @@
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import { Component, Fragment, useEffect, useState, type ReactNode, type RefObject } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -6,6 +7,8 @@ import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import type { WorkbenchBrowserPresentation } from './BrowserPresentationStage'
+
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 /** Only the original address draft crosses a failed Renderer tree. No page state does. */
 export type BrowserWorkfaceAddressDraft = { browserId: string; value: string; edited: boolean }
@@ -59,7 +62,7 @@ function BrowserRenderingFailure({ tab, addressDraft, failure, retry, onRegionCl
         const value = event.target.value
         addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value)
       }} /></label>
-      {onRegionClose ? <button type="button" aria-label="Close split" title="Close split" onClick={onRegionClose}>×</button> : null}
+      {onRegionClose ? <button type="button" aria-label="Close split" title="Close split" onClick={onRegionClose}><ThemeActionCloseIcon size={14} /></button> : null}
     </form>
     <div className="pane-state pane-state--error" role="status">
       <strong>Browser view could not display</strong>

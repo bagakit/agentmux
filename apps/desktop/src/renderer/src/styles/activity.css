@@ -296,16 +296,7 @@
   color: var(--text-3);
   font-size: var(--fs-meta);
 }
-.activity-working__dots { display: inline-flex; gap:var(--sp-1); }
-.activity-working__dots i {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--text-3);
-  animation: activity-working-pulse 1.2s ease-in-out infinite;
-}
-.activity-working__dots i:nth-child(2) { animation-delay: .15s; }
-.activity-working__dots i:nth-child(3) { animation-delay: .3s; }
+.activity-working__dots { display: inline-flex; }
 @keyframes activity-working-pulse {
   0%, 60%, 100% { opacity: .28; }
   30% { opacity: 1; }
@@ -317,7 +308,6 @@
 .semantic-icon-motion { display: inline-flex; flex: none; vertical-align: middle; line-height: 0; }
 .semantic-icon-motion--working { animation: activity-working-pulse 1.2s ease-in-out infinite; will-change: opacity; }
 @media (prefers-reduced-motion: reduce) {
-  .activity-working__dots i { animation: none; opacity: .6; }
   /* 动势退化为静态，但字形差异（Activity vs Radio）不受影响仍在——满足合同「reduced-motion 下字形差异必须保留」。 */
   .semantic-icon-motion--working { animation: none; will-change: auto; }
 }
