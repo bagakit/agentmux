@@ -1,11 +1,16 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './fixture-values.js'
 import { fixturePath } from './fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { vi } from 'vitest'
 import { AgentMuxClient as SourceClient } from '../../src/client.js'
-const AgentMuxClient: typeof SourceClient = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
-  ? (await import(process.env.AGENTMUX_TEST_RPC_CORE_ENTRY)).AgentMuxClient : SourceClient
-import { AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore as SourceStore } from '../../src/agent-session-store.js'
+const ownerEntry = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
+  ? await import(process.env.AGENTMUX_TEST_RPC_CORE_ENTRY) : null
+const AgentMuxClient: typeof SourceClient = ownerEntry ? ownerEntry.AgentMuxClient : SourceClient
+// One actual package owner: mixing src Store errors with dist Client classes
+// bypasses that package's same-owner stale CAS retry and invalidates the probe.
+const AgentMuxFileAgentSessionStore: typeof SourceStore = ownerEntry ? ownerEntry.AgentMuxFileAgentSessionStore : SourceStore
 import { issueAgentCapability, hashAgentCapability } from '../../src/agent-capability.js'
 import type { AgentMuxStoredAgentSession } from '../../src/types.js'
 import type { CtxmuxAdapterObservationEvent, CtxmuxAdapterRun } from '../../src/ctxmux-run-adapter.js'
@@ -20,7 +25,7 @@ export async function rpcOwnerFixture(ids = ['caller', 'recipient']) {
   for (const agentSessionId of ids) {
     const record: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex',
       hostId: 'local', workspacePath: root, run: { runId: 'run-' + agentSessionId }, retiredRuns: [],
-      hookBindingId: 'fixture-hook', hookToken: 'fixture-token', capabilityHash: hashAgentCapability(capability), createdAt: 1, updatedAt: 1 }
+      hookBindingId: 'fixture-hook', hookToken: 'fixture-token', capabilityHash: hashAgentCapability(capability), createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
     await store.compareAndSwap(null, record)
   }
   const client = new AgentMuxClient({ store })
