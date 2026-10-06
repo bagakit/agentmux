@@ -85,7 +85,7 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="product-entry.css"></head><body><div id="root"></div><script type="module" src="product-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), path.join(compiled, 'index.html'), directory, ...(process.argv.includes('--baseline') ? ['baseline'] : process.argv.includes('--navigation') ? ['navigation'] : process.argv.includes('--source-recovery') ? ['source-recovery'] : [])],
+  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), path.join(compiled, 'index.html'), directory, ...(process.argv.includes('--baseline') ? ['baseline'] : process.argv.includes('--navigation') ? ['navigation'] : process.argv.includes('--source-recovery') ? ['source-recovery'] : process.argv.includes('--input-history') ? ['input-history'] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
