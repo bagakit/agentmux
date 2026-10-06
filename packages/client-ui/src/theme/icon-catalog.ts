@@ -156,6 +156,8 @@ export const SEMANTIC_ICON_CATALOG = {
   'action.outdent': { label: 'Outdent', glyph: 'indent-decrease' },
   'action.create-subnote': { label: 'Create Subnote', glyph: 'plus' },
   'action.open-folder': { label: 'Open Folder', glyph: 'folder-input' },
+  'action.move-to-folder': { label: 'Move item to folder', glyph: 'folder-input' },
+  'action.open-project': { label: 'Open existing folder as project', glyph: 'folder-plus' },
   'action.create-notebook': { label: 'Create Notebook', glyph: 'plus' },
   'object.tree': { label: 'Tree', glyph: 'list-tree' },
   'layout.grid': { label: 'Grid', glyph: 'layout-grid' },

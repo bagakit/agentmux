@@ -1,19 +1,5 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import {
-  Columns2,
-  Check,
-  Copy,
-  CornerDownRight,
-  Crosshair,
-  ExternalLink,
-  FolderSymlink,
-  LayoutGrid,
-  Pencil,
-  ListX,
-  PanelLeftClose,
-  PanelRightClose,
-  X
-} from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
 import type { AgentMuxArrangeMode } from '@agentmux/core/control'
 import {
@@ -32,6 +18,22 @@ import {
 } from './workbench-split-menu-icons'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
+const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
+const ThemeActionCopyIcon = semanticIconComponent('action.copy')
+const ThemeActionCopyAddressIcon = semanticIconComponent('action.copy-address')
+const ThemeActionCopyRelativePathIcon = semanticIconComponent('action.copy-relative-path')
+const ThemeActionRevealFileIcon = semanticIconComponent('action.reveal-file')
+const ThemeActionEditIcon = semanticIconComponent('action.edit')
+const ThemeObjectFolderLinkIcon = semanticIconComponent('object.folder-link')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeLayoutColumns2Icon = semanticIconComponent('layout.columns-2')
+const ThemeLayoutGridIcon = semanticIconComponent('layout.grid')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeActionClearListIcon = semanticIconComponent('action.clear-list')
+const ThemeLayoutCloseRightIcon = semanticIconComponent('layout.close-right')
+const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
+
+
 type WorkbenchTabActionId =
   | 'copy-tab-address'
   | 'copy-session-address'
@@ -42,7 +44,7 @@ type WorkbenchTabActionId =
 type WorkbenchTabCopyAction = {
   id: WorkbenchTabActionId
   label: string
-  icon: typeof Copy
+  icon: typeof ThemeActionCopyIcon
   onSelect(): Promise<void>
 }
 
@@ -89,7 +91,7 @@ export function createWorkbenchTabCopyModel({
     tabAddress: {
       id: 'copy-tab-address',
       label: 'Copy Tab Link',
-      icon: Crosshair,
+      icon: ThemeActionCopyAddressIcon,
       onSelect: async () => copy(formatTabAddress(tabId), 'Copy Tab Link')
     },
     ...(agentSessionId
@@ -97,7 +99,7 @@ export function createWorkbenchTabCopyModel({
           sessionAddress: {
             id: 'copy-session-address' as const,
             label: 'Copy Agent Link',
-            icon: Copy,
+            icon: ThemeActionCopyAddressIcon,
             onSelect: async () => copy(formatSessionAddress(agentSessionId), 'Copy Agent Link')
           }
         }
@@ -107,7 +109,7 @@ export function createWorkbenchTabCopyModel({
           copyPath: {
             id: 'copy-path' as const,
             label: 'Copy Path',
-            icon: Copy,
+            icon: ThemeActionCopyIcon,
             onSelect: async () =>
               copy(
                 applyCopyPathStyle(formatPathsForCopy([file.path], 'absolute', file.workspaceRoot), {
@@ -120,7 +122,7 @@ export function createWorkbenchTabCopyModel({
           copyRelativePath: {
             id: 'copy-relative-path' as const,
             label: 'Copy Relative Path',
-            icon: CornerDownRight,
+            icon: ThemeActionCopyRelativePathIcon,
             onSelect: async () =>
               copy(formatPathsForCopy([file.path], 'relative', file.workspaceRoot), 'Copy Relative Path')
           },
@@ -130,7 +132,7 @@ export function createWorkbenchTabCopyModel({
             // 也就没有「忘了传就掉回一个恰好合法的中性值」这条静默降级路。
             id: 'reveal' as const,
             label: file.revealLabel,
-            icon: ExternalLink,
+            icon: ThemeActionRevealFileIcon,
             onSelect: async () => file.onReveal()
           }
         }
@@ -226,7 +228,7 @@ export function WorkbenchTabContextMenu({
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onRenameTab}>
-            <Pencil size={14} />
+            <ThemeActionEditIcon size={14} />
             <span>{renameLabel}</span>
           </ContextMenu.Item>
           <ContextMenu.Separator className="tab-context-menu__separator" />
@@ -246,9 +248,9 @@ export function WorkbenchTabContextMenu({
           <ContextMenu.Separator className="tab-context-menu__separator" />
           <ContextMenu.Sub>
             <ContextMenu.SubTrigger className="tab-context-menu__item" disabled={displayTargets.length === 0}>
-              <FolderSymlink size={14} />
+              <ThemeObjectFolderLinkIcon size={14} />
               <span>Link to Workspace / Group</span>
-              <span className="tab-context-menu__chevron">›</span>
+              <span className="tab-context-menu__chevron"><ThemeNavigationSubmenuIcon size={12} /></span>
             </ContextMenu.SubTrigger>
             <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
               <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
@@ -262,7 +264,7 @@ export function WorkbenchTabContextMenu({
                     onSelect={(event) => event.preventDefault()}
                     onCheckedChange={(linked) => onDisplayBindingChange(target.displayWorkspaceId, target.groupId, linked === true)}
                   >
-                    <span style={{ width: 14 }}><ContextMenu.ItemIndicator><Check size={14} /></ContextMenu.ItemIndicator></span>
+                    <span style={{ width: 14 }}><ContextMenu.ItemIndicator><ThemeStatusSelectedIcon size={14} /></ContextMenu.ItemIndicator></span>
                     <span>{target.label}</span>
                   </ContextMenu.CheckboxItem>
                 ))}
@@ -271,9 +273,9 @@ export function WorkbenchTabContextMenu({
           </ContextMenu.Sub>
           <ContextMenu.Sub>
             <ContextMenu.SubTrigger className="tab-context-menu__item" disabled={!canMoveToNewGroup}>
-              <Columns2 size={14} />
+              <ThemeLayoutColumns2Icon size={14} />
               <span>Move Tab to New Group</span>
-              <span className="tab-context-menu__chevron">›</span>
+              <span className="tab-context-menu__chevron"><ThemeNavigationSubmenuIcon size={12} /></span>
             </ContextMenu.SubTrigger>
             <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
               <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
@@ -306,9 +308,9 @@ export function WorkbenchTabContextMenu({
           {layoutEntries.length > 0 ? (
             <ContextMenu.Sub>
               <ContextMenu.SubTrigger className="tab-context-menu__item">
-                <LayoutGrid size={14} />
+                <ThemeLayoutGridIcon size={14} />
                 <span>Rearrange Splits</span>
-                <span className="tab-context-menu__chevron">›</span>
+                <span className="tab-context-menu__chevron"><ThemeNavigationSubmenuIcon size={12} /></span>
               </ContextMenu.SubTrigger>
               <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
                 <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
@@ -332,9 +334,9 @@ export function WorkbenchTabContextMenu({
           {moveSessionViewTargets.length > 0 ? (
             <ContextMenu.Sub>
               <ContextMenu.SubTrigger className="tab-context-menu__item">
-                <FolderSymlink size={14} />
+                <ThemeObjectFolderLinkIcon size={14} />
                 <span>Move to Workspace</span>
-                <span className="tab-context-menu__chevron">›</span>
+                <span className="tab-context-menu__chevron"><ThemeNavigationSubmenuIcon size={12} /></span>
               </ContextMenu.SubTrigger>
               <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
                 <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
@@ -344,7 +346,7 @@ export function WorkbenchTabContextMenu({
                       className="tab-context-menu__item"
                       onSelect={() => onMoveSessionView(target.workspaceId)}
                     >
-                      <FolderSymlink size={14} />
+                      <ThemeObjectFolderLinkIcon size={14} />
                       <span>{target.name}</span>
                     </ContextMenu.Item>
                   ))}
@@ -354,19 +356,19 @@ export function WorkbenchTabContextMenu({
           ) : null}
           <ContextMenu.Separator className="tab-context-menu__separator" />
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onClose}>
-            <X size={14} />
+            <ThemeActionCloseIcon size={14} />
             <span>Close</span>
           </ContextMenu.Item>
           <ContextMenu.Item className="tab-context-menu__item" disabled={!canCloseOthers} onSelect={onCloseOthers}>
-            <ListX size={14} />
+            <ThemeActionClearListIcon size={14} />
             <span>Close Others</span>
           </ContextMenu.Item>
           <ContextMenu.Item className="tab-context-menu__item" disabled={!canCloseRight} onSelect={onCloseRight}>
-            <PanelRightClose size={14} />
+            <ThemeLayoutCloseRightIcon size={14} />
             <span>Close Tabs to the Right</span>
           </ContextMenu.Item>
           <ContextMenu.Item className="tab-context-menu__item" disabled={!canCloseLeft} onSelect={onCloseLeft}>
-            <PanelLeftClose size={14} />
+            <ThemeLayoutCloseLeftIcon size={14} />
             <span>Close Tabs to the Left</span>
           </ContextMenu.Item>
         </ContextMenu.Content>
