@@ -159,7 +159,9 @@ async function install(f: Scope, intent = 'full') {
   const { installApplication } = await import('../scripts/package-macos.mjs')
   // Deliberately omit quit and launch overrides: this is the default production IO.
   return await installApplication(f.candidate, { intent, homeDirectory: f.home }).then(
-    () => ({ error: null }), (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }))
+    () => ({ error: null, native: undefined }), (error: unknown) => ({
+      error: error instanceof Error ? error.message : String(error),
+      native: (error as { transaction?: { native?: { status: string } } }).transaction?.native }))
 }
 
 it('the default full installer completes GUI quit while only its fenced semantic owner survives', async () => {
@@ -208,11 +210,54 @@ it.each(['birth', 'Store', 'PID', 'UID', 'argv', 'mode', 'Source'] as const)(
     expect(f.signals).toEqual([]); expect(f.cutover).toBe(false)
   })
 
-it('the ui-only path does not exempt an unplanned child semantic Host', async () => {
+it('the default ui-only installer completes GUI quit while only its fenced semantic owner survives', async () => {
   const f = await fixture(), outcome = await install(f, 'ui-only')
-  expect(outcome.error, 'Without a prepared full Source plan, the original child owner must remain protected').toContain('has not exited gracefully')
+  expect(outcome.error, 'UI-only still replaces the complete App and must close its exact original Host').toBe('OWNED_CUTOVER_BOUNDARY')
+  expect(f.events.filter(event => event !== 'public-owner')).toEqual(['normal-gui-quit', 'semantic-host-shutdown', 'cutover'])
+  expect(f.signals).toEqual([[211, 'SIGTERM']]); expect(f.cutover).toBe(true)
+  expect(outcome.native?.status, 'Semantic reload must not perform the deferred Native Runtime upgrade').toBe('deferred')
+})
+
+it('the ui-only installer prepares a Host that first appears after normal GUI quit', async () => {
+  const f = await fixture(), lateHost = { ...f.host!, ppid: 1 }
+  f.host = null
+  f.afterGuiQuit = () => { f.host = lateHost }
+  const outcome = await install(f, 'ui-only')
+  expect(outcome.error).toBe('OWNED_CUTOVER_BOUNDARY')
+  expect(f.events.filter(event => event !== 'public-owner'), 'The late exact Host must close before directory replacement').toEqual(['normal-gui-quit', 'semantic-host-shutdown', 'cutover'])
+  expect(f.signals).toEqual([[211, 'SIGTERM']]); expect(f.host).toBeNull()
+  expect(outcome.native?.status).toBe('deferred')
+})
+
+it('the ui-only installer retains an unconfirmed original semantic owner', async () => {
+  const f = await fixture(); f.hostMode = 'unknown'
+  const outcome = await install(f, 'ui-only')
+  expect(outcome.error).toContain('Semantic Host OS mode or birth is unconfirmed')
+  expect(f.events).not.toContain('normal-gui-quit')
   expect(f.signals).toEqual([]); expect(f.cutover).toBe(false)
 })
+
+it.each(['birth', 'Store', 'PID', 'UID', 'argv', 'mode', 'Source'] as const)(
+  'the default ui-only installer rejects changed %s facts before excluding or stopping an owner', async change => {
+    const f = await fixture()
+    f.beforeQuit = async () => {
+      if (change === 'birth') f.host!.birth = _hygiene_fixturePsBirth(24022801000)
+      if (change === 'Store') f.publicStore = join(f.root, 'foreign-store.json')
+      if (change === 'PID') f.publicPid = 999
+      if (change === 'UID') f.host!.uid++
+      if (change === 'argv') f.host!.command = `${f.app}/Contents/MacOS/AgentMux ${_hygiene_fixturePath('other-worker.js')} --store ${f.store}`
+      if (change === 'mode') f.hostMode = 'unknown'
+      if (change === 'Source') {
+        const file = join(f.app, 'Contents/Resources/app/package-identity.json')
+        const identity = JSON.parse(await readFile(file, 'utf8')); identity.sourceCommit = 'd'.repeat(40)
+        await writeFile(file, JSON.stringify(identity))
+      }
+    }
+    const outcome = await install(f, 'ui-only')
+    expect(outcome.error).toMatch(/Semantic Host|installation changed/)
+    expect(f.events).not.toContain('normal-gui-quit')
+    expect(f.signals).toEqual([]); expect(f.cutover).toBe(false)
+  })
 
 it.each(['GUI-child', 'detached', 'endpoint-worker'] as const)(
   'the same-Source full installer reloads its exact %s semantic namespace', async shape => {
@@ -228,6 +273,28 @@ it.each(['GUI-child', 'detached', 'endpoint-worker'] as const)(
     expect(f.signals).toEqual([[211, 'SIGTERM']]); expect(f.host).toBeNull(); expect(f.worker).toBeNull()
     expect(f.cutover).toBe(true)
   })
+
+it.each(['GUI-child', 'detached', 'endpoint-worker'] as const)(
+  'the same-Source ui-only installer reloads its exact %s semantic namespace', async shape => {
+    const f = await fixture({ sameSource: true, worker: shape === 'endpoint-worker' })
+    if (shape === 'detached') f.host!.ppid = 1
+    if (shape === 'endpoint-worker') {
+      f.worker!.ppid = 211
+      f.worker!.command = `${join(f.app, 'Contents/MacOS/AgentMux')} ${join(f.app, 'Contents/Resources/app/node_modules/@agentmux/core/dist/control-endpoint-listener-worker.js')} ${join(f.root, 'original-namespace')}`
+    }
+    const outcome = await install(f, 'ui-only')
+    expect(outcome.error).toBe('OWNED_CUTOVER_BOUNDARY')
+    expect(f.events.filter(event => event !== 'public-owner')).toEqual(['normal-gui-quit', 'semantic-host-shutdown', 'cutover'])
+    expect(f.signals).toEqual([[211, 'SIGTERM']]); expect(f.host).toBeNull(); expect(f.worker).toBeNull()
+    expect(outcome.native?.status).toBe('deferred')
+  })
+
+it('the default ui-only installer preserves the GUI-only cold namespace path', async () => {
+  const f = await fixture({ host: false }), outcome = await install(f, 'ui-only')
+  expect(outcome.error).toBe('OWNED_CUTOVER_BOUNDARY')
+  expect(f.events).toEqual(['normal-gui-quit', 'cutover']); expect(f.signals).toEqual([])
+  expect(outcome.native?.status).toBe('deferred')
+})
 
 it('the default full installer preserves the GUI-only cold namespace path', async () => {
   const f = await fixture({ host: false }), outcome = await install(f)
