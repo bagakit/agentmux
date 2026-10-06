@@ -44,10 +44,11 @@ export async function discoverClaudeNativeSession(context: AgentProviderNativeSe
   if (!original) return null
   return { handle: { kind: 'provider', providerId: 'claude', sessionId: original.id, transcriptPath: original.file.path },
     async assertCurrent() {
+      // A descriptor is a replaceable handle; the original owner and file object must remain.
       const current = await locate(context)
       if (!current || current.id !== original.id || current.file.path !== original.file.path ||
         current.file.processId !== original.file.processId || current.file.processGroup !== original.file.processGroup ||
-        current.file.descriptor !== original.file.descriptor || current.file.device !== original.file.device || current.file.inode !== original.file.inode) {
+        current.file.device !== original.file.device || current.file.inode !== original.file.inode) {
         throw unavailable('The original writable main native transcript changed; refresh its exact source.')
       }
     } }

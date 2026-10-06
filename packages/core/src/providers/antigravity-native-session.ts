@@ -55,10 +55,11 @@ export async function discoverAntigravityNativeSession(context: AgentProviderNat
   if (!original) return null
   return { handle: { kind: 'provider', providerId: 'antigravity', sessionId: original.id, transcriptPath: original.transcriptPath },
     async assertCurrent() {
+      // A descriptor is a replaceable handle; the original owner and file object must remain.
       const current = await locate(context)
       if (!current || current.birth !== original.birth || current.id !== original.id || current.transcriptPath !== original.transcriptPath ||
         current.file.processId !== original.file.processId || current.file.processGroup !== original.file.processGroup ||
-        current.file.descriptor !== original.file.descriptor || current.file.device !== original.file.device || current.file.inode !== original.file.inode) {
+        current.file.device !== original.file.device || current.file.inode !== original.file.inode) {
         throw unavailable('The original native process presence changed. Refresh its exact source; the Run is kept.')
       }
     } }
