@@ -180,8 +180,9 @@ export function useFocusContextHover(context: FocusContext, requested: boolean, 
     </section> : null}
     {identity ? <section className="focus-context-hover__workbench" aria-label="Original workbench positions">
       <small>{identity.occurrenceCount} confirmed {identity.occurrenceCount === 1 ? 'position' : 'positions'}</small>
-      {identity.tabs.map(tab => <section key={tab.tabId}>
+      {identity.tabs.map(tab => <section key={tab.occurrenceKey ?? tab.tabId} data-focus-occurrence-key={tab.occurrenceKey}>
         <strong>{tab.title}</strong>
+        {tab.locationLabel ? <small className="focus-context-hover__position-label">{tab.locationLabel}</small> : null}
         <WorkbenchRegionMap regions={tab.regions} highlightedRegionIds={tab.highlightedRegionIds} aspectRatio={16 / 10} className="workbench-topology__inspector-regions" />
       </section>)}
     </section> : null}

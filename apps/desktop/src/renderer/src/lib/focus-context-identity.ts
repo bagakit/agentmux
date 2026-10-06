@@ -1,5 +1,6 @@
 import type { AgentMuxSpaceCatalog } from '@agentmux/core'
 import type { AppConfig } from '../../../shared/contracts'
+import { groupIds, type WorkspaceLayout } from '@agentmux/layout'
 import type { WorkbenchTabDetail } from '../components/WorkbenchTopology'
 import type { FocusContext } from './focus-context'
 import { topicTabRegionCells } from './scratch-topic-layout'
@@ -9,6 +10,7 @@ export const focusContextIdentityKey = (hostId: string, sessionId: string) => JS
 type RegionReference = { tabId: string; regionId: string; agentSessionId: string }
 type ExecutionFor = (reference: RegionReference) => { hostId: string } | null
 type Cached<T> = { dependencies: readonly unknown[]; value: T }
+type Position = { tabId: string; regionIds: Set<string>; locationLabel?: string }
 export type FocusContextIdentity = { tabs: readonly WorkbenchTabDetail[]; occurrenceCount: number }
 const same = (left: readonly unknown[], right: readonly unknown[]) => left.length === right.length && left.every((value, index) => value === right[index])
 
@@ -21,13 +23,16 @@ export function createFocusContextIdentitySelector() {
   let tabCache = new Map<string, Cached<WorkbenchTabDetail>>()
   let subjectCache = new Map<string, Cached<FocusContextIdentity>>()
   return (catalog: AgentMuxSpaceCatalog, tabs: Readonly<Record<string, WorkbenchTab>>,
-    contexts: readonly FocusContext[], config: AppConfig | null, executionFor: ExecutionFor): ReadonlyMap<string, FocusContextIdentity> => {
+    contexts: readonly FocusContext[], config: AppConfig | null, layouts: Readonly<Record<string, WorkspaceLayout>>,
+    executionFor: ExecutionFor): ReadonlyMap<string, FocusContextIdentity> => {
     const executors = config?.executors, retainedAvatars = config?.appearance.agentAvatars
     const contextsByKey = new Map(contexts.map(context => [focusContextIdentityKey(context.hostId, context.id), context]))
     const regions = new Map(catalog.regions.map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
     const contextForRegion = new Map<string, FocusContext>()
-    const positions = new Map<string, Map<string, Set<string>>>()
+    const positions = new Map<string, Map<string, Position>>()
     const occurrences = new Map<string, Set<string>>()
+    const displayNames = new Map(config?.workspaces.map(workspace => [workspace.id, workspace.name]))
+    const groupOrders = new Map<string, string[]>()
     // Locations prove actual membership. A retained, detached Tab object is not a position.
     for (const location of catalog.locations) {
       const key = JSON.stringify([location.tabId, location.regionId])
@@ -41,12 +46,18 @@ export function createFocusContextIdentitySelector() {
       originalOccurrences.add(JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]))
       occurrences.set(subject, originalOccurrences)
       contextForRegion.set(key, context)
-      const subjectTabs = positions.get(subject) ?? new Map<string, Set<string>>()
-      const subjectRegions = subjectTabs.get(location.tabId) ?? new Set<string>()
-      subjectRegions.add(location.regionId); subjectTabs.set(location.tabId, subjectRegions); positions.set(subject, subjectTabs)
+      const occurrenceKey = JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId])
+      const layout = layouts[location.displayWorkspaceId], displayName = displayNames.get(location.displayWorkspaceId)
+      const order = groupOrders.get(location.displayWorkspaceId) ?? (layout ? groupIds(layout.root) : [])
+      groupOrders.set(location.displayWorkspaceId, order)
+      const groupIndex = order.indexOf(location.groupId)
+      const locationLabel = displayName && groupIndex >= 0 ? `${displayName} · Group ${groupIndex + 1}` : undefined
+      const subjectPositions = positions.get(subject) ?? new Map<string, Position>()
+      const position = subjectPositions.get(occurrenceKey) ?? { tabId: location.tabId, regionIds: new Set<string>(), ...(locationLabel ? { locationLabel } : {}) }
+      position.regionIds.add(location.regionId); subjectPositions.set(occurrenceKey, position); positions.set(subject, subjectPositions)
     }
     const nextTabs = new Map<string, Cached<WorkbenchTabDetail>>()
-    for (const subjectTabs of positions.values()) for (const tabId of subjectTabs.keys()) {
+    for (const subjectPositions of positions.values()) for (const { tabId } of subjectPositions.values()) {
       if (nextTabs.has(tabId)) continue
       const tab = tabs[tabId]!
       const cells = topicTabRegionCells(tab)
@@ -73,12 +84,13 @@ export function createFocusContextIdentitySelector() {
     }
     const nextSubjects = new Map<string, Cached<FocusContextIdentity>>()
     const result = new Map<string, FocusContextIdentity>()
-    for (const [subject, subjectTabs] of positions) {
+    for (const [subject, subjectPositions] of positions) {
       const occurrenceCount = occurrences.get(subject)!.size
-      const dependencies = [occurrenceCount, ...[...subjectTabs].flatMap(([tabId, ids]) => [nextTabs.get(tabId)!.value, ...ids])]
+      const dependencies = [occurrenceCount, ...[...subjectPositions].flatMap(([occurrenceKey, { tabId, regionIds: ids, locationLabel }]) => [occurrenceKey, locationLabel, nextTabs.get(tabId)!.value, ...ids])]
       const previous = subjectCache.get(subject)
       const value = previous && same(previous.dependencies, dependencies) ? previous.value
-        : { tabs: [...subjectTabs].map(([tabId, ids]) => ({ ...nextTabs.get(tabId)!.value, highlightedRegionIds: [...ids] })), occurrenceCount }
+        : { tabs: [...subjectPositions].map(([occurrenceKey, { tabId, regionIds: ids, locationLabel }]) => ({ ...nextTabs.get(tabId)!.value, occurrenceKey,
+          ...(locationLabel ? { locationLabel } : {}), highlightedRegionIds: [...ids] })), occurrenceCount }
       nextSubjects.set(subject, { dependencies, value }); result.set(subject, value)
     }
     tabCache = nextTabs; subjectCache = nextSubjects
