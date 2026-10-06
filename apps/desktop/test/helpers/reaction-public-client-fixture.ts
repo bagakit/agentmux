@@ -9,7 +9,17 @@ export async function reactionPublicClientFixture(id: string, runId: string) {
  const store=new AgentMuxFileAgentSessionStore(join(root,'sessions.json'))
  await store.compareAndSwap(null,{kind:'agent',agentSessionId:id,providerId:'traex',executorId:'traex',hostId:'local',workspacePath:root,
   run:{runId},retiredRuns:[],hookBindingId:'reaction-binding',hookToken:'reaction-token',createdAt:1,updatedAt:1})
- const client=new AgentMuxClient({store})
+ // A client running inside AgentMux inherits its public journal authority. This
+ // fixture owns only this new directory, so bind the constructor explicitly.
+ const inherited=Object.fromEntries(Object.entries(process.env).filter(([key])=>key.startsWith('AGENTMUX_')||key.startsWith('CTXMUX_')))
+ const clearScope=()=>{for(const key of Object.keys(process.env))if(key.startsWith('AGENTMUX_')||key.startsWith('CTXMUX_'))delete process.env[key]}
+ let client:AgentMuxClient
+ try {
+  clearScope()
+  Object.assign(process.env,{AGENTMUX_MESSAGE_QUEUE_PATH:join(root,'global-messages.ndjson'),
+   AGENTMUX_AGENT_SESSION_STORE:store.path,AGENTMUX_STATE_DIRECTORY:join(root,'state'),AGENTMUX_RUNTIME_DIRECTORY:join(root,'runtime')})
+  client=new AgentMuxClient({store,controlSocketPath:join(root,'control.sock')})
+ } finally {clearScope();Object.assign(process.env,inherited)}
  const internal=client as unknown as {kernel:Record<string,unknown>;registry:{load(host:string):Promise<void>};connected:boolean}
  await internal.registry.load('local')
  let cursor=0
@@ -26,5 +36,10 @@ export async function reactionPublicClientFixture(id: string, runId: string) {
   return {run:run(),appliedByteRange:range}
  }
  internal.connected=true
- return {client,store,writes,close:async()=>{await client.dispose();await rm(root,{recursive:true})}}
+ const queuePath=client.agentMessageQueuePath()
+ if(queuePath!==join(root,'global-messages.ndjson'))throw new Error('Private FileStore must own the original message journal')
+ return {client,store,writes,settle:async()=>{
+  const owner=client as unknown as {inputWaitingRecipients:Map<string,{pending:Promise<void>}>}
+  await Promise.all([...owner.inputWaitingRecipients.values()].map(value=>value.pending))
+ },close:async()=>{await client.dispose();await rm(root,{recursive:true})}}
 }

@@ -1,3 +1,4 @@
+import { fixtureEpoch as _liveTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -75,6 +76,8 @@ beforeEach(() => {
     agentSteerInFlight: {}, agentSteerInFlightPhase: {}, runtimeEndpointWarnings: [], noticeReadReceipts: {},
     timelines: { [sid]: { agentSessionId: sid, revision: 0, items: [] } } })
   vi.spyOn(api.sessions, 'refresh').mockResolvedValue(session)
+  vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
+  vi.spyOn(api.sessions, 'notifyInputOccupation').mockResolvedValue(undefined)
   vi.spyOn(api.sessions, 'recordDeliveryFailure').mockImplementation(async record => {
     const previous = reporterRecords.get(record.logId)
     if (previous) expect(record).toEqual(previous)
@@ -443,7 +446,7 @@ it('preserves the draft and all original queue records when admission refuses tw
   expect(submit).not.toHaveBeenCalled()
 })
 
-it('releases the admission diagnostic when a synchronous subscriber removes the Session, then gives the same entry retry a new logid', async () => {
+it('keeps the captured Core control usable when a synchronous subscriber removes the presentation, retaining each failure log', async () => {
   const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValueOnce(refusal('restored same entry refused again'))
   const savedSession = structuredClone(useAppStore.getState().sessions[0]!)
   useAppStore.setState({ agentSteerQueues: {}, agentComposerDrafts: { [sid]: body } })
@@ -462,24 +465,25 @@ it('releases the admission diagnostic when a synchronous subscriber removes the 
   const first = structuredClone(queue()[0]!), firstRecord = messageDeliveryDiagnostics.get(first.logId!)!.record
   expect(removed).toBe(true)
   expect(first.text).toBe(body)
-  expect(firstRecord).toMatchObject({ operationId: first.operationId, stage: 'queue-validation', error: { code: 'UNKNOWN_AGENT_SESSION' } })
-  expect(submit).not.toHaveBeenCalled()
+  expect(firstRecord).toMatchObject({ operationId: first.operationId, stage: 'core-submit', error: { code: 'AGENT_PROMPT_PREPARATION_FAILED' } })
+  expect(submit).toHaveBeenCalledOnce()
   await act(async () => useAppStore.setState({ sessions: [savedSession] }))
-  expect(submit).not.toHaveBeenCalled()
+  expect(submit).toHaveBeenCalledOnce()
   await click(action(card(first.operationId), '立即发送这条待发消息'))
   await settled(() => expect(queue()[0]!.logId).not.toBe(first.logId))
   expect(queue()[0]!.operationId).toBe(first.operationId)
   expect(queue()[0]!.text).toBe(body)
-  expect(submit).toHaveBeenCalledOnce()
+  expect(submit).toHaveBeenCalledTimes(2)
   expect(submit.mock.calls[0]![2]).toBe(first.operationId)
+  expect(submit.mock.calls[1]![2]).toBe(first.operationId)
   expect(messageDeliveryDiagnostics.get(first.logId!)!.record).toEqual(firstRecord)
   expect(inspectReported(first.logId!).record).toEqual(firstRecord)
 })
 
 
-it('keeps native manual input on the original Core key and rejoins from the mounted pending action', async () => {
+it('keeps current-terminal manual input on the original Core key and rejoins from the mounted pending action', async () => {
  const session = composerSession()
- session.capabilities.promptExecution = {immediate: 'native-steer'}
+ session.capabilities.promptExecution = {immediate: 'terminal-submit'}
  useAppStore.setState({sessions: [session], agentSteerQueues: {}, agentComposerDrafts: {[sid]: body + '\nNative steer choice'}})
  vi.mocked(api.sessions.refresh).mockResolvedValue(session)
  let receipt: AgentInputSubmissionReceipt | null = null
@@ -510,4 +514,135 @@ it('keeps native manual input on the original Core key and rejoins from the moun
  expect(submit).toHaveBeenCalledOnce()
  expect(queue()[0]?.operationId).toBe(first.operationId)
  expect(queue()[0]?.inputReceipt?.ref.waitGeneration).toBe(2)
+})
+
+function terminalReceipt(submissionId: string): AgentInputSubmissionReceipt {
+  const key = { kind: 'prompt' as const, agentSessionId: sid, expectedRun: { ...condition.expectedRun }, submissionId }
+  const ref = { key, waitGeneration: 1 }, gateId = 'original-terminal-gate'
+  return { key, ref, persistence: 'confirmed', status: 'terminal-confirmed', observation: 'closed',
+    control: { ref, state: 'dispatch-authorized', gateId, at: _liveTailFixtureEpoch(0, 0, 2) },
+    admission: { agentSessionId: sid, run: key.expectedRun, admission: { inputKey: key, inputDispatch: { ref, gateId },
+      submissionId, operationId: 'original-terminal-phase', transport: 'pty', startByte: 0, endByte: new TextEncoder().encode(body + '\r').byteLength, acknowledged: true,
+      intent: { run: key.expectedRun, ownerInstanceId: 'controlled-original-owner', prompt: body, execution: 'immediate',
+        admissionIntent: { kind: 'manual-actor', expectedRun: key.expectedRun }, plan: { kind: 'single-phase', data: body + '\r' },
+        message: { userContent: body, authorHuman: true } } } } }
+}
+function waitingReceipt(receipt: AgentInputSubmissionReceipt): AgentInputSubmissionReceipt {
+  return { ...receipt, admission: null, status: 'waiting', observation: 'owned', control: { ref: receipt.ref, state: 'enabled', at: _liveTailFixtureEpoch(0, 0, 1),
+    waiting: { phase: 'service', reason: 'runtime-unavailable', wake: 'runtime-restored' } } }
+}
+
+it('uses the current manual terminal without a Native catalog gate and settles its bytes before a late first-save reply', async () => {
+  const session = composerSession(), reply = hold()
+  useAppStore.setState({ sessions: [session], agentSteerQueues: {}, agentComposerDrafts: { [sid]: body } })
+  vi.mocked(api.sessions.refresh).mockResolvedValue(session)
+  vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
+  let receipt: AgentInputSubmissionReceipt | undefined
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (_control, _body, op) => {
+    receipt = terminalReceipt(op); await reply.promise; return waitingReceipt(receipt)
+  })
+  await dom.render(<AgentSessionComposer sessionId={sid} />)
+  await click(action(dom.container, 'Send'))
+  await settled(() => expect(submit).toHaveBeenCalledOnce())
+  const op = queue()[0]!.operationId
+  expect(submit.mock.calls[0]![3]).toEqual({ expectedRun: condition.expectedRun, admissionIntent: { kind: 'manual-actor' } })
+  const publish = (value: AgentInputSubmissionReceipt) => useAppStore.getState().applyEvent({ hostId: 'local', event: { type: 'agent-input', receipt: value } })
+  await act(async () => publish(receipt!))
+  expect(queue()[0]).toMatchObject({ operationId: op, archived: true, inputReceipt: receipt })
+  await act(async () => useAppStore.getState().setAgentComposerDraft(sid, 'Independent neighbor draft'))
+  expect(action(dom.container, 'Send').disabled).toBe(false)
+  const panel = dom.container.querySelector<HTMLElement>('.composer-mailbox')!
+  await act(async () => {
+    const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'open' }); panel.dispatchEvent(event)
+  })
+  await click(action(dom.container, 'Outbox'))
+  expect(row(op).textContent).toContain('终端输入已确认')
+  await click(row(op).querySelector<HTMLButtonElement>('.composer-mailbox__row')!)
+  expect(row(op).textContent).toContain('Native 是否采用尚未确认')
+  expect(row(op).textContent).toContain('不是任务完成')
+  expect(row(op).querySelectorAll('.composer-pending__retry')).toHaveLength(1)
+  expect(row(op).querySelector('.composer-mailbox__record-note')).toBeNull()
+  expect([...row(op).querySelectorAll('button')].some(button => button.getAttribute('aria-label') === 'Send queued message immediately')).toBe(false)
+  await act(async () => reply.resolve())
+  expect(queue()[0]!.inputReceipt).toEqual(receipt)
+  expect(useAppStore.getState().agentSteerInFlight[sid]).toBeUndefined()
+  await act(async () => publish({ ...receipt!, status: 'unknown', observation: 'rejoin-needed' }))
+  expect(queue()[0]!.inputReceipt).toEqual(receipt)
+  const conflict = structuredClone(receipt!)
+  conflict.admission!.admission!.endByte++
+  await act(async () => publish(conflict))
+  expect(queue()[0]!.inputReceipt).toEqual(receipt)
+  expect(useAppStore.getState().error).toContain('conflict')
+  expect(submit).toHaveBeenCalledOnce()
+})
+
+it('keeps queue-only Enter unbound and freezes a current-terminal manual intent only on its explicit Send', async () => {
+  const session = composerSession(); session.status = { state: 'working', source: 'native-hook', observedAt: _liveTailFixtureEpoch(0, 0, 1) }
+  useAppStore.setState({ sessions: [session], agentSteerQueues: {} })
+  vi.mocked(api.sessions.refresh).mockResolvedValue(session)
+  vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (_control, _body, op) => terminalReceipt(op))
+  expect(useAppStore.getState().enqueueAgentSteer(sid, body, undefined, undefined, 'manual')).toBe(true)
+  const op = queue()[0]!.operationId
+  expect(queue()[0]).not.toHaveProperty('directInputBinding')
+  await act(async () => { await useAppStore.getState().flushAgentSteerQueue(sid) })
+  expect(submit).not.toHaveBeenCalled()
+  await dom.render(<AgentSessionComposer sessionId={sid} />)
+  await act(async () => { await useAppStore.getState().sendQueuedAgentSteer(sid, op) })
+  await settled(() => expect(submit).toHaveBeenCalledOnce())
+  expect(submit.mock.calls[0]![3]).toEqual({ expectedRun: session.control.run, admissionIntent: { kind: 'manual-actor' } })
+  expect(queue()[0]).toMatchObject({ archived: true, inputReceipt: { status: 'terminal-confirmed' } })
+})
+
+
+it.each(['missing','wrong-session','wrong-run'] as const)('refuses a %s captured control without falling through to the current route', async invalid => {
+  const session=composerSession(),binding={expectedRun:session.control.run,admissionIntent:{kind:'manual-actor' as const}}
+  const control={...session.control,...(invalid==='wrong-session'?{agentSessionId:'another-session'}:{}),...(invalid==='wrong-run'?{run:{runId:'another-run'}}:{})}
+  useAppStore.setState({sessions:[session],agentSteerQueues:{[sid]:[entry(originalOp,{promptCondition:null,directInputBinding:binding,...(invalid==='missing'?{}:{directInputControl:control})})]}})
+  const inspect=vi.spyOn(api.sessions,'inspectInput').mockResolvedValue(null),submit=vi.spyOn(api.sessions,'submitPrompt')
+  await expect(useAppStore.getState().sendQueuedAgentSteer(sid,originalOp)).rejects.toMatchObject({code:'CONTROL_REQUEST_CONFLICT'})
+  expect(inspect).not.toHaveBeenCalled();expect(submit).not.toHaveBeenCalled()
+  expect(original().directInputBinding).toEqual(binding)
+})
+
+it('inspects the exact captured old control when the current Session Run has changed', async () => {
+ const old=composerSession(),current={...old,control:{...old.control,run:{runId:'replacement-run'}}}
+ const receipt=terminalReceipt(originalOp)
+ useAppStore.setState({sessions:[current],agentSteerQueues:{[sid]:[entry(originalOp,{promptCondition:null,directInputBinding:{expectedRun:old.control.run,admissionIntent:{kind:'manual-actor'}},directInputControl:old.control})]}})
+ const inspect=vi.spyOn(api.sessions,'inspectInput').mockResolvedValue(receipt),submit=vi.spyOn(api.sessions,'submitPrompt')
+ const observed=await useAppStore.getState().sendQueuedAgentSteer(sid,originalOp).then(result=>({result}),error=>({error}))
+ expect(observed).toMatchObject({result:'submitted'})
+ expect(inspect).toHaveBeenCalledExactlyOnceWith(old.control,receipt.key)
+ expect(submit).not.toHaveBeenCalled();expect(original().inputReceipt).toEqual(receipt)
+})
+
+it('retains a confirmed original gate when a contradictory higher generation arrives', async () => {
+ const session=composerSession(),receipt=terminalReceipt(originalOp)
+ useAppStore.setState({sessions:[session],agentSteerQueues:{[sid]:[entry(originalOp,{promptCondition:null,archived:true,directInputBinding:{expectedRun:session.control.run,admissionIntent:{kind:'manual-actor'}},directInputControl:session.control,inputReceipt:receipt})]}})
+ const late=waitingReceipt(receipt),ref={...late.ref,waitGeneration:2}
+ await act(async()=>useAppStore.getState().applyEvent({hostId:'local',event:{type:'agent-input',receipt:{...late,ref,control:{...late.control,ref}}}}))
+ expect(original().inputReceipt).toEqual(receipt)
+ expect(useAppStore.getState().error).toContain('later waiting generation conflicts')
+})
+
+
+it('does not use a controlled input timeline row to confirm location or prevent restoring its original archive', async () => {
+ const session=composerSession(),binding={expectedRun:session.control.run,admissionIntent:{kind:'manual-actor' as const}}
+ useAppStore.setState({sessions:[session],agentSteerQueues:{[sid]:[entry(originalOp,{promptCondition:null,directInputBinding:binding,directInputControl:session.control,archived:true,inputIntakeStarted:true})]},timelines:{[sid]:{agentSessionId:sid,revision:1,items:[{id:'prompt:'+originalOp,agentSessionId:sid,kind:'user_message',status:'complete',source:'agentmux',createdAt:_liveTailFixtureEpoch(0, 0, 1),updatedAt:_liveTailFixtureEpoch(0, 0, 1),title:'Authored input',content:body}]}}})
+ await dom.render(<AgentSessionComposer sessionId={sid} />)
+ const panel=dom.container.querySelector<HTMLElement>('.composer-mailbox')!
+ await act(async()=>{const event=new Event('toggle');Object.defineProperty(event,'newState',{value:'open'});panel.dispatchEvent(event)})
+ await click(action(dom.container,'Outbox'))
+ await click(row().querySelector<HTMLButtonElement>('.composer-mailbox__row')!)
+ expect(row().textContent).not.toContain('输入已确认')
+ expect(row().querySelector<HTMLButtonElement>('[aria-label="恢复为待发"]')!.disabled).toBe(false)
+ const submit=vi.spyOn(api.sessions,'submitPrompt')
+ const restored=await useAppStore.getState().archiveAgentSteer(sid,originalOp,body,false).then(result=>({result}),error=>({error}))
+ expect(restored).toMatchObject({result:{changed:true,entry:{operationId:originalOp}}})
+ expect(original().archived).not.toBe(true)
+ expect(original().directInputBinding).toEqual(binding)
+ await act(async()=>{})
+ expect(row()).not.toBeNull()
+ expect(row().textContent).not.toContain('输入已确认')
+ expect(submit).not.toHaveBeenCalled()
 })

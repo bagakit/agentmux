@@ -1,3 +1,4 @@
+import { fixtureEpoch as _liveTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { act, type ReactNode } from 'react'
@@ -5,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { expect, vi } from 'vitest'
 import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
-import type { AgentMuxAgentSession, AgentMuxClientEvent, AgentSessionHistoryObservation, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
+import type { AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentMuxClientEvent, AgentSessionHistoryObservation, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 export const evidence = { source: 'native-hook' as const, observedAt: _reshape_fixtureEpoch(0, 0, 1), run: { runId: 'run-original' } }
@@ -27,7 +28,10 @@ export function fixture() {
   const listeners = new Set<(event: AgentMuxClientEvent) => void>()
   const observers = new Set<(observation: AgentSessionHistoryObservation) => void>()
   const disposeHistory = vi.fn(), unsubscribe = vi.fn()
-  const submit = vi.fn<AgentMuxHostedClient['submitAgentPrompt']>().mockResolvedValue()
+  const submit = vi.fn<AgentMuxHostedClient['submitAgentPrompt']>().mockImplementation(acceptedPrompt)
+  const inspectInput = vi.fn<AgentMuxHostedClient['inspectAgentInput']>().mockResolvedValue(null)
+  const rejoinInput = vi.fn<AgentMuxHostedClient['rejoinAgentInputWaiting']>()
+  const stopInput = vi.fn<AgentMuxHostedClient['stopAgentInputWaiting']>()
   const respond = vi.fn<AgentMuxHostedClient['respondAgentInteraction']>().mockResolvedValue()
   const readHistory = vi.fn<AgentMuxHostedClient['sessionHistoryPage']>(async id => page.agentSessionId === id ? page : history(id))
   const readTimeline = vi.fn<AgentMuxHostedClient['sessionTimeline']>(async id => timeline.agentSessionId === id
@@ -35,6 +39,7 @@ export function fixture() {
   // The fake is confined to tests; every product read/write goes through the public SDK method.
   const client = {
     catalog: () => new AgentProviderRegistry().catalog(),
+    runtimeOwnerIdentity: () => ({ runtimeId: 'original-runtime' }),
     agentSession: (id: string) => { const value = sessions.get(id); if (!value) throw new Error('unknown Session'); return value },
     agentSessions: () => [...sessions.values()],
     onEvent(listener: (event: AgentMuxClientEvent) => void) { listeners.add(listener); return () => { listeners.delete(listener); unsubscribe() } },
@@ -42,14 +47,30 @@ export function fixture() {
       observers.add(listener)
       return { source: history(id).source, dispose() { observers.delete(listener); disposeHistory() } }
     }),
-    sessionHistoryPage: readHistory, sessionTimeline: readTimeline, submitAgentPrompt: submit, respondAgentInteraction: respond
+    sessionHistoryPage: readHistory, sessionTimeline: readTimeline, submitAgentPrompt: submit, respondAgentInteraction: respond,
+    inspectAgentInput: inspectInput, rejoinAgentInputWaiting: rejoinInput, stopAgentInputWaiting: stopInput
   } as unknown as AgentMuxHostedClient
-  return { client, sessions, submit, respond, readHistory, readTimeline, disposeHistory, unsubscribe,
+  return { client, sessions, submit, respond, readHistory, readTimeline, disposeHistory, unsubscribe, inspectInput, rejoinInput, stopInput,
     setPage(value: AgentSessionHistoryPage) { page = value },
     setTimeline(value: AgentTimelineSnapshot) { timeline = value },
     emit(event: AgentMuxClientEvent) { for (const listener of listeners) listener(event) },
     observe(observation: AgentSessionHistoryObservation) { for (const listener of observers) listener(observation) }
   }
+}
+
+/** Controlled SDK receipt port, not a real Runtime/Provider or Native acceptance. */
+export async function acceptedPrompt(input: Parameters<AgentMuxHostedClient['submitAgentPrompt']>[0]): Promise<AgentInputSubmissionReceipt | void> {
+  if (!('admissionIntent' in input) || input.admissionIntent?.kind !== 'manual-actor') return
+  if (!input.operationId) throw new Error('The actual caller must provide its original input ID')
+  const key = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId }
+  const ref = { key, waitGeneration: 1 }, gateId = 'controlled-gate-' + input.operationId
+  return { key, ref, persistence: 'confirmed', status: 'terminal-confirmed', observation: 'closed', control: { ref, state: 'dispatch-authorized', gateId, at: _liveTailFixtureEpoch(0, 0, 1) },
+    admission: { agentSessionId: input.agentSessionId, run: input.expectedRun, admission: { inputKey: key, inputDispatch: { ref, gateId },
+      submissionId: input.operationId, operationId: input.operationId, transport: 'pty', startByte: 0,
+      endByte: new TextEncoder().encode(input.prompt + '\r').byteLength, acknowledged: true,
+      intent: { run: input.expectedRun, ownerInstanceId: 'controlled-original-owner', prompt: input.prompt, execution: 'immediate',
+        admissionIntent: { kind: 'manual-actor', expectedRun: input.expectedRun }, plan: { kind: 'single-phase', data: input.prompt + '\r' },
+        message: { userContent: input.prompt, authorHuman: true } } } } }
 }
 export const mounted: Array<{ root: Root; element: HTMLElement }> = []
 export async function mount(content: ReactNode) {
@@ -78,6 +99,10 @@ export async function paste(element: HTMLElement, value: string) {
     Object.defineProperty(event, 'clipboardData', { value: { items: [], getData: () => value } })
     editor(element).dispatchEvent(event)
   })
+}
+/** Exercise the existing queue/condition path, rather than an explicit manual Send. */
+export async function plainEnter(element: HTMLElement) {
+  await act(async () => { editor(element).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', cancelable: true })) })
 }
 export function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (error: unknown) => void

@@ -306,3 +306,17 @@ it('keeps a distinct original Core failure beside a transport error without mist
   expect(report).toContain('inputReceipt.control.waiting.observation.failure.detail（收到的原因字段）: {"reason":"original-connection-absent"}')
   expect(report).not.toContain('尚未写入输入')
 })
+
+
+it('presents terminal byte confirmation as information, without Native admission, task completion or a replay action', async () => {
+  const inputReceipt = { ...savedInput(), status: 'terminal-confirmed' as const }, retry = vi.fn()
+  await render(<MessageDeliveryFailure compact error="Old reader ended" inputReceipt={inputReceipt} onRetry={retry} copyText={async () => true} />)
+  const surface = container.querySelector('section')!
+  expect(surface.dataset.kind).toBe('terminal-confirmed')
+  expect(surface.textContent).toContain('终端输入已确认')
+  expect(surface.textContent).toContain('Native 是否采用尚未确认')
+  expect(surface.textContent).toContain('不是任务完成')
+  expect(surface.querySelector('[role="alert"]')).toBeNull()
+  expect([...surface.querySelectorAll('button')].some(button => button.textContent?.includes('重试'))).toBe(false)
+  expect(retry).not.toHaveBeenCalled()
+})
