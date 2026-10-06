@@ -32,7 +32,12 @@ export const TERMINAL_THEME_CATALOG: readonly TerminalThemeDefinition[] = Object
     label: 'Catppuccin Mocha',
     description: 'Softer contrast · warmer accents',
     theme: terminalPalette('catppuccin-mocha')
-  }
+  },
+  { id: 'dracula', label: 'Dracula', description: 'Classic · violet and vivid ANSI', theme: terminalPalette('dracula') },
+  { id: 'nord', label: 'Nord', description: 'Arctic · cool slate and restrained ANSI', theme: terminalPalette('nord') },
+  { id: 'gruvbox-dark', label: 'Gruvbox Dark', description: 'Medium dark · warm earth tones', theme: terminalPalette('gruvbox-dark') },
+  { id: 'solarized-dark', label: 'Solarized Dark', description: 'Deep teal · balanced original ANSI', theme: terminalPalette('solarized-dark') },
+  { id: 'solarized-light', label: 'Solarized Light', description: 'Warm paper · balanced original ANSI', theme: terminalPalette('solarized-light') }
 ])
 
 export function terminalTheme(themeId: TerminalThemeId, workspace?: ResolvedTheme): Readonly<ITheme> {
