@@ -204,7 +204,8 @@ type PromptSubmissionDeps = {
 
 /** Invocation-local authenticated author; never persisted as a reusable grant. */
 export type AgentPromptInputAuthority = Readonly<{
-  binding: Readonly<AgentCapabilityBinding>
+  /** Only Core-authenticated Agent authors contribute the atomic metadata binding. */
+  binding?: Readonly<AgentCapabilityBinding>
   assertCurrent(): Promise<void>
 }>
 
@@ -368,8 +369,9 @@ export class AgentPromptSubmissionCoordinator {
       if (!prepared || nativeHandleIdentity !== JSON.stringify(session.nativeHandle ?? null) ||
           nativeBindingIdentity !== bindingIdentity(session.nativeBinding)) throw new AgentMuxError('The original Native input environment changed.', 'AGENT_NATIVE_INPUT_UNCONFIRMED')
       assertScope(current, currentRun)
-      await authority?.assertCurrent()
       await prepared.assertCurrent(signal ?? AbortSignal.timeout(8_000))
+      signal?.throwIfAborted()
+      await authority?.assertCurrent()
       signal?.throwIfAborted()
       // The original journal stop/dispatch decision precedes any new Session
       // claim. Losing this ACK never authorizes a replacement gate or replay.
@@ -405,7 +407,6 @@ export class AgentPromptSubmissionCoordinator {
         // immediately before dispatch. A detached TUI cannot authorize its old peer.
         signal?.throwIfAborted()
         await prepared.assertCurrent(signal ?? AbortSignal.timeout(8_000))
-        await authority?.assertCurrent()
         const dispatchRun = await this.deps.kernel.status(current.run.runId)
         const dispatchSession = await this.deps.registry.refresh(current.agentSessionId, current.run)
         const assertDispatch = (stored: AgentMuxAgentSession): void => {
@@ -415,7 +416,8 @@ export class AgentPromptSubmissionCoordinator {
               !isDeepStrictEqual(admission.native.plan, plan)) throw new AgentMuxError('The original Native claim changed before dispatch.', 'STALE_AGENT_SESSION')
         }
         assertDispatch(dispatchSession)
-        if (authority) await this.deps.updateExactAgentSession(current.agentSessionId, current.run, stored => {
+        await authority?.assertCurrent()
+        if (authority?.binding) await this.deps.updateExactAgentSession(current.agentSessionId, current.run, stored => {
           assertDispatch(stored)
           return stored
         }, undefined, authority.binding)

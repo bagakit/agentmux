@@ -19,6 +19,8 @@ export type AgentMuxRpcHttpAuthorization = {
   principal: AgentMuxRpcPrincipal;
   /** Original device authority can revoke this request/Reader. */
   signal?: AbortSignal;
+  /** Current original authority, independent of this request Reader's lifetime. */
+  assertCurrent?(): void | Promise<void>;
   dispose?(): void | Promise<void>
 }
 export type AgentMuxRpcHttpOptions = {
@@ -120,6 +122,7 @@ export class AgentMuxControlServer {
     const subscriptions = new Map<string, { method: AgentMuxRpcStreamMethod; dispose(): void | Promise<void> }>()
     const context: AgentMuxRpcConnection = {
       principal, transport, signal: authority?.signal ? AbortSignal.any([controller.signal, authority.signal]) : controller.signal,
+      ...(authority?.assertCurrent ? { assertCurrent: authority.assertCurrent } : {}),
       stream: true, send, afterResponse: [],
       activate: (id, method, dispose) => { subscriptions.set(id, { method, dispose }) },
       cancel: async id => { const sub = subscriptions.get(id); if (!sub) return false

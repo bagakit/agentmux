@@ -2,6 +2,14 @@ import { AgentMuxError } from './errors.js'
 import { agentPromptInputId, validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
 import type { AgentNativeBinding, AgentNativeSessionHandle, AgentOperationDevice, AgentMessageChannel, AgentPromptSubmissionRecord } from './types.js'
 
+/** In-process Host context, never a wire argument or a persisted grant. */
+export type AgentInputCallContext = Readonly<{
+  /** Ends only intake observation until the original Core accepts its waiting owner. */
+  requestSignal?: AbortSignal
+  /** Restricts the original action using its current author owner; cannot mint authority. */
+  assertCurrent?(): void | Promise<void>
+}>
+
 /** Original input identity, waiting generation and stop action are distinct. */
 export type AgentInputWaitRef = { key: AgentPromptInputKey; waitGeneration: number }
 export type AgentInputSelector = { key: AgentPromptInputKey } | { kind: 'message-control'; originalControlOperationId: string }
