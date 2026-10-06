@@ -220,6 +220,8 @@ type NativeParams = MoteAvatarParameterMap & TopicParameterMap & HostSettingsPar
   'message.inbox.ack': { generation: number; readerRun: import('./types.js').AgentMuxRunRef }
   'message.dispatch.open': { sourceMessageId: string }
   'message.dispatch.inspect': { sourceMessageId: string }
+  'message.dispatch.read': { sourceMessageId: string; hostId?: string }
+  'message.dispatch.ls': { hostId?: string; participantSessionId?: string; afterSourceMessageId?: string; limit?: number }
   'message.dispatch.report': { sourceMessageId: string; replyMessageId: string; kind: import('./agent-handoff.js').DispatchEventKind }
   'app.snapshot': AgentMuxRpcSnapshotParams
   'goal.activity': AgentMuxRpcGoalFilters
@@ -271,6 +273,8 @@ type NativeResult = MoteAvatarResultMap & TopicResultMap & HostSettingsResultMap
   'message.inbox.ack': Awaited<ReturnType<AgentMuxClient['ackDeliveryBatch']>>
   'message.dispatch.open': Awaited<ReturnType<AgentMuxClient['openDispatch']>>
   'message.dispatch.inspect': Awaited<ReturnType<AgentMuxClient['showDispatch']>>
+  'message.dispatch.read': Awaited<ReturnType<AgentMuxClient['readDispatch']>> & { hostId: string }
+  'message.dispatch.ls': Awaited<ReturnType<AgentMuxClient['listDispatches']>> & { hostId: string }
   'message.dispatch.report': Awaited<ReturnType<AgentMuxClient['recordDispatchEvent']>>
   'app.snapshot': AgentMuxRpcSnapshot
   'goal.activity': { activity: Array<import('./control.js').AgentMuxDemandActivity & { goalId: string }>; diskDurability: 'confirmed' }
@@ -315,6 +319,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'message.delivery.inspect': 'short', 'message.delivery.report': 'long',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
   'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
+  'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
   'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
   'system.endpoint': 'short', 'system.subscription.cancel': 'short'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>

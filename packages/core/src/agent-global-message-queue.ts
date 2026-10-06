@@ -5,7 +5,8 @@ import { chmod, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from './errors.js'
-import { assertDispatchEventKind, assertDispatchMessage, openDispatch, recordDispatchEvent, type Dispatch, type DispatchEvent, type DispatchEventKind } from './agent-handoff.js'
+import { assertDispatchEventKind, assertDispatchMessage, openDispatch, recordDispatchEvent, type Dispatch, type DispatchEvent, type DispatchEventKind,
+  type DispatchObservation, type DispatchIdentityDiagnostic, type DispatchPage } from './agent-handoff.js'
 import { validateAgentPromptAdmissionIntent, validateAgentPromptCondition, type AgentPromptAdmissionIntent, type AgentPromptCondition } from './agent-prompt-condition.js'
 import { ackDeliveryBatch, checkDeliveries, type ConsumerCursor, type DeliveryQueue } from './agent-delivery-queue.js'
 import { advanceDelivery, type AgentDeliveryState } from './agent-message.js'
@@ -15,7 +16,7 @@ import type { AgentMuxRunRef, AgentPromptExecution, AgentMessageChannel, AgentOp
 import { normalizeMessageChannel } from './message-origin.js'
 import { composeAgentPrompt } from './agent-outbound-message.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { configureMessageJournal, inputControlJournalSchema, openMessageJournal, syncMessageJournal } from './agent-message-journal.js'
+import { configureMessageJournal, inputControlJournalSchema, dispatchDiscoveryJournalSchema, openMessageJournal, syncMessageJournal } from './agent-message-journal.js'
 import { agentInputJournalKey, validateAgentInputControlId, validateAgentInputWaitRef,
   type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputWaitControl,
   type AgentInputWaitJournalRecord, type AgentInputWaitReason, type AgentInputWaitRef,
@@ -910,6 +911,59 @@ export class DurableAgentMuxMessageQueue {
         throw new AgentMuxError('Only a Dispatch participant can inspect it.', 'DISPATCH_PARTICIPANT_MISMATCH')
       }
       return structuredClone(dispatch)
+    })
+  }
+
+  /** No cursor or consumption mutation. Only the original participants may use Agent authority. */
+  async readDispatch(
+    input: { readonly sourceMessageId: string; readonly callerAgentSessionId?: string },
+    reauthorize: (messages: readonly AgentMuxMessageEnvelope[]) => Promise<readonly DispatchIdentityDiagnostic[]>
+  ): Promise<DispatchObservation> {
+    return this.withLock(async () => {
+      const { dispatch, messages } = this.dispatchProjection(input.sourceMessageId)
+      if (input.callerAgentSessionId !== undefined && input.callerAgentSessionId !== dispatch.ownerAgentSessionId &&
+        input.callerAgentSessionId !== dispatch.workerAgentSessionId) throw new AgentMuxError(
+        'Only a Dispatch participant can read it with Agent authority.', 'DISPATCH_PARTICIPANT_MISMATCH')
+      const identityDiagnostics = await reauthorize(messages)
+      return structuredClone({ dispatch, source: this.message(dispatch.sourceMessageId)!,
+        replies: dispatch.events.map(event => this.message(event.replyMessageId)!), identityDiagnostics })
+    })
+  }
+
+  async listDispatches(
+    input: { readonly participantSessionId: string; readonly afterSourceMessageId?: string; readonly limit?: number },
+    reauthorize: () => Promise<void>
+  ): Promise<DispatchPage> {
+    const participantSessionId = nonEmpty(input.participantSessionId, 'Dispatch participant Session id')
+    const limit = input.limit ?? 50
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AgentMuxError(
+      'Dispatch page limit must be an integer from 1 to 100.', 'MESSAGE_BATCH_LIMIT_INVALID')
+    return this.withLock(async () => {
+      await reauthorize()
+      // Only this discovery operation creates its related projection. Failure to
+      // initialize a discovery index cannot become an admission gate for input.
+      this.db.exec(dispatchDiscoveryJournalSchema)
+      let after = 0
+      if (input.afterSourceMessageId !== undefined) {
+        const cursor = this.dispatchProjection(input.afterSourceMessageId).dispatch
+        if (cursor.ownerAgentSessionId !== participantSessionId && cursor.workerAgentSessionId !== participantSessionId) throw new AgentMuxError(
+          'The original page cursor belongs to another participant.', 'DISPATCH_PARTICIPANT_MISMATCH')
+        after = Number(this.db.prepare('SELECT open_sequence FROM dispatches WHERE source_message_id=?').get(cursor.sourceMessageId)!.open_sequence)
+      }
+      // Each side starts from its own expression index, rather than scanning every dispatch
+      // or discovering unrelated Sessions. UNION also removes self-directed duplicates.
+      const sources = this.db.prepare(`SELECT d.source_message_id, d.open_sequence FROM (
+        SELECT sequence FROM records INDEXED BY message_sender
+          WHERE json_extract(json, '$.kind') = 'message' AND json_extract(json, '$.envelope.senderSessionId') = ?
+        UNION
+        SELECT sequence FROM records INDEXED BY message_recipient
+          WHERE json_extract(json, '$.kind') = 'message' AND json_extract(json, '$.envelope.recipientSessionId') = ?
+      ) original JOIN messages m ON m.message_sequence=original.sequence
+        JOIN dispatches d ON d.source_message_id=m.message_id
+        WHERE d.open_sequence > ? ORDER BY d.open_sequence LIMIT ?`).all(participantSessionId, participantSessionId, after, limit + 1)
+      const page = sources.slice(0, limit).map(row => this.dispatchProjection(String(row.source_message_id)).dispatch)
+      return structuredClone({ participantSessionId, dispatches: page,
+        nextSourceMessageId: sources.length > limit ? page.at(-1)!.sourceMessageId : null })
     })
   }
 

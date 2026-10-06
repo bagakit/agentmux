@@ -1564,6 +1564,16 @@ export type AgentMuxObservationOrigin =
   | { kind: 'runtime-connection'; boundary: 'core-ctxmux' | 'consumer-core' }
 
 export type AgentMuxClientEvent = (
+  | {
+      /** Durable communication changed. Consumers re-read the exact source; this is no Task verdict. */
+      type: 'dispatch-changed'
+      sourceMessageId: string
+      ownerAgentSessionId: string
+      workerAgentSessionId: string
+      threadId: string
+      event?: import('./agent-handoff.js').DispatchEvent
+      evidence: AgentMuxEvidence
+    }
   | { type: 'agent-input'; receipt: import('./agent-input-wait.js').AgentInputSubmissionReceipt }
   | (import('./control-endpoint-state.js').AgentMuxControlEndpointState & {
       type: 'control-endpoint-state'

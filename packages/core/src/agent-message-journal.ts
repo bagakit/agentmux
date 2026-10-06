@@ -43,6 +43,14 @@ export const inputControlJournalSchema = `
   );
 `
 
+/** The original records remain the SSOT. These indexes select one participant's messages. */
+export const dispatchDiscoveryJournalSchema = `
+  CREATE INDEX IF NOT EXISTS message_sender ON records(json_extract(json, '$.envelope.senderSessionId'))
+    WHERE json_extract(json, '$.kind') = 'message';
+  CREATE INDEX IF NOT EXISTS message_recipient ON records(json_extract(json, '$.envelope.recipientSessionId'))
+    WHERE json_extract(json, '$.kind') = 'message';
+`
+
 export function configureMessageJournal(db: DatabaseSync): void {
   // DELETE + EXTRA keeps SQLite's atomic rollback protocol and its directory-sync ACK.
   // No synchronous busy wait may occupy the terminal/Hook event loop.

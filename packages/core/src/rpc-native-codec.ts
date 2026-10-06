@@ -192,6 +192,47 @@ function dispatch(value: unknown, params: Record<string, unknown>): void {
   array(p.events, value => { const event = record(value, ['kind', 'replyMessageId', 'at']); assertDispatchEventKind(event.kind); string(event.replyMessageId); count(event.at) })
   if (params.replyMessageId !== undefined && !(p.events as Array<Record<string, unknown>>).some(event => event.replyMessageId === params.replyMessageId && event.kind === params.kind)) fail()
 }
+function dispatchObservation(value: unknown, params: Record<string, unknown>): void {
+  const p = record(value, ['dispatch', 'source', 'replies', 'identityDiagnostics', 'hostId'])
+  string(p.hostId); if (params.hostId !== undefined && p.hostId !== params.hostId) fail()
+  dispatch(p.dispatch, params)
+  const supervision = p.dispatch as Record<string, unknown>, source = message(p.source)
+  if (source.messageId !== supervision.sourceMessageId || source.senderSessionId !== supervision.ownerAgentSessionId ||
+    source.recipientSessionId !== supervision.workerAgentSessionId || source.threadId !== supervision.threadId) fail()
+  const events = supervision.events as Array<Record<string, unknown>>
+  if (!Array.isArray(p.replies) || p.replies.length !== events.length) fail()
+  let replyIndex = 0
+  array(p.replies, value => {
+    const reply = message(value), event = events[replyIndex++]!
+    const cleanup = event.kind === 'cleanup'
+    if (reply.messageId !== event.replyMessageId || reply.replyTo !== source.messageId || reply.threadId !== source.threadId ||
+      reply.senderSessionId !== (cleanup ? supervision.ownerAgentSessionId : supervision.workerAgentSessionId) ||
+      reply.recipientSessionId !== (cleanup ? supervision.workerAgentSessionId : supervision.ownerAgentSessionId)) fail()
+  })
+  array(p.identityDiagnostics, value => {
+    const diagnostic = record(value, ['agentSessionId', 'runId', 'code', 'message'])
+    string(diagnostic.agentSessionId); string(diagnostic.runId); text(diagnostic.message)
+    member(diagnostic.code, ['DISPATCH_IDENTITY_UNAVAILABLE', 'AGENT_SESSION_STORE_READ_UNCONFIRMED'])
+    if (diagnostic.agentSessionId !== supervision.ownerAgentSessionId && diagnostic.agentSessionId !== supervision.workerAgentSessionId) fail()
+  })
+}
+function dispatchPage(value: unknown, params: Record<string, unknown>): void {
+  const p = record(value, ['hostId', 'participantSessionId', 'dispatches', 'nextSourceMessageId'])
+  string(p.hostId); string(p.participantSessionId)
+  if (params.hostId !== undefined && p.hostId !== params.hostId ||
+    params.participantSessionId !== undefined && p.participantSessionId !== params.participantSessionId) fail()
+  const sources = new Set<unknown>()
+  array(p.dispatches, value => {
+    const item = record(value)
+    dispatch(item, { sourceMessageId: item.sourceMessageId })
+    if (sources.has(item.sourceMessageId) || item.ownerAgentSessionId !== p.participantSessionId && item.workerAgentSessionId !== p.participantSessionId) fail()
+    sources.add(item.sourceMessageId)
+  })
+  if (p.nextSourceMessageId !== null) {
+    string(p.nextSourceMessageId)
+    if (!(p.dispatches as Array<Record<string, unknown>>).length || p.nextSourceMessageId !== (p.dispatches as Array<Record<string, unknown>>).at(-1)!.sourceMessageId) fail()
+  }
+}
 function activity(value: unknown): void {
   array(value, item => { const p = record(item, ['goalId', 'id', 'kind', 'message', 'createdAt', 'actorId', 'operationId', 'nameChangeId']); string(p.goalId); parseControlDemandActivity(p) })
 }
@@ -452,6 +493,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'message.dispatch.open': case 'message.dispatch.inspect': case 'message.dispatch.report': dispatch(p, input); break
+      case 'message.dispatch.read': dispatchObservation(p, input); break
+      case 'message.dispatch.ls': dispatchPage(p, input); break
       case 'goal.activity': record(p, ['activity', 'diskDurability']); activity(p.activity); member(p.diskDurability, ['confirmed']); break
       case 'app.snapshot': {
         record(p, ['projects', 'workspaces', 'topics', 'motes', 'spaces', 'zones', 'executors', 'agents', 'sessions', 'goals', 'decisions', 'activity', 'unavailable'])
