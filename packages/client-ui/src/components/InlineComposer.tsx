@@ -1,5 +1,5 @@
 import { insertComposerContent, replaceComposerRange, type ComposerInsertionHandle, type ComposerPasteImage } from '../lib/composer-insertion.js'
-import { useEffect, useImperativeHandle, useMemo, useRef, type Ref } from 'react'
+import { createContext, useContext, useEffect, useImperativeHandle, useMemo, useRef, type Ref } from 'react'
 import { Decoration, Extension, Node, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -9,6 +9,15 @@ import { composerKeywordMatches } from '../lib/composer-keywords.js'
 import { encodeSemanticReference, parseComposerDraft, type ComposerSemanticReference } from '../lib/composer-semantic-reference.js'
 import { createSemanticIconElement } from '../theme/icon-sprite.js'
 import { useClientUiPlatform } from '../platform.js'
+import { ConversationImageCollection } from './ConversationImageCollection.js'
+import { uniqueImageReferences, type ConversationImageReference } from '../lib/conversation-image-references.js'
+
+const ComposerImageReader = createContext<ReadPastedImage | undefined>(undefined)
+
+function ComposerImage({ path, text, readImage }: { path: string; text: string; readImage: ReadPastedImage }) {
+  const sourceReader = useContext(ComposerImageReader)
+  return <ConversationImage path={path} text={text} readImage={sourceReader ?? readImage} />
+}
 
 export function draftDocument(value: string): JSONContent {
   return { type: 'doc', content: value.split('\n').map((line) => ({
@@ -106,7 +115,7 @@ export function composerExtensions(
     renderText({ node }) { return node.attrs.text },
     addNodeView() {
       return ReactNodeViewRenderer(({ node }) => <NodeViewWrapper as="span" className="composer-image" contentEditable={false}>
-        <ConversationImage text={node.attrs.text} path={node.attrs.path} readImage={readPastedImage} />
+        <ComposerImage text={node.attrs.text} path={node.attrs.path} readImage={readPastedImage} />
       </NodeViewWrapper>)
     }
   }), keywordUnderlineExtension(keywords)]
@@ -131,6 +140,16 @@ export type InlineComposerProps = {
 
 export function InlineComposer(props: InlineComposerProps) {
   const platform = useClientUiPlatform()
+  const draftContent = useMemo(() => draftDocument(props.value), [props.value])
+  const imageReferences = useMemo(() => {
+    const references: ConversationImageReference[] = []
+    const visit = (node: JSONContent) => {
+      if (node.type === 'pastedImage') references.push({ path: node.attrs!.path, text: node.attrs!.text })
+      else node.content?.forEach(visit)
+    }
+    visit(draftContent)
+    return uniqueImageReferences(references)
+  }, [draftContent])
   const editorRef = useRef<Editor | null>(null)
   const latest = useRef(props)
   latest.current = props
@@ -202,7 +221,7 @@ export function InlineComposer(props: InlineComposerProps) {
     queueMicrotask(() => {
       if (!cancelled && !editor.isDestroyed && documentDraft(editor.getJSON()) !== props.value && !editor.view.composing) {
         const wasEmpty = editor.isEmpty
-        editor.chain().setMeta('addToHistory', false).setContent(draftDocument(props.value), { emitUpdate: false }).run()
+        editor.chain().setMeta('addToHistory', false).setContent(draftContent, { emitUpdate: false }).run()
         if (wasEmpty) editor.commands.setTextSelection(editor.state.doc.content.size - 1)
       }
     })
@@ -219,7 +238,9 @@ export function InlineComposer(props: InlineComposerProps) {
     editor.commands.updateDecorations()
   }, [editor, keywordKey])
   return <div className="composer__editor" data-placeholder={props.placeholder} data-disabled={props.disabled} data-empty={props.value.length === 0 ? 'true' : 'false'}>
-    <EditorContent editor={editor} />
+    <ComposerImageReader.Provider value={props.readPastedImage}><ConversationImageCollection references={imageReferences} readImage={props.readPastedImage}>
+      <EditorContent editor={editor} />
+    </ConversationImageCollection></ComposerImageReader.Provider>
     {!editor && props.value ? <span className="composer__editor-fallback">{props.value}</span> : null}
   </div>
 }

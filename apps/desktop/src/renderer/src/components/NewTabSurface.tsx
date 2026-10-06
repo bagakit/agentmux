@@ -397,7 +397,7 @@ export function NewTabSurface({
         {moteId && displayedExecutorId && !executors.some(item => item.id === displayedExecutorId) ? <div className="launcher-error" role="status">Saved Agent {displayedExecutorId} is unavailable. Choose another Agent or edit this Mote’s quick mode.</div> : null}
         <AgentExecutorPicker executors={executors} selected={displayedExecutorId || null}
           active={visible && presentationActive} onSelect={chooseExecutor} />
-        <div className="launcher-composer composer"><InlineComposer aria-label="Agent prompt" disabled={false} readPastedImage={path => api.ui.readPastedImage(path)} insertionRef={insertionRef}
+        <div className="launcher-composer composer"><InlineComposer aria-label="Agent prompt" disabled={false} readPastedImage={api.ui.readPastedImage} insertionRef={insertionRef}
           onPasteImage={(file, insert) => { void feedback.run(async () => {
             if (host?.kind !== 'local') throw new Error('This image has not been sent to the selected machine. Your draft is kept; use Files to reference an image in that project, or paste it after choosing the local machine.')
             await insert(async () => { const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' }); return feedback.isCurrent() ? appendFileReferences('', [path]) : null }, { separate: true }) }) }}

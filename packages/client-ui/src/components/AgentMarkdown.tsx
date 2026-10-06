@@ -12,6 +12,8 @@ import { objectLinkReference, splitObjectLinkReferences } from '../lib/object-li
 import { useObjectLinkRenderer, type ClientUiPlatform } from '../platform.js'
 import { MarkdownCodeBlock } from './MarkdownCodeBlock.js'
 import { MarkdownMath } from './MarkdownMath.js'
+import { ConversationImageCollection } from './ConversationImageCollection.js'
+import { markdownImageReferences } from '../lib/conversation-image-references.js'
 
 export type LinkClickModifiers = { metaKey: boolean; ctrlKey: boolean; altKey?: boolean; clientX: number; clientY: number }
 export type OpenHttpLink = (url: string, event: LinkClickModifiers) => void
@@ -71,6 +73,21 @@ function navigateWithinMarkdown(source: HTMLElement, attribute: 'data-md-anchor'
   target?.focus({ preventScroll: true })
 }
 
+/** Rendering and gallery collection share the exact link-label fallback decision. */
+function resolveLink(node: Extract<InlineNode, { kind: 'link' }>, context: InlineContext) {
+  const object = context.renderObjectLink ? objectLinkReference(node.href, inlineLabel(node.children)) : null
+  if (object) return { kind: 'object', object } as const
+  if (context.documentMode && node.href.startsWith('#')) {
+    let anchor: string
+    try { anchor = decodeURIComponent(node.href.slice(1)) } catch { anchor = node.href.slice(1) }
+    return { kind: 'anchor', anchor } as const
+  }
+  const file = context.openWorkspaceFile ? classifyMarkdownLinkHref(node.href, context.workspaceRoot, context.homeDir, context.sourcePath) : null
+  if (file) return { kind: 'file', file } as const
+  const url = parseHttpLinkUrl(node.href)
+  return url ? { kind: 'http', url } as const : { kind: 'text' } as const
+}
+
 function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContext }) {
   return <>{nodes.map((node, index) => {
     const key = `${node.kind}-${index}`
@@ -104,22 +121,17 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
     }
     const labelContext = { ...context, inLink: true }
     if (context.readOnly) return <span key={key} className="md-link md-link--readonly" title={node.href}><Inline nodes={node.children} context={labelContext} /></span>
-    const object = context.renderObjectLink ? objectLinkReference(node.href, inlineLabel(node.children)) : null
-    if (object) return <Fragment key={key}>{context.renderObjectLink?.(object) ?? <Inline nodes={node.children} context={labelContext} />}</Fragment>
-    if (context.documentMode && node.href.startsWith('#')) {
-      let anchor: string
-      try { anchor = decodeURIComponent(node.href.slice(1)) } catch { anchor = node.href.slice(1) }
-      return <button key={key} type="button" className="md-link" title={node.href}
-        onClick={event => navigateWithinMarkdown(event.currentTarget, 'data-md-anchor', anchor)}><Inline nodes={node.children} context={labelContext} /></button>
-    }
-    const file = context.openWorkspaceFile ? classifyMarkdownLinkHref(node.href, context.workspaceRoot, context.homeDir, context.sourcePath) : null
-    if (file && context.openWorkspaceFile) {
-      const open = context.openWorkspaceFile
+    const target = resolveLink(node, context)
+    if (target.kind === 'object') return <Fragment key={key}>{context.renderObjectLink?.(target.object) ?? <Inline nodes={node.children} context={labelContext} />}</Fragment>
+    if (target.kind === 'anchor') return <button key={key} type="button" className="md-link" title={node.href}
+      onClick={event => navigateWithinMarkdown(event.currentTarget, 'data-md-anchor', target.anchor)}><Inline nodes={node.children} context={labelContext} /></button>
+    if (target.kind === 'file' && context.openWorkspaceFile) {
+      const open = context.openWorkspaceFile, file = target.file
       return <button key={key} type="button" className="md-link md-link--file" title={file.path}
         onClick={event => open(file.path, referenceRevealLocation(file), event)}><Inline nodes={node.children} context={labelContext} /></button>
     }
-    const url = parseHttpLinkUrl(node.href)
-    if (!url) return <Fragment key={key}><Inline nodes={node.children} context={context} /></Fragment>
+    if (target.kind !== 'http') return <Fragment key={key}><Inline nodes={node.children} context={context} /></Fragment>
+    const url = target.url
     // Buttons route to the Host, so an untrusted href cannot navigate the Renderer.
     return <button key={key} type="button" className="md-link" title={url} onClick={event => context.openHttpLink(url, {
       metaKey: event.metaKey, ctrlKey: event.ctrlKey, altKey: event.altKey, clientX: event.clientX, clientY: event.clientY
@@ -202,10 +214,14 @@ export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHt
     ...(sourcePath ? { sourcePath } : {}), ...(!readOnly && openWorkspaceFile ? { openWorkspaceFile } : {}),
     ...(!readOnly && readPastedImage ? { readPastedImage } : {}), ...(!readOnly && renderWorkspaceImage ? { renderWorkspaceImage } : {}),
     ...(!readOnly && renderImage ? { renderImage } : {}) }
-  if (!parsed || (!parsed.blocks.length && !documentMode)) return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>
-  const { document, blocks } = parsed
-  return <div data-markdown-root="" className={`${className ? className + ' ' : ''}md${documentMode ? ' md-document' : isInput ? ' md-input' : ''}`}>
+  const plainContent = !parsed || (!parsed.blocks.length && !documentMode)
+  const imageReferences = useMemo(() => readPastedImage && !readOnly
+    ? markdownImageReferences(content, plainContent ? undefined : parsed?.blocks, Boolean(context.renderObjectLink), node => resolveLink(node, context).kind === 'text') : [],
+  [content, parsed, plainContent, readPastedImage, readOnly, renderObjectLink, documentMode, openWorkspaceFile, workspaceRoot, homeDir, sourcePath])
+  if (plainContent) return <ConversationImageCollection references={imageReferences} readImage={readPastedImage}><p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p></ConversationImageCollection>
+  const { document, blocks } = parsed!
+  return <ConversationImageCollection references={imageReferences} readImage={readPastedImage}><div data-markdown-root="" className={`${className ? className + ' ' : ''}md${documentMode ? ' md-document' : isInput ? ' md-input' : ''}`}>
     {document && <MarkdownOutline headings={document.headings} onNavigate={(source, anchor) => navigateWithinMarkdown(source, 'data-md-anchor', anchor)} />}
     {blocks.map((block, index) => <Block key={index} node={block} context={context} />)}
-  </div>
+  </div></ConversationImageCollection>
 }

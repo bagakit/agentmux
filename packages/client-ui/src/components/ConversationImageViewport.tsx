@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode, type Ref } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { SemanticIcon } from '../theme/icons.js'
 import { constrainImageView, FIT_IMAGE, imageViewSize, zoomImageView, type ImageViewGeometry } from '../lib/image-view-transform.js'
 
 /** Viewing state only. The parent still owns the exact bytes, source and decode failure. */
-export function ConversationImageViewport({ src, alt, name, onError }: {
-  src: string; alt: string; name: string; onError(): void
+export function ConversationImageViewport({ src, alt, name, onError, fallback, navigation }: {
+  src: string | undefined; alt: string; name: string; onError(): void; fallback?: ReactNode
+  navigation?: { index: number; count: number; previous(): void; next(): void; previousButton: Ref<HTMLButtonElement>; nextButton: Ref<HTMLButtonElement> }
 }) {
   const viewport = useRef<HTMLDivElement>(null)
   const image = useRef<HTMLImageElement>(null)
@@ -26,8 +27,8 @@ export function ConversationImageViewport({ src, alt, name, onError }: {
 
   const measure = useCallback(() => {
     const host = viewport.current, img = image.current
-    if (!host || !img) return
     endDrag()
+    if (!host || !img) return
     geometry.current = { width: host.clientWidth, height: host.clientHeight, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight }
     setSize(imageViewSize(geometry.current))
     setView(previous => constrainImageView(previous, geometry.current))
@@ -37,9 +38,10 @@ export function ConversationImageViewport({ src, alt, name, onError }: {
     if (!host) return
     const observer = new ResizeObserver(measure)
     observer.observe(host)
+    setView(FIT_IMAGE)
     measure()
     return () => observer.disconnect()
-  }, [measure])
+  }, [measure, src])
   useEffect(() => {
     const host = viewport.current
     if (!host) return
@@ -66,6 +68,12 @@ export function ConversationImageViewport({ src, alt, name, onError }: {
     endDrag()
   }
   return <div className="md-conversation-image__viewer" onKeyDown={event => {
+    if (navigation && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+      event.preventDefault(); event.stopPropagation()
+      if (event.key === 'ArrowLeft') navigation.previous()
+      else navigation.next()
+      return
+    }
     if (!['+', '=', '-', '0'].includes(event.key)) return
     event.preventDefault(); event.stopPropagation()
     if (event.key === '0') fit()
@@ -100,17 +108,21 @@ export function ConversationImageViewport({ src, alt, name, onError }: {
         setDragging(true)
         setView(previous => constrainImageView({ ...previous, x: start.x + dx, y: start.y + dy }, geometry.current))
       }} onPointerUp={finishDrag} onPointerCancel={finishDrag} onLostPointerCapture={() => { drag.current = null; setDragging(false) }}>
-      <img ref={image} className="md-conversation-image__full" src={src} alt={alt} draggable={false}
+      {src ? <img ref={image} className="md-conversation-image__full" src={src} alt={alt} draggable={false}
         onLoad={measure} onError={onError} style={{ ...(size.width ? { width: size.width, height: size.height } : {}),
-          transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }} />
+          transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }} /> : fallback}
     </div>
     <footer className="md-conversation-image__toolbar">
-      <span className="md-conversation-image__hint">Ctrl/⌘ + scroll to zoom · Drag to pan</span>
+      {navigation ? <div className="md-conversation-image__navigation" role="group" aria-label="Image navigation">
+        <button ref={navigation.previousButton} type="button" className="md-conversation-image__control" aria-label="Previous image" title="Previous image (←)" disabled={navigation.index === 0} onClick={navigation.previous}><SemanticIcon name="navigation.previous" size={16} aria-hidden="true" /></button>
+        <span className="md-conversation-image__position" aria-live="polite">{navigation.index + 1} / {navigation.count}</span>
+        <button ref={navigation.nextButton} type="button" className="md-conversation-image__control" aria-label="Next image" title="Next image (→)" disabled={navigation.index === navigation.count - 1} onClick={navigation.next}><SemanticIcon name="navigation.next" size={16} aria-hidden="true" /></button>
+      </div> : <span className="md-conversation-image__hint">Ctrl/⌘ + scroll to zoom · Drag to pan</span>}
       <div className="md-conversation-image__tools" role="group" aria-label="Image zoom">
-        <button type="button" className="md-conversation-image__control" aria-label="Zoom out" title="Zoom out (−)" disabled={view.scale === 1} onClick={() => zoom(1 / 1.25)}><SemanticIcon name="action.zoom-out" size={16} aria-hidden="true" /></button>
-        <span className="md-conversation-image__zoom" aria-label="Zoom level">{Math.round(view.scale * 100)}%</span>
-        <button type="button" className="md-conversation-image__control" aria-label="Zoom in" title="Zoom in (+)" disabled={view.scale >= size.maxScale} onClick={() => zoom(1.25)}><SemanticIcon name="action.zoom-in" size={16} aria-hidden="true" /></button>
-        <button type="button" className="md-conversation-image__control" aria-label="Fit image" title="Fit image (0)" onClick={fit}><SemanticIcon name="layout.expand" size={16} aria-hidden="true" /></button>
+        <button type="button" className="md-conversation-image__control" aria-label="Zoom out" title="Zoom out (−)" disabled={!src || view.scale === 1} onClick={() => zoom(1 / 1.25)}><SemanticIcon name="action.zoom-out" size={16} aria-hidden="true" /></button>
+        <span className="md-conversation-image__zoom" aria-label="Zoom level">{src ? `${Math.round(view.scale * 100)}%` : '—'}</span>
+        <button type="button" className="md-conversation-image__control" aria-label="Zoom in" title="Zoom in (+)" disabled={!src || view.scale >= size.maxScale} onClick={() => zoom(1.25)}><SemanticIcon name="action.zoom-in" size={16} aria-hidden="true" /></button>
+        <button type="button" className="md-conversation-image__control" aria-label="Fit image" title="Fit image (0)" disabled={!src} onClick={fit}><SemanticIcon name="layout.expand" size={16} aria-hidden="true" /></button>
       </div>
     </footer>
   </div>
