@@ -1,0 +1,165 @@
+// @vitest-environment happy-dom
+import { act } from 'react'
+import type { Root } from 'react-dom/client'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { createWorkspaceLayout } from '@agentmux/layout'
+vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
+vi.mock('../src/renderer/src/components/WorkspaceWorkbench', () => ({ WorkspaceWorkbench: () => null }))
+vi.mock('../src/renderer/src/components/SurfaceToolDock', () => ({ SurfaceToolDock: () => null }))
+import { App } from '../src/renderer/src/App'
+import { api } from '../src/renderer/src/lib/api'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { useAppStore } from '../src/renderer/src/store'
+import { providerCatalogReader, historySourcesReader } from './helpers/startup-observation-api-fixture'
+import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
+import { createClientUiRoot } from './helpers/client-ui-render'
+import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter } from './helpers/notification-center'
+
+const initial = useAppStore.getState()
+let root: Root, container: HTMLDivElement
+const healthySession = (id: string) => ({ ...composerSession(id), status: { state: 'working' as const, source: 'native-hook' as const, observedAt: Date.now() } })
+const original = healthySession('original'), healthy = healthySession('healthy')
+const originalTab = createWorkbenchTab('original-tab', { kind: 'agent', regionId: 'original-region', workspaceId: 'workspace', sessionId: original.id, phase: 'attached' })
+const healthyTab = createWorkbenchTab('healthy-tab', { kind: 'agent', regionId: 'healthy-region', workspaceId: 'workspace', sessionId: healthy.id, phase: 'attached' })
+const diagnostic = 'Original operation receipt is unavailable.\nFull diagnostic: exact request and recovery facts remain readable.'
+beforeEach(async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
+  vi.spyOn(api.sessions, 'notifyInputOccupation').mockResolvedValue(undefined)
+  vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig)
+  vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
+  vi.spyOn(api.sessions, 'historySources').mockImplementation(historySourcesReader())
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [original, healthy], timelines: {}, recoveryCandidates: [] })
+  useAppStore.setState({ ...initial, loading: true }, true)
+  container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
+  await act(async () => { root.render(<App />) })
+  for (let attempt = 0; attempt < 30 && useAppStore.getState().loading; attempt += 1) {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+  }
+  expect(useAppStore.getState().loading, 'The actual App must finish initialization').toBe(false)
+  expect(container.querySelector('main.main-shell')).not.toBeNull()
+  await act(async () => useAppStore.setState({ sessions: [original, healthy],
+    tabs: { [originalTab.id]: originalTab, [healthyTab.id]: healthyTab },
+    layouts: { workspace: createWorkspaceLayout('original-group', [healthyTab.id, originalTab.id]) },
+    activeWorkspaceId: 'workspace', mainSurface: 'workbench',
+    agentComposerDrafts: { original: 'Original draft', healthy: 'Healthy draft' },
+    environmentWarning: undefined, runtimeOwnershipWarnings: [], runtimeEndpointWarnings: [],
+    displacedAgentSessionIds: [], error: null, lastError: null, errorNoticeContext: null, notificationEvents: [], noticeReadReceipts: {} }))
+})
+afterEach(async () => {
+  await act(async () => root.unmount()); container.remove()
+  vi.restoreAllMocks(); useAppStore.setState(initial, true)
+})
+
+it('retains independent failures behind one window entry without recreating a bottom notification strip', async () => {
+  await act(async () => {
+    useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: original.control })
+    useAppStore.getState().reportError('Independent storage receipt failed')
+  })
+  expect(container.querySelectorAll('.global-system-notices__trigger')).toHaveLength(1)
+  expect(container.querySelector('.main-shell__notices')).toBeNull()
+  expect(container.querySelector('.error-notice')).toBeNull()
+  expect(container.querySelector('.remote-core-upgrade-notices')).toBeNull()
+  expect(notificationEventRows(container), JSON.stringify(useAppStore.getState().notificationEvents.map(event => event.message))).toHaveLength(2)
+  expect(notificationTrigger(container).getAttribute('aria-label')).toBe('System notifications: 2 unread, 0 current, 2 recent events')
+  expect(notificationTrigger(container).getAttribute('aria-expanded')).toBe('false')
+  expect(notificationEventRows(container).map(row => row.textContent).join('\n')).toContain(diagnostic)
+})
+
+it('keeps repeated observations read while distinct subjects and Runs remain independent', async () => {
+  await act(async () => useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: original.control }))
+  const firstId = notificationEventRows(container)[0]!.dataset.eventId!
+  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  const receipts = useAppStore.getState().noticeReadReceipts
+  await act(async () => useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: original.control }))
+  expect(notificationEventRows(container)).toHaveLength(1)
+  expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts)
+  expect(receipts['global:events']?.[firstId]).toBe(firstId)
+  expect(notificationTrigger(container).getAttribute('aria-label')).toBe('System notifications: 0 unread, 0 current, 1 recent events')
+  await act(async () => {
+    useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: healthy.control })
+    useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: { ...original.control, run: { runId: 'replacement-run' } } })
+  })
+  expect(notificationEventRows(container)).toHaveLength(3)
+  expect(new Set(notificationEventRows(container).map(row => row.dataset.eventId)).size).toBe(3)
+  expect(notificationTrigger(container).getAttribute('aria-label')).toBe('System notifications: 2 unread, 0 current, 3 recent events')
+  expect(notificationTrigger(container).getAttribute('aria-expanded')).toBe('false')
+})
+
+it('preserves acknowledged identities through a new window observation before the same failure reappears', async () => {
+  await act(async () => useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: original.control }))
+  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  const receipts = useAppStore.getState().noticeReadReceipts
+  await act(async () => useAppStore.setState({ notificationEvents: [], error: null, loading: true }))
+  await act(async () => useAppStore.setState({ loading: false }))
+  expect(useAppStore.getState().noticeReadReceipts['global:events']).toEqual(receipts['global:events'])
+  await act(async () => useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: original.control }))
+  expect(notificationEventRows(container)).toHaveLength(1)
+  expect(notificationTrigger(container).getAttribute('aria-label')).toBe('System notifications: 0 unread, 0 current, 1 recent events')
+})
+
+it('acknowledges and clears only read events while current problems, healthy Sessions, drafts and focus remain', async () => {
+  await act(async () => {
+    useAppStore.setState({ environmentWarning: 'Original shell observation is incomplete' })
+    useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: original.control })
+  })
+  const before = useAppStore.getState()
+  const input = document.createElement('textarea'); container.append(input); input.value = 'Unsent local selection'; input.focus(); input.setSelectionRange(2, 7)
+  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  await act(async () => useAppStore.getState().reportError('Unread independent event'))
+  const clear = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Clear read events')!
+  expect(clear, 'Read history must have an explicit clear action').toBeDefined()
+  await act(async () => clear.click())
+  expect(notificationEventRows(container)).toHaveLength(1)
+  expect(notificationEventRows(container)[0]!.textContent).toContain('Unread independent event')
+  expect(currentNotificationRows(container)).toHaveLength(1)
+  expect(currentNotificationRows(container)[0]!.textContent).toContain('Original shell observation is incomplete')
+  const after = useAppStore.getState()
+  expect(after.environmentWarning).toBe(before.environmentWarning)
+  expect(after.sessions).toBe(before.sessions); expect(after.sessions.find(session => session.id === healthy.id)).toBe(healthy)
+  expect(after.tabs).toBe(before.tabs); expect(after.layouts).toBe(before.layouts); expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect([document.activeElement === input, input.value, input.selectionStart, input.selectionEnd]).toEqual([true, 'Unsent local selection', 2, 7])
+})
+
+it('keeps a current Provider observation distinct from an older same-text event on another subject', async () => {
+  await act(async () => {
+    useAppStore.getState().reportError(diagnostic, { kind: 'indeterminate', subject: original.control })
+    useAppStore.getState().reportError(diagnostic, { kind: 'indeterminate', startupProviderCatalog: { warningMessage: diagnostic } })
+  })
+  expect(notificationEventRows(container)).toHaveLength(1)
+  expect(currentNotificationRows(container)).toHaveLength(1)
+  expect(currentNotificationRows(container)[0]!.textContent).toContain(diagnostic)
+  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  await act(async () => useAppStore.getState().clearReadNotificationEvents())
+  expect(notificationEventRows(container)).toHaveLength(0)
+  expect(currentNotificationRows(container)).toHaveLength(1)
+  expect(useAppStore.getState()).toMatchObject({ error: diagnostic, errorDismissed: false,
+    errorNoticeContext: { startupProviderCatalog: { warningMessage: diagnostic } } })
+})
+
+it('reopens complete diagnostics, copies their original content and navigates the original Session', async () => {
+  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await act(async () => useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: original.control }))
+  const row = notificationEventRows(container)[0]!
+  const details = row.querySelector<HTMLDetailsElement>('details')!
+  expect(details.open).toBe(false)
+  await toggleNotificationCenter(container, 'open')
+  expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
+  await act(async () => { details.open = true })
+  expect(row.querySelector('[aria-label^="Complete details:"]')?.textContent).toContain(diagnostic)
+  const nestedToggle = new Event('toggle', { bubbles: true })
+  Object.defineProperty(nestedToggle, 'newState', { value: 'closed' })
+  await act(async () => { details.dispatchEvent(nestedToggle) })
+  expect(notificationTrigger(container).getAttribute('aria-expanded')).toBe('true')
+  expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
+  await act(async () => row.querySelector<HTMLButtonElement>('.notification-item__original button')!.click())
+  expect(clipboard).toHaveBeenCalledExactlyOnceWith(diagnostic)
+  expect(row.textContent).toContain('Copied')
+  const before = useAppStore.getState()
+  await act(async () => row.querySelector<HTMLButtonElement>('.notification-item__action')!.click())
+  expect(useAppStore.getState().layouts.workspace!.groups[0]!.activeTabId).toBe(originalTab.id)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(useAppStore.getState().tabs[originalTab.id]!.regions['original-region']).toEqual(before.tabs[originalTab.id]!.regions['original-region'])
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(notificationEventRows(container)).toHaveLength(1)
+})
