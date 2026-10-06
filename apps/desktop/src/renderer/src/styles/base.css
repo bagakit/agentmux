@@ -184,30 +184,17 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .status--exited { --status-ink: var(--text-3); }
 .status--done { --status-ink: var(--blue); }
 .status--disconnected { --status-ink: var(--text-3); }
-.status__dot { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--status-ink); box-shadow: 0 0 0 2px var(--overlay-line); }
-.status--working .status__dot { box-shadow: 0 0 0 3px var(--overlay-line); }
-.status--working .status__dot { animation: pulse var(--dur-breath) infinite; }
-/* Needs-you (waiting/blocked) carries a SHAPE, not only a colour: an amber pip bearing a "?" so the
-   one "an agent needs you" state survives colour-blindness and a fast glance, and never reads the
-   same as any other amber. This is the shared status seam — StatusDot and the status bar's
-   StatusCount both render .status--waiting/.status--blocked, so the pip lifts every full-size
-   surface at once (tab, board card, quick switcher, attention bar) from one rule. Accent expresses
-   state, not decoration (design SSOT: "颜色表达状态，不兼任布局线"). */
-.status--waiting .status__dot, .status--blocked .status__dot { width: 9px; height: 9px; box-shadow: 0 0 0 3px var(--amber-wash); }
-.status--waiting .status__dot::after, .status--blocked .status__dot::after { content: "?"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--amber-bg); font-size: 7px; font-weight: 800; line-height: 1; }
-.status--error .status__dot { width: 9px; height: 9px; }
-.status--error .status__dot::after { content: "!"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--surface-1); font-size: 7px; font-weight: 800; line-height: 1; }
-/* Tab-corner marks shrink the dot to 5px (workbench.css `.workbench-tab__agent-mark`);
-   a 7px glyph inside a 5px pip is illegible, and the
-   corner position already differentiates. So the pip lifts only on full-size surfaces.
-   This is keyed on the MARK, not on a list of glyph states — "?" and "!" are both 7px and both
-   unreadable there, and the next glyph would be too. Dropped by bcd94ac3 and restored here: for a
-   month both marks were rendering a smudge where the plain pip belongs. */
-.workbench-tab__agent-mark .status__dot::after { display: none; }
-/* Disconnected is a dropped link, not an attention request — split off amber (which now means "needs
-   you") onto a neutral hollow dot so a lost connection can never be mistaken for one. Ring, not fill:
-   a distinct shape as well as a neutral colour. */
-.status--running .status__dot, .status--disconnected .status__dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--status-ink); }
+.status__dot { position: relative; width: 7px; height: 7px; background: var(--status-ink); mask: var(--native-presence-neutral-mask) center / contain no-repeat; }
+.status--unknown .status__dot { mask-image: var(--native-presence-unknown-mask); }
+.status--starting .status__dot { mask-image: var(--native-presence-starting-mask); }
+.status--working .status__dot { mask-image: var(--native-presence-working-mask); animation: pulse var(--dur-breath) infinite; }
+.status--running .status__dot { mask-image: var(--native-presence-running-mask); }
+.status--waiting .status__dot { width: 9px; height: 9px; mask-image: var(--native-presence-waiting-mask); }
+.status--blocked .status__dot { width: 9px; height: 9px; mask-image: var(--native-presence-blocked-mask); }
+.status--error .status__dot { width: 9px; height: 9px; mask-image: var(--native-presence-error-mask); }
+.status--exited .status__dot { mask-image: var(--native-presence-exited-mask); }
+.status--done .status__dot { mask-image: var(--native-presence-done-mask); }
+.status--disconnected .status__dot { mask-image: var(--native-presence-disconnected-mask); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0s !important; animation-duration: 0s !important; }
