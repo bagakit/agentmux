@@ -86,7 +86,7 @@ import type {
   SessionQuestionReplyInput,
   TerminalLaunchInput
 } from '../shared/contracts.js'
-import { CONTROL_ENDPOINT_PUBLICATION_STEP, runInterruptionFact, SESSION_EVENT_CHANNEL } from '../shared/contracts.js'
+import { CONNECTION_OBSERVATION_SOURCE_STEP, CONTROL_ENDPOINT_PUBLICATION_STEP, runInterruptionFact, SESSION_EVENT_CHANNEL } from '../shared/contracts.js'
 import { projectNativeSourceFacts } from '../shared/agent-native-source.js'
 import {
   scanTerminalOscColorQueries,
@@ -2249,9 +2249,10 @@ export class RuntimeController {
         if (this.hosts.get(hostId)?.client !== client) return
         const available = runtimeOwner(client)?.availability === 'connected'
         this.publish(hostId, { type: 'connection-state', state: available ? 'restored' : 'unrecoverable',
+          observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' },
           ...(available ? { diagnostic: { code: 'CTXMUX_CONNECTION_OBSERVATION_FAILED',
             message: `${error instanceof Error ? error.message : String(error)}. Original Runtime remains available; retry Session observation.` } } : {}),
-          evidence: { source: 'run-process', observedAt: Date.now() } }, endpointWarning(hostId, available ? 'Observing Runtime' : 'Connecting to Runtime', error))
+          evidence: { source: 'agentmux', observedAt: Date.now() } }, endpointWarning(hostId, available ? 'Observing Runtime' : 'Connecting to Runtime', error))
       }
     })()
     this.endpointConnections.set(client, connection)
@@ -2574,23 +2575,35 @@ export class RuntimeController {
       endpointObservation = { step, warning }
     }
     if (event.type === 'connection-state') {
-      const recoveryWarningKey = JSON.stringify([hostId, 'Observing Runtime'])
-      if (event.state === 'restored' && !event.diagnostic) {
-        this.observationWarnings.delete(recoveryWarningKey)
-        if (this.endpointWarnings.get(hostId)?.step !== 'Saving Runtime binding') {
-          this.endpointWarnings.delete(hostId)
-          warningChange = null
-        }
-      } else {
-        warningChange = connectionWarning ?? endpointWarning(hostId, 'Observing Runtime',
+      const candidate = event.observationOrigin
+      const origin = candidate?.kind === 'runtime-connection' && (candidate.boundary === 'consumer-core' || candidate.boundary === 'core-ctxmux')
+        ? candidate : undefined
+      const step = origin?.boundary === 'consumer-core' ? 'Core control connection' : origin?.boundary === 'core-ctxmux'
+        ? 'Core to ctxmux connection' : CONNECTION_OBSERVATION_SOURCE_STEP
+      const key = JSON.stringify([hostId, step])
+      const warning: RuntimeEndpointWarning | null = origin && event.state === 'restored' && !event.diagnostic ? null : {
+        ...(connectionWarning ?? endpointWarning(hostId, step,
           event.diagnostic ? new AgentMuxError(event.diagnostic.message, event.diagnostic.code) :
-          new AgentMuxError(event.state === 'lost' ? 'Runtime connection was lost.' :
-            'Automatic reconnect did not verify the Runtime. Its existing Sessions remain unverified; reconnect this endpoint.', 'RUNTIME_UNAVAILABLE'))
-        if (event.state === 'restored') warningChange = { ...warningChange, availability: 'connected' }
-        if (event.state === 'restored' && this.endpointWarnings.get(hostId)?.step === 'Saving Runtime binding') {
-          warningChange = { ...warningChange, scope: 'observation' }
-          this.observationWarnings.set(recoveryWarningKey, warningChange)
-        } else this.endpointWarnings.set(hostId, warningChange)
+          new AgentMuxError(origin ? `${step} is ${event.state}. Current Run availability and pending operation receipts are unconfirmed.` :
+            'The connection event did not identify its observation boundary. Current Run availability and pending operation receipts remain unconfirmed.',
+            origin ? 'RUNTIME_UNAVAILABLE' : 'CONTROL_PROTOCOL_ERROR'))),
+        hostId, step, scope: 'observation', availability: origin && event.state === 'restored' ? 'connected' : 'unverified',
+        observationOrigin: origin ?? null, evidence: event.evidence,
+        recovery: `${origin?.boundary === 'consumer-core' ? "Open this Host’s Connection settings to restore its original Core connection, then refresh the Session observation." : 'Refresh the original Session observation; use this Host’s Connection settings if its Runtime cannot be reached.'} Keep its Host, Run, history and draft; inspect an unconfirmed operation on its original identity before sending again.`
+      }
+      // Each connection observer clears only its own notice. A semantic lease
+      // cannot confirm Native recovery, and a Native reconnect cannot confirm the GUI lease.
+      if (warning) this.observationWarnings.set(key, warning)
+      else this.observationWarnings.delete(key)
+      endpointObservation = { step, warning }
+      if (origin?.boundary === 'core-ctxmux' && event.state === 'restored' && !event.diagnostic &&
+        this.observationWarnings.delete(JSON.stringify([hostId, CONNECTION_OBSERVATION_SOURCE_STEP]))) {
+        endpointObservation.resolvedSteps = [CONNECTION_OBSERVATION_SOURCE_STEP]
+      }
+      if (origin?.boundary === 'consumer-core' && event.state === 'restored' && !event.diagnostic &&
+        this.endpointWarnings.get(hostId)?.step !== 'Saving Runtime binding') {
+        this.endpointWarnings.delete(hostId)
+        warningChange = null
       }
     }
     const projectedEvent = event.type === 'agent-session' ? { ...event, session: { ...event.session, hostId } } : event

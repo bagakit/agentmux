@@ -130,9 +130,10 @@ export async function connectHostedAgentMux(options: {
     if (connectionPhase === state) return
     connectionPhase = state
     emit({ type: 'connection-state', state,
+      observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' },
       ...(error instanceof Error ? { diagnostic: { code: error instanceof AgentMuxError ? error.code : 'RUNTIME_UNAVAILABLE',
         message: `${error.message} Existing Session references are retained; reconnect this endpoint to restore observation.` } } : {}),
-      evidence: { source: 'run-process', observedAt: Date.now() } })
+      evidence: { source: 'agentmux', observedAt: Date.now() } })
   }
   const connectionFailure = (error: unknown): void => connectionState(error instanceof AgentMuxError && error.code === 'AGENT_CAPABILITY_INVALID' ? 'unrecoverable' : 'lost', error)
   const attachmentUnavailable = (reading: Reading, error: unknown, step: string): void => {

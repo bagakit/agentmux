@@ -25,6 +25,7 @@ import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { dismissOpenDestinationRequest, type OpenHttpLinkOrigin } from '../lib/open-destination'
 import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
 import { useAppStore } from '../store'
+import { useShallow } from 'zustand/react/shallow'
 import { installTerminalOscHandlers } from '../lib/terminal-capability-replies'
 import {
   isTerminalLinkClick,
@@ -93,7 +94,8 @@ import {
   terminalRevealServiceOutcome
 } from '../lib/terminal-reveal'
 import { agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, hookIngressServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
-import { useRunService } from '../lib/run-service-projection'
+import { runServiceProjection, useRunService } from '../lib/run-service-projection'
+import { terminalConnectionNotices } from '../lib/runtime-endpoint-notice'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { TerminalServiceNotices } from './TerminalServiceNotices'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -217,6 +219,9 @@ export function TerminalView({
   const readOnlyRef = useRef(readOnly)
   readOnlyRef.current = readOnly
   const nativeService = useRunService(session)
+  const connectionWarnings = useAppStore(useShallow(state => (state.runtimeEndpointWarnings ?? [])
+    .filter(warning => warning.hostId === session.control.hostId && warning.observationOrigin !== undefined)))
+  const observationAvailable = connectionWarnings.length === 0
   const rootRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const observationReaderRef = useRef<(() => AgentMuxTerminalViewObservation | undefined) | null>(null)
@@ -1790,21 +1795,22 @@ export function TerminalView({
         overdue: revealOverdue,
         processState: session.processState,
         liveReady: liveOutputReady
-      })
+      }), observationAvailable
     )
   )
   const replayGeometryNotice = serviceNoticeToRender(classifyServiceNotice(
-    terminalReplayGeometryOutcome(replaySizeUnknown, session.processState)
+    terminalReplayGeometryOutcome(replaySizeUnknown, session.processState), observationAvailable
   ))
   const viewportSyncNotice = serviceNoticeToRender(classifyServiceNotice(
-    terminalViewportSyncOutcome(viewportSyncFailed, session.processState)
+    terminalViewportSyncOutcome(viewportSyncFailed, session.processState), observationAvailable
   ))
   const continuationNotice = serviceNoticeToRender(classifyServiceNotice(
-    terminalContinuationOutcome(continuationAbsence, session.processState)
+    terminalContinuationOutcome(continuationAbsence, session.processState), observationAvailable
   ))
-  const sessionObservationNotice = serviceNoticeToRender(classifyServiceNotice(nativeSessionServiceOutcome(session, nativeService))) ??
-    (session.kind === 'agent' ? serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(session))) : null)
-  const hookIngressNotice = serviceNoticeToRender(classifyServiceNotice(hookIngressServiceOutcome(session)))
+  const sessionObservationNotice = serviceNoticeToRender(classifyServiceNotice(nativeSessionServiceOutcome(session, nativeService, observationAvailable), observationAvailable)) ??
+    (session.kind === 'agent' ? serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(session), observationAvailable)) : null)
+  const hookIngressNotice = serviceNoticeToRender(classifyServiceNotice(hookIngressServiceOutcome(session), observationAvailable))
+  const connectionObservations = terminalConnectionNotices(session, connectionWarnings, nativeService, runServiceProjection.evidence(session))
   const attachmentNotice = attachmentFailure ? { kind: 'indeterminate' as const, notice: {
     step: attachmentFailure.step,
     mode: `${attachmentFailure.message} The original Run was last observed ${session.processState}. This read does not determine current Run availability or input delivery. Your Session, history and draft are kept.`,
@@ -1955,6 +1961,8 @@ export function TerminalView({
             }}
             attachment={attachmentNotice} sessionObservation={sessionObservationNotice} hookIngress={hookIngressNotice}
             refreshingObservation={refreshingObservation}
+            connectionObservations={connectionObservations}
+            storageControl={session.control} continuationReason={continuationAbsence?.reason}
             onRefreshObservation={() => void refreshObservationRef.current?.()}
             historyNotice={historyNotice}
             historyContent={historyNotice?.id === 'history-gap' ? <TerminalReplayGapNotice
