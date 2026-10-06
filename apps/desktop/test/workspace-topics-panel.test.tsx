@@ -35,7 +35,7 @@ const fixture = vi.hoisted(() => ({
     topicCategories: [],
     spaceZoneBindings: {},
     workbenchSpaceSelection: null,
-    get config() { return { workspaces: [workspace], hosts: [], executors: {} } },
+    get config() { return { workspaces: [workspace], hosts: [], executors: {}, appearance: {} } },
     get scratchTopicSnapshots() { return { [workspace.id]: { scope: scratchTopicsScope(workspace), revision: 0, topics: fixture.snapshot, error: null, reading: false } } },
     refreshScratchTopics: vi.fn(),
     createScratchTopic: vi.fn(),
