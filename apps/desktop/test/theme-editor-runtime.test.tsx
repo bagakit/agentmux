@@ -159,3 +159,32 @@ it('invalid path text entered during a valid pending save survives its owner ack
   expect(button('Save theme').disabled).toBe(true)
   expect(button('Discard draft and close')).toBeTruthy()
 })
+
+it('restoring a draft does not claim to undo a Main save committed before its acknowledgement', async () => {
+  let release!: () => void; const original = save
+  save = async (next, expected) => { await original(next, expected); await new Promise<void>(resolve => { release = resolve }) }
+  await render(); await click('Customize selected theme'); await fill('Theme name', 'Committed before acknowledgement'); await fill('Surface 0 hexadecimal color', '#223344'); await click('Save custom copy')
+  const committed = structuredClone(config.appearance)
+  expect(getThemeCatalog(config.appearance.customThemes).items.find(item => item.id === config.appearance.themeId)!.value.name).toBe('Committed before acknowledgement')
+  await click('Restore saved version')
+  expect(container.textContent).toContain('Editor draft restored. The earlier save is still awaiting confirmation.')
+  expect(config.appearance).toEqual(committed)
+  expect(container.querySelector<HTMLInputElement>('input[aria-label="Theme name"]')!.value).toBe(GRAPHITE_THEME.name)
+  expect(surface()).toBe('#223344')
+  await act(async () => release())
+  expect(config.appearance).toEqual(committed)
+  expect(container.querySelector<HTMLInputElement>('input[aria-label="Theme name"]')!.value).toBe(GRAPHITE_THEME.name)
+  expect(button('Save theme').disabled).toBe(false)
+  expect(container.textContent).toContain('Your newer draft is still unsaved.')
+})
+
+it('restoring after a lost acknowledgement keeps the original committed owner and unconfirmed feedback', async () => {
+  const original = save
+  save = async (next, expected) => { await original(next, expected); throw new Error('Receipt unavailable after commit') }
+  await render(); await click('Customize selected theme'); await fill('Theme name', 'Saved but not acknowledged'); await click('Save custom copy')
+  const committed = structuredClone(config.appearance)
+  await click('Restore saved version')
+  expect(config.appearance).toEqual(committed)
+  expect(container.textContent).toContain('Editor draft restored. The earlier save remains unconfirmed.')
+  expect(container.querySelector<HTMLInputElement>('input[aria-label="Theme name"]')!.value).toBe(GRAPHITE_THEME.name)
+})
