@@ -2,6 +2,8 @@
  * Selected for actual AgentMux semantic roles; identity marks have their own owner.
  * Data only: no library React components, handlers, URLs or active SVG. */
 export const ICON_GLYPHS = {
+  "mouse-pointer-2": [["path",{"d":"m4 4 7.07 17 2.51-7.39L21 11.07z"}]],
+  "crop": [["path",{"d":"M6 3v12a3 3 0 0 0 3 3h12"}],["path",{"d":"M18 21V9a3 3 0 0 0-3-3H3"}]],
   "status-dot": [["circle",{"cx":"12","cy":"12","r":"10","fill":"currentColor","stroke":"none"}]],
   "resize-corner": [["path",{"d":"M0 0H24V24H18V6H0Z","fill":"currentColor","stroke":"none"}]],
   "workflow-progress": [["circle",{"cx":"12","cy":"12","r":"8.25","opacity":".16"}],["circle",{"cx":"12","cy":"12","r":"8.25","pathLength":"100","stroke-dasharray":"30 70"}]],

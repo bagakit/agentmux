@@ -19,7 +19,9 @@ export function renderCommittedLayer(
   shapes: readonly ScreenshotShape[],
   cssWidth: number,
   cssHeight: number,
-  dpr: number
+  dpr: number,
+  image?: CanvasImageSource,
+  modelWidth = cssWidth
 ): void {
   const size = scenePixels(cssWidth, cssHeight, dpr)
   if (layer.width !== size.width || layer.height !== size.height) {
@@ -28,8 +30,10 @@ export function renderCommittedLayer(
   }
   const context = layer.getContext('2d')
   if (!context) return
-  context.setTransform(size.scale, 0, 0, size.scale, 0, 0)
-  context.clearRect(0, 0, cssWidth, cssHeight)
+  const fit = cssWidth / modelWidth || 1
+  context.setTransform(size.scale * fit, 0, 0, size.scale * fit, 0, 0)
+  context.clearRect(0, 0, modelWidth, cssHeight / fit)
+  if (image) context.drawImage(image, 0, 0, modelWidth, cssHeight / fit)
   drawScreenshotShapes(context, shapes)
 }
 
@@ -39,7 +43,8 @@ export function renderScreenshotScene(
   inProgress: ScreenshotShape | null,
   cssWidth: number,
   cssHeight: number,
-  dpr: number
+  dpr: number,
+  modelWidth = cssWidth
 ): void {
   const context = target.getContext('2d')
   if (!context) return
@@ -53,6 +58,7 @@ export function renderScreenshotScene(
   if (committed.width > 0 && committed.height > 0) {
     context.drawImage(committed, 0, 0, size.width, size.height)
   }
-  context.setTransform(size.scale, 0, 0, size.scale, 0, 0)
+  const fit = cssWidth / modelWidth || 1
+  context.setTransform(size.scale * fit, 0, 0, size.scale * fit, 0, 0)
   if (inProgress) drawScreenshotShapes(context, [inProgress])
 }
