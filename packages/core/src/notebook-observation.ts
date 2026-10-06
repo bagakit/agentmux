@@ -6,7 +6,7 @@ import { parseNoteWikiQuery } from './note-links.js'
 
 /** Original file observations, never another Note body or relationship store. */
 export type NoteContentObservation = { noteId: string; resource: NoteResource } & (
-  | { status: 'read'; revision: string; content: string; actualNoteId: string; blockIds: string[] }
+  | { status: 'read'; revision: string; content: string; actualNoteId: string; blockIds: string[]; unanchoredBlockCount?: number }
   | { status: 'missing' | 'unknown' | 'invalid' | 'identity-mismatch'; message: string; revision?: string; actualNoteId?: string })
 export type NoteContentMetadata = NoteContentObservation extends infer O ? O extends NoteContentObservation ? Omit<O, 'content'> : never : never
 export type NotebookGraphParams = { notebookId?: string; noteId?: string; maxBytes?: number }
@@ -67,16 +67,17 @@ export function parseNoteContentObservation(value: unknown, includeContent = tru
   return protocolResult(() => validateNoteContentObservation(value, includeContent))
 }
 function validateNoteContentObservation(value: unknown, includeContent: boolean): NoteContentObservation | NoteContentMetadata {
-  const p = object(value, ['noteId', 'resource', 'status', 'revision', 'content', 'actualNoteId', 'blockIds', 'message'])
+  const p = object(value, ['noteId', 'resource', 'status', 'revision', 'content', 'actualNoteId', 'blockIds', 'unanchoredBlockCount', 'message'])
   id(p.noteId); resource(p.resource)
   if (p.status === 'read') {
+    if (p.unanchoredBlockCount !== undefined) count(p.unanchoredBlockCount)
     id(p.revision); id(p.actualNoteId); if (p.noteId !== p.actualNoteId) bad('A confirmed Note body belongs to another identity.')
     if (includeContent ? typeof p.content !== 'string' : p.content !== undefined) bad('Invalid Note content payload.')
     list(p.blockIds).forEach(id); if (new Set(p.blockIds as string[]).size !== (p.blockIds as string[]).length) bad('Duplicated observed block identities.'); if (p.message !== undefined) bad('Unexpected read issue.')
   } else {
     member(p.status, ['missing', 'unknown', 'invalid', 'identity-mismatch']); id(p.message)
     if (p.revision !== undefined) id(p.revision); if (p.actualNoteId !== undefined) id(p.actualNoteId)
-    if (p.content !== undefined || p.blockIds !== undefined) bad('Unconfirmed Note body cannot report parsed content.')
+    if (p.content !== undefined || p.blockIds !== undefined || p.unanchoredBlockCount !== undefined) bad('Unconfirmed Note body cannot report parsed content.')
   }
   return value as NoteContentObservation | NoteContentMetadata
 }
@@ -105,7 +106,7 @@ function validateNotebookGraph(value: unknown, params: NotebookGraphParams): Not
   const duplicates = [...identities].filter(([, locations]) => locations.size > 1).map(([noteId]) => noteId)
   if (new Set(p.duplicateNoteIds as string[]).size !== duplicates.length || duplicates.some(noteId => !(p.duplicateNoteIds as string[]).includes(noteId))) bad('The duplicated Note identities do not match their original resources.')
   if (params.noteId && !byNoteId.has(params.noteId)) bad('The requested Note observation is missing.')
-  if (p.completeness === 'complete' && (observations.some(o => o.status !== 'read') || (p.duplicateNoteIds as unknown[]).length > 0)) bad('Incomplete file observations cannot confirm the whole graph.')
+  if (p.completeness === 'complete' && (observations.some(o => o.status !== 'read' || (o.unanchoredBlockCount ?? 0) > 0) || (p.duplicateNoteIds as unknown[]).length > 0)) bad('Incomplete file observations cannot confirm the whole graph.')
   list(p.hierarchy).forEach(v => { const e = object(v, ['parentNoteId', 'noteId']); id(e.parentNoteId); id(e.noteId); if (![e.parentNoteId, e.noteId].every(noteId => byNoteId.has(noteId as string))) bad('An original hierarchy endpoint is outside the observed catalog.') })
   const endpoint = (v: unknown) => { const e = object(v, ['noteId', 'blockId']); id(e.noteId); id(e.blockId) }
   list(p.references).forEach(v => {

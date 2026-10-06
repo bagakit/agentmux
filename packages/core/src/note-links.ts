@@ -112,6 +112,7 @@ export function parseNotebookResolveResult(value: unknown, params: NotebookResol
       if (result.stage !== undefined || result.message !== undefined || observation?.status !== 'read' || target.noteId !== observation.noteId || target.blockId && !ids.has(target.blockId) || Boolean(query.query.fragment) !== Boolean(target.blockId)) fail('The lookup target is not confirmed in its original.', code)
       if (params.select?.blockId && params.select.blockId !== target.blockId) fail('The lookup returned another selected block.', code)
       if (query.query.fragment && !params.select?.blockId) {
+        if (query.query.fragment.kind !== 'block' && (observation.unanchoredBlockCount ?? 0) > 0) fail('Unanchored original headings cannot grant a unique target.', code)
         const matches = matchingNoteLinkBlocks(p.blocks as NoteBlockCandidate[], query.query.fragment)
         if (matches.length !== 1 || matches[0]!.blockId !== target.blockId) fail('The returned block does not uniquely match the original fragment query.', code)
       }

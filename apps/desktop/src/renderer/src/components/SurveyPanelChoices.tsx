@@ -1,3 +1,4 @@
+import { NOTE_FILE_EXTENSION } from '../../../shared/note-format'
 import { groupIds, regionIds } from '@agentmux/layout'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useState } from 'react'
@@ -28,7 +29,7 @@ function contentKind(surface: WorkbenchSurface | undefined) {
     case 'browser': return { name: 'Browser', Icon: ThemeObjectBrowserIcon }
     case 'agent': return { name: 'Agent', Icon: ThemeObjectAgentIcon }
     case 'terminal': return { name: 'Terminal', Icon: ThemeObjectTerminalIcon }
-    case 'file': return { name: surface.path.endsWith('.note.json') ? 'Note' : 'File', Icon: ThemeFileTextIcon }
+    case 'file': return { name: surface.path.endsWith(NOTE_FILE_EXTENSION) ? 'Note' : 'File', Icon: ThemeFileTextIcon }
     case 'git': return { name: 'Git history', Icon: ThemeFileTextIcon }
     case 'git-diff': return { name: 'Diff', Icon: ThemeFileTextIcon }
     case 'launcher': return { name: 'New Tab', Icon: ThemeActionCreateIcon }

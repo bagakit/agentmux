@@ -8,7 +8,7 @@ import { noteWikiLiteralExtension } from '../note/note-wiki-view.js'
 import { noteReadingSelectionExtension } from '../note/note-reading-selection.js'
 import { noteWikiInputExtension } from '../note/note-wiki-input.js'
 import type { NoteInlineLinkAttributes } from '@agentmux/core/note-links'
-import { readNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../note/note-document.js'
+import { readNoteDocument, serializeNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../note/note-document.js'
 import { noteKnowledge, projectNoteBlocks, resolveNoteBlock, type NoteKnowledge } from '../note/note-knowledge.js'
 import { acknowledgeNoteWrite, type NoteEditState } from '../note/note-edit-state.js'
 import { noteProvenanceAttributes } from '../note/note-provenance.js'
@@ -212,7 +212,7 @@ function EditableNote({ note, content, revision, editing }: { note: NoteDocument
     } catch (error) { setNotice(`核对原文件失败：${error instanceof Error ? error.message : String(error)}。草稿与原意图保留。`) }
   }
   return <>{!opened ? <><RichContent key="saved" content={note.content} /><button type="button" onClick={() => { persist({ noteId: note.noteId, draft: content, expectedRevision: revision }); open(true) }}>编辑原笔记</button></> : <>
-    <RichContent key="draft" content={baseline} onChange={value => persist({ ...current.current, draft: JSON.stringify({ schema: note.schema, noteId: note.noteId, content: value }) })} />
+    <RichContent key="draft" content={baseline} onChange={value => persist({ ...current.current, draft: serializeNoteDocument({ schema: note.schema, noteId: note.noteId, content: value }) })} />
     <button type="button" disabled={Boolean(state.attempt)} onClick={() => { void save() }}>保存原笔记</button>
     <button type="button" onClick={() => { void inspect() }}>核对当前原文</button>
     {editing.readDeviceDraft && <button type="button" onClick={() => { try { const value = editing.readDeviceDraft!(); if (!value || value.noteId !== note.noteId) { setNotice('未读到同一原 Note 的本机草稿；当前编辑保留。'); return }; setDevice(value) } catch (error) { setNotice(`本机草稿读取失败：${error instanceof Error ? error.message : String(error)}；原编辑保留。`) } }}>核对本机笔记草稿</button>}

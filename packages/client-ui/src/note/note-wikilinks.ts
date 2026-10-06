@@ -3,6 +3,7 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { parseNoteWikiQuery, scanNoteWikiLinks, type NoteLinkTarget, type NoteWikiQuery, type NoteWikiToken } from '@agentmux/core/note-links'
 import type { NoteGraphTarget } from '@agentmux/core/notebook-observation'
 import type { NoteDocument } from './note-document.js'
+import { NOTE_BLOCK_TYPES } from './note-content-schema.js'
 
 export type PendingNoteWikiLink = { referenceId: string; text: string; query: NoteWikiQuery }
 export type IndexedNoteReference = { blockId: string; target: NoteGraphTarget; mode: 'reference' | 'embed' | 'link'; occurrence:
@@ -11,7 +12,7 @@ export type IndexedNoteReference = { blockId: string; target: NoteGraphTarget; m
 export function noteSemanticText(node: ProseMirrorNode): string {
   return node.textBetween(0, node.content.size, '', leaf => leaf.type.name === 'noteLink' ? `[[${String(leaf.attrs.text)}]]` : leaf.type.name === 'hardBreak' ? '\n' : '')
 }
-const eligible = (node: JSONContent) => node.type === 'text' && !node.marks?.some(mark => mark.type === 'code' || mark.type === 'link')
+const eligible = (node: JSONContent) => node.type === 'text' && !node.marks?.some(mark => mark.type === 'code' || mark.type === 'link' || mark.type === 'noteWikiLiteral')
 /** One text-run adapter for the writer and saved-file index; marks never create another lexer. */
 function runs(children: readonly JSONContent[], accept: (run: readonly JSONContent[], from: number, tokens: readonly NoteWikiToken[]) => void) {
   let start = 0, at = 0
@@ -88,6 +89,7 @@ export function bindNoteWikiLink(note: NoteDocument, input: { referenceId: strin
 export function indexNoteReferences(tree: ProseMirrorNode): readonly IndexedNoteReference[] {
   const references: IndexedNoteReference[] = []
   function visit(node: ProseMirrorNode, absolute: number, owner?: { blockId: string; start: number }) {
+    if (NOTE_BLOCK_TYPES.some(type => type === node.type.name) && typeof node.attrs.blockId !== 'string') owner = undefined
     if (typeof node.attrs.blockId === 'string') owner = { blockId: node.attrs.blockId, start: absolute + 1 }
     if (owner && node.type.name === 'blockReference') references.push({ blockId: owner.blockId, mode: node.attrs.mode, occurrence: { kind: 'stored', referenceId: node.attrs.referenceId }, target: { kind: 'block', ...node.attrs.target } })
     if (owner && node.type.name === 'noteLink') references.push({ blockId: owner.blockId, mode: 'link', occurrence: { kind: 'stored', referenceId: node.attrs.referenceId }, target: node.attrs.target === null ? { kind: 'unbound', text: node.attrs.text } : { kind: node.attrs.target.blockId ? 'block' : 'page', ...node.attrs.target } })

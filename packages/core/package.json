@@ -14,6 +14,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./note-format": {
+      "types": "./dist/note-format.d.ts",
+      "import": "./dist/note-format.js"
+    },
     "./mote-preferences": {
       "types": "./dist/mote-preferences.d.ts",
       "import": "./dist/mote-preferences.js"

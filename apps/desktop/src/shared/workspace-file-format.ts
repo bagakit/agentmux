@@ -33,7 +33,7 @@ const SOURCE_FORMATS: readonly SourceFormat[] = [
   { extensions: ['tex', 'latex'], preview: 'latex', language: 'latex', mime: 'text/x-tex', confirmation: 'renderer' },
   { extensions: ['typ'], preview: 'typst', language: 'typst', mime: 'text/plain', confirmation: 'renderer' },
   { extensions: ['vl'], preview: 'vega-lite', language: 'json', mime: 'application/json', confirmation: 'renderer' },
-  { extensions: [NOTE_FILE_EXTENSION.slice(1)], preview: 'note', language: 'json', mime: 'application/json', confirmation: 'source' }
+  { extensions: [NOTE_FILE_EXTENSION.slice(1)], preview: 'note', language: 'markdown', mime: 'text/markdown', confirmation: 'source' }
 ]
 type WorkspaceFileFormatter = 'prettier' | 'jsonl' | 'delimited'
 const formatterFormats = new Map<string, WorkspaceFileFormatter>([

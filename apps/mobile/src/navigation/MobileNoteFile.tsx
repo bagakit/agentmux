@@ -1,3 +1,4 @@
+import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { FileReadParams, FileReadResult, FileReadResource } from '@agentmux/core/files'
@@ -77,7 +78,7 @@ function NoteFile({ rpc, params, read, visible = true, target }: MobileNoteFileP
       const listing = await rpc('file.list', { ...fileScope(params), path: directory })
       if (token !== intent.current) return
       if (listing.result.status === 'unknown') throw new Error(listing.result.message)
-      setCandidates(listing.result.files.filter(path => path.endsWith('.note.json')).map(path => ({ path: directory === '.' ? path : directory + '/' + path, params })))
+      setCandidates(listing.result.files.filter(path => path.endsWith(NOTE_FILE_EXTENSION)).map(path => ({ path: directory === '.' ? path : directory + '/' + path, params })))
       setIssue(`${indexIssue}请为此原块引用选择当前范围中的准确 Note 文件。${!listing.result.complete ? '原文件列表尚不完整，可刷新重试。' : ''}`)
     } catch (error) { if (token === intent.current) setIssue(`引用读取未确认：${error instanceof Error ? error.message : String(error)}。原引用保留，可重试。`) }
   }

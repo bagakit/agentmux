@@ -1,3 +1,4 @@
+import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -19,7 +20,7 @@ type Region = AgentMuxSpaceCatalog['regions'][number]
 type Target = { key: string; zoneId: string | null; tabId: string; region: Region; tabName: string; zoneName: string; zone?: AgentMuxSpaceCatalog['zones'][number] }
 const EMPTY_CONTEXT: MobileSurveyContext = { zoneId: null, tabId: null, regionId: null }
 const targetKey = (zoneId: string | null, region: Region) => JSON.stringify([zoneId, region.tabId, region.regionId, region.kind, region.browserId ?? null, region.file ?? null])
-const kindName = (region: Region) => ({ agent: 'Agent', terminal: '终端', browser: '网页', file: region.file?.path.endsWith('.note.json') ? '笔记' : '文件', git: 'Git 历史', 'git-diff': '变更', launcher: '启动入口' }[region.kind])
+const kindName = (region: Region) => ({ agent: 'Agent', terminal: '终端', browser: '网页', file: region.file?.path.endsWith(NOTE_FILE_EXTENSION) ? '笔记' : '文件', git: 'Git 历史', 'git-diff': '变更', launcher: '启动入口' }[region.kind])
 
 /** Reads original collected membership; never manufactures it from Zones or current focus. */
 export function MobileSurveySurface({ client, connected, visible = true, ...actions }: MobileSurveyProps) {

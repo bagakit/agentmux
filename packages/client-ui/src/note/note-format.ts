@@ -1,3 +1,3 @@
-/** File routing needs only the format identity, without loading the rich document parser. */
+/** The original in-memory rich document schema is independent of its persisted format. */
 export const NOTE_SCHEMA = 'agentmux.note.v1'
-export const NOTE_FILE_EXTENSION = '.note.json'
+export { NOTE_MARKDOWN_SCHEMA, NOTE_FILE_EXTENSION, readNoteMarkdownHeader } from '@agentmux/core/note-format'

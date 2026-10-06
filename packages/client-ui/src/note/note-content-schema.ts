@@ -1,4 +1,4 @@
-import { Extension, Node, getSchema } from '@tiptap/core'
+import { Extension, Mark, Node, getSchema } from '@tiptap/core'
 import UniqueID from '@tiptap/extension-unique-id'
 import StarterKit from '@tiptap/starter-kit'
 import { noteProvenanceAttributes } from './note-provenance.js'
@@ -45,16 +45,23 @@ export const NoteInlineLinkNode = Node.create({
   renderText({ node }) { return `[[${String(node.attrs.text)}]]` }
 })
 
+/** CommonMark escaping is semantic: a literal wiki label must not become a query. */
+const NoteWikiLiteral = Mark.create({ name: 'noteWikiLiteral', inclusive: false,
+  parseHTML() { return [{ tag: 'span[data-note-wiki-literal]' }] },
+  renderHTML() { return ['span', { 'data-note-wiki-literal': '' }, 0] }
+})
+
 /** The parser and rich editor share the installed TipTap node/mark schema. */
 export function noteContentExtensions() {
-  return [StarterKit.configure({ trailingNode: false }), BlockIdentity, NoteBlockReferenceNode, NoteInlineLinkNode]
+  return [StarterKit.configure({ trailingNode: false }), BlockIdentity, NoteBlockReferenceNode, NoteInlineLinkNode, NoteWikiLiteral]
 }
 export const noteContentSchema: ReturnType<typeof getSchema> = getSchema(noteContentExtensions())
 
-/** The original editor allocators: only missing/new block and reference identities are assigned. */
+/** Reading never allocates identities. New reference occurrences are authored by editor transactions;
+ * missing semantic block IDs are assigned only by the original file writer. */
 export function noteIdentityExtensions() {
   return [
-    UniqueID.extend({ name: 'noteBlockUniqueId' }).configure({ attributeName: 'blockId', types: [...NOTE_BLOCK_TYPES] }),
-    UniqueID.extend({ name: 'noteReferenceUniqueId' }).configure({ attributeName: 'referenceId', types: [NoteBlockReferenceNode.name, NoteInlineLinkNode.name] })
+    UniqueID.extend({ name: 'noteBlockUniqueId', onCreate() {} }).configure({ attributeName: 'blockId', types: [...NOTE_BLOCK_TYPES], generateID: () => null, filterTransaction: transaction => !transaction.getMeta('preventUpdate') && !transaction.getMeta('noteSelectionRestore') }),
+    UniqueID.extend({ name: 'noteReferenceUniqueId', onCreate() {} }).configure({ attributeName: 'referenceId', types: [NoteBlockReferenceNode.name, NoteInlineLinkNode.name], generateID: () => crypto.randomUUID(), filterTransaction: transaction => !transaction.getMeta('preventUpdate') && !transaction.getMeta('noteSelectionRestore') })
   ]
 }
