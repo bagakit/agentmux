@@ -1,7 +1,10 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AgentMuxClient } from '../src/client.js'
-import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
+import type { AgentMuxClient } from '../src/client.js'
+import { metadataTestRuntime } from './helpers/metadata-test-runtime.js'
+const Client = metadataTestRuntime.AgentMuxClient
+const { AgentMuxMemoryAgentSessionStore } = metadataTestRuntime
 import type {
   CtxmuxAdapterObservationEvent,
   CtxmuxAdapterOutputObservation,
@@ -88,8 +91,8 @@ function storedSession(
     hookToken: 'token-resize',
 
     terminalPromptReadiness: readiness,
-    createdAt: 100,
-    updatedAt: 100
+    createdAt: reshapeFixtureEpoch(0, 0, 100),
+    updatedAt: reshapeFixtureEpoch(0, 0, 100)
   }
 }
 
@@ -113,7 +116,7 @@ function runProjection(cols: number, rows: number, latestOutputBytes = 0): Ctxmu
 
 /**
  * 真 client + 真 AgentScreenEvidenceStore + 真 registry + 真 AgentPromptSubmissionCoordinator；
- * 只把 kernel 的三个协作方法换成 fake（observeOutput 给新 Run 的空屏 checkpoint、resize 原样回报、isConnected 为真）。
+ * 只把 kernel 的协作方法换成 fake（observeOutput 给新 Run 的空屏 checkpoint、raw replay 保原有序字节、resize 原样回报、isConnected 为真）。
  * 屏幕证据的失效与重建逻辑是被测对象，绝不 stub。
  *
  * 空屏 checkpoint 不算原输出或 composer 帧，readiness 保持 pending，直到原字节里真的出现空 composer。
@@ -133,7 +136,7 @@ async function resizeClient(
 }> {
   const store = new AgentMuxMemoryAgentSessionStore()
   await store.compareAndSwap(null, storedSession(readiness))
-  const client = new AgentMuxClient({ store })
+  const client = new Client({ store })
   clients.push(client)
   const state = client as unknown as Internals
   await state.registry.load('local')
@@ -142,11 +145,17 @@ async function resizeClient(
   let size = { cols: 80, rows: 24 }
   let resizeRevision = 0
   let latestOutputBytes = 0
+  const rawReplay: Array<{ startByte: number; endByte: number; data: string; dataBytes: Uint8Array }> = []
   let liveListener: ((event: CtxmuxAdapterObservationEvent) => void) | null = null
   // 在 `kernel.resize` 的 await 里跑一次真相变更，模拟 resize 与别的生命周期操作撞车的交错。
   // 换 Run（resume）与退场（stop/删除）各是一种，注入点相同，所以共用这一个钩子。
   let duringResize: (() => Promise<void>) | null = null
   state.kernel.isConnected = () => true
+  state.kernel.replay = async (_runId: string, afterByte: number, view: string) => {
+    if (_runId !== RUN_ID || afterByte !== 0 || view !== 'raw') throw new Error('This fixture only owns the original raw prefix from byte zero.')
+    return { run: runProjection(size.cols, size.rows, latestOutputBytes), replay: [...rawReplay], gap: null,
+      terminal: { type: 'not-requested' }, resizeRevision }
+  }
   state.kernel.observeOutput = async (
     _runId: string,
     _afterByte: number,
@@ -197,7 +206,10 @@ async function resizeClient(
       if (event.type === 'resized') {
         size = { cols: event.cols, rows: event.rows }
         resizeRevision = event.resizeRevision
-      } else if (event.type === 'data') latestOutputBytes = event.endByte
+      } else if (event.type === 'data') {
+        latestOutputBytes = event.endByte
+        rawReplay.push({ startByte: event.startByte, endByte: event.endByte, data: event.data, dataBytes: event.dataBytes })
+      }
       liveListener?.(event)
     },
     swapRunDuringResize: (nextRunId: string) => {

@@ -167,12 +167,26 @@ it('keeps original metadata and Native-only I/O while full Provider observation 
   const events: AgentMuxClientEvent[] = []; client.onEvent(event => events.push(event))
   expect(await client.readAgentSessions()).toMatchObject([{ agentSessionId: original.agentSessionId, nativeHandle: original.nativeHandle, run: original.run }])
   expect(client.runtimeIdentity()).toEqual(originalNative)
-  // Existing P1 boundary, preserved honestly: before registry.load, the exact SID
-  // raw route cannot resolve its active binding. This task does not move that owner.
-  await expect(client.writeAgent({ agentSessionId: original.agentSessionId, expectedRun: original.run, source: 'user', data: 'must-not-guess-binding' }))
-    .rejects.toMatchObject({ code: 'UNKNOWN_AGENT_SESSION' })
-  await expect(client.reattachAgent(original.agentSessionId, 0, 'raw')).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_SESSION' })
-  expect((await client.readRunReplay(original.run, 0, 'raw')).run).toMatchObject({ pid: before.run.pid, state: 'running', acceptedInputBytes: before.run.acceptedInputBytes })
+  // The exact saved binding is sufficient for raw Native capabilities even before
+  // the unrelated global lifecycle observer can load the Session catalog.
+  expect((await client.reattachAgent(original.agentSessionId, 0, 'raw')).session).toMatchObject({
+    agentSessionId: original.agentSessionId, nativeHandle: original.nativeHandle, run: original.run
+  })
+  await expect(client.writeAgent({ agentSessionId: original.agentSessionId, expectedRun: { runId: 'another-original-run' }, source: 'user', data: 'must-not-inject' }))
+    .rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+  await expect(client.reattachAgent('genuinely-absent-session', 0, 'raw')).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_SESSION' })
+  await expect(client.writeAgent({ agentSessionId: original.agentSessionId, expectedRun: original.run, source: 'forged-source' as 'user', data: 'must-not-inject' }))
+    .rejects.toMatchObject({ code: 'INVALID_AGENT_INPUT_SOURCE' })
+  const earlyText = '🧊'
+  const earlyAck = await client.writeAgent({ agentSessionId: original.agentSessionId, expectedRun: original.run, source: 'user', data: earlyText })
+  expect(earlyAck).toMatchObject({ runId: original.run.runId, acceptedThroughByte: before.run.acceptedInputBytes! + Buffer.byteLength(earlyText) })
+  await until(async () => Buffer.concat((await client.readRunReplay(original.run, 0, 'raw')).replay.map(chunk => Buffer.from(chunk.dataBytes))).toString(), value => value.includes(earlyText), 'actual original raw echo before lifecycle observation')
+  let outputInitial: unknown
+  const publicOutput = await rpc.subscribe('agent.output', { agentSessionId: original.agentSessionId, afterByte: 0, follow: false }, { onInitial: value => { outputInitial = value }, onEvent: () => {} })
+  expect(outputInitial).toMatchObject({ session: { agentSessionId: original.agentSessionId, nativeHandle: original.nativeHandle, run: original.run },
+    run: { runId: original.run.runId, pid: before.run.pid, state: 'running' } })
+  await publicOutput.dispose()
+  expect((await client.readRunReplay(original.run, 0, 'raw')).run).toMatchObject({ pid: before.run.pid, state: 'running', acceptedInputBytes: earlyAck.acceptedThroughByte })
   releaseLifecycle(); await observing
   const snapshot = await rpc.call('runtime.bootstrap', { consumerId: 'held-provider-metadata', fence: { runtimeId: owner.ownerIdentity().runtimeId, ownerInstanceId: owner.ownerIdentity().ownerInstanceId } })
   expect(snapshot.sessions).toMatchObject([{ agentSessionId: original.agentSessionId, nativeHandle: original.nativeHandle, run: original.run }])
@@ -184,7 +198,7 @@ it('keeps original metadata and Native-only I/O while full Provider observation 
     .then(value => ({ value }), error => ({ error }))
   expect(waiting).toHaveProperty('error')
   const exact = await client.readRunReplay(original.run, 0, 'raw')
-  expect(exact.run).toMatchObject({ runId: original.run.runId, pid: before.run.pid, state: 'running', acceptedInputBytes: before.run.acceptedInputBytes })
+  expect(exact.run).toMatchObject({ runId: original.run.runId, pid: before.run.pid, state: 'running', acceptedInputBytes: earlyAck.acceptedThroughByte })
   expect((await client.reattachAgent(original.agentSessionId, 0, 'raw')).session).toMatchObject({ agentSessionId: original.agentSessionId, nativeHandle: original.nativeHandle, run: original.run })
   const text = '🧪'
   const ack = await client.writeAgent({ agentSessionId: original.agentSessionId, expectedRun: original.run, source: 'user', data: text })

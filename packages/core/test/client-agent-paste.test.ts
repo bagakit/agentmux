@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
@@ -32,8 +33,9 @@ function deferred() {
 
 async function fixture(providerId: 'codex' | 'claude' | 'generic' = 'codex', pending = false) {
   const template = new AgentProviderRegistry().get('codex')
+  const { providerFork: _nativeFork, promptExecution: _nativePromptExecution, ...genericCapabilities } = template.catalog.capabilities
   const generic = defineAgentProvider({
-    catalog: { ...template.catalog, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
+    catalog: { ...template.catalog, capabilities: genericCapabilities, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
     hook: template.hook,
     buildArgs: (_prompt, args) => [...args]
   })
@@ -41,11 +43,11 @@ async function fixture(providerId: 'codex' | 'claude' | 'generic' = 'codex', pen
   const stored: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'paste-agent', providerId, executorId: providerId,
     hostId: 'local', workspacePath: fixturePath("synthetic"), run: { runId: 'paste-run' }, retiredRuns: [],
-    hookBindingId: 'paste-binding', hookToken: 'paste-token', createdAt: 1, updatedAt: 2,
+    hookBindingId: 'paste-binding', hookToken: 'paste-token', createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 2),
     ...(pending ? { pendingInteraction: { request: {
       kind: 'permission' as const, id: 'permission', agentSessionId: 'paste-agent', title: 'Allow?',
       options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' as const }],
-      evidence: { source: 'native-hook' as const, observedAt: 2, run: { runId: 'paste-run' }, hookReceiptId: 'permission' }
+      evidence: { source: 'native-hook' as const, observedAt: reshapeFixtureEpoch(0, 0, 2), run: { runId: 'paste-run' }, hookReceiptId: 'permission' }
     } } } : {})
   }
   await store.compareAndSwap(null, stored)
