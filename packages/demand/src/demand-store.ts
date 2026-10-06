@@ -394,7 +394,9 @@ export class DemandStore {
         if (owner!.id !== id || !sameDemandDispatchIntent(original, intent)) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Start operation belongs to another Goal, Session, Run or input. Inspect it without resending.')
         return { unchanged: demand }
       }
-      demand.dispatches = [...(demand.dispatches ?? []), { ...intent, stage: 'prepared', preparedAt: Date.now() }]
+      demand.dispatches = [...(demand.dispatches ?? []), { ...intent, stage: 'prepared', preparedAt: Date.now(),
+        ...(intent.execution === 'finite' ? { resultBasis: { alignmentRevision: demand.alignment?.revision ?? null,
+          criteria: clone(demand.alignment?.criteria ?? []), groundingSubmissionId: demand.grounding?.submissionId ?? null } } : {}) }]
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     }, undefined, intent.operationId)
@@ -427,6 +429,43 @@ export class DemandStore {
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     }, undefined, operationId)
+  }
+
+  /** One notice for the original finite Start; Core retains its native input fact. */
+  async prepareDispatchAttention(id: string, operationId: string, input: DemandDelegationAttentionInput): Promise<DemandReceipt> {
+    const attention = parseDemandDelegationAttentionInput(input)
+    return this.mutate('dispatch.attention-prepare', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath), original = demand.dispatches?.find(item => item.operationId === operationId)
+      if (!original) this.rejectDelegation('The original Goal Start is unavailable. Preserve its identity and inspect that operation.')
+      const prior = snapshot.demands.flatMap(goal => [
+        ...(goal.dispatches ?? []).map(item => ({ kind: 'start', goalId: goal.id, operationId: item.operationId, attention: item.attention })),
+        ...(goal.delegations ?? []).map(item => ({ kind: 'delegation', goalId: goal.id, operationId: item.operationId, attention: item.attention }))
+      ]).filter(item => item.attention)
+        .find(item => item.attention!.operationId === attention.operationId || item.attention!.intentId === attention.intentId)
+      if (prior && (prior.kind !== 'start' || prior.goalId !== id || prior.operationId !== operationId)) this.rejectDelegation('The original notice belongs to another business source.')
+      if (original.attention) {
+        if (!sameDemandDelegationAttention(original.attention, attention)) this.rejectDelegation('The original Start notice is frozen. Inspect it without moving its target or changing its text.')
+        return { unchanged: demand }
+      }
+      if (original.execution !== 'finite' || original.hostId !== attention.hostId || demand.supervisorSessionId !== attention.supervisorAgentSessionId ||
+        demand.status === 'done' || demand.status === 'cancelled') this.rejectDelegation('A Start notice needs its original Host and exact current Supervisor for an open Goal.')
+      original.attention = { ...attention, preparedAt: Date.now() }
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      validateNewDemand(demand, this.storePath)
+      return demand
+    }, undefined, attention.operationId)
+  }
+
+  /** Persist the single attempt before any Native claim; uncertainty never resends it. */
+  async markDispatchAttentionAttempt(id: string, operationId: string, attentionOperationId: string): Promise<DemandReceipt> {
+    return this.mutate('dispatch.attention-attempt', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath), original = demand.dispatches?.find(item => item.operationId === operationId)
+      if (!original?.attention || original.attention.operationId !== attentionOperationId) this.rejectDelegation('The notice attempt must name the exact original Start input.')
+      if (original.attention.attemptedAt !== undefined) return { unchanged: demand }
+      original.attention.attemptedAt = Date.now()
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      return demand
+    }, undefined, attentionOperationId)
   }
 
   /** The host admits the caller and original Session/Run identities before preparing. */
@@ -561,9 +600,11 @@ export class DemandStore {
     const attention = parseDemandDelegationAttentionInput(input)
     return this.mutate('delegation.attention-prepare', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath), entry = this.findDelegation(demand, delegationOperationId)
-      const previous = snapshot.demands.flatMap(item => (item.delegations ?? []).map(delegation => ({ goalId: item.id, delegation })))
-        .find(item => item.delegation.attention?.operationId === attention.operationId || item.delegation.attention?.intentId === attention.intentId)
-      if (previous && (previous.goalId !== id || previous.delegation.operationId !== delegationOperationId)) this.rejectDelegation('The original attention input belongs to another delegation. Inspect that exact reference.')
+      const previous = snapshot.demands.flatMap(goal => [
+        ...(goal.delegations ?? []).map(item => ({ kind: 'delegation', goalId: goal.id, operationId: item.operationId, attention: item.attention })),
+        ...(goal.dispatches ?? []).map(item => ({ kind: 'start', goalId: goal.id, operationId: item.operationId, attention: item.attention }))
+      ]).find(item => item.attention?.operationId === attention.operationId || item.attention?.intentId === attention.intentId)
+      if (previous && (previous.kind !== 'delegation' || previous.goalId !== id || previous.operationId !== delegationOperationId)) this.rejectDelegation('The original attention input belongs to another delegation. Inspect that exact reference.')
       if (entry.attention) {
         if (!sameDemandDelegationAttention(entry.attention, attention)) this.rejectDelegation('The original attention input is frozen. It cannot silently move to another Supervisor, Run or note.')
         return { unchanged: demand }
