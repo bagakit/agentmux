@@ -1,5 +1,5 @@
 import type { ComposerInsertionHandle, ComposerPasteImage } from '../lib/composer-insertion.js'
-import type { ReactNode, Ref } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 import { composerKeywordAtCaret } from '../lib/composer-keywords.js'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
@@ -42,10 +42,9 @@ export type AgentComposerProps = {
   primaryAction?: 'send' | 'stop'
   feedback?: ReactNode
   postureTool?: ReactNode
-  // Shell-style history recall on the up/down arrows. The shell owns the keys; the semantics (line
-  // boundary + the recall reducer) live in the adapter so they stay unit-testable — this component cannot
-  // run its own handlers under this repo's node-env vitest. Returns the value to place in the box, or null
-  // to let the arrow fall through to normal caret movement. direction: 'older' = ArrowUp, 'newer' = ArrowDown.
+  // The adapter atomically updates its draft and navigation. Non-null means handled; the shell
+  // must not call the ordinary edit callback again, which would exit that navigation.
+  historyNavigation?: 'browsing' | 'restored'
   onHistoryRecall?: (direction: 'older' | 'newer', draft: string, caret: number) => string | null
   onChange(value: string): void
   onSubmit?: () => void
@@ -85,8 +84,12 @@ export function AgentComposer({
   onPasteImage,
   insertionRef,
   onHistoryRecall,
+  historyNavigation,
   promptKeywords = []
 }: AgentComposerProps) {
+  const composerRef = useRef<HTMLDivElement>(null)
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<string | null>(null)
+  useEffect(() => { setDismissedSuggestions(null) }, [value])
   const canSubmit = !disabled && Boolean(onSubmit) && Boolean(value.trim())
 
   const explicitTrigger = value.match(/(?:^|\s)([\/$@][^\s]*)$/)?.[1] ?? ''
@@ -106,7 +109,7 @@ export function AgentComposer({
   const trigger = explicitTrigger || (keywordSuggestions.length ? bareWord : '')
   const suggestionKind = trigger.startsWith('/') ? 'command' : trigger.startsWith('$') ? 'skill' : trigger.startsWith('@') ? 'reference' : trigger ? 'keyword' : null
   const source = suggestionKind === 'command' ? commands : suggestionKind === 'skill' ? skills : suggestionKind === 'reference' ? references : []
-  const suggestions = suggestionKind === 'keyword'
+  const suggestions = dismissedSuggestions === value ? [] : suggestionKind === 'keyword'
     ? keywordSuggestions
     : source.filter((item) => item.text.startsWith(trigger) && item.text !== trigger)
   const keywordTexts = promptKeywords.map((item) => item.text)
@@ -120,18 +123,51 @@ export function AgentComposer({
     grouped.set(key, [...(grouped.get(key) ?? []), item])
   }
   const suggestionGroups = [...grouped]
+  function focusEditor(): void {
+    composerRef.current?.querySelector<HTMLElement>('[role="textbox"]')?.focus()
+  }
+  function suggestionKeyDown(event: KeyboardEvent | ReactKeyboardEvent): boolean {
+    if (!suggestions.length || isImeOwnedKeyboardEvent(event) || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return false
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      setDismissedSuggestions(value)
+      focusEditor()
+      return true
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Enter') return false
+    const buttons = [...(composerRef.current?.querySelectorAll<HTMLButtonElement>('.composer__suggestions button') ?? [])]
+    if (!buttons.length) return false
+    const current = buttons.indexOf(document.activeElement as HTMLButtonElement)
+    if (event.key === 'Enter') {
+      if (current < 0) return false
+      event.preventDefault()
+      buttons[current]!.click()
+      return true
+    }
+    event.preventDefault()
+    const next = current < 0 ? (event.key === 'ArrowDown' ? 0 : buttons.length - 1)
+      : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length
+    buttons[next]!.focus()
+    return true
+  }
+  function chooseSuggestion(command: ComposerSuggestion): void {
+    const replacement = onSelectSuggestion?.(command.text, suggestionKind!) ?? command.text
+    onChange(`${value.slice(0, value.length - trigger.length)}${replacement} `)
+    focusEditor()
+  }
   return (
     <>
     {aboveInput}
-    <div className="composer" data-agent-composer="true">
+    <div ref={composerRef} className="composer" data-agent-composer="true">
       {/* The maintained editor owns composition, selection and undo; the host owns the draft. */}
       <InlineComposer
         aria-label="Message Agent"
         {...(insertionRef ? { insertionRef } : {})}
         disabled={disabled}
         value={value}
+        {...(historyNavigation ? { historyNavigation } : {})}
         onValueChange={onChange}
-        onKeyDown={(event, caret) => {
+        onKeyDown={(event, caret, selectionEmpty) => {
           // No !isWorking guard: a running Agent can be steered. Enter submits whenever the surface allows
           // a submit and there is text; delivery (and codex's mid-turn refusal) is Core's call, not the
           // renderer's. Stop stays a click on the button, so mid-turn Enter never risks an accidental stop.
@@ -140,30 +176,12 @@ export function AgentComposer({
           // the Agent conversation (#609). 判据必须走 SSOT 的四路谓词：此前这里手抄了两路
           // (`nativeEvent?.isComposing || keyCode === 229`)，漏掉顶层 `isComposing` 与
           // `nativeEvent.keyCode`。只标记那两路的输入法照旧会把半转换草稿提交上去。
-          if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && suggestions.length && !isImeOwnedKeyboardEvent(event)) {
-            event.preventDefault()
-            const buttons = [...((event.target as HTMLElement).closest('.composer')?.querySelectorAll<HTMLButtonElement>('.composer__suggestions button') ?? [])]
-            const current = document.activeElement instanceof HTMLButtonElement ? buttons.indexOf(document.activeElement) : -1
-            const next = event.key === 'ArrowDown' ? (current + 1) % buttons.length : (current - 1 + buttons.length) % buttons.length
-            buttons[next]?.focus()
-            return
-          }
-          if (event.key === 'Escape' && suggestions.length) {
-            event.preventDefault();
-            (event.target as HTMLElement).focus()
-            return
-          }
-          // Shell-style history recall. Suggestions win the arrows (their block above returns first), so
-          // this only runs with no open list. The adapter decides everything testable — line boundary and
-          // the recall reducer — and returns the value to place, or null to let the arrow move the caret
-          // normally (the multiline resolution: bare ArrowUp only recalls when the caret is on the first
-          // line, ArrowDown only on the last line; otherwise the caret just moves). #609 IME guard applies.
-          if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !suggestions.length && onHistoryRecall && !isImeOwnedKeyboardEvent(event)) {
-            const recalled = onHistoryRecall(event.key === 'ArrowUp' ? 'older' : 'newer', value, caret)
-            if (recalled !== null) {
-              event.preventDefault()
-              onChange(recalled)
-            }
+          // Candidates retain their own scope after moving focus out of the editor.
+          if (selectionEmpty && suggestionKeyDown(event)) return
+          const plainArrow = !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey
+          if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && plainArrow && selectionEmpty &&
+            !suggestions.length && onHistoryRecall && !isImeOwnedKeyboardEvent(event)) {
+            if (onHistoryRecall(event.key === 'ArrowUp' ? 'older' : 'newer', value, caret) !== null) event.preventDefault()
             return
           }
           // Tab 一键替换识别词。**只在光标正停在某个识别词末尾时**接管，否则一律放行——Tab 是焦点
@@ -242,14 +260,15 @@ export function AgentComposer({
         </div>
       </div>
       {feedback}
-      {suggestions.length && !disabled ? <div className="composer__suggestions" role="listbox" aria-label={`Agent ${suggestionKind ?? 'suggestions'}`}>
+      {suggestions.length && !disabled ? <div className="composer__suggestions" role="listbox" aria-label={`Agent ${suggestionKind ?? 'suggestions'}`}
+        onKeyDown={(event) => { suggestionKeyDown(event) }}>
         {/* 按 group 分段并给每段一个标题。分组只在**确实有两个以上来源**时出现：单一来源时加一个
             标题等于给一份列表起个多余的名字。段序由候选自身的顺序决定（先出现的 group 先排），
             不另外写一张 group 名字的优先级表——那张表会和上游的拼装顺序漂开。
             `role="group"` + `aria-label` 让分段对读屏是真的分段，而不只是视觉上多了一行字。 */}
         {suggestionGroups.map(([group, items]) => {
           const options = items.map((command) => <button type="button" role="option" aria-selected="false" key={command.text}
-            onClick={() => { const replacement = onSelectSuggestion?.(command.text, suggestionKind!) ?? command.text; onChange(`${value.slice(0, value.length - trigger.length)}${replacement} `) }}>{command.text}<small>{command.description}</small></button>)
+            onClick={() => chooseSuggestion(command)}>{command.text}<small>{command.description}</small></button>)
           if (!group || suggestionGroups.length < 2) return options
           return <div className="composer__suggestion-group" role="group" aria-label={group} key={group}>
             <h4>{group}</h4>{options}

@@ -1,10 +1,11 @@
+import { closeHistory } from '@tiptap/pm/history'
 import { selectionToInsertionEnd, type Editor, type JSONContent } from '@tiptap/core'
 
 export type ComposerInsert = (
   resolve: () => string | null | Promise<string | null>,
   options?: { separate?: boolean }
 ) => Promise<void>
-export type ComposerInsertionHandle = { insert: ComposerInsert }
+export type ComposerInsertionHandle = { insert: ComposerInsert; replace(value: string): void }
 export type ComposerPasteImage = (file: File, insert: ComposerInsert) => void
 
 /** An open document slice joins its edge paragraphs to the surrounding text, like a native paste. */
@@ -16,6 +17,17 @@ export function replaceComposerRange(editor: Editor, content: JSONContent, range
   const transaction = editor.state.tr.replaceRange(range.from, range.to, slice)
   if (followInsertion) selectionToInsertionEnd(transaction, transaction.steps.length - 1, -1)
   editor.view.dispatch(transaction.scrollIntoView())
+}
+
+/** Whole-draft history selection is a synchronous, single undoable edit in the same editor. */
+export function replaceComposerDraft(editor: Editor, content: JSONContent): void {
+  const parsed = editor.schema.nodeFromJSON(content)
+  const transaction = closeHistory(editor.state.tr).replaceWith(0, editor.state.doc.content.size, parsed.content)
+  selectionToInsertionEnd(transaction, transaction.steps.length - 1, -1)
+  editor.view.dispatch(transaction.scrollIntoView())
+  // A subsequent typed edit must not be grouped into this replacement either.
+  editor.view.dispatch(closeHistory(editor.state.tr))
+  editor.commands.focus()
 }
 
 /** Keep an async attachment anchored in the maintained editor's transaction history, not a draft copy. */

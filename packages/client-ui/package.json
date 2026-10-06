@@ -74,6 +74,7 @@
     "@agentmux/core": "workspace:*",
     "@radix-ui/react-dialog": "^1.1.23",
     "@tiptap/core": "^3.31.3",
+    "@tiptap/pm": "3.31.3",
     "@tiptap/react": "^3.31.3",
     "@tiptap/starter-kit": "^3.31.3",
     "lucide-react": "^0.468.0",
