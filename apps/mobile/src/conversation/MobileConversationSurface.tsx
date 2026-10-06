@@ -70,6 +70,21 @@ function originalPromptRefused(session: AgentMuxAgentSession | null | undefined,
   const fact = agentPromptNotApplied(session)
   return fact?.submissionId === attempt.operationId && fact.run.runId === attempt.runId
 }
+function retainedPromptKey(sessionId: string | null, operationId: string): string {
+  return JSON.stringify(['retained-prompt', sessionId, operationId])
+}
+/** These keys route existing device intents; they grant no Core input authority. */
+function promptAttemptsForSession(attempts: ReadonlyMap<string, PromptAttempt>, sessionId: string | null) {
+  const active = JSON.stringify(['draft', sessionId])
+  return [...attempts].filter(([key]) => {
+    if (key === active) return true
+    try {
+      const value: unknown = JSON.parse(key)
+      return Array.isArray(value) && value.length === 3 &&
+        (value[0] === 'retained-prompt' || value[0] === 'refused-prompt') && value[1] === sessionId
+    } catch { return false }
+  })
+}
 export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink'> & {
   client: AgentMuxHostedClient | null
@@ -132,18 +147,19 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     if (mounted.current) redraw(value => value + 1)
   }
   useEffect(() => {
-    const pending = attempts.current.get(draftKey)
-    if (!pending || pending.phase !== 'unknown') return
-    if (originalPromptRefused(reading.session, agentSessionId, pending, client?.runtimeOwnerIdentity?.()?.runtimeId)) {
-      pending.phase = 'rejected'
-      pending.message = 'Core 已确认原输入未应用；草稿保留，可由你重新发送。'
-      local.save()
-      redraw(value => value + 1)
-      return
+    for (const [key, pending] of promptAttemptsForSession(attempts.current, agentSessionId)) {
+      if (pending.phase !== 'unknown') continue
+      if (originalPromptRefused(reading.session, agentSessionId, pending, client?.runtimeOwnerIdentity?.()?.runtimeId)) {
+        pending.phase = 'rejected'
+        pending.message = 'Core 已确认原输入未应用；草稿保留，可由你重新发送。'
+        local.save()
+        redraw(value => value + 1)
+        continue
+      }
+      const receipt = reading.timeline?.items.find(item => item.agentSessionId === agentSessionId
+        && item.id === `prompt:${pending.operationId}` && item.kind === 'user_message' && item.status === 'complete')
+      if (receipt) confirmPrompt(key, pending)
     }
-    const receipt = reading.timeline?.items.find(item => item.agentSessionId === agentSessionId
-      && item.id === `prompt:${pending.operationId}` && item.kind === 'user_message' && item.status === 'complete')
-    if (receipt) confirmPrompt(draftKey, pending)
   }, [reading.timeline, reading.session, agentSessionId, draftKey, revision])
 
   useEffect(() => {
@@ -174,31 +190,33 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     if (attempts.current.get(key) === original) local.save()
     if (mounted.current) redraw(value => value + 1)
   }
-  async function submit(explicit = true, originalBody?: PromptAttempt): Promise<void> {
-    const existing = attempts.current.get(draftKey)
+  async function submit(explicit = true, originalBody?: PromptAttempt, selectedKey = draftKey): Promise<void> {
+    const existing = attempts.current.get(selectedKey)
     const body = originalBody?.draft ?? draft
     if (existing?.phase === 'sending' || !body.trim() || originalBody && originalBody !== existing) return
     const refused = originalPromptRefused(reading.session, agentSessionId, existing, client?.runtimeOwnerIdentity?.()?.runtimeId)
     if (originalBody && !refused) return
-    if (!refused && existing?.phase === 'unknown' && existing.draft !== body) {
-      const seed = startDeliveryAttempt({ agentSessionId, operationId: null,
-        hostId: reading.session?.hostId ?? null, prompt: expandSemanticReferences(draft) })
-      await retainFailure(existing, seed, Object.assign(new Error(
-        '上一条消息的发送结果尚未核实，当前正文已不同。本次未发送；两份正文均保留，可用“重试原请求”续做原消息。'),
-        { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' }), 'editor-validation', client, draftKey, true)
-      return
-    }
-    if (!refused && (existing?.phase === 'unknown' || existing?.phase === 'rejected' && existing.draft === body)) { await retryOriginalPrompt(); return }
-    const originalClient = client, originalId = agentSessionId, originalKey = draftKey
+    // An identical unresolved input keeps its original identity, even after another
+    // draft became active. A distinct explicit body is a new intent for Core to qualify.
+    const unresolved = !originalBody && promptAttemptsForSession(attempts.current, agentSessionId).find(([, value]) =>
+      value.phase === 'unknown' && expandSemanticReferences(value.draft) === expandSemanticReferences(body))
+    if (unresolved) { await retryOriginalPrompt(unresolved[0]); return }
+    if (!refused && existing?.phase === 'rejected' && existing.draft === body) { await retryOriginalPrompt(selectedKey); return }
+    const originalClient = client, originalId = agentSessionId
     const original: PromptAttempt = { operationId: randomClientRequestId(), runId: reading.session?.run.runId ?? null,
       draft: body, phase: 'sending', message: '正在发送输入…', inputRequested: false,
       originalRuntimeId: originalClient?.runtimeOwnerIdentity?.()?.runtimeId ?? null,
       originalHostId: reading.session?.hostId ?? null, explicit }
     let seed = startDeliveryAttempt({ agentSessionId: originalId, operationId: original.operationId,
       hostId: reading.session?.hostId ?? null, prompt: expandSemanticReferences(body) })
-    if (refused && existing) {
-      existing.phase = 'rejected'
-      attempts.current.set(JSON.stringify(['refused-prompt', originalId, existing.operationId]), existing)
+    const originalKey = originalBody && selectedKey !== draftKey ? retainedPromptKey(originalId, original.operationId) : draftKey
+    if (existing && (refused || existing.phase === 'unknown')) {
+      if (refused) existing.phase = 'rejected'
+      // Preserve the complete old intent in the same CAS-backed owner before replacing
+      // the active draft slot. No save, navigation or retry dispatches this retained record.
+      if (selectedKey === draftKey) attempts.current.set(refused
+        ? JSON.stringify(['refused-prompt', originalId, existing.operationId])
+        : retainedPromptKey(originalId, existing.operationId), existing)
     }
     attempts.current.set(originalKey, original)
     let stage = 'client-validation'
@@ -228,14 +246,14 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     } catch (error) { await retainFailure(original, seed, error, stage, originalClient, originalKey, false) }
   }
 
-  async function retryOriginalPrompt(): Promise<void> {
-    const original = attempts.current.get(draftKey)
+  async function retryOriginalPrompt(selectedKey = draftKey): Promise<void> {
+    const original = attempts.current.get(selectedKey)
     if (!original || original.phase === 'sending' || original.phase === 'confirmed') return
     if (originalPromptRefused(reading.session, agentSessionId, original, client?.runtimeOwnerIdentity?.()?.runtimeId)) {
-      await submit(original.request!.explicit, original)
+      await submit(original.request!.explicit, original, selectedKey)
       return
     }
-    const originalClient = client, originalId = agentSessionId, originalKey = draftKey
+    const originalClient = client, originalId = agentSessionId, originalKey = selectedKey
     let seed = startDeliveryAttempt({ agentSessionId: originalId, operationId: original.operationId,
       hostId: reading.session?.hostId ?? null, condition: original.request?.condition,
       ...(original.request ? { execution: original.request.execution } : {}), prompt: expandSemanticReferences(original.draft) })
@@ -340,6 +358,29 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     onSelectAnnotation: ({ messageId, quote }: Parameters<NonNullable<ConversationMessageProps['onSelectAnnotation']>>[0]) =>
       appendQuote(`引用会话 ${JSON.stringify(agentSessionId)}，消息 ${JSON.stringify(messageId)}：\n${quote.split('\n').map(line => `> ${line}`).join('\n')}`)
   }
+  const retainedAttempts = promptAttemptsForSession(attempts.current, agentSessionId).filter(([key, original]) => key !== draftKey && original.phase !== 'confirmed')
+  const renderPromptAttempt = ([key, original]: [string, PromptAttempt]) => <aside
+          className="mobile-send-status" key={key} data-phase={original.phase} data-retained={key !== draftKey || undefined}
+          data-original-operation={original.operationId} aria-live="polite">
+          <div className="mobile-send-status__summary">
+            <span>{original.phase === 'sending' ? '正在发送…' : key !== draftKey
+              ? original.phase === 'unknown' ? '先前消息结果未确认 · 原记录保留' : '先前消息未发送 · 原记录保留'
+              : original.phase === 'unknown' ? '发送结果未确认 · 草稿已保留' : '尚未发送 · 草稿已保留'}</span>
+            {original.phase !== 'sending' ? <div className="mobile-send-status__actions">
+              <button type="button" onClick={() => { void retryOriginalPrompt(key) }}>{originalPromptRefused(reading.session, agentSessionId, original, client?.runtimeOwnerIdentity?.()?.runtimeId) ? '重新发送原正文' : key === draftKey ? '重试原请求' : '重试这条原请求'}</button>
+              <button type="button" onClick={() => { void reading.refresh() }}>刷新</button>
+            </div> : null}
+          </div>
+          {original.phase !== 'sending' ? <details className="mobile-send-status__diagnosis"><summary>发送详情</summary>
+            <pre>{original.draft}</pre>
+            <button type="button" onClick={() => { void platform.copyText(original.draft, error => setCopyNotice(`原正文未复制：${errorMessage(error)}`))
+              .then(copied => { if (copied) setCopyNotice('已复制原正文。') }) }}>复制原正文</button>
+            <dl><dt>原操作</dt><dd>{original.operationId}</dd><dt>原 Run</dt><dd>{original.runId ?? '尚未确认'}</dd></dl>
+            <p role="alert">{original.message}</p>
+            {original.logId ? <DeliveryLogDetails log={diagnostics.get(original.logId)} logId={original.logId} copyText={text => platform.copyText(text, error => setCopyNotice(errorMessage(error)))} /> : null}
+            {onShowTerminal ? <button type="button" onClick={onShowTerminal}>终端</button> : null}
+          </details> : null}
+        </aside>
   return <ClientUiProvider platform={platform}>
     <section className="mobile-conversation" aria-label="会话" data-agent-surface-mode="activity" data-agent-session-id={agentSessionId ?? ''}>
       {!available || connection.issue ? <p className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前发送暂不可用。' : ''}</p> : null}
@@ -354,7 +395,6 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           void platform.copyText(local.exportBackup(), error => setCopyNotice(`本页备份未复制：${errorMessage(error)}`))
             .then(copied => { if (copied) setCopyNotice('已复制本页保全备份，包含原正文和操作身份。') })
         }}>复制本页保全备份</button> : null}
-        {copyNotice ? <span>{copyNotice}</span> : null}
       </aside> : null}
       {local.conflicts.filter(item => item.key === draftKey).length > 0 && <details className="mobile-conversation__notice"><summary>保全的冲突内容</summary>
         {local.conflicts.filter(item => item.key === draftKey).map((item, index) => {
@@ -457,21 +497,11 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           onChange={setDraft} {...(attempt?.phase !== 'sending' ? { onSubmit: () => void submit(), onQueue: () => void submit(false) } : {})}
           onAttach={onAttach ?? (() => { void attachmentControls.current?.choose() })} {...(readPastedImage ? { readPastedImage } : {})}
           />
-        {attempt && attempt.phase !== 'confirmed' ? <aside className="mobile-send-status" data-phase={attempt.phase} aria-live="polite">
-          <div className="mobile-send-status__summary">
-            <span>{attempt.phase === 'sending' ? '正在发送…' : attempt.phase === 'unknown' ? '发送结果未确认 · 草稿已保留' : '尚未发送 · 草稿已保留'}</span>
-            {attempt.phase !== 'sending' ? <div className="mobile-send-status__actions">
-              <button type="button" onClick={() => { void retryOriginalPrompt() }}>{originalPromptRefused(reading.session, agentSessionId, attempt, client?.runtimeOwnerIdentity?.()?.runtimeId) ? '重新发送原正文' : '重试原请求'}</button>
-              <button type="button" onClick={() => { void reading.refresh() }}>刷新</button>
-            </div> : null}
-          </div>
-          {attempt.phase !== 'sending' ? <details className="mobile-send-status__diagnosis"><summary>发送详情</summary>
-            <dl><dt>原操作</dt><dd>{attempt.operationId}</dd><dt>原 Run</dt><dd>{attempt.runId ?? '尚未确认'}</dd></dl>
-            <p role="alert">{attempt.message}</p>
-            {attempt.logId ? <DeliveryLogDetails log={diagnostics.get(attempt.logId)} logId={attempt.logId} copyText={text => platform.copyText(text, error => setCopyNotice(errorMessage(error)))} /> : null}
-            {onShowTerminal ? <button type="button" onClick={onShowTerminal}>终端</button> : null}
-          </details> : null}
-        </aside> : null}
+        {attempt && attempt.phase !== 'confirmed' ? renderPromptAttempt([draftKey, attempt]) : null}
+        {retainedAttempts.length ? <details className="mobile-retained-prompts"><summary>保留的原消息 ({retainedAttempts.length})</summary>
+          {retainedAttempts.map(renderPromptAttempt)}
+        </details> : null}
+        {copyNotice ? <p role="status">{copyNotice}</p> : null}
       </div>
     </section>
   </ClientUiProvider>

@@ -105,6 +105,10 @@
 .mobile-send-status__diagnosis dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 8px; margin: 0 0 8px; }
 .mobile-send-status__diagnosis dt { color: var(--text-3); }
 .mobile-send-status__diagnosis dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
+.mobile-send-status__diagnosis > pre { max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; user-select: text; }
+.mobile-retained-prompts { margin: 6px; color: var(--text-3); font-size: 11px; }
+.mobile-retained-prompts > summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; }
+.mobile-retained-prompts[open] { max-height: min(36dvh, 280px); overflow: auto; overscroll-behavior: contain; }
 .mobile-send-status summary { display: flex; align-items: center; gap: 8px; color: var(--text-3); }
 /* Attachments stay beside the original message, with one explicit transfer action. */
 .mobile-attachments:empty { display: none; }
