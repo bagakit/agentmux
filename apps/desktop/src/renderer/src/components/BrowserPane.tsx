@@ -1154,7 +1154,7 @@ function BrowserPaneContent({
             <ThemeFileCodeIcon size={14} />
           </button>
         ) : null}
-          <DropdownMenu.Root onOpenChange={setMenuOpen}>
+          <DropdownMenu.Root modal={false} onOpenChange={setMenuOpen}>
             <DropdownMenu.Trigger asChild>
               <button type="button" className={toolbar?.more || regionSplitItems ? undefined : 'browser-toolbar__more--optional'} aria-label="More browser tools" title="More browser tools"><ThemeActionMoreIcon size={14} /></button>
             </DropdownMenu.Trigger>

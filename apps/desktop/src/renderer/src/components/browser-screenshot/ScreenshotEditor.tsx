@@ -96,7 +96,12 @@ export const ScreenshotEditor = forwardRef<ScreenshotEditorHandle, {
     const result = await saveEditableAnnotationFile(api.files, { workspaceId: props.workspaceId, ...attempt })
     // A submitted write may finish after Cancel; it is never retried or claimed rolled back.
     if (result.status === 'unknown' || (result.status === 'written' && operation.current !== token)) uncertain.current.set(path, attempt)
-    if (operation.current !== token) return { status: 'error', message: 'The save reply arrived after closing. Read the original file to check its result.' }
+    if (operation.current !== token) {
+      if (host.current?.isConnected && edits.current === attempt.edit)
+        setStatus(result.status === 'written' ? 'Earlier save confirmed · Check file before saving again' :
+          result.status === 'unknown' ? 'Earlier save unconfirmed · Check file before saving again' : 'Earlier save did not complete · Edits kept')
+      return { status: 'error', message: 'The save reply arrived after closing. Read the original file to check its result.' }
+    }
     if (result.status === 'written') {
       setFile({ path, revision: result.revision })
       setStatus(edits.current === attempt.edit ? 'Original saved' : 'Earlier edits saved · Newer edits unsaved')
