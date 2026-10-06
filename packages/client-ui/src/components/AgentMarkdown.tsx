@@ -16,6 +16,7 @@ import { ConversationImageCollection } from './ConversationImageCollection.js'
 import { markdownImageReferences } from '../lib/conversation-image-references.js'
 import { useVisibleWork } from '../lib/use-visible-work.js'
 import { useHorizontalReading } from '../lib/use-horizontal-reading.js'
+import { markProgrammaticReadingScroll } from '../lib/reading-scroll.js'
 
 export type LinkClickModifiers = { metaKey: boolean; ctrlKey: boolean; altKey?: boolean; clientX: number; clientY: number }
 export type OpenHttpLink = (url: string, event: LinkClickModifiers) => void
@@ -72,6 +73,8 @@ function navigateWithinMarkdown(source: HTMLElement, attribute: 'data-md-anchor'
   const root = source.closest('[data-markdown-root]')
   const target = Array.from(root?.querySelectorAll<HTMLElement>(`[${attribute}]`) ?? []).find(element => element.getAttribute(attribute) === value)
   target?.scrollIntoView?.({ block: 'start' })
+  const viewport = target?.closest<HTMLElement>('[data-workbench-reading-scroll]')
+  if (viewport) markProgrammaticReadingScroll(viewport, 'navigation')
   target?.focus({ preventScroll: true })
 }
 

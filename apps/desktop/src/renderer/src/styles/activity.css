@@ -322,6 +322,7 @@
 .activity-feed__reading-action:hover:not(:disabled) { color: var(--text); background: color-mix(in oklab, var(--text) 5%, transparent); }
 .activity-feed__reading-action:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
 .activity-feed__reading-action:disabled { cursor: default; opacity: .5; }
+.activity-feed__reading-action[aria-busy="true"] { opacity: 1; color: var(--text-2); }
 .activity-feed__reading-status { color: var(--text-2); animation: activity-reading-arrive var(--dur-fast) var(--ease-enter) both; }
 .activity-feed__reading-status > svg { flex: none; color: var(--blue); }
 @keyframes activity-reading-arrive { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }

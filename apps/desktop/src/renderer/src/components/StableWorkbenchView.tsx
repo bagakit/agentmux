@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { WorkbenchPresentationContext, type BrowserControlConfirmation } from '../lib/workbench-presentation'
 import { workbenchRegionProjectionSlotId } from '../lib/workbench-projection'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
+import { markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 
 type ReadingRange = { start: Node; startOffset: number; end: Node; endOffset: number }
 type ReadingScroll = { element: HTMLElement; top: number; left: number }
@@ -96,7 +97,10 @@ class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: bo
             for (const scroll of snapshot.scrolls) if (host.contains(scroll.element) && scroll.element.isConnected) {
               // Repair only a DOM-induced reset. A valid position already
               // committed by this reader, or a browser clamp, remains current.
-              if (scroll.element.scrollTop === 0) scroll.element.scrollTop = scroll.top
+              if (scroll.element.scrollTop === 0) {
+                scroll.element.scrollTop = scroll.top
+                markProgrammaticReadingScroll(scroll.element)
+              }
               if (scroll.element.scrollLeft === 0) scroll.element.scrollLeft = scroll.left
             }
           }
