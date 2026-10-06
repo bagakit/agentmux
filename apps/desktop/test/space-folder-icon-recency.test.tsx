@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath, fixtureTime: _hygiene_fixtureTime } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, type ReactNode } from 'react'
@@ -41,14 +42,14 @@ let visibility: DocumentVisibilityState, root: Root | undefined, container: HTML
 
 function agent(id: string, observedAt = NOW - 30 * 60_000, source: Extract<SessionSnapshot, { kind: 'agent' }>['status']['source'] = 'native-hook', path = _hygiene_fixturePath("repo"), hostId = 'local'): Extract<SessionSnapshot, { kind: 'agent' }> {
   return { id, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId, workspacePath: path,
-    label: id, createdAt: 1, updatedAt: NOW, agentSessionUpdatedAt: NOW, processState: 'running', latestOutputBytes: 0,
+    label: id, createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: NOW, agentSessionUpdatedAt: NOW, processState: 'running', latestOutputBytes: 0,
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
-    status: { state: 'done', source, observedAt }, semanticStatus: { state: 'done', source, observedAt, stateEnteredAt: 1 },
+    status: { state: 'done', source, observedAt }, semanticStatus: { state: 'done', source, observedAt, stateEnteredAt: _reshape_fixtureEpoch(0, 0, 1) },
     control: { kind: 'agent', hostId, agentSessionId: id, run: { runId: `run-${id}` } } }
 }
 function terminal(): SessionSnapshot {
   return { id: 'terminal', kind: 'terminal', providerId: null, hostId: 'local', workspacePath: _hygiene_fixturePath("repo"), label: 'Terminal',
-    createdAt: 1, updatedAt: NOW, processState: 'running', latestOutputBytes: 100,
+    createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: NOW, processState: 'running', latestOutputBytes: 100,
     status: { state: 'running', source: 'run-process', observedAt: NOW },
     control: { kind: 'terminal', hostId: 'local', runId: 'terminal-run', run: { runId: 'terminal-run' } } }
 }
@@ -174,7 +175,7 @@ it('requires the retained semantic fact, and never borrows updatedAt, display ru
 })
 
 it('filters each bad time before taking the max, retaining an honest old observation among newer invalid ones', async () => {
-  await mount([agent('nan', Number.NaN), agent('old', NOW - 20 * HOUR), agent('future', NOW + 1000), agent('infinite', Number.POSITIVE_INFINITY), agent('zero', 0), agent('illegal-source', NOW, 'user')])
+  await mount([agent('nan', Number.NaN), agent('old', NOW - 20 * HOUR), agent('future', NOW + 1000), agent('infinite', Number.POSITIVE_INFINITY), agent('zero', _reshape_fixtureEpoch(0, 0, 0)), agent('illegal-source', NOW, 'user')])
   expect(useAppStore.getState().sessions).toHaveLength(6)
   expectTone('quiet')
   await act(async () => useAppStore.setState({ sessions: [agent('older', NOW - 6 * HOUR), agent('fresh', NOW - 10 * 60_000, 'acp'), agent('future', NOW + 1000)] }))
@@ -253,7 +254,7 @@ it('the actual App Settings path cancels the Folder clock through ProjectRail an
   useAppStore.setState({ initialize: vi.fn(async () => () => {}), toolsOpen: false, projectRailOpen: true,
     tabs: { [tab.id]: tab }, layouts: { [project.id]: createWorkspaceLayout('retained-group', [tab.id]) },
     agentComposerDrafts: { [session.id]: 'Original Agent draft' },
-    agentFocus: { execution: { sessionId: session.id, history: [{ sessionId: session.id, focusedAt: 1 }] }, pmo: { sessionId: null } } })
+    agentFocus: { execution: { sessionId: session.id, history: [{ sessionId: session.id, focusedAt: _reshape_fixtureEpoch(0, 0, 1) }] }, pmo: { sessionId: null } } })
   const timers = vi.spyOn(globalThis, 'setTimeout'), cleared = vi.spyOn(globalThis, 'clearTimeout')
   await mount([session], [project], <App />)
   const before = useAppStore.getState(), img = image(), paint = vi.spyOn(recency, 'folderIconRecency')
@@ -358,8 +359,8 @@ it('memoized primitive observations ignore unrelated Sessions/timelines and upda
   expect(api.workspaces.appearance).not.toHaveBeenCalled()
   const event: RuntimeEvent = { type: 'core', hostId: 'local', event: { type: 'agent-session', session: {
     kind: 'agent', agentSessionId: owned.id, providerId: owned.providerId, executorId: owned.executorId, hostId: owned.hostId, workspacePath: owned.workspacePath,
-    run: owned.control.run, retiredRuns: [], createdAt: 1, updatedAt: NOW + 100,
-    semanticStatus: { state: 'done', source: 'native-hook', observedAt: NOW, stateEnteredAt: 1 }
+    run: owned.control.run, retiredRuns: [], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: NOW + 100,
+    semanticStatus: { state: 'done', source: 'native-hook', observedAt: NOW, stateEnteredAt: _reshape_fixtureEpoch(0, 0, 1) }
   } } }
   await act(async () => useAppStore.getState().applyEvent(event))
   expect(image()).toBe(img); expectTone('full')
@@ -455,7 +456,7 @@ it('unresolved appearance and an empty glyph never invent a colored identity or 
   expectMonogramTone('full'); expect(vi.getTimerCount()).toBe(1)
   await act(async () => useAppStore.setState({ config: { ...config, workspaces: [{ ...project, name: '   ' }] } }))
   expect(container.querySelectorAll('[data-monogram], [data-folder-icon-recency]')).toHaveLength(0)
-  expect(row().querySelector('svg.lucide-folder')).not.toBeNull(); expect(vi.getTimerCount()).toBe(0)
+  expect(row().querySelector('svg[data-semantic-icon="object.folder"]')).not.toBeNull(); expect(vi.getTimerCount()).toBe(0)
 })
 
 it('the default ProjectIcon and Topic monograms stay neutral without a Space Folder identity', async () => {
