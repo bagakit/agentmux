@@ -9,8 +9,15 @@ const sharedAliases = [
     .filter(entry => entry.isFile() && /\.tsx?$/.test(entry.name))
     .map(entry => ({ find: `@agentmux/client-ui/${directory === 'lib' ? '' : 'components/'}${entry.name.replace(/\.tsx?$/, '')}`,
       replacement: resolve(shared, directory, entry.name) }))),
+  { find: '@agentmux/client-ui/input/styles.css', replacement: resolve(shared, 'input/input.css') },
+  { find: '@agentmux/client-ui/input', replacement: resolve(shared, 'input/index.ts') },
+  { find: '@agentmux/client-ui/icons', replacement: resolve(shared, 'theme/icons.tsx') },
+  { find: '@agentmux/client-ui/theme', replacement: resolve(shared, 'theme/index.ts') },
+  { find: '@agentmux/client-ui/note', replacement: resolve(shared, 'note') },
+  { find: '@agentmux/client-ui/terminal', replacement: resolve(shared, 'terminal') },
   { find: '@agentmux/client-ui/platform', replacement: resolve(shared, 'platform.tsx') },
   { find: '@agentmux/client-ui/styles.css', replacement: resolve(shared, 'styles/index.css') },
+  { find: '@agentmux/client-ui/styles', replacement: resolve(shared, 'styles') },
   { find: '@agentmux/client-ui', replacement: resolve(shared, 'index.ts') }
 ]
 if (sharedAliases.length <= 3) throw new Error('Owning shared source modules must be present')

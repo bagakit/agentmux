@@ -7,7 +7,7 @@ import { createFocusProjectionSelector } from '../../../src/renderer/src/lib/foc
 import { formatSessionAddress } from '../../../src/renderer/src/lib/agent-address'
 import { GlobalFocusSurface } from '../../../src/renderer/src/components/GlobalFocusSurface'
 import { FocusContextRow } from '../../../src/renderer/src/components/FocusContextRow'
-import { TransientErrorNotice } from '../../../src/renderer/src/components/TransientErrorNotice'
+import { GlobalSystemNotices } from '../../../src/renderer/src/components/GlobalSystemNotices'
 import '../../../src/renderer/src/styles/index.css'
 
 // Maintained typed preview transport, original card/Store/menu/copy/error owners.
@@ -41,7 +41,6 @@ const original = useAppStore.getState(), select = createFocusProjectionSelector(
 const compact = contexts.find(context => context.id === 'offline')
 if (!compact) throw new Error('Nonempty retained compact Context required')
 function Probe() {
-  const error = useAppStore(state => state.error), lastError = useAppStore(state => state.lastError), dismissed = useAppStore(state => state.errorDismissed)
   const [chosen, setChosen] = useState(null)
   return h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 } },
     h('div', { style: { flex: 1, minHeight: 0 } }, h(GlobalFocusSurface)),
@@ -49,12 +48,12 @@ function Probe() {
       h('div', { style: { width: '160px' }, 'data-min-column': true }, h(FocusContextRow, { context: contexts.find(context => context.id === 'recap-a'), selected: false, onSelect: setChosen })),
       h('div', { style: { width: '160px' }, 'data-compact-column': true }, h(FocusContextRow, { context: compact, compact: true, selected: chosen === compact.id, onSelect: setChosen })),
       h('input', { 'aria-label': 'Later explicit input', defaultValue: original.agentComposerDrafts['recap-b'], style: { flex: 1, minWidth: '160px' } })),
-    h(TransientErrorNotice, { error, lastError, dismissed, onDismiss: () => useAppStore.setState({ errorDismissed: true }), onReopen: () => useAppStore.setState({ errorDismissed: false }) }))
+    h('footer', { className: 'window-status-bar', style: { position: 'fixed', left: 0, right: 0, bottom: 0 } }, h(GlobalSystemNotices)))
 }
 createRoot(document.getElementById('root')).render(h(Probe))
 let nodes = [], draft
 window.recapProof = {
-  ready: true, response, prompt, population: ids, expectedSecondAddress: formatSessionAddress('recap-b')),
+  ready: true, response, prompt, population: ids, expectedSecondAddress: formatSessionAddress('recap-b'),
   remember() { nodes = [...document.querySelectorAll('.focus-context')]; draft = document.querySelector('[aria-label="Later explicit input"]'); draft.setSelectionRange(2,8) },
   denyClipboard(value) { denyClipboard = value },
   churn() { for (let index = 0; index < 200; index++) useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, latestOutputBytes: session.latestOutputBytes + 1, status: { ...session.status, observedAt: now + index + 1 } })) })) },

@@ -13,7 +13,7 @@ import { GlobalFocusSurface } from '../../../src/renderer/src/components/GlobalF
 import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'
 import { PmoTeamsTopicFloatingPanel } from '../../../src/renderer/src/components/PmoTeamsTopicFloatingPanel'
 import { PmoTeamsTopicEntry } from '../../../src/renderer/src/components/PmoTeamsTopicEntry'
-import { TransientErrorNotice } from '../../../src/renderer/src/components/TransientErrorNotice'
+import { GlobalSystemNotices } from '../../../src/renderer/src/components/GlobalSystemNotices'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { usePmoTeamsTopicFloatingState, pmoTeamsTopicFloatingViewTargets, requestPmoTeamsTopicFloatingClose } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
@@ -90,7 +90,7 @@ function Scene() {
     h('div', { className: 'workspace-workbench-registry workspace-workbench-registry--parked' },
       h(WorkspaceWorkbench, { workspaceId: 'project', visible: state.mainSurface === 'workbench', viewTargets: focusTargets }),
       h(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID, visible: false, viewTargets: targets })),
-    h(PmoTeamsTopicFloatingPanel, { floating, setFloating }), h(TransientErrorNotice))
+    h(PmoTeamsTopicFloatingPanel, { floating, setFloating }), h('footer', { className: 'window-status-bar', style: { position: 'fixed', left: 0, right: 0, bottom: 0 } }, h(GlobalSystemNotices)))
 }
 window.toolbarActionsScene = {
   ready: true, phase, seedCount: phase === 'seed' ? 1 : 0, sourceId, sourceRegion, longName, sourceAddress: formatTabAddress(sourceId),
