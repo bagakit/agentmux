@@ -24,13 +24,13 @@ export type ConnectionOperation = { operationId: string; status: 'configured'; c
 export type ConnectionInspectInput = { connectionId: string; operationId?: never } | { operationId: string; connectionId?: never }
 export type ConnectionInspectResult = { connection: ConnectionRecord | null; operation: ConnectionOperation | null }
 export type ConnectionMethod = keyof ConnectionParamsMap
-export type ConnectionParamsMap = import('./room-binding-contract.js').RoomBindingParamsMap & {
+export type ConnectionParamsMap = import('./room-binding-contract.js').RoomBindingParamsMap & import('./connection-delivery-contract.js').ConnectionDeliveryParamsMap & {
   'connection.ls': Record<string, never>
   'connection.inspect': ConnectionInspectInput
   'connection.configure': ConnectionConfigureInput
   'connection.test': { connectionId: string }
 }
-export type ConnectionResultMap = import('./room-binding-contract.js').RoomBindingResultMap & {
+export type ConnectionResultMap = import('./room-binding-contract.js').RoomBindingResultMap & import('./connection-delivery-contract.js').ConnectionDeliveryResultMap & {
   'connection.ls': { connections: ConnectionRecord[] }
   'connection.inspect': ConnectionInspectResult
   'connection.configure': ConnectionOperation
@@ -38,6 +38,7 @@ export type ConnectionResultMap = import('./room-binding-contract.js').RoomBindi
 }
 /** Borrow the Host's original connection owner. Core never constructs adapters or stores credentials. */
 export interface ConnectionPort {
+  delivery?: import('./connection-delivery-contract.js').ConnectionDeliveryPort
   bindings?: import('./room-binding-contract.js').RoomBindingsPort
   list(): Promise<ConnectionResultMap['connection.ls']>
   inspect(input: ConnectionInspectInput): Promise<ConnectionInspectResult>
