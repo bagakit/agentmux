@@ -28,10 +28,10 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
  ssr: { noExternal: ['@agentmux/client-ui'], resolve: { conditions: ['browser', 'import', 'default'] } },
  cacheDir: resolve(root, '.cache/activity-unified-owning'),
  plugins: [{ name: 'actual-unified-input', enforce: 'pre', transform(code, id) {
-  const file = id.split('?')[0]!; if (!file.startsWith(root + '/apps/desktop/src/') && !file.startsWith(root + '/packages/') && file !== resolve(root, 'apps/desktop/test/activity-unified-history.integration.test.tsx')) return
+  const file = id.split('?')[0]!; if (!file.startsWith(root + '/apps/desktop/src/') && !file.startsWith(root + '/packages/') && file !== resolve(root, 'apps/desktop/test/activity-unified-history.integration.test.tsx') && file !== resolve(root, 'apps/desktop/test/activity-reading-demand.test.tsx') && file !== resolve(root, 'apps/desktop/test/conversation-selected-head-reading.test.tsx')) return
   const log = process.env.AGENTMUX_UNIFIED_LOADED
   if (log) appendFileSync(log, JSON.stringify({ path: relative(root, file), bytes: Buffer.byteLength(code), sha256: createHash('sha256').update(code).digest('hex') }) + '\n')
  }}],
- test: { include: ['apps/desktop/test/activity-unified-history.integration.test.tsx'], passWithNoTests: false, fileParallelism: false, testTimeout: 15000,
+ test: { include: ['apps/desktop/test/activity-unified-history.integration.test.tsx', 'apps/desktop/test/activity-reading-demand.test.tsx', 'apps/desktop/test/conversation-selected-head-reading.test.tsx'], passWithNoTests: false, fileParallelism: false, testTimeout: 15000,
   globalSetup: [], setupFiles: [], server: { deps: { inline: ['@agentmux/client-ui'] } } }
 })
