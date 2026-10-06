@@ -38,6 +38,10 @@
 .confirmation-dialog__description { margin: var(--sp-4) 0 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.6; overflow-wrap: anywhere; }
 .confirmation-dialog footer { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-3); margin-top: var(--sp-6); }
 .confirmation-dialog__cancel { margin-right: auto; }
+.annotation-file-dialog form { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-5); }
+.annotation-file-dialog form > label { color: var(--text-2); font-size: var(--fs-small); }
+.annotation-file-dialog form > input { width: 100%; }
+.annotation-file-dialog form > footer { flex-wrap: wrap; margin-top: var(--sp-3); }
 .confirmation-dialog footer button[data-confirm-label] { display: grid; place-items: center; }
 .confirmation-dialog footer button[data-confirm-label]::before { content: attr(data-confirm-label); }
 .confirmation-dialog footer button[data-confirm-label]::after { content: 'Working…'; }
