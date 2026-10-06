@@ -74,8 +74,7 @@ describe('real theme editor with the production Main configuration boundary', ()
   })
   it('semantic glyph and path edits reach actual shared sprite consumers; invalid geometry remains a draft', async () => {
     await render(); await click('Customize selected theme')
-    const drawing = container.querySelector<HTMLSelectElement>('select[aria-label="Semantic icon drawing"]')!
-    await act(async () => { drawing.value = 'paths'; drawing.dispatchEvent(new Event('change', { bubbles: true })) })
+    await click('Use custom paths')
     const asset = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Semantic icon paths"]')!
     const text = '[{"d":"M3 3 L21 3 L21 21 L3 21 Z","fill":"currentColor"}]'
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(asset, text); asset.dispatchEvent(new Event('input', { bubbles: true })) })
