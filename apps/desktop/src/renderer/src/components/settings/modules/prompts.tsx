@@ -18,7 +18,7 @@ async function saveComposerShortcuts(composerShortcuts: ComposerShortcut[], expe
 
 export const promptsSettingsModule = {
   id: 'prompts',
-  group: 'resources',
+  group: 'message-tool',
   title: 'Prompts',
   description: 'Keep your everyday instructions close at hand.',
   icon: ThemeObjectContextIcon,

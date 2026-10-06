@@ -6,6 +6,7 @@ import { generalSettingsModule } from './modules/general'
 import { keyboardShortcutsSettingsModule } from './modules/keyboard-shortcuts'
 import { agentsSettingsModule } from './modules/agents'
 import { promptsSettingsModule } from './modules/prompts'
+import { messageToolSettingsModule } from './modules/message-tool'
 import { profileSettingsModule } from './modules/profile'
 import { focusSettingsModule } from './modules/focus'
 import { hostsSettingsModule } from './modules/hosts'
@@ -25,6 +26,8 @@ export const settingsModules = [
   browserSettingsModule,
   generalSettingsModule,
   keyboardShortcutsSettingsModule,
+  messageToolSettingsModule,
+  promptsSettingsModule,
   moteSettingsModule,
   spaceSettingsModule,
   focusSettingsModule,
@@ -33,7 +36,6 @@ export const settingsModules = [
   notesSettingsModule,
   toolkitSettingsModule,
   agentsSettingsModule,
-  promptsSettingsModule,
   hostsSettingsModule,
   devicesSettingsModule
 ] as const

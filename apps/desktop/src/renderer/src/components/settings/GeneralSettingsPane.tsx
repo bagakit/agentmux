@@ -1,22 +1,18 @@
-import { useId, useState } from 'react'
+import { useState } from 'react'
 import { api } from '../../lib/api'
 import { crashLogRevealNotice } from '../../lib/crash-log-reveal'
 import type { CrashLogRevealResult } from '../../../../shared/contracts'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
-import { MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_IDS, type MessageToolInitialLayout } from '../../../../shared/contracts'
 
-export type GeneralSettingsValues = { copyPathsAsAbsolute: boolean; messageToolInitialLayout: MessageToolInitialLayout }
+export type GeneralSettingsValues = { copyPathsAsAbsolute: boolean }
 
-export function GeneralSettingsPane({ copyPathsAsAbsolute, messageToolInitialLayout, onSave }: {
+export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave }: {
   copyPathsAsAbsolute: boolean | undefined
-  messageToolInitialLayout?: MessageToolInitialLayout
   onSave: (value: GeneralSettingsValues, expected: GeneralSettingsValues) => Promise<void>
 }) {
   const saved = copyPathsAsAbsolute === true
-  const savedLayout = messageToolInitialLayout ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT
-  const draft = useSettingDraftRecord({ copyPathsAsAbsolute: saved, messageToolInitialLayout: savedLayout })
-  const layoutGroup = useId()
+  const draft = useSettingDraftRecord({ copyPathsAsAbsolute: saved })
   const saveState = useSettingsSave()
   const [reveal, setReveal] = useState<CrashLogRevealResult | null>(null)
   const [pending, setPending] = useState(false)
@@ -51,18 +47,6 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, messageToolInitialLay
             <small>By default, project paths abbreviate your own home directory as <code>~/proj/app</code>. This preference also applies to tooltips and Copy Path actions. Remote paths and paths belonging to another user stay complete.</small>
           </span>
         </label>
-      </section>
-      <section className="settings-group">
-        <header><span>Message Tool</span><small>Saved: {savedLayout === 'one-line' ? 'One line' : 'Two lines'}</small></header>
-        <fieldset className="settings-reading-width">
-          <legend>Initial layout</legend>
-          {MESSAGE_TOOL_INITIAL_LAYOUT_IDS.map(layout => <label key={layout} data-selected={draft.value.messageToolInitialLayout === layout}>
-            <input type="radio" name={layoutGroup} value={layout} checked={draft.value.messageToolInitialLayout === layout}
-              onChange={() => draft.setField('messageToolInitialLayout', layout)} />
-            <span><strong>{layout === 'one-line' ? 'One line' : 'Two lines'}</strong><small>{layout === 'one-line' ? 'Keep tools compact beside the input' : 'Show a separate tool row below the input'}</small></span>
-          </label>)}
-        </fieldset>
-        <p className="settings-workflows__note">New Agent message tools start with this layout. You can switch the layout at any time.</p>
       </section>
       <section className="settings-card">
         <dl className="settings-footnote">
