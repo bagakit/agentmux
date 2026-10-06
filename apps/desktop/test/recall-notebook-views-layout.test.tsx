@@ -1,6 +1,11 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
-import recallCss from '../src/renderer/src/styles/recall.css?raw'
+import { readFileSync } from 'node:fs'
+const recallCss = readFileSync('apps/desktop/src/renderer/src/styles/recall.css', 'utf8')
+const canvasCss = readFileSync('apps/desktop/src/renderer/src/styles/note-canvas.css', 'utf8')
+import { emptyNotebookState } from '@agentmux/core/notebook-catalog'
+import { api } from '../src/renderer/src/lib/api'
+import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -14,8 +19,8 @@ const hostname = Array.from({ length: 4 }, () => 'a'.repeat(60)).join('.') + '.t
 const book: Notebook = { notebookId: 'long-title-book', name: 'Long findings', createdAt: 1 }
 const pages: NotebookPage[] = Array.from({ length: 4 }, (_, i) => ({ noteId: `note-${i}`, notebookId: book.notebookId, parentNoteId: null, title: i ? `Original note ${i}` : title, createdAt: 1, updatedAt: 1, resource: { workspaceId: 'original', hostId: 'local', workspacePath: _hygiene_fixturePath("original"), path: `${i}.note.json` }, sources: [{ sourceId: `source-${i}`, url: `https://${hostname}/finding`, title: null, recordedAt: 1 }], topics: [] }))
 let host: HTMLDivElement, root: Root, style: HTMLStyleElement
-beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); host = document.createElement('div'); document.body.append(host); root = createRoot(host); style = document.createElement('style'); style.textContent = recallCss; document.head.append(style); useAppStore.setState({ documents: {}, config: null }) })
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); style.remove() })
+beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); host = document.createElement('div'); document.body.append(host); root = createRoot(host); style = document.createElement('style'); style.textContent = recallCss; document.head.append(style); useAppStore.setState({ documents: {}, config: null, noteCanvasLayouts: {}, noteCanvasSaveIssues: {} }); installNoteCanvasGeometry(); const catalog = emptyNotebookState(); catalog.pages = Object.fromEntries(pages.map(page => [page.noteId, page])); vi.spyOn(api.notebooks, 'graph').mockResolvedValue({ catalog, graph: { catalogRevision: 0, scope: { kind: 'catalog' }, scannedScope: 'catalog', completeness: 'unknown', observations: pages.map(page => ({ noteId: page.noteId, resource: page.resource, status: 'unknown', message: 'Original not yet read' })), duplicateNoteIds: [], references: [], hierarchy: [] } }); vi.spyOn(api.notebooks, 'onChange').mockImplementation(() => () => {}) })
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); style.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 it('bounds real Notebook long-title cards and Graph nodes while keeping original full labels and opening the same page', async () => {
   const open = vi.fn()
@@ -29,12 +34,13 @@ it('bounds real Notebook long-title cards and Graph nodes while keeping original
   expect(recallCss.match(/\.recall-note-card span \{([^}]+)\}/)?.[1]).toContain('-webkit-line-clamp: 2')
   await act(async () => card.click()); expect(open).toHaveBeenLastCalledWith(pages[0])
   await render('graph')
-  const nodes = [...host.querySelectorAll<HTMLButtonElement>('.recall-graph-node')]
-  expect(nodes).toHaveLength(4)
-  for (const node of nodes) { expect(getComputedStyle(node).height).toBe('80px'); expect(getComputedStyle(node).boxSizing).toBe('border-box') }
-  expect(nodes[0]!.title).toBe(`${title}\n${hostname}`)
-  expect(recallCss.match(/\.recall-graph-node strong \{([^}]+)\}/)?.[1]).toContain('-webkit-line-clamp: 2')
-  expect(getComputedStyle(nodes[0]!.querySelector('small')!).textOverflow).toBe('ellipsis')
-  expect(Number.parseInt(nodes[3]!.style.top) - Number.parseInt(nodes[0]!.style.top)).toBeGreaterThan(80)
+  await vi.waitFor(() => expect(host.querySelectorAll('.note-canvas-title[data-note-id]')).toHaveLength(4))
+  const nodes = [...host.querySelectorAll<HTMLButtonElement>('.note-canvas-title[data-note-id]')]
+  expect(nodes[0]!.title).toBe(title)
+  expect(nodes[0]!.textContent).toBe(title)
+  expect(canvasCss).toContain('overflow-wrap: anywhere')
+  expect(host.querySelector('[aria-label="Read saved body: ' + title + '"]')).not.toBeNull()
+  expect(host.querySelector('[aria-label="Expand relationships: ' + title + '"]')).not.toBeNull()
+  expect(host.querySelector('[aria-label="Fit visible notes"]')).not.toBeNull()
   await act(async () => nodes[0]!.click()); expect(open).toHaveBeenLastCalledWith(pages[0])
 })
