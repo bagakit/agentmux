@@ -306,11 +306,12 @@ describe('One Activity reading surface over public original-sequence windows', (
   const segment = original.closest<HTMLElement>('[data-segment-key]')!
   expect(segment).not.toBeNull()
   const actualNativeBottom = () => nativeBottom + (viewport.querySelector('[data-native-record-id="record-1201"]') ? 100 : 0)
+  const currentNoticeHeight = () => viewport.querySelector('.activity-feed__newer-edge') ? 40 : 0
   tail.getBoundingClientRect = () => rect(100 + actualNativeBottom() - viewport.scrollTop, 0)
   const nativeOriginal = viewport.querySelector<HTMLElement>('[data-native-record-id="record-1200"]')!
   nativeOriginal.getBoundingClientRect = () => rect(100 + nativeBottom - 30 - viewport.scrollTop, 60)
-  segment.getBoundingClientRect = () => rect(100 + actualNativeBottom() + 30 - viewport.scrollTop, 3000)
-  observations.getBoundingClientRect = () => rect(100 + actualNativeBottom() - viewport.scrollTop, 3000)
+  segment.getBoundingClientRect = () => rect(100 + actualNativeBottom() + currentNoticeHeight() + 30 - viewport.scrollTop, 3000)
+  observations.getBoundingClientRect = () => rect(100 + actualNativeBottom() + currentNoticeHeight() - viewport.scrollTop, 3000)
   await scrollTo(viewport, 1910)
   await act(async () => original.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 1 })))
   const offset = segment.getBoundingClientRect().top - viewport.getBoundingClientRect().top
