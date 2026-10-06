@@ -10,6 +10,7 @@ import { App } from '../src/renderer/src/App.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import type { RuntimeEvent, RuntimeSnapshot } from '../src/shared/contracts.js'
+import { providerCatalogReader, historySourcesReader } from './helpers/startup-observation-api-fixture'
 import { composerConfig } from './helpers/composer-dom-fixture.js'
 
 /** Real App → canonical snapshots → one footer inbox. Removing its actual caller must fail. */
@@ -75,14 +76,15 @@ async function mountApp(): Promise<HTMLElement> {
 
 /** 窗口上那一组服务窗的标题行。告示形态同构（都是 `.service-window`），所以按标题区分是哪一块。 */
 function serviceWindowSteps(element: HTMLElement): string[] {
-  return [...element.querySelectorAll('footer.window-status-bar .service-window')]
-    .map((notice) => notice.querySelector('.service-window__step')?.textContent ?? '')
+  return [...element.querySelectorAll('footer.window-status-bar .notification-item[data-notice-id]')]
+    .map((notice) => notice.querySelector('.notification-item__title')?.textContent ?? '')
 }
 
 describe('窗口把两块服务窗真的挂了出来', () => {
   it('initialize 读到的归属警告与 shell 环境警告，各自在主壳里亮成一块告示', async () => {
     vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
-    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
+  vi.spyOn(api.sessions, 'historySources').mockImplementation(historySourcesReader())
     vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({
       ...emptySnapshot(),
       runtimeOwnershipWarnings: ['local'],
@@ -112,7 +114,8 @@ describe('窗口把两块服务窗真的挂了出来', () => {
 
   it('没有警告时主壳里一块告示都没有（证上一条不是恒真）', async () => {
     vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
-    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
+  vi.spyOn(api.sessions, 'historySources').mockImplementation(historySourcesReader())
     vi.spyOn(api.sessions, 'snapshot').mockResolvedValue(emptySnapshot())
 
     const element = await mountApp()
@@ -124,7 +127,8 @@ describe('窗口把两块服务窗真的挂了出来', () => {
 describe('成员重同步这条路也能点亮归属告示', () => {
   it('启动时干净、随后重同步读到警告，窗口上就亮起来', async () => {
     vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
-    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
+  vi.spyOn(api.sessions, 'historySources').mockImplementation(historySourcesReader())
     const snapshot = vi.spyOn(api.sessions, 'snapshot')
       // 启动这一次干净：于是下面亮起来的那块**只能**来自 resync 的写入，不可能是 initialize 那句留下的。
       .mockResolvedValueOnce(emptySnapshot())

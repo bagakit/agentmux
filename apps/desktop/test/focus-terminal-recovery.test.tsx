@@ -1,3 +1,5 @@
+import { notificationEventRows, notificationTrigger, toggleNotificationCenter } from './helpers/notification-center'
+import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement, forwardRef, useImperativeHandle, type ReactNode } from 'react';
@@ -20,12 +22,11 @@ vi.mock('react-resizable-panels', () => ({ PanelGroup: forwardRef(({ children }:
     }, ref) => { useImperativeHandle(ref, () => ({ getLayout: () => [50, 50], setLayout: () => { } })); return createElement('div', null, children); }), Panel: ({ children }: {
         children: ReactNode;
     }) => createElement('div', null, children), PanelResizeHandle: () => createElement('div') }));
-import { TransientErrorNotice } from '../src/renderer/src/components/TransientErrorNotice';
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench';
 const initial = useAppStore.getState();
 let root: Root, container: HTMLDivElement, resolveRecovery: (result: SessionRecoveryResult) => void, recover: MockInstance<typeof api.sessions.recover>, originalTab: ReturnType<typeof createWorkbenchTab>, recovered: SessionSnapshot;
 function terminal(id: string): SessionSnapshot { return { id, kind: 'terminal', providerId: null, hostId: 'local', workspacePath: _hygiene_fixturePath("repo"), label: 'Terminal', createdAt: 1, updatedAt: 1, processState: 'running', status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0, control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id } } }; }
-function Notices() { const state = useAppStore(); return createElement(TransientErrorNotice, { error: state.error, dismissed: state.errorDismissed, lastError: state.lastError, onDismiss: state.dismissError, onReopen: state.reopenError, kind: state.errorNoticeContext?.kind ?? 'indeterminate' }); }
+function Notices() { return createElement(GlobalSystemNotices); }
 function Fixture() { return createElement('section', null, createElement(Notices), createElement(WorkspaceWorkbench, { workspaceId: 'repo', visible: true })); }
 const row = (id: string) => { const r = container.querySelector<HTMLElement>(`[data-test-terminal-paint="${id}"]`); expect(r).not.toBeNull(); return r!; };
 const selectedTab = () => useAppStore.getState().layouts.repo!.groups[0]!.activeTabId;
@@ -132,18 +133,16 @@ it('shows the cleanup failure beside the recovered Terminal without losing healt
     expect(after.closingWorkbenchViews).toEqual({});
     expect(String(useAppStore.getState().agentFocus.execution.sessionId === 'new')).toBe('true');
     expect(container.querySelector('[data-test-terminal-paint="new"]')).not.toBeNull();
-    const notices = container.querySelectorAll('.error-notice');
+    const notices = container.querySelectorAll('.notification-item[data-event-id]');
     expect(notices).toHaveLength(1);
     expect(notices[0]!.getAttribute('role')).toBe('status');
     expect(notices[0]!.textContent).toContain('Recovered Session owner disappeared and cleanup failed');
-    expect(notices[0]!.querySelector('[aria-label="Dismiss error"]')).not.toBeNull();
-    await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Dismiss error"]')!.click(); await settle(); });
-    expect(container.querySelectorAll('.error-notice')).toHaveLength(0);
-    const reopen = container.querySelector<HTMLButtonElement>('.error-notice__reopen');
-    expect(reopen).not.toBeNull();
-    await act(async () => { reopen!.click(); await settle(); });
-    expect(container.querySelectorAll('.error-notice')).toHaveLength(1);
-    expect(container.querySelector('.error-notice')!.textContent).toContain('cleanup failed');
+    await toggleNotificationCenter(container, 'open');
+    await toggleNotificationCenter(container, 'closed');
+    expect(notificationTrigger(container).getAttribute('aria-expanded')).toBe('false');
+    expect(notificationEventRows(container)).toHaveLength(1);
+    await toggleNotificationCenter(container, 'open');
+    expect(container.querySelector('.notification-item[data-event-id]')!.textContent).toContain('cleanup failed');
     expect(container.querySelector('[data-test-terminal-paint="new"]')).not.toBeNull();
     expect(useAppStore.getState().sessions.find(session => session.id === 'sibling')).toBe(sibling);
 
