@@ -45,7 +45,7 @@ afterEach(async () => {
 })
 
 describe('actual phone primary workfaces', () => {
-  it('keeps the original settings and refresh actions reachable from one heading across all five workfaces', async () => {
+  it('keeps one heading and the original auxiliary menu separate from the five primary workfaces', async () => {
     const f = originalClient()
     const owner = getDeviceWorkface(), record = owner.recordIdentity()
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
@@ -55,7 +55,9 @@ describe('actual phone primary workfaces', () => {
       expect(headings).toHaveLength(1)
       expect(headings[0]!.querySelector('h1')?.textContent).toBe(label)
       expect(view.element.querySelector('.mobile-header')).toBeNull()
-      const menu = headings[0]!.querySelector('[aria-label="手机设置与连接"]')
+      const menu = view.element.querySelector('.mobile-navigation-bar [aria-label="手机设置与连接"]')
+      expect(headings[0]!.querySelector('[aria-label="手机设置与连接"]')).toBeNull()
+      expect(menu?.closest('nav')).toBeNull()
       expect(menu).not.toBeNull()
       await click(menu!)
       expect(document.querySelector('.mobile-drawer')?.textContent).toContain('连接与设备')
@@ -103,7 +105,7 @@ describe('actual phone primary workfaces', () => {
     expect(owner.snapshot().record.presentation!.goals).toEqual({ goalId: 'original-goal', mode: 'edit', discussion: null })
   })
 
-  it('toolbar return from the original Goal Agent discussion restores its exact Goal and body rather than a residual Tab zone', async () => {
+  it('direct return from the original Goal Agent discussion restores its exact Goal and body rather than a residual Tab zone', async () => {
     const f = originalClient(), original = f.client.forwardRpc!
     const goal = { id: 'original-goal', title: '原Goal', description: '原目标正文', status: 'backlog', priority: 'normal', sessionIds: ['session-original'], assigneeSessionIds: ['session-original'], supervisorSessionId: 'session-original', participations: [], activityLog: [], source: 'session', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 7) }
     f.client.runtimeOwnerIdentity = () => ({ runtimeId: 'original-runtime', ownerInstanceId: 'original-process', availability: 'connected' })
@@ -119,7 +121,8 @@ describe('actual phone primary workfaces', () => {
     await click(button(view.element, '打开目标原讨论'))
     expect(view.element.querySelector('.mobile-session-toolbar')).not.toBeNull()
     expect(getDeviceWorkface().snapshot().record.presentation!.goals!.discussion).toEqual({ goalId: goal.id, tabId: 'original-tab', agentSessionId: 'session-original' })
-    await click(view.element.querySelector('.mobile-session-toolbar button')!)
+    await click(button(view.element, '返回 Goals'))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
     expect(view.element.querySelector('.mobile-session-toolbar')).toBeNull()
     const article = view.element.querySelector('[aria-label="目标详情"]')!
     expect(article.closest('[hidden]')).toBeNull(); expect(article.textContent).toContain('原目标正文')
@@ -266,7 +269,7 @@ describe('actual phone primary workfaces', () => {
     expect(f.submit).not.toHaveBeenCalled()
   })
 
-  it.each(['browser', 'native'])('%s Back exits the original source, Profile, result and chat one layer at a time while keeping the same editor and input guard', async mode => {
+  it.each(['browser', 'native', 'direct'])('%s Back exits the original source, Profile, result and chat one layer at a time while keeping the same editor and input guard', async mode => {
     const f = originalClient(), overlay = document.createElement('div'); document.body.append(overlay)
     const view = await mount(<MobileApp client={f.client} connection={connected} native={mode === 'native'} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
     await click(button(nav(view.element), 'Mote')); await openTreeSession(view.element)
@@ -280,7 +283,12 @@ describe('actual phone primary workfaces', () => {
     await click(button(overlay, '合作方式 · BEHAVIOR.md'))
     expect(overlay.textContent).toContain('原依据保留')
     const back = async () => { await act(async () => {
-      if (mode === 'native') native.back!(); else window.history.back()
+      if (mode === 'direct') {
+        const target = overlay.querySelector('.mobile-mote-source > button') ?? overlay.querySelector('[aria-label="关闭面板"]') ?? view.element.querySelector('[data-mobile-back]')
+        expect(target, 'Current layer has a direct Back without opening the menu').not.toBeNull()
+        expect(overlay.querySelector('.mobile-drawer')).toBeNull()
+        target!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      } else if (mode === 'native') native.back!(); else window.history.back()
       await new Promise(resolve => setTimeout(resolve, 20))
     }) }
     await back()
