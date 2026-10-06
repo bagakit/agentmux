@@ -118,3 +118,44 @@ describe('real theme editor with the production Main configuration boundary', ()
     expect(container.textContent).toContain('Custom copy saved and applied')
   })
 })
+
+
+it('invalid path text after a saved theme stays unsaved and requires explicit draft discard', async () => {
+  const document = structuredClone(GRAPHITE_THEME); document.id = 'custom.invalid-path-draft'
+  document.icons = { 'action.close': { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z' }] } }
+  await save({ ...config.appearance, themeId: document.id, customThemes: { [document.id]: themeValue(document) } }, config.appearance)
+  await render(); await click('Customize selected theme')
+  const asset = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Semantic icon paths"]')!
+  const original = JSON.stringify(config.appearance)
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(asset, '{'); asset.dispatchEvent(new Event('input', { bubbles: true })) })
+  const editor = container.querySelector('.theme-editor')!
+  expect(asset.value).toBe('{'); expect(JSON.stringify(config.appearance)).toBe(original)
+  expect(editor.textContent).toContain('last valid drawing')
+  expect(editor.querySelector('[data-settings-save-bar] [role="status"]')!.textContent).toContain('Unsaved changes')
+  expect(button('Save theme').disabled).toBe(true)
+  expect(button('Discard draft and close')).toBeTruthy()
+  await click('Restore saved version')
+  expect(container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Semantic icon paths"]')!.value).toContain('M4 4H20V20H4Z')
+  expect(container.querySelector('.theme-editor [role="alert"]')).toBeNull()
+  expect(button('Close editor')).toBeTruthy()
+})
+
+it('invalid path text entered during a valid pending save survives its owner acknowledgment as an unsaved draft', async () => {
+  const document = structuredClone(GRAPHITE_THEME); document.id = 'custom.pending-path-draft'
+  document.icons = { 'action.close': { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z' }] } }
+  await save({ ...config.appearance, themeId: document.id, customThemes: { [document.id]: themeValue(document) } }, config.appearance)
+  let release!: () => void; const original = save
+  save = async (next, expected) => { await new Promise<void>(resolve => { release = resolve }); await original(next, expected) }
+  await render(); await click('Customize selected theme'); await fill('Theme name', 'Submitted valid theme'); await click('Save theme')
+  const asset = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Semantic icon paths"]')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(asset, '{'); asset.dispatchEvent(new Event('input', { bubbles: true })) })
+  await act(async () => release())
+  const item = getThemeCatalog(config.appearance.customThemes).items.find(item => item.id === document.id)!
+  expect(item.value.name).toBe('Submitted valid theme')
+  expect(item.value.icons['action.close']).toEqual(document.icons['action.close'])
+  expect(asset.value).toBe('{')
+  expect(container.querySelector('.theme-editor')!.textContent).toContain('last valid drawing')
+  expect(container.querySelector('.theme-editor [data-settings-save-bar] [role="status"]')!.textContent).toContain('Unsaved changes')
+  expect(button('Save theme').disabled).toBe(true)
+  expect(button('Discard draft and close')).toBeTruthy()
+})
