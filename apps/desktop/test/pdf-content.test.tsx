@@ -43,6 +43,8 @@ vi.mock('pdfjs-dist/web/pdf_viewer.mjs', async () => {
   if (boundary.holdColdImports) await boundary.viewerGate
   return { EventBus: boundary.EventBus, PDFViewer: boundary.Viewer, PDFFindController: class { setDocument = vi.fn() }, RenderingStates: { FINISHED: 3 }, PDFLinkService: class { setViewer = vi.fn(); setDocument = vi.fn(); goToDestination = vi.fn(async () => {}) } }
 })
+import { mountThemeRuntime, previewTheme, GRAPHITE_THEME } from '@agentmux/client-ui/theme'
+import { semanticIconHref } from '@agentmux/client-ui/icons'
 import { PdfContent } from '../src/renderer/src/components/PdfContent'
 
 let root: Root, container: HTMLDivElement
@@ -150,7 +152,19 @@ describe('the actual File PDF reader', () => {
     expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('ready')
     await click('Fit page'); expect(reader.scaleValue).toBe('page-fit')
     await click('PDF original size'); expect(reader.currentScale).toBe(1)
-    await click('Zoom PDF in'); expect(reader.currentScale).toBe(1.25)
+    const release = mountThemeRuntime(window)
+    try {
+      const zoomOut = container.querySelector('[aria-label="Zoom PDF out"]')!
+      expect(zoomOut.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('action.zoom-out'))
+      expect(container.querySelector('[aria-label="Zoom PDF in"] use')?.getAttribute('href')).toBe(semanticIconHref('action.zoom-in'))
+      const custom = structuredClone(GRAPHITE_THEME)
+      custom.id = 'custom.pdf-zoom-proof'; custom.name = 'PDF zoom'
+      custom.icons = { 'action.zoom-out': { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z', fill: 'currentColor' }] } }
+      expect(previewTheme(custom).applied).toBe(true)
+      expect(container.querySelector('[aria-label="Zoom PDF out"]')).toBe(zoomOut)
+      expect(document.getElementById(semanticIconHref('action.zoom-out').slice(1))!.querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')
+      await click('Zoom PDF in'); expect(reader.currentScale).toBe(1.25)
+    } finally { release() }
     await click('Zoom PDF out'); expect(reader.currentScale).toBe(1)
     await click('Fit width'); expect(reader.scaleValue).toBe('page-width')
     await event('pagerendered', { pageNumber: 2, error: new Error('background preload failure') })

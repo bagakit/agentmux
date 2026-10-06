@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 // Actual saved-version component consumers; no native clipboard, input, Browser, or restart claim.
 import { act, createElement, type ComponentProps } from 'react'
@@ -5,18 +6,20 @@ import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
 import { BrowserTaskBatchEditor } from '../src/renderer/src/components/BrowserTaskBatchEditor'
 import { BrowserTaskAssetEditor } from '../src/renderer/src/components/BrowserTaskAssetEditor'
+import { mountThemeRuntime } from '@agentmux/client-ui/theme'
+import { semanticIconHref } from '@agentmux/client-ui/icons'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskBatchRun, BrowserTaskVersion } from '../src/shared/browser-task-assets'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 type BatchProps = ComponentProps<typeof BrowserTaskBatchEditor>
-const version: BrowserTaskVersion = { version: 1, savedAt: 1, name: 'Original saved items', url: 'https://fixture.invalid/form',
+const version: BrowserTaskVersion = { version: 1, savedAt: _reshape_fixtureEpoch(0, 0, 1), name: 'Original saved items', url: 'https://fixture.invalid/form',
   parameters: [{ key: 'item', label: 'Item value', secret: false }, { key: 'secret', label: 'Fresh token', secret: true }],
   steps: [{ id: 'item-step', kind: 'fill', url: 'https://fixture.invalid/form', reviewed: true, parameterKey: 'item', target: { role: 'text input', name: 'Item', ordinal: 1, count: 1 } },
     { id: 'secret-step', kind: 'fill', url: 'https://fixture.invalid/form', reviewed: true, parameterKey: 'secret', target: { role: 'text input', name: 'Token', ordinal: 1, count: 1 } }] }
 const batch: BrowserTaskBatchRun = { id: 'original-batch', browserId: 'original-browser', assetId: 'original-asset', version: 1,
-  items: [{ id: 'first', runId: 'first-run' }, { id: 'second', runId: 'second-run' }], nextItem: 1, status: 'waiting-human', operationCount: 1, executedMillis: 1, startedAt: 1, updatedAt: 2, warning: 'Review the person checkpoint.' }
-const runs: BrowserTaskAssetRun[] = [{ id: 'first-run', browserId: batch.browserId, assetId: batch.assetId, version: 1, nextStep: 2, status: 'completed', operationIds: ['first-operation'], startedAt: 1, updatedAt: 2 },
-  { id: 'second-run', browserId: batch.browserId, assetId: batch.assetId, version: 1, nextStep: 0, status: 'waiting-human', operationIds: [], startedAt: 2, updatedAt: 2 }]
+  items: [{ id: 'first', runId: 'first-run' }, { id: 'second', runId: 'second-run' }], nextItem: 1, status: 'waiting-human', operationCount: 1, executedMillis: 1, startedAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), warning: 'Review the person checkpoint.' }
+const runs: BrowserTaskAssetRun[] = [{ id: 'first-run', browserId: batch.browserId, assetId: batch.assetId, version: 1, nextStep: 2, status: 'completed', operationIds: ['first-operation'], startedAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2) },
+  { id: 'second-run', browserId: batch.browserId, assetId: batch.assetId, version: 1, nextStep: 0, status: 'waiting-human', operationIds: [], startedAt: _reshape_fixtureEpoch(0, 0, 2), updatedAt: _reshape_fixtureEpoch(0, 0, 2) }]
 function button(host: HTMLElement, label: string) {
   const result = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === label)
   expect(result, `Actual ${label} button`).toBeDefined(); return result!
@@ -92,7 +95,7 @@ describe('saved-version batch input remains bounded and transient', () => {
     } finally { await m.close() }
   })
   it('the real AssetEditor mounts batch input only at the selected saved version', async () => {
-    const asset: BrowserTaskAsset = { id: batch.assetId, browserId: batch.browserId, sourceRecordingId: 'recording', revision: 1, createdAt: 1, updatedAt: 2, draft: version, versions: [version] }
+    const asset: BrowserTaskAsset = { id: batch.assetId, browserId: batch.browserId, sourceRecordingId: 'recording', revision: 1, createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), draft: version, versions: [version] }
     const host = document.createElement('div'); document.body.append(host); const root = createRoot(host), onRunBatch = vi.fn<BatchProps['onRun']>(async () => {})
     try {
       await act(async () => root.render(createElement(BrowserTaskAssetEditor, { asset, recording: null, batch, batchRuns: runs, onRunBatch, onStopBatch: vi.fn(),
@@ -106,4 +109,22 @@ describe('saved-version batch input remains bounded and transient', () => {
       expect(onRunBatch).toHaveBeenCalledOnce(); expect(onRunBatch.mock.calls[0]?.[0]).toMatchObject({ version: 1, batchId: batch.id })
     } finally { await act(async () => root.unmount()); host.remove() }
   })
+})
+
+it('the actual editable Browser task adds an original human checkpoint with the plus role', async () => {
+  const asset: BrowserTaskAsset = { id: batch.assetId, browserId: batch.browserId, sourceRecordingId: 'recording', revision: 1, createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), draft: version, versions: [version] }
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host), dispose = mountThemeRuntime(window), save = vi.fn(async () => {})
+  try {
+    await act(async () => root.render(createElement(BrowserTaskAssetEditor, { asset, recording: null, onImport: vi.fn(), onSaveDraft: save, onSaveVersion: vi.fn(async () => {}), onLocateStep: vi.fn(), onRun: vi.fn(async () => {}), onStop: vi.fn() })))
+    const add = [...host.querySelectorAll<HTMLButtonElement>('button')].find(e => e.textContent === 'Add checkpoint')!
+    expect(add, 'actual Add checkpoint').toBeDefined()
+    expect(add.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('action.create-checkpoint'))
+    const symbol = document.getElementById(semanticIconHref('action.create-checkpoint').slice(1))!
+    expect(symbol.querySelector('path[d="M12 5v14"]')).not.toBeNull(); expect(symbol.querySelector('path[d="M5 12h14"]')).not.toBeNull()
+    await act(async () => add.click())
+    await act(async () => button(host, 'Save draft').click())
+    expect(save).toHaveBeenCalledOnce()
+    expect(save.mock.calls[0]?.[0]).toMatchObject({ steps: [...version.steps, { kind: 'checkpoint', url: version.url, label: 'Human checkpoint', reviewed: true }] })
+    expect(asset.draft.steps).toHaveLength(2); expect(asset.versions[0]!.steps).toHaveLength(2)
+  } finally { await act(async () => root.unmount()); dispose(); host.remove() }
 })
