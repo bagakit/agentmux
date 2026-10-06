@@ -56,7 +56,8 @@ import {
   type AgentMuxTerminalRegion,
   type AgentMuxTerminalViewObservation
 } from './control.js'
-import { AgentMuxError } from './errors.js'
+import { AgentMuxError, parseAgentMuxErrorData } from './errors.js'
+import { rpcRecord } from './rpc-data.js'
 import { parseMetricsObservation, type MetricsObservation, type MetricsSubscription } from './metrics.js'
 import { assertToolkitResultTarget, isToolkitOperation, parseToolkitRequest, parseToolkitResult } from './toolkit.js'
 import { parseDesktopFocusRequest, parseDesktopFocusSuccessReceipt } from './desktop-focus-parser.js'
@@ -1559,14 +1560,24 @@ export function parseAgentMuxControlReceipt(value: unknown): AgentMuxControlRece
   }
   if (source.ok !== false) throw new AgentMuxError('Control receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (source.result !== undefined) throw new AgentMuxError('Control receipt must contain exactly one result or error.', 'CONTROL_PROTOCOL_ERROR')
-  const error = object(source.error, 'Control error receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const error = rpcRecord(source.error, ['code', 'message', 'candidates', 'controlFailure', 'cause'], 'CONTROL_PROTOCOL_ERROR')
   const code = controlErrorCode(error.code)
   if (code === 'CONTROL_FAILED' && error.code !== 'CONTROL_FAILED') throw new AgentMuxError('Control error receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const message = text(error.message, 'Control error message', 'CONTROL_PROTOCOL_ERROR')
+  if (code === 'MESSAGE_TARGET_NOT_UNIQUE' && (Object.hasOwn(error, 'cause') || Object.hasOwn(error, 'controlFailure'))) {
+    throw new AgentMuxError('Addressing candidates cannot carry input failure facts.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  const cause = error.cause === undefined ? undefined : parseAgentMuxErrorData(error.cause)
+  if (cause?.code === 'MESSAGE_TARGET_NOT_UNIQUE') throw new AgentMuxError('Addressing candidates require their original Control union.', 'CONTROL_PROTOCOL_ERROR')
+  const controlFailure = error.controlFailure === undefined ? undefined : parseAgentMuxErrorData({ code, message, controlFailure: error.controlFailure }).controlFailure
+  if (cause?.controlFailure && controlFailure && (cause.controlFailure.disposition !== controlFailure.disposition ||
+      cause.controlFailure.confirmedInputBytes !== controlFailure.confirmedInputBytes)) {
+    throw new AgentMuxError('Original input failure facts are inconsistent.', 'CONTROL_PROTOCOL_ERROR')
+  }
   const parsedError = code === 'MESSAGE_TARGET_NOT_UNIQUE'
     ? { code, message, candidates: candidates(error.candidates) ?? (() => { throw new AgentMuxError('Control error candidates are required.', 'CONTROL_PROTOCOL_ERROR') })() }
-    : error.candidates === undefined
-      ? { code, message }
+    : !Object.hasOwn(error, 'candidates')
+      ? { code, message, ...(cause === undefined ? {} : { cause }), ...(controlFailure === undefined ? {} : { controlFailure }) }
       : (() => { throw new AgentMuxError('Control error candidates are invalid.', 'CONTROL_PROTOCOL_ERROR') })()
   return {
     schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,

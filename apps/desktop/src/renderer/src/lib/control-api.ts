@@ -1,5 +1,6 @@
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
+  parseAgentMuxErrorData,
   type AgentMuxControlError,
   type AgentMuxControlErrorCode
 } from '@agentmux/core/control'
@@ -108,14 +109,21 @@ function responseError(error: unknown): AgentMuxControlError {
   if (source?.candidates !== undefined) {
     return { code: 'CONTROL_FAILED', message: 'Desktop Control owner returned unexpected message target candidates.' }
   }
-  const failure = source?.controlFailure
-  // Preserve the new exact pre-input refusal; never infer historical delivery from its code.
-  const noInput = code === 'AGENT_PROMPT_CONDITION_CHANGED' && typeof failure === 'object' && failure !== null &&
-    (failure as Record<string, unknown>).disposition === 'not_applied' && (failure as Record<string, unknown>).confirmedInputBytes === 0
+  let cause
+  try {
+    if (typeof source?.code === 'string' && (!controlErrorCode(source.code) || source.detail !== undefined || source.controlFailure !== undefined || source.logId !== undefined)) {
+      cause = parseAgentMuxErrorData({ code: source.code, message,
+        ...(source.detail === undefined ? {} : { detail: source.detail }),
+        ...(source.controlFailure === undefined ? {} : { controlFailure: source.controlFailure }),
+        ...(source.logId === undefined ? {} : { logId: source.logId }) })
+    }
+  } catch {
+    return { code: 'CONTROL_PROTOCOL_ERROR', message: 'Desktop Control owner returned invalid original input failure facts.' }
+  }
   return {
     code,
     message: withRecovery(message, { code }),
-    ...(noInput ? { controlFailure: { disposition: 'not_applied' as const, confirmedInputBytes: 0 } } : {})
+    ...(cause ? { cause, ...(cause.controlFailure ? { controlFailure: cause.controlFailure } : {}) } : {})
   }
 }
 

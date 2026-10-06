@@ -1431,6 +1431,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
       write: (...args) => preload.sessions.write(...args).then(unwrapSessionInputWriteResult),
       paste: (...args) => preload.sessions.paste(...args).then(unwrapSessionInputWriteResult),
       submitPrompt: (...args) => preload.sessions.submitPrompt(...args).then(unwrapSessionInputWriteResult),
+      submitMessage: (...args) => preload.sessions.submitMessage(...args).then(unwrapSessionInputWriteResult),
       observeHistory: createRendererHistoryObservation(preload.sessions.observeHistory),
       onEvent: createRendererSessionEvents(preload.sessions.onEvent)
     }
