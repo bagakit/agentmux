@@ -14,6 +14,8 @@ import { MarkdownCodeBlock } from './MarkdownCodeBlock.js'
 import { MarkdownMath } from './MarkdownMath.js'
 import { ConversationImageCollection } from './ConversationImageCollection.js'
 import { markdownImageReferences } from '../lib/conversation-image-references.js'
+import { useVisibleWork } from '../lib/use-visible-work.js'
+import { useHorizontalReading } from '../lib/use-horizontal-reading.js'
 
 export type LinkClickModifiers = { metaKey: boolean; ctrlKey: boolean; altKey?: boolean; clientX: number; clientY: number }
 export type OpenHttpLink = (url: string, event: LinkClickModifiers) => void
@@ -143,6 +145,17 @@ function inlineLabel(nodes: InlineNode[]): string {
   return nodes.map(node => 'text' in node ? node.text : 'children' in node ? inlineLabel(node.children) : node.kind === 'break' ? ' ' : '').join('')
 }
 
+function MarkdownTable({ node, context }: { node: Extract<BlockNode, { kind: 'table' }>; context: InlineContext }) {
+  const viewport = useVisibleWork<HTMLTableElement>(context.visible && !context.readOnly)
+  const reading = useHorizontalReading<HTMLDivElement>(viewport.visible, node)
+  return <div className="md-table-scroll md-horizontal-reading" {...reading} aria-label={reading.tabIndex === 0 ? 'Scrollable table' : undefined}>
+    <table ref={viewport.ref} className="md-table"><thead><tr>{node.header.map((cell, index) => <th key={index}
+      {...(node.align[index] ? { 'data-align': node.align[index] } : {})}><Inline nodes={cell} context={context} /></th>)}</tr></thead>
+      <tbody>{node.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, index) => <td key={index}
+        {...(node.align[index] ? { 'data-align': node.align[index] } : {})}><Inline nodes={cell} context={context} /></td>)}</tr>)}</tbody></table>
+  </div>
+}
+
 function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
   if (node.kind === 'heading') {
     const Heading = context.documentMode ? (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const)[node.level - 1] ?? 'h6' : 'p'
@@ -164,10 +177,7 @@ function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
   }
   if (node.kind === 'quote') return <blockquote className="md-quote">{node.children.map((child, index) => <Block key={index} node={child} context={context} />)}</blockquote>
   if (node.kind === 'rule') return <hr className="md-rule" />
-  if (node.kind === 'table') return <div className="md-table-scroll"><table className="md-table"><thead><tr>{node.header.map((cell, index) => <th key={index}
-    {...(node.align[index] ? { 'data-align': node.align[index] } : {})}><Inline nodes={cell} context={context} /></th>)}</tr></thead>
-    <tbody>{node.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, index) => <td key={index}
-      {...(node.align[index] ? { 'data-align': node.align[index] } : {})}><Inline nodes={cell} context={context} /></td>)}</tr>)}</tbody></table></div>
+  if (node.kind === 'table') return <MarkdownTable node={node} context={context} />
   if (node.kind === 'footnotes') return <section className="md-footnotes" aria-label="Footnotes"><ol className="md-list">{node.items.map(note => <li key={note.identifier}
     data-md-footnote={note.number} tabIndex={context.readOnly ? undefined : -1}>{note.children.map((child, index) => <Block key={index} node={child} context={context} />)}
     {!context.readOnly && <span className="md-footnote-backlinks">{Array.from({ length: note.references }, (_, index) => <button key={index} type="button" className="md-link"
