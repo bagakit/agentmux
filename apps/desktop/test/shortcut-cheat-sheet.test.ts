@@ -54,6 +54,7 @@ describe('grouping is derived from scope + gate, and is total', () => {
     expect(groupOf('terminal.search')).toBe('terminal')
     expect(groupOf('editor.save')).toBe('editor')
     expect(groupOf('launcher.submit')).toBe('launcher')
+    expect(groupOf('message-tool.send')).toBe('message-tool')
   })
 
   // 守的缺陷：`groupIdForBinding` 曾以 `return binding.gate === 'not-in-editable' ? 'workbench' : 'global'`

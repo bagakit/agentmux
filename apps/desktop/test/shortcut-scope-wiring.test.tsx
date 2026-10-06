@@ -7,6 +7,7 @@ import { SHORTCUT_BINDINGS, SHORTCUT_SCOPES, bindingById, monacoKeybindingFor } 
 import { windowShortcutHandlers, type WorkbenchShortcutStore } from '../src/renderer/src/lib/workbench-shortcuts.js'
 import { launcherKeydownLaunches } from '../src/renderer/src/lib/launcher-submit.js'
 import { terminalShortcutHandlers } from '../src/renderer/src/lib/terminal-shortcuts.js'
+import { matchComposerShortcut } from '@agentmux/client-ui/composer-keyboard'
 import { monacoKeybindingConstants } from './helpers/editor-pane-store.js'
 
 // 跨 scope 的接线元守卫：**每个** scope 的壳都必须真的把匹配出的 id 变成动作。
@@ -107,19 +108,20 @@ vi.mock('../src/renderer/src/lib/api.js', () => ({
   api: { files: { reveal: vi.fn(async () => {}) } }
 }))
 
-import { EditorPane } from '../src/renderer/src/components/EditorPane.js'
+import { FileSourceEditor } from '../src/renderer/src/components/FileSourceEditor.js'
 
 const WORKSPACE = 'workspace'
 const PATH = 'src/app.ts'
 const KEY = `${WORKSPACE}\0${PATH}`
 
-/** 把 EditorPane 挂一次，返回它注册进 Monaco 的每个命令（和弦 + handler）。 */
+/** Mount the real shortcut owner. EditorPane now loads this lazily; SSR only sees its loading surface. */
 function commandsRegisteredOnMount(): Array<{ keybinding: number; handler: () => void }> {
   monacoSpy.commands = []
   fixture.state.documents = { [KEY]: { path: PATH, content: 'hello', revision: 'r1' } }
   renderToStaticMarkup(
-    createElement(EditorPane, {
+    createElement(FileSourceEditor, {
       tabId: 'tab',
+      viewState: { current: null },
       surface: { regionId: 'region', kind: 'file' as const, workspaceId: WORKSPACE, path: PATH }
     })
   )
@@ -166,6 +168,26 @@ function stubStore(): WorkbenchShortcutStore {
  *    真要退到这一层，必须另配一条接线层守卫（见本文件末尾那条）说明壳有没有被执行到。
  */
 const SCOPE_INTERROGATIONS = new Map<string, (ids: readonly string[]) => void>([
+  [
+    'message-tool',
+    (ids) => {
+      // AgentComposer consumes this shared matcher directly. Its real editor, suggestion focus and
+      // submit/queue effects are exercised by message-tool-keyboard.integration.test.tsx.
+      const cases = [
+        ['message-tool.send', { key: 'Enter' }],
+        ['message-tool.send-immediately', { key: 'Enter', metaKey: true }],
+        ['message-tool.newline', { key: 'Enter', shiftKey: true }],
+        ['message-tool.previous', { key: 'ArrowUp' }],
+        ['message-tool.next', { key: 'ArrowDown' }],
+        ['message-tool.expand-prompt', { key: 'Tab' }],
+        ['message-tool.dismiss-suggestions', { key: 'Escape' }]
+      ] as const
+      expect([...ids].sort()).toEqual(cases.map(([id]) => id).sort())
+      for (const [id, event] of cases) {
+        expect(matchComposerShortcut({ metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...event })).toBe(id)
+      }
+    }
+  ],
   [
     'window',
     (ids) => {
