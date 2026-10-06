@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -10,21 +11,12 @@ import { ConfigOwner } from '../../../apps/desktop/src/main/config-owner.js'
 import { DEFAULT_CONFIG } from '../../../apps/desktop/src/main/config-store.js'
 import { SettingsHostsUpgradeOwner } from '../../../apps/desktop/src/main/settings-hosts-upgrade.js'
 import { executeSettingsHostsControl } from '../../../apps/desktop/src/main/settings-hosts-control.js'
-import { callRemoteCoreMaintenance } from '../src/remote-core-upgrade-wire.js'
-import { spawn } from 'node:child_process'
-import { EventEmitter } from 'node:events'
-import { PassThrough } from 'node:stream'
 // This Core test consumes the real Desktop adapter. Electron is resolved by that
 // package, rather than a coincidentally installed Electron in an ancestor tree.
 vi.mock('../../../apps/desktop/node_modules/electron/index.js', async () => {
   const { fixturePath } = await import('./helpers/fixture-values.js')
   return { app: { getPath: () => fixturePath('temporary') } }
 })
-vi.mock('node:child_process', async original => {
-  const real = await original<typeof import('node:child_process')>()
-  return { ...real, spawn: vi.fn(real.spawn) }
-})
-
 let root: string, server: AgentMuxControlServer
 const seen: AgentMuxControlRequest[] = []
 const digest = 'a'.repeat(64)
@@ -75,7 +67,7 @@ it('refuses malformed admissions and wrong-object replies before accepting any u
   const check = { input: saved, candidate: { digest, sourceCommit: 'source', protocolVersion: 22 }, eligible: false, reason: 'unverified', detail: 'Original Runtime observation is unavailable.' }
   expect(() => parseRpcControlResult('settings.hosts.upgrade-check', { check: { ...check, input: { ...saved, id: 'other' } } }, { id: 'local' })).toThrow('another target')
   expect(() => parseRpcControlResult('settings.hosts.upgrade-check', { check: { ...check, eligible: true } }, { id: 'local' })).toThrow()
-  const receipt = { input: saved, operationId: 'other-operation', expected, status: 'failed', stage: 'preparing', detail: 'Refused before mutation.', updatedAt: 1 }
+  const receipt = { input: saved, operationId: 'other-operation', expected, status: 'failed', stage: 'preparing', detail: 'Refused before mutation.', updatedAt: reshapeFixtureEpoch(0, 0, 1) }
   expect(() => parseRpcControlResult('settings.hosts.upgrade-inspect', { receipt }, { id: 'local', operationId: 'one' })).toThrow('another target')
   const original = { ...receipt, operationId: 'one' }
   const params = { id: 'local', operationId: 'one', expected }
@@ -91,7 +83,7 @@ it('refuses malformed admissions and wrong-object replies before accepting any u
 it.each(['completed', 'failed', 'unknown'] as const)('built CLI reads the original %s upgrade receipt without replaying deployment', async status => {
   const operationId = 'retained-' + status
   const receipt = { input: saved, operationId, expected, status, stage: status === 'completed' ? 'completed' : 'verifying',
-    detail: 'Original maintenance facts.', remoteCommand: fixturePath("candidate/core"), updatedAt: 1 }
+    detail: 'Original maintenance facts.', remoteCommand: fixturePath("candidate/core"), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
   const directory = join(root, 'upgrade', 'operations')
   await mkdir(directory, { recursive: true })
   const ledger = join(directory, operationId + '.json'), bytes = JSON.stringify({ receipt })
@@ -108,7 +100,7 @@ it('keeps maintenance eligibility independent of ordinary handshake while reconc
     remoteCommand: fixturePath("original/core"), remoteSocketPath: fixturePath("original/control.sock") }
   const pinned = { ...expected, targetDigest: remoteCoreUpgradeTargetDigest(host) }
   const receipt = { input: host, expected: pinned, operationId: 'original-update', status: 'completed' as const,
-    stage: 'completed' as const, detail: 'Core is updated.', remoteCommand: fixturePath("candidate/core"), updatedAt: 1 }
+    stage: 'completed' as const, detail: 'Core is updated.', remoteCommand: fixturePath("candidate/core"), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
   const deploy = vi.fn(async () => receipt), inspect = vi.fn(async () => receipt)
   const manager = { upgrade: deploy, inspect, check: vi.fn(async (input: unknown) => ({ input, candidate: { digest, sourceCommit: null, protocolVersion: 22 },
     eligible: true, reason: 'ready', expected: pinned, detail: 'Core is qualified.', latestOperation: receipt })) } as unknown as RemoteCoreUpgradeManager
@@ -139,13 +131,4 @@ it('keeps maintenance eligibility independent of ordinary handshake while reconc
   connection.mockImplementation(async () => ({ detail: 'fresh connection confirmed' }))
   expect((await restarted.inspect(config.hosts[0], receipt.operationId))?.status).toBe('completed')
   expect(inspect).toHaveBeenCalledTimes(2); expect(deploy).toHaveBeenCalledTimes(1)
-})
-
-it('keeps an early SSH request-pipe failure scoped to an unknown maintenance response', async () => {
-  const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), kill: vi.fn() })
-  vi.mocked(spawn).mockImplementationOnce(() => child as unknown as ReturnType<typeof spawn>)
-  const response = callRemoteCoreMaintenance({ id: 'remote', kind: 'ssh', label: 'Remote', hostname: 'unavailable.invalid', remoteCommand: fixturePath("core"), remoteSocketPath: fixturePath("scope/control.sock") }, 'runtime.owner.identity', {})
-  const rejected = expect(response).rejects.toMatchObject({ code: 'CORE_UPGRADE_RESPONSE_UNKNOWN' })
-  child.stdin.emit('error', Object.assign(new Error('broken pipe'), { code: 'EPIPE' }))
-  await rejected; expect(child.kill).toHaveBeenCalledWith('SIGTERM')
 })
