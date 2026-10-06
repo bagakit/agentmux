@@ -23,7 +23,7 @@ app.whenReady().then(async () => {
     }
     const frame = async file => { await settle(); await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.frames.push({ file }) }
     await win.loadURL(url); win.webContents.focus(); await read(() => document.fonts.ready)
-    assert.equal(slice, 'goal-decision-details')
+    if (slice === 'goal-decision-details') {
     await until(() => document.querySelector('[data-goal-detail-id="decision-goal"] .goals-activity'))
     for (const width of [1024, 390]) {
       win.setContentSize(width, 900); await settle()
@@ -59,6 +59,35 @@ app.whenReady().then(async () => {
     assert.equal(await read(() => document.querySelector('[data-decision-id="original-decision"]').open), false)
     assert.equal(await read(() => document.querySelector('.goals-activity').open), false)
     result.operations.push({ originalNodeAndSelectionPreserved: true, changedGoalIsolated: true })
+    } else if (slice === 'component-gallery-inspection') {
+      await until(() => document.querySelector('.wf-gallery__examples .observation-gallery'))
+      const setWidth = value => win.webContents.executeJavaScript(`(() => { const select=document.querySelector('[aria-label="Preview width"]');select.value='${value}';select.dispatchEvent(new Event('change',{bubbles:true})) })()`)
+      await read(() => { const button=document.querySelector('.wf-card button[aria-expanded]');window.referenceCardButton=button;button.focus() });await press('Enter')
+      await read(() => { window.referenceExpanded=window.referenceCardButton.getAttribute('aria-expanded') })
+      for (const width of [1024,390]) {
+        win.setContentSize(width,900);await settle();await setWidth(width === 1024 ? '640' : '320');await settle()
+        for (const mode of ['dark','light']) {
+          await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.wf-gallery__theme button')).find(button => button.textContent === '${mode === 'dark' ? '深色' : '浅色'}').click()`);await settle()
+          assert.equal(await read(() => document.documentElement.dataset.appearance),mode)
+          assert.equal(await read(() => document.documentElement.scrollWidth === innerWidth),true)
+          assert.equal(await read(() => { const r=document.querySelector('.wf-gallery__examples').getBoundingClientRect();return r.width<=innerWidth&&r.left>=0&&r.right<=innerWidth }),true)
+          assert.equal(await read(() => document.querySelector('.wf-gallery__examples').contains(document.querySelector('.observation-gallery'))),true)
+          assert.equal(await read(() => document.contains(window.referenceCardButton) && window.referenceCardButton.getAttribute('aria-expanded') === window.referenceExpanded),true)
+          await read(() => { document.querySelector('.wf-gallery').scrollTop=0;document.querySelector('[aria-label="Preview width"]').focus({preventScroll:true}) })
+          await frame(`${slice}-${mode}-${width}.png`)
+          result.operations.push({width,mode,originalDeveloperEntry:true,originalExamples:true,availableWidth:true,expandedNodePreserved:true})
+        }
+      }
+      await read(() => document.querySelector('.wf-gallery__inspect input').focus());await press('Space')
+      assert.equal(await read(() => document.querySelector('.wf-gallery__examples').dataset.inspectBounds), 'true')
+      await frame(`${slice}-boundaries-390.png`)
+      await read(() => { document.querySelector('.wf-gallery__inspect button').focus();window.referenceExample=document.querySelector('.wf-gallery__examples') });await press('Enter')
+      assert.equal(await read(() => document.querySelector('[aria-label="Preview width"]').value),'fit')
+      assert.equal(await read(() => document.querySelector('.wf-gallery__examples').dataset.inspectBounds),'false')
+      assert.equal(await read(() => window.referenceExample === document.querySelector('.wf-gallery__examples')),true)
+      await read(() => document.querySelector('.observation-gallery').scrollIntoView({block:'start'}));await frame(`${slice}-observation-390.png`)
+      result.operations.push({nativeBoundaryKeyboard:true,nativeResetKeyboard:true,resetKeepsOriginalExamples:true})
+    } else throw new Error('Unknown original surface scene')
     assert.deepEqual(result.errors, []); result.passed = true
   } catch (error) {
     result.failure = { name: error.name, message: error.message, stack: error.stack }

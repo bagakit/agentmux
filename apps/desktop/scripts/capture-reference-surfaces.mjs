@@ -12,14 +12,14 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const require = createRequire(resolve(root, 'apps/desktop/package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const slice = process.argv[2]
-assert.ok(['goal-decision-details'].includes(slice))
+assert.ok(['goal-decision-details', 'component-gallery-inspection'].includes(slice))
 const evidence = resolve(root, '.tmp/reference-surfaces', slice)
 const privateRoot = await mkdtemp(resolve(tmpdir(), 'agentmux-reference-surface-'))
 const compiled = resolve(privateRoot, 'compiled')
 const hash = data => createHash('sha256').update(data).digest('hex')
 const source = {}
 const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', source, frames: [],
-  scope: 'Actual App and original Goal reading with controlled preview observations; isolated Chromium, no live Provider, user data or installed Host claim.' }
+  scope: 'Original product surface and its entry; controlled preview observations where needed. Isolated Chromium, no live Provider, user data or installed Host claim.' }
 let server
 await mkdir(evidence, { recursive: true })
 try {
@@ -32,7 +32,7 @@ try {
       // PostCSS follows local @imports without passing every leaf through transform.
       for (const path of this.getWatchFiles()) if (path.startsWith(root + sep) && !path.includes('/node_modules/') && path.endsWith('.css')) source[relative(root, path)] = hash(await readFile(path))
     } }] })
-  assert.ok(source['apps/desktop/src/renderer/src/styles/goals.css'], 'The actual owning Goal CSS must be captured')
+  assert.ok(source[slice === 'goal-decision-details' ? 'apps/desktop/src/renderer/src/styles/goals.css' : 'apps/desktop/src/renderer/src/styles/workflow.css'], 'The actual owning CSS must be captured')
   for (const name of ['capture-reference-surfaces.mjs', 'reference-surfaces-electron.cjs']) {
     const path = resolve(root, 'apps/desktop/scripts', name); source[relative(root, path)] = hash(await readFile(path))
   }
