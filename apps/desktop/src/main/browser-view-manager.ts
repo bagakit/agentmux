@@ -1086,8 +1086,8 @@ export class BrowserViewManager {
     if (!Object.hasOwn(BROWSER_VIEWPORT_PRESETS, viewport)) {
       throw new Error(`Unknown browser viewport: ${String(viewport)}`)
     }
+    this.applyViewport(entry, entry.view, viewport)
     entry.viewport = viewport
-    this.applyViewport(entry)
     this.emit(entry)
     return this.snapshot(entry)
   }
@@ -2440,9 +2440,11 @@ export class BrowserViewManager {
     const becomingVisible = !entry.visible
     const boundsChanged = !entry.bounds || entry.bounds.x !== normalized.x || entry.bounds.y !== normalized.y ||
       entry.bounds.width !== normalized.width || entry.bounds.height !== normalized.height
+    const sizeChanged = !entry.bounds || entry.bounds.width !== normalized.width || entry.bounds.height !== normalized.height
     entry.bounds = normalized
     entry.visible = true
     entry.view.setBounds(entry.bounds)
+    if (sizeChanged && entry.viewport !== 'responsive') this.applyViewport(entry)
     if (becomingVisible) this.window.contentView.addChildView(entry.view, 1)
     entry.view.setVisible(true)
     if (becomingVisible) this.synchronizeVisiblePage(entry, entry.view)
@@ -2847,20 +2849,29 @@ export class BrowserViewManager {
     if (errors.length) throw new AggregateError(errors, 'Browser native cleanup failed: ' + errors.map(error => error instanceof Error ? error.message : String(error)).join('; '))
   }
 
-  private applyViewport(entry: BrowserEntry, view = entry.view): void {
+  private applyViewport(entry: BrowserEntry, view = entry.view, viewport = entry.viewport): void {
     const contents = view.webContents
-    if (entry.viewport === 'responsive') {
+    if (viewport === 'responsive') {
       contents.disableDeviceEmulation()
       return
     }
-    const size = BROWSER_VIEWPORT_PRESETS[entry.viewport]
+    const size = BROWSER_VIEWPORT_PRESETS[viewport]
+    // Desktop emulation includes page zoom in its layout size. Compensate locally:
+    // changing zoom would also change same-origin pages in this profile.
+    const zoom = contents.getZoomFactor()
+    const viewSize = viewport === 'desktop'
+      ? { width: Math.round(size.width * zoom), height: Math.round(size.height * zoom) }
+      : size
+    const scale = entry.bounds
+      ? Math.min(1, entry.bounds.width / viewSize.width, entry.bounds.height / viewSize.height)
+      : 1
     contents.enableDeviceEmulation({
-      screenPosition: entry.viewport === 'desktop' ? 'desktop' : 'mobile',
+      screenPosition: viewport === 'desktop' ? 'desktop' : 'mobile',
       screenSize: size,
       viewPosition: { x: 0, y: 0 },
       deviceScaleFactor: 0,
-      viewSize: size,
-      scale: 1
+      viewSize,
+      scale
     })
   }
 
