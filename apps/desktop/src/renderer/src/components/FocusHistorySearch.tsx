@@ -1,13 +1,39 @@
-import { memo, useCallback, useMemo } from 'react'
+import { Fragment, memo, useCallback, useMemo } from 'react'
 import type { AgentSessionHistoryContentPart, AgentSessionHistoryItem, AgentTimelineItem } from '@agentmux/core'
 import { sessionHistoryTextForReading, sessionUserMessageText } from '@agentmux/core/session-user-messages'
 import { projectConversationRecords } from '@agentmux/client-ui/conversation-records'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { focusHistoryHitKey, type FocusHistoryHit, type useFocusHistorySearch } from '../lib/use-focus-history-search'
 import { api } from '../lib/api'
+import { useAppStore } from '../store'
+import { agentSessionPresentationIndex } from '../lib/session-presentation'
+import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
+
+function highlightExcerpt(text: string, query: string) {
+ if (!query) return text
+ return text.split(query).map((fragment, index) => <Fragment key={index}>{index ? <mark>{query}</mark> : null}{fragment}</Fragment>)
+}
 
 const Hit = memo(function Hit({ hit, query, open, onExpand }: { hit: FocusHistoryHit; query: string; open: boolean; onExpand(key: string, open: boolean): void }) {
  const item = hit.entry.item
+ const currentNameSelector = useMemo(() => {
+  let previous: readonly unknown[] | undefined, name: string | undefined
+  return (state: ReturnType<typeof useAppStore.getState>) => {
+   const matches = (agentSessionPresentationIndex(state.sessions).get(hit.reference.agentSessionId) ?? []).filter(session =>
+    session.hostId === hit.reference.hostId && session.control.hostId === hit.reference.hostId && session.control.agentSessionId === hit.reference.agentSessionId)
+   const session = matches.length === 1 ? matches[0] : undefined, timeline = session ? state.timelines[session.id] : undefined
+   const userName = session ? state.agentNames[session.id] : undefined
+   const facts = [session?.id, session?.label, session?.providerId, userName, timeline, timeline?.revision, timeline?.items, timeline?.items.length]
+   if (previous && facts.every((fact, index) => fact === previous![index])) return name
+   previous = facts
+   const display = session ? agentDisplayName({ userName, firstPrompt: userName?.trim() ? undefined : firstPromptFromTimeline(timeline), fallbackLabel: session.label.trim() || hit.reference.agentSessionId, providerLabel: session.providerId }) : undefined
+   name = display === hit.reference.agentSessionId ? undefined : display
+   return name
+  }
+ }, [hit.reference.hostId, hit.reference.agentSessionId])
+ const currentName = useAppStore(currentNameSelector)
+ const hosts = useAppStore(state => state.config?.hosts)
+ const hostName = hosts?.find(host => host.id === hit.reference.hostId)?.label.trim() || hit.reference.hostId
  const record = useMemo(() => projectConversationRecords({ agentSessionId: hit.reference.agentSessionId, executionHostId: hit.reference.hostId,
   ...(hit.nativeSource ? { historyPage: { agentSessionId: hit.reference.agentSessionId, source: hit.nativeSource, items: [item as AgentSessionHistoryItem], nextCursor: null } }
    : { timeline: { agentSessionId: hit.reference.agentSessionId, revision: 0, items: [item as AgentTimelineItem] } }) })[0], [hit])
@@ -15,13 +41,27 @@ const Hit = memo(function Hit({ hit, query, open, onExpand }: { hit: FocusHistor
  const answer = record?.input?.questionAnswers?.length ? sessionUserMessageText(record.input.contentParts, record.input.questionAnswers) : null
  const text = answer ?? parts.map(part => part.kind === 'text' ? sessionHistoryTextForReading(part) : part.kind === 'reasoning' ? part.text : part.kind === 'tool-call' ? `${part.name}\n${part.input}` : part.kind === 'tool-result' ? part.output : '').join('\n')
  const at = query ? text.indexOf(query) : 0, start = Math.max(0, at - 80)
- const snippet = at < 0 ? 'Matches original stored text · expand to read the record' : `${start ? '…' : ''}${text.slice(start, start + 320)}${text.length > start + 320 ? '…' : ''}`
+ const excerpt = text.slice(start, start + 320)
  const readResource = useCallback((input: Parameters<typeof api.sessions.historyResource>[1]) => api.sessions.historyResource({ hostId: hit.reference.hostId, agentSessionId: hit.reference.agentSessionId }, input), [hit.reference.hostId, hit.reference.agentSessionId])
  const nativeRecord = useMemo(() => hit.nativeSource ? { source: hit.nativeSource, recordId: item.id, ...('turnId' in item && item.turnId ? { turnId: item.turnId } : {}) } : undefined, [hit])
  const body = (content: string | readonly AgentSessionHistoryContentPart[]) => <ConversationMessage compact recordedIdentity {...(record?.speaker ? { speaker: record.speaker } : {})} {...(record?.input ? { inputSource: record.input.source } : {})} content={content} recordTitle={item.kind} messageId={item.id} conversationSessionId={hit.reference.agentSessionId} executionHostId={hit.reference.hostId} {...(nativeRecord ? { nativeResourceRecord: nativeRecord } : {})} readHistoryResource={readResource} />
  return <details className="focus-history-hit" open={open} onToggle={event => onExpand(focusHistoryHitKey(hit), event.currentTarget.open)}>
-  <summary><span><strong>{hit.reference.agentSessionId}</strong><small>{hit.reference.hostId} · {hit.reference.source}{hit.nativeSource ? ` / ${hit.nativeSource.nativeSessionId}` : ''} · {item.kind} · {item.id}</small></span><span className="focus-history-hit__excerpt">{snippet}</span></summary>
-  {open ? <>{body(answer ?? parts)}{answer !== null ? <details><summary>Original record</summary>{body(parts)}</details> : null}</> : null}
+  <summary>
+   <span className="focus-history-hit__identity"><strong>{currentName || hit.reference.agentSessionId}</strong><small>{currentName ? 'Current name · ' : ''}{hostName}</small></span>
+   <span className="focus-history-hit__excerpt">{at < 0 ? 'Matches original stored text · expand to read the record' : <>{start ? '…' : ''}{highlightExcerpt(excerpt, query)}{text.length > start + 320 ? '…' : ''}</>}</span>
+   <small className="focus-history-hit__source">{hit.reference.source} · {item.kind}</small>
+  </summary>
+  {open ? <>
+   <dl className="focus-history-hit__provenance" aria-label="Original record source">
+    <div><dt>Host</dt><dd>{hit.reference.hostId}</dd></div>
+    <div><dt>Session</dt><dd>{hit.reference.agentSessionId}</dd></div>
+    <div><dt>Source</dt><dd>{hit.reference.source}</dd></div>
+    {hit.nativeSource ? <div><dt>Provider</dt><dd>{hit.nativeSource.providerId}</dd></div> : null}
+    {hit.nativeSource ? <div><dt>Native session</dt><dd>{hit.nativeSource.nativeSessionId}</dd></div> : null}
+    <div><dt>Record</dt><dd>{item.id}</dd></div>
+   </dl>
+   {body(answer ?? parts)}{answer !== null ? <details><summary>Original record</summary>{body(parts)}</details> : null}
+  </> : null}
  </details>
 })
 export function FocusHistorySearch({ search }: { search: ReturnType<typeof useFocusHistorySearch> }) {
