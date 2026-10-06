@@ -1,3 +1,4 @@
+import { withInteractionOperation } from '../../../packages/core/test/fixtures/interaction-client.js'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -58,7 +59,7 @@ it('a self answer does not claim caught up when Core clears the request but stil
     expect(dom.container.querySelectorAll('[data-request-id="permission-1"]')).toHaveLength(2)
     expect(summarizeAgentAttention(useAppStore.getState().sessions).needsYou).toBe(1)
     vi.spyOn(api.sessions, 'respondInteraction').mockImplementation(async (_control, response) => {
-      await client.respondAgentInteraction({ agentSessionId: 'agent-1', expectedRun: session.control.run, response })
+      await client.respondAgentInteraction(withInteractionOperation(client, { agentSessionId: 'agent-1', expectedRun: session.control.run, response }))
     })
     await dom.click('.attention-request-panel .agent-interaction__actions button.is-primary')
     expect(published).toContain('agent-session')

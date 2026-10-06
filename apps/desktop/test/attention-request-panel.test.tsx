@@ -75,7 +75,7 @@ describe('Needs you request panel', () => {
     await act(async () => reviewButton().click())
     const answer = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Stable')) as HTMLButtonElement
     await act(async () => answer.click())
-    expect(respondInteraction).toHaveBeenCalledExactlyOnceWith(session.control, { kind: 'question', requestId: 'request-a', outcome: 'answered', answers: [{ questionId: 'channel', optionId: 'stable' }] })
+    expect(respondInteraction).toHaveBeenCalledExactlyOnceWith(session.control, { kind: 'question', requestId: 'request-a', outcome: 'answered', answers: [{ questionId: 'channel', optionId: 'stable' }] }, { operationId: expect.any(String), expectedRequest: request })
     expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('attention-a')
   })
 

@@ -79,7 +79,7 @@ if (!request || request.kind !== 'permission') {
 crashArmed = true
 await client.respondAgentInteraction({
   agentSessionId: session.agentSessionId,
-  expectedRun: session.run,
+  expectedRun: session.run, operationId: 'crash-response', expectedRequest: request,
   response: {
     kind: 'permission',
     requestId: request.id,

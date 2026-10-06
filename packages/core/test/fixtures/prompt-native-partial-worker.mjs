@@ -61,7 +61,7 @@ try {
   assert.equal(original.promptCompletionAdmission.intent.prompt, prompt)
   assert.equal(original.promptCompletionAdmission.intent.plan.kind, 'render-then-submit')
   assert.equal(original.terminalPromptSubmission.submit.acknowledged, false)
-  await client.respondAgentInteraction({ agentSessionId: id, expectedRun: session.run,
+  await client.respondAgentInteraction({ agentSessionId: id, expectedRun: session.run, operationId: 'partial-response', expectedRequest: pending.request,
     response: { kind: 'permission', requestId: pending.request.id,
       decision: { outcome: 'selected', optionId: 'allow-once' } } })
   const answered = (await store.load())[0]

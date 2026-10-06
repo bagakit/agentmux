@@ -114,8 +114,8 @@ describe('state Prompt actions mounted through the actual Session composer and S
     const response: AgentMuxInteractionResponse = kind === 'permission'
       ? { kind, requestId: 'request', decision: { outcome: 'selected', optionId: 'allow' } }
       : { kind, requestId: 'request', outcome: 'answered', answers: [{ questionId: 'q', optionId: 'choice' }] }
-    await act(async () => useAppStore.getState().respondInteraction(sessionId, response))
-    expect(reply).toHaveBeenCalledWith(original.control, response)
+    await act(async () => useAppStore.getState().respondInteraction(sessionId, response, { operationId: 'original-answer', expectedRequest: original.pendingInteraction! }))
+    expect(reply).toHaveBeenCalledWith(original.control, response, { operationId: 'original-answer', expectedRequest: original.pendingInteraction })
     expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map((call) => call[1])).toEqual([configured('running').body])
     expect(dom.draft()).toBe(draft)
   })

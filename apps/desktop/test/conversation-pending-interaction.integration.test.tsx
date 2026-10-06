@@ -1,3 +1,4 @@
+import { withInteractionOperation } from '../../../packages/core/test/fixtures/interaction-client.js'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -73,7 +74,7 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   await observeProvider('claude')
   vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({agentSessionId: AGENT_ID, source: {providerId: 'claude', nativeSessionId: 'controlled-transcript'}, items: [{id: 'user-1', kind: 'user-message', contentParts: [{kind: 'text', text: 'Original native message'}]}], nextCursor: null})
-  vi.spyOn(api.sessions, 'respondInteraction').mockImplementation(async (control, response) => await client.respondAgentInteraction({agentSessionId: control.agentSessionId, expectedRun: control.run, response}))
+  vi.spyOn(api.sessions, 'respondInteraction').mockImplementation(async (control, response) => await client.respondAgentInteraction(withInteractionOperation(client, {agentSessionId: control.agentSessionId, expectedRun: control.run, response})))
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => {

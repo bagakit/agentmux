@@ -1,3 +1,4 @@
+import { withInteractionOperation } from './fixtures/interaction-client.js'
 import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { BUILT_IN_AGENT_PROVIDERS } from '../src/agent-provider.js'
@@ -361,10 +362,10 @@ it('native interaction first claim invalidates idle but replay preserves the new
     // Modern Stores may commit through their atomic updater rather than CAS.
     throw new Error('response input acknowledgement lost')
   })
-  const respond = () => h.client.respondAgentInteraction({
+  const respond = () => h.client.respondAgentInteraction(withInteractionOperation(h.client, {
     agentSessionId: 'entry-agent', expectedRun: { runId: 'entry-run' },
     response: { kind: 'permission', requestId: 'permission-one', decision: { outcome: 'selected', optionId: 'allow-once' } }
-  })
+  }))
   await expect(respond()).rejects.toThrow('response input acknowledgement lost')
   h.beforeAck()
   const clock = vi.spyOn(Date, 'now').mockReturnValue(reshapeFixtureEpoch(0, 0, 2_000))

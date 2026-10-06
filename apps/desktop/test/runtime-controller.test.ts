@@ -1,3 +1,4 @@
+const { fixtureEpoch: _newTailFixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 import { fixturePath as _tail_fixturePath } from '../../../test/fixture-values.mjs'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
@@ -1694,13 +1695,14 @@ describe('RuntimeController configuration transaction', () => {
 
     client.connect.mockRejectedValue(new Error('Runtime observation unavailable'))
     const beforeConnect = client.connect.mock.calls.length
-    await controller.respondInteraction(control, response)
+    const intent = { operationId: 'original-response', expectedRequest: { kind: 'permission' as const, id: response.requestId, agentSessionId: control.agentSessionId, title: 'Original permission', options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' as const }], evidence: { source: 'native-hook' as const, run: control.run, observedAt: _newTailFixtureEpoch(0, 0, 1), hookReceiptId: response.requestId } } }
+    await controller.respondInteraction(control, response, intent)
     expect(client.connect.mock.calls.length).toBe(beforeConnect)
 
     expect(client.respondAgentInteraction).toHaveBeenCalledWith({
       agentSessionId: 'agent-1',
       expectedRun: { runId: 'run-1' },
-      response
+      response, ...intent
     })
   })
 

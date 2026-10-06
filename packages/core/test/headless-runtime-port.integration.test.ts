@@ -1,3 +1,4 @@
+import { withInteractionOperation } from './fixtures/interaction-client.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -66,8 +67,8 @@ describe('Headless public Core Runtime port over real private Unix owner', () =>
     const waiting = await until(() => client.agentSession(session.agentSessionId), value => value.pendingInteraction?.request.kind === 'permission', 'native permission')
     expect(waiting.nativeHandle).toMatchObject({ kind: 'provider', providerId: 'codex', sessionId: `native-${session.agentSessionId}` })
     const request = waiting.pendingInteraction!.request
-    await client.respondAgentInteraction({ agentSessionId: session.agentSessionId, expectedRun: session.run,
-      response: { kind: 'permission', requestId: request.id, decision: { outcome: 'selected', optionId: 'allow-once' } } })
+    await client.respondAgentInteraction(withInteractionOperation(client, { agentSessionId: session.agentSessionId, expectedRun: session.run,
+      response: { kind: 'permission', requestId: request.id, decision: { outcome: 'selected', optionId: 'allow-once' } } }))
     await until(() => client.agentSession(session.agentSessionId), value => !value.pendingInteraction && value.semanticStatus?.state === 'done', 'permission settlement and native Stop')
     const page = await client.sessionHistoryPage(session.agentSessionId)
     expect(page.items).toEqual([{ id: 'fixture-native-record', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'native history fixture' }] }])
@@ -127,8 +128,8 @@ describe('Headless public Core Runtime port over real private Unix owner', () =>
       injectAgentMuxGuide: false, createOperationId: 'native-exit-create', commandOverride: command,
       env: { AGENTMUX_FAKE_PERMISSION_REQUEST: '1', AGENTMUX_FAKE_EXIT_AFTER_PERMISSION: '1' } })
     const ending = await until(() => client.agentSession(ended.agentSessionId), value => value.pendingInteraction?.request.kind === 'permission', 'exiting fixture permission')
-    await client.respondAgentInteraction({ agentSessionId: ended.agentSessionId, expectedRun: ended.run, response: { kind: 'permission',
-      requestId: ending.pendingInteraction!.request.id, decision: { outcome: 'selected', optionId: 'allow-once' } } })
+    await client.respondAgentInteraction(withInteractionOperation(client, { agentSessionId: ended.agentSessionId, expectedRun: ended.run, response: { kind: 'permission',
+      requestId: ending.pendingInteraction!.request.id, decision: { outcome: 'selected', optionId: 'allow-once' } } }))
     await until(() => client.statusAgent(ended.agentSessionId), value => value.run.state !== 'running', 'native process exit')
     const continued = await client.ensureAgentContinuity({ agentSessionId: ended.agentSessionId, expectedRun: ended.run,
       operationId: 'headless-resume', commandOverride: command })

@@ -1,3 +1,4 @@
+import { withInteractionOperation } from './fixtures/interaction-client.js'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
@@ -161,7 +162,7 @@ it.each(['codex', 'claude'] as const)('publishes witnessed %s source change, pre
   expect(observed.observedNativeHandle).toEqual({ kind: 'provider', providerId: provider, sessionId: NEW, transcriptPath: f.currentPath })
   expect(observed.pendingInteraction).toEqual(f.original.pendingInteraction)
   expect(observed.terminalPromptReadiness).toEqual(f.original.terminalPromptReadiness)
-  await expect(f.client.respondAgentInteraction({ agentSessionId: SID, expectedRun: { runId: RUN }, response: f.original.pendingInteraction!.response!.value }))
+  await expect(f.client.respondAgentInteraction(withInteractionOperation(f.client, { agentSessionId: SID, expectedRun: { runId: RUN }, response: f.original.pendingInteraction!.response!.value })))
     .rejects.toMatchObject({ code: 'AGENT_INTERACTION_SOURCE_CHANGED' })
   expect(f.input).not.toHaveBeenCalled()
   expect(f.prepareInteractionResponse).not.toHaveBeenCalled()
@@ -215,8 +216,8 @@ it.each(['codex', 'claude'] as const)('publishes witnessed %s source change, pre
   expect(f.client.agentSession(SID).pendingInteraction?.request.nativeToolCallId).toBe(`tool-${NEW}`)
   expect(f.client.agentSession(SID).nativeHandle?.sessionId).toBe(NEW)
   const active = f.client.agentSession(SID).pendingInteraction!.request
-  await f.client.respondAgentInteraction({ agentSessionId: SID, expectedRun: { runId: RUN },
-    response: { kind: 'permission', requestId: active.id, decision: { outcome: 'selected', optionId: 'allow-once' } } })
+  await f.client.respondAgentInteraction(withInteractionOperation(f.client, { agentSessionId: SID, expectedRun: { runId: RUN },
+    response: { kind: 'permission', requestId: active.id, decision: { outcome: 'selected', optionId: 'allow-once' } } }))
   expect(f.input).toHaveBeenCalledTimes(2)
   expect(f.prepareInteractionResponse).toHaveBeenCalledOnce()
   expect(f.verifyInteractionTarget).toHaveBeenCalledTimes(3)

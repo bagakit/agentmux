@@ -428,7 +428,7 @@ describe('original explicit selection survives recovery and only known local pre
     vi.spyOn(api.sessions, 'respondInteraction').mockImplementation(async () => {
       runtimeEvent!({ type: 'core', hostId: 'local', event: { type: 'agent-session', session: clearedFact(resumed) } })
     })
-    await store.getState().respondInteraction(sessionId, { kind: 'permission', requestId: 'resumed-decision', decision: { outcome: 'selected', optionId: 'deny' } })
+    await store.getState().respondInteraction(sessionId, { kind: 'permission', requestId: 'resumed-decision', decision: { outcome: 'selected', optionId: 'deny' } }, { operationId: 'resumed-response', expectedRequest: resumed.pendingInteraction! })
     expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map(call => [call[0].run.runId, call[1], call[2], call[4], call[6]])).toEqual([
       [resumed.control.run.runId, 'CAS revised original text', selected.operationId, { allowUncertainTurn: true, execution: 'immediate' }, 'original note']
     ])
