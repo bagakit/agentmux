@@ -8,14 +8,13 @@ const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeObjectConnectionCodeIcon = semanticIconComponent('object.connection-code')
 const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
 import { useContext, useEffect, useState } from 'react'
-import type { ToolkitConfirmedResult } from '@agentmux/core/control'
+import type { ToolkitConfirmedResult, ToolkitResultDocument } from '@agentmux/core/control'
 import { MOBILE_CONNECTION_TOOL_ID } from '../../../../shared/toolkit-preferences'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
 import { SettingsNavigation } from '../SettingsNavigation'
 import { ConnectionLinkCode } from './ConnectionLinkCode'
 import { continueToolkitRequest, CONTINUE_TOOLKIT_NOTICE } from './continue-toolkit-request'
-import { toolkitResultDocument, type ToolkitResultDocument } from './toolkit-result-document'
 import { useToolkitScriptObservation } from './use-toolkit-script-observation'
 
 type Connection = { url: string; result: ToolkitConfirmedResult; current: boolean }
@@ -37,14 +36,15 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
   const name = snapshot?.definition.name ?? 'Phone connection'
 
   useEffect(() => {
-    const displayResult = display?.latestConfirmed?.state === 'succeeded' ? display.latestConfirmed : display?.lastSucceeded
+    const displayResult = display?.latestConfirmed?.state === 'succeeded' && display.latestConfirmed.document ? display.latestConfirmed : display?.lastSucceeded
     const result = displayResult ?? snapshot?.latestConfirmed
     if (result?.state !== 'succeeded') return
-    const document = toolkitResultDocument(result.text)
+    const document = result.document
     if (!document) return
     setDevices({ document, at: result.endedAt })
     const link = document.links[0]
-    if (link) setConnection({ url: link.url, result, current: Boolean(displayResult) })
+    if (link) setConnection({ url: link.url, result, current: result === display?.latestConfirmed })
+    else setConnection(current => current ? { ...current, current: false } : null)
   }, [display?.latestConfirmed, display?.lastSucceeded, snapshot?.latestConfirmed])
 
   async function refresh() {
@@ -67,10 +67,11 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
     try { await api.ui.writeClipboardText(connection.url); setNotice('Connection link copied.') }
     catch (cause) { setCopyError(`Could not copy the link. Select the full link below. ${presentError(cause)}`) }
   }
-  const displayIssue = reading.error || reading.sourceReason || error || (display?.state === 'unknown' || display?.state === 'failed' || display?.state === 'stopped' ? display.reason || 'Current connection details could not be confirmed.' : '')
+  const missingDocument = display?.latestConfirmed?.state === 'succeeded' && !display.latestConfirmed.document?.links.length
+  const displayIssue = reading.error || reading.sourceReason || error || (missingDocument ? display.latestConfirmed?.reason || 'The connection lookup finished without a confirmed connection document. Refresh to check current details.' : '') || (display?.state === 'unknown' || display?.state === 'failed' || display?.state === 'stopped' ? display.reason || 'Current connection details could not be confirmed.' : '')
   const oldUnknown = snapshot?.state === 'unknown'
   const oldRunning = Boolean(admission && !oldUnknown)
-  const currentCode = connection?.current && display?.state === 'succeeded' && !reading.error
+  const currentCode = connection?.current && display?.state === 'succeeded' && !displayIssue
   return <>
     <header className="performance-header phone-connection__header"><div className="performance-title"><ThemeObjectPhoneIcon size={18} /><h2>{name}</h2></div>
       <button type="button" className="performance-icon-button" data-toolkit-close aria-label={`Close ${name}`} onClick={close}><ThemeActionCloseIcon size={15} /></button></header>
@@ -89,7 +90,7 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
           <details className="phone-connection__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={connection.url} onFocus={event => event.target.select()} /></details>
         </> : <>
           <div className="phone-connection__placeholder"><ThemeObjectConnectionCodeIcon size={48} strokeWidth={1.2} aria-hidden="true" /></div>
-          <p className="phone-connection__scan">{evaluating || reading.pending || refreshing ? 'Preparing your connection code…' : 'Scan a code to open AgentMux'}</p>
+          <p className="phone-connection__scan">{evaluating || reading.pending || refreshing ? 'Preparing your connection code…' : 'Connection code is not available yet'}</p>
           {!(evaluating || reading.pending || refreshing) ? <button type="button" className="primary-button phone-connection__generate" disabled={!canEvaluate} onClick={() => void refresh()}><ThemeActionRefreshIcon size={15} /> Refresh connection</button> : null}
         </>}
         {notice ? <p className="phone-connection__feedback" role="status">{notice}</p> : null}
