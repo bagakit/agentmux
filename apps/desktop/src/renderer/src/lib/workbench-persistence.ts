@@ -425,7 +425,8 @@ export function persistedSessionSurfaceIds(
 ): Set<string> {
   return new Set(persisted ? Object.values(persisted.tabs).flatMap((tab) => (
     workbenchSurfaces(hydratePersistedTab(tab)).flatMap((surface) => (
-      sessionSurface(surface) || tab.space && isSessionSurface(surface) ? [surface.sessionId] : []
+      surface.kind === 'agent' ? surface.phase === 'attached' || tab.space ? [surface.sessionId] : []
+        : surface.kind === 'terminal' && surface.phase === 'attached' ? [surface.sessionId] : []
     ))
   )) : [])
 }
@@ -446,15 +447,8 @@ function sessionSurface(surface: WorkbenchSurface): surface is SessionWorkbenchS
  * surface kind would be lost across restart with nothing going red. The switch is exhaustive via
  * `assertUnreachableSurface`, so a 6th kind cannot compile until someone decides — here, in one place
  * — whether it survives. A `Record<kind, boolean>` would not fit: `file` and `agent` are not
- * constant, they depend on `fileSurvives`/`spatiallyBound`, and the launching-session leak below needs a
- * real case, not a table cell.
- *
- * Note the `agent`/`terminal` case: `sessionSurface` is a kind-based predicate whose body also gates
- * on phase, so a LAUNCHING agent/terminal fails it and reaches this classifier even though the caller
- * has narrowed the static type to file|launcher|browser. Taking the full `WorkbenchSurface` here (not
- * the narrowed remainder) makes that runtime leak an explicit, handled case instead of an
- * `assertUnreachableSurface` throw — a launching view has no run to keep, so it is dropped, exactly as
- * before this was made exhaustive.
+ * constant: they depend on `fileSurvives`/`spatiallyBound`. A launching Terminal owns a durable
+ * Region before its Run is confirmed; retaining that definition never authorizes another Start.
  */
 function persistedSurfaceSurvives(
   surface: WorkbenchSurface,
@@ -464,7 +458,7 @@ function persistedSurfaceSurvives(
     case 'agent':
       return ctx.spatiallyBound === true
     case 'terminal':
-      return false
+      return true
     case 'launcher':
       // Project launchers own durable Region identities and unsent inputs just like Topic launchers.
       return true

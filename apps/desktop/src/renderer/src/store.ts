@@ -35,7 +35,7 @@ import { categoriesFromSpatial } from '../../shared/topic-categories'
 import {DesktopSpatialPersistence,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial,sameSpatialValue} from './lib/desktop-spatial-state'
 import { acknowledgedNameProjection, projectedNameRevision } from './lib/name-authority'
 import type { AgentMuxDisplayLabel, AgentMuxNameTarget, AgentMuxDisplayLabelResult } from '@agentmux/core/spatial-graph'
-import { displayLabel } from '@agentmux/core/spatial-graph'
+import { displayLabel, nameTargetKey } from '@agentmux/core/spatial-graph'
 import { createSurveyBrowser } from './lib/survey-browser-creation'
 import { isToolkitRequest } from '@agentmux/core/control'
 import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
@@ -2905,7 +2905,15 @@ function partializeAppState(state: AppState): PersistedAppState {
     restoredWorkbench: projectPersistedWorkbench({ tabs, layouts })
   }
   if(coreSpatialPersistence?.ready) { delete projection.restoredWorkbench;delete projection.spaceZoneBindings;delete projection.projectGroups }
-  if (state.nameAuthorityRevision > 0) { delete projection.agentNames; delete projection.surveyExplorationNames }
+  if (state.nameAuthorityRevision > 0) {
+    // A name document revision confirms its exact targets, not an unrelated startup handoff.
+    projection.agentNames = Object.fromEntries(Object.entries(projection.agentNames ?? {})
+      .filter(([id]) => !Object.hasOwn(state.nameLabels, nameTargetKey({ kind: 'agent-session', id }))))
+    projection.surveyExplorationNames = Object.fromEntries(Object.entries(projection.surveyExplorationNames ?? {})
+      .filter(([id]) => !Object.hasOwn(state.nameLabels, nameTargetKey({ kind: 'zone', id }))))
+    if (!Object.keys(projection.agentNames).length) delete projection.agentNames
+    if (!Object.keys(projection.surveyExplorationNames).length) delete projection.surveyExplorationNames
+  }
   previousCoreSpatialReady=Boolean(coreSpatialPersistence?.ready)
   previousPersistedInputs = inputs
   previousPersistedProjection = projection
@@ -2927,6 +2935,14 @@ function applyNameAcknowledgement(saved: import('@agentmux/core/spatial-graph').
     ? { operationId: ack.operationId, target: ack.target, message: ack.issue ?? 'The name was applied; its disk confirmation is unknown.' }
     : ack?.diskDurability === 'confirmed' && ack.operationId === current.nameSaveUnconfirmed?.operationId ? null : current.nameSaveUnconfirmed
   let tabs = current.tabs
+  if (names) {
+    names.agentNames = { ...current.agentNames, ...names.agentNames }
+    names.surveyExplorationNames = { ...current.surveyExplorationNames, ...names.surveyExplorationNames }
+    for (const label of Object.values(names.nameLabels)) if (label.value === null) {
+      if (label.target.kind === 'agent-session') delete names.agentNames[label.target.id]
+      if (label.target.kind === 'zone') delete names.surveyExplorationNames[label.target.id]
+    }
+  }
   for (const label of Object.values(names?.nameLabels ?? {})) {
     if (label.target.kind !== 'tab' || !tabs[label.target.id]) continue
     const tab = tabs[label.target.id]!, renamed = renameWorkbenchTab(tab, label.value)
@@ -3343,8 +3359,7 @@ export async function applyNotesStorageSnapshot(snapshot: NotesStorageSnapshot):
       if (fromKey !== toKey || change.from.workspacePath !== change.to.workspacePath) { advanceDocumentLifetime(fromKey); if (toKey !== fromKey) advanceDocumentLifetime(toKey) }
     }
     useAppStore.setState(next)
-    try { await reobserveNotesStorageResources(next, snapshot.resourceChanges, useAppStore.getState) }
-    catch (error) { useAppStore.getState().reportError(new Error('The original Note moved and your draft is kept. File observation is unconfirmed; reopen this same Note to reconnect it. ' + presentError(error))) }
+    await reobserveNotesStorageResources(next, snapshot.resourceChanges, useAppStore.getState)
   }
 }
 
@@ -3666,7 +3681,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   setRecallSidebarCollapsed(recallSidebarCollapsed) { set({ recallSidebarCollapsed }) },
   setRecallSidebarWidth(width) { set({ recallSidebarWidth: clampSurveySidebarWidth(width) }); void saveWorkbenchSelection(false) },
   setRecallNotebook(notebookId, noteId = null) { set({ recallNotebookId: notebookId, recallNoteId: noteId }) },
-  async refreshNotesStorage() { await applyNotesStorageSnapshot(await api.notesStorage.inspect()) },
+  async refreshNotesStorage() {
+    try { await applyNotesStorageSnapshot(await api.notesStorage.inspect()) }
+    catch (error) { get().reportError(new Error('The original Note and draft are kept. File observation is unconfirmed; reopen this same Note to reconnect it. ' + presentError(error))) }
+  },
   surveyZoneSelection: null,
   surveyCollectedZones: {},
   surveyExplorationNames: {},
@@ -3800,10 +3818,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const pendingSessionEvents = sessionMembershipEventBuffer()
     const pendingBrowserEvents: BrowserEvent[] = []
     let booting = true
+    let observing = true
     let pendingNotesStorage: NotesStorageSnapshot | null = null
     const disposeNotesStorage = api.notesStorage.onChange(snapshot => {
-      if (booting) pendingNotesStorage = snapshot
-      else void applyNotesStorageSnapshot(snapshot).catch(error => get().reportError(new Error('Notes directory view could not reconnect. Your original workface and drafts are kept; refresh the Notes directory in Settings. ' + presentError(error))))
+      pendingNotesStorage = snapshot
+      if (!booting) void applyNotesStorageSnapshot(snapshot).catch(error => {
+        if (observing) get().reportError(new Error('Notes directory view could not reconnect. Your original workface and drafts are kept; refresh the Notes directory in Settings. ' + presentError(error)))
+      })
     })
     const disposeSessions = api.sessions.onEvent((event) => {
       if (booting) {
@@ -3833,6 +3854,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     runtimeSubscriptionCount += 4
     const disposeRuntimeSubscriptions = (): void => {
+      observing = false
       disposeCoreSpatial?.();disposeCoreSpatial=null
       if (runtimeSubscriptionCount === 0) return
       runtimeSubscriptionCount -= 4
@@ -3901,203 +3923,24 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // Workbench and an already-running Agent remain usable. Keep those failures scoped to a visible
       // startup notice instead of letting Promise.all turn them into a full-window connection error.
       const configBeforeRead = get().config
-      const [configResult, initialSnapshotResult, providerCatalogResult, demandResult] = await Promise.allSettled([
-        api.config.get(),
-        api.sessions.snapshot(),
-        api.providers.list({ observation: true }),
-        api.demands.list()
-      ])
-      if (configResult.status === 'rejected') throw configResult.reason
-      const avatarHandoff = await handoffSpaceIcons(get().config !== configBeforeRead && get().config !== null ? get().config! : configResult.value)
-      configResult.value = avatarHandoff.config
-      if (initialSnapshotResult.status === 'fulfilled') set({
-        environmentWarning: initialSnapshotResult.value.environmentWarning ?? null,
-        runtimeOwnershipWarnings: initialSnapshotResult.value.runtimeOwnershipWarnings ?? [],
-        runtimeEndpointWarnings: initialSnapshotResult.value.runtimeEndpointWarnings ?? []
-      })
-      if (providerCatalogResult.status === 'fulfilled') set(state => ({ runtimeEndpointWarnings: runtimeEndpointWarningsAfterMetadataRead(
-        state.runtimeEndpointWarnings, 'Reading Provider catalog', providerCatalogResult.value.warnings) }))
-      // 本机 home 从快照里学（渲染层没有 process/os）。拿不到就保留旧值——不缩写好过按空串猜边界。
-      if (initialSnapshotResult.status === 'fulfilled' && initialSnapshotResult.value.localHome !== undefined) {
-        set({ localHome: initialSnapshotResult.value.localHome })
-      }
-      const startupWarnings: string[] = avatarHandoff.warning ? [avatarHandoff.warning] : []
-      let emptySessionSnapshotWarning: string | null = null
-      let missingRuntimeReferenceIds: string[] | null = null
-      let snapshotFailureMessage: string | undefined
-      let providerCatalogWarning: string | undefined
-      let snapshot = initialSnapshotResult.status === 'fulfilled'
-        ? startupSnapshotForSavedReferences(initialSnapshotResult.value, get().restoredWorkbench?.tabs ?? {}, configResult.value).snapshot
-        : emptyRuntimeSnapshot()
-      if (providerCatalogResult.status === 'fulfilled') snapshot = { ...snapshot, runtimeEndpointWarnings: runtimeEndpointWarningsAfterMetadataRead(
-        snapshot.runtimeEndpointWarnings, 'Reading Provider catalog', providerCatalogResult.value.warnings) }
-      let snapshotVerified = initialSnapshotResult.status === 'fulfilled'
-      if (initialSnapshotResult.status === 'rejected') {
-        snapshotFailureMessage = startupWorkflowWarning(
-          'Runtime Session snapshot',
-          initialSnapshotResult.reason,
-          'The saved Workbench remains visible; Session status will reconcile when the Runtime is available.'
-        )
-        emptySessionSnapshotWarning = snapshotFailureMessage
-      }
-      const providerCatalog = providerCatalogResult.status === 'fulfilled'
-        ? providerCatalogResult.value.catalog
-        : []
-      if (providerCatalogResult.status === 'rejected') {
-        providerCatalogWarning = startupWorkflowWarning(
-          'Provider catalog lookup',
-          providerCatalogResult.reason,
-          'Existing Sessions remain usable; the original Provider directory will be checked automatically when its owner is available.'
-        )
-        startupWarnings.push(providerCatalogWarning)
-      }
-      if (demandResult.status === 'rejected') {
-        startupWarnings.push(startupWorkflowWarning(
-          'Demand filesystem snapshot',
-          demandResult.reason,
-          'The saved Board Demand projection remains visible; retry the Demand store when the filesystem is available.'
-        ))
-      } else if (demandResult.value.length > 0) {
-        set({ demands: Object.fromEntries(demandResult.value.map((demand) => [demand.id, demandRecordFromFilesystem(demand)])) })
-      }
-      const readCanonicalSnapshot = async (step: string): Promise<RuntimeSnapshot | null> => {
-        try {
-          const next = await api.sessions.snapshot()
-          snapshotVerified = true
-          return startupSnapshotForSavedReferences(next, get().restoredWorkbench?.tabs ?? {}, get().config ?? configResult.value).snapshot
-        } catch (error) {
-          snapshotVerified = false
-          startupWarnings.push(startupWorkflowWarning(
-            step,
-            error,
-            'The saved Workbench remains visible; the Runtime will reconcile it on a later canonical snapshot.'
-          ))
-          return null
-        }
-      }
+      const demandsBeforeRead = get().demands
+      // Optional readers start independently; only durable projection/config owns publication.
+      const providerRead = api.providers.list({ observation: true }).then(
+        value => ({ status: 'fulfilled', value }) as const,
+        reason => ({ status: 'rejected', reason }) as const)
+      const demandRead = api.demands.list().then(
+        value => ({ status: 'fulfilled', value }) as const,
+        reason => ({ status: 'rejected', reason }) as const)
+      const configRead = await api.config.get()
+      const avatarHandoff = await handoffSpaceIcons(get().config !== configBeforeRead && get().config !== null ? get().config! : configRead)
       const persistedSessionIds = persistedSessionSurfaceIds(get().restoredWorkbench)
-      // An empty Runtime snapshot cannot distinguish "there are no Sessions" from a freshly
-      // connected/incorrectly rooted store. If the persisted Workbench still names Session Regions
-      // (Agent OR Terminal), keep those Regions as pending projections until Core returns a candidate
-      // or an explicit retirement. Treating this one response as authoritative is what made a restart
-      // erase the user's layout when the GUI and Runtime addressed different userData roots — and a
-      // pure-Terminal View was hit worst, because the ctxmux daemon outlives the app, so its runs
-      // reappear a beat later, but this guard would already have judged the empty snapshot final.
-      if (
-        snapshotVerified &&
-        persistedSessionIds.size > 0 &&
-        snapshot.sessions.length === 0 &&
-        snapshot.recoveryCandidates.length === 0
-      ) {
-        snapshotVerified = false
-        emptySessionSnapshotWarning = 'Runtime Session snapshot returned no Session facts. The saved Session Regions remain visible until a canonical snapshot confirms their identity.'
-      }
-      const recoveryFailures: SessionSnapshot[] = []
-      const retiredAgentIds = new Set<string>()
-      let recovered = false
-      // Both retained ended Runs and absent Runs keep durable Session identity. Only fresh native
-      // idle evidence authorizes cold-start resume; healthy Runs are left to ordinary attachment.
-      const projectedAgents = snapshot.sessions.filter((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent')
-      const startupSessionsById = new Map(snapshot.sessions.map((session) => [session.id, session]))
-      const recoveryCandidates: AgentSessionRecoveryCandidate[] = (snapshotVerified ? [
-        ...snapshot.recoveryCandidates,
-        ...projectedAgents.map((session) => ({ ...session, agentSessionId: session.id, run: session.control.run }))
-      ] : []).filter((candidate) => persistedSessionIds.has(candidate.agentSessionId))
-      for (const [index, candidate] of recoveryCandidates.entries()) {
-        set({ startupProgress: { step: 'sessions', current: index + 1, total: recoveryCandidates.length } })
-        const projected = startupSessionsById.get(candidate.agentSessionId)
-        const decision = agentStartupRecoveryDecision({
-          runState: projected?.processState ?? 'missing',
-          ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
-          canonical: snapshotVerified && !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId),
-          now: Date.now()
-        })
-        if (deferScratchConversationRecovery(get().restoredWorkbench?.tabs ?? {},
-          get().config !== configBeforeRead && get().config !== null ? get().config : configResult.value, candidate.agentSessionId, [...get().sessions, ...snapshot.sessions])) {
-          if (!projected) recoveryFailures.push(recoveryCandidateSession(candidate, { kind: 'pending', detail: 'Original Mote settings are being confirmed after its workface restores.' }))
-          continue
-        }
-        if (decision.kind !== 'resume') {
-          if (!projected) recoveryFailures.push(recoveryCandidateSession(candidate, { kind: 'pending', detail: agentStartupRecoveryDetail(decision) }))
-          continue
-        }
-        try {
-          const recovery = await api.sessions.recover({
-            kind: 'agent',
-            hostId: candidate.hostId,
-            agentSessionId: candidate.agentSessionId,
-            run: { ...candidate.run }
-          }, candidate.workspacePath)
-          if (recovery.kind === 'reattachable' || recovery.kind === 'resumed') {
-            recovered = true
-            if (recovery.advisory && recovery.session.id === candidate.agentSessionId && recovery.session.control.hostId === candidate.hostId)
-              startupWarnings.push(recovery.advisory)
-          } else if (recovery.kind === 'unavailable' || recovery.kind === 'conflict') {
-            recoveryFailures.push(projected ? {
-              ...projected,
-              status: { ...projected.status, state: 'error', ...continuityStatusFields(recovery) }
-            } : recoveryCandidateSession(candidate, recovery))
-          } else if (recovery.kind === 'retired') {
-            retiredAgentIds.add(candidate.agentSessionId)
-            // Retired means an actor deliberately ended this Agent, so the Region must NOT be retained
-            // — the same judgement the manual path makes (`recoverSession` removes the projection on
-            // `retired`), and the reason the empty-snapshot guard above names "an explicit retirement"
-            // as legitimate grounds to stop retaining. What was missing is the *telling*: unavailable
-            // and conflict both leave a visible error skeleton, while a retirement removed the Region
-            // in total silence, so a Region the user left behind was simply gone with `error` null.
-            // Say it instead. Deleting this arm turns the startup notice assertion red, not a tab
-            // count — the tab is correctly absent either way.
-            startupWarnings.push(
-              `The Agent in a saved Region was retired and could not be restored (${candidate.label}). Its Region was closed; start a new Agent to continue there.`
-            )
-          }
-        } catch (error) {
-          // A rejected recovery call is a failed workflow step, not proof that the Agent is dead. Do
-          // not invent a continuity reason; retain its persisted Region through the unverified
-          // projection path and leave the exact cause in the service-window notice.
-          snapshotVerified = false
-          if (!projected) recoveryFailures.push(recoveryCandidateSession(candidate, {
-            kind: 'pending', detail: 'Automatic recovery did not complete. Existing history and your draft are kept; retry Resume.'
-          }))
-          startupWarnings.push(startupWorkflowWarning(
-            'Automatic Agent recovery',
-            error,
-            'The original Region remains visible; retry recovery after the Runtime is reachable.'
-          ))
-        }
-      }
-      if (recovered) {
-        const refreshedSnapshot = await readCanonicalSnapshot('Runtime Session snapshot after recovery')
-        if (refreshedSnapshot) snapshot = refreshedSnapshot
-      }
-      // A previous process's unclaimed View marker is not a current Stop intent.
-      // Keep observed Runs discoverable; only an exact, current cancellation owns cleanup.
-      // One compensating read keeps the existing quiet-overflow behavior. Sustained
-      // Runtime traffic cannot hold the original durable workface behind another read.
-      if (pendingSessionEvents.overflowed) {
-        resetSessionMembershipRead(pendingSessionEvents)
-        const refreshedSnapshot = await readCanonicalSnapshot('Runtime Session snapshot during startup reconciliation')
-        if (refreshedSnapshot) snapshot = refreshedSnapshot
-      }
-      // A canonical read already adopted during startup can finish this producer before publication.
-      // An incomplete read keeps the original scope for the existing membership resync below.
       const persistedState = get()
       // Main may publish while get or Session recovery is awaiting. An older read must not roll back
       // that committed fact; use the existing Store identity, with no second configuration cache.
       const config = persistedState.config !== configBeforeRead && persistedState.config !== null
-        ? persistedState.config : configResult.value
-      if (emptySessionSnapshotWarning && snapshotVerified && !pendingSessionEvents.overflowed && startupSnapshotConfirmsSessions(
-        snapshot, [...persistedSessionIds], persistedState.restoredWorkbench?.tabs ?? {}, config
-      )) {
-        emptySessionSnapshotWarning = null
-      }
+        ? persistedState.config : avatarHandoff.config
       set({ startupProgress: { step: 'layout' } })
-      const visibleSessions = [...new Map([
-        ...snapshot.sessions,
-        ...recoveryFailures.filter((pending) => !snapshot.sessions.some((current) => (
-          current.id === pending.id && (current.processState === 'running' || !sessionOwnsControl(current, pending.control))
-        )))
-      ].filter((session) => !retiredAgentIds.has(session.id)).map((session) => [session.id, session])).values()]
+      const visibleSessions = persistedState.sessions
       const restoredUi = restorePersistedUiState(config, persistedState)
       const workbench = restorePersistedWorkbench({
         config,
@@ -4105,27 +3948,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         persisted: persistedState.restoredWorkbench,
         preserveEntityIds:coreSpatialPersistence?.current ? new Set(coreSpatialPersistence.current.graph.tabs.map(tab=>tab.tabId)) : undefined,
         createTabGroupId: newTabGroupId,
-        retiredSessionIds: retiredAgentIds
+        retiredSessionIds: new Set()
       })
       const observedSessionIds = new Set(visibleSessions.map(session => session.id))
-      let unobservedSavedSessions = [...persistedSessionIds].filter(id => !retiredAgentIds.has(id) && !observedSessionIds.has(id)
+      const unobservedSavedSessions = [...persistedSessionIds].filter(id => !observedSessionIds.has(id)
         && hasAttachedSessionView(workbench.tabs, id))
-      if (snapshotVerified && !emptySessionSnapshotWarning && unobservedSavedSessions.length > 0) {
-        try {
-          const observed = await api.sessions.historySources({ observation: true })
-          snapshot = { ...snapshot, runtimeEndpointWarnings: runtimeEndpointWarningsAfterMetadataRead(
-            snapshot.runtimeEndpointWarnings, 'Reading retained History sources', observed.warnings) }
-          const retiredReferences = retiredHistoryReferenceIds(observed.sources, workbench.tabs, config)
-          unobservedSavedSessions = unobservedSavedSessions.filter(id => !retiredReferences.has(id))
-        } catch (error) {
-          startupWarnings.push(startupWorkflowWarning('Saved conversation metadata', error,
-            'The original Regions remain visible. Their current Session state is unconfirmed; retry the metadata read.'))
-        }
-        if (unobservedSavedSessions.length > 0) {
-          missingRuntimeReferenceIds = unobservedSavedSessions
-          emptySessionSnapshotWarning = missingSavedRuntimeFactsNotice(unobservedSavedSessions.length)
-        }
-      }
+      const emptySessionSnapshotWarning = unobservedSavedSessions.length ? missingSavedRuntimeFactsNotice(unobservedSavedSessions.length) : null
       const restoredAgentFocus = sanitizeAgentFocus(
         restoreAgentFocus(persistedState.agentFocus),
         visibleSessions,
@@ -4138,7 +3966,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             scratchTopicsForWorkspace(persistedState.scratchTopicSnapshots, workspace)) : null
         },
         new Set([...persistedSessionIds].filter((id) => (
-          !retiredAgentIds.has(id) && hasAttachedSessionView(workbench.tabs, id)
+          hasAttachedSessionView(workbench.tabs, id)
         )))
       )
       // 抢救过的持久化 Tab 必须响亮：静默修好等于用户下次发现某一格不见了却无从查证。
@@ -4148,21 +3976,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ? [`Saved workspace state could not be restored: ${presentError(persistWarning)}`]
           : []),
         ...(repairNotice ? [repairNotice] : []),
-        ...startupWarnings
+        ...(avatarHandoff.warning ? [avatarHandoff.warning] : [])
       ].join(' ')
       const startupError = [otherStartupError, emptySessionSnapshotWarning].filter(Boolean).join(' ')
       set({
         restoredWorkbench: null,
         config,
-        providerCatalog,
-        sessions: projectRuntimeEndpointSessions(visibleSessions, snapshot.runtimeEndpointWarnings),
-        sessionNameMetadata: snapshot.sessionNameMetadataWarning ? get().sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], get().sessionNameMetadata),
-        sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null,
-        recoveryCandidates: snapshot.recoveryCandidates,
-        timelines: snapshot.timelines,
-        runtimeOwnershipWarnings: snapshotVerified ? snapshot.runtimeOwnershipWarnings ?? [] : get().runtimeOwnershipWarnings,
-        runtimeEndpointWarnings: snapshotVerified ? snapshot.runtimeEndpointWarnings ?? [] : get().runtimeEndpointWarnings,
-        environmentWarning: snapshotVerified ? snapshot.environmentWarning ?? null : get().environmentWarning,
+        sessions: visibleSessions,
         pendingAgentLaunches: {},
         agentFocus: restoredAgentFocus,
         ...restoredUi,
@@ -4173,32 +3993,53 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         lastError: startupError || null,
         errorNoticeContext: startupError ? {
           kind: 'indeterminate',
-          summary: startupNoticeSummary(otherStartupError || null, emptySessionSnapshotWarning ? (missingRuntimeReferenceIds ?? [...persistedSessionIds]).length : 0),
-          ...(providerCatalogWarning ? { startupProviderCatalog: { warningMessage: providerCatalogWarning } } : {}),
+          summary: startupNoticeSummary(otherStartupError || null, unobservedSavedSessions.length),
           ...(emptySessionSnapshotWarning ? { startupSessionSnapshot: {
-            sessionIds: missingRuntimeReferenceIds ?? [...persistedSessionIds],
+            sessionIds: unobservedSavedSessions,
             remainingMessage: otherStartupError || null,
-            ...(snapshotFailureMessage ? { failureMessage: snapshotFailureMessage } : {})
           } } : {})
         } : null,
         errorDismissed: false
       })
-      // Resource/draft rebinding publishes synchronously; reconnecting a file watch must
-      // neither hold healthy Session publication nor trap a later directory receipt in boot.
-      try {
-        const observed = pendingNotesStorage ?? await api.notesStorage.inspect()
-        const latest = pendingNotesStorage ?? observed
-        pendingNotesStorage = null
-        void applyNotesStorageSnapshot(latest).catch(error => get().reportError(new Error('Notes directory view could not reconnect. Your original workface and drafts are kept; refresh the Notes directory in Settings. ' + presentError(error))))
-      }
-      catch (error) { get().reportError(new Error('Notes directory view could not reconnect. Your original workface and drafts are kept; refresh the Notes directory in Settings. ' + presentError(error))) }
-      // Publication releases the boot buffer before optional spatial/browser work awaits.
-      // Latest replacement facts survive a noisy neighbor; truncated timelines use Core.
+      // Publication releases the boot buffer before any optional reader can wait.
       booting = false
-      if (pendingNotesStorage) {
-        const latest = pendingNotesStorage; pendingNotesStorage = null
-        void applyNotesStorageSnapshot(latest).catch(error => get().reportError(new Error('Notes directory view could not reconnect. Your original workface and drafts are kept; refresh the Notes directory in Settings. ' + presentError(error))))
-      }
+      void providerRead.then(result => {
+        if (!observing) return
+        if (result.status === 'fulfilled') set(state => ({ providerCatalog: result.value.catalog,
+          runtimeEndpointWarnings: runtimeEndpointWarningsAfterMetadataRead(state.runtimeEndpointWarnings,
+            'Reading Provider catalog', result.value.warnings) }))
+        else {
+          const warning = startupWorkflowWarning('Provider catalog lookup', result.reason,
+            'Existing Sessions remain usable; the original Provider directory will be checked automatically when its owner is available.')
+          set(state => {
+            const retained = state.errorNoticeContext
+            const message = [state.error, warning].filter(Boolean).join(' ')
+            return { error: message, lastError: message, errorDismissed: false, errorNoticeContext: {
+              ...retained, kind: retained?.kind ?? 'indeterminate', summary: retained?.summary ?? startupNoticeSummary(message),
+              startupProviderCatalog: { warningMessage: warning },
+              ...(retained?.startupSessionSnapshot ? { startupSessionSnapshot: { ...retained.startupSessionSnapshot,
+                remainingMessage: [retained.startupSessionSnapshot.remainingMessage, warning].filter(Boolean).join(' ') } } : {})
+            } }
+          })
+          startSessionMembershipResync(undefined, { reportFailure: false })
+        }
+      })
+      void demandRead.then(result => {
+        if (!observing) return
+        if (result.status === 'rejected') get().reportError(new Error(startupWorkflowWarning('Demand filesystem snapshot', result.reason,
+          'The saved Board Demand projection remains visible; retry the Demand store when the filesystem is available.')))
+        else set(state => ({ demands: { ...state.demands, ...Object.fromEntries(result.value
+          .filter(demand => state.demands[demand.id] === demandsBeforeRead[demand.id])
+          .map(demand => [demand.id, demandRecordFromFilesystem(demand, state.demands[demand.id])])) } }))
+      })
+      const queuedNotesStorage = pendingNotesStorage; pendingNotesStorage = null
+      void (queuedNotesStorage ? Promise.resolve(queuedNotesStorage) : api.notesStorage.inspect())
+        .then(snapshot => {
+          if (!observing) return
+          const current = pendingNotesStorage ?? snapshot; pendingNotesStorage = null
+          return applyNotesStorageSnapshot(current)
+        })
+        .catch(error => { if (observing) get().reportError(new Error('Notes directory view could not reconnect. Your original workface and drafts are kept; refresh the Notes directory in Settings. ' + presentError(error))) })
       for (const pending of drainSessionMembershipEvents(pendingSessionEvents)) get().applyEvent(pending.event)
       for (const sessionId of pendingSessionEvents.timelineGaps) void get().resyncTimeline(sessionId)
       for (const { hostId, warning, observationStep } of pendingSessionEvents.endpointWarnings.values()) {
@@ -4210,10 +4051,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // Catalog observations may finish after the initial Runtime cut. Read their
       // current diagnostics through the same reader after publishing the workface;
       // a successful catalog does not broaden recovery authorization.
-      startSessionMembershipResync(undefined, { reportFailure: false, recoverSavedAgents: !snapshotVerified || Boolean(emptySessionSnapshotWarning) })
-      // The Runtime and its Agents remain usable; only the optional persisted presentation projection
-      // was unavailable. Open the fence after the fallback state is installed so that this warning
-      // itself cannot serialize the empty fallback over the user's last good record.
+      startSessionMembershipResync(undefined, { reportFailure: false, recoverSavedAgents: true })
+      if (!persistWarning) openPersistWrites()
+      // Keep observing and saving through the original Core spatial owner. A failed first
+      // read retains the original preference projection until Core can confirm its document.
       if(coreSpatialPersistence) {
         const spatial=coreSpatialPersistence
         const capture=()=> !get().config && spatial.current
@@ -4255,7 +4096,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           set({}) // Rewrite UI preferences after the Core ACK, removing the old entity snapshot.
         } catch(error) {get().reportWorkbenchSaveFailure(error)}
       }
-      if (!persistWarning) openPersistWrites()
       // Ordinary startup ensures the original primary identity once. Metadata failure is advisory;
       // it cannot hold up restored workfaces or reconcile a healthy Session into a replacement.
       if (config.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) {
@@ -8546,6 +8386,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tabId)) throw new Error('The View is closing')
     const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
     const sessionId = crypto.randomUUID()
+    const request: TerminalLaunchInput = {
+      hostId: workspace.hostId,
+      workspacePath: workspacePath ?? workspace.path,
+      createOperationId: crypto.randomUUID()
+    }
     const pendingSurface: TerminalWorkbenchSurface = {
       regionId,
       kind: 'terminal',
@@ -8563,12 +8408,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         [displayWorkspaceId!]: nextLayout
       }
     }))
+    let creationObserved = false
     try {
-      const session = await api.sessions.launchTerminal({
-        hostId: workspace.hostId,
-        workspacePath: workspacePath ?? workspace.path,
-        createOperationId: crypto.randomUUID()
-      })
+      const session = await api.sessions.launchTerminal(request)
+      creationObserved = true
       const launchOwner = findWorkbenchRegion(get().tabs, regionId)
       if (
         !ownsSessionLaunch(launchOwner?.surface, 'terminal', sessionId) ||
@@ -8601,9 +8444,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       })
     } catch (error) {
       if (!ownsSessionLaunch(findWorkbenchRegion(get().tabs, regionId)?.surface, 'terminal', sessionId)) return
+      const ownerFailure = sessionLaunchFailure(error)
+      if (creationObserved || ownerFailure.controlFailure.disposition !== 'not_applied') {
+        const retained = Object.assign(new Error(`${presentError(error)} Original Terminal creation ${request.createOperationId}, Region ${regionId}. Keep this Region and confirm the original request without starting again.`),
+          { code: ownerFailure.code,
+            createOperationId: request.createOperationId,
+            controlFailure: ownerFailure.controlFailure.disposition === 'unknown' ? ownerFailure.controlFailure
+              : { disposition: 'unknown' as const, confirmedInputBytes: null } })
+        get().reportError(retained, { kind: 'indeterminate', lifecycle: { step: 'launch', regionId, tabId } })
+        throw retained
+      }
       set((current) => reduceSessionLaunchFailed(current, regionId, 'terminal', sessionId,
         launcherSurface?.kind === 'launcher' ? launcherSurface : undefined))
-      get().reportError(error)
+      get().reportError(error, { kind: 'indeterminate', lifecycle: { step: 'launch', regionId, tabId } })
       throw error
     }
   },
