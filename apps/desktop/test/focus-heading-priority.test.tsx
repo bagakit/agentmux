@@ -41,7 +41,7 @@ it('keeps identity, location, activity and status readable before a long optiona
     // Load the consumed stylesheet, so the regression assertion exercises Chromium flex sizing.
     await writeFile(join(directory, 'index.html'), `<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="styles.css"><div class="global-focus-surface"><div class="global-focus-main">${html}</div></div>`)
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-    const processResult = await runProbeProcess(require('electron'), [join(desktop, 'scripts/fixtures/focus-heading-priority/main.cjs'), directory], {
+    const processResult = await runProbeProcess(require('electron'), [join(desktop, 'test/fixtures/focus-heading-priority/main.cjs'), directory], {
       cwd: desktop, env, timeoutMs: 30_000
     })
     probePid = processResult.originalPid
