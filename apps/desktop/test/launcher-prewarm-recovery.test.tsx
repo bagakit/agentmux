@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -15,8 +16,8 @@ const dom = composerDOM(), launcherInitial = useLauncherState.getState()
 const original = useAppStore.getState()
 const shell = (id = 'same-original-run') => ({ ...composerSession(id), kind: 'terminal' as const, providerId: null,
   control: { kind: 'terminal' as const, hostId: 'local', runId: id, run: { runId: id } } })
-const unknown = () => Object.assign(new Error('The original shell receipt was lost.'), {
-  code: 'CTXMUX_IO', detail: 'start receipt unavailable', controlFailure: { disposition: 'unknown', confirmedInputBytes: null }
+const unknown = (code = 'CTXMUX_IO') => Object.assign(new Error('The original shell receipt was lost.'), {
+  code, detail: 'start receipt unavailable', controlFailure: { disposition: 'unknown', confirmedInputBytes: null }
 })
 beforeEach(() => {
   const tab = createWorkbenchTab('launcher', { regionId: 'input', kind: 'launcher', workspaceId: 'workspace' })
@@ -66,10 +67,15 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
     expect(dom.container.querySelector('.launcher-terminal-recovery-actions button')?.hasAttribute('disabled')).toBe(false)
   })
 
-  it('Open Terminal confirms the same failed creation before attaching its original Run', async () => {
-    const launch = vi.spyOn(api.sessions, 'launchTerminal').mockRejectedValueOnce(unknown()).mockResolvedValue(shell() as never)
+  it.each(['CTXMUX_IO', 'CONTROL_CANCELLED'])('Open Terminal confirms the same %s creation before attaching its original Run', async code => {
+    const launch = vi.spyOn(api.sessions, 'launchTerminal').mockRejectedValueOnce(unknown(code)).mockResolvedValue(shell() as never)
     vi.spyOn(api.sessions, 'refresh').mockResolvedValue(shell() as never)
     await render()
+    expect(launch).toHaveBeenCalledOnce()
+    expect(useAppStore.getState().warmTerminal?.creation).toMatchObject({
+      request: { createOperationId: expect.any(String) }, issue: { code, controlFailure: { disposition: 'unknown', confirmedInputBytes: null } }
+    })
+    expect(launch.mock.calls[0]![0].createOperationId).not.toBe('')
     await dom.click('.launcher-terminal-recovery-actions button:last-child')
     expect(launch).toHaveBeenCalledTimes(2)
     expect(launch.mock.calls[1]![0]).toEqual(launch.mock.calls[0]![0])
@@ -203,7 +209,7 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
     await render()
     const originalRequest = launch.mock.calls[0]![0]
     const restored = (hostId: string) => ({ type: 'core' as const, hostId, event: { type: 'connection-state' as const, state: 'restored' as const,
-      evidence: { source: 'run-process' as const, observedAt: 10 } }, endpointWarning: null })
+      evidence: { source: 'run-process' as const, observedAt: _reshape_fixtureEpoch(0, 0, 10) } }, endpointWarning: null })
     await act(async () => {
       useAppStore.setState({ runtimeEndpointWarnings: [] })
       useAppStore.getState().applyEvent(restored('unrelated-host'))
