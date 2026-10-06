@@ -9,6 +9,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface } from '../src/recovery/device-workface'
 import '../src/mobile.css'
+import '@agentmux/client-ui/styles.css'
 
 // This separate HTML entry is test-only. Product startup never receives this fixture client.
 const listeners = new Set<(event: AgentMuxClientEvent) => void>()
@@ -35,6 +36,7 @@ const attachment = (): AgentMuxRunAttachment => ({ run: { ...session.run, native
 const finite = {
   // Optional public read transport is absent in this bounded terminal SDK fixture.
   subscribeRpc: undefined as AgentMuxHostedClient['subscribeRpc'],
+  forwardRpc: undefined as AgentMuxHostedClient['forwardRpc'],
   // This bounded SDK fixture has no observed public RPC owner; diagnostics remain unknown.
   runtimeOwnerIdentity() { return null },
   runtimeIdentity() { return { hostId: 'local', instanceId: 'private-fixture-runtime', buildIdentity: 'fixture', protocolVersion: 1, processId: null } },
@@ -390,4 +392,12 @@ export async function proveCoveredNativeInputIsPassive() {
  const before=calls.filter(call=>call.method==='writeAgent').length;terminal!.input('covered native input must remain local',true);
  await new Promise(resolve=>setTimeout(resolve,25));assert(calls.filter(call=>call.method==='writeAgent').length===before,'A covering dialog cannot preserve the prior input control intent');
  return {before,after:calls.filter(call=>call.method==='writeAgent').length,readonly:terminal!.textarea?.readOnly};
+}
+
+/** Private display references and native UI adapter flags do not admit Runtime input. */
+export function renderLowFrequencyMobileProof(mote: boolean) {
+ const identity=mote?{name:'Private Mote reference',project:'Private project',mote:{spaceId:'private-mote-reference'}}:null;
+ localStorage.setItem('agentmux-mobile-workface-v1',JSON.stringify({...emptyDeviceWorkface(),selectedSessionId:session.agentSessionId,hostUrl:'',panel:'conversation',presentation:{primary:'focus',showSession:true,showGoalWork:false,identity,profile:null}}));
+ root.render(<MobileApp native client={client} connection={{...connection,issue:'Private metadata observation unavailable. The original terminal remains usable.'}} platform={platform} focusComposer={()=>{const editor=document.querySelector<HTMLElement>('[contenteditable="true"]');editor?.focus();return !!editor}} />);
+ return {referenceOnly:identity,nativeUiAdapterOnly:true,noInputAdmissionClaim:true};
 }
