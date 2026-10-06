@@ -7,6 +7,7 @@ import { invalidateAgentIdleEvidence } from './agent-semantic-state.js'
 import { AgentMuxAgentSessionRegistry } from './agent-session-registry.js'
 import type { AgentMuxAgentSessionStore } from './agent-session-store.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
+import type { AgentCapabilityBinding } from './agent-capability.js'
 import {
   CtxmuxRunAdapter,
   type CtxmuxAdapterRun
@@ -192,9 +193,16 @@ type PromptSubmissionDeps = {
     agentSessionId: string,
     expectedRun: AgentMuxRunRef,
     update: (current: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession,
-    futureIntentId?: string
+    futureIntentId?: string,
+    author?: Readonly<AgentCapabilityBinding>
   ) => Promise<AgentMuxStoredAgentSession>
 }
+
+/** Invocation-local authenticated author; never persisted as a reusable grant. */
+export type AgentPromptInputAuthority = Readonly<{
+  binding: Readonly<AgentCapabilityBinding>
+  assertCurrent(): Promise<void>
+}>
 
 /**
  * Prompt 两阶段提交 owner（f-23q8faabh / T-004）：把 payload → 渲染验证 → submit 的状态机、
@@ -269,7 +277,7 @@ export class AgentPromptSubmissionCoordinator {
   async submitNativeInputPlan(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, submissionId: string, prompt: string,
     condition: AgentPromptCondition, message: AgentPromptMessageContent, execution: AgentPromptExecution,
     prepared: AgentProviderNativePromptInput | undefined, signal?: AbortSignal,
-    assertSession?: (session: AgentMuxAgentSession) => void): Promise<AgentPromptMessageContent> {
+    assertSession?: (session: AgentMuxAgentSession) => void, authority?: AgentPromptInputAuthority): Promise<AgentPromptMessageContent> {
     return await this.deps.store.withPromptSubmission(session.agentSessionId, async () => {
       const current = await this.deps.registry.refresh(session.agentSessionId, session.run)
       const currentRun = await this.deps.kernel.status(run.runId)
@@ -310,6 +318,7 @@ export class AgentPromptSubmissionCoordinator {
       }
       if (!prepared || nativeHandleIdentity !== JSON.stringify(session.nativeHandle ?? null)) throw new AgentMuxError('The original Native input environment changed.', 'AGENT_NATIVE_INPUT_UNCONFIRMED')
       assertScope(current, currentRun)
+      await authority?.assertCurrent()
       await prepared.assertCurrent(signal ?? AbortSignal.timeout(8_000))
       const ownerInstanceId = this.deps.kernel.identity().daemonInstanceId
       const plan = prepared.plan
@@ -323,7 +332,7 @@ export class AgentPromptSubmissionCoordinator {
         }, updatedAt: Math.max(stored.updatedAt, Date.now()) }
         delete next.terminalPromptSubmission
         return next
-      })
+      }, undefined, authority?.binding)
       let dispatched = false
       let receipt: Awaited<ReturnType<AgentProviderNativePromptInput['dispatch']>>
       try {
@@ -331,14 +340,23 @@ export class AgentPromptSubmissionCoordinator {
         // immediately before dispatch. A detached TUI cannot authorize its old peer.
         signal?.throwIfAborted()
         await prepared.assertCurrent(signal ?? AbortSignal.timeout(8_000))
+        await authority?.assertCurrent()
         const dispatchRun = await this.deps.kernel.status(current.run.runId)
         const dispatchSession = await this.deps.registry.refresh(current.agentSessionId, current.run)
-        assertScope(dispatchSession, dispatchRun)
-        const admission = dispatchSession.promptCompletionAdmission
-        if (admission?.transport !== 'native' || admission.submissionId !== submissionId || admission.native.outcome !== 'claimed' ||
-            !isDeepStrictEqual(admission.native.plan, plan)) throw new AgentMuxError('The original Native claim changed before dispatch.', 'STALE_AGENT_SESSION')
-        // No further await separates the latest typed owner facts from the RPC call.
-        // The Provider's expectedTurnId remains the Native actor's atomic guard.
+        const assertDispatch = (stored: AgentMuxAgentSession): void => {
+          assertScope(stored, dispatchRun)
+          const admission = stored.promptCompletionAdmission
+          if (admission?.transport !== 'native' || admission.submissionId !== submissionId || admission.native.outcome !== 'claimed' ||
+              !isDeepStrictEqual(admission.native.plan, plan)) throw new AgentMuxError('The original Native claim changed before dispatch.', 'STALE_AGENT_SESSION')
+        }
+        assertDispatch(dispatchSession)
+        if (authority) await this.deps.updateExactAgentSession(current.agentSessionId, current.run, stored => {
+          assertDispatch(stored)
+          return stored
+        }, undefined, authority.binding)
+        // The final CAS checks author and recipient under one durable metadata
+        // owner. No further await separates this input decision from Native dispatch.
+        // Manual Native input atomically selects idle start or busy append.
         dispatched = true
         receipt = await prepared.dispatch(prompt, submissionId, signal)
       } catch (error) {

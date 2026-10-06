@@ -3,6 +3,7 @@ import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentForkSource } from './agent-fork.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
+import { assertCurrentAgentCapabilityBinding, type AgentCapabilityBinding } from './agent-capability.js'
 import { agentActivityTimelineItem } from './agent-activity-state.js'
 import { createHash } from 'node:crypto'
 import { appendFile, mkdir, open, readFile, readdir, stat, unlink } from 'node:fs/promises'
@@ -137,9 +138,14 @@ export type AgentMuxAgentSessionStore = {
   readHistorySource(agentSessionId: string): Promise<AgentSessionHistoryDescriptor | null>
   readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null>
   listFuturePromptIntents(agentSessionId: string, options?: { afterIntentId?: string; limit?: number }): Promise<AgentMuxFuturePromptPage>
-  /** Metadata and, when supplied, one exact intent change commit under the same Session CAS. */
+  /**
+   * Metadata and an optional exact intent change commit under one Session CAS.
+   * An authenticated author binding, when supplied, must also match the current
+   * author metadata with no author lifecycle reservation under that same owner.
+   * Implementations must reject drift before committing; it is not a grant.
+   */
   compareAndSwapMetadata(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
-    signal?: AbortSignal, future?: AgentMuxSessionFutureChange): Promise<void>
+    signal?: AbortSignal, future?: AgentMuxSessionFutureChange, author?: Readonly<AgentCapabilityBinding>): Promise<void>
   loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]>
   loadRetiredAgentSessions(): Promise<readonly AgentMuxRetiredAgentSession[]>
   /** Read only the original pending reopen correlation, including unavailable correlations. */
@@ -1300,11 +1306,17 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
 
 function nativePromptPlan(value: unknown): import('./types.js').AgentNativePromptInputPlan {
   const plan = record(value, 'native prompt plan')
-  if (plan.kind !== 'native-rpc' || Object.keys(plan).some(key => !['kind', 'protocolId', 'sourceId', 'actorId', 'threadId', 'expectedTurnId'].includes(key))) {
+  if (plan.kind !== 'native-rpc' || Object.keys(plan).some(key => !['kind', 'protocolId', 'sourceId', 'actorId', 'threadId', 'operation', 'expectedTurnId'].includes(key))) {
     throw new AgentMuxError('Invalid native prompt plan.', 'INVALID_AGENT_SESSION_STORE')
   }
-  return { kind: 'native-rpc', protocolId: string(plan.protocolId, 'native protocol contract'), sourceId: string(plan.sourceId, 'native input source'), actorId: string(plan.actorId, 'native input actor'),
-    threadId: string(plan.threadId, 'native input thread'), expectedTurnId: string(plan.expectedTurnId, 'native input expected turn') }
+  const common = { kind: 'native-rpc' as const, protocolId: string(plan.protocolId, 'native protocol contract'), sourceId: string(plan.sourceId, 'native input source'), actorId: string(plan.actorId, 'native input actor'),
+    threadId: string(plan.threadId, 'native input thread') }
+  if (plan.operation === 'start-or-steer') {
+    if (plan.expectedTurnId !== undefined) throw new AgentMuxError('A start-or-steer plan cannot claim an exact turn.', 'INVALID_AGENT_SESSION_STORE')
+    return { ...common, operation: 'start-or-steer' }
+  }
+  if (plan.operation !== undefined && plan.operation !== 'steer') throw new AgentMuxError('Invalid native input operation.', 'INVALID_AGENT_SESSION_STORE')
+  return { ...common, ...(plan.operation === undefined ? {} : { operation: 'steer' as const }), expectedTurnId: string(plan.expectedTurnId, 'native input expected turn') }
 }
 
 /** Public and durable Session facts share the same validation owner. */
@@ -1416,7 +1428,8 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
           const intent = promptInputIntent(admission.intent)
           if (admission.submissionId === undefined || admission.operationId !== admission.submissionId || intent.message === undefined ||
               !['claimed', 'admitted', 'not-applied', 'unknown'].includes(String(native.outcome)) || JSON.stringify(intent.plan) !== JSON.stringify(plan) ||
-              (native.outcome === 'admitted' ? admission.acknowledged !== true || native.turnId !== plan.expectedTurnId : admission.acknowledged === true) ||
+              (native.outcome === 'admitted' ? admission.acknowledged !== true || typeof native.turnId !== 'string' || !native.turnId ||
+                plan.operation !== 'start-or-steer' && native.turnId !== plan.expectedTurnId : admission.acknowledged === true) ||
               (native.outcome === 'not-applied') !== (admission.notApplied === true)) throw new AgentMuxError('Invalid native admission outcome.', 'INVALID_AGENT_SESSION_STORE')
           return { transport: 'native' as const, native: { plan, outcome: native.outcome as 'claimed' | 'admitted' | 'not-applied' | 'unknown',
             ...(native.turnId === undefined ? {} : { turnId: string(native.turnId, 'native admitted turn') }),
@@ -2058,8 +2071,14 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     return futurePromptPage(entries.slice(index + 1, index + 2 + limit).map(([intentId, intent]) => ({ intentId, intent: structuredClone(intent) })), limit)
   }
   async compareAndSwapMetadata(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
-    signal?: AbortSignal, future?: AgentMuxSessionFutureChange): Promise<void> {
+    signal?: AbortSignal, future?: AgentMuxSessionFutureChange, author?: Readonly<AgentCapabilityBinding>): Promise<void> {
     signal?.throwIfAborted()
+    if (author) {
+      const currentAuthor = this.sessions.get(author.agentSessionId)
+      assertCurrentAgentCapabilityBinding(author, currentAuthor ? { agentSessionId: currentAuthor.agentSessionId,
+        workspacePath: currentAuthor.workspacePath, runId: currentAuthor.run.runId, capabilityHash: currentAuthor.capabilityHash ?? '' } : null)
+      if (this.reservations.has(author.agentSessionId)) throw new AgentMuxError('The original message author has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
+    }
     const id = expected?.agentSessionId ?? next?.agentSessionId
     if (!id || expected && next && expected.agentSessionId !== next.agentSessionId) throw new AgentMuxError('Agent Session CAS identity is invalid.', 'INVALID_AGENT_SESSION_STORE')
     const current = this.sessions.get(id) ?? null
@@ -2602,8 +2621,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async compareAndSwapMetadata(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
-    signal?: AbortSignal, future?: AgentMuxSessionFutureChange): Promise<void> {
-    await this.enqueue(async () => { await this.swapSession(expected, next, false, signal, future) }, signal)
+    signal?: AbortSignal, future?: AgentMuxSessionFutureChange, author?: Readonly<AgentCapabilityBinding>): Promise<void> {
+    await this.enqueue(async () => { await this.swapSession(expected, next, false, signal, future, author) }, signal)
   }
 
   async loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]> {
@@ -2649,8 +2668,14 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   private async swapSession(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
-    complete: boolean, signal?: AbortSignal, future?: AgentMuxSessionFutureChange): Promise<void> {
+    complete: boolean, signal?: AbortSignal, future?: AgentMuxSessionFutureChange, author?: Readonly<AgentCapabilityBinding>): Promise<void> {
     signal?.throwIfAborted()
+    if (author) {
+      const currentAuthor = this.sessionMetadata(this.db, author.agentSessionId)
+      assertCurrentAgentCapabilityBinding(author, currentAuthor ? { agentSessionId: currentAuthor.agentSessionId,
+        workspacePath: currentAuthor.workspacePath, runId: currentAuthor.run.runId, capabilityHash: currentAuthor.capabilityHash ?? '' } : null)
+      if (this.db.prepare('SELECT 1 FROM reservations WHERE id=?').get(author.agentSessionId)) throw new AgentMuxError('The original message author has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
+    }
     const id = expected?.agentSessionId ?? next?.agentSessionId
     if (!id || expected && next && expected.agentSessionId !== next.agentSessionId) throw new AgentMuxError('Agent Session CAS identity is invalid.', 'INVALID_AGENT_SESSION_STORE')
     const current = complete ? this.completeSession(this.db, id) : this.sessionMetadata(this.db, id)

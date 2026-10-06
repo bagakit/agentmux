@@ -28,16 +28,17 @@ export function hasCodexNativeWriter(files: readonly NativeProcessFile[], peerPi
 }
 
 /** Only after the original actor's current mapped 0.162.1 image qualified this contract. */
-export function codexNativeSteerReceipt(response: JSONRPCResponse, expectedTurnId: string): Awaited<ReturnType<AgentProviderNativePromptInput['dispatch']>> {
+export function codexNativePromptReceipt(response: JSONRPCResponse): Awaited<ReturnType<AgentProviderNativePromptInput['dispatch']>> {
   if (response.error) {
     const code = response.error.code
     return code === -32600 || code === -32602 ? { outcome: 'not-applied', errorCode: code } : { outcome: 'unknown', errorCode: code }
   }
-  const admitted = object(response.result)
-  return admitted?.turnId === expectedTurnId ? { outcome: 'admitted', turnId: expectedTurnId } : { outcome: 'unknown' }
+  const admitted = object(object(response.result)?.turn)
+  return typeof admitted?.id === 'string' && admitted.id.length > 0 && admitted.status === 'inProgress'
+    ? { outcome: 'admitted', turnId: admitted.id } : { outcome: 'unknown' }
 }
 
-/** rust-v0.162.1 turn/steer: Native loaded actor, atomic expectedTurnId, no TTY/interrupt/resume. */
+/** rust-v0.162.1 turn/start: original loaded actor atomically starts or steers manual input. */
 export async function prepareCodexNativePromptInput(context: Parameters<NonNullable<AgentProvider['prepareNativePromptInput']>>[0]): Promise<AgentProviderNativePromptInput> {
   const handle = context.nativeHandle, signal = context.signal
   context.onPreparationPhase?.('native-target')
@@ -95,28 +96,23 @@ export async function prepareCodexNativePromptInput(context: Parameters<NonNulla
     context.onPreparationPhase?.('native-thread')
     const thread = object(result(await channel.request('thread/read', { threadId: handle.sessionId, includeTurns: false }, undefined, signal), 'native-thread').thread)
     const status = object(thread?.status)
-    if (thread?.id !== handle.sessionId || thread.path !== handle.transcriptPath || status?.type !== 'active') throw waiting('native-thread', 'original-loaded-active-thread-unconfirmed')
-    // One machine page per preparation, no polling or full-history request. Native's
-    // older rollout-backed implementation can hydrate history internally; do not retry
-    // this read automatically or use it as a high-frequency status detector.
-    context.onPreparationPhase?.('native-turn')
-    const turns = result(await channel.request('thread/turns/list', { threadId: handle.sessionId, limit: 1, sortDirection: 'desc', itemsView: 'summary' }, undefined, signal), 'native-turn').data
-    const turn = Array.isArray(turns) && turns.length === 1 ? object(turns[0]) : undefined
-    if (typeof turn?.id !== 'string' || !turn.id || turn.status !== 'inProgress') throw waiting('native-turn', 'original-active-turn-unconfirmed')
-    const expectedTurnId = turn.id
+    if (thread?.id !== handle.sessionId || thread.path !== handle.transcriptPath ||
+        status?.type !== 'idle' && status?.type !== 'active') throw waiting('native-thread', 'original-loaded-thread-unconfirmed')
+    // Idle and busy are both permitted by this manual intent. Native makes the
+    // selection atomically; this observation never grants an automatic idle fence.
     let dispatched = false
     return {
-      plan: { kind: 'native-rpc', protocolId: 'codex-turn-steer-v0.162.1', sourceId, actorId: channel.sourceId, threadId: handle.sessionId, expectedTurnId },
+      plan: { kind: 'native-rpc', protocolId: 'codex-turn-start-v0.162.1', operation: 'start-or-steer', sourceId, actorId: channel.sourceId, threadId: handle.sessionId },
       assertCurrent: async fresh => { if (await verifySource(fresh) !== sourceId) throw waiting('native-source', 'native-source-changed') },
       dispatch: async (prompt, operationId, waitSignal) => {
         if (dispatched) throw new AgentMuxError('The original Native request has already been dispatched.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
         dispatched = true
-        const response = await channel.request('turn/steer', { threadId: handle.sessionId, expectedTurnId, clientUserMessageId: operationId,
-          input: [{ type: 'text', text: prompt, textElements: [] }] }, operationId,
+        const response = await channel.request('turn/start', { threadId: handle.sessionId, clientUserMessageId: operationId,
+          input: [{ type: 'text', text: prompt, text_elements: [] }] }, operationId,
           waitSignal ? AbortSignal.any([waitSignal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000))
         // Internal errors and lost replies can occur after queueing. No display
         // message or clientUserMessageId is a negative/deduplication receipt.
-        return codexNativeSteerReceipt(response, expectedTurnId)
+        return codexNativePromptReceipt(response)
       },
       close: channel.close
     }

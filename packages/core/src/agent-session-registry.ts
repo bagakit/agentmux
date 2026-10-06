@@ -2,6 +2,7 @@ import { AgentMuxError } from './errors.js'
 import { randomUUID } from 'node:crypto'
 import { cloneSession } from './agent-session-identity.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
+import type { AgentCapabilityBinding } from './agent-capability.js'
 import {
   loadAgentSessionMetadata,
   agentSessionMetadata,
@@ -359,7 +360,8 @@ export class AgentMuxAgentSessionRegistry {
     expectedCurrentRun: AgentMuxRunRef,
     operation: (current: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession,
     signal?: AbortSignal,
-    futureIntentId?: string
+    futureIntentId?: string,
+    author?: Readonly<AgentCapabilityBinding>
   ): Promise<AgentMuxStoredAgentSession> {
     return await this.enqueue(agentSessionId, async (writeSignal) => {
       writeSignal.throwIfAborted()
@@ -384,7 +386,7 @@ export class AgentMuxAgentSessionRegistry {
       }
       this.assertAvailable(normalized)
       await this.persist(agentSessionMetadata(normalized), () => this.store.compareAndSwapMetadata(previous, agentSessionMetadata(normalized), writeSignal,
-        futureIntentId === undefined ? undefined : { intentId: futureIntentId, expected: future ?? null, next: normalized.futurePromptIntents?.[futureIntentId] ?? null }))
+        futureIntentId === undefined ? undefined : { intentId: futureIntentId, expected: future ?? null, next: normalized.futurePromptIntents?.[futureIntentId] ?? null }, author))
       this.forget(previous)
       this.remember(normalized)
       return futureIntentId === undefined ? this.get(agentSessionId) : normalized
