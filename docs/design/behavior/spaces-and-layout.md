@@ -312,7 +312,9 @@ Space 左侧 Folders 即使确认没有原图，也要从自动字母图标看�
 
 Topic 的工作面摘要区分 Tab、Region 布局及内容身份，使用原 Workspace／Session／Timeline 的真实事实。Tab 顺序、标题、Region 边界、Executor、surface 类型、最近活动及焦点均可核对，不另存布局、活动或 Session 状态。
 
-- **收起态**横向呈现该 Topic 全部原 Tab；每张 Tab 只占一个紧凑缩略图位，不另加总计块或 `Tn`、`nR`。单 Region 显示该内容的身份图标，Agent 使用真实头像；Terminal、Browser、File、Launcher 使用原类型图标。多 Region 使用原 bounds 比例构成的方形分栏轮廓。Tab 数量和 Region 数量仍可在详情中明确核对。
+Tab 身份缩略图与 Region 检视复用同一只读呈现能力，调用方提供本次准确 Tab、Region 几何与原内容身份；Topic 的成员聚合、导航选择和后台 Agent 名额仍由各自原 owner 持有。检视某个 Agent 时，只强调被检视 Tab 中已确认绑定该准确 Host／Session 的目标 Region；这与当前 Tab、全局活动 Region 和 Agent 状态分别成立。同一 Session 的多个合法位置保留各自 occurrence，位置或执行身份未确认时不按名称、裸 SID、当前 Tab 或列表首项补猜高亮。悬停或键盘检视只阅读原资料，不切换工作面、重排布局或控制 Session／Run，也不由空间图授予执行、输入或恢复资格；不新增布局、历史、状态 Store 或后台读取。
+
+- **收起态**横向呈现该 Topic 全部原 Tab；每张 Tab 只占一个紧凑缩略图位，不另加总计块或 `Tn`、`nR`。单 Region 显示该内容的身份图标，Agent 使用真实 Executor／头像设计；Terminal、Browser、File、Launcher 使用原类型图标。多 Region 使用原 bounds 比例构成的方形分栏轮廓，每格保留对应内容身份。Tab 数量和 Region 数量仍可在详情中明确核对。
 - **导航**按真实 Tab 顺序，点击或键盘确认缩略图直接激活该 Tab 的准确 Workspace／Group／Tab／Region。当前 Tab 可辨；每枚都是独立 hover／focus 目标，被指向或聚焦的图标浮到上层并完整可读，轻微叠压只表达同 Topic 的一组工作面。
 - **详情**只使用一个顶层 topology inspector。标题与上下文位于上方，主体按原 Region bounds 绘制所选 Tab 的工作面小地图；每格显示准确 Executor／类型与 Agent 头像，真实名称和最近活动属于对应格，不在地图下重复列同一批 Region。详情不被列表、滚动容器或工具面 overflow 裁掉，靠边时在锚点上方或下方选择可见位置。hover 是快捷阅读，键盘能取得等价信息，Topic 行原打开动作保持。
 - **在场状态**把已展示 Agent 嵌入对应 Region，不另列重复头像。没有挂载到可见 Region 的健康后台 Agent 仍在同一行可见可达；已明确结束的进程退出在场名额，unknown／断连不冒充关闭，关闭 Tab 不等于结束 Agent。历史 Session 与 collaborators 铭牌保留。
