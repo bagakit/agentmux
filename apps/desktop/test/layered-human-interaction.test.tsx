@@ -1,3 +1,4 @@
+import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter } from './helpers/notification-center'
 import { withInteractionOperation } from '../../../packages/core/test/fixtures/interaction-client.js'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
@@ -11,13 +12,13 @@ import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentIntera
 import { AttentionRequestPanel } from '../src/renderer/src/components/AttentionRequestPanel'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
-import { TransientErrorNotice } from '../src/renderer/src/components/TransientErrorNotice'
 import { api } from '../src/renderer/src/lib/api'
 import { summarizeAgentAttention } from '../src/renderer/src/lib/agent-attention'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
+const deliveryNotice = () => currentNotificationRows(dom.container).find(row => row.dataset.noticeId === JSON.stringify(['local', 'agent-1', 'delivery']))
 const pending = () => ({ ...composerSession(), status: { state: 'waiting' as const, source: 'native-hook' as const, observedAt: 2 },
   pendingInteraction: { kind: 'permission' as const, id: 'permission-1', agentSessionId: 'agent-1', title: 'Allow a change?',
     options: [{ id: 'once', label: 'Allow once', kind: 'allow-once' as const }],
@@ -27,11 +28,7 @@ const degraded = () => ({ ...composerSession(), terminalPromptDelivery: {
   submissionId: 'prompt-1', run: { runId: 'run-agent-1' }, observedAt: 2
 } })
 
-function Transient() {
-  const state = useAppStore()
-  return <TransientErrorNotice error={state.error} dismissed={state.errorDismissed} lastError={state.lastError}
-    onDismiss={state.dismissError} onReopen={state.reopenError} />
-}
+
 
 it('projects the same persistent delivery cause locally and globally and locates its Session after acknowledgement', async () => {
   const select = vi.spyOn(useAppStore.getState(), 'selectSession')
@@ -39,19 +36,19 @@ it('projects the same persistent delivery cause locally and globally and locates
     runtimeOwnershipWarnings: [], displacedAgentSessionIds: [], noticeReadReceipts: {} })
   await dom.render(<><GlobalSystemNotices /><AgentSessionComposer sessionId="agent-1" /></>)
   const local = dom.container.querySelector('.composer-notice')
-  const global = dom.container.querySelector('.global-system-notices__item')
+  const global = deliveryNotice()
   expect(local).not.toBeNull()
   expect(global).not.toBeNull()
   expect(global!.textContent).toContain(local!.querySelector('strong')!.textContent)
-  await dom.click('.global-system-notices__action')
+  await dom.click('.notification-item__action')
   expect(select).toHaveBeenCalledExactlyOnceWith('agent-1')
   const toggle = new Event('toggle')
   Object.defineProperty(toggle, 'newState', { value: 'open' })
   await act(async () => dom.container.querySelector('.global-system-notices__details')!.dispatchEvent(toggle))
   expect(dom.container.querySelector('.global-system-notices__trigger')?.getAttribute('data-unread')).toBe('false')
-  expect(dom.container.querySelector('.global-system-notices__item')?.textContent).toContain('Screen confirmation was interrupted')
+  expect(deliveryNotice()?.textContent).toContain('Screen confirmation was interrupted')
   await act(async () => useAppStore.setState({ sessions: [composerSession()] }))
-  expect(dom.container.querySelector('.global-system-notices__item')).toBeNull()
+  expect(deliveryNotice()).toBeUndefined()
 })
 
 it('the attention view consumes the same native-only response fact as the Session card', async () => {
@@ -96,16 +93,17 @@ it('a tool failure preserves body and existing attachment, then retries against 
   expect(dom.container.querySelector('.composer-notice')).toBeNull()
 })
 
-it('dismissed transient replay stays dismissed while the persistent issue remains findable', async () => {
+it('acknowledged event replay stays read while the persistent issue remains findable', async () => {
   useAppStore.setState({ sessions: [degraded()], loading: false, runtimeOwnershipWarnings: [], displacedAgentSessionIds: [],
     error: null, lastError: null, errorDismissed: false, environmentWarning: undefined })
-  await dom.render(<><Transient /><GlobalSystemNotices /></>)
+  await dom.render(<GlobalSystemNotices />)
   await act(async () => useAppStore.getState().reportError(new Error('The receipt was not read'), { kind: 'process-degraded', subject: degraded().control }))
-  await dom.click('.error-notice__close')
+  await toggleNotificationCenter(dom.container, 'open'); await toggleNotificationCenter(dom.container, 'closed')
   await act(async () => useAppStore.getState().reportError(new Error('The receipt was not read'), { kind: 'process-degraded', subject: degraded().control }))
-  expect(dom.container.querySelector('.error-notice')).toBeNull()
-  expect(dom.container.querySelector('.error-notice__reopen')).not.toBeNull()
-  expect(dom.container.querySelector('.global-system-notices__item')?.textContent).toContain('Screen confirmation was interrupted')
+  expect(notificationEventRows(dom.container)).toHaveLength(1)
+  expect(notificationTrigger(dom.container).getAttribute('aria-expanded')).toBe('false')
+  expect(useAppStore.getState().noticeReadReceipts['global:events']).toHaveProperty(notificationEventRows(dom.container)[0]!.dataset.eventId!)
+  expect(deliveryNotice()?.textContent).toContain('Screen confirmation was interrupted')
 })
 
 it('a failed answer stays on the exact card and retries without a window-level error or clearing Core facts', async () => {
