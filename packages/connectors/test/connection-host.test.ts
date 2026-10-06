@@ -54,7 +54,7 @@ describe('original connection owner', () => {
     const { owner } = await host({ adapters: [{ adapterId: 'sample', test: async () => { throw new Error('private-credential in a platform response') } }] })
     await create(owner)
     const checked = await owner.test({ connectionId: config.connectionId })
-    expect(checked.observation.authentication).toEqual({ state: 'unavailable', reason: 'check-failed' })
+    expect(checked.observation.authentication).toEqual({ state: 'unknown', reason: 'check-failed' })
     expect(JSON.stringify(checked)).not.toContain('private-credential')
     expect((await owner.list()).connections).toHaveLength(1)
     expect(() => parseConnectionParams('connection.configure', { operationId: 'secret-input', expectedRevision: null, connection: { ...config, secret: 'private-credential' } })).toThrow()
