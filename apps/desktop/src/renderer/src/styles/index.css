@@ -81,6 +81,7 @@
 @import '@agentmux/client-ui/styles/conversation-tool-trace.css';
 @import '@agentmux/client-ui/styles/conversation-native-thread.css';
 @import './workflow.css';
+@import '@agentmux/client-ui/styles/workflow-status.css';
 @import '@agentmux/client-ui/styles/conversation-avatar.css';
 @import './conversation-axis.css';
 @import './overlays.css';

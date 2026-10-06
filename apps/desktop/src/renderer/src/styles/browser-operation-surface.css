@@ -3,7 +3,8 @@
 .browser-operation-status__trigger { width: 27px; height: 27px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .browser-operation-status__trigger:hover, .browser-operation-status__trigger[data-state="open"] { color: var(--text); background: var(--surface-3); }
 .browser-operation-status__trigger:focus-visible { outline: 2px solid var(--green-line); outline-offset: -2px; }
-.browser-operation-status[data-phase="running"], .browser-operation-status[data-phase="preparing"], .browser-operation-status[data-phase="completed"] { color: var(--green-2); }
+.browser-operation-status[data-phase="running"], .browser-operation-status[data-phase="preparing"] { color: var(--green-2); }
+.browser-operation-status[data-phase="completed"] { color: var(--success); }
 .browser-operation-status[data-phase="waiting"], .browser-operation-status[data-phase="human"], .browser-operation-status[data-phase="unknown"], .browser-operation-status[data-phase="indeterminate"] { color: var(--amber-text); }
 .browser-operation-status[data-phase="failed"] { color: var(--red-text); }
 .browser-operation-status:not([data-phase="idle"]) .browser-operation-status__trigger { color: inherit; }
@@ -42,7 +43,7 @@
 .browser-rsi-timeline__step.is-selected .browser-rsi-timeline__step-button { background: var(--green-bg); }
 .browser-rsi-timeline__step.is-selected strong { color: var(--text); font-weight: 650; }
 .browser-rsi-timeline__marker { flex: none; display: inline-flex; align-items: center; color: var(--text-3); }
-.browser-rsi-timeline__step--completed .browser-rsi-timeline__marker { color: var(--green-2); }
+.browser-rsi-timeline__step--completed .browser-rsi-timeline__marker { color: var(--success); }
 .browser-rsi-timeline__step--failed .browser-rsi-timeline__marker, .browser-rsi-timeline__step--failed .browser-rsi-timeline__status { color: var(--red-text); }
 .browser-rsi-timeline__step--running .browser-rsi-timeline__marker { color: var(--amber-text); }
 .browser-rsi-timeline__step-content { min-width: 0; flex: 1; display: grid; gap: 1px; }
