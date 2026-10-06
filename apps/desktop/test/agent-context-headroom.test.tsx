@@ -9,7 +9,7 @@ import type { AppConfig, RuntimeEvent, RuntimeSnapshot, SessionSnapshot } from '
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
 const transport = vi.hoisted(() => ({
   listeners: new Map<string, Set<(...args: unknown[]) => void>>(),
-  handlers: new Map<string, () => unknown>(),
+  handlers: new Map<string, (...args: unknown[]) => unknown>(),
   calls: [] as string[]
 }))
 // Replace Electron's transport only. Real preload/API/Store and all headroom consumers run below.
@@ -17,11 +17,11 @@ vi.mock('electron', () => ({
   contextBridge: { exposeInMainWorld: (name: string, api: unknown) => Object.assign(window, { [name]: api }) },
   webFrame: { getZoomFactor: () => 1 },
   ipcRenderer: {
-    async invoke(channel: string) {
+    async invoke(channel: string, ...args: unknown[]) {
       transport.calls.push(channel)
       const handler = transport.handlers.get(channel)
       if (!handler) throw new Error(`Unexpected headroom fixture IPC: ${channel}`)
-      return await handler()
+      return await handler(...args)
     },
     on(channel: string, listener: (...args: unknown[]) => void) {
       const listeners = transport.listeners.get(channel) ?? new Set()
@@ -96,13 +96,13 @@ async function emit(event: RuntimeEvent) {
     for (const listener of listeners!) listener({}, event)
   })
 }
-function Workbench() {
+function Workbench({ visible = true }: { visible?: boolean }) {
   const sessions = useAppStore(state => state.sessions)
   const onOpen = useAppStore(state => state.selectSession)
   return <>
     <AgentTreePanel count={2} filter="all" heading="Headroom Agents" label="Show headroom Agents" />
     <WorkspaceAgentsTool workspace={config.workspaces[0]!} sessions={sessions} onOpen={onOpen} />
-    {IDS.map(id => <section data-composer-for={id} key={id}><AgentSessionComposer sessionId={id} /></section>)}
+    {IDS.map(id => <section data-composer-for={id} key={id}><AgentSessionComposer visible={visible} sessionId={id} /></section>)}
   </>
 }
 async function openTree() {
@@ -138,31 +138,35 @@ beforeEach(async () => {
   vi.spyOn(Date, 'now').mockReturnValue(NOW)
   transport.calls.length = 0; transport.listeners.clear(); transport.handlers.clear()
   transport.handlers.set('config:get', () => config)
-  transport.handlers.set('providers:list', () => [])
+  transport.handlers.set('providers:list', options => options ? { catalog: [], warnings: [] } : [])
+  transport.handlers.set('ui:spatialLinksReady', () => undefined)
+  transport.handlers.set('notesStorage:inspect', () => ({ directory: _hygiene_fixturePath('notes'), catalogPath: _hygiene_fixturePath('notes/notebooks.json'), resourceChanges: [], directoryChanges: [], operation: null }))
   transport.handlers.set('demands:list', () => [])
-  const snapshot: RuntimeSnapshot = { sessions: IDS.map(agent), timelines: {}, recoveryCandidates: [] }
+  const snapshot: RuntimeSnapshot = { sessions: IDS.map(agent), timelines: Object.fromEntries(IDS.map(id => [id, { agentSessionId: id, revision: 0, items: [] }])), recoveryCandidates: [] }
   transport.handlers.set('sessions:snapshot', () => structuredClone(snapshot))
   transport.handlers.set('ui:requestStorageFlush', () => undefined)
   transport.handlers.set('schedule:list', () => ({ schedules: [] }))
   transport.handlers.set('continuousProgress:list', () => [])
   transport.handlers.set('continuousProgress:pauseForInput', () => undefined)
+  transport.handlers.set('sessions:inputOccupation', () => undefined)
   useAppStore.persist.clearStorage(); window.localStorage.clear()
   useAppStore.setState({ ...initial, loading: true }, true)
   await useAppStore.persist.rehydrate()
   expect(useAppStore.persist.hasHydrated()).toBe(true)
   dispose = await useAppStore.getState().initialize()
+  await vi.waitFor(() => expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(IDS))
   expect(useAppStore.getState().loading).toBe(false)
   expect(useAppStore.getState().error).toBeNull()
-  expect(transport.calls).toEqual(['spatial:read', 'config:get', 'sessions:snapshot', 'providers:list', 'demands:list'])
+  expect(transport.calls.toSorted()).toEqual(['spatial:read', 'config:get', 'sessions:snapshot', 'providers:list', 'demands:list', 'ui:spatialLinksReady', 'notesStorage:inspect'].toSorted())
   container = document.createElement('div'); overlay = document.createElement('div'); overlay.dataset.overlayHost = ''
   document.body.append(container, overlay); root = createRoot(container)
   await act(async () => root!.render(<Workbench />))
   await openTree()
   renderedCalls = [...transport.calls]
-  expect(renderedCalls).toEqual([
-    'spatial:read', 'config:get', 'sessions:snapshot', 'providers:list', 'demands:list',
+  expect(renderedCalls.toSorted()).toEqual([
+    'spatial:read', 'config:get', 'sessions:snapshot', 'providers:list', 'demands:list', 'ui:spatialLinksReady', 'notesStorage:inspect',
     ...IDS.flatMap(() => ['schedule:list', 'continuousProgress:list'])
-  ])
+  ].toSorted())
 })
 afterEach(async () => {
   if (root) await act(async () => root!.unmount())
@@ -262,8 +266,8 @@ it('a native turn without capacity remains unknown and does not lock the healthy
   expect(composer('unknown').details.textContent).toContain('never an estimate from lifetime billing')
   expect(composer('high').chip.textContent).toContain('90%')
   expect(useAppStore.getState().agentSteerQueues).toEqual({})
-  // Each explicit Composer input retains its existing continuous-progress pause; usage adds no reads.
-  expect(transport.calls).toEqual([...renderedCalls, 'continuousProgress:pauseForInput', 'continuousProgress:pauseForInput'])
+  // Explicit input retains progress pause and input-occupation publication; usage adds no reads.
+  expect(transport.calls).toEqual([...renderedCalls, 'continuousProgress:pauseForInput', 'sessions:inputOccupation', 'continuousProgress:pauseForInput', 'sessions:inputOccupation'])
 })
 
 it('the published native usage is owned by the Store rather than its mutable incoming envelope', async () => {
@@ -273,4 +277,24 @@ it('the published native usage is owned by the Store rather than its mutable inc
   event.event.session.turnUsage!.context!.usedTokens = 999
   expect(current('warm').turnUsage?.context).toEqual({ usedTokens: 700, capacityTokens: 1000 })
   expect(composer('warm').chip.textContent).toContain('70%')
+})
+
+it('the real Composer closes a retained context reader when its occurrence becomes hidden', async () => {
+  const { chip, details } = composer('low')
+  let opened = false
+  Object.defineProperties(details, {
+    matches: { configurable: true, value: (selector: string) => selector === ':popover-open' && opened },
+    showPopover: { configurable: true, value: () => { opened = true; const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'open' }); details.dispatchEvent(event) } },
+    hidePopover: { configurable: true, value: () => { opened = false } }
+  })
+  await act(async () => chip.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
+  await act(async () => chip.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })))
+  expect(opened).toBe(true); expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
+  await act(async () => root!.render(<Workbench visible={false} />))
+  expect(composer('low').details).toBe(details); expect(opened).toBe(false)
+  expect(chip.getAttribute('aria-expanded')).toBe('false'); expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
+  await act(async () => chip.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
+  expect(opened).toBe(false)
+  await act(async () => root!.render(<Workbench />))
+  expect(composer('low').details).toBe(details); expect(opened).toBe(false)
 })

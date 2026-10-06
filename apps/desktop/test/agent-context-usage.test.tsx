@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { AgentContextUsage } from '../src/renderer/src/components/AgentContextUsage'
 import { extractTurnUsage, parseTurnUsage } from '../../../packages/core/src/agent-usage-transcript'
 import { normalizeStoredAgentSession } from '../../../packages/core/src/agent-session-store'
-import { styleFiles, stripCssComments } from './helpers/styles.js'
+import { readStyleSheet, stripCssComments } from './helpers/styles.js'
 
 // ── A tiny brace-aware CSS reader, only enough to answer "does any rule width-clamp the chip?" ──
 // No CSS parser is installed in this tree, and the property we must pin — "the chip is never
@@ -209,7 +209,7 @@ describe('context observation to composer', () => {
   // base-rule regex never sees. So we PARSE: every rule whose subject compound targets the chip, across
   // every stylesheet, checked for a resolved width constraint.
   it('no stylesheet rule width-clamps the context chip (pins the property, not one spelling)', () => {
-    const rules = styleFiles().flatMap((file) => parseRules(stripCssComments(file.text)))
+    const rules = [{ name: 'index.css and its actual imports', text: readStyleSheet('./index.css') }].flatMap((file) => parseRules(stripCssComments(file.text)))
     const chipRules = rules.filter((rule) => matchesChip(rule.selector))
     // Existence: if the class is renamed or deleted the whole guard would pass vacuously (memory:
     // name-existence-check-is-blind-to-rule-bodies). The chip must actually be styled, and its bare base
