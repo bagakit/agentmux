@@ -30,11 +30,12 @@
 .image-annotation-editor__hint { color: var(--text-3); font-size: 10px; line-height: 1.5; }
 .image-annotation-editor__workarea { flex: 1 1 0; display: flex; min-height: 0; min-width: 0; }
 .image-annotation-editor__canvas-area { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); }
-.image-annotation-editor__viewport { position: absolute; z-index: 0; top: 50%; left: 50%; overflow: hidden; transform: translate(-50%, -50%); }
+.image-annotation-editor__viewport { position: absolute; z-index: 0; inset: 0; overflow: hidden; }
 .image-annotation-editor__viewport > img, .image-annotation-editor__viewport > canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-.image-annotation-editor__viewport > img { z-index: 0; user-select: none; -webkit-user-drag: none; }
+.image-annotation-editor__viewport > img { display: none; }
 .image-annotation-editor__viewport > canvas { z-index: 1; touch-action: none; }
 .image-annotation-editor__text { position: absolute; z-index: 3; min-width: 120px; max-width: min(360px, calc(100% - 16px)); padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; outline: none; background: var(--surface-1); font-weight: 600; }
+.image-annotation-editor__image-error { position: absolute; z-index: 4; inset: 16px 16px auto; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-1); color: var(--text); line-height: 1.5; }
 .image-annotation-editor__notes { flex: 0 0 210px; display: flex; flex-direction: column; gap: 8px; min-width: 0; overflow: auto; padding: 10px; border-left: 1px solid var(--line); background: var(--surface-1); }
 .image-annotation-editor__notes > header { display: flex; justify-content: space-between; align-items: center; color: var(--text-2); font-size: 11px; }
 .image-annotation-editor__notes > header small { color: var(--text-3); }
@@ -46,6 +47,14 @@
 .image-annotation-editor__notes > label { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 6px; font-size: 10px; color: var(--text-3); }
 .image-annotation-editor__notes textarea { flex: 1; height: 82px; min-height: 38px; max-height: 180px; resize: vertical; background: var(--surface-0); border: 1px solid var(--line); border-radius: 4px; padding: 7px; font: inherit; color: var(--text); }
 .image-annotation-editor__footer { flex: none; min-height: 23px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px; padding: 3px 10px; border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: 10px; font-variant-numeric: tabular-nums; }
+.image-annotation-editor__zoom { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.image-annotation-editor .image-annotation-editor__zoom button { height: 24px; min-width: 25px; padding-inline: 5px; }
+.image-annotation-editor__zoom > span { min-width: 34px; text-align: center; }
+.image-annotation-editor__zoom button[aria-pressed=true] { background: var(--surface-3); color: var(--text); border-color: var(--line); }
+.image-annotation-editor__note-actions { display: flex; align-items: center; gap: 6px; }
+.image-annotation-editor__note-actions label { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-3); font-size: 10px; }
+.image-annotation-editor__note-actions select { min-width: 0; max-width: 120px; height: 25px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-0); color: var(--text); font: inherit; }
+.image-annotation-editor__note-actions button { margin-left: auto; height: 25px; border-color: var(--line); }
 @container screenshot-editor (max-width: 580px) {
   .image-annotation-editor__title small { display: none; }
   .image-annotation-editor__header { gap: 5px; padding-inline: 7px; }
@@ -59,6 +68,7 @@
   .image-annotation-editor__note-list button { width: auto; max-width: 180px; }
   .image-annotation-editor__notes > header { display: none; }
   .image-annotation-editor__notes textarea { min-height: 50px; max-height: 70px; }
+  .image-annotation-editor__view-hint { display: none; }
 }
 @container screenshot-editor (max-height: 300px) {
   .image-annotation-editor__notes { padding: 8px; gap: 6px; }

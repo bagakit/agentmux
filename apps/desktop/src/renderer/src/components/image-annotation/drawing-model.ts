@@ -12,10 +12,12 @@ export type ArrowShape = ShapeBase & { kind: 'arrow'; from: ScreenshotPoint; to:
 export type RectShape = ShapeBase & { kind: 'rect'; from: ScreenshotPoint; to: ScreenshotPoint; width: number }
 export type EllipseShape = ShapeBase & { kind: 'ellipse'; from: ScreenshotPoint; to: ScreenshotPoint; width: number }
 export type TextShape = ShapeBase & { kind: 'text'; at: ScreenshotPoint; text: string; fontSize: number }
-export type NoteShape = ShapeBase & { kind: 'note'; from: ScreenshotPoint; to: ScreenshotPoint; width: number; radius: number; number: number; note: string }
+export type NoteTemplate = 'observation' | 'expected' | 'request'
+export type NoteShape = ShapeBase & { kind: 'note'; from: ScreenshotPoint; to: ScreenshotPoint; width: number; radius: number; number: number; note: string; template?: NoteTemplate }
 export type PixelateShape = ShapeBase & { kind: 'pixelate'; from: ScreenshotPoint; to: ScreenshotPoint; blockSize: number }
+export type CoverShape = ShapeBase & { kind: 'cover'; from: ScreenshotPoint; to: ScreenshotPoint }
 
-export type ScreenshotShape = PenShape | HighlightShape | ArrowShape | RectShape | EllipseShape | TextShape | NoteShape | PixelateShape
+export type ScreenshotShape = PenShape | HighlightShape | ArrowShape | RectShape | EllipseShape | TextShape | NoteShape | PixelateShape | CoverShape
 
 export const SCREENSHOT_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#111827', '#ffffff'] as const
 export const DEFAULT_SCREENSHOT_COLOR: string = SCREENSHOT_COLORS[0]
@@ -113,6 +115,8 @@ export function scaleShape(shape: ScreenshotShape, scale: number): ScreenshotSha
       return { ...shape, width: shape.width * scale, radius: shape.radius * scale, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
     case 'pixelate':
       return { ...shape, blockSize: shape.blockSize * scale, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
+    case 'cover':
+      return { ...shape, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
     case 'text':
       return { ...shape, fontSize: shape.fontSize * scale, at: scalePoint(shape.at, scale) }
   }
@@ -153,13 +157,13 @@ export function intersectRect(a: NormalizedRect, b: NormalizedRect): NormalizedR
 /** Both PNG and textual handoff consume this list. A cropped-away number or a
  * masked note must not survive solely as textual context. Masks paint last. */
 export function screenshotOutputShapes(shapes: readonly ScreenshotShape[], crop?: NormalizedRect | null): ScreenshotShape[] {
-  const masks = shapes.filter((shape): shape is PixelateShape => shape.kind === 'pixelate')
+  const masks = shapes.filter((shape): shape is PixelateShape | CoverShape => shape.kind === 'pixelate' || shape.kind === 'cover')
   const visible = shapes.filter(shape => {
     if (shape.kind !== 'note') return true
     if (crop && (shape.from.x < crop.x || shape.from.x >= crop.x + crop.width || shape.from.y < crop.y || shape.from.y >= crop.y + crop.height)) return false
     return !masks.some(mask => intersectRect(shapeBounds(shape), normalizeRect(mask.from, mask.to)))
   })
-  return [...visible.filter(shape => shape.kind !== 'pixelate'), ...masks]
+  return [...visible.filter(shape => shape.kind !== 'pixelate' && shape.kind !== 'cover'), ...masks]
 }
 
 export function distanceToSegment(point: ScreenshotPoint, from: ScreenshotPoint, to: ScreenshotPoint): number {
@@ -212,7 +216,7 @@ export function hitTestShape(shapes: readonly ScreenshotShape[], point: Screensh
     if (shape.kind === 'note' && Math.hypot(point.x - shape.from.x, point.y - shape.from.y) <= shape.radius + tolerance) return shape
     const rect = shapeBounds(shape, textWidth)
     if (point.x < rect.x - tolerance || point.x > rect.x + rect.width + tolerance || point.y < rect.y - tolerance || point.y > rect.y + rect.height + tolerance) continue
-    if (shape.kind === 'text' || shape.kind === 'pixelate') return shape
+    if (shape.kind === 'text' || shape.kind === 'pixelate' || shape.kind === 'cover') return shape
     const ink = tolerance + shape.width / 2
     if (shape.kind === 'ellipse') {
       if (distanceToEllipse(point, rect) <= ink) return shape

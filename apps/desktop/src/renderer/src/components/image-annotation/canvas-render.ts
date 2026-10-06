@@ -3,62 +3,65 @@
 
 import { clampScreenshotScale } from './geometry'
 import { drawScreenshotShapes } from './drawing-renderer'
-import type { ScreenshotShape } from './drawing-model'
+import { normalizeRect, type ScreenshotShape } from './drawing-model'
+import type { ImageViewport } from './view'
 
-function scenePixels(cssWidth: number, cssHeight: number, dpr: number) {
-  const scale = clampScreenshotScale(dpr)
-  return {
-    scale,
-    width: Math.max(1, Math.round(cssWidth * scale)),
-    height: Math.max(1, Math.round(cssHeight * scale))
-  }
-}
-
-export function renderCommittedLayer(
-  layer: HTMLCanvasElement,
-  shapes: readonly ScreenshotShape[],
-  cssWidth: number,
-  cssHeight: number,
-  dpr: number,
-  image?: CanvasImageSource,
-  modelWidth = cssWidth
-): void {
-  const size = scenePixels(cssWidth, cssHeight, dpr)
-  if (layer.width !== size.width || layer.height !== size.height) {
-    layer.width = size.width
-    layer.height = size.height
-  }
-  const context = layer.getContext('2d')
-  if (!context) return
-  const fit = cssWidth / modelWidth || 1
-  context.setTransform(size.scale * fit, 0, 0, size.scale * fit, 0, 0)
-  context.clearRect(0, 0, modelWidth, cssHeight / fit)
-  if (image) context.drawImage(image, 0, 0, modelWidth, cssHeight / fit)
-  drawScreenshotShapes(context, shapes)
-}
-
-export function renderScreenshotScene(
-  target: HTMLCanvasElement,
-  committed: HTMLCanvasElement,
-  inProgress: ScreenshotShape | null,
-  cssWidth: number,
-  cssHeight: number,
-  dpr: number,
-  modelWidth = cssWidth
-): void {
-  const context = target.getContext('2d')
-  if (!context) return
-  const size = scenePixels(cssWidth, cssHeight, dpr)
-  if (target.width !== size.width || target.height !== size.height) {
-    target.width = size.width
-    target.height = size.height
-  }
+function prepare(canvas: HTMLCanvasElement, viewport: ImageViewport): CanvasRenderingContext2D | null {
+  const dpr = clampScreenshotScale(viewport.dpr)
+  const width = Math.max(1, Math.round(viewport.width * dpr)), height = Math.max(1, Math.round(viewport.height * dpr))
+  if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height }
+  const context = canvas.getContext('2d')
+  if (!context) return null
   context.setTransform(1, 0, 0, 1, 0, 0)
-  context.clearRect(0, 0, size.width, size.height)
-  if (committed.width > 0 && committed.height > 0) {
-    context.drawImage(committed, 0, 0, size.width, size.height)
+  context.clearRect(0, 0, width, height)
+  applyView(context, viewport)
+  return context
+}
+
+function applyView(context: CanvasRenderingContext2D, viewport: ImageViewport) {
+  const dpr = clampScreenshotScale(viewport.dpr), view = viewport.view
+  context.setTransform(dpr * view.scale, 0, 0, dpr * view.scale, dpr * view.x, dpr * view.y)
+}
+
+/** Only viewport-sized bitmaps are allocated, even at high image magnification. */
+export function renderCommittedLayer(layer: HTMLCanvasElement, shapes: readonly ScreenshotShape[], viewport: ImageViewport, image?: CanvasImageSource): void {
+  const context = prepare(layer, viewport)
+  if (!context) return
+  context.save()
+  try {
+    context.beginPath(); context.rect(0, 0, viewport.imageWidth, viewport.imageHeight); context.clip()
+    if (image) context.drawImage(image, 0, 0, viewport.imageWidth, viewport.imageHeight)
+    drawScreenshotShapes(context, shapes)
+  } finally { context.restore() }
+}
+
+export function renderScreenshotScene(target: HTMLCanvasElement, committed: HTMLCanvasElement,
+  inProgress: ScreenshotShape | null, viewport: ImageViewport, masks: readonly ScreenshotShape[] = []): void {
+  const context = prepare(target, viewport)
+  if (!context) return
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  if (committed.width && committed.height) context.drawImage(committed, 0, 0)
+  applyView(context, viewport)
+  if (inProgress) {
+    context.save()
+    try {
+      context.beginPath(); context.rect(0, 0, viewport.imageWidth, viewport.imageHeight); context.clip()
+      drawScreenshotShapes(context, [inProgress])
+    } finally { context.restore() }
   }
-  const fit = cssWidth / modelWidth || 1
-  context.setTransform(size.scale * fit, 0, 0, size.scale * fit, 0, 0)
-  if (inProgress) drawScreenshotShapes(context, [inProgress])
+  // Restore already processed mask pixels instead of resampling pixelation on each frame.
+  if (inProgress && inProgress.kind !== 'pixelate' && inProgress.kind !== 'cover' && masks.length) {
+    const { view } = viewport, dpr = clampScreenshotScale(viewport.dpr)
+    context.setTransform(1, 0, 0, 1, 0, 0)
+    for (const mask of masks) {
+      if (mask.kind !== 'pixelate' && mask.kind !== 'cover') continue
+      const rect = normalizeRect(mask.from, mask.to)
+      const x = Math.max(0, Math.floor((view.x + rect.x * view.scale) * dpr))
+      const y = Math.max(0, Math.floor((view.y + rect.y * view.scale) * dpr))
+      const right = Math.min(target.width, Math.ceil((view.x + (rect.x + rect.width) * view.scale) * dpr))
+      const bottom = Math.min(target.height, Math.ceil((view.y + (rect.y + rect.height) * view.scale) * dpr))
+      if (right > x && bottom > y) context.drawImage(committed, x, y, right - x, bottom - y, x, y, right - x, bottom - y)
+    }
+    applyView(context, viewport)
+  }
 }
