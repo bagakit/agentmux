@@ -169,6 +169,8 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 ### 重启后的 Tab/Region 与 Session 恢复
 - 重启恢复必须先还原持久化的 Workbench Tab、Region、分屏树、顺序和焦点，再把其中的 Agent/Terminal Region 按其稳定 session identity attach 到仍由 Runtime 持有的 Run；不得因为 Runtime 尚未返回首个 snapshot 就创建第二个 session 或把 Region 清空。
+- 新 Terminal 创建在 Native 派发前，须由 Core 持久确认原创建输入、创建操作身份和准确执行 Host；派发所选 Native 的持久 Runtime 身份也须准确保留。Region、Group 与当前焦点只描述空间归属，不能代替创建身份或据此重选执行目标。Native 独占创建 key 与实际 Run 的对应，Core 不复制完整 Native 执行 spec；普通布局快照、关闭展示或迟到旧回执不能改写、删除或替换尚未收口的原创建事实。
+- 创建回执丢失或客户端重启后，先沿原操作与原 Runtime 读取准确已保留 Run，再接回仍属于原请求的工作面，不重新提交 Start 充当查询。保存确认不证明 Native 已经派发；跨进程后无法确认派发、key 未保留、观察失败或能力未支持时保持未知，保留原输入和复查入口，不自动创建或重放。历史定义本来缺少原 key 时不能补造身份、猜 Run 或迁移数据。取消 reader、退出 GUI 和解除展示绑定不停止健康 Run；Native 已确认而后续空间保存失败时，原 Run 的输入与接回能力继续可用，持久确认失败单独露出。
 - 完整产品的私有恢复验收必须在首次 hydrate 前提供真实非空持久化输入，并确认它进入实际工作面、正常退出后仍可恢复；不能在 hydrate 后补写 seed，再把即时读回或后续人工修补当作重启保留的证明。普通写入与恢复流程保持原行为。
 - “session 仍在运行”与“界面尚未重新 attach”必须是两个独立状态。健康 Runtime 只允许显示连接中/待同步告示，不得把它翻译成“在其他应用打开”并要求用户手动 resume。
 - 只有 Core 明确确认原 Run 已退出且 Provider native handle 可恢复时，才显示 resume/restart 出口；恢复失败必须保留原 Tab/Region 拓扑和可解释的服务窗告示。
