@@ -25,6 +25,9 @@
 .note-canvas-card[data-root="true"] { border-color: var(--blue); box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 15%, transparent), 0 3px 12px #0000000b; }
 .note-canvas-card[data-selected="true"] { outline: 2px solid var(--focus-line); outline-offset: 3px; }
 .note-canvas-drag { padding: 14px 15px 16px; cursor: grab; }
+.note-canvas-endpoint { position: relative; }
+.note-canvas-block-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; padding: 6px 15px; border-top: 1px solid var(--line-soft); color: var(--text-2); font-size: 10px; line-height: 1.5; }
+.note-canvas-block-summary > span:last-child { color: var(--text-3); font-size: var(--fs-micro); }
 .react-flow__node.dragging .note-canvas-drag { cursor: grabbing; }
 .note-canvas-book { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--text-3); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
 .note-canvas-book > svg { flex: none; }
@@ -65,6 +68,8 @@
 .note-canvas .note-canvas-edge-embed { stroke: var(--green); stroke-width: 1.8; }
 .note-canvas .note-canvas-edge-hierarchy { stroke: var(--text-3); stroke-width: 1; opacity: .65; }
 .note-canvas-edge-label { position: absolute; pointer-events: all; padding: 5px 8px; min-height: 26px; border: 1px solid var(--line-soft); border-radius: 4px; background: var(--surface-1); color: var(--text-3); font-size: 11px !important; line-height: 1.4; }
+.note-canvas-edge-label > span, .note-canvas-edge-label > small { display: block; }
+.note-canvas-edge-label > small { margin-top: 1px; color: var(--text-2); font-size: var(--fs-micro); font-weight: 400; }
 .note-canvas-edge-label.is-reference { color: var(--blue); }
 .note-canvas-edge-label.is-link { color: var(--blue); }
 .note-canvas-edge-label.is-embed { color: var(--green); }
@@ -111,8 +116,8 @@
 }
 
 .note-canvas-degrees { display: flex; gap: 12px; padding: 0 15px 12px; color: var(--text-3); font-size: 10px; line-height: 1.5; }
-.note-canvas-card > .react-flow__handle { opacity: 0; }
-.note-canvas-card:hover > .react-flow__handle { opacity: 1; }
+.note-canvas-endpoint > .react-flow__handle { opacity: .65; }
+.note-canvas-card:hover .note-canvas-endpoint > .react-flow__handle { opacity: 1; }
 .note-canvas-reference-query { display: flex; flex-direction: column; gap: 5px; line-height: 1.6; overflow-wrap: anywhere; }
 .note-canvas-reference-query > span { color: var(--text-3); font-size: 10px; }
 /* Graph keeps the Notebook identity close to its view controls so the relationships lead. */

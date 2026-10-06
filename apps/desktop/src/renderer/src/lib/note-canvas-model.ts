@@ -4,10 +4,10 @@ import type { NotebookGraphSnapshot } from '../../../shared/notebook-observation
 import type { NoteCanvasScope } from './note-canvas-state'
 
 export type CanvasReference = NotebookGraph['references'][number]
-export type CanvasRelationship = { id: string; kind: 'hierarchy' | 'reference' | 'embed' | 'link'; source: string; target: string; references: CanvasReference[] }
+export type CanvasRelationship = { id: string; kind: 'hierarchy' | 'reference' | 'embed' | 'link'; source: string; target: string; sourceKind: 'page' | 'block'; targetKind: 'page' | 'block'; references: CanvasReference[] }
 export type CanvasNote = { id: string; page?: NotebookPage; observation?: NoteContentMetadata; title: string; notebook: string; root: boolean; context: boolean; neighbors: number; incoming: number; outgoing: number; unbound: CanvasReference[] }
 export type CanvasProjection = { notes: CanvasNote[]; relationships: CanvasRelationship[]; unbound: CanvasReference[] }
-const key = (kind: string, from: string, to: string) => JSON.stringify([kind, from, to])
+const key = (kind: string, from: string, to: string, targetKind: string) => JSON.stringify([kind, from, to, targetKind])
 
 /** A projection of the original observation. It neither reads files nor infers new links. */
 export function projectNoteCanvas(snapshot: NotebookGraphSnapshot, scope: NoteCanvasScope, expanded: readonly string[], seedNoteIds?: readonly string[]): CanvasProjection {
@@ -15,9 +15,10 @@ export function projectNoteCanvas(snapshot: NotebookGraphSnapshot, scope: NoteCa
   const relationships = new Map<string, CanvasRelationship>()
   const adjacent = new Map<string, Set<string>>()
   function add(kind: CanvasRelationship['kind'], source: string, target: string, reference?: CanvasReference) {
-    const id = key(kind, source, target)
+    const sourceKind = reference ? 'block' : 'page', targetKind = reference?.target.kind === 'block' ? 'block' : 'page'
+    const id = key(kind, source, target, targetKind)
     let edge = relationships.get(id)
-    if (!edge) { edge = { id, kind, source, target, references: [] }; relationships.set(id, edge) }
+    if (!edge) { edge = { id, kind, source, target, sourceKind, targetKind, references: [] }; relationships.set(id, edge) }
     if (reference) edge.references.push(reference)
     for (const [a, b] of [[source, target], [target, source]] as const) {
       if (!adjacent.has(a)) adjacent.set(a, new Set())
