@@ -8,6 +8,7 @@ import { GoalCommonProperties, GoalProperties } from './GoalProperties'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { GoalExecution } from './GoalExecution'
+import { GoalActivity } from './GoalActivity'
 import { GoalAlignment, type GoalAcknowledgementFeedback } from './GoalAlignment'
 
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
@@ -35,7 +36,6 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
     try { await updateDemand(demand.id, patch, undefined, expectedUpdatedAt); for (const key of Object.keys(patch) as Array<keyof typeof patch>) if (failedPatch.current[key] === patch[key]) delete failedPatch.current[key]; if (!Object.keys(failedPatch.current).length) setSaveError(null); if ('title' in patch && draftRef.current.title === patch.title) { setTitleDirty(false); onDraftSaved?.('title', patch.title!) }; if ('description' in patch && draftRef.current.description === patch.description) { setDescriptionDirty(false); onDraftSaved?.('description', patch.description!) }; return true }
     catch (error) { if (expectedUpdatedAt !== undefined) return false; failedPatch.current = { ...failedPatch.current, ...patch }; setSaveError(error instanceof Error ? error.message : String(error)); return false }
   }
-  const timeline = [...(demand.activities ?? []).map((activity) => ({ id: activity.id, at: activity.createdAt, label: activity.kind, text: activity.message })), ...(demand.decisions ?? []).map((decision) => ({ id: decision.id, at: decision.createdAt, label: 'Decision', text: decision.decision }))].sort((left, right) => right.at - left.at)
   const intentBody = <ComposerTextarea aria-label="Goal description" value={description} onValueChange={(value) => { draftRef.current.description = value; onDraftChange?.('description', value); setDescription(value); setDescriptionDirty(true) }} onBlur={() => { if (descriptionDirty) void update({ description }) }} rows={Math.max(3, Math.min(14, description.split('\n').length + 1))} placeholder="Describe the outcome in your own words…" />
   const continueInBody = Boolean(demand.alignment?.confirmedAt && !demand.grounding)
   return <aside className="goals-detail" data-goal-detail-id={demand.id} aria-label={`Goal workspace for ${demand.title}`}>
@@ -50,7 +50,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
       {moteError ? <div className="goals-service" role="status">{moteError.mode === 'open' ? 'Goal saved. The discussion could not be opened.' : `${moteError.mode === 'grill' ? 'Goal' : 'Check'} request delivery is unconfirmed. Your goal and current work are kept.`} <span>{moteError.message}</span><button type="button" className="goals-button" disabled={Boolean(motePending)} onClick={onRetryMote}>{moteError.mode === 'open' ? 'Retry opening discussion' : moteError.mode === 'grill' ? 'Retry goal request' : 'Retry check request'}</button></div> : null}
       <GoalExecution demand={demand} onUpdate={update} />
       <GoalProperties demand={demand} onUpdate={patch => void update(patch)} />
-      {timeline.length ? <details className="goals-activity"><summary>Activity<span>{timeline.length}</span></summary>{timeline.map((entry) => <div className="goals-activity__row" key={entry.id}><time dateTime={new Date(entry.at).toISOString()}>{new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(entry.at)}</time><span><b>{entry.label}</b> {entry.text}</span></div>)}</details> : null}
+      <GoalActivity demand={demand} />
     </article>
     <ConfirmationDialog open={deleteRequested} title="Delete goal?" subject={demand.title}
       description="This removes the goal and its saved planning records. Linked Sessions keep running."

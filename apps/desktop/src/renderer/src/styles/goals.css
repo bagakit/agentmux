@@ -190,6 +190,13 @@
 .goals-topology { margin-top: var(--sp-5); }
 .goals-activity__row { display: flex; gap: var(--sp-5); margin-top: var(--sp-5); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; }
 .goals-activity__row time { flex: none; color: var(--text-3); }
+.goals-activity__content { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.goals-activity__decision { margin-top: var(--sp-2); }
+.goals-activity__decision summary { color: var(--text-3); cursor: pointer; }
+.goals-activity__decision summary:focus-visible { outline: 1px solid var(--focus-line); border-radius: var(--radius-sm); }
+.goals-activity__decision dl { margin: var(--sp-3) 0 0; padding-left: var(--sp-4); border-left: 1px solid var(--line-soft); }
+.goals-activity__decision dt { color: var(--text-3); font-size: var(--fs-micro); }
+.goals-activity__decision dd { margin: var(--sp-1) 0 var(--sp-3); color: var(--text-2); }
 @container (width < 840px) {
   .goals-surface--detail-open .goals-layout { flex-direction: column; }
   .goals-surface--detail-open .goals-index { flex: none; width: 100%; min-width: 0; max-width: none; }
