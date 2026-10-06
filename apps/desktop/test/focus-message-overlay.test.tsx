@@ -81,7 +81,9 @@ async function fixture() {
   container = document.createElement('div'); container.id = 'root'; document.body.append(container); root = createRoot(container)
   await act(async () => root!.render(createElement(GlobalFocusSurface))); await settle()
   const markers = [...container.querySelectorAll<HTMLButtonElement>('.recent-focus__message')]
-  expect(markers.map(item => item.dataset.messageId)).toEqual([ID])
+  expect(markers.map(item => item.dataset.inputMessageId)).toEqual([ID])
+  expect(JSON.parse(markers[0]!.dataset.conversationItemRefs!)).toEqual([{ hostId: 'local', agentSessionId: A,
+    source: { kind: 'captured', recordId: 'prompt:overlay-message' } }])
   expect(markers[0]!.closest<HTMLElement>('[data-focus-timeline-id]')!.dataset.focusTimelineId).toBe(A)
   const marker = markers[0]!
   return { marker, history, unsafe, subjects: sessions.map(session => [session.id, session.control.run.runId]),
