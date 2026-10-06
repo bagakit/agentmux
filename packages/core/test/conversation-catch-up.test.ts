@@ -171,3 +171,36 @@ it('public watch ends only after its actual original observation resource termin
     { type: 'end', data: { reason: 'source-observation-released' } }
   ])))
 })
+
+for (const asynchronous of [false, true]) it(`a ${asynchronous ? 'rejected' : 'throwing'} service consumer releases only its own original reader`, async () => {
+  const f = await historyReaderFixture(true, true); close.push(f.close)
+  const service = new core.AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client: f.client }] })
+  close.push(() => service.dispose())
+  const observe = vi.spyOn(f.client, 'observeSessionHistory')
+  const fail = vi.fn(() => { if (asynchronous) return Promise.reject(new Error('Consumer persistence failed'))
+    throw new Error('Consumer persistence failed') })
+  const sub = await service.subscribe('agent.conversation.watch', f.reference, fail)
+  close.push(async () => { await sub.dispose() })
+  const original = await observe.mock.results[0]!.value
+  const healthy = vi.fn(), other = await f.client.observeSessionHistory(f.reference.agentSessionId, healthy)
+  close.push(async () => { other.dispose() })
+  await appendFile(f.transcript, row('consumer-error'))
+  await vi.waitFor(() => expect(original.closed?.aborted).toBe(true))
+  expect(fail).toHaveBeenCalled()
+  expect(other.closed?.aborted).toBe(false)
+  expect(healthy).toHaveBeenCalled()
+  const checkpoint = await f.client.conversationCheckpoint(f.reference.agentSessionId)
+  expect(checkpoint.source.nativeSessionId).toBe('original-native')
+})
+
+it('actual CLI help and skill expose scoped changes and reader-only follow cancellation', async () => {
+  const f = await historyReaderFixture(true, true); close.push(f.close)
+  const env = objectCliEnvironment(f.root)
+  const help = await runCompiledObjectCli(['agent', 'conversation', 'watch', '--help'], env)
+  expect(help.code, help.stderr).toBe(0)
+  expect(help.stdout).toContain('Ctrl-C releases this reader')
+  const skill = await runCompiledObjectCli(['--skill'], env)
+  expect(skill.code, skill.stderr).toBe(0)
+  for (const action of ['checkpoint', 'changes', 'watch']) expect(skill.stdout).toContain(`amux agent conversation ${action}`)
+  await f.unchanged()
+})
