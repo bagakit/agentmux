@@ -3,6 +3,10 @@ import { afterEach, expect, it } from 'vitest'
 import { nativeHistoryFixture, jsonl } from './fixtures/native-history-session.js'
 import { loadAgentSessions } from '../src/agent-session-store.js'
 import { SESSION_HISTORY_MAX_PAGE_BYTES } from '../src/session-history.js'
+import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { spawn } from 'node:child_process'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 const fixtures: Awaited<ReturnType<typeof nativeHistoryFixture>>[] = []
 afterEach(async () => { await Promise.all(fixtures.splice(0).map((fixture) => fixture.close())) })
@@ -11,6 +15,50 @@ async function fixture(data: string | Buffer) {
 }
 const record = (uuid: string, type: string, content: unknown, extra: Record<string, unknown> = {}) => ({
   sessionId: 'native-main', uuid, type, message: { role: type, content }, ...extra
+})
+
+it('reads only the original main Claude image resource with exact UUID, turn and part identity', async () => {
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0K8AAAAASUVORK5CYII='
+  const image = (data: string) => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data } })
+  const f = await fixture(jsonl([
+    record('original-image', 'user', [{ type: 'text', text: 'Keep original prose' }, image(png)], { user_message_uuid: 'original-turn' }),
+    record('original-image', 'user', [image('foreign-image')], { user_message_uuid: 'original-turn', isSidechain: true }),
+    { type: 'queue-operation', operation: 'enqueue' }
+  ]))
+  const request = { source: { providerId: 'claude', nativeSessionId: 'native-main' }, recordId: 'original-image', turnId: 'original-turn', partIndex: 1, expectedReference: `data:image/png;base64,${png}` }
+  const result = await f.client.sessionHistoryResource('private-agent', request)
+  expect(result).toMatchObject({ source: request.source, recordId: request.recordId, turnId: request.turnId, partIndex: request.partIndex,
+    reference: request.expectedReference, result: { status: 'read', mimeType: 'image/png', dataBase64: png } })
+  for (const patch of [{ recordId: 'missing-record' }, { turnId: 'foreign-turn' }]) {
+    await expect(f.client.sessionHistoryResource('private-agent', { ...request, ...patch })).rejects.toHaveProperty('code', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')
+  }
+  await expect(f.client.sessionHistoryResource('private-agent', { ...request, partIndex: 0 })).rejects.toHaveProperty('code', 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH')
+  expect(await f.bytes()).toEqual(f.before)
+  expect(f.controls).toHaveLength(6); for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+})
+
+it('the actual resource CLI consumes the built-in Claude exact reader and original receipt', async () => {
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0K8AAAAASUVORK5CYII='
+  const f = await fixture(jsonl([record('cli-image', 'user', [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } }])]))
+  const request = { hostId: 'local', agentSessionId: 'private-agent', source: { providerId: 'claude', nativeSessionId: 'native-main' }, recordId: 'cli-image', partIndex: 0, expectedReference: `data:image/png;base64,${png}` }
+  const socket = join(f.root, 'resource.sock'), input = join(f.root, 'resource.json')
+  await writeFile(input, JSON.stringify(request))
+  const server = new AgentMuxControlServer({ coreClients: () => [{ hostId: 'local', client: f.client }] }, socket)
+  await server.start()
+  try {
+    const output = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
+      const child = spawn(process.execPath, [process.env.AGENTMUX_IMAGE_CLI ?? join(import.meta.dirname, '../dist/agentmux.js'), '--endpoint', `unix:${socket}`, 'agent', 'history', 'resource', '--input', input], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+      let stdout = '', stderr = ''
+      const deadline = setTimeout(() => { child.kill(); reject(new Error('Private resource CLI did not finish.')) }, 10000)
+      child.stdout.on('data', value => { stdout += value }); child.stderr.on('data', value => { stderr += value })
+      child.once('error', error => { clearTimeout(deadline); reject(error) }); child.once('close', code => { clearTimeout(deadline); resolve({ code, stdout, stderr }) })
+    })
+    expect(output.code, output.stderr).toBe(0); expect(output.stderr).toBe('')
+    expect(JSON.parse(output.stdout)).toMatchObject({ ok: true, operation: 'agent.history.resource', result: { hostId: 'local', agentSessionId: 'private-agent', source: request.source, recordId: 'cli-image', partIndex: 0, reference: request.expectedReference, result: { status: 'read', mimeType: 'image/png', dataBase64: png } } })
+    expect(await f.bytes()).toEqual(f.before)
+    expect(f.controls).toHaveLength(6); for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+  } finally { await server.stop() }
 })
 
 it('omits sidechain entries even when they carry the main native Session ID', async () => {
