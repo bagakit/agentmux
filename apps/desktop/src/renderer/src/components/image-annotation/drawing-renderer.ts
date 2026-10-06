@@ -13,6 +13,7 @@ import {
   type RectShape,
   type NoteShape,
   type PixelateShape,
+  type CoverShape,
   type ScreenshotShape,
   type TextShape
 } from './drawing-model'
@@ -25,17 +26,19 @@ export function drawScreenshotShape(context: CanvasRenderingContext2D, shape: Sc
   context.lineJoin = 'round'
   context.strokeStyle = shape.color
   context.fillStyle = shape.color
-  switch (shape.kind) {
-    case 'pen': drawStroke(context, shape); break
-    case 'highlight': drawHighlight(context, shape); break
-    case 'arrow': drawArrow(context, shape); break
-    case 'rect': drawRect(context, shape); break
-    case 'ellipse': drawEllipse(context, shape); break
-    case 'text': drawText(context, shape); break
-    case 'note': drawNote(context, shape); break
-    case 'pixelate': drawPixelate(context, shape); break
-  }
-  context.restore()
+  try {
+    switch (shape.kind) {
+      case 'pen': drawStroke(context, shape); break
+      case 'highlight': drawHighlight(context, shape); break
+      case 'arrow': drawArrow(context, shape); break
+      case 'rect': drawRect(context, shape); break
+      case 'ellipse': drawEllipse(context, shape); break
+      case 'text': drawText(context, shape); break
+      case 'note': drawNote(context, shape); break
+      case 'pixelate': drawPixelate(context, shape); break
+      case 'cover': drawCover(context, shape); break
+    }
+  } finally { context.restore() }
 }
 
 export function drawScreenshotShapes(context: CanvasRenderingContext2D, shapes: readonly ScreenshotShape[]): void {
@@ -141,6 +144,25 @@ function drawNote(context: CanvasRenderingContext2D, shape: NoteShape): void {
   context.fillText(String(shape.number), shape.from.x, shape.from.y)
 }
 
+/** Align outward to actual canvas pixels so fractional zoom/DPR cannot leave a
+ * translucent edge. Cover always paints a fixed opaque color, including drafts
+ * loaded with an alpha-bearing color field. The caller restores this transform. */
+function drawCover(context: CanvasRenderingContext2D, shape: CoverShape): void {
+  const rect = normalizeRect(shape.from, shape.to)
+  if (rect.width <= 0 || rect.height <= 0) return
+  const transform = context.getTransform()
+  const left = Math.max(0, Math.floor(rect.x * transform.a + transform.e))
+  const top = Math.max(0, Math.floor(rect.y * transform.d + transform.f))
+  const right = Math.min(context.canvas.width, Math.ceil((rect.x + rect.width) * transform.a + transform.e))
+  const bottom = Math.min(context.canvas.height, Math.ceil((rect.y + rect.height) * transform.d + transform.f))
+  if (right <= left || bottom <= top) return
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.globalAlpha = 1
+  context.globalCompositeOperation = 'source-over'
+  context.fillStyle = '#111827'
+  context.fillRect(left, top, right - left, bottom - top)
+}
+
 /** Sample the already painted image, then draw the blocks without interpolation.
  * The same renderer is used for preview and final PNG; no underlying pixels are exported. */
 function drawPixelate(context: CanvasRenderingContext2D, shape: PixelateShape): void {
@@ -153,8 +175,8 @@ function drawPixelate(context: CanvasRenderingContext2D, shape: PixelateShape): 
   const bottom = Math.min(context.canvas.height, Math.ceil((rect.y + rect.height) * transform.d + transform.f))
   if (right <= x || bottom <= y) return
   const sample = document.createElement('canvas')
-  sample.width = Math.max(1, Math.ceil((right - x) / (shape.blockSize * transform.a)))
-  sample.height = Math.max(1, Math.ceil((bottom - y) / (shape.blockSize * transform.d)))
+  sample.width = Math.max(1, Math.ceil((right - x) / Math.max(1, shape.blockSize * transform.a)))
+  sample.height = Math.max(1, Math.ceil((bottom - y) / Math.max(1, shape.blockSize * transform.d)))
   const small = sample.getContext('2d')
   if (!small) throw new Error('Screenshot pixelation requires a 2D canvas')
   small.drawImage(context.canvas, x, y, right - x, bottom - y, 0, 0, sample.width, sample.height)
