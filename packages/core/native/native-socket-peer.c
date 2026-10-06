@@ -26,7 +26,9 @@ static void quoted(const char *value) {
 }
 static struct proc_bsdinfo process(pid_t pid) {
   struct proc_bsdinfo value;
-  if (proc_pidinfo(pid,PROC_PIDTBSDINFO,0,&value,sizeof(value))!=sizeof(value) || value.pbi_uid!=getuid()) failure("process-owner");
+  if (proc_pidinfo(pid,PROC_PIDTBSDINFO,0,&value,sizeof(value))!=sizeof(value) ||
+      value.pbi_pid!=(uint32_t)pid || value.pbi_uid!=getuid() ||
+      !value.pbi_start_tvsec || value.pbi_start_tvusec>=1000000) failure("process-owner");
   return value;
 }
 static struct socket_fdinfo socket_info(pid_t pid,int fd) {
@@ -93,6 +95,14 @@ static struct original_connection original_connection(pid_t root,const char *end
   struct original_connection result={.pid=tui,.descriptor=tui_fd,.value=original};strcpy(result.endpoint,selected);return result;
 }
 int main(int argc,char **argv) {
+  if(argc==3 && !strcmp(argv[1],"--process-identity")) {
+    char *end=NULL;long number=strtol(argv[2],&end,10);
+    if(!end||*end||number<=0||number>INT_MAX)failure("original-process");
+    struct proc_bsdinfo value=process((pid_t)number);
+    printf("{\"type\":\"native-process-identity\",\"schema\":1,\"pid\":%u,\"uid\":%u,\"startSec\":\"%llu\",\"startUsec\":\"%llu\"}\n",
+      value.pbi_pid,value.pbi_uid,value.pbi_start_tvsec,value.pbi_start_tvusec);
+    return 0;
+  }
   if(argc==14 && !strcmp(argv[1],"--verify")) {
     pid_t root=(pid_t)strtol(argv[2],NULL,10),tui=(pid_t)strtol(argv[3],NULL,10),peer=(pid_t)strtol(argv[4],NULL,10);
     struct proc_bsdinfo r=process(root),t=process(tui),p=process(peer);
