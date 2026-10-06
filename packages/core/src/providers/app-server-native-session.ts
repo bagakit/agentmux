@@ -80,10 +80,11 @@ export async function discoverAppServerNativeSession(context: AgentProviderNativ
     childSessionIds: original.childSessionIds,
     handle: { kind: 'provider', providerId, sessionId: original.id, transcriptPath: original.file.path },
     async assertCurrent() {
+      // A descriptor is a replaceable handle; the original owner and file object must remain.
       const current = await locateAppServerNativeSession(context, mainRole)
       if (!current || current.id !== original.id || current.file.path !== original.file.path ||
         current.file.processId !== original.file.processId || current.file.processGroup !== original.file.processGroup ||
-        current.file.descriptor !== original.file.descriptor || current.file.device !== original.file.device || current.file.inode !== original.file.inode) {
+        current.file.device !== original.file.device || current.file.inode !== original.file.inode) {
         throw unavailable('The original native process record changed; refresh its exact source.')
       }
     }
