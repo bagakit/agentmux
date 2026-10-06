@@ -15,7 +15,6 @@ import {
 } from './lib/surface-tool-dock'
 import { SettingsPanel, type SettingsPageId } from './components/SettingsPanel'
 import { GlobalSystemNotices } from './components/GlobalSystemNotices'
-import { RemoteCoreUpgradeNotices } from './components/RemoteCoreUpgradeNotices'
 import { ToolkitStatusBar } from './components/toolkit/ToolkitStatusBar'
 import { WindowUtilityBar } from './components/WindowUtilityBar'
 import { WindowOverlayHost } from './components/WindowOverlayHost'
@@ -38,7 +37,6 @@ import { installDesktopPresentationOwner, desktopPresentationCommitted, type Des
 import { SCRATCH_WORKSPACE_ID } from '../../shared/scratch-topics'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
-import { TransientErrorNotice } from './components/TransientErrorNotice'
 import { WorkspaceWorkbench as WorkspaceWorkbenchView } from './components/WorkspaceWorkbench'
 import { executionFocusSessionId } from './lib/agent-focus'
 import { executionFocusPresentation, mainFocusPresentation } from './lib/focus-tab-projection'
@@ -95,13 +93,6 @@ function DesktopApp() {
   const loading = useAppStore((state) => state.loading)
   const startupProgress = useAppStore((state) => state.startupProgress)
   const error = useAppStore((state) => state.error)
-  const lastError = useAppStore((state) => state.lastError)
-  const errorDismissed = useAppStore((state) => state.errorDismissed)
-  const errorNoticeKind = useAppStore((state) => state.errorNoticeContext?.kind ?? 'indeterminate')
-  const errorSummary = useAppStore((state) => state.errorNoticeContext?.summary)
-  const lifecycleError = useAppStore((state) => state.errorNoticeContext?.lifecycle !== undefined)
-  const dismissError = useAppStore((state) => state.dismissError)
-  const reopenError = useAppStore((state) => state.reopenError)
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const layouts = useAppStore((state) => state.layouts)
@@ -637,18 +628,6 @@ function DesktopApp() {
               ) : null}
             </section>
           </div>
-        <div className="main-shell__notices">
-          <RemoteCoreUpgradeNotices />
-          <TransientErrorNotice
-            error={lifecycleError ? null : error}
-            dismissed={errorDismissed}
-            lastError={lifecycleError ? null : lastError}
-            kind={errorNoticeKind}
-            summary={errorSummary}
-            onDismiss={dismissError}
-            onReopen={reopenError}
-          />
-        </div>
       </main>
       </div>
       <PmoTeamsTopicFloatingPanel floating={moteFloating} setFloating={setMoteFloating} projectionState={moteProjection} />

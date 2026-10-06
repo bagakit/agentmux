@@ -450,6 +450,17 @@ export type ErrorNoticeContext = {
   startupProviderCatalog?: { warningMessage: string }
 }
 
+/** Window-local event history; acknowledgement never changes a domain owner's facts. */
+export type NotificationEvent = { id: string; message: string; context: ErrorNoticeContext | null }
+
+export function notificationEventIdentity(message: string, context: ErrorNoticeContext | null | undefined): string {
+  const subject = context?.subject
+  return JSON.stringify([context?.kind ?? 'indeterminate', context?.cause,
+    subject?.hostId, subject?.kind, subject?.kind === 'agent' ? subject.agentSessionId : undefined,
+    subject?.run.runId, context?.lifecycle, context?.startupSessionSnapshot?.sessionIds,
+    context?.startupProviderCatalog ? 'provider-catalog' : undefined, errorIdentity(message)])
+}
+
 function resolvedNativeIdentityNotice(state: Pick<AppState, 'sessions' | 'errorNoticeContext'>):
   Partial<Pick<AppState, 'error' | 'lastError' | 'errorNoticeContext' | 'errorDismissed'>> {
   const notice = state.errorNoticeContext, subject = notice?.subject
@@ -900,6 +911,8 @@ type AppState = {
   lastError: string | null
   errorNoticeContext: ErrorNoticeContext | null
   errorDismissed: boolean
+  notificationEvents: NotificationEvent[]
+  clearReadNotificationEvents(): void
   /** UI projection of the latest save request failure, never a persistence or Agent health owner. */
   workbenchSaveWarning: string | null
   nameSaveUnconfirmed: { operationId: string; target: AgentMuxNameTarget; message: string } | null
@@ -3759,6 +3772,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   lastError: null,
   errorNoticeContext: null,
   errorDismissed: false,
+  notificationEvents: [],
+  clearReadNotificationEvents() {
+    const read = get().noticeReadReceipts['global:events'] ?? {}
+    set(state => ({ notificationEvents: state.notificationEvents.filter(event => read[event.id] !== event.id),
+      ...(state.error !== null && state.notificationEvents.some(event => event.id === notificationEventIdentity(state.error!, state.errorNoticeContext) && read[event.id] === event.id)
+        ? { errorDismissed: true } : {}) }))
+  },
   workbenchSaveWarning: null,
   nameSaveUnconfirmed: null,
   nameEditFailure: null,
@@ -10426,7 +10446,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       && (current.errorNoticeContext?.lifecycle?.step !== 'launch' ||
         context?.lifecycle?.step === 'launch' && current.errorNoticeContext.lifecycle.regionId === context.lifecycle.regionId)
       && errorIdentity(current.lastError) === errorIdentity(message)) return
-    set({ error: message, lastError: message, errorNoticeContext: context ?? null, errorDismissed: false })
+    const event: NotificationEvent = { id: notificationEventIdentity(message, context), message, context: context ?? null }
+    // Lifecycle/current-source warnings already have an exact current-owner projection in the inbox.
+    const retainEvent = !context?.lifecycle && !context?.cause && !context?.startupSessionSnapshot && !context?.startupProviderCatalog
+    const existing = current.notificationEvents.find(item => item.id === event.id)
+    const notificationEvents = !retainEvent ? current.notificationEvents
+      : existing ? current.notificationEvents.map(item => item === existing ? event : item)
+      : [...current.notificationEvents, event]
+    set({ error: message, lastError: message, errorNoticeContext: context ?? null, errorDismissed: false, notificationEvents })
   },
   dismissError() {
     if (!get().error) return

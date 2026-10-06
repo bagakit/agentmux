@@ -145,15 +145,9 @@ export function serviceNoticeToRender(classification: ServiceNoticeClass): Rende
  * 就是「由 agentViability 推导」。用 `Record` 总映射的理由同 `AGENT_VIABILITY_BY_PROCESS_STATE`（见上）：
  * 新增一类会让 tsc 变红。`assertive` 只给 dead，alive/unknown 都 `polite`——降级轻声说，不喊狼来了。
  *
- * 诚实一句：`serviceNoticeToRender` 对 `agent-broken` 与 `healthy` 都返回 null，所以服务窗只会渲染
- * `process-degraded`/`indeterminate`（都 polite），`assertive` 这一档**在本渲染面没有消费方**。
- * 它不是无用的占位：这张表已经是第二个渲染面的音量来源——`TransientErrorNotice`（`reportError` 的唯一
- * 出口，~69 处调用全走它）原先一律硬编码 assertive，现在改为向本函数取音量（见该组件文件头）。
- * 也就是说轴已经收敛成一条，两个渲染面共用，没有第二张严重度表。
- *
- * App 的既有 Session 订阅只把 Core 已确认崩溃的当前 Run 标成 agent-broken，经 Store 提示元数据
- * 传给 TransientErrorNotice。通用 reportError 仍默认 indeterminate：流程失败、用户停止和未知退出
- * 不能因为显示 error 就被升成 Agent 崩溃。只有知识 owner 提供分类，这里只持有唯一音量映射。
+ * 服务窗只渲染流程降级与未知；统一 NotificationItem 和窗口内新事件公告也消费本映射。
+ * 原 Session 订阅仅将 Core 已确认的当前 Run 崩溃标为 agent-broken，Store 保留该元数据。
+ * 通用 reportError 默认 indeterminate，流程失败、用户停止和未知退出不能因错误展示被升为崩溃。
  *
  * f-25n8fzxzw 的处置：它的诊断（重连失败后字进沉默终端）成立，但它开的方子（status==='error' 时
  * canSubmit=false）是 RED-LINES.md 的红线，已由 8a62269b 反向钉死。它的真实残值是「把降级如实告知」
