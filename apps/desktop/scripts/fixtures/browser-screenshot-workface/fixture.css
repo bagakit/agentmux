@@ -1,0 +1,7 @@
+html, body, #root { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+body { background: var(--bg); color: var(--text); font: 13px -apple-system, BlinkMacSystemFont, sans-serif; }
+.screenshot-native-fixture { padding: 18px 20px; height: 100%; box-sizing: border-box; }
+.screenshot-native-fixture > header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; height: 22px; }
+.screenshot-native-fixture > header span { color: var(--text-dim); font-size: 11px; }
+.screenshot-native-fixture__original { width: min(660px, calc(100vw - 40px)); height: calc(100vh - 85px); }
+.screenshot-native-fixture__original > * { height: 100%; }
