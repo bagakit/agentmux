@@ -4,20 +4,21 @@
 .mobile-goals h1 { font-size: 17px; margin: 0; }
 .mobile-goals h2 { font-size: 17px; margin-block: 12px 6px; }
 .mobile-goals h3 { font-size: 14px; margin-block: 0 6px; }
-.mobile-goals button, .mobile-goals input, .mobile-goals select, .mobile-goals textarea { font: inherit; color: inherit; background: var(--surface-1); border: 1px solid var(--line-soft); border-radius: 7px; min-height: 44px; padding: 6px 8px; }
+.mobile-goals button, .mobile-goals input, .mobile-goals select, .mobile-goals textarea { font: inherit; color: inherit; background: var(--surface-1); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); min-height: 44px; padding: 6px 8px; }
 .mobile-goals button { cursor: pointer; font-size: 12px; }
 .mobile-goals .mobile-goals-refresh { background: transparent; border: 0; padding: 0; width: 44px; }
 .mobile-goals :focus-visible:not(.ui-input) { outline: 2px solid var(--mobile-accent); outline-offset: 2px; }
 .mobile-goals-filters input { flex: 1; min-width: 0; }
-.mobile-goals-filters select { max-width: 36%; font-size: 13px; }
-.mobile-goals-filters { margin-bottom: 6px; }
-.mobile-goals-filters input { background: var(--surface-1); border-color: transparent; }
+.mobile-goals-filters select { width: 112px; max-width: 112px; }
+.mobile-goals-filters { gap: 0; margin-bottom: 4px; }
 .mobile-goals-list { list-style: none; padding: 0; margin-block: 6px; }
-.mobile-goals-list li { border-bottom: 1px solid var(--line); }
-.mobile-goals-list button { width: 100%; text-align: left; display: grid; border: 0; border-radius: 0; background: transparent; gap: 3px; padding-block: 8px; min-height: 52px; }
+.mobile-goals-list li + li { margin-top: 2px; }
+.mobile-goals-list button { width: 100%; text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; border: 0; border-radius: var(--radius-sm); background: transparent; gap: 2px 8px; padding: 6px 4px; min-height: 44px; }
+.mobile-goals-list strong { font-size: 13px; line-height: 1.4; }
 .mobile-goals-list span, .mobile-goals-list small { color: var(--text-2); font-size: 11px; }
-.mobile-goals-list small { white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.mobile-goals article section, .mobile-goals details { margin-block: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.mobile-goals-list span { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-goals-list small { grid-column: 1 / -1; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.mobile-goals article section, .mobile-goals details { margin-block: 12px; padding-top: 6px; }
 .mobile-goals-body { white-space: pre-wrap; line-height: 1.6; }
 .mobile-goals label { display: grid; gap: 6px; margin-block: 8px; font-size: 11px; }
 .mobile-goals textarea { min-height: 110px; resize: vertical; }

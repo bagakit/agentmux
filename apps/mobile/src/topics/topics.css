@@ -8,19 +8,20 @@
 .mobile-topics button { min-height: 44px; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); }
 .mobile-topics button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .mobile-topics-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.mobile-topics-actions > button { padding-inline: 6px; background: transparent; color: var(--text-2); }
 .mobile-topics-actions h1, .mobile-topics-actions small { flex: 1; }
 .mobile-topic-organization { position: static; }
 .mobile-topic-organization > summary { min-height: 44px; display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; border-radius: var(--radius-sm); color: var(--text-3); list-style: none; }
 .mobile-topic-organization[open] > .mobile-topics-actions { position: absolute; right: 12px; top: 48px; z-index: 3; min-width: 180px; padding: var(--sp-4); background: var(--surface-2); box-shadow: var(--elev-2); border-radius: var(--radius); display: grid; }
 .mobile-topic-organization .mobile-topic-editor { position: static; margin: 0; padding: 8px 0; border-top: 1px solid var(--line-soft); }
-.mobile-topics-tabs { display: flex; gap: 3px; margin: 4px 0 10px; padding: 3px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
-.mobile-topics-tabs button { flex: 1; min-width: 0; background: transparent; color: var(--text-3); }
-.mobile-topics-tabs button[aria-pressed="true"] { box-shadow: none; font-weight: 600; color: var(--text); background: var(--surface-2); }
-.mobile-topics-search { display: flex; gap: var(--sp-4); margin: var(--sp-4) 0; }
+.mobile-topics-tabs { display: flex; gap: 2px; margin: 0 0 2px; }
+.mobile-topics-tabs button { min-width: 44px; padding: 0 8px; border: 6px solid transparent; border-radius: var(--radius-lg); background: transparent; background-clip: padding-box; color: var(--text-3); font-size: 12px; }
+.mobile-topics-tabs button[aria-pressed="true"] { font-weight: 600; color: var(--text); background-color: var(--surface-2); }
+.mobile-topics-search { display: flex; margin: 0 0 4px; }
 .mobile-topics input, .mobile-topics textarea, .mobile-topics select { min-height: 44px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); padding: var(--sp-4); font: inherit; font-size: 16px; }
 .mobile-topics-search input { flex: 1; min-width: 0; }
 .mobile-topics-list { list-style: none; margin: var(--sp-4) 0; padding: 0; }
-.mobile-topics-list button { width: 100%; text-align: left; display: grid; gap: var(--sp-2); background: transparent; border-bottom: 1px solid var(--line-soft); border-radius: 0; padding: 8px 0; min-height: 48px; }
+.mobile-topics-list button { width: 100%; text-align: left; display: grid; gap: var(--sp-2); background: transparent; border: 0; border-radius: var(--radius-sm); padding: 8px 0; min-height: 48px; }
 .mobile-topics-list button[aria-current="page"] { background: var(--surface-2); }
 .mobile-topics-list strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .mobile-topics small, .mobile-topics-empty { color: var(--text-3); font-size: 11px; }
@@ -50,7 +51,7 @@
 .mobile-topics-category > svg { transition: transform 120ms ease; }
 .mobile-topics-category[aria-expanded="true"] > svg { transform: rotate(90deg); }
 .mobile-topics-category[aria-expanded="true"] { color: var(--green); }
-.mobile-topics-branch { margin: 0 0 4px 12px; padding-left: 14px; border-left: 1px solid var(--line-soft); }
+.mobile-topics-branch { margin: 0 0 4px 12px; padding-left: 14px; }
 .mobile-topics-tree .mobile-topics-topic strong { font-weight: 500; }
 .mobile-topics-tree .mobile-topics-topic small { -webkit-line-clamp: 1; }
 .mobile-topics-branch > .mobile-topics-empty { margin: 6px; }
