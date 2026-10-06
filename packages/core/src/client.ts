@@ -915,6 +915,12 @@ export class AgentMuxClient {
   // stop 路径写入意图，acceptKernelEvent 在退出事件里读它、合成 exitReason。一个 runId 只会退出一次，
   // 分类后即删，不留驻。裸集合足矣——意图是布尔（在场即「我们关的」），不需要携带别的。
   private readonly stopRequestedRuns = new Set<string>()
+  private readonly agentStopFlights = new Map<string, {
+    readers: number
+    retired: boolean
+    admission: Promise<{ session: AgentMuxAgentSession; reservation: AgentMuxLifecycleReservation; stopOperation: CtxmuxAdapterStopOperation }>
+    retirement?: Promise<void>
+  }>()
   // 「这个 runId 的进程已经终结」这条**观察结果**的台账，与上面那条**意图**台账分居两处、语义不同：
   // 意图是我们想不想关，这条是内核报没报它已经没了。「这个 run 再不会有 hook 事件」的权威终点有**两条**
   // 到达路径，故写入点也是两处，各对应一条路径：
@@ -5548,87 +5554,90 @@ export class AgentMuxClient {
 
   async stopAgent(agentSessionId: string, expectedRun: AgentMuxRunRef): Promise<void> {
     this.requireConnected()
-    const session = this.requireAgentSession(agentSessionId)
-    if (!sameRun(session.run, expectedRun)) {
-      throw new AgentMuxError(
-        'Agent Session changed before its Run was stopped.',
-        'STALE_AGENT_SESSION'
-      )
+    const flightKey = JSON.stringify([agentSessionId, expectedRun.runId])
+    let flight = this.agentStopFlights.get(flightKey)
+    if (!flight) {
+      flight = { readers: 0, retired: false, admission: this.prepareAgentStop(agentSessionId, expectedRun) }
+      this.agentStopFlights.set(flightKey, flight)
     }
-    // 停止意图落台账。用户主动停止走的干净路径是 run-removed（下方），但进程可能在我们的 stop 生效前就
-    // 自退——那条 exit 事件会先到 acceptKernelEvent；先记意图，才能让它诚实归为 user-stopped 而非 crashed。
-    const lifecycleOperationId = agentLifecycleOperationIdentity(
-      'stop',
-      agentSessionId,
-      randomUUID()
-    )
-    const stopOperation: CtxmuxAdapterStopOperation = await this.kernel.prepareStop(
-      expectedRun.runId,
-      lifecycleOperationId
-    )
-    const reservation = await this.registry.reserveExisting(
-      'stop',
-      agentSessionId,
-      expectedRun,
-      lifecycleOperationId,
-      stopOperation
-    )
-    // Record intent only after both prepare and reservation succeeded. This
-    // keeps exit classification honest when setup itself fails.
-    this.stopRequestedRuns.add(expectedRun.runId)
-    let preserveReservation = false
+    flight.readers++
     try {
+      const { session, reservation, stopOperation } = await flight.admission
+      if (flight.retirement) return await flight.retirement
+      // Each explicit retry can reconcile the original operation independently.
+      // A stalled Runtime receipt reader must not block the next Stop reader.
       let run: CtxmuxAdapterRun | null = null
       try {
         run = await this.requireCurrentAgentRun(session)
       } catch (error) {
-        if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION_BINDING') {
-          throw error
-        }
+        if (flight.retirement) return await flight.retirement
+        if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION_BINDING') throw error
       }
+      if (flight.retirement) return await flight.retirement
       if (run?.state.type === 'running') {
-        try {
-          await this.kernel.stop(stopOperation)
-        } catch (error) {
-          // Stop is idempotent at the Session boundary: a Run that vanished
-          // between status and stop has already completed its process exit.
-          if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') {
-            preserveReservation = true
-          } else {
-            // Any non-vanished error leaves submission state uncertain. Keep
-            // the reservation for startup recovery instead of releasing it
-            // and losing an accepted/in-flight stop.
-            preserveReservation = true
-            throw error
-          }
+        try { await this.kernel.stop(stopOperation) }
+        catch (error) {
+          if (flight.retirement) return await flight.retirement
+          if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') throw error
         }
-        preserveReservation = true
+      } else if (run) await this.releaseRunAttachment(session.run)
+      // A late original reader joins the same retirement, even after the Session
+      // leaves the registry. A failed cleanup permits explicit retry of that tail.
+      if (!flight.retirement) {
+        const retirement = this.retireStoppedAgent(session, reservation, () => { flight.retired = true })
+        flight.retirement = retirement
+        void retirement.catch(() => { if (!flight.retired && flight.retirement === retirement) delete flight.retirement })
       }
-      else if (run) await this.releaseRunAttachment(session.run)
-      await this.hookBindings.get(session.run.runId)?.close()
-      this.hookBindings.delete(session.run.runId)
-      this.settleHookRestore(session)
-      const cleanup = await Promise.allSettled([
-        this.acp.unbind(agentSessionId),
-        this.registry.commitLifecycle(reservation, null)
-      ])
-      preserveReservation ||= cleanup[1]?.status === 'rejected'
-      if (cleanup[1]?.status === 'fulfilled') {
-        this.runPids.delete(session.run.runId)
+      await flight.retirement
+    } finally {
+      flight.readers--
+      if (!flight.readers && this.agentStopFlights.get(flightKey) === flight) this.agentStopFlights.delete(flightKey)
+    }
+  }
+
+  private async prepareAgentStop(agentSessionId: string, expectedRun: AgentMuxRunRef) {
+    const session = this.requireAgentSession(agentSessionId)
+    if (!sameRun(session.run, expectedRun)) {
+      throw new AgentMuxError('Agent Session changed before its Run was stopped.', 'STALE_AGENT_SESSION')
+    }
+    const retained = (await this.registry.claimStaleLifecycles(Date.now(), { agentSessionId, expectedRun }))[0]
+    const operationId = retained?.operationId ?? agentLifecycleOperationIdentity('stop', agentSessionId, randomUUID())
+    const stopOperation = retained?.kind === 'stop' ? retained.stopOperation : await this.kernel.prepareStop(expectedRun.runId, operationId)
+    const reservation = retained ?? await this.registry.reserveExisting('stop', agentSessionId, expectedRun, operationId, stopOperation)
+    // Intent is recorded only after admission succeeds. Keep this prepared
+    // identity through observation/receipt/cleanup failures until retirement;
+    // no individual reader can release another reader's accepted operation.
+    this.stopRequestedRuns.add(expectedRun.runId)
+    return { session, reservation, stopOperation }
+  }
+
+  private async retireStoppedAgent(session: AgentMuxAgentSession, reservation: AgentMuxLifecycleReservation, onRetired: () => void): Promise<void> {
+    const agentSessionId = session.agentSessionId
+    await this.hookBindings.get(session.run.runId)?.close()
+    // A lost Store commit ACK can leave this old reader unconfirmed while the
+    // original identity has already been explicitly reopened with another Run.
+    if (this.registry.has(agentSessionId) && !sameRun(this.registry.get(agentSessionId).run, session.run)) {
+      throw new AgentMuxError('Agent Session changed before its original Stop cleanup.', 'STALE_AGENT_SESSION')
+    }
+    this.hookBindings.delete(session.run.runId)
+    this.settleHookRestore(session)
+    const cleanup = await Promise.allSettled([
+      this.acp.unbind(agentSessionId),
+      this.registry.commitLifecycle(reservation, null).then(onRetired)
+    ])
+    if (cleanup[1]?.status === 'fulfilled') {
+      this.runPids.delete(session.run.runId)
+      if (!this.registry.has(agentSessionId) || sameRun(this.registry.get(agentSessionId).run, session.run)) {
         this.agentInputCursors.delete(agentSessionId)
         this.agentInputTails.delete(agentSessionId)
-        this.publisher.publish({
-          type: 'run-removed',
-          agentSessionId,
-          run: { ...session.run },
-          evidence: { source: 'user', observedAt: Date.now(), run: { ...session.run } }
-        })
       }
-      const errors = cleanup.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
-      if (errors.length > 0) throw new AggregateError(errors, 'Agent stopped but Agent Session cleanup failed.')
-    } finally {
-      if (!preserveReservation) await this.registry.releaseLifecycle(reservation)
+      this.publisher.publish({
+        type: 'run-removed', agentSessionId, run: { ...session.run },
+        evidence: { source: 'user', observedAt: Date.now(), run: { ...session.run } }
+      })
     }
+    const errors = cleanup.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
+    if (errors.length > 0) throw new AggregateError(errors, 'Agent stopped but Agent Session cleanup failed.')
   }
 
   async bindAcp(agentSessionId: string, binding: AgentMuxAcpBinding): Promise<void> {

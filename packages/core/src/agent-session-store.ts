@@ -172,7 +172,8 @@ export type AgentMuxAgentSessionStore = {
   prepareReopen(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, session: AgentMuxStoredAgentSession): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>>
   releaseReopenOwner(ownerId: string): Promise<void>
   claimReopen(agentSessionId: string, operationId: string, expectedRetiredAt: number, claim: AgentMuxLifecycleClaim): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }> | null>
-  claimStaleLifecycles(claim: AgentMuxLifecycleClaim): Promise<AgentMuxLifecycleReservation[]>
+  /** A target claims only its original Stop; adapters must preserve this filter. */
+  claimStaleLifecycles(claim: AgentMuxLifecycleClaim, target?: { agentSessionId: string; expectedRun: AgentMuxRunRef }): Promise<AgentMuxLifecycleReservation[]>
   releaseLifecycle(
     reservation: AgentMuxLifecycleReservation,
     retiredRuns?: readonly AgentMuxRunRef[]
@@ -2331,9 +2332,13 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     return next ? structuredClone(next) : null
   }
 
-  async claimStaleLifecycles(claim: AgentMuxLifecycleClaim): Promise<AgentMuxLifecycleReservation[]> {
+  async claimStaleLifecycles(claim: AgentMuxLifecycleClaim, target?: { agentSessionId: string; expectedRun: AgentMuxRunRef }): Promise<AgentMuxLifecycleReservation[]> {
     const claimed: AgentMuxLifecycleReservation[] = []
-    for (const [agentSessionId, reservation] of this.reservations) {
+    const original = target ? this.reservations.get(target.agentSessionId) : undefined
+    const candidates: Iterable<[string, AgentMuxLifecycleReservation]> = target
+      ? original ? [[target.agentSessionId, original]] : [] : this.reservations
+    for (const [agentSessionId, reservation] of candidates) {
+      if (target && (reservation.kind !== 'stop' || reservation.expectedRun.runId !== target.expectedRun.runId)) continue
       if (
         !((reservation.kind === 'reopen' || reservation.kind === 'create') && reservation.ownerReleased) && reservation.ownerId !== claim.ownerId &&
         processIsAlive(reservation.ownerPid)
@@ -2929,9 +2934,20 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     return next ? structuredClone(next) : null
   }
 
-  async claimStaleLifecycles(claim: AgentMuxLifecycleClaim): Promise<AgentMuxLifecycleReservation[]> {
+  async claimStaleLifecycles(claim: AgentMuxLifecycleClaim, target?: { agentSessionId: string; expectedRun: AgentMuxRunRef }): Promise<AgentMuxLifecycleReservation[]> {
     let claimed: AgentMuxLifecycleReservation[] = []
     await this.enqueue(async () => {
+      if (target) {
+        const row = this.db.prepare('SELECT json FROM reservations WHERE id=?').get(target.agentSessionId)
+        const reservation = row ? lifecycleReservation(JSON.parse(String(row.json))) : null
+        if (!reservation || reservation.kind !== 'stop' || reservation.expectedRun.runId !== target.expectedRun.runId ||
+          reservation.ownerId !== claim.ownerId && processIsAlive(reservation.ownerPid)) return
+        const next = lifecycleReservation({ ...reservation, ownerId: claim.ownerId, ownerPid: claim.ownerPid, expiresAt: claim.expiresAt })
+        this.db.prepare('UPDATE reservations SET json=? WHERE id=?').run(JSON.stringify(next), target.agentSessionId)
+        this.dirty = true
+        claimed = [next]
+        return
+      }
       const document = await this.read()
       claimed = document.reservations.flatMap((reservation) => {
         if (
