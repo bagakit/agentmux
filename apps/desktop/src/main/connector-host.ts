@@ -70,7 +70,8 @@ export async function createDesktopConnections(options: { directory: string; enc
       } satisfies import('@agentmux/core/connections').ConnectionDeliveryPort } : {}),
       ...(options.ingress && options.bindings ? { ingress: {
         inspect: async input => (await ensure()).ingress!.inspect(input),
-        list: async input => (await ensure()).ingress!.list(input)
+        list: async input => (await ensure()).ingress!.list(input),
+        authority: async input => (await ensure()).ingress!.authority(input)
       } satisfies import('@agentmux/core/connections').ConnectionIngressReadPort } : {}),
       list: async () => (await ensure()).connections.list(),
       inspect: async input => (await ensure()).connections.inspect(input),

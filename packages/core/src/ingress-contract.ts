@@ -28,16 +28,26 @@ export type ConnectionIngressInspection = {
   observation: 'not-started' | 'observed' | 'unavailable'
 }
 export type ConnectionIngressPage = { ingresses: ConnectionIngressRecord[]; nextAfterIngressId: string | null }
+export type ConnectionIngressAuthorityCode = 'INGRESS_CLAIM_UNAVAILABLE' | 'INGRESS_CONNECTION_UNAVAILABLE' | 'INGRESS_BINDING_UNAVAILABLE' | 'INGRESS_ACTOR_NOT_AUTHORIZED' | 'INGRESS_INPUT_OUTSIDE_SCOPE' | 'INGRESS_ADDRESSING_UNCONFIRMED' | 'INGRESS_AUTHORITY_REVISED' | 'INGRESS_STORAGE_UNCONFIRMED'
+/** Original claim and current owner observation only. No Core receipt read or serialized permission. */
+export type ConnectionIngressAuthority = {
+  ingress: ConnectionIngressRecord | null
+  authority: 'current' | 'refused' | 'unavailable'
+  code?: ConnectionIngressAuthorityCode
+}
 export interface ConnectionIngressReadPort {
   inspect(input: ConnectionIngressInspectInput): Promise<ConnectionIngressInspection>
   list(input: ConnectionIngressListInput): Promise<ConnectionIngressPage>
+  authority(input: { operationId: string }): Promise<ConnectionIngressAuthority>
 }
 export type ConnectionIngressParamsMap = {
   'connection.ingress.inspect': ConnectionIngressInspectInput
   'connection.ingress.ls': ConnectionIngressListInput
+  'connection.ingress.authority': { operationId: string }
 }
 export type ConnectionIngressResultMap = {
   'connection.ingress.inspect': ConnectionIngressInspection
   'connection.ingress.ls': ConnectionIngressPage
+  'connection.ingress.authority': ConnectionIngressAuthority
 }
 export type ConnectionIngressMethod = keyof ConnectionIngressParamsMap
