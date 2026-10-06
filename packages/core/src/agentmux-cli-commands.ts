@@ -563,7 +563,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.inspect', '[target]', 'Read supported host settings.'),
   settings('settings.set', '<key> <value> [--operation-id ID]', 'Set one supported value; reuse the original operation ID to recover a directory move.', 2),
   ...(['executors', 'prompts', 'themes'] as const).flatMap(resource => [
-    settings(`settings.${resource}.ls`, '', resource === 'themes' ? 'List built-in and custom themes, readonly metadata and retained-record issues.' : `List configured ${resource}, not active Sessions.`),
+    settings(`settings.${resource}.ls`, '', resource === 'themes' ? 'List built-in and custom themes, retained-record issues, and the semantic icon catalog with meanings and default drawings.' : `List configured ${resource}, not active Sessions.`),
     { ...settings(`settings.${resource}.inspect`, resource === 'prompts' ? '<id>|--keyword <code>' : resource === 'themes' ? '<id> [--output FILE]' : '<id>',
       resource === 'prompts' ? 'Read an exact saved Prompt by ID or its explicit keyword; quick reply meaning is its saved body.' : 'Inspect an exact saved resource.', 1), ...(resource === 'themes' ? { documentOutput: true } : {}) },
     settings(`settings.${resource}.create`, '<id> --input <file|->', 'Create a complete saved resource.', 1),

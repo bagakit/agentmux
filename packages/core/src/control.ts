@@ -340,6 +340,12 @@ export type AgentMuxControlSettingsHostsResult =
 export type AgentMuxControlSettingsResourceItem = { id: string; value: AgentMuxControlSettingsResourceFields; readonly?: boolean; document?: AgentMuxControlSettingsResourceFields }
 /** Unreadable authored records remain in their owner; these diagnostics never imply deletion. */
 export type AgentMuxControlSettingsResourceIssue = { id: string; message: string }
+/** Client-owned drawing metadata. Core carries portable identities, not a UI or glyph registry. */
+export type AgentMuxControlThemeIconCatalog = {
+  groups: { id: string; label: string; description: string }[]
+  icons: { id: string; label: string; description: string; groupId: string; defaultGlyph: string }[]
+  glyphs: string[]
+}
 export type AgentMuxControlSettingsWorkspaceAddRequest = RequestBase & {
   operation: 'settings.workspaces.add'; input: AgentMuxControlSettingsResourceFields
 }
@@ -353,7 +359,8 @@ export type AgentMuxControlSettingsResourceRequest = RequestBase & (
   | { operation: 'settings.resource.remove'; resource: 'themes'; id: string; expected?: AgentMuxControlSettingsResourceJson }
 )
 export type AgentMuxControlSettingsResourceResult =
-  | { operation: 'settings.resource.list'; resource: AgentMuxControlSettingsResourceKind; items: AgentMuxControlSettingsResourceItem[]; partial: true; issues?: AgentMuxControlSettingsResourceIssue[] }
+  | { operation: 'settings.resource.list'; resource: Exclude<AgentMuxControlSettingsResourceKind, 'themes'>; items: AgentMuxControlSettingsResourceItem[]; partial: true; issues?: AgentMuxControlSettingsResourceIssue[] }
+  | { operation: 'settings.resource.list'; resource: 'themes'; items: AgentMuxControlSettingsResourceItem[]; partial: true; issues?: AgentMuxControlSettingsResourceIssue[]; iconCatalog: AgentMuxControlThemeIconCatalog }
   | { operation: 'settings.resource.get'; resource: AgentMuxControlSettingsResourceKind; item: AgentMuxControlSettingsResourceItem }
   | { operation: 'settings.resource.add'; resource: AgentMuxControlSettingsResourceKind; item: AgentMuxControlSettingsResourceItem; changed: boolean }
   | { operation: 'settings.resource.update'; resource: AgentMuxControlSettingsResourceKind; item: AgentMuxControlSettingsResourceItem; changed: boolean }

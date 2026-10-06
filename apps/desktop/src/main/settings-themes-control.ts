@@ -1,4 +1,4 @@
-import { DEFAULT_THEME_ID, getThemeCatalog, isBuiltinThemeId, themeIdSchema, themeValueSchema, themeDocumentSchema, themeValue, serializeThemeFile } from '@agentmux/client-ui/theme'
+import { DEFAULT_THEME_ID, getThemeCatalog, getSemanticIconCatalog, isBuiltinThemeId, themeIdSchema, themeValueSchema, themeDocumentSchema, themeValue, serializeThemeFile } from '@agentmux/client-ui/theme'
 import type { AgentMuxControlSettingsResourceFields as Fields, AgentMuxControlSettingsResourceRequest as Request,
   AgentMuxControlSettingsResourceResult as Result } from '@agentmux/core'
 import { ConfigConflict, configValuesEqual } from '../shared/config-edit.js'
@@ -40,7 +40,8 @@ export async function executeSettingsThemesControl(request: Request, owner: Conf
   if (request.operation === 'settings.resource.list') {
     const catalog = getThemeCatalog(owner.current.appearance.customThemes)
     return { operation: request.operation, resource: 'themes', partial: true,
-      items: catalog.items.map(candidate => ({ ...candidate, value: candidate.value as Fields })), issues: catalog.issues }
+      items: catalog.items.map(candidate => ({ ...candidate, value: candidate.value as Fields })), issues: catalog.issues,
+      iconCatalog: getSemanticIconCatalog() }
   }
   if (request.operation === 'settings.resource.get') {
     if (request.id === undefined) fail('INVALID_SETTING_VALUE', 'A theme lookup requires its exact ID.')

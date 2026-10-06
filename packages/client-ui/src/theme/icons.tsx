@@ -2,6 +2,7 @@ import type { ComponentType, CSSProperties, SVGProps } from 'react'
 import type { SemanticIconId } from './icon-catalog.js'
 import { semanticIconHref } from './icon-sprite.js'
 export * from './icon-catalog.js'
+export { getSemanticIconCatalog } from './icon-catalog-metadata.js'
 export { iconShapes } from './icon-assets.js'
 export { semanticIconHref, createSemanticIconElement, iconMaskDataUrl, iconSvgDataUrl, updateIconSprite, removeIconSprite } from './icon-sprite.js'
 
