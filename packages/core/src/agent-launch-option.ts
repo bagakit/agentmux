@@ -285,13 +285,13 @@ export const CLAUDE_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
   {
     id: 'effort',
     label: 'Effort',
-    description: 'How much reasoning effort Claude spends per turn.',
+    description: 'Reasoning effort for this launch. Model support and configured limits can cap the level.',
     choices: [
-      { id: 'low', label: 'Low', argv: ['--effort', 'low'] },
-      { id: 'medium', label: 'Medium', argv: ['--effort', 'medium'] },
-      { id: 'high', label: 'High', argv: ['--effort', 'high'] },
-      { id: 'xhigh', label: 'Extra high', argv: ['--effort', 'xhigh'] },
-      { id: 'max', label: 'Max', argv: ['--effort', 'max'] }
+      { id: 'low', label: 'Low', description: 'Less reasoning for straightforward work; uses fewer resources.', argv: ['--effort', 'low'] },
+      { id: 'medium', label: 'Medium', description: 'A moderate reasoning budget between Low and High.', argv: ['--effort', 'medium'] },
+      { id: 'high', label: 'High', description: 'Deeper reasoning for complex work; uses more resources.', argv: ['--effort', 'high'] },
+      { id: 'xhigh', label: 'Extra high', description: 'More reasoning than High for demanding work.', argv: ['--effort', 'xhigh'] },
+      { id: 'max', label: 'Max', description: 'Highest reasoning effort; can use substantially more tokens.', argv: ['--effort', 'max'] }
     ]
   },
   {
