@@ -209,7 +209,7 @@ type NativeParams = GoalDelegationParamsMap & MoteAvatarParameterMap & TopicPara
   'agent.input.stop': { ref: import('./agent-input-wait.js').AgentInputWaitRef; cancelOperationId: string }
   'agent.input.rejoin': { ref: import('./agent-input-wait.js').AgentInputWaitRef }
   'agent.send': { target: AgentMuxMessageTarget; text: string; operationId: string;
-    execution?: AgentPromptExecution; sourceChannel?: import('./types.js').AgentMessageChannel;
+    execution?: AgentPromptExecution; expectedRun?: import('./types.js').AgentMuxRunRef; sourceChannel?: import('./types.js').AgentMessageChannel;
     messageId?: string; threadId?: string; correlationId?: string; replyTo?: string }
   'agent.discuss': { executorId: string; providerId?: string; text: string; operationId: string }
   'agent.handoff': { toAgentSessionId: string; taskId: string }
@@ -219,6 +219,7 @@ type NativeParams = GoalDelegationParamsMap & MoteAvatarParameterMap & TopicPara
   'message.delivery.report': { hostId: string; record: import('./delivery-attempt.js').DeliveryAttempt }
   'message.inbox.check': { limit: number }
   'message.inbox.ack': { generation: number; readerRun: import('./types.js').AgentMuxRunRef }
+  'message.read': { operationId: string; hostId?: string }
   'message.dispatch.open': { sourceMessageId: string }
   'message.dispatch.inspect': { sourceMessageId: string }
   'message.dispatch.read': { sourceMessageId: string; hostId?: string }
@@ -272,6 +273,7 @@ type NativeResult = GoalDelegationResultMap & MoteAvatarResultMap & TopicResultM
   'message.delivery.report': import('./delivery-attempt.js').DeliveryAttemptLookup
   'message.inbox.check': Awaited<ReturnType<AgentMuxClient['checkDeliveries']>>
   'message.inbox.ack': Awaited<ReturnType<AgentMuxClient['ackDeliveryBatch']>>
+  'message.read': { hostId: string; message: Awaited<ReturnType<AgentMuxClient['readMessage']>> }
   'message.dispatch.open': Awaited<ReturnType<AgentMuxClient['openDispatch']>>
   'message.dispatch.inspect': Awaited<ReturnType<AgentMuxClient['showDispatch']>>
   'message.dispatch.read': Awaited<ReturnType<AgentMuxClient['readDispatch']>> & { hostId: string }
@@ -321,7 +323,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'message.delivery.inspect': 'short', 'message.delivery.report': 'long',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
   'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
-  'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
+  'message.read': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
   'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
   'system.endpoint': 'short', 'system.subscription.cancel': 'short'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>

@@ -16,7 +16,7 @@ import type { AgentMuxRunRef, AgentPromptExecution, AgentMessageChannel, AgentOp
 import { normalizeMessageChannel } from './message-origin.js'
 import { composeAgentPrompt } from './agent-outbound-message.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { configureMessageJournal, inputControlJournalSchema, dispatchDiscoveryJournalSchema, openMessageJournal, syncMessageJournal } from './agent-message-journal.js'
+import { configureMessageJournal, inputControlJournalSchema, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, openMessageJournal, syncMessageJournal } from './agent-message-journal.js'
 import { agentInputJournalKey, validateAgentInputControlId, validateAgentInputWaitRef,
   type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputWaitControl,
   type AgentInputWaitJournalRecord, type AgentInputWaitReason, type AgentInputWaitRef,
@@ -773,11 +773,19 @@ export class DurableAgentMuxMessageQueue {
   }
 
   /** Read the first original operation binding without replaying unrelated communication. */
-  async readByOperationId(operationId: string): Promise<DurableAgentMuxMessage | null> {
+  async readByOperationId(operationId: string,
+    reauthorize?: (message: DurableAgentMuxMessage | null) => Promise<void>): Promise<DurableAgentMuxMessage | null> {
     return this.withLock(async () => {
       const messageId = this.operationMessageId(nonEmpty(operationId, 'Message operation id'))
-      return messageId ? this.message(messageId)! : null
+      const message = messageId ? this.message(messageId)! : null
+      await reauthorize?.(message)
+      return message
     })
+  }
+
+  /** Exact immutable message identity lookup; never discovers unrelated messages. */
+  async readByMessageId(messageId: string): Promise<DurableAgentMuxMessage | null> {
+    return this.withLock(async () => this.message(nonEmpty(messageId, 'Message id')) ?? null)
   }
 
   async listAfter(sequence = 0): Promise<readonly DurableAgentMuxMessage[]> {
@@ -914,6 +922,38 @@ export class DurableAgentMuxMessageQueue {
     })
   }
 
+  private dispatchReplies(dispatch: Dispatch): readonly DurableAgentMuxMessage[] {
+    // Only explicit reads initialize this index. Ordinary input/open/report must
+    // not acquire a new discovery prerequisite to keep a healthy Agent usable.
+    this.db.exec(dispatchReplyJournalSchema)
+    const select = this.db.prepare(`SELECT sequence, json FROM records INDEXED BY message_reply_chain
+      WHERE json_extract(json, '$.kind') = 'message'
+        AND json_extract(json, '$.envelope.replyTo') = ?
+        AND json_extract(json, '$.envelope.threadId') = ?
+        AND json_extract(json, '$.envelope.senderSessionId') = ?
+        AND json_extract(json, '$.envelope.recipientSessionId') = ?
+        AND json_extract(json, '$.envelope.sender.kind') = 'agent-session'
+        AND json_extract(json, '$.envelope.recipient.kind') = 'agent-session'`)
+    const pending = [dispatch.sourceMessageId], seen = new Set(pending)
+    const replies: DurableAgentMuxMessage[] = []
+    for (let index = 0; index < pending.length; index++) {
+      for (const [sender, recipient] of [[dispatch.ownerAgentSessionId, dispatch.workerAgentSessionId],
+        [dispatch.workerAgentSessionId, dispatch.ownerAgentSessionId]]) {
+        for (const row of select.all(pending[index]!, dispatch.threadId, sender!, recipient!)) {
+          const original = JSON.parse(String(row.json)) as JournalMessage
+          const id = original.envelope.messageId
+          if (seen.has(id)) continue
+          // Admission facts can supply an originally unresolved recipient Run;
+          // the returned immutable envelope itself is never rewritten.
+          this.dispatchMessage(id)
+          const reply = this.message(id)!
+          seen.add(id); pending.push(id); replies.push(reply)
+        }
+      }
+    }
+    return replies.sort((left, right) => left.sequence - right.sequence)
+  }
+
   /** No cursor or consumption mutation. Only the original participants may use Agent authority. */
   async readDispatch(
     input: { readonly sourceMessageId: string; readonly callerAgentSessionId?: string },
@@ -924,9 +964,12 @@ export class DurableAgentMuxMessageQueue {
       if (input.callerAgentSessionId !== undefined && input.callerAgentSessionId !== dispatch.ownerAgentSessionId &&
         input.callerAgentSessionId !== dispatch.workerAgentSessionId) throw new AgentMuxError(
         'Only a Dispatch participant can read it with Agent authority.', 'DISPATCH_PARTICIPANT_MISMATCH')
-      const identityDiagnostics = await reauthorize(messages)
-      return structuredClone({ dispatch, source: this.message(dispatch.sourceMessageId)!,
-        replies: dispatch.events.map(event => this.message(event.replyMessageId)!), identityDiagnostics })
+      // Authorize the caller before building a read projection, then include each
+      // original Run in diagnostics even when its reply has no dispatch event.
+      await reauthorize(messages)
+      const replies = this.dispatchReplies(dispatch)
+      const identityDiagnostics = await reauthorize([messages[0]!, ...replies.map(reply => this.dispatchMessage(reply.envelope.messageId))])
+      return structuredClone({ dispatch, source: this.message(dispatch.sourceMessageId)!, replies, identityDiagnostics })
     })
   }
 

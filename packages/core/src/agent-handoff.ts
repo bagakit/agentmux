@@ -55,6 +55,7 @@ export type DispatchObservation = {
   readonly dispatch: Dispatch
   /** Original immutable journal records, including their original delivery facts. */
   readonly source: DurableAgentMuxMessage
+  /** Original two-participant reply lineage, including replies without supervision events. */
   readonly replies: readonly DurableAgentMuxMessage[]
   readonly identityDiagnostics: readonly DispatchIdentityDiagnostic[]
 }

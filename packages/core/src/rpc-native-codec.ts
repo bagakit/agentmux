@@ -37,7 +37,7 @@ import { agentInteractionResponseUnavailableReason } from './agent-interaction-s
 import { validateAgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import { agentPromptInputId, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
-import { assertDispatchEventKind } from './agent-handoff.js'
+import { assertDispatchEventKind, assertDispatchMessage } from './agent-handoff.js'
 import { isAgentDeliveryState } from './agent-message.js'
 import { parseRpcControlResult, rpcRecord } from './rpc-business-codec.js'
 import type { AgentMuxRpcCredentials, AgentMuxRpcMethod } from './public-rpc.js'
@@ -201,15 +201,39 @@ function dispatchObservation(value: unknown, params: Record<string, unknown>): v
   if (source.messageId !== supervision.sourceMessageId || source.senderSessionId !== supervision.ownerAgentSessionId ||
     source.recipientSessionId !== supervision.workerAgentSessionId || source.threadId !== supervision.threadId) fail()
   const events = supervision.events as Array<Record<string, unknown>>
-  if (!Array.isArray(p.replies) || p.replies.length !== events.length) fail()
-  let replyIndex = 0
+  const envelopes = new Map<string, ReturnType<typeof validateAgentMuxMessageEnvelope>>()
   array(p.replies, value => {
-    const reply = message(value), event = events[replyIndex++]!
-    const cleanup = event.kind === 'cleanup'
-    if (reply.messageId !== event.replyMessageId || reply.replyTo !== source.messageId || reply.threadId !== source.threadId ||
+    const reply = message(value), entry = value as Record<string, unknown>
+    const admitted = reply.recipientRunId === null && entry.promptCondition
+      ? { ...reply, recipientRunId: validateAgentPromptCondition(entry.promptCondition).expectedRun.runId } : reply
+    assertDispatchMessage(admitted)
+    if (envelopes.has(reply.messageId) || reply.messageId === source.messageId || reply.threadId !== source.threadId ||
+      !(reply.senderSessionId === supervision.ownerAgentSessionId && reply.recipientSessionId === supervision.workerAgentSessionId ||
+        reply.senderSessionId === supervision.workerAgentSessionId && reply.recipientSessionId === supervision.ownerAgentSessionId)) fail()
+    envelopes.set(reply.messageId, reply)
+  })
+  // Order is the original journal order, not an event/reply positional join.
+  // Every actual reply must reach this exact source; dangling/cyclic chains fail.
+  const rooted = new Set([source.messageId])
+  for (const reply of envelopes.values()) {
+    const path = new Set<string>()
+    let current = reply
+    while (!rooted.has(current.messageId)) {
+      if (path.has(current.messageId) || current.replyTo === null) return fail()
+      path.add(current.messageId)
+      if (rooted.has(current.replyTo)) break
+      const parent = envelopes.get(current.replyTo)
+      if (!parent) return fail()
+      current = parent
+    }
+    for (const id of path) rooted.add(id)
+  }
+  for (const event of events) {
+    const reply = envelopes.get(String(event.replyMessageId)), cleanup = event.kind === 'cleanup'
+    if (!reply || reply.replyTo !== source.messageId ||
       reply.senderSessionId !== (cleanup ? supervision.ownerAgentSessionId : supervision.workerAgentSessionId) ||
       reply.recipientSessionId !== (cleanup ? supervision.workerAgentSessionId : supervision.ownerAgentSessionId)) fail()
-  })
+  }
   array(p.identityDiagnostics, value => {
     const diagnostic = record(value, ['agentSessionId', 'runId', 'code', 'message'])
     string(diagnostic.agentSessionId); string(diagnostic.runId); text(diagnostic.message)
@@ -464,6 +488,13 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (p.sourceChannel !== undefined) normalizeMessageChannel(p.sourceChannel)
         if (p.sourceDevice !== undefined) normalizeOperationDevice(p.sourceDevice)
         const envelope = message(p)
+        if (input.expectedRun !== undefined) {
+          const intent = p.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(p.admissionIntent)
+          const capturedRun = envelope.recipientRunId ?? (p.promptCondition === undefined || p.promptCondition === null ? undefined :
+            validateAgentPromptCondition(p.promptCondition).expectedRun.runId) ??
+            (intent?.kind === 'manual-actor' ? intent.expectedRun.runId : intent?.condition.expectedRun.runId)
+          if (capturedRun !== runRef(input.expectedRun).runId) fail()
+        }
         if (p.inputReceipt !== undefined) {
           const receipt = inputReceipt(p.inputReceipt)
           if (receipt.key.kind !== 'message' || receipt.key.messageId !== envelope.messageId || receipt.originalControlOperationId !== envelope.operationId ||
@@ -495,6 +526,21 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'message.dispatch.open': case 'message.dispatch.inspect': case 'message.dispatch.report': dispatch(p, input); break
+      case 'message.read': {
+        record(p, ['hostId', 'message']); string(p.hostId)
+        if (input.hostId !== undefined && p.hostId !== input.hostId) fail()
+        if (p.message !== null) {
+          const original = record(p.message, ['sequence', 'envelope', 'delivery', 'promptCondition', 'execution', 'admissionIntent', 'sourceChannel', 'sourceDevice'])
+          const envelope = message(original)
+          if (envelope.operationId !== input.operationId || credentials && envelope.senderSessionId !== credentials.agentSessionId &&
+            envelope.recipientSessionId !== credentials.agentSessionId) fail()
+          if (original.execution !== undefined) member(original.execution, ['default', 'immediate'])
+          if (original.admissionIntent !== undefined) validateAgentPromptAdmissionIntent(original.admissionIntent)
+          if (original.sourceChannel !== undefined) normalizeMessageChannel(original.sourceChannel)
+          if (original.sourceDevice !== undefined) normalizeOperationDevice(original.sourceDevice)
+        }
+        break
+      }
       case 'message.dispatch.read': dispatchObservation(p, input); break
       case 'message.dispatch.ls': dispatchPage(p, input); break
       case 'goal.activity': record(p, ['activity', 'diskDurability']); activity(p.activity); member(p.diskDurability, ['confirmed']); break
