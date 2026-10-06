@@ -1,3 +1,4 @@
+import { parseConversationChangesInput } from './conversation-changes.js'
 import { parseNotebookObservationParams } from './notebook-observation.js'
 import { parseNotebookResolveParams, scanNoteWikiLinks } from './note-links.js'
 import { parseMoteAvatarWriteParams } from './mote-avatar-write.js'
@@ -258,6 +259,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.inspect', '(--session ID|--run ID|--provider-native ID --provider ID|--acp-native ID --adapter ID)', 'Inspect the service routeHostId, original Core identity and Desktop display facts separately.',
     { '--session': 'data', '--run': 'data', '--provider-native': 'data', '--provider': 'data', '--acp-native': 'data', '--adapter': 'data' }, f => ({ target: inspectTarget(f) }),
     'status.session.semanticStatus.failure carries code, message, recovery, nativeTurnId and available nativeCode/httpStatusCode. Failed turns retain their original healthy Run; observation errors are reported separately.'),
+  command('agent.conversation.checkpoint', '--host ID --session ID', 'Cut the original durable source without exporting previous records.',
+    { '--host': 'data', '--session': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true) })),
+  command('agent.conversation.changes', '--input FILE|-', 'Resume bounded original changes from a saved source checkpoint.',
+    { '--input': 'data' }, async f => ({ ...parseConversationChangesInput(await readControlJsonInput(value(f, '--input', true)!, 'Conversation changes')) }), 'JSON requires hostId, agentSessionId, checkpoint and optional limit. Keep the returned checkpoint with the effects derived from its records. A source Gap retains the original boundary and requires explicit sharing review.'),
+  command('agent.conversation.watch', '--host ID --session ID', 'Follow relevant source invalidations; resume durable changes to recover notification gaps.',
+    { '--host': 'data', '--session': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true) })),
   command('agent.conversation.inspect', '--host ID --session ID --source captured|native [--limit N] [--cursor CURSOR] [--max-bytes N]',
     'Read the original bounded conversation with source-qualified records and retained byte fragments.',
     { '--host': 'data', '--session': 'data', '--source': 'value', '--limit': 'value', '--cursor': 'data', '--max-bytes': 'value' }, f => {

@@ -1,3 +1,4 @@
+import { parseConversationCheckpoint, parseConversationChangesPage, type ConversationCheckpoint, type ConversationChangesPage } from './conversation-changes.js'
 import type { AgentConversationReadPage } from './conversation.js'
 import { createInputPerformanceRecorder, hostedCarrierPerformance, readInputObservation, readInputObservationField, type InputObservationReference, type ClientPerformanceDiagnostics, type InputPerformanceHandle } from './performance-diagnostics.js'
 import { DeliveryAttemptStore } from './delivery-attempt-store.js'
@@ -2864,6 +2865,45 @@ export class AgentMuxClient {
       options.signal?.removeEventListener('abort', cancelled)
       lifetime.close()
     }
+  }
+
+  /** A durable cut in the original Provider source. It excludes already recorded history. */
+  async conversationCheckpoint(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env'> = {}): Promise<ConversationCheckpoint> {
+    const page = await this.conversationChangesPage(agentSessionId, { ...options, tail: true })
+    return page.checkpoint
+  }
+
+  /** Resume after a persisted source cut; notifications only wake this authoritative read. */
+  async readConversationChanges(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit'> & { checkpoint: ConversationCheckpoint }): Promise<ConversationChangesPage> {
+    const checkpoint = parseConversationCheckpoint(options.checkpoint)
+    if (checkpoint.agentSessionId !== agentSessionId) throw new AgentMuxError('The checkpoint belongs to another original Session.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+    return this.conversationChangesPage(agentSessionId, { ...options, checkpoint })
+  }
+
+  private async conversationChangesPage(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit'> & { checkpoint?: ConversationCheckpoint; tail?: true }): Promise<ConversationChangesPage> {
+    if (this.providerReadsDisposed) throw new AgentMuxError('Conversation reader was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
+    const limit = options.limit ?? 30
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AgentMuxError('Changes require a finite limit from 1 to 100.', 'INVALID_AGENT_SESSION_HISTORY_OPTIONS')
+    if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) throw new AgentMuxError('Conversation reading is busy; retry this original checkpoint.', 'AGENT_SESSION_HISTORY_BUSY')
+    options.signal?.throwIfAborted()
+    const lifetime = this.providerReadLifetime('history'), { controller, read } = lifetime
+    const cancel = () => controller.abort(options.signal?.reason)
+    options.signal?.addEventListener('abort', cancel, { once: true })
+    try {
+      const binding = await read(this.nativeHistoryBinding(agentSessionId, options, controller.signal, 'read'))
+      const { provider, session, handle } = binding, source = { providerId: session.providerId, nativeSessionId: handle.sessionId }
+      if (!provider.readConversationChanges) throw new AgentMuxError('This Provider cannot resume durable changes. Existing history and Agent input remain available.', 'AGENT_CONVERSATION_CHANGES_UNSUPPORTED')
+      if (options.checkpoint && (options.checkpoint.source.providerId !== source.providerId || options.checkpoint.source.nativeSessionId !== source.nativeSessionId))
+        throw new AgentMuxError('The original native conversation source changed. Keep its checkpoint and inspect the new sharing boundary.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+      const executor = binding.executorOptions, contentSigningSecret = (await read(this.store.readMetadata(agentSessionId)))?.hookToken
+      const page = await read(provider.readConversationChanges({ agentSessionId, source, limit, signal: controller.signal,
+        command: resolveAgentExecutable(executor.commandOverride, provider.executable), args: executor.args ?? [], env: executor.env ?? {}, workspacePath: session.workspacePath,
+        ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }),
+        ...(options.checkpoint ? { after: options.checkpoint.cursor } : {}), ...(options.tail ? { tail: true as const } : {}) }))
+      await read(binding.assertCurrent())
+      const checkpoint = { agentSessionId, source, cursor: page.cursor }, ref = { hostId: 'local', agentSessionId }
+      return parseConversationChangesPage({ ...ref, source: page.source, items: page.items, checkpoint, more: page.more }, { ...ref, checkpoint: options.checkpoint ?? checkpoint, limit })
+    } finally { options.signal?.removeEventListener('abort', cancel); lifetime.close() }
   }
 
   /** Read exact recorded content in its original native source; caller fields never authorize a path. */

@@ -1,3 +1,4 @@
+import { parseConversationRef, parseConversationCheckpointPage, parseConversationChangesInput, parseConversationChangesPage } from './conversation-changes.js'
 import { isGoalDelegationMethod, parseGoalDelegationParams, parseGoalDelegationResult, type GoalDelegationsOwner } from './goal-delegation.js'
 import { isMoteAvatarWriteMethod, parseMoteAvatarWriteParams, parseMoteAvatarWriteResult, type AgentMuxRpcMoteAvatarsOwner, type MoteAvatarWriteMethod } from './mote-avatar-write.js'
 import { parseAppearanceObservation, type AgentMuxAppearanceObservationPort } from './public-rpc-settings-observation.js'
@@ -63,7 +64,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
-  'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'readAgentSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'readAgentSessionHistory' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
@@ -150,6 +151,9 @@ const NATIVE_FIELDS = {
   'agent.context': ['hostId', 'agentSessionId', 'cursor', 'limit'],
   'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel'],
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes'],
+  'agent.conversation.checkpoint': ['hostId', 'agentSessionId'],
+  'agent.conversation.changes': ['hostId', 'agentSessionId', 'checkpoint', 'limit'],
+  'agent.conversation.watch': ['hostId', 'agentSessionId'],
   'agent.conversation.inspect': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes'],
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes', 'kind', 'query', 'scanLimit'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
@@ -611,6 +615,24 @@ export class AgentMuxRpcService {
           ...(context.signal ? { signal: context.signal } : {}) }) }
       }
       return parseSessionHistoryResourceResult(result, input) as AgentMuxRpcResult<M>
+    }
+    if (method === 'agent.conversation.checkpoint' || method === 'agent.conversation.changes') {
+      const input = method === 'agent.conversation.changes' ? parseConversationChangesInput(params) : parseConversationRef(params)
+      const owners = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+      if (owners.length !== 1) throw new AgentMuxError('The exact conversation Host is unavailable or ambiguous.', 'RUNTIME_UNAVAILABLE')
+      const client = owners[0]!.client, options = context.signal ? { signal: context.signal } : {}
+      let result: unknown
+      if (client.forwardRpc) {
+        const { caller: _localCaller, ...readContext } = context
+        const remote = await client.forwardRpc(method, { ...input, hostId: 'local' } as AgentMuxRpcParams<typeof method>, readContext)
+        result = { ...remote, hostId: input.hostId }
+      } else if (method === 'agent.conversation.checkpoint') {
+        result = { ...input, checkpoint: await client.conversationCheckpoint(input.agentSessionId, options) }
+      } else {
+        const request = input as import('./conversation-changes.js').ConversationChangesInput
+        result = { ...await client.readConversationChanges(input.agentSessionId, { checkpoint: request.checkpoint, ...(request.limit === undefined ? {} : { limit: request.limit }), ...options }), hostId: input.hostId }
+      }
+      return (method === 'agent.conversation.checkpoint' ? parseConversationCheckpointPage(result, input) : parseConversationChangesPage(result, input as import('./conversation-changes.js').ConversationChangesInput)) as AgentMuxRpcResult<M>
     }
     if (method === 'agent.conversation.inspect') {
       // Reuse the exact original route, authorization, budget and fragment contract.
@@ -1583,7 +1605,15 @@ export class AgentMuxRpcService {
     const emit = (event: unknown) => { if (!closed) return onEvent(event as AgentMuxRpcStreamEvent<M>) }
     try {
       let initial: unknown, start: (() => void | Promise<void>) | undefined
-      if (method === 'agent.output') {
+      if (method === 'agent.conversation.watch') {
+        const input = parseConversationRef(params), owners = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+        if (owners.length !== 1) throw new AgentMuxError('The exact conversation Host is unavailable or ambiguous.', 'RUNTIME_UNAVAILABLE')
+        // Hosted Clients delegate this same reader to the original semantic Host.
+        const observer = await owners[0]!.client.observeSessionHistory(input.agentSessionId, observation => {
+          void emit({ type: 'snapshot', data: { ...input, observation } })
+        }, { signal: controller.signal })
+        initial = { ...input, source: observer.source }; cleanup = () => observer.dispose()
+      } else if (method === 'agent.output') {
         const owner = outputOwner!
         const cursor = rpcCount(params.afterByte, 0)
         const current = await owner.client.refreshAgentSession(owner.agentSessionId, owner.session.run), runId = current.run.runId

@@ -180,7 +180,7 @@ export async function connectHostedAgentMux(options: {
         signal = cancellation; wireArgs = [value, ...args.slice(1)]
       }
     }
-    if (method === 'sessionHistoryPage' || method === 'sessionHistoryResource' || method === 'readAgentSessionHistory') {
+    if (method === 'sessionHistoryPage' || method === 'sessionHistoryResource' || method === 'readAgentSessionHistory' || method === 'conversationCheckpoint' || method === 'readConversationChanges') {
       const input = args[1] as Parameters<AgentMuxHostedClient['sessionHistoryPage']>[1]
       if (input && isAbortSignal(input.signal)) {
         const { signal: cancellation, ...value } = input

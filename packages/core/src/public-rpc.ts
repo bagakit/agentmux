@@ -202,6 +202,9 @@ type NativeParams = GoalDelegationParamsMap & MoteAvatarParameterMap & TopicPara
   'agent.context': import('./agent-context.js').AgentContextParams
   'agent.question.reply': Omit<import('./client.js').AgentMuxSessionQuestionReplyInput, 'authorHuman' | 'sourceDevice' | 'signal' | 'commandOverride' | 'args' | 'env'>
   'agent.history.resource': import('./session-history-resource.js').AgentSessionHistoryResourceParams
+  'agent.conversation.checkpoint': import('./conversation.js').ConversationRef
+  'agent.conversation.changes': import('./conversation-changes.js').ConversationChangesInput
+  'agent.conversation.watch': import('./conversation.js').ConversationRef
   'agent.conversation.inspect': import('./session-history-reader.js').AgentSessionHistoryReadInput
   'agent.history': import('./session-history-reader.js').AgentSessionHistoryReadInput
   'agent.reopen': Parameters<AgentMuxClient['reopenAgent']>[0]
@@ -261,6 +264,9 @@ type NativeResult = GoalDelegationResultMap & MoteAvatarResultMap & TopicResultM
   'agent.context': import('./agent-context.js').AgentContextPage
   'agent.question.reply': import('./types.js').AgentSessionQuestionReplyReceipt
   'agent.history.resource': import('./session-history-resource.js').AgentSessionHistoryResourceResult
+  'agent.conversation.checkpoint': import('./conversation-changes.js').ConversationCheckpointPage
+  'agent.conversation.changes': import('./conversation-changes.js').ConversationChangesPage
+  'agent.conversation.watch': import('./conversation-changes.js').ConversationWatchOpening
   'agent.conversation.inspect': import('./conversation.js').AgentConversationReadPage
   'agent.history': import('./session-history-reader.js').AgentSessionHistoryReadPage
   'agent.reopen': { session: Awaited<ReturnType<AgentMuxClient['reopenAgent']>> }
@@ -323,7 +329,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'settings.appearance.watch': 'long',
   'notebook.ls': 'short', 'notebook.inspect': 'long', 'notebook.graph': 'long', 'notebook.resolve': 'long', 'notebook.apply': 'long',
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
-  whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.inspect': 'long', 'agent.history.resource': 'long', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
+  whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.resource': 'long', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',
   'agent.input.inspect': 'short', 'agent.input.stop': 'short', 'agent.input.rejoin': 'long', 'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
   'system.diagnostics.inspect': 'short',
@@ -335,11 +341,12 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'system.endpoint': 'short', 'system.subscription.cancel': 'short'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
 
-export type AgentMuxRpcStreamMethod = 'agent.output' | 'browser.follow' | 'toolkit.watch' | 'system.metrics.watch' | 'settings.appearance.watch' |
+export type AgentMuxRpcStreamMethod = 'agent.conversation.watch' | 'agent.output' | 'browser.follow' | 'toolkit.watch' | 'system.metrics.watch' | 'settings.appearance.watch' |
   AgentMuxHostedStreamMethod
 export type AgentMuxRpcStreamParams<M extends AgentMuxRpcStreamMethod> = AgentMuxRpcParams<M> &
   (M extends 'agent.output' ? { follow?: boolean } : Record<never, never>)
 type AgentMuxRpcStreamInitialMap = AgentMuxHostedStreamInitialMap & {
+  'agent.conversation.watch': import('./conversation-changes.js').ConversationWatchOpening
   'agent.output': AgentMuxRpcOutputInitial
   'browser.follow': { runOperation: import('./control.js').AgentMuxControlBrowserOperation | null;
     gap: { droppedThrough: number } | null }
@@ -352,6 +359,7 @@ export type AgentMuxRpcStreamEvent<M extends AgentMuxRpcStreamMethod> =
   | { type: 'end'; data: unknown }
   | { type: 'error'; error: { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: import('./errors.js').AgentMuxControlFailure; logId?: string; evidence?: import('./types.js').AgentMuxEvidence } }
   | (M extends AgentMuxHostedStreamMethod ? Extract<AgentMuxHostedStreamEvent, { type: 'snapshot' }>
+    : M extends 'agent.conversation.watch' ? { type: 'snapshot'; data: import('./conversation-changes.js').ConversationObservation }
     : M extends 'agent.output' ? { type: 'output'; data: AgentMuxRpcOutputBytes }
     : M extends 'browser.follow' ? { type: 'progress'; data: import('./control.js').AgentMuxControlBrowserEvent }
     : { type: 'snapshot'; data: M extends 'toolkit.watch' ? import('./toolkit.js').ToolkitSnapshot : M extends 'settings.appearance.watch' ? import('./public-rpc-settings-observation.js').AgentMuxAppearanceObservation : import('./metrics.js').MetricsObservation })
@@ -361,7 +369,7 @@ export function isAgentMuxRpcMethod(value: unknown): value is AgentMuxRpcMethod 
     Object.hasOwn(AGENTMUX_RPC_NATIVE_METHODS, value))
 }
 export function isAgentMuxRpcStream(method: AgentMuxRpcMethod, params: Record<string, unknown>): method is AgentMuxRpcStreamMethod {
-  return method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' || method === 'settings.appearance.watch' ||
+  return method === 'agent.conversation.watch' || method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' || method === 'settings.appearance.watch' ||
     method === 'agent.output' || method === 'runtime.events' || method === 'runtime.history-watch' ||
     method === 'runtime.attachment-watch' || method === 'runtime.replay-watch'
 }
