@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -141,7 +142,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
   }
   const visibleGoals = useMemo(() => goals?.filter(goal => (!status || goal.status === status) && `${goal.title} ${goal.description} ${goal.projectName ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [goals, status, query])
   return <section className="mobile-goals" aria-label="Goals" hidden={!visible}>
-    <header><h1>Goals</h1><button onClick={() => refresh(value => value + 1)}>刷新目标</button></header>
+    <header><h1>Goals</h1><button className="mobile-icon-button mobile-goals-refresh" aria-label="刷新目标" title="刷新目标" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} /><span className="mobile-visually-hidden">刷新目标</span></button></header>
     {!connected && <p role="status">连接暂不可用，已读目标与草稿保留；可刷新核对。</p>}
     {!client?.forwardRpc && <p role="status">目标公共端口暂不可用，已读目标与会话保留。</p>}
     {issue && <p role="status">{issue}</p>}
