@@ -24,7 +24,7 @@ function InlineLink({ node, editor }: NodeViewProps) {
 function Reference({ node }: NodeViewProps) {
   const scope = useContext(Scope)
   const reference = node.attrs as NoteBlockReference
-  if (!scope) return <NodeViewWrapper>引用内容尚未确认。</NodeViewWrapper>
+  if (!scope || !reference.target) return <NodeViewWrapper className="mobile-note-reference" role="status">引用目标尚未确认；当前输入保留，可撤销这次粘贴后继续编辑。</NodeViewWrapper>
   const result = resolveNoteBlock(scope.knowledge, reference.target)
   const key = JSON.stringify(reference.target)
   return <NodeViewWrapper className="mobile-note-reference" data-block-id={node.attrs.blockId} {...noteProvenanceAttributes(node.attrs.provenance)}>
@@ -157,6 +157,7 @@ function EditableNote({ note, content, revision, editing, original }: { note: No
   const [state, setState] = useState<NoteEditState>(initial ?? { noteId: note.noteId, draft: content, expectedRevision: revision })
   const current = useRef(state); current.current = state
   const [opened, open] = useState(Boolean(initial)), [notice, setNotice] = useState(initial?.attempt ? '原保存回执未确认，草稿保留；请核对原文件，不会重复写入。' : '')
+  const [formatIssue, setFormatIssue] = useState('')
   const [remote, setRemote] = useState<{ document: { content: string; revision: string }; note: NoteDocument } | null>(null)
   const [externalDraft, setExternalDraft] = useState<string | null>(null)
   const [device, setDevice] = useState<NoteEditState | null>(null)
@@ -216,11 +217,16 @@ function EditableNote({ note, content, revision, editing, original }: { note: No
     } catch (error) { setNotice(`核对原文件失败：${error instanceof Error ? error.message : String(error)}。草稿与原意图保留。`) }
   }
   return <>{!opened ? <><RichContent key="saved" content={note.content} /><button type="button" onClick={() => { persist({ noteId: note.noteId, draft: content, expectedRevision: revision }); open(true) }}>编辑原笔记</button></> : <>
-    <RichContent key="draft" content={baseline} onChange={value => persist({ ...current.current, draft: serializeNoteDocument({ schema: note.schema, noteId: note.noteId, content: value }) })} />
+    <RichContent key="draft" content={baseline} onChange={value => {
+      let draft: string
+      try { draft = serializeNoteDocument({ schema: note.schema, noteId: note.noteId, content: value }) }
+      catch (error) { setFormatIssue(`本次输入尚未保存：${error instanceof Error ? error.message : String(error)}。输入与撤销记录保留，可撤销这次输入后继续编辑。`); return }
+      setFormatIssue(''); persist({ ...current.current, draft })
+    }} />
     <button type="button" disabled={Boolean(state.attempt)} onClick={() => { void save() }}>保存原笔记</button>
     <button type="button" onClick={() => { void inspect() }}>核对当前原文</button>
     {editing.readDeviceDraft && <button type="button" onClick={() => { try { const value = editing.readDeviceDraft!(); if (!value || value.noteId !== note.noteId) { setNotice('未读到同一原 Note 的本机草稿；当前编辑保留。'); return }; setDevice(value) } catch (error) { setNotice(`本机草稿读取失败：${error instanceof Error ? error.message : String(error)}；原编辑保留。`) } }}>核对本机笔记草稿</button>}
     {device && editing.adoptDeviceDraft && <details open><summary>较新的本机草稿（当前编辑保留）</summary><pre>{device.draft}</pre><button type="button" onClick={() => { const value = { ...device, alternates: [...device.alternates ?? [], { draft: current.current.draft, expectedRevision: current.current.expectedRevision }] }; try { editing.adoptDeviceDraft!(value); current.current = value; setState(value); setExternalDraft(value.draft); editing.onDraft(value); setDevice(null); setNotice('已采用本机草稿，原编辑另存保留；仍可核对原文件并继续。') } catch (error) { setNotice(`采用本机草稿未确认：${error instanceof Error ? error.message : String(error)}；两份内容保留。`) } }}>保留当前编辑，采用本机草稿</button></details>}
     {remote && <details open><summary>当前原文件（草稿保留）</summary><RichContent content={remote.note.content} />{state.attempt?.phase !== 'sending' && <button type="button" onClick={() => { persist({ ...current.current, attempt: undefined, ...(current.current.attempt ? { unconfirmed: [...current.current.unconfirmed ?? [], { content: current.current.attempt.content, expectedRevision: current.current.attempt.expectedRevision }] } : {}), expectedRevision: remote.document.revision }); setNotice('已选择当前修订；下次保存将以本草稿替换刚核对的原文。') }}>{state.attempt ? '保留未知保存记录，以当前修订继续编辑' : '以当前修订继续保存本草稿'}</button>}</details>}
-  </>}{notice && <p role="status">{notice}</p>}{!!state.unconfirmed?.length && <details><summary>原未知保存记录</summary>{state.unconfirmed.map((value, index) => <div key={index}><p>此保存的历史回执仍未确认。后续保存不代签该结果。</p><code>{value.expectedRevision}</code><pre>{value.content}</pre></div>)}</details>}{!!state.alternates?.length && <details><summary>另一个工作面的原编辑</summary>{state.alternates.map((value, index) => <pre key={index}>{value.draft}</pre>)}</details>}</>
+  </>}{formatIssue && <p role="status">{formatIssue}</p>}{notice && <p role="status">{notice}</p>}{!!state.unconfirmed?.length && <details><summary>原未知保存记录</summary>{state.unconfirmed.map((value, index) => <div key={index}><p>此保存的历史回执仍未确认。后续保存不代签该结果。</p><code>{value.expectedRevision}</code><pre>{value.content}</pre></div>)}</details>}{!!state.alternates?.length && <details><summary>另一个工作面的原编辑</summary>{state.alternates.map((value, index) => <pre key={index}>{value.draft}</pre>)}</details>}</>
 }

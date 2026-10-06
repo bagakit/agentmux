@@ -119,7 +119,10 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     setSelected(id)
     if (id && !transaction.getMeta('noteSelectionRestore') && !editor.isDestroyed && editor.view.hasFocus()) props.current.onSelectedBlock?.({ noteId: props.current.note.noteId, blockId: id })
   }, onUpdate({ editor }) {
-    const current = props.current, raw = serializeNoteDocument({ ...current.note, content: editor.getJSON() })
+    const current = props.current
+    let raw: string
+    try { raw = serializeNoteDocument({ ...current.note, content: editor.getJSON() }) }
+    catch (error) { current.onIssue(error instanceof Error ? error.message : String(error)); return }
     const read = readNoteDocument(raw)
     if (read.status === 'invalid') { current.onIssue(read.message); return }
     current.onIssue(null)
@@ -148,7 +151,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   useEffect(() => {
     if (!editor) return
     const syncContent = () => {
-      if (editor.isDestroyed || JSON.stringify(editor.getJSON()) === JSON.stringify(note.content)) return
+      if (editor.isDestroyed || editor.state.doc.eq(editor.schema.nodeFromJSON(note.content))) return
       const selection = editor.state.selection, blockId = selection.$from.parent.attrs.blockId, offset = selection.$from.parentOffset
       editor.chain().setMeta('noteSelectionRestore', true).setContent(note.content, { emitUpdate: false }).run()
       if (typeof blockId === 'string') editor.state.doc.descendants((node, pos) => {
