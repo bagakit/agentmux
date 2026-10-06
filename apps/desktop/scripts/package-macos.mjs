@@ -20,6 +20,7 @@ import {
 } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+import { isDeepStrictEqual } from 'node:util'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
@@ -811,6 +812,7 @@ async function relaunchInstalledApplication(appPath) {
   return pids
 }
 
+// Tab/Region arrays are registries. Layout arrays retain their presentation order.
 function workbenchIdentity(workbench) {
   return { activeWorkspaceId: workbench.activeWorkspaceId, mainSurface: workbench.mainSurface, focus: workbench.focus,
     layouts: workbench.layouts, tabs: workbench.tabs.map(tab => ({ ...tab, regions: tab.regions.map(region => {
@@ -823,49 +825,60 @@ function workbenchIdentity(workbench) {
         return descriptor
       }
       return region
-    }) })) }
+    }).sort((a, b) => a.regionId < b.regionId ? -1 : a.regionId > b.regionId ? 1 : 0) }))
+      .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0) }
 }
 
 /** Actual loaded identity and complete Store topology, not process appearance. */
 async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
   const observation = await observeUiClient(appPath)
-  assert(observation.main.package, 'The loaded Main package identity is unknown; no UI commit can be confirmed.')
-  assertPackageIdentity(observation.main.package, await readPackageIdentity(appPath))
-  assert(!observation.workbench.loading, 'The saved workbench is still loading; no UI commit can be confirmed.')
-  if (outgoing) requireOutgoingWorkbenchStorage(observation)
-  const bundled = JSON.parse(await readFile(join(appPath, 'Contents/Resources/app/out/renderer/release.json'), 'utf8'))
-  assert(observation.main.renderer.identity.shell === bundled.identity.shell && observation.main.renderer.identity.ctxmux === bundled.identity.ctxmux,
-    'The loaded Renderer does not belong to this application contract.')
-  if (before) {
-    assert(JSON.stringify(workbenchIdentity(observation.workbench)) === JSON.stringify(workbenchIdentity(before.workbench)),
-      'The original workbench, Region descriptors or focus have not been restored.')
-    for (const tab of before.workbench.tabs) for (const region of tab.regions) {
-      const restored = observation.workbench.tabs.find(candidate => candidate.id === tab.id)?.regions.find(candidate => candidate.regionId === region.regionId)
-      if ((region.kind === 'agent' || region.kind === 'terminal') && region.processState === 'running') {
-        assert(restored && restored.kind === region.kind && restored.control && region.control &&
-          restored.control.run.runId === region.control.run.runId && restored.control.hostId === region.control.hostId,
-        'An original healthy Run is not yet available in its restored Region.')
+  try {
+    assert(observation.main.package, 'The loaded Main package identity is unknown; no UI commit can be confirmed.')
+    assertPackageIdentity(observation.main.package, await readPackageIdentity(appPath))
+    assert(!observation.workbench.loading, 'The saved workbench is still loading; no UI commit can be confirmed.')
+    if (outgoing) requireOutgoingWorkbenchStorage(observation)
+    const bundled = JSON.parse(await readFile(join(appPath, 'Contents/Resources/app/out/renderer/release.json'), 'utf8'))
+    assert(observation.main.renderer.identity.shell === bundled.identity.shell && observation.main.renderer.identity.ctxmux === bundled.identity.ctxmux,
+      'The loaded Renderer does not belong to this application contract.')
+    if (before) {
+      assert(isDeepStrictEqual(workbenchIdentity(observation.workbench), workbenchIdentity(before.workbench)),
+        'The original workbench, Region descriptors or focus have not been restored.')
+      for (const tab of before.workbench.tabs) for (const region of tab.regions) {
+        const restored = observation.workbench.tabs.find(candidate => candidate.id === tab.id)?.regions.find(candidate => candidate.regionId === region.regionId)
+        if ((region.kind === 'agent' || region.kind === 'terminal') && region.processState === 'running') {
+          assert(restored && restored.kind === region.kind && restored.control && region.control &&
+            restored.control.run.runId === region.control.run.runId && restored.control.hostId === region.control.hostId,
+          'An original healthy Run is not yet available in its restored Region.')
+        }
+        if (region.kind === 'browser' && !region.error) assert(restored?.kind === 'browser' && restored.navigationId && !restored.error,
+          'An original Browser page has not reopened; its Region is preserved but UI activation is unconfirmed.')
       }
-      if (region.kind === 'browser' && !region.error) assert(restored?.kind === 'browser' && restored.navigationId && !restored.error,
-        'An original Browser page has not reopened; its Region is preserved but UI activation is unconfirmed.')
     }
+    return observation
+  } catch (error) {
+    error.uiContinuity = { before: structuredClone(before), after: structuredClone(observation) }
+    throw error
   }
-  return observation
 }
 
 async function awaitUiActivation(appPath, before, runtimePlan = null) {
   const deadline = Date.now() + 30_000
-  let lastError
+  let lastError, lastObservation = null
   do {
     try {
       const observed = await qualifyUi(appPath, before)
+      lastObservation = observed
       if (runtimePlan) assertUiRuntimeObservation(observed, await confirmUiRuntime(runtimePlan), before)
       return observed
     }
-    catch (error) { lastError = error }
+    catch (error) {
+      lastError = error
+      if (error.uiContinuity?.after) lastObservation = error.uiContinuity.after
+    }
     await new Promise(resolve => setTimeout(resolve, 100))
   } while (Date.now() < deadline)
-  throw lastError
+  // Preserve the last successful read even if a later RPC observation fails.
+  throw Object.assign(lastError, { uiContinuity: { before: structuredClone(before), after: structuredClone(lastObservation) } })
 }
 
 export async function installApplication(appPath, { intent = installIntent, homeDirectory = homedir(),
@@ -925,7 +938,8 @@ export async function installApplication(appPath, { intent = installIntent, home
       : 'No existing listener was observed. No Native upgrade was attempted; ordinary GUI startup may start a Runtime.' }
   } catch (error) {
     await closeRuntimeUpgrade(uiRuntime)
-    throw Object.assign(error, { transaction: { intent, ui: { status: 'not-started', error: error.message }, native } })
+    throw Object.assign(error, { transaction: { intent, ui: { status: 'not-started', error: error.message,
+      ...(error.uiContinuity ? { continuity: error.uiContinuity } : {}) }, native } })
   }
   try {
     // 换目录之前先请旧实例退出。放在 ditto/codesign 之后，是为了让候选包先被证明可用——候选不合格时
@@ -1043,6 +1057,7 @@ export async function installApplication(appPath, { intent = installIntent, home
     return { intent, ui: { status: 'committed', main: observed.main, path: destination }, native }
   } catch (error) {
     if (!error.transaction) error.transaction = { intent, ui: { status: 'unknown', error: error.message }, native }
+    if (error.uiContinuity) error.transaction.ui.continuity = error.uiContinuity
     throw error
   } finally {
     await closeRuntimeUpgrade(runtimeUpgrade)
