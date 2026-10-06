@@ -125,12 +125,16 @@ export type NoteReaderProps = { noteProvenance?: NoteProvenanceSnapshot | undefi
 const EMPTY_IDS: readonly string[] = []
 const EMPTY_DOCUMENTS: NonNullable<NoteReaderProps['documents']> = []
 export function NoteReader({ content, path, workspaceId, revision, noteProvenance, documents = EMPTY_DOCUMENTS, blockIds, highlightBlockIds = EMPTY_IDS, clipBlocks = true, readReference, editing, target, onOpenLink }: NoteReaderProps) {
-  const original = useMemo(() => ({ path, content, revision: revision ?? '', ...noteProvenance ? { noteProvenance } : {} }), [path, content, revision, noteProvenance])
+  const observed = useMemo(() => ({ path, content, revision: revision ?? '', ...noteProvenance ? { noteProvenance } : {} }), [path, content, revision, noteProvenance])
+  const [written, setWritten] = useState<{ source: NoteFileDocument; document: NoteFileDocument } | null>(null)
+  // Consume this original write receipt while its input observation is still current.
+  // A later authoritative read wins; newer draft bytes are hydrated by their own actual hash.
+  const original = written?.source === observed ? written.document : observed
   const parsed = useMemo(() => parseNoteFile(original), [original])
   const body = useRef<HTMLDivElement>(null)
   const [working, setWorking] = useState<{ noteId: string; content: string } | null>(null)
   const workingContent = parsed.status === 'valid' && working?.noteId === parsed.note.noteId ? working.content
-    : parsed.status === 'valid' && editing?.initial?.noteId === parsed.note.noteId ? editing.initial.draft : content
+    : parsed.status === 'valid' && editing?.initial?.noteId === parsed.note.noteId ? editing.initial.draft : original.content
   const knowledge = useMemo(() => noteKnowledge([{ location: { workspaceId, path }, document: { ...original, content: workingContent } }, ...documents]), [workingContent, path, workspaceId, original, documents])
   const excerpt = useMemo(() => {
     const source = knowledge.sources.find(source => source.location.workspaceId === workspaceId && source.location.path === path)
@@ -143,14 +147,14 @@ export function NoteReader({ content, path, workspaceId, revision, noteProvenanc
     element?.scrollIntoView?.({ block: 'center' })
   }, [target?.noteId, target?.blockId, block?.status])
   return parsed.status === 'valid' ? <Scope.Provider value={{ knowledge, trail: [], readReference, onOpenLink }}><div ref={body} data-note-id={parsed.note.noteId} data-target-block={block?.status === 'resolved' ? target?.blockId : undefined}>
-    {noteProvenance?.status === 'unconfirmed' && <p role="status">块作者未确认：{noteProvenance.reason} 正文仍可阅读和编辑；重新读取同一原文件可核对元数据。</p>}
+    {original.noteProvenance?.status === 'unconfirmed' && <p role="status">块作者未确认：{original.noteProvenance.reason} 正文仍可阅读和编辑；重新读取同一原文件可核对元数据。</p>}
     {target && <section aria-label="原块定位" data-block-target-status={block?.status}>
       {block?.status === 'resolved' ? <><strong>引用的原块</strong><p>{block.block.text}</p></> : <p role="status">原块未确认：{block?.message} 原引用保留，仍可阅读完整笔记。</p>}
     </section>}
-    {editing && revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={content} revision={revision} original={original} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent highlightBlockIds={highlightBlockIds} content={excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : parsed.note.content} />}
+    {editing && original.revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={original.content} revision={original.revision} original={original} onWritten={document => setWritten({ source: observed, document })} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent highlightBlockIds={highlightBlockIds} content={excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : parsed.note.content} />}
   </div></Scope.Provider> : <><p role="status">原笔记读取问题：{parsed.message}</p><pre>{content}</pre></>
 }
-function EditableNote({ note, content, revision, editing, original }: { note: NoteDocument; content: string; revision: string; editing: NoteEditing; original: NoteFileDocument }) {
+function EditableNote({ note, content, revision, editing, original, onWritten }: { note: NoteDocument; content: string; revision: string; editing: NoteEditing; original: NoteFileDocument; onWritten(document: NoteFileDocument): void }) {
   const alive = useRef(true)
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   const initial = editing.initial?.noteId === note.noteId ? editing.initial : undefined
@@ -194,10 +198,11 @@ function EditableNote({ note, content, revision, editing, original }: { note: No
     catch (error) { result = { status: 'unknown', code: 'NOTE_SAVE_UNKNOWN', message: error instanceof Error ? error.message : String(error) } }
     if (!alive.current) return
     if (result.status === 'written') {
+      onWritten({ path: original.path, content: result.content ?? attempt.content, revision: result.revision, ...(result.noteProvenance ? { noteProvenance: result.noteProvenance } : {}) })
       const accepted = acknowledgeNoteWrite(current.current, attempt.content, attempt.expectedRevision, result)
       if (persist(accepted)) {
         if (accepted.draft === result.content) setExternalDraft(accepted.draft)
-        setNotice(result.noteAttribution?.status === 'unconfirmed' ? `原文件保存已确认；块作者未确认：${result.noteAttribution.reason}` : '原文件保存已确认。')
+        setNotice(result.noteAttribution?.status === 'unconfirmed' && result.noteProvenance?.status !== 'unconfirmed' ? `原文件保存已确认；块作者未确认：${result.noteAttribution.reason}` : '原文件保存已确认。')
       }
     }
     else if (result.status === 'unknown') { persist({ ...current.current, attempt: { ...attempt, phase: 'unknown' } }); setNotice(`保存回执未知：${result.message}。草稿保留，请核对原文件；不会重复写入。`) }
