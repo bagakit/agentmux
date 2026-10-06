@@ -16,7 +16,7 @@ const fixture = vi.hoisted(() => ({
   invokes: [] as Array<{ channel: string; values: unknown[] }>,
   sender: { id: 1, isDestroyed: () => false, send: vi.fn(), once: vi.fn(), off: vi.fn(), session: { flushStorageData: vi.fn() } }
 }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   app: { getPath: () => fixture.path, getAppPath: () => fixture.path },
   contextBridge: { exposeInMainWorld: (_key: string, value: AgentMuxPreloadApi) => { fixture.api = value } },
   webFrame: { getZoomFactor: () => 1 },
@@ -62,7 +62,7 @@ beforeEach(async () => {
   await git('switch', '-c', 'target'); await writeFile(join(root, 'one.txt'), 'target\n'); await git('add', '--all'); await git('commit', '-m', 'Target'); targetOid = await git('rev-parse', 'HEAD')
   await git('switch', 'base'); await writeFile(join(root, 'one.txt'), 'dirty decoy\n')
   const runtime = { resourceSampler: { setObservationSources: () => () => {} }, setContinuousProgressInputObserver: () => () => {}, setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {}, executionHost: () => host } as unknown as RuntimeController
-  dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow, runtime,
+  dispose = await registerIpc({ initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', hostId: 'local', path: root, name: 'Private', kind: 'folder' }] }), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => ({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', hostId: 'local', path: root, name: 'Private', kind: 'folder' }] }) } as unknown as ConfigStore,
     scratchTopics: { setNameAudit: () => {} } as unknown as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles,
     progressLoops: { subscribe: () => () => {} } as unknown as Parameters<typeof registerIpc>[0]['progressLoops'] })

@@ -17,7 +17,7 @@ const fixture = vi.hoisted(() => ({ path: '', api: undefined as unknown as Agent
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   invokes: [] as Array<{ channel: string; values: unknown[] }>,
   sender: { id: 1, isDestroyed: () => false, send: vi.fn(), once: vi.fn(), off: vi.fn(), session: { flushStorageData: vi.fn() } } }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   app: { getPath: () => fixture.path, getAppPath: () => fixture.path },
   contextBridge: { exposeInMainWorld: (_key: string, value: AgentMuxPreloadApi) => { fixture.api = value } },
   webFrame: { getZoomFactor: () => 1 },
@@ -59,7 +59,8 @@ beforeEach(async () => {
   const runtime = { resourceSampler: { setObservationSources: () => () => {} }, setContinuousProgressInputObserver: () => () => {},
     setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
     executionHost: (id: string) => { expect(id).toBe('original-host'); return host } } as unknown as RuntimeController
-  dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow, runtime,
+  dispose = await registerIpc({ initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', hostId: 'original-host', path: root,
+      name: 'Original project', kind: 'folder' }] }), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => ({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', hostId: 'original-host', path: root,
       name: 'Original project', kind: 'folder' }] }) } as unknown as ConfigStore,
     scratchTopics: { setNameAudit: () => {} } as unknown as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles,

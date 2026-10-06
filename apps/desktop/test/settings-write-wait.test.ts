@@ -17,7 +17,7 @@ const ipc = vi.hoisted(() => ({ root: '',
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined
 }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => ipc.root || tmpdir() },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
@@ -81,7 +81,7 @@ async function registered() {
       if (channel === CONFIG_CHANGED_CHANNEL) { publications.push(value as AppConfig); trace.push('publish'); published.resolve() }
     }) })
   ipc.handlers.clear(); ipc.execute = undefined
-  const dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ initialConfig: await store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     configStore: store, runtime, progressLoops, scratchTopics: {} as ScratchTopics,
     workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   expect(ipc.execute).toBeTypeOf('function')

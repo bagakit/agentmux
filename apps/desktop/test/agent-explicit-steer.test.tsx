@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 // Install the actual mocked preload before Source UI helpers read its desktop API.
@@ -26,7 +27,7 @@ const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
   storageDirectory: _hygiene_fixturePath("private-explicit-steer"), invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
 // Electron transport and unrelated startup services are isolated. The target's Renderer, Store,
 // preload, registered IPC, RuntimeController and public Core submission all execute below.
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   contextBridge: { exposeInMainWorld: (name: string, api: AgentMuxPreloadApi) => {
     bridge.api = api; Object.assign(window, { [name]: api })
   } },
@@ -103,7 +104,7 @@ beforeEach(async () => {
     kind: 'agent', agentSessionId: ID, providerId: 'codex', executorId: 'codex', hostId: 'local',
     workspacePath: _hygiene_fixturePath("private/explicit-steer"), run: { runId: RUN }, retiredRuns: [],
     hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token', capabilityHash: hashAgentCapability(capability),
-    createdAt: 1, updatedAt: 1, semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1 }
+    createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), semanticStatus: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }
   }
   await store.compareAndSwap(null, durable)
   client = new AgentMuxClient({ store })
@@ -141,7 +142,7 @@ beforeEach(async () => {
   }, workspaces: [{ id: 'private', name: 'Fixture', hostId: 'local', path: durable.workspacePath, kind: 'folder' }] }
   const sender = Object.assign(new EventEmitter(), { id: 772, isDestroyed: () => false, send: vi.fn(),
     session: { getStoragePath: () => privateQueueDirectory, flushStorageData: vi.fn() } })
-  disposeIpc = await registerIpc({ window: { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
+  disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as unknown as ContinuousProgressLoopManager,
     configStore: { get: async () => config } as unknown as ConfigStore,
     scratchTopics: { setNameAudit: vi.fn() } as unknown as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
@@ -157,7 +158,7 @@ beforeEach(async () => {
     }
   })
   const session = { ...composerSession(ID), workspacePath: durable.workspacePath,
-    status: { state: 'working' as const, source: 'native-hook' as const, observedAt: 1 } }
+    status: { state: 'working' as const, source: 'native-hook' as const, observedAt: _reshape_fixtureEpoch(0, 0, 1) } }
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [session], timelines: {}, recoveryCandidates: [] })
   // Existing transport/fence cases use an ordinary Provider capability. Native immediate
   // preparation has its separate complete-frame and actual CLI acceptance fixtures.
@@ -376,7 +377,7 @@ it('retains exact Run and permission boundaries even for explicit input', async 
   const session = useAppStore.getState().sessions[0]!
   await act(async () => useAppStore.setState({ sessions: [{ ...session,
     pendingInteraction: { requestId: 'private-permission', kind: 'permission', summary: 'Pending decision',
-      options: [{ id: 'allow', label: 'Allow' }], observedAt: 1 } } as never] }))
+      options: [{ id: 'allow', label: 'Allow' }], observedAt: _reshape_fixtureEpoch(0, 0, 1) } } as never] }))
   await draft('cannot bypass permission'); await enter('ctrlKey'); await settled()
   expect(queue()).toEqual([])
   expect(useAppStore.getState().agentComposerDrafts[ID]).toBe('cannot bypass permission\n')
@@ -405,7 +406,7 @@ it('keeps a newly explicit healthy replacement Run intent when the old pending r
   await inner.registry.update(ID, { runId: RUN }, (current: AgentMuxStoredAgentSession) => {
     const { terminalPromptSubmission: _submission, terminalPromptDelivery: _delivery,
       terminalPromptReadiness: _readiness, promptCompletionAdmission: _admission, ...rest } = current
-    return { ...rest, run: { runId: nativeRunId }, retiredRuns: [...current.retiredRuns, { runId: RUN }], updatedAt: 2 }
+    return { ...rest, run: { runId: nativeRunId }, retiredRuns: [...current.retiredRuns, { runId: RUN }], updatedAt: _reshape_fixtureEpoch(0, 0, 2) }
   })
   const session = useAppStore.getState().sessions[0]!
   await act(async () => useAppStore.setState({ sessions: [{ ...session,
@@ -488,7 +489,7 @@ it('Control send steers its exact message through registered Main and public Cor
   expect(client.agentSession(ID).semanticStatus?.state).toBe('working')
   const message: AgentMuxMessageEnvelope = {
     schema: 'agentmux.a2a.v1', messageId: 'control-exact-message', operationId: 'control-first-request',
-    createdAt: 1, sender: { kind: 'agent-session', agentSessionId: ID },
+    createdAt: _reshape_fixtureEpoch(0, 0, 1), sender: { kind: 'agent-session', agentSessionId: ID },
     recipient: { kind: 'agent-session', agentSessionId: ID }, threadId: 'control-thread',
     correlationId: 'control-correlation', replyTo: null, workspaceId: 'private',
     senderSessionId: ID, senderRunId: RUN, recipientSessionId: ID, recipientRunId: RUN,
@@ -630,7 +631,7 @@ it('Core refuses the final Enter when a new permission arrived during render, re
   const pending = { request: {
     kind: 'permission', id: 'late-product-permission', agentSessionId: ID, title: 'Later permission',
     options: [{ id: 'deny', label: 'Deny', kind: 'reject-once' }],
-    evidence: { source: 'native-hook', observedAt: 200, run: { runId: RUN }, hookReceiptId: 'late-product-permission' }
+    evidence: { source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 200), run: { runId: RUN }, hookReceiptId: 'late-product-permission' }
   } }
   await (client as any).registry.update(ID, { runId: RUN }, (current: AgentMuxStoredAgentSession) => ({
     ...current, pendingInteraction: pending, updatedAt: Math.max(current.updatedAt, 200)

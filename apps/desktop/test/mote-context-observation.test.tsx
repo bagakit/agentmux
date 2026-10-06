@@ -20,7 +20,7 @@ const fixture = vi.hoisted(() => ({ root: '', socket: '', generation: 1, loading
   sender: null as any, hold: false, pending: [] as AgentMuxControlRequest[],
   sent: [] as AgentMuxControlRequest[], replies: [] as AgentMuxControlResult[]
 }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   app: { getPath: () => fixture.root || tmpdir(), getAppPath: () => fixture.root || tmpdir() },
   ipcMain: { handle: (name: string, handler: (...args: any[]) => unknown) => fixture.handlers.set(name, handler),
     removeHandler: (name: string) => fixture.handlers.delete(name),
@@ -131,7 +131,7 @@ async function main() {
     setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
     rpcClients: () => fixture.coreClients?.() ?? [], connectedRuntimeIdentities: () => [], rendererGeneration: () => fixture.generation }
   const config = useAppStore.getState().config!
-  const dispose = await registerIpc({ window: { id: 99, isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 99, isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow,
     runtime: runtime as never, configStore: { get: async () => config } as never,
     scratchTopics: { setNameAudit: () => {}, normalizeDirectoryIdentities: async () => {} } as never,
     workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), write: vi.fn(), dispose: async () => {} } as never,

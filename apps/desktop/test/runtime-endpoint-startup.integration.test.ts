@@ -27,7 +27,7 @@ const controlled = vi.hoisted(() => ({ paths: new Map<string, string>(),
 // selector and connect scheduling are controlled: this is not an SSH/Farm qualification.
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} } }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   contextBridge: { exposeInMainWorld: (_name: string, value: AgentMuxPreloadApi) => { bridge.api = value } },
   ipcRenderer: { invoke: bridge.invoke, send: vi.fn(),
     on: (channel: string, callback: (...args: unknown[]) => void) => {
@@ -100,7 +100,7 @@ async function ipc(scope: Awaited<ReturnType<typeof setup>>) {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return await handler!({ sender } as unknown as IpcMainInvokeEvent, ...args)
   })
-  const registration = registerIpc({ window: { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow,
+  const registration = registerIpc({ initialConfig: await scope.configStore.get(), window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow,
     runtime: scope.controller, configStore: scope.configStore, scratchTopics: { setNameAudit: vi.fn(), normalizeDirectoryIdentities: vi.fn().mockResolvedValue([]) } as never,
     progressLoops: { subscribe: () => () => {} } as never, workspaceFiles: { dispose: async () => {} } as never })
   // A still-pending remote connect must not delay actual IPC registration. The latch stays closed.

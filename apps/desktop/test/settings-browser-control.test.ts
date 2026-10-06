@@ -15,7 +15,7 @@ const ipc = vi.hoisted(() => ({
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined,
   remember: undefined as ((scheme: string, choice: AppLinkSchemeChoice) => Promise<void>) | undefined
 }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   app: { getPath: () => ipc.root || tmpdir() },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
@@ -169,7 +169,7 @@ describe('Browser settings share the sole typed Main owner', () => {
     // The durable private file is already initialized; no default global Topics bootstrap is part of this owner oracle.
     vi.spyOn(f.store, 'get').mockResolvedValue(f.config)
     ipc.handlers.clear(); ipc.execute = undefined; ipc.remember = undefined
-    const dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+    const dispose = await registerIpc({ initialConfig: await f.store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
       configStore: f.store, runtime, progressLoops, scratchTopics: {} as ScratchTopics,
       workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
     try {

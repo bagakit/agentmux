@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
@@ -24,7 +25,7 @@ const ipc = vi.hoisted(() => ({
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined
 }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   app: { getPath: () => _hygiene_fixturePath("private-executor-reference-ipc"), getAppPath: () => new URL('../', import.meta.url).pathname, isPackaged: false },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
@@ -67,7 +68,7 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
   function record(id: string, executorId = 'kept', providerId = 'codex', hostId = 'local'): AgentMuxStoredAgentSession {
     return { kind: 'agent', agentSessionId: id, executorId, providerId, hostId, workspacePath: root,
       run: { runId: `run-${id}` }, retiredRuns: [], hookBindingId: `binding-${id}`, hookToken: `token-${id}`,
-      nativeHandle: { kind: 'provider', providerId, sessionId: `native-${id}` }, createdAt: 1, updatedAt: 1 }
+      nativeHandle: { kind: 'provider', providerId, sessionId: `native-${id}` }, createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1) }
   }
 
   function run(id: string, state: CtxmuxAdapterRun['state'] = { type: 'running' }): CtxmuxAdapterRun {
@@ -328,7 +329,7 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
     const progressLoops = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(root, 'loops.json')),
       async () => 'unknown', undefined, async () => { throw new Error('No automatic loop is admitted in the Executor reference fixture') })
     ipc.handlers.clear()
-    const dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+    const dispose = await registerIpc({ initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
       configStore: disk, runtime, progressLoops, scratchTopics: { setNameAudit: vi.fn() } as unknown as ScratchTopics,
       workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
     const invoke = async (channel: string, ...values: unknown[]) => {

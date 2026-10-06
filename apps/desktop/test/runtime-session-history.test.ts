@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import {EventEmitter} from 'node:events'
@@ -11,7 +12,7 @@ import type {ScratchTopics} from '../src/main/scratch-topics'
 import type {WorkspaceFiles} from '../src/main/workspace-files'
 import {RuntimeController} from '../src/main/runtime-controller'
 const preload=vi.hoisted(()=>({api:null as AgentMuxPreloadApi|null,invoke:vi.fn(),handlers:new Map<string,Function>(),receivers:new Map<string,Function>()}))
-vi.mock('electron',()=>({
+vi.mock('electron',()=>({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
  contextBridge:{exposeInMainWorld:(_name:string,api:AgentMuxPreloadApi)=>{preload.api=api}},
  ipcRenderer:{invoke:preload.invoke,on:(channel:string,listener:Function)=>preload.receivers.set(channel,listener),removeListener:(channel:string,listener:Function)=>{if(preload.receivers.get(channel)===listener)preload.receivers.delete(channel)},off:vi.fn(),send:vi.fn()},webFrame:{getZoomFactor:()=>1},
  app:{getPath:()=>_hygiene_fixturePath("isolated-history-ipc-test"),getAppPath:()=>_hygiene_fixturePath("isolated-history-ipc-test"),isPackaged:false},
@@ -35,7 +36,7 @@ const page:AgentSessionHistoryPage={agentSessionId:control.agentSessionId,source
 async function owner(){
  const store=new AgentMuxMemoryAgentSessionStore()
  await store.compareAndSwap(null,{kind:'agent',agentSessionId:control.agentSessionId,providerId:'codex',executorId:'specific-codex',hostId:control.hostId,
- workspacePath:_hygiene_fixturePath("synthetic"),run:control.run,retiredRuns:[],hookBindingId:'private-binding',hookToken:'private-token',createdAt:1,updatedAt:1,
+ workspacePath:_hygiene_fixturePath("synthetic"),run:control.run,retiredRuns:[],hookBindingId:'private-binding',hookToken:'private-token',createdAt:_reshape_fixtureEpoch(0, 0, 1),updatedAt:_reshape_fixtureEpoch(0, 0, 1),
  nativeHandle:{kind:'provider',providerId:'codex',sessionId:'native-main'}})
  const controller=new RuntimeController(store, localRuntimeConnector)
  const client={providers:new AgentProviderRegistry(),sessionHistorySources:vi.fn(async()=>loadSessionHistorySources(store)),observeSessionHistory:vi.fn(),sessionHistoryPage:vi.fn().mockResolvedValue(page),writeAgent:vi.fn().mockResolvedValue(undefined),connect:vi.fn().mockResolvedValue(undefined),onEvent:vi.fn().mockReturnValue(vi.fn()),dispose:vi.fn().mockResolvedValue(undefined)}
@@ -54,7 +55,7 @@ it('actual preload/registered IPC/RuntimeController use trusted exact durable Ex
  client.connect.mockRejectedValue(new Error('synthetic Runtime is temporarily unavailable'))
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:77,isDestroyed:()=>false,send:vi.fn()})
- const dispose=await registerIpc({window:{webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ const dispose=await registerIpc({ initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
  configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,
  workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  try{
@@ -83,7 +84,7 @@ it('actual snapshot IPC preserves separate observation steps and the unverified 
  vi.spyOn(controller,'endpointWarningSnapshot').mockReturnValue([reading,catalog,runtime])
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:78,isDestroyed:()=>false,send:vi.fn()})
- const dispose=await registerIpc({window:{webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ const dispose=await registerIpc({ initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
   configStore:{get:async()=>config,save:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,
   workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  try{
@@ -102,7 +103,7 @@ it('actual preload and IPC distinguish partial History observations from strict 
  Object.assign(other,{runtimeOwnerIdentity:()=>({availability:'connected'})})
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:79,isDestroyed:()=>false,send:vi.fn()})
- const dispose=await registerIpc({window:{webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ const dispose=await registerIpc({ initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
   configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,
   workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  try{
@@ -182,7 +183,7 @@ it('actual trusted IPC/preload observation owns its token, filters other notices
  const {controller,client,config}=await owner()
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:88,isDestroyed:()=>false,send:vi.fn((channel:string,payload:unknown)=>preload.receivers.get(channel)?.({},payload))})
- const disposeIpc=await registerIpc({window:{webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ const disposeIpc=await registerIpc({ initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
  configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  let deliver!:(event:unknown)=>void
  let ready!:(handle:AgentSessionHistoryObservationHandle)=>void

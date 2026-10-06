@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -21,7 +22,7 @@ const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invok
   handlers: new Map<string, (...args: any[]) => any>(), renderer: new Map<string, Set<(...args: any[]) => any>>(),
   main: new Map<string, Set<(...args: any[]) => any>>(), sender: null as any,
   deliver: (channel: string, ...args: any[]) => {}, reply: (channel: string, ...args: any[]) => {} }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   contextBridge: { exposeInMainWorld: (name: string, api: AgentMuxPreloadApi) => { bridge.api = api; Object.assign(window, { [name]: api }) } },
   ipcRenderer: { invoke: bridge.invoke,
     on: (channel: string, fn: (...args: any[]) => any) => { const set = bridge.renderer.get(channel) ?? new Set(); set.add(fn); bridge.renderer.set(channel, set) },
@@ -79,7 +80,7 @@ beforeEach(async () => {
   await mkdir(join(directory, 'home'))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(directory, 'runtime'))
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'runtime', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
-  writes = []; requests = []; observations = []; cursor = 0; now = 0; ended = false
+  writes = []; requests = []; observations = []; cursor = 0; now = _reshape_fixtureEpoch(0, 0, 0); ended = false
   corruptReply = false; dropReply = false; afterInputObservation = undefined
   const store = new AgentMuxMemoryAgentSessionStore(), timestamp = Date.now()
   session = { kind: 'agent', agentSessionId: 'progress-agent', hostId: 'local', providerId: 'codex', executorId: 'codex',
@@ -128,7 +129,7 @@ beforeEach(async () => {
       const once = afterInputObservation; afterInputObservation = undefined; void once().then(send)
     } else send()
   }
-  disposeIpc = await registerIpc({ window: { webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
+  disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
     runtime, progressLoops: manager, configStore: { get: async () => config } as unknown as ConfigStore,
     scratchTopics: new ScratchTopics(), workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
@@ -248,7 +249,7 @@ it('keeps an existing draft and queue owned by Store, rejects enabling and pause
   await expect(api.continuousProgress.action(target(), loop.loopId, 'resume')).rejects.toThrow(/draft|queued/)
   await manager.check(1_000_000)
   expect(writes).toEqual([]); expect(useAppStore.getState().agentComposerDrafts[session.agentSessionId]).toBe('my draft')
-  useAppStore.setState({ agentComposerDrafts: {}, agentSteerQueues: { [session.agentSessionId]: [{ operationId: 'owned-message', text: 'my queued message', enqueuedAt: 1, status: 'queued', promptCondition: null }] } })
+  useAppStore.setState({ agentComposerDrafts: {}, agentSteerQueues: { [session.agentSessionId]: [{ operationId: 'owned-message', text: 'my queued message', enqueuedAt: _reshape_fixtureEpoch(0, 0, 1), status: 'queued', promptCondition: null }] } })
   await expect(api.continuousProgress.action(target(), loop.loopId, 'resume')).rejects.toThrow(/queued/)
   expect(writes).toEqual([])
 })

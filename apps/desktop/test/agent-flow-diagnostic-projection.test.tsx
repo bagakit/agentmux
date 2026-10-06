@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 import { gapFacts } from '../../../packages/core/test/helpers/output-gap.js'
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -26,7 +27,7 @@ const bridge = vi.hoisted(() => ({
 }))
 // Isolate native transport/painting and unrelated services, not Core producers, subscription,
 // RuntimeController, preload, initialized Store, mounted App or Focus.
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   app: { getPath: () => bridge.storageRoot, getAppPath: () => process.cwd(), isPackaged: false, dock: { setBadge: vi.fn() } },
   contextBridge: { exposeInMainWorld: (key: string, value: unknown) => Object.assign(window, { [key]: value }) },
   webFrame: { getZoomFactor: () => 1 },
@@ -181,7 +182,7 @@ beforeEach(async () => {
       if (channel === SESSION_EVENT_CHANNEL) wire.push(value)
       for (const listener of bridge.listeners.get(channel) ?? []) listener({}, value)
     } })
-  disposeIpc = await registerIpc({ window: { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
+  disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     // Unrelated progress manager is an explicit empty API boundary; diagnostics still use real IPC.
     progressLoops: { subscribe: () => () => {}, start: async () => {}, list: () => [], pauseTarget: async () => {} } as never,
     configStore: { get: async () => config } as unknown as ConfigStore,
@@ -192,7 +193,7 @@ beforeEach(async () => {
   const layouts = { 'private-workspace': createWorkspaceLayout('private-group', Object.keys(tabs)) }
   useAppStore.setState({ ...initial, loading: true, config: null, mainSurface: 'agents', activeWorkspaceId: 'private-workspace',
     tabs, layouts, restoredWorkbench: projectPersistedWorkbench({ tabs, layouts }),
-    agentFocus: { execution: { sessionId: ids[0]!, history: [{ sessionId: ids[0]!, focusedAt: 10 }] }, pmo: { sessionId: null } },
+    agentFocus: { execution: { sessionId: ids[0]!, history: [{ sessionId: ids[0]!, focusedAt: _reshape_fixtureEpoch(0, 0, 10) }] }, pmo: { sessionId: null } },
     agentComposerDrafts: { [ids[0]!]: 'Keep this unsent draft' }, sessions: [], timelines: {}, error: null, lastError: null }, true)
   // Seed the fixture's durable topology through the actual Core-owned public IPC,
   // rather than expecting the Renderer-only retired layout owner to restore it.
@@ -434,8 +435,8 @@ it('locates a real Core Gap for an ordinary Terminal without changing the workfa
   await mount()
   const terminal = {
     id: 'run-terminal', kind: 'terminal', hostId: 'local', providerId: null,
-    workspacePath: dir, label: 'Build terminal', createdAt: 1, updatedAt: 1,
-    processState: 'running', status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0,
+    workspacePath: dir, label: 'Build terminal', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1),
+    processState: 'running', status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, latestOutputBytes: 0,
     control: { kind: 'terminal', hostId: 'local', runId: 'run-terminal', run: { runId: 'run-terminal' } }
   } as const
   await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, terminal],

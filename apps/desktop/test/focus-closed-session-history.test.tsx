@@ -19,7 +19,7 @@ const bridge = vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false)
   return { api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, Function>() }
 })
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api; window.agentmux = api } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
   app: { getPath: () => _hygiene_fixturePath("private-focus-closed-renderer"), getAppPath: () => resolve('apps/desktop') },
@@ -165,7 +165,7 @@ beforeAll(async () => {
   config = { ...structuredClone(DEFAULT_CONFIG), hosts: [{ id: 'local', kind: 'local', label: 'Private' }], executors: { 'private-claude': { providerId: 'claude', label: 'Private reader', command: process.execPath, args: [cli], env: {}, injectAgentMuxGuide: false } },
     workspaces: ['alpha', 'beta'].map(id => ({ id, hostId: 'local', kind: 'folder' as const, name: id === 'alpha' ? 'Alpha' : 'Beta', path: join(directory, id) })) }
   vi.spyOn(controller, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
-  disposeIpc = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime: controller,
+  disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime: controller,
     configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never, scratchTopics: {} as never, workspaceFiles: { dispose: async () => {} } as never })
   bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => { const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function'); return handler!({ sender } as unknown as IpcMainInvokeEvent, ...args) })
   sourceCalls = vi.spyOn(api.sessions, 'historySources')

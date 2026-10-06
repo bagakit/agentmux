@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import {EventEmitter} from 'node:events'
@@ -13,7 +14,7 @@ import type {WorkspaceFiles} from '../src/main/workspace-files'
 import {RuntimeController} from '../src/main/runtime-controller'
 const preload=await vi.hoisted(async()=>({api:null as AgentMuxPreloadApi|null,invoke:vi.fn(),handlers:new Map<string,Function>(),receivers:new Map<string,Function>(),directory:await(await import('node:fs/promises')).mkdtemp(_hygiene_fixturePath("tmp/amx-resource-main-review-"))}))
 afterAll(async()=>{await rm(preload.directory,{recursive:true,force:true})})
-vi.mock('electron',()=>({
+vi.mock('electron',()=>({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
  contextBridge:{exposeInMainWorld:(_name:string,api:AgentMuxPreloadApi)=>{preload.api=api}},
  ipcRenderer:{invoke:preload.invoke,on:(channel:string,listener:Function)=>preload.receivers.set(channel,listener),removeListener:(channel:string,listener:Function)=>{if(preload.receivers.get(channel)===listener)preload.receivers.delete(channel)},off:vi.fn(),send:vi.fn()},webFrame:{getZoomFactor:()=>1},
  app:{getPath:()=>preload.directory,getAppPath:()=>new URL('../',import.meta.url).pathname,isPackaged:false},
@@ -39,10 +40,10 @@ const page:AgentSessionHistoryPage={agentSessionId:control.agentSessionId,source
 async function owner(){
  const store=new AgentMuxMemoryAgentSessionStore()
  await store.compareAndSwap(null,{kind:'agent',agentSessionId:control.agentSessionId,providerId:'codex',executorId:'specific-codex',hostId:control.hostId,
- workspacePath:_hygiene_fixturePath("synthetic"),run:control.run,retiredRuns:[],hookBindingId:'private-binding',hookToken:'private-token',createdAt:1,updatedAt:1,
+ workspacePath:_hygiene_fixturePath("synthetic"),run:control.run,retiredRuns:[],hookBindingId:'private-binding',hookToken:'private-token',createdAt:_reshape_fixtureEpoch(0, 0, 1),updatedAt:_reshape_fixtureEpoch(0, 0, 1),
  nativeHandle:{kind:'provider',providerId:'codex',sessionId:'native-main'}})
  const controller=new RuntimeController(store, localRuntimeConnector);controllers.push(controller)
- const client={observeSessionHistory:vi.fn(),sessionHistoryPage:vi.fn().mockResolvedValue(page),sessionHistorySources:vi.fn().mockResolvedValue([{agentSessionId:control.agentSessionId,history:{providerId:'codex',executorId:'specific-codex',workspacePath:_hygiene_fixturePath("synthetic"),createdAt:1}}]),sessionHistoryResource:vi.fn(),writeAgent:vi.fn().mockResolvedValue(undefined),connect:vi.fn().mockResolvedValue(undefined),connectRuntime:vi.fn().mockResolvedValue(undefined),onEvent:vi.fn().mockReturnValue(vi.fn()),dispose:vi.fn().mockResolvedValue(undefined)}
+ const client={observeSessionHistory:vi.fn(),sessionHistoryPage:vi.fn().mockResolvedValue(page),sessionHistorySources:vi.fn().mockResolvedValue([{agentSessionId:control.agentSessionId,history:{providerId:'codex',executorId:'specific-codex',workspacePath:_hygiene_fixturePath("synthetic"),createdAt:_reshape_fixtureEpoch(0, 0, 1)}}]),sessionHistoryResource:vi.fn(),writeAgent:vi.fn().mockResolvedValue(undefined),connect:vi.fn().mockResolvedValue(undefined),connectRuntime:vi.fn().mockResolvedValue(undefined),onEvent:vi.fn().mockReturnValue(vi.fn()),dispose:vi.fn().mockResolvedValue(undefined)}
  controller.commit({hosts:[{id:control.hostId,config:{id:'local',kind:'local',label:'Local'},client:client as unknown as AgentMuxClient,executionHost:{kind:'local',dispose:vi.fn()} as never}],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const config:AppConfig={...structuredClone(DEFAULT_CONFIG),executors:{
  'specific-codex':{providerId:'codex',label:'Specific Codex',command:_hygiene_fixturePath("synthetic/specific-codex"),args:['--config','model="specific"'],env:{CODEX_HOME:_hygiene_fixturePath("synthetic/specific-home")},injectAgentMuxGuide:false},
@@ -60,7 +61,7 @@ it('resource IPC/preload keeps the recorded target and trusted Executor on its o
  const sender=Object.assign(new EventEmitter(),{id:777,isDestroyed:()=>false,send:vi.fn()})
  let dispose:(()=>Promise<void>)|undefined
  try {
-  dispose=await registerIpc({window:{webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+  dispose=await registerIpc({ initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
   configStore:{get:async()=>config,validate:(next:AppConfig)=>next,save:async(next:AppConfig)=>next} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,workspaceFiles:{read:vi.fn(),listFiles:vi.fn(),dispose:async()=>{}} as unknown as WorkspaceFiles})
   const handler=preload.handlers.get('sessions:historyResource');expect(handler).toBeTypeOf('function')
   preload.invoke.mockImplementation((channel:string,subject,request)=>{expect(channel).toBe('sessions:historyResource');return handler!({sender} as unknown as IpcMainInvokeEvent,subject,request)})

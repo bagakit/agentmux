@@ -13,7 +13,7 @@ import { WorkspaceFiles } from '../src/main/workspace-files'
 import { RuntimeController } from '../src/main/runtime-controller'
 
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
-vi.mock('electron', () => ({
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
   app: { getPath: () => _hygiene_fixturePath("private-file-preview-ipc") },
@@ -51,7 +51,7 @@ it('actual preload and registered Main IPC retain Workspace identity, raw PNG by
   const sender = Object.assign(new EventEmitter(), { id: 710, isDestroyed: () => false, send: vi.fn() })
   let dispose: (() => Promise<void>) | undefined
   try {
-    dispose = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime,
+    dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
       configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
       scratchTopics: {} as never, workspaceFiles: files })
     bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
