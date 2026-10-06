@@ -10,7 +10,7 @@ import { usePreviewObjectUrl, useWorkspaceFilePreview, type ReadyFilePreview } f
 import { FilePathLabel } from './FilePathLabel'
 import { FilePreviewState } from './FilePreviewState'
 
-const ThemeActionCollapseIcon = semanticIconComponent('action.collapse')
+const ThemeActionZoomOutIcon = semanticIconComponent('action.zoom-out')
 const ThemeActionZoomInIcon = semanticIconComponent('action.zoom-in')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
@@ -107,7 +107,7 @@ export function ImageContent({ src, name, byteLength, onDecodeError }: {
         <div className="file-preview__controls" role="group" aria-label="Image zoom">
           <button className="small-button" aria-pressed={zoom === 'fit'} disabled={!natural} title="Fit image (F or 0)" onClick={() => changeZoom('fit')}>Fit</button>
           <button className="small-button" aria-pressed={zoom === 1} disabled={!natural} title="Original size (1)" onClick={() => changeZoom(1)}>1:1</button>
-          <button className="icon-button" aria-label="Zoom out" title="Zoom out (-)" disabled={!natural || scale <= 0.1} onClick={() => changeZoom(scale / 1.25)}><ThemeActionCollapseIcon size={13} /></button>
+          <button className="icon-button" aria-label="Zoom out" title="Zoom out (-)" disabled={!natural || scale <= 0.1} onClick={() => changeZoom(scale / 1.25)}><ThemeActionZoomOutIcon size={13} /></button>
           <output aria-label="Image zoom level">{natural ? `${Math.round(scale * 100)}%` : '—'}</output>
           <button className="icon-button" aria-label="Zoom in" title="Zoom in (+)" disabled={!natural || scale >= 20} onClick={() => changeZoom(scale * 1.25)}><ThemeActionZoomInIcon size={13} /></button>
         </div>

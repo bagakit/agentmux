@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
-const ThemeActionCollapseIcon = semanticIconComponent('action.collapse')
+const ThemeControlCheckboxMixedIcon = semanticIconComponent('control.checkbox-mixed')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 
@@ -43,7 +43,7 @@ export function SurveyTopicRelations({ zone, topics, relatedTopics, unknownRelat
         onCheckedChange={value => onLinkChange(topic.spaceId, value === true)}>
         <span className="survey-topic-menu__indicator" aria-hidden="true">
           {pendingSpaceId === topic.spaceId ? <ThemeStatusLoadingIcon className="spin" size={13} />
-            : <DropdownMenu.ItemIndicator>{checked === 'indeterminate' ? <ThemeActionCollapseIcon size={13} /> : <ThemeStatusSelectedIcon size={13} />}</DropdownMenu.ItemIndicator>}
+            : <DropdownMenu.ItemIndicator>{checked === 'indeterminate' ? <ThemeControlCheckboxMixedIcon size={13} /> : <ThemeStatusSelectedIcon size={13} />}</DropdownMenu.ItemIndicator>}
         </span>
         <span className="survey-topic-menu__context"><strong>{topic.name}</strong><small>{topic.hostId} · {displayPath(topic.directoryPath, topic.hostId)}</small></span>
       </DropdownMenu.CheckboxItem>
