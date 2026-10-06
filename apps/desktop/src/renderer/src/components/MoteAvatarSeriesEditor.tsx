@@ -68,8 +68,8 @@ function SeriesEntryThumbnail({ source, entry, visible }: { source: MoteAvatarSe
 }
 
 /** Prepared drafts remain local. Only the original Picker's explicit save may publish them. */
-export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialChoice, initialImage, onDraft, onPreparing }: {
-  targetKey: string; visible: boolean; disabled: boolean; initialChoice?: MoteAvatarSeriesChoice | null; initialImage?: string | null;
+export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialChoice, initialImage, savedImageConfirmed = false, onDraft, onPreparing }: {
+  targetKey: string; visible: boolean; disabled: boolean; initialChoice?: Pick<MoteAvatarSeriesChoice, 'source' | 'definition' | 'parameters'> | null; initialImage?: string | null; savedImageConfirmed?: boolean;
   onDraft(draft: MoteAvatarSeriesDraft | null): void; onPreparing?(preparing: boolean): void
 }) {
   const [catalog, setCatalog] = useState<MoteAvatarSeriesCatalog | null>(null)
@@ -115,7 +115,8 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
   }
   async function prepareSource(source: MoteAvatarSeriesLocator, expectedRevision?: string) {
     const request = ++sourceRequest.current, target = targetKey
-    const input = { source, ...(expectedRevision ? { expectedRevision } : {}) }; lastSourceRequest.current = input
+    const locator = { origin: source.origin, seriesId: source.seriesId, entryId: source.entryId }
+    const input = { source: locator, ...(expectedRevision ? { expectedRevision } : {}) }; lastSourceRequest.current = input
     setPreparing(true); setPending(locatorKey(source))
     try {
       const value = await api.moteAvatars.preview(input)
@@ -300,7 +301,7 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
             {parameters?.kind === 'face2d' ? <div ref={face} className="mote-series__face" role="img" aria-label="Current series face preview"><MoteFace face={parameters.face} /></div> : null}
           </> : png ? <img src={png} alt="Your saved series avatar" /> : <div className="mote-series__empty"><ThemeObjectProfileIcon size={30} /><span>Choose a character</span></div>}
         </div>
-        <div className="mote-series__preview-note"><span>{preparing ? 'Preparing source…' : rendering ? 'Preparing preview…' : parameters?.kind === 'glb' ? 'Drag to turn' : parameters?.kind === 'image' ? 'Drag to position' : 'Your draft'}</span>
+        <div className="mote-series__preview-note"><span>{preparing ? 'Preparing source…' : rendering ? 'Preparing preview…' : parameters?.kind === 'glb' ? 'Drag to turn' : parameters?.kind === 'image' ? 'Drag to position' : savedImageConfirmed && !prepared ? 'Saved avatar' : 'Your draft'}</span>
           {parameters && prepared ? <button type="button" className="small-button" disabled={controlsDisabled} aria-label="Reset series adjustments"
             onClick={() => changeParameters(initialChoice && locatorKey(initialChoice.source) === locatorKey(prepared.source) && initialChoice.source.revision === prepared.source.revision ? structuredClone(initialChoice.parameters) : initialParameters(prepared.definition))}><ThemeActionResetOptionsIcon size={12} />Reset</button> : null}</div>
         <div className="mote-series__sizes" aria-label="Actual avatar sizes">{[24, 34, 48, 104].map(size => <figure key={size}>
@@ -334,7 +335,7 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
       </div> : null}
     </div>
     {issue || partial || catalog?.roots.some(root => root.state === 'missing') ? <div className="mote-series__notice">
-      <div><span role="status">{issue ? issue.scope === 'catalog' ? 'Series unavailable. Other avatar styles are ready.' : 'Preview unavailable. Your current draft is kept.' : partial ? 'Some sources are unavailable.' : 'Your avatar folder has not been created yet.'}</span>
+      <div><span role="status">{issue ? issue.scope === 'catalog' ? 'Series unavailable. Other avatar styles are ready.' : issue.scope === 'source' && savedImageConfirmed && !prepared ? 'Editing source unavailable. Saved avatar kept.' : 'Preview unavailable. Your current draft is kept.' : partial ? 'Some sources are unavailable.' : 'Your avatar folder has not been created yet.'}</span>
         {issue ? <button type="button" className="small-button" disabled={disabled || preparing || catalogLoading} onClick={retry}>Retry</button> : null}</div>
       <details><summary>Details</summary>{issue ? <p>{issue.detail}</p> : null}
         {[...(catalog?.issues ?? []), ...(prepared?.issues ?? [])].map((value, index) => <p key={index}>{value.message} {value.recovery}</p>)}
