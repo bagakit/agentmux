@@ -13,9 +13,9 @@ import './terminal.css'
 
 const noticeSummary = (message: string) => message.split(/[；。]/u, 1)[0]
 
-export function MobileTerminalViewer({ client, agentSessionId, connection, platform, visible, terminalPalette }: {
+export function MobileTerminalViewer({ client, agentSessionId, connection, platform, visible, inputActive = visible, terminalPalette }: {
   client: AgentMuxHostedClient | null; agentSessionId: string | null; connection: MobileConnection
-  platform: ClientUiPlatform; visible: boolean; terminalPalette?: ITheme | undefined
+  platform: ClientUiPlatform; visible: boolean; inputActive?: boolean; terminalPalette?: ITheme | undefined
 }) {
   const paletteRef = useRef(terminalPalette); paletteRef.current = terminalPalette
   const container = useRef<HTMLDivElement>(null)
@@ -96,16 +96,17 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
     })
     return () => { input.dispose(); binding.watch(); if (control.current === binding) control.current = null }
   }, [client, agentSessionId, currentCanvas])
+  // A covering dialog pauses only UI input. The retained workface still owns its passive read lease.
   useEffect(() => {
     reader.current?.setVisible(visible)
-    if (!visible || connection.state !== 'connected') control.current?.watch()
-  }, [visible, connection.state])
+    if (!visible || !inputActive || connection.state !== 'connected') control.current?.watch()
+  }, [visible, inputActive, connection.state])
   useEffect(() => {
     const canvas = currentCanvas
     if (!canvas) return
     // React may still render the previous Session's mode while the new canvas is
     // mounted. Only this selected Session's actual intent owner can admit input.
-    const enabled = visible && connection.state === 'connected' && inputState.mode === 'control' && inputState.phase !== 'unknown'
+    const enabled = visible && inputActive && connection.state === 'connected' && inputState.mode === 'control' && inputState.phase !== 'unknown'
       && control.current === controls.current.get(agentSessionId ?? '') && control.current?.facts().mode === 'control' && control.current.facts().phase !== 'unknown'
     canvas.options.disableStdin = !enabled
     canvas.options.mouseEventsRequireAlt = !enabled
@@ -113,9 +114,9 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
       canvas.textarea.readOnly = !enabled; canvas.textarea.tabIndex = enabled ? 0 : -1; canvas.textarea.inputMode = enabled ? 'text' : 'none'
       canvas.textarea.setAttribute('aria-label', enabled ? '原会话终端输入' : '只读终端输出')
     }
-  }, [currentCanvas, agentSessionId, visible, connection.state, inputState.mode, inputState.phase])
+  }, [currentCanvas, agentSessionId, visible, inputActive, connection.state, inputState.mode, inputState.phase])
   const enableControl = () => {
-    if (connection.state !== 'connected' || !visible || control.current !== controls.current.get(agentSessionId ?? '') || !control.current?.enable()) return
+    if (connection.state !== 'connected' || !visible || !inputActive || control.current !== controls.current.get(agentSessionId ?? '') || !control.current?.enable()) return
     // Focus belongs to this explicit gesture, never foreground/reconnect or output restoration.
     const canvas = terminal.current
     if (!canvas) return
