@@ -341,7 +341,7 @@ export function AgentSessionComposer({
           ? 'Queue a message until the pending request is answered.' : session.processState !== 'running' || session.status.state === 'disconnected'
             ? 'Send to restore this Session.' : 'Send a message to this Session.'}
         onSelect={sendStatusPrompt} resultReview={resultReview} /> : null}
-      contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
+      contextUsage={<AgentContextUsage visible={visible} source={session?.kind === 'agent' ? JSON.stringify([session.hostId, session.id, session.providerId, session.control.run.runId]) : sessionId} usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
       onActivateSemanticReference={(reference) => {
         const path = reference.reference.startsWith('@') ? reference.reference.slice(1) : reference.reference
         if (workspace) {

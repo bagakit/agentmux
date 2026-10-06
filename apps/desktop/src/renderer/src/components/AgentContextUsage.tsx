@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentTurnUsage } from '@agentmux/core'
 import { contextUsedPercent, formatTokenCount } from '../lib/agent-usage'
@@ -9,7 +10,7 @@ const ThemeObjectPerformanceIcon = semanticIconComponent('object.performance')
 
 /**
  * The composer's context-usage indicator: an always-visible chip carrying the one scannable number,
- * plus a click-opened card with the full breakdown.
+ * plus a hover preview that can be explicitly kept open for reading.
  *
  * A native observation, not an estimate based on lifetime billing or the unsent draft.
  *
@@ -31,9 +32,48 @@ const ThemeObjectPerformanceIcon = semanticIconComponent('object.performance')
  * capacity or used never renders a fake 0% — it says "unavailable". used% and remaining% are derived
  * from ONE rounded number (`remaining = 100 - used`) so they always sum to 100.
  */
-export function AgentContextUsage({ usage }: { usage?: AgentTurnUsage | undefined }) {
-  const cardId = useId()
-  const [open, setOpen] = useState(false)
+export function AgentContextUsage({ usage, source, visible = true }: { usage?: AgentTurnUsage | undefined; source?: string; visible?: boolean }) {
+  const cardId = useId(), anchor = `--context-${cardId.replace(/[^a-zA-Z0-9_-]/gu, '')}`
+  const owner = useMemo(() => ({}), [source, visible])
+  const latest = useRef(owner); latest.current = owner
+  const mounted = useRef(true), preview = useRef(false), interacted = useRef(false)
+  const trigger = useRef<HTMLButtonElement>(null), card = useRef<HTMLDivElement>(null)
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const [opened, setOpened] = useState<object | null>(null)
+  const open = visible && opened === owner
+  const cancelClose = () => clearTimeout(closeTimer.current)
+  const current = () => visible && mounted.current && latest.current === owner
+  function pin() { if (!current()) return; cancelClose(); preview.current = false }
+  function enter(event: PointerEvent) {
+    if (!current() || event.pointerType !== 'mouse' || event.buttons !== 0) return
+    cancelClose()
+    if (card.current?.matches(':popover-open')) return
+    preview.current = true; interacted.current = true
+    // Native source supplies the implicit relationship; the unique named anchor scopes each chip.
+    ;(card.current!.showPopover as (options: { source: HTMLButtonElement }) => void)
+      .call(card.current, { source: trigger.current! })
+  }
+  function leave(event: PointerEvent) {
+    if (!current() || event.pointerType !== 'mouse' || !preview.current) return
+    cancelClose()
+    closeTimer.current = setTimeout(() => { if (current() && preview.current) card.current?.hidePopover() }, 180)
+  }
+  useLayoutEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false; cancelClose(); preview.current = false
+      if (interacted.current && card.current?.isConnected) card.current.hidePopover()
+      interacted.current = false
+    }
+  }, [owner])
+  useEffect(() => {
+    if (!open) return
+    const dismissPreview = (event: KeyboardEvent) => {
+      if (preview.current && event.key === 'Escape' && !isImeOwnedKeyboardEvent(event)) card.current?.hidePopover()
+    }
+    document.addEventListener('keydown', dismissPreview, true)
+    return () => document.removeEventListener('keydown', dismissPreview, true)
+  }, [open])
   const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
   const releaseNativeSurfaceOverlay = useAppStore((state) => state.releaseNativeSurfaceOverlay)
   useEffect(() => {
@@ -60,18 +100,25 @@ export function AgentContextUsage({ usage }: { usage?: AgentTurnUsage | undefine
 
   return (
     <>
-      <button type="button" className="composer__context" aria-label={ariaLabel}
-        popoverTarget={cardId} popoverTargetAction="toggle">
+      <button ref={trigger} type="button" className="composer__context" aria-label={ariaLabel}
+        style={{ anchorName: anchor }} aria-expanded={open} aria-controls={cardId}
+        popoverTarget={cardId} popoverTargetAction="toggle" onPointerEnter={enter} onPointerLeave={leave}
+        onClick={event => { if (!current()) { event.preventDefault(); return }; interacted.current = true; if (preview.current) { event.preventDefault(); pin() } }}>
         <ThemeObjectPerformanceIcon size={12} aria-hidden="true" /> {chip}
       </button>
-      <div id={cardId} popover="auto" className="composer__context-card" aria-label="Context window"
+      <div ref={card} id={cardId} popover="auto" className="composer__context-card" aria-label="Context window"
+        style={{ positionAnchor: anchor }} onPointerEnter={() => { if (current()) cancelClose() }} onPointerLeave={leave} onPointerDownCapture={pin} onFocusCapture={pin}
         data-state={open ? 'open' : 'closed'}
-        onToggle={(event) => setOpen(event.newState === 'open')}>
+        onToggle={(event) => { if (current()) {
+          if (event.newState === 'open') interacted.current = true
+          else { cancelClose(); preview.current = false }
+          setOpened(event.newState === 'open' ? owner : null)
+        } }}>
         <h3>Context window</h3>
         {known && usage ? (
           <>
             <strong>{used}% used</strong> <span>({remaining}% remaining)</span>
-            <p>{formatTokenCount(context.usedTokens)} of {formatTokenCount(context.capacityTokens)} tokens</p>
+            <p>{formatTokenCount(context.usedTokens)} of {formatTokenCount(context.capacityTokens)} tokens · {formatTokenCount(Math.max(0, context.capacityTokens - context.usedTokens))} remaining</p>
             <p>Native observation, unsent draft excluded. The Provider may compact at its own threshold,
               which AgentMux does not guess. Last observed {new Date(usage.observedAt).toLocaleString()}.</p>
           </>
@@ -79,6 +126,11 @@ export function AgentContextUsage({ usage }: { usage?: AgentTurnUsage | undefine
           <p>Unavailable — this Agent has not reported used tokens and capacity, so the compression
             threshold is unknown. This is a native reading, never an estimate from lifetime billing.</p>
         )}
+        {usage ? <div className="composer__context-turn"><h3>Last turn</h3><dl>
+          <div><dt>Input</dt><dd>{formatTokenCount(usage.inputTokens)}</dd></div>
+          <div><dt>Output</dt><dd>{formatTokenCount(usage.outputTokens)}</dd></div>
+          <div><dt>Total</dt><dd>{formatTokenCount(usage.totalTokens)}</dd></div>
+        </dl><p>Reported turn tokens, not a breakdown of the context window.</p></div> : null}
       </div>
     </>
   )
