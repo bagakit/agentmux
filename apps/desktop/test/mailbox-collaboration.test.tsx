@@ -142,3 +142,73 @@ it('original message file references cannot inherit the current reader workspace
   const web = [...dom.container.querySelectorAll<HTMLElement>('button,a')].find(node => node.textContent === 'Web evidence')!; expect(web).toBeDefined(); await act(async () => web.click())
   expect(openHttpLink).toHaveBeenCalled(); expect(dom.container.textContent).toContain('Recorded Workspace')
 })
+
+async function findLoaded(value: string) {
+  const input = dom.container.querySelector<HTMLInputElement>('[aria-label="Find loaded collaboration records"]')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) })
+}
+async function communication(value: string) {
+  const trigger = dom.container.querySelector<HTMLButtonElement>('[aria-label="Filter collaboration communication"]')!
+  await act(async () => { trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse', ctrlKey: false })) })
+  const option = document.querySelector<HTMLElement>(`[role="menuitemradio"][data-value="${value}"]`)!
+  expect(option).not.toBeNull(); await act(async () => option.click())
+}
+it('finds only loaded source and participant facts, never prefetches bodies, and keeps pagination on an empty match', async () => {
+  vi.mocked(api.sessions.dispatches).mockResolvedValueOnce(page(['source-one'], 'source-one')).mockResolvedValueOnce(page(['source-two']))
+  await start(); await findLoaded('source-two')
+  expect(dom.container.querySelector('[data-source-message]')).toBeNull(); expect(dom.container.textContent).toContain('0 of 1 loaded records')
+  expect(dom.container.textContent).toContain('No loaded records match'); expect(api.sessions.dispatch).not.toHaveBeenCalled()
+  await clickText('Load more collaboration records')
+  expect(dom.container.querySelector('[data-source-message="source-two"]')).not.toBeNull(); expect(dom.container.textContent).toContain('1 of 2 loaded records')
+  await findLoaded('OPERATION-source-two'); expect(dom.container.querySelector('[data-source-message]')).toBeNull()
+  await findLoaded(' OWNER-AGENT '); expect(dom.container.querySelectorAll('[data-source-message]')).toHaveLength(2)
+  expect(api.sessions.dispatches).toHaveBeenCalledTimes(2); expect(api.sessions.dispatch).not.toHaveBeenCalled()
+})
+it('current presentation names help find original identities without changing the exact detail source or author', async () => {
+  const readDetails = vi.fn()
+  await render(true, control, { describeSpeaker: speaker => ({ name: speaker.id === 'owner-agent' ? 'Review owner' : 'Implementation colleague', readDetails }) })
+  await toggle('open'); await dom.click('[id$="-collaboration-tab"]'); await findLoaded('COLLEAGUE')
+  expect(dom.container.querySelectorAll('[data-source-message]')).toHaveLength(2); expect(dom.container.textContent).toContain('Review owner → Implementation colleague')
+  expect(dom.container.textContent).toContain('owner-agent → worker-agent'); expect(readDetails).not.toHaveBeenCalled()
+  await select('source-two'); expect(api.sessions.dispatch).toHaveBeenLastCalledWith({ hostId: 'local', agentSessionId: 'owner-agent' }, 'source-two')
+  await expand('source-two'); expect(dom.container.textContent).toContain('original-run-owner-agent')
+})
+it('communication filters never imply execution, and clearing filters returns focus without writing the draft', async () => {
+  const reported = observation('source-two').dispatch; reported.originAwaits = false
+  vi.mocked(api.sessions.dispatches).mockResolvedValueOnce({ ...page(), dispatches: [observation().dispatch, reported] })
+  await start(); await communication('reported')
+  expect(dom.container.querySelector('[data-source-message="source-one"]')).toBeNull(); expect(dom.container.querySelector('[data-source-message="source-two"]')).not.toBeNull()
+  expect(dom.container.textContent).toContain('Report recorded · review separate'); expect(dom.container.textContent).not.toContain('Execution complete')
+  await communication('waiting'); expect(dom.container.querySelector('[data-source-message="source-one"]')).not.toBeNull(); expect(dom.container.querySelector('[data-source-message="source-two"]')).toBeNull()
+  await findLoaded('missing'); await clickText('Clear filters')
+  expect(document.activeElement?.getAttribute('aria-label')).toBe('Find loaded collaboration records')
+  expect(dom.container.querySelectorAll('[data-source-message]')).toHaveLength(2); expect(dom.draft()).toBe('Keep my draft')
+})
+it('query and communication choice survive original detail reading, refresh, and Back with the original list position', async () => {
+  await start(); await findLoaded('source-two'); await communication('waiting')
+  const viewport = dom.container.querySelector<HTMLElement>('.composer-mailbox__content')!; viewport.scrollTop = 150
+  await select('source-two'); const details = await expand('source-two'); await clickText('Refresh records')
+  expect(dom.container.querySelector('[data-message-id="source-two"]')).toBe(details)
+  await clickText('Back to collaboration'); expect(viewport.scrollTop).toBe(150)
+  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Find loaded collaboration records"]')!.value).toBe('source-two')
+  expect(dom.container.querySelector('[aria-label="Filter collaboration communication"]')!.getAttribute('data-value')).toBe('waiting')
+  expect(dom.container.querySelectorAll('[data-source-message]')).toHaveLength(1)
+  const input = dom.container.querySelector<HTMLInputElement>('[aria-label="Find loaded collaboration records"]')!
+  const parent = vi.fn(); document.addEventListener('keydown', parent)
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true })))
+  expect(parent).not.toHaveBeenCalled(); document.removeEventListener('keydown', parent)
+  await render(true, { ...control, hostId: 'other-host', run: { runId: 'other-run' } })
+  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Find loaded collaboration records"]')).toBeNull()
+  expect(dom.draft()).toBe('Keep my draft')
+})
+it('one Escape closes only the original communication menu, preserving Mailbox and its trigger focus', async () => {
+  await start(); const trigger = dom.container.querySelector<HTMLElement>('[aria-label="Filter collaboration communication"]')!
+  const panel = dom.container.querySelector<HTMLElement>('.composer-mailbox')!, hide = vi.fn()
+  Object.defineProperty(panel, 'hidePopover', { configurable: true, value: hide })
+  trigger.focus(); await act(async () => trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse', ctrlKey: false })))
+  const menu = document.querySelector<HTMLElement>('.selection-field__menu')!; expect(menu).not.toBeNull(); menu.focus()
+  await act(async () => { menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await new Promise(done => setTimeout(done, 0)) })
+  expect(hide).not.toHaveBeenCalled(); expect(document.querySelector('.selection-field__menu')).toBeNull(); await act(async () => { await new Promise(done => setTimeout(done, 0)) }); expect(document.activeElement).toBe(trigger)
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  expect(hide).toHaveBeenCalledOnce()
+})
