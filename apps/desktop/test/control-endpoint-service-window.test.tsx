@@ -13,7 +13,7 @@ import type { DesktopRuntimeClient } from '../src/main/desktop-host'
 import { RuntimeController } from '../src/main/runtime-controller'
 import type { RuntimeEndpointWarning, RuntimeEvent } from '../src/shared/contracts'
 import { useAppStore } from '../src/renderer/src/store'
-import { RemoteCoreUpgradeNotices } from '../src/renderer/src/components/RemoteCoreUpgradeNotices'
+import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
@@ -51,14 +51,14 @@ beforeEach(async () => {
   const webContents = Object.assign(new EventEmitter(), { id: 71, isDestroyed: () => false,
     send: (_channel: string, event: RuntimeEvent) => { sent.push(event); useAppStore.getState().applyEvent(event) } })
   detach = controller.attach(webContents as unknown as WebContents)
-  useAppStore.setState({ loading: false, sessions: [composerSession()], runtimeEndpointWarnings: [],
+  useAppStore.setState({ loading: false, sessions: [{ ...composerSession(), status: { state: 'working', source: 'native-hook', observedAt: Date.now() } }], runtimeEndpointWarnings: [],
     runtimeOwnershipWarnings: [], environmentWarning: undefined, displacedAgentSessionIds: [],
     noticeReadReceipts: {}, workbenchSaveWarning: null, nameSaveUnconfirmed: null, nameEditFailure: null,
     desktopNavigationNotice: null, errorNoticeContext: null })
 })
 afterEach(async () => { detach?.(); await controller.dispose() })
 const mount = () => dom.render(<SettingsNavigation.Provider value={{ open: vi.fn(), openToolkit: vi.fn(), openHost: vi.fn() }}>
-  <RemoteCoreUpgradeNotices />
+  <GlobalSystemNotices />
 </SettingsNavigation.Provider>)
 
 it('delivers the Core publication fact through Main to a visible service window while exact Agent input remains available', async () => {
@@ -71,7 +71,7 @@ it('delivers the Core publication fact through Main to a visible service window 
       hostId: 'local', step, scope: 'observation', availability: 'connected', ...diagnostic
     }))
     expect(sent.at(-1)).toMatchObject({ endpointObservation: { step, warning: { ...diagnostic, scope: 'observation' } } })
-    expect(dom.container.querySelector('.remote-core-upgrade-notices .service-disclosure')).not.toBeNull()
+    expect(dom.container.querySelector('.notification-item[data-notice-id]')).not.toBeNull()
     expect(dom.container.textContent).toContain(`This Mac: ${step}`)
     expect(dom.container.textContent).toContain('automatically')
     await controller.write(composerSession().control, 'Original exact input', 'user')
@@ -98,16 +98,16 @@ it('clears only the publication observation in Main and Renderer and admits a vi
   expect(controller.endpointWarningSnapshot()).toEqual(unrelated.slice(0, 2))
   expect(useAppStore.getState().runtimeEndpointWarnings).toEqual(unrelated)
   expect(dom.container.textContent).not.toContain(`This Mac: ${step}`)
-  expect(dom.container.querySelectorAll('.remote-core-upgrade-notices .service-disclosure')).toHaveLength(1)
+  expect(dom.container.querySelectorAll('.notification-item[data-notice-id]')).toHaveLength(unrelated.length)
   await act(async () => listener!(publication('unavailable', 3)))
-  expect(dom.container.querySelectorAll('.remote-core-upgrade-notices .service-disclosure')).toHaveLength(2)
+  expect(dom.container.querySelectorAll('.notification-item[data-notice-id]')).toHaveLength(unrelated.length + 1)
 })
 
 it('retains the current unavailable publication through actual Hosted client late Main commit and clears only that fact', async () => {
   const semantic = {
     ...client, runtimeIdentity: () => ({ hostId: 'local', instanceId: 'original-daemon',
       buildIdentity: 'private-fixture', protocolVersion: 1, processId: 123, ownership: 'owned' as const }),
-    catalog: () => [], agentSessions: () => [], agentMessageQueuePath: () => _hygiene_fixturePath("private-fixture/messages.ndjson")
+    catalog: () => [], agentSessions: () => [], readAgentSessions: async () => [], metadata: { pendingIds: () => [] }, agentMessageQueuePath: () => _hygiene_fixturePath("private-fixture/messages.ndjson")
   }
   const service = new AgentMuxHostedRuntimeService(semantic as unknown as AgentMuxClient, _hygiene_fixturePath("private-fixture/sessions.json"),
     () => hostedTestOwner(semantic))
@@ -148,7 +148,7 @@ it('retains the current unavailable publication through actual Hosted client lat
     await act(async () => useAppStore.setState(state => ({ runtimeEndpointWarnings: [...state.runtimeEndpointWarnings!, metadata] })))
     await act(async () => service.publishControlEndpointState({ state: 'available' }))
     await vi.waitFor(() => expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([metadata]))
-    expect(dom.container.querySelector('.remote-core-upgrade-notices')).toBeNull()
+    expect(dom.container.textContent).not.toContain(`This Mac: ${step}`)
     expect(useAppStore.getState().sessions[0]?.control).toEqual(composerSession().control)
   } finally { await hosted.dispose(); await service.dispose() }
 })
