@@ -56,6 +56,7 @@ import {
   validateAgentMuxMessageEnvelope,
   type AgentMuxDeliveryBatch,
   type AgentMuxDeliveryAcknowledgement,
+  type DurableAgentMuxMessage,
   type AgentMuxMessageEnvelope
 } from './agent-global-message-queue.js'
 import { renderAgentMuxMessageEnvelope } from './agent-message-render.js'
@@ -3653,6 +3654,18 @@ export class AgentMuxClient {
     const author = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, caller)
     return await this.messageQueue.showDispatch({ callerAgentSessionId: author, sourceMessageId: input.sourceMessageId },
       async (messages) => { await this.assertDispatchAdmission(input.capability, author, caller.run, messages) })
+  }
+
+  /** Read original intake before any input claim or dispatch exists; no Runtime readiness is required. */
+  async readMessage(input: { operationId: string; caller?: { agentSessionId: string; capability: string } }): Promise<DurableAgentMuxMessage | null> {
+    return this.messageQueue.readByOperationId(input.operationId, async message => {
+      if (!input.caller) return
+      const caller = input.caller
+      await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
+      if (message && caller.agentSessionId !== message.envelope.senderSessionId &&
+        caller.agentSessionId !== message.envelope.recipientSessionId) throw new AgentMuxError(
+        'Only an original message participant can read it with Agent authority.', 'MESSAGE_PARTICIPANT_MISMATCH')
+    })
   }
 
   /** SDK callers are trusted Host readers; managed authority is checked again under the journal lock. */
