@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Background, BackgroundVariant, BaseEdge, EdgeLabelRenderer, Handle, MarkerType, Position, ReactFlow, applyNodeChanges, getBezierPath, type Edge, type EdgeProps, type Node, type NodeProps, type NodeChange, type Viewport, type ReactFlowInstance } from '@xyflow/react'
+import { Background, BackgroundVariant, BaseEdge, EdgeLabelRenderer, Handle, MarkerType, Position, ReactFlow, applyNodeChanges, type Edge, type EdgeProps, type Node, type NodeProps, type NodeChange, type Viewport, type ReactFlowInstance } from '@xyflow/react'
 import { NoteReader, type NoteLinkOpenRequest } from '@agentmux/client-ui/components/NoteReader'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { NotebookPage } from '@agentmux/core/notebook-catalog'
@@ -25,7 +25,7 @@ const OpenIcon = semanticIconComponent('action.open-external'), CloseIcon = sema
 type OpenNote = (page: NotebookPage, blockId?: string) => void
 type NoteNodeData = { item: CanvasNote; snapshot: NotebookGraphSnapshot; active: boolean; expanded: boolean; preview: boolean; onOpen: OpenNote; onOpenLink(link: NoteLinkOpenRequest): void; onNeighbors(id: string): void; onPreview(id: string): void; onUnbound(id: string): void; refresh(): void }
 type CanvasNode = Node<NoteNodeData, 'note'>
-type CanvasEdge = Edge<{ relationship: CanvasRelationship; inspect(id: string): void; offset: number; sourceTitle: string; targetTitle: string }, 'relationship'>
+type CanvasEdge = Edge<{ relationship: CanvasRelationship; inspect(id: string): void; offset: number; labelBaseline: number; sourceTitle: string; targetTitle: string }, 'relationship'>
 
 function SavedBody({ item, snapshot, active, onOpen, onOpenLink, refresh }: Pick<NoteNodeData, 'item' | 'snapshot' | 'active' | 'onOpen' | 'onOpenLink' | 'refresh'>) {
   const [result, setResult] = useState<{ snapshot: NotebookGraphSnapshot; value?: NoteContentObservation; issue?: string } | null>(null)
@@ -53,38 +53,41 @@ function SavedBody({ item, snapshot, active, onOpen, onOpenLink, refresh }: Pick
   </div>
 }
 
+function EndpointHandles({ kind }: { kind: 'page' | 'block' }) {
+  return <>{(['left', 'right'] as const).flatMap(side => (['in', 'out'] as const).map(direction => <Handle key={`${direction}-${side}`} id={`${kind}-${direction}-${side}`} type={direction === 'in' ? 'target' : 'source'} position={side === 'left' ? Position.Left : Position.Right} isConnectable={false} />))}</>
+}
+
 const NoteCard = memo(function NoteCard({ data, selected }: NodeProps<CanvasNode>) {
   const { item } = data
   return <article className="note-canvas-card" data-root={item.root} data-context={item.context} data-selected={selected} data-preview={data.preview}>
-    <Handle id="in-left" type="target" position={Position.Left} isConnectable={false} />
-    <header className="note-canvas-drag"><span className="note-canvas-book"><FileIcon size={12} /><span title={item.notebook}>{item.notebook}</span>{item.context && <em>Related</em>}{item.unbound.length > 0 && <button type="button" className="note-canvas-unbound nodrag" aria-label={`Inspect ${item.unbound.length} unbound links in ${item.title}`} onClick={() => data.onUnbound(item.id)}>{item.unbound.length} unbound</button>}</span>
+    <header className="note-canvas-drag note-canvas-endpoint" data-endpoint-kind="page"><EndpointHandles kind="page" /><span className="note-canvas-book"><FileIcon size={12} /><span title={item.notebook}>{item.notebook}</span>{item.context && <em>Related</em>}{item.unbound.length > 0 && <button type="button" className="note-canvas-unbound nodrag" aria-label={`Inspect ${item.unbound.length} unbound links in ${item.title}`} onClick={() => data.onUnbound(item.id)}>{item.unbound.length} unbound</button>}</span>
       {item.page ? <button type="button" className="note-canvas-title nodrag" data-note-id={item.id} title={item.title} onClick={() => data.onOpen(item.page!)}><span>{item.title}</span><OpenIcon size={12} /></button>
         : <strong className="note-canvas-title" title={item.id}>{item.title}</strong>}
       {!item.page || item.observation?.status !== 'read' ? <span className="note-canvas-note-state" title={item.observation && 'message' in item.observation ? item.observation.message : item.id}>{item.observation?.status ?? 'Target not observed'}</span> : null}
     </header>
     {data.preview && item.page ? <SavedBody item={item} snapshot={data.snapshot} active={data.active} onOpen={data.onOpen} onOpenLink={data.onOpenLink} refresh={data.refresh} /> : null}
+    <div className="note-canvas-block-summary note-canvas-endpoint" data-endpoint-kind="block" title="Block endpoints are grouped here. Inspect a relationship to see its exact original blocks."><EndpointHandles kind="block" /><span>Blocks</span><span>Grouped endpoints</span></div>
     <div className="note-canvas-degrees" aria-label={`${item.incoming} incoming, ${item.outgoing} outgoing occurrences in the saved graph`} title="Saved links and references, including notes outside this view. Unmatched links count only as outgoing."><span>↓ {item.incoming} incoming</span><span>↑ {item.outgoing} outgoing</span></div>
     <footer className="nodrag"><button type="button" aria-expanded={data.preview} aria-label={`${data.preview ? 'Collapse' : 'Read'} saved body: ${item.title}`} onClick={() => data.onPreview(item.id)} disabled={!item.page}><FileIcon size={12} />{data.preview ? 'Hide body' : 'Read body'}</button>
       <button type="button" aria-expanded={data.expanded} aria-label={`${data.expanded ? 'Collapse' : 'Expand'} relationships: ${item.title}`} onClick={() => data.onNeighbors(item.id)} disabled={!item.neighbors}><BranchIcon size={12} />{data.expanded ? 'Collapse' : 'Explore'}<small>{item.neighbors}</small></button>
     </footer>
-    <Handle id="out-left" type="source" position={Position.Left} isConnectable={false} />
-    <Handle id="in-right" type="target" position={Position.Right} isConnectable={false} />
-    <Handle id="out-right" type="source" position={Position.Right} isConnectable={false} />
   </article>
 })
 
 const RelationshipEdge = memo(function RelationshipEdge(props: EdgeProps<CanvasEdge>) {
-  const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, id, markerEnd, data } = props
+  const { sourceX, sourceY, targetX, targetY, id, markerEnd, data } = props
   if (!data) return null
   const self = props.source === props.target, { relationship, offset } = data, loopOffset = Math.abs(offset)
-  const [curve, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, curvature: .35 })
-  const midX = (sourceX + targetX) / 2
-  const path = self ? `M ${sourceX},${sourceY} C ${sourceX + 100},${sourceY - 145 - loopOffset} ${targetX - 100},${targetY - 145 - loopOffset} ${targetX},${targetY}`
-    : offset ? `M ${sourceX},${sourceY} C ${midX},${sourceY + offset} ${midX},${targetY + offset} ${targetX},${targetY}` : curve
+  // One baseline per Note pair prevents different page/block handle heights from cancelling lane spacing.
+  const midX = (sourceX + targetX) / 2, labelY = data.labelBaseline + (self ? -loopOffset : offset)
+  const controlY = labelY * 4 / 3 - (sourceY + targetY) / 6
+  const path = self ? `M ${sourceX},${sourceY} C ${sourceX + 100},${controlY} ${targetX - 100},${controlY} ${targetX},${targetY}`
+    : `M ${sourceX},${sourceY} C ${midX},${controlY} ${midX},${controlY} ${targetX},${targetY}`
   const linked = relationship.kind !== 'hierarchy', count = relationship.references.length, noun = relationship.kind === 'embed' ? 'embed' : relationship.kind === 'link' ? 'link' : 'reference'
+  const endpoints = `${relationship.sourceKind === 'block' ? 'Block' : 'Page'} → ${relationship.targetKind}`
   return <><BaseEdge id={id} path={path} {...(markerEnd ? { markerEnd } : {})} className={`note-canvas-edge-${relationship.kind}`} interactionWidth={20} />
-    <EdgeLabelRenderer><button type="button" data-source-note={relationship.source} data-target-note={relationship.target} data-relationship-kind={relationship.kind} data-lane={offset} title={`${data.sourceTitle} → ${data.targetTitle}`} className={`note-canvas-edge-label nodrag nopan is-${relationship.kind}`} style={{ transform: `translate(-50%, -50%) translate(${self ? midX : labelX}px,${self ? sourceY - 108 - loopOffset * .75 : labelY + offset * .75}px)` }}
-      aria-label={linked ? `Inspect ${count}${relationship.kind === 'link' ? '' : ' block'} ${noun}${count === 1 ? '' : 's'}` : 'Inspect parent and subpage relationship'} onClick={() => data.inspect(id)}>{linked ? `${count} ${noun}${count === 1 ? '' : 's'}` : 'Subpage'}</button></EdgeLabelRenderer>
+    <EdgeLabelRenderer><button type="button" data-edge-id={id} data-source-note={relationship.source} data-target-note={relationship.target} data-source-kind={relationship.sourceKind} data-target-kind={relationship.targetKind} data-source-handle={props.sourceHandleId} data-target-handle={props.targetHandleId} data-relationship-kind={relationship.kind} data-lane={offset} title={`${data.sourceTitle} → ${data.targetTitle} · ${endpoints}`} className={`note-canvas-edge-label nodrag nopan is-${relationship.kind}`} style={{ transform: `translate(-50%, -50%) translate(${midX}px,${labelY}px)` }}
+      aria-label={linked ? `Inspect ${count} ${noun}${count === 1 ? '' : 's'}: ${endpoints}` : 'Inspect parent and subpage relationship: Page → page'} onClick={() => data.inspect(id)}><span>{linked ? `${count} ${noun}${count === 1 ? '' : 's'}` : 'Subpage'}</span><small>{endpoints}</small></button></EdgeLabelRenderer>
   </>
 })
 const nodeTypes = { note: NoteCard }, edgeTypes = { relationship: RelationshipEdge }
@@ -145,10 +148,13 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onTalk, seedNoteIds, 
       const lane = peers.findIndex(peer => peer.id === relationship.id)
       const offset = relationship.source === relationship.target ? (lane + 1) * 58 : (lane - (peers.length - 1) / 2) * 58
       const rightward = (byId.get(relationship.source)?.position.x ?? 0) <= (byId.get(relationship.target)?.position.x ?? 0)
+      const source = byId.get(relationship.source), target = byId.get(relationship.target)
+      const labelBaseline = relationship.source === relationship.target ? (source?.position.y ?? 0) - 50
+        : ((source?.position.y ?? 0) + (source?.measured?.height ?? 154) / 2 + (target?.position.y ?? 0) + (target?.measured?.height ?? 154) / 2) / 2
       return { id: relationship.id, source: relationship.source, target: relationship.target, type: 'relationship',
-        sourceHandle: rightward ? 'out-right' : 'out-left', targetHandle: rightward ? 'in-left' : 'in-right',
+        sourceHandle: `${relationship.sourceKind}-out-${rightward ? 'right' : 'left'}`, targetHandle: `${relationship.targetKind}-in-${rightward ? 'left' : 'right'}`,
         markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: relationship.kind === 'hierarchy' ? 'var(--text-3)' : relationship.kind === 'embed' ? 'var(--green)' : 'var(--blue)' },
-        data: { relationship, inspect: inspectRelationship, offset, sourceTitle: snapshot?.catalog.pages[relationship.source]?.title ?? 'Uncatalogued note', targetTitle: snapshot?.catalog.pages[relationship.target]?.title ?? 'Uncatalogued note' }, selectable: false, deletable: false }
+        data: { relationship, inspect: inspectRelationship, offset, labelBaseline, sourceTitle: snapshot?.catalog.pages[relationship.source]?.title ?? 'Uncatalogued note', targetTitle: snapshot?.catalog.pages[relationship.target]?.title ?? 'Uncatalogued note' }, selectable: false, deletable: false }
     })
   }, [projection.relationships, nodes, snapshot, inspectRelationship])
   const topology = JSON.stringify([projection.notes.map(item => item.id), projection.relationships.map(edge => edge.id)])
