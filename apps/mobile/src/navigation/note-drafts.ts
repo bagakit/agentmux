@@ -1,10 +1,15 @@
 import type { FileWriteReceipt } from '@agentmux/core/files'
 import { acknowledgeNoteWrite, type NoteEditState } from '@agentmux/client-ui/note/note-edit-state'
 import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { convertLegacyNoteDraft } from '@agentmux/client-ui/note/note-legacy-draft'
+import type { NotesResourceChange } from '@agentmux/core/notebook-store'
+import type { FileReadResource } from '@agentmux/core/files'
 
 const observers = new Map<string, Set<(raw: string, durable?: boolean) => void>>()
 const latest = new Map<string, string>()
 const pending = new Map<string, number>()
+const prefix = 'agentmux-mobile-note-draft:'
+export const noteDraftResourceIdentity = (resource: FileReadResource) => [resource.hostId, resource.workspaceId, resource.workspacePath, resource.zoneId, resource.zonePath, resource.path, resource.logicalDirectory ?? null]
 function parse(raw: string): NoteEditState {
   const value = JSON.parse(raw) as NoteEditState
   const note = readNoteDocument(value.draft)
@@ -17,7 +22,7 @@ function parse(raw: string): NoteEditState {
 }
 /** Device-owned draft and unresolved save intent, never a filesystem truth or write queue. */
 export function noteDrafts(identity: readonly string[]) {
-  const key = 'agentmux-mobile-note-draft:' + JSON.stringify(identity)
+  const key = prefix + JSON.stringify(identity)
   let observed: string | null = null, inspected: string | null = null
   let initial: NoteEditState | undefined, issue = '', readable = true
   const listener = (raw: string, durable = true) => { if (durable) observed = raw; for (const callback of callbacks) callback(parse(raw)) }
@@ -41,6 +46,53 @@ export function noteDrafts(identity: readonly string[]) {
   }
   return {
     initial, issue, save,
+    /** Exact owner receipts re-key the original device draft; original records remain backups. */
+    restoreRelocated(resource: FileReadResource, noteId: string, changes: readonly NotesResourceChange[], bodyRevision: string) {
+      const origins: { resource: NotesResourceChange['from']; conversion?: NotesResourceChange['conversion'] }[] = []
+      let cursor = { hostId: resource.hostId, workspaceId: resource.workspaceId, workspacePath: resource.workspacePath, path: resource.path }
+      let conversion: NotesResourceChange['conversion']
+      for (const change of [...changes].reverse()) if (change.noteId === noteId && (['hostId', 'workspaceId', 'workspacePath', 'path'] as const).every(field => change.to[field] === cursor[field])) {
+        cursor = change.from; conversion = change.conversion ?? conversion
+        origins.push({ resource: cursor, ...(conversion ? { conversion } : {}) })
+      }
+      if (conversion) for (const origin of origins) origin.conversion ??= conversion
+      const matches: { key: string; raw: string; origin: typeof origins[number] }[] = []
+      for (let index = 0; index < localStorage.length; index++) {
+        const candidateKey = localStorage.key(index)
+        if (!candidateKey?.startsWith(prefix) || candidateKey === key) continue
+        let address: unknown, owner: unknown
+        try { address = JSON.parse(candidateKey.slice(prefix.length)); owner = Array.isArray(address) && typeof address[0] === 'string' ? JSON.parse(address[0]) : null } catch { continue }
+        if (!Array.isArray(address) || address[1] !== noteId || !Array.isArray(owner) || owner.length !== 7 || owner[3] !== resource.zoneId) continue
+        const origin = origins.find(({ resource: from }) => owner[0] === from.hostId && owner[1] === from.workspaceId && owner[2] === from.workspacePath && owner[5] === from.path)
+        if (origin) { const raw = localStorage.getItem(candidateKey); if (raw !== null) matches.push({ key: candidateKey, raw, origin }) }
+      }
+      if (!matches.length) return false
+      if (matches.length > 1) throw new Error('原设备存在多个准确资源草稿；全部保留，请先核对原工作面，未自动选择或覆盖')
+      const match = matches[0]!, legacy = JSON.parse(match.raw) as NoteEditState
+      const converted = convertLegacyNoteDraft(legacy.draft, noteId)
+      if (legacy.noteId !== noteId || converted.status === 'unconfirmed') throw new Error(converted.status === 'unconfirmed' ? converted.message : '原设备草稿Note身份不匹配')
+      if (converted.status === 'converted' && !match.origin.conversion) throw new Error('原格式转换回执尚未确认；旧设备草稿保留，未自动改写')
+      const retained = parse(JSON.stringify({ ...legacy, draft: converted.content }))
+      const originalDraft = { draft: legacy.draft, expectedRevision: legacy.expectedRevision }
+      let next: NoteEditState = { ...retained, ...(retained.attempt ? { attempt: { ...retained.attempt, phase: 'unknown' } } : {}),
+        ...(converted.status === 'converted' ? { alternates: [...retained.alternates ?? [], originalDraft] } : {}) }
+      if (!next.attempt && match.origin.conversion && next.expectedRevision === match.origin.conversion.sourceRevision && bodyRevision === match.origin.conversion.targetRevision) next.expectedRevision = bodyRevision
+      const currentRaw = localStorage.getItem(key)
+      if (currentRaw !== observed || localStorage.getItem(match.key) !== match.raw) throw new Error('原设备草稿在转换观察期间改变，两份均保留；请刷新核对')
+      if (currentRaw !== null) {
+        const current = parse(currentRaw), alternates = [...current.alternates ?? []], unconfirmed = [...current.unconfirmed ?? []]
+        for (const draft of [{ draft: next.draft, expectedRevision: next.expectedRevision }, ...next.alternates ?? []]) {
+          if (draft.draft !== current.draft && !alternates.some(other => other.draft === draft.draft && other.expectedRevision === draft.expectedRevision)) alternates.push(draft)
+        }
+        for (const attempt of [...next.unconfirmed ?? [], ...next.attempt ? [next.attempt] : []]) {
+          if (!unconfirmed.some(other => other.content === attempt.content && other.expectedRevision === attempt.expectedRevision)) unconfirmed.push({ content: attempt.content, expectedRevision: attempt.expectedRevision })
+        }
+        next = { ...current, alternates, unconfirmed }
+      }
+      save(next)
+      for (const callback of callbacks) callback(next)
+      return true
+    },
     subscribe(callback: (value: NoteEditState) => void) {
       callbacks.add(callback)
       if (!observers.has(key)) observers.set(key, new Set())

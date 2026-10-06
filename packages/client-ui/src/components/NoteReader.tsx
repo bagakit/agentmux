@@ -168,6 +168,7 @@ function EditableNote({ note, content, revision, editing, original }: { note: No
     const retained = unretained.current ? { ...value, draft: current.current.draft,
       alternates: [...value.alternates ?? [], { draft: value.draft, expectedRevision: value.expectedRevision }] } : value
     current.current = retained; setState(retained); setExternalDraft(retained.draft); open(true)
+    if (retained.attempt) setNotice('原保存回执未确认，草稿保留；请核对原文件，不会重复写入。')
     if (unretained.current) {
       unretained.current = false
       try { draftWriter.current(retained); setNotice('本机存储已恢复，两份原编辑均已保全。') }

@@ -27,12 +27,26 @@ function NoteFile({ rpc, params, read, visible = true, target }: MobileNoteFileP
   const [documents, setDocuments] = useState<{ location: NoteLocation; document: NoteFileDocument }[]>([])
   const [reference, setReference] = useState<NoteBlockTarget | null>(null), [candidates, setCandidates] = useState<{ path: string; params: FileReadParams }[]>([])
   const [issue, setIssue] = useState('')
+  const [draftIssue, setDraftIssue] = useState(''), [draftLookup, retryDraftLookup] = useState(0)
+  const [conversionIssue, setConversionIssue] = useState('')
   const intent = useRef(0)
   useEffect(() => () => { intent.current += 1 }, [visible, rpc])
   const parsed = read.result.status === 'read' ? readNoteDocument(read.result.document.content) : null
   const noteId = parsed?.status === 'valid' ? parsed.note.noteId : 'unconfirmed-note'
   const resourceIdentity = JSON.stringify(originalFileIdentity(params, read.resource))
   const draft = useMemo(() => noteDrafts([resourceIdentity, noteId]), [resourceIdentity, noteId])
+  useEffect(() => {
+    if (!visible || !read.resource || parsed?.status !== 'valid' || read.result.status !== 'read') return
+    let disposed = false
+    const resource = read.resource, revision = read.result.document.revision
+    void rpc('notebook.inspect', { noteId }).then(result => {
+      if (!disposed) {
+        draft.restoreRelocated(resource, noteId, result.resourceChanges ?? [], revision); setDraftIssue('')
+        setConversionIssue((result.conversionIssues ?? []).filter(issue => issue.resource?.hostId === resource.hostId && issue.resource.workspaceId === resource.workspaceId && issue.resource.workspacePath === resource.workspacePath && issue.resource.path === resource.path).map(issue => issue.message).join(' '))
+      }
+    }).catch(error => { if (!disposed) setDraftIssue(`原设备草稿续接尚未确认：${error instanceof Error ? error.message : String(error)}；当前笔记仍可编辑，原记录保留。`) })
+    return () => { disposed = true }
+  }, [visible, rpc, draft, resourceIdentity, noteId, draftLookup])
   async function readCandidate(target: NoteBlockTarget, path: string, token = ++intent.current, scope = params) {
     if (!visible) return
     const result = await rpc('file.read', { ...scope, path })
@@ -85,6 +99,8 @@ function NoteFile({ rpc, params, read, visible = true, target }: MobileNoteFileP
   if (read.result.status !== 'read') return null
   const document = read.result.document
   return <>
+    {conversionIssue && <p role="status">{conversionIssue}<button type="button" onClick={() => retryDraftLookup(value => value + 1)}>刷新原转换状态</button></p>}
+    {draftIssue && <p role="status">{draftIssue}<button type="button" onClick={() => retryDraftLookup(value => value + 1)}>重试原设备草稿续接</button></p>}
     {draft.issue && <p role="status">{draft.issue}</p>}
     <NoteReader content={document.content} path={document.path} workspaceId={params.expectedResource.workspaceId} revision={document.revision} noteProvenance={document.noteProvenance} documents={documents} target={target}
       readReference={target => { void discover(target) }} editing={read.resource ? { initial: draft.initial, subscribe: draft.subscribe, readDeviceDraft: draft.readDevice, adoptDeviceDraft: draft.adoptDevice,

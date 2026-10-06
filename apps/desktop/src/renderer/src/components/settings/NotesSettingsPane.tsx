@@ -18,7 +18,10 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
   useEffect(() => { let active = true; void api.notesStorage.inspect().then(value => { if (active) { setStorage(value); setDirectory(value.operation?.phase === 'prepared' ? value.operation.directory : value.directory); if (value.operation) setIntent(value.operation) } }).catch(error => { if (active) setDirectoryIssue(String(error)) }); return () => { active = false } }, [])
   async function moveDirectory() {
     if (!storage || moving) return
-    const original = intent ?? { operationId: crypto.randomUUID(), expectedDirectory: storage.directory, directory: directory.trim() }; setIntent(original); setMoving(true); setDirectoryIssue(null)
+    return changeStorage(intent ?? { operationId: crypto.randomUUID(), expectedDirectory: storage.directory, directory: directory.trim() })
+  }
+  async function changeStorage(original: import('@agentmux/core/notebook-store').NotesStorageChange) {
+    setIntent(original); setMoving(true); setDirectoryIssue(null)
     try { const confirmed = await api.notesStorage.change(original); setStorage(confirmed); setDirectory(confirmed.directory); setIntent(null); await useAppStore.getState().refreshNotesStorage() } catch (error) { setDirectoryIssue(error instanceof Error ? error.message : String(error)); try { const actual = await api.notesStorage.inspect(original.operationId); setStorage(actual); if (!actual.operation) setIntent(null) } catch { /* Keep the same move intent until its original result can be inspected. */ } } finally { setMoving(false) }
   }
   const saved = resolveNotesPreferences(preferences)
@@ -41,6 +44,10 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
       <div className="settings-workflows__inline-action"><button type="button" className="small-button" disabled={!storage || moving || (!intent && directory.trim() === storage.directory)} onClick={() => void moveDirectory()}>{moving ? 'Moving…' : intent ? 'Retry original move' : 'Move notes'}</button></div>
       <button type="button" className="small-button" disabled={moving} onClick={() => { void useAppStore.getState().refreshNotesStorage().then(() => api.notesStorage.inspect()).then(value => { setStorage(value); setDirectoryIssue(null); if (!directory) setDirectory(value.directory) }).catch(error => setDirectoryIssue(String(error))) }}>Refresh directory</button>
       {directoryIssue && <p role="alert" className="settings-workflows__note">{directoryIssue}</p>}
+      {!!storage?.conversionIssues?.length && <div className="settings-workflows__note" role="status"><p>Some original Notes still need conversion. Other local Notes remain available.</p>
+        <ul>{storage.conversionIssues.map((issue, index) => <li key={index}><strong>{issue.noteId ?? 'Original resource not confirmed'}</strong>{issue.resource ? <code>{issue.resource.hostId} · {issue.resource.workspaceId} / {issue.resource.path}</code> : null}<p>{issue.message}</p></li>)}</ul>
+        <button type="button" className="small-button" disabled={moving} onClick={() => void changeStorage(storage.operation ?? { operationId: crypto.randomUUID(), expectedDirectory: storage.directory, directory: storage.directory })}>Retry original Note conversion</button>
+      </div>}
     </section>
     <section className="settings-group">
       <header><span>Reading</span><small>Saved: {saved.fontSize} px · {saved.contentWidth === 'wide' ? 'Wide' : 'Standard'}</small></header>

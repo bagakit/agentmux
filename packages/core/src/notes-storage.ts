@@ -146,10 +146,13 @@ export class AgentMuxNotesStorage {
         let catalog = original.state
         if (join(destination, NOTEBOOK_DATABASE_NAME) !== sourceCatalog && await readNotebookDatabase(join(destination, NOTEBOOK_DATABASE_NAME))) throw failure('The target already contains a Notebook directory.', 'NOTES_STORAGE_CONFLICT')
         const resourceChanges: NotesResourceChange[] = [], files: NotesStorageTransfer[] = []
+        // Explicit adoption consumes only the original converter's latest exact observation.
+        // Ordinary directory changes must still confirm every managed source.
+        const deferred = new Set(adoption ? (location.conversionIssues ?? []).flatMap(issue => issue.resource ? [noteProvenanceResourceKey(issue.resource)] : []) : [])
         for (const page of Object.values(catalog.pages)) {
           const r = page.resource
           const owned = adoption ? r.hostId === adoption.workspace.hostId && r.workspaceId === adoption.workspace.id && r.workspacePath === adoption.workspace.path && !r.path.includes('/') : r.hostId === 'local' && r.workspacePath === sourceRoot
-          if (!owned) continue
+          if (!owned || deferred.has(noteProvenanceResourceKey(r))) continue
           const source = resolve(r.workspacePath, r.path), destinationFile = resolve(destination, r.path)
           await this.confirmOriginal(source, r.workspacePath)
           if (!nested(destination, destinationFile)) throw failure('A Note resource escaped its original directory.', 'NOTES_STORAGE_INPUT_INVALID')
@@ -378,19 +381,25 @@ export class AgentMuxNotesStorage {
     if (operation.database) await unlink(operation.database.snapshotPath).catch(error => { if (error.code !== 'ENOENT') throw error })
   }
   async bootstrap(legacy: { catalogPath: string; workspace: { id: string; hostId: string; path: string }; destinationWorkspaceId: string }): Promise<NotesStorageSnapshot> {
-    await this.withLock(async () => {
-      if (await this.hasLocation()) return
-      try { await readFile(legacy.catalogPath) } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return; throw e }
-      await this.persist({ schemaVersion: 1, directory: dirname(legacy.catalogPath), operations: {}, pending: null })
+    return this.withLock(async () => {
+      if (!await this.hasLocation()) {
+        try {
+          await readFile(legacy.catalogPath)
+          await this.persist({ schemaVersion: 1, directory: dirname(legacy.catalogPath), operations: {}, pending: null })
+        } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e }
+      }
+      // A prior batch keeps its original operation identity; only newly observed sources
+      // may start a new batch after that pending operation has settled.
+      await this.resume()
+      const current = await this.inspect()
+      if (current.directory !== dirname(legacy.catalogPath)) {
+        const catalog = (await readNotebookDatabase(current.catalogPath, false))?.state
+        const deferred = new Set((current.conversionIssues ?? []).flatMap(issue => issue.resource ? [noteProvenanceResourceKey(issue.resource)] : []))
+        if (!catalog || !Object.values(catalog.pages).some(p => p.resource.hostId === legacy.workspace.hostId && p.resource.workspaceId === legacy.workspace.id && p.resource.workspacePath === legacy.workspace.path && !p.resource.path.includes('/') && !deferred.has(noteProvenanceResourceKey(p.resource)))) return this.inspect()
+        return this.change({ operationId: 'adopt-original-note-resources:' + randomUUID(), expectedDirectory: current.directory, directory: current.directory }, { ...legacy, catalogPath: current.catalogPath })
+      }
+      return this.change({ operationId: 'adopt-original-notes-directory:' + randomUUID(), expectedDirectory: current.directory, directory: this.initialDirectory }, legacy)
     })
-    let current = await this.inspect()
-    if (current.directory !== dirname(legacy.catalogPath)) {
-      await this.resume(); current = await this.inspect()
-      const catalog = (await readNotebookDatabase(current.catalogPath, false))?.state
-      if (!catalog || !Object.values(catalog.pages).some(p => p.resource.hostId === legacy.workspace.hostId && p.resource.workspaceId === legacy.workspace.id && p.resource.workspacePath === legacy.workspace.path && !p.resource.path.includes('/'))) return this.inspect()
-      return this.change({ operationId: 'adopt-original-note-resources', expectedDirectory: current.directory, directory: current.directory }, { ...legacy, catalogPath: current.catalogPath })
-    }
-    return this.change({ operationId: 'adopt-original-notes-directory', expectedDirectory: current.directory, directory: this.initialDirectory }, legacy)
   }
   async resume(): Promise<void> { await this.withLock(async () => { const location = await this.location(); if (location.pending) await this.retry(location, location.operations[location.pending]!) }) }
 }

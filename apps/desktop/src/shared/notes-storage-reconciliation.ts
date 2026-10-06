@@ -6,12 +6,14 @@ export function reconcileNotesSpatialResources(graph: AgentMuxSpatialGraph, chan
   let resources = graph.resources
   for (const region of graph.regions) {
     if (region.kind !== 'file') continue
-    const key = 'region:' + region.regionId, saved = resources[key] as Record<string, SpatialJson> | undefined
+    const key = 'region:' + region.regionId
+    let saved = resources[key] as Record<string, SpatialJson> | undefined
     if (!saved) continue
-    const change = changes.find(c => c.from.workspaceId === saved.workspaceId && c.from.path === saved.path)
-    if (!change) continue
-    if (resources === graph.resources) resources = { ...resources }
-    resources[key] = { ...saved, workspaceId: change.to.workspaceId, path: change.to.path }
+    for (const change of changes) if (change.from.workspaceId === saved.workspaceId && change.from.path === saved.path) {
+      if (resources === graph.resources) resources = { ...resources }
+      saved = { ...saved, workspaceId: change.to.workspaceId, path: change.to.path }
+      resources[key] = saved
+    }
   }
   let zones = graph.zones
   for (const move of directoryChanges) zones = zones.map(zone => {

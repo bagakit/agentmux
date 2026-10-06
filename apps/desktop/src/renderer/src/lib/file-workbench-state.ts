@@ -506,7 +506,7 @@ export function reduceDocumentRead(
   return {
     ...state,
     documentObservationGenerations,
-    documents: { ...state.documents, [key]: result.document },
+    documents: { ...state.documents, [key]: { ...result.document, ...(current.noteConversion ? { noteConversion: current.noteConversion } : {}) } },
     dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
     documentGenerations: { ...state.documentGenerations, [key]: (state.documentGenerations[key] ?? 0) + 1 },
     documentIssues: withoutIssue(state.documentIssues, key)
@@ -518,7 +518,7 @@ export function reduceDocumentReloaded(state: FileWorkbenchState, workspaceId: s
   if (!state.documents[key]) return state
   return {
     ...state,
-    documents: { ...state.documents, [key]: document },
+    documents: { ...state.documents, [key]: { ...document, ...(state.documents[key]?.noteConversion ? { noteConversion: state.documents[key]!.noteConversion } : {}) } },
     dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
     documentGenerations: { ...state.documentGenerations, [key]: (state.documentGenerations[key] ?? 0) + 1 },
     documentIssues: withoutIssue(state.documentIssues, key)

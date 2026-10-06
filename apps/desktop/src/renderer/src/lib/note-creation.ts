@@ -23,6 +23,8 @@ export type NoteCreationReceipt = {
   path: string
   status: 'pending' | 'written' | 'unknown' | 'error'
   write?: Exclude<WorkspaceFileWriteResult, { status: 'conflict' }>
+  /** Original pre-conversion creation record, never replayed or confirmed by changing formats. */
+  legacyConversion?: { path: string; target: NoteCreationTarget; content: string; expectedRevision: null; write?: Exclude<WorkspaceFileWriteResult, { status: 'conflict' }> }
   notebook?: import('./notebook-library').NoteNotebookContext
   notebookRegistered?: boolean
   notebookIssue?: string | undefined
