@@ -31,14 +31,34 @@ function ReactionChoice({ children, hint }: {
     if (!open || !anchor.current || !panel.current) return
     let current = true
     const reference = anchor.current, surface = panel.current
+    const closeIfUnavailable = () => {
+      if (!current) return true
+      if (reference.isConnected && !reference.closest('[hidden], [inert], [aria-hidden="true"]')) return false
+      setHovered(false); setFocused(false)
+      return true
+    }
+    // Retained messages can hide or move without unmounting this Portal.
+    // Observe only this open hint's original ancestor chain, never the whole tree.
+    const visibility = new MutationObserver(() => {
+      if (!closeIfUnavailable()) observeSource()
+    })
+    function observeSource() {
+      visibility.disconnect()
+      for (let node: HTMLElement | null = reference; node; node = node.parentElement) {
+        visibility.observe(node, { attributes: true, attributeFilter: ['hidden', 'inert', 'aria-hidden'], childList: true })
+      }
+    }
+    if (closeIfUnavailable()) return
+    observeSource()
     const update = async () => {
+      if (closeIfUnavailable()) return
       const { x, y } = await computePosition(reference, surface, {
         strategy: 'fixed', placement: 'top-end', middleware: [offset(6), flip({ padding: 10 }), shift({ padding: 10 })]
       })
-      if (current) Object.assign(surface.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
+      if (!closeIfUnavailable()) Object.assign(surface.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
     }
     const stop = autoUpdate(reference, surface, () => { void update() })
-    return () => { current = false; stop() }
+    return () => { current = false; visibility.disconnect(); stop() }
   }, [open])
   return <span ref={anchor} className="conversation-reactions__choice"
     onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}
