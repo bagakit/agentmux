@@ -8,11 +8,11 @@
   "scripts": {
     "build:workspace-move-helper": "node scripts/build-workspace-move-helper.mjs",
     "build:brand-assets": "node scripts/build-brand-assets.mjs",
-    "predev": "pnpm build:workspace-move-helper && pnpm build:brand-assets",
+    "predev": "pnpm --filter @agentmux/connectors... build && pnpm build:workspace-move-helper && pnpm build:brand-assets",
     "dev": "node scripts/dev-desktop.mjs",
     "dev:web": "vite --config vite.web.config.ts --host 127.0.0.1",
     "build:gallery": "vite build --config vite.gallery.config.ts",
-    "prebuild": "pnpm --filter @agentmux/git build && pnpm build:workspace-move-helper && pnpm build:brand-assets",
+    "prebuild": "pnpm --filter @agentmux/connectors... build && pnpm --filter @agentmux/git build && pnpm build:workspace-move-helper && pnpm build:brand-assets",
     "build": "pnpm --filter @agentmux/mobile build && electron-vite build && node scripts/build-renderer-release.mjs && node scripts/copy-mobile.mjs",
     "package:mac": "node scripts/package-macos.mjs",
     "package:mac:install": "node scripts/package-macos.mjs --install",
