@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DemandDelegation } from '@agentmux/demand'
+import type { DemandDelegation, DemandDispatch, GoalStartObservation } from '@agentmux/demand'
 import { openDemandStore } from '@agentmux/demand'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import type { GoalDelegationObservation, GoalDelegationResult } from '@agentmux/core/goal-delegation'
@@ -14,6 +14,7 @@ import type { RuntimeEvent } from '../src/shared/contracts'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { goalDelegationRows } from '../src/renderer/src/lib/goal-delegation-presentation'
 import { goalNextStep } from '../src/renderer/src/lib/goal-presentation'
+import { goalStartRows } from '../src/renderer/src/lib/goal-start-presentation'
 import { createGoalDelegationEvents } from '../src/renderer/src/lib/goal-delegation-events'
 import { applyGoalDelegationResult, beginGoalDelegationRead } from '../src/renderer/src/lib/goal-delegation-work'
 import { GoalDelegationWork } from '../src/renderer/src/components/GoalDelegationWork'
@@ -48,9 +49,41 @@ function observation(state: 'running' | 'exited' | 'interrupted' = 'running'): G
     source: {} as never, replies: [], identityDiagnostics: [] } }
 }
 function result(record: DemandRecord): GoalDelegationResult {
-  return { goalId: record.id, goalUpdatedAt: record.updatedAt, diskDurability: 'confirmed', delegations: record.delegations!, observations: record.delegationObservations ?? [observation()],
+  return { goalId: record.id, goalUpdatedAt: record.updatedAt, diskDurability: 'confirmed', delegations: record.delegations ?? [], observations: record.delegationObservations ?? (record.delegations?.length ? [observation()] : []),
+    ...(record.dispatches ? { dispatches: record.dispatches, startObservations: record.startObservations ?? [] } : {}),
     ...(record.grounding ? { grounding: record.grounding } : {}) }
 }
+
+function finiteStart(): DemandDispatch {
+  return { operationId: 'original-start', agentSessionId: 'original-worker', hostId: 'original-host', runId: 'original-run',
+    execution: 'finite', prompt: 'Original finite Goal work', stage: 'confirmed', preparedAt: _reshape_fixtureEpoch(0, 0, 10), submittedAt: _reshape_fixtureEpoch(0, 0, 11),
+    receipt: { kind: 'core-prompt', itemId: 'prompt:original-start', createdAt: _reshape_fixtureEpoch(0, 0, 12) } }
+}
+function startObservation(): GoalStartObservation {
+  const start = finiteStart()
+  return { operationId: start.operationId, responsibility: 'working', originalRun: { runId: start.runId, state: 'running' },
+    input: { state: 'confirmed', proof: { kind: 'core-prompt', agentSessionId: start.agentSessionId, runId: start.runId,
+      operationId: start.operationId, acknowledged: true, prompt: start.prompt,
+      inputKey: { kind: 'prompt', agentSessionId: start.agentSessionId, expectedRun: { runId: start.runId }, submissionId: start.operationId } } } }
+}
+
+it('finite Start reading requires actual input and exact Run while Goal-level results retain unknown worker association', () => {
+  const record = { ...goal(), delegations: [], dispatches: [finiteStart()] }
+  expect(goalNextStep(record)).toBe('Start observation unknown · Check original input')
+  const observed = startObservation()
+  expect(goalStartRows({ ...record, startObservations: [observed] })[0]!.state).toBe('working')
+  expect(goalStartRows({ ...record, startObservations: [{ ...observed, input: { state: 'unknown' } }] })[0]!.state).toBe('unknown')
+  expect(goalStartRows({ ...record, startObservations: [{ ...observed, originalRun: { runId: 'another-run', state: 'exited' } }] })[0]!.state).toBe('unknown')
+  expect(goalNextStep({ ...record, startObservations: [{ ...observed, originalRun: { runId: 'original-run', state: 'exited' } }] }))
+    .toBe('Agent ended · Check Goal results or continue')
+  const grounding = { ...report().grounding, submissionId: 'goal-result', submittedAt: _reshape_fixtureEpoch(0, 0, 30), acceptedAt: null }
+  const goalResult = { grounding, association: 'unknown' as const, basis: 'unknown' as const, changedSinceStart: null }
+  expect(goalStartRows({ ...record, startObservations: [{ ...observed, goalResult }] })[0]!.state).toBe('working')
+  const review = { ...observed, goalResult: { ...goalResult, basis: 'captured' as const, changedSinceStart: true } }
+  expect(goalNextStep({ ...record, startObservations: [review] })).toBe('Goal results need review · Start association unknown')
+  expect(goalStartRows({ ...record, delegationObservationIssue: 'Read unavailable', startObservations: [review] })[0])
+    .toMatchObject({ state: 'review', issue: 'Read unavailable' })
+})
 
 describe('original delegation reading facts', () => {
   it('requires the original observed Run and never interprets Goal status or another Run as completion', () => {
@@ -76,6 +109,26 @@ describe('original delegation reading facts', () => {
       const observed = { ...observation(), communication: { dispatch: { ...delegation(), openedAt: _reshape_fixtureEpoch(0, 0, 1), originAwaits: true,
         events: [{ kind, replyMessageId: 'original-question', at: _reshape_fixtureEpoch(0, 0, 2) }] }, source: {}, replies: [], identityDiagnostics: [] } } as unknown as GoalDelegationObservation
       expect(goalDelegationRows({ ...goal(), delegationObservations: [observed] })[0]).toMatchObject({ state: 'question', replyMessageId: 'original-question' })
+    }
+  })
+  it('keeps an answered original question waiting on the worker without resolving an escalation or hiding Run exit', () => {
+    const observed: any = structuredClone(observation())
+    observed.communication!.dispatch.originAwaits = true
+    observed.communication!.dispatch.events = [{ kind: 'question', replyMessageId: 'question', at: _reshape_fixtureEpoch(0, 0, 12) }]
+    observed.communication!.replies = [{ envelope: { replyTo: 'question', sender: { kind: 'agent-session', agentSessionId: 'original-owner' },
+      senderSessionId: 'original-owner', recipientSessionId: 'original-worker', threadId: 'original-thread' } } as never]
+    expect(goalDelegationRows({ ...goal(), delegationObservations: [observed] })[0]!.next).toBe('Task owner replied · Awaiting worker')
+    observed.communication!.dispatch.events[0]!.kind = 'escalation'
+    expect(goalDelegationRows({ ...goal(), delegationObservations: [observed] })[0]!.next).toBe('Follow-up sent · Blocker needs verification')
+    expect(goalDelegationRows({ ...goal(), delegationObservations: [observed] })[0]!.state).toBe('question')
+    observed.workerRun!.state = 'exited'
+    expect(goalDelegationRows({ ...goal(), delegationObservations: [observed] })[0]!.next).toBe('No report · Continue the original Agent')
+    observed.workerRun!.state = 'running'
+    observed.communication!.dispatch.events[0]!.kind = 'question'
+    for (const field of ['replyTo', 'senderSessionId', 'recipientSessionId', 'threadId'] as const) {
+      const changed = structuredClone(observed)
+      ;(changed.communication!.replies[0]!.envelope as unknown as Record<string, unknown>)[field] = 'another-original'
+      expect(goalDelegationRows({ ...goal(), delegationObservations: [changed] })[0]!.next).toBe('Question needs a reply')
     }
   })
   it('separates reported, collected and exact human-accepted results while keeping observation failures visible', () => {
@@ -114,6 +167,19 @@ it('indexes one event bridge by exact source/Host/Run and changed Goal, ignoring
   releaseSecond(); expect(stopSessions).toHaveBeenCalledTimes(1); expect(stopDomain).toHaveBeenCalledTimes(1)
 })
 
+it('finite Start adds only its original Host and Run to the existing event bridge', () => {
+  let notify!: (event: RuntimeEvent) => void
+  const events = vi.fn(listener => { notify = listener; return vi.fn() })
+  const observe = createGoalDelegationEvents({ sessions: events, demands: () => vi.fn() }), changed = vi.fn()
+  const release = observe('original-goal', [], changed, [finiteStart()])
+  for (let index = 0; index < 100; index++) notify({ hostId: 'original-host', event: { type: 'process-state', run: { runId: 'unrelated-' + index }, state: 'exited' } } as RuntimeEvent)
+  notify({ hostId: 'another-host', event: { type: 'process-state', run: { runId: 'original-run' }, state: 'exited' } } as RuntimeEvent)
+  expect(changed).not.toHaveBeenCalled()
+  notify({ hostId: 'original-host', event: { type: 'process-state', run: { runId: 'original-run' }, state: 'exited' } } as RuntimeEvent)
+  expect(changed).toHaveBeenCalledTimes(1); expect(events).toHaveBeenCalledTimes(1)
+  release()
+})
+
 const initial = useAppStore.getState()
 let root: Root, container: HTMLDivElement
 let notifyDomain: (goalIds: string[]) => void
@@ -140,6 +206,34 @@ function button(label: string) {
 async function click(label: string) { await act(async () => button(label).click()); await settle() }
 
 describe('mounted original Goal delegation consumer', () => {
+  it('finite-only GoalExecution reads original Start responsibility and preserves its native navigation and unknown report association', async () => {
+    const observed = { ...startObservation(), originalRun: { runId: 'original-run', state: 'exited' as const }, responsibility: 'original-worker-continuation' as const }
+    const record = { ...goal(), delegations: [], dispatches: [finiteStart()], startObservations: [observed] }
+    const read = vi.spyOn(api.demands, 'delegation').mockResolvedValue(result(record))
+    await mount(record, createElement(GoalExecution, { demand: { ...record, sessions: [], workspacePath: null }, onUpdate: vi.fn().mockResolvedValue(true) }))
+    expect(read).toHaveBeenCalledWith('goal.delegations', { goalId: record.id })
+    expect(container.textContent).toContain('Agent ended · Check Goal results or continue')
+    expect(container.textContent).toContain('Original Start and input')
+    expect(container.textContent).toContain('prompt:original-start')
+    expect(container.textContent).not.toContain('Collect report')
+    await click('Open original Agent')
+    expect(api.ui.openObjectLink).toHaveBeenCalledWith('amux://agent/original-worker')
+    const grounding = { ...report().grounding, submissionId: 'goal-result', submittedAt: _reshape_fixtureEpoch(0, 0, 30), acceptedAt: null }
+    const latest = { ...record, updatedAt: _reshape_fixtureEpoch(0, 0, 2), startObservations: [{ ...observed, goalResult: { grounding, association: 'unknown' as const, basis: 'unknown' as const, changedSinceStart: null } }] }
+    read.mockResolvedValue(result(latest)); await click('Refresh reports')
+    expect(container.textContent).toContain('Goal-level results are available. Their association with this Start is unknown.')
+    expect(container.textContent).toContain('Review results')
+    expect(container.textContent).not.toContain('Result accepted')
+  })
+  it('distinguishes two same-state workers and current follow-up responsibility beside the visible report', async () => {
+    const original = delegation(), second = { ...original, operationId: 'second-operation', sourceMessageId: 'second-message', workerAgentSessionId: 'second-worker' }
+    const record = { ...goal(), supervisorSessionId: 'current-supervisor', delegations: [original, second] }
+    await mount(record)
+    const captions = [...container.querySelectorAll('.goal-delegation__identity')].map(element => element.textContent)
+    expect(captions).toEqual(['Agent original-worker · Follow-up current-supervisor', 'Agent second-worker · Follow-up current-supervisor'])
+    await act(async () => { useAppStore.setState({ demands: { [record.id]: { ...record, supervisorSessionId: null } } }) })
+    expect(container.querySelector('.goal-delegation__identity')!.textContent).toContain('needs an assigned Supervisor')
+  })
   it('the actual full Goal list adapter preserves a newer original owner cut against a delayed older filesystem snapshot', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'amux-goal-read-cut-'))
     try {
