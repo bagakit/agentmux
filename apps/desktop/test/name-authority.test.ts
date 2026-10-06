@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -15,12 +16,13 @@ import { DesktopSpatialPersistence, reconcileSpatialGraphs } from '../src/render
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { api } from '../src/renderer/src/lib/api'
-import { useAppStore } from '../src/renderer/src/store'
+import { useAppStore, prepareRendererUpdate } from '../src/renderer/src/store'
 import { createWorkbenchTab, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
+import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 // The registered vertical gate consumes the existing named-owner suite as well.
 import './name-change-owners.test'
 // The already-installed build tool belongs to Core; Desktop does not acquire a
@@ -545,4 +547,49 @@ finally{await rpc.dispose();await server.stop();}
       userRuntimeTouched: false, cleanup: { exactSourceUntouched: true, privateFixturesRemoved: true },
       scope: 'Loaded isolated source bundles exercise actual Spatial owner and Renderer rebase; compiled public/UI callers and process restart are independently covered by GUI receipt.' }, null, 2))
   }, 60000)
+})
+
+it.each(['launch', 'derived'] as const)('actual launch keeps %s name provenance for both Session and Tab', async source => {
+  const { owner, launcher, directory } = await appFixture()
+  vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => {
+    const session: Extract<SessionSnapshot, { kind: 'agent' }> = { id: input.agentSessionId!, kind: 'agent', providerId: 'codex', executorId: 'private',
+      hostId: 'private-host', workspacePath: directory, label: 'Private', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), processState: 'running',
+      status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, latestOutputBytes: 0,
+      capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+      control: { kind: 'agent', hostId: 'private-host', agentSessionId: input.agentSessionId!, run: { runId: 'private-created-run' } } }
+    return { created: agentCreationFixture(session), projectionFailures: [], session, timeline: { agentSessionId: session.id, revision: 0, items: [] } }
+  })
+  await useAppStore.getState().launchAgent('private', '', 'private-group', { tabId: launcher.id, regionId: launcher.layout.activeRegionId }, undefined,
+    { agentName: 'Report recovery · PMO', tabName: 'Report recovery · PMO', ...(source === 'derived' ? { nameSource: source } : {}) })
+  const state = useAppStore.getState(), surface = state.tabs[launcher.id]!.regions[launcher.layout.activeRegionId]!
+  expect(surface).toMatchObject({ kind: 'agent', phase: 'attached' })
+  if (surface.kind !== 'agent') throw new Error('The actual launch must attach its original Agent')
+  const saved = (await new AgentMuxSpatialStateStore(owner.path).readForLayout())!
+  expect(displayLabel(saved.graph, { kind: 'agent-session', id: surface.sessionId })).toMatchObject({ value: 'Report recovery · PMO', source, nameRevision: 1 })
+  expect(displayLabel(saved.graph, { kind: 'tab', id: launcher.id })).toMatchObject({ value: 'Report recovery · PMO', source, nameRevision: 1 })
+  expect(state.agentNames[surface.sessionId]).toBe('Report recovery · PMO')
+  expect(state.tabs[launcher.id]!.name).toBe('Report recovery · PMO')
+  await prepareRendererUpdate()
+})
+
+it('a failed PMO preparation retains a readable launcher name in the original durable name owner', async () => {
+  const { owner, directory } = await appFixture(), before = useAppStore.getState()
+  const goal = { id: 'original-goal', title: 'Report recovery', description: 'Discuss the original outcome', status: 'backlog' as const,
+    priority: 'normal' as const, projectId: null, projectName: null, sessionIds: [], createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1), source: 'default-topic' as const }
+  const launch = vi.fn(), prepare = vi.spyOn(api.scratch, 'ensureTopic').mockRejectedValue(new Error('Private preparation unavailable'))
+  useAppStore.setState({ config: { ...before.config!, workspaces: [...before.config!.workspaces,
+    { id: SCRATCH_WORKSPACE_ID, name: 'Private Topics', path: join(directory, 'scratch'), hostId: 'private-host', kind: 'scratch' }] },
+    demands: { [goal.id]: goal }, demandPmoTabIds: {}, launchAgent: launch })
+  const tabId = await useAppStore.getState().requestDemandPmoTask(goal.id, 'grill')
+  await vi.waitFor(async () => expect(displayLabel((await owner.readForLayout())!.graph, { kind: 'tab', id: tabId }))
+    .toMatchObject({ value: 'Report recovery · PMO', source: 'derived', nameRevision: 1 }))
+  const state = useAppStore.getState(), tab = state.tabs[tabId]!
+  expect(tab.regions[tab.layout.activeRegionId]).toMatchObject({ kind: 'launcher' })
+  expect(tab.name).toBe('Report recovery · PMO')
+  expect(state.agentComposerDrafts[tab.layout.activeRegionId]).toBe('Clarify goal')
+  expect(state.agentComposerNotes[tab.layout.activeRegionId]).toContain('collect the original delegated reports')
+  expect(state.demands[goal.id]).toEqual(goal)
+  expect(prepare).toHaveBeenCalledTimes(1)
+  expect(launch).not.toHaveBeenCalled()
+  await prepareRendererUpdate()
 })
