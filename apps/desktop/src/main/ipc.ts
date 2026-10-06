@@ -1,4 +1,5 @@
 import { parseGoalDelegationParams, parseGoalDelegationResult, type GoalDelegationParamsMap } from '@agentmux/core/goal-delegation'
+import { GoalDelegationAttentionOwner } from './goal-delegation-attention.js'
 import { GoalDelegationOwner } from './goal-delegation-owner.js'
 import { observeTerminalBrightness, terminalPaletteChanged, terminalPaletteForAppearance } from './terminal-theme.js'
 import { exportThemeFile, writeThemeFile } from './theme-file-export.js'
@@ -909,11 +910,12 @@ export async function registerIpc(args: {
   handle('scratch:resetWiki', async (workspaceId: string, topicId: string) =>
     await args.scratchTopics.resetWiki(workspace(config, workspaceId), topicId)
   )
+  let goalAttention: GoalDelegationAttentionOwner | undefined
   const goalDelegations = new GoalDelegationOwner(demands, args.runtime, input => publicFiles.read(input), {
     call: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context),
     readDispatch: (hostId, sourceMessageId) => args.runtime.readOriginalDispatch(hostId, sourceMessageId),
     observeRun: (hostId, runId) => args.runtime.observeOriginalRun(hostId, runId)
-  })
+  }, async (goalId, delegation) => goalAttention?.observe(goalId, delegation))
   const goalVersions = new Map<string, string>()
   const disposeDemandChanges = demands.subscribe(snapshot => {
     const changed: string[] = [], retained = new Set<string>()
@@ -926,6 +928,10 @@ export async function registerIpc(args: {
     for (const id of goalVersions.keys()) if (!retained.has(id)) { changed.push(id); goalVersions.delete(id) }
     if (changed.length && !args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('demands:changed', changed)
   })
+  goalAttention = new GoalDelegationAttentionOwner(demands, args.runtime, goalDelegations, goalIds => {
+    if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('demands:changed', goalIds)
+  })
+  void goalAttention.start()
   handleWithEvent('demands:delegation', async (event, method: 'goal.delegations' | 'goal.collect', input: GoalDelegationParamsMap['goal.delegations'] | GoalDelegationParamsMap['goal.collect']) => {
     requireTrustedSender('demands:delegation', event)
     if (method !== 'goal.delegations' && method !== 'goal.collect') throw new AgentMuxError('This UI action requires the original Goal read or explicit report collection.', 'INVALID_CONTROL_REQUEST')
@@ -1936,6 +1942,7 @@ export async function registerIpc(args: {
     await runOwnerDisposals([
       { owner: 'terminal-brightness', dispose: disposeTerminalBrightness },
       { owner: 'spatial', dispose: () => disposeSpatial() },
+      { owner: 'goal-attention', dispose: () => goalAttention?.dispose() },
       { owner: 'demand-changes', dispose: () => disposeDemandChanges() },
       { owner: 'notebook', dispose: () => disposeNotebook() },
       { owner: 'toolkit-ipc', dispose: () => disposeToolkitIpc() },
