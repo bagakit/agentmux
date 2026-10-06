@@ -1,3 +1,4 @@
+const { fixturePath: _reshape_fixturePath } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath, fixturePsBirth: _hygiene_fixturePsBirth, fixtureTime: _hygiene_fixtureTime } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { EventEmitter } from 'node:events'
 import { access, appendFile, cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
@@ -111,7 +112,8 @@ afterEach(async () => {
     await rm(root, { recursive: true, force: true })
     expect(await access(root).then(() => false, (error: NodeJS.ErrnoException) => error.code === 'ENOENT'), 'The private installer filesystem must be removed').toBe(true)
     if (process.env.PACKAGE_INSTALL_QUIT_SCOPE_RECEIPT) await appendFile(process.env.PACKAGE_INSTALL_QUIT_SCOPE_RECEIPT,
-      JSON.stringify({ root, removed: true, noLiveProcessCreated: true, events: scope?.events, signals: scope?.signals, cutover: scope?.cutover }) + '\n', { mode: 0o600 })
+      JSON.stringify({ caseName: expect.getState().currentTestName, root, removed: true, noLiveProcessCreated: true,
+        events: scope?.events, signals: scope?.signals, cutover: scope?.cutover }) + '\n', { mode: 0o600 })
   }
 })
 
@@ -206,11 +208,26 @@ it.each(['birth', 'Store', 'PID', 'UID', 'argv', 'mode', 'Source'] as const)(
     expect(f.signals).toEqual([]); expect(f.cutover).toBe(false)
   })
 
-it.each(['ui-only', 'same-source'] as const)('the %s path does not exempt an unplanned child semantic Host', async path => {
-  const f = await fixture({ sameSource: path === 'same-source' }), outcome = await install(f, path === 'ui-only' ? path : 'full')
+it('the ui-only path does not exempt an unplanned child semantic Host', async () => {
+  const f = await fixture(), outcome = await install(f, 'ui-only')
   expect(outcome.error, 'Without a prepared full Source plan, the original child owner must remain protected').toContain('has not exited gracefully')
   expect(f.signals).toEqual([]); expect(f.cutover).toBe(false)
 })
+
+it.each(['GUI-child', 'detached', 'endpoint-worker'] as const)(
+  'the same-Source full installer reloads its exact %s semantic namespace', async shape => {
+    const f = await fixture({ sameSource: true, worker: shape === 'endpoint-worker' })
+    if (shape === 'detached') f.host!.ppid = 1
+    if (shape === 'endpoint-worker') {
+      f.worker!.ppid = 211
+      f.worker!.command = `${join(f.app, 'Contents/MacOS/AgentMux')} ${join(f.app, 'Contents/Resources/app/node_modules/@agentmux/core/dist/control-endpoint-listener-worker.js')} ${join(f.root, 'original-namespace')}`
+    }
+    const outcome = await install(f)
+    expect(outcome.error, 'Equal Source commits cannot skip exact owner qualification or independent Host shutdown').toBe('OWNED_CUTOVER_BOUNDARY')
+    expect(f.events.filter(event => event !== 'public-owner')).toEqual(['normal-gui-quit', 'semantic-host-shutdown', 'cutover'])
+    expect(f.signals).toEqual([[211, 'SIGTERM']]); expect(f.host).toBeNull(); expect(f.worker).toBeNull()
+    expect(f.cutover).toBe(true)
+  })
 
 it('the default full installer preserves the GUI-only cold namespace path', async () => {
   const f = await fixture({ host: false }), outcome = await install(f)
@@ -257,7 +274,7 @@ it('the semantic shutdown waits for original children without signalling a linge
 it.each(['healthy', 'UID', 'birth', 'parent', 'executable', 'mode', 'cycle'])(
   'semantic family requires a complete bound Node chain (%s)', async change => {
     const { semanticHostProcessIds } = await import('../scripts/package-semantic-host.mjs')
-    const app = '/Applications/AgentMux.app', uid = process.getuid!(), executable = `${app}/Contents/MacOS/AgentMux`
+    const app = _reshape_fixturePath("Applications/AgentMux.app"), uid = process.getuid!(), executable = `${app}/Contents/MacOS/AgentMux`
     const owner = { uid, pid: 211, ppid: 1, birth: 'owner' }
     const middle = { uid, pid: 212, ppid: 211, birth: 'middle' }, child = { uid, pid: 213, ppid: 212, birth: 'child' }
     const rows = [owner, middle, child], modes = rows.map(row => ({ ...row, mode: 'node', executable }))

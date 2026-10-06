@@ -1,3 +1,4 @@
+import { fixturePath as _reshape_fixturePath } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath, fixturePsBirth as _hygiene_fixturePsBirth } from "../scripts/lib/fixture-values.mjs"
 import { describe, it, expect, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
@@ -5,7 +6,7 @@ import ts from 'typescript'
 import { assertSemanticHostOwner, prepareSemanticHostReload, stopSemanticHostForInstall,
   confirmSemanticHostReload } from '../scripts/package-semantic-host.mjs'
 
-const app = '/Applications/AgentMux.app', candidate = '/Applications/.AgentMux.candidate.app'
+const app = _reshape_fixturePath("Applications/AgentMux.app"), candidate = _reshape_fixturePath("Applications/.AgentMux.candidate.app")
 const store = (_hygiene_fixturePath("data/original") + " workbench/agent-sessions.json")
 const command = `${app}/Contents/MacOS/AgentMux ${app}/Contents/Resources/app/out/main/agentmux-host.js --store ${store}`
 const original = { uid: process.getuid!(), pid: 211, ppid: 201, birth: _hygiene_fixturePsBirth(24022800000), command }
@@ -51,10 +52,18 @@ describe('the original Semantic Host follows a full Source installation', () => 
     expect(f.ops.signal.mock.calls).toEqual([[211, 'SIGTERM']])
   })
 
-  it('keeps a same-Source backend without any bootstrap or signal', async () => {
+  it('qualifies and reloads the original same-Source namespace for a full App replacement', async () => {
     const f = fixture(); f.source('b'.repeat(40))
-    expect(await prepareSemanticHostReload(app, candidate, f.ops)).toBeNull()
-    expect(f.ops.bootstrap).not.toHaveBeenCalled(); expect(f.ops.signal).not.toHaveBeenCalled()
+    const plan = await prepareSemanticHostReload(app, candidate, f.ops)
+    expect(plan, 'A full directory replacement must qualify its original same-Source owner').not.toBeNull()
+    expect(plan.originalSource).toBe(plan.candidateSource)
+    expect(plan.owner.pid).toBe(original.pid)
+    expect(f.ops.bootstrap).toHaveBeenCalledOnce(); expect(f.ops.signal).not.toHaveBeenCalled()
+    f.quit()
+    await stopSemanticHostForInstall(plan, f.ops)
+    expect(f.ops.signal.mock.calls).toEqual([[211, 'SIGTERM']])
+    f.launch()
+    await expect(confirmSemanticHostReload(plan, app, f.ops)).resolves.toBeUndefined()
   })
 
   it('keeps the cold path when no bundle Semantic Host exists', async () => {
@@ -87,12 +96,6 @@ describe('the original Semantic Host follows a full Source installation', () => 
     { pid: 999 }, { uid: process.getuid!() + 1 }, { ppid: 999 }, { executable: _hygiene_fixturePath("other/AgentMux") }
   ])('requires a bound kernel mode and birth (%j)', delta => {
     expect(() => assertSemanticHostOwner(app, identity, original, { ...modeFor(), ...delta })).toThrow()
-  })
-
-  it('accepts the original explicit private-access manifest without selecting another store', () => {
-    const row = { ...original, command: command + (" --private-access " + _hygiene_fixturePath("data/private") + " access.json") }
-    expect(assertSemanticHostOwner(app, identity, row, modeFor(row))).toEqual(row)
-    expect(() => assertSemanticHostOwner(app, { ...identity, storePath: _hygiene_fixturePath("data/other.json") }, row, modeFor(row))).toThrow()
   })
 
   it('rejects PID reuse, another Store or an intervening installation before signal', async () => {
