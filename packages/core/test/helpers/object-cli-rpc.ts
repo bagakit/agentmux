@@ -131,7 +131,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'message.read': ['--operation-id', 'ORIGINAL', '--host', 'local'],
     'message.dispatch.open': ['--source-message', 'M'], 'message.dispatch.inspect': ['--source-message', 'M'],
     'message.dispatch.report': ['--source-message', 'M', '--reply-message', 'REPLY', '--kind', 'worker_done'],
-    'app.inspect': [], 'app.snapshot': [], 'app.focus': ['--surface', 'space'], 'mote.playbook.pmo': [],
+    'app.search': ['--mode', 'metadata', '--query', 'search'], 'app.inspect': [], 'app.snapshot': [], 'app.focus': ['--surface', 'space'], 'mote.playbook.pmo': [],
     'settings.inspect': [], 'settings.set': ['client.label', '--help'], 'settings.executors.refresh': ['E', '--host', '--help'],
     'settings.hosts.ls': [], 'settings.hosts.test': ['--help'], 'settings.workspaces.register': ['--input', input],
     'settings.browser-links.ls': [], 'settings.browser-links.forget': ['--help'],
