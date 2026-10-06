@@ -3,7 +3,7 @@ import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MessageDeliveryFailure } from '../src/components/MessageDeliveryFailure.js'
-import { messageDeliveryDiagnosticReport, presentMessageDeliveryFailure } from '../src/lib/message-delivery-presentation.js'
+import { messageDeliveryDiagnosticExport, messageDeliveryDiagnosticReport, presentMessageDeliveryFailure } from '../src/lib/message-delivery-presentation.js'
 import type { ClientDeliveryLog } from '../src/lib/delivery-diagnostics.js'
 import type { AgentInputSubmissionReceipt, AgentInputWaitStopReceipt } from '@agentmux/core'
 
@@ -32,7 +32,7 @@ beforeEach(() => {
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
 const render = async (node: ReactNode) => { await act(async () => root.render(node)) }
-async function click(label = '复制完整诊断') {
+async function click(label = '复制诊断摘要') {
   const button = [...container.querySelectorAll('button')].find(button => button.getAttribute('aria-label') === label || button.textContent === label)
   expect(button).toBeDefined(); await act(async () => button!.click())
 }
@@ -45,12 +45,12 @@ it('shows concise preparation cause and state while preserving the original erro
   expect(container.querySelector('.message-delivery-failure__state')!.textContent).not.toContain('preclaimObservation')
   expect(container.querySelector('details')!.open).toBe(false)
   expect(container.querySelector('summary')!.textContent).toBe('技术详情')
-  await click()
+  await click('复制完整资料')
   const report = copy.mock.calls[0]![0]
-  expect(report).toContain(original); expect(report).toContain(error.detail)
+  expect(JSON.parse(report).error).toMatchObject({ message: original, detail: error.detail, stack: error.stack })
   for (const value of [logId, 'original-host', 'original-session', 'original-run', 'original-operation', 'previous-submission']) expect(report).toContain(value)
-  expect(container.querySelector('[data-copy-state]')!.textContent).toBe('完整诊断已复制')
-  expect(container.querySelector('pre')!.textContent).toBe(report)
+  expect(container.querySelector('[data-copy-state]')!.textContent).toBe('完整资料已复制')
+  expect(container.querySelector('[aria-label="完整诊断原文"]')!.textContent).toBe(report)
 })
 
 it('the compact host presentation folds explanations without clipping original diagnostics or changing retry and copy receipts', async () => {
@@ -65,8 +65,8 @@ it('the compact host presentation folds explanations without clipping original d
   await click(); expect(container.querySelector('[data-copy-state]')!.getAttribute('data-copy-state')).toBe('copied')
   const report = copy.mock.calls[1]![0]
   expect(report).toBe(messageDeliveryDiagnosticReport({ error, logId, log: diagnostic }))
-  expect(container.querySelector('pre')!.textContent).toBe(report)
-  for (const value of [original, logId, 'original-host', 'original-session', 'original-run', 'original-operation', 'previous-submission']) expect(report).toContain(value)
+  expect(container.querySelector('[aria-label="诊断摘要"]')!.textContent).toBe(report)
+  for (const value of [logId, 'original-host', 'original-session', 'original-run', 'original-operation', 'previous-submission']) expect(report).toContain(value)
   expect(retry).not.toHaveBeenCalled()
   await click('重试'); expect(retry).toHaveBeenCalledTimes(1)
 })
@@ -85,9 +85,9 @@ it('keeps old generic failures honest and does not clip complete copy even beyon
   await render(<MessageDeliveryFailure error={raw} copyText={copy} />)
   expect(container.querySelector('[role="alert"]')!.textContent).not.toContain('尚未写入')
   expect(container.querySelector('.message-delivery-failure__next')!.textContent).toContain('输入结果未知')
-  await click()
-  expect(copy.mock.calls[0]![0]).toContain(raw)
-  expect(messageDeliveryDiagnosticReport({ error: raw })).toContain('final-marker')
+  await click('复制完整资料')
+  expect(JSON.parse(copy.mock.calls[0]![0]).error).toBe(raw)
+  expect(JSON.parse(messageDeliveryDiagnosticExport({ error: raw })).error).toContain('final-marker')
 })
 
 it('separates a known condition refusal from the original unknown delivery without recommending the frozen retry', () => {
@@ -122,7 +122,7 @@ it.each(['false', 'reject'] as const)('reports actual clipboard %s and allows co
   const retry = vi.fn()
   await render(<MessageDeliveryFailure error={failure()} copyText={copy} onRetry={retry} />)
   await click(); expect(container.querySelector('[data-copy-state]')!.textContent).toContain('复制失败')
-  await click(); expect(container.querySelector('[data-copy-state]')!.textContent).toBe('完整诊断已复制')
+  await click(); expect(container.querySelector('[data-copy-state]')!.textContent).toBe('诊断摘要已复制')
   expect(copy.mock.calls[0]![0]).toBe(copy.mock.calls[1]![0]); expect(retry).not.toHaveBeenCalled()
 })
 
@@ -130,7 +130,7 @@ it('cannot let an old delayed clipboard completion acknowledge a different repor
   let release!: (copied: boolean) => void
   const copy = vi.fn(() => new Promise<boolean>(resolve => { release = resolve }))
   await render(<MessageDeliveryFailure error={failure()} logId={logId} copyText={copy} />)
-  await click(); expect(container.querySelector('[aria-label="复制完整诊断"]')!.hasAttribute('disabled')).toBe(true)
+  await click(); expect(container.querySelector('[aria-label="复制诊断摘要"]')!.hasAttribute('disabled')).toBe(true)
   await render(<MessageDeliveryFailure error="A different original error" copyText={copy} />)
   await act(async () => release(true))
   expect(container.querySelector('[data-copy-state]')!.getAttribute('data-copy-state')).toBe('idle')
@@ -144,10 +144,10 @@ it('uses the saved Core receipt after observation ends, retaining the full recei
   expect(container.querySelector('.message-delivery-failure__heading')!.textContent).toBe('已保存 · 等待确认')
   expect(container.querySelector('[role="alert"]')).toBeNull()
   expect(container.querySelector('.message-delivery-failure__next')!.textContent).toContain('继续确认原环境')
-  await click()
+  await click('复制完整资料')
   const report = copy.mock.calls[0]![0]
   expect(report).toContain('This operation was aborted')
-  expect(report).toContain(JSON.stringify(inputReceipt, null, 2))
+  expect(JSON.parse(report).inputReceipt).toEqual(inputReceipt)
   expect(report).not.toContain('输入结果未知')
   expect(retry).not.toHaveBeenCalled()
   await click('继续确认'); expect(retry).toHaveBeenCalledOnce()
@@ -174,8 +174,8 @@ it('keeps an exact stop receipt ahead of a stale waiting projection, without bor
   const inputReceipt = savedInput()
   const inputStopReceipt: AgentInputWaitStopReceipt = { ref: structuredClone(inputReceipt.ref), cancelOperationId: 'original-stop', outcome: 'stopped-before-dispatch', at: _reshape_fixtureEpoch(0, 0, 3) }
   expect(presentMessageDeliveryFailure({ error: 'inspect failed', inputReceipt, inputStopReceipt }).kind).toBe('stopped')
-  const report = messageDeliveryDiagnosticReport({ error: 'inspect failed', inputReceipt, inputStopReceipt })
-  expect(report).toContain(JSON.stringify(inputStopReceipt, null, 2))
+  const report = messageDeliveryDiagnosticExport({ error: 'inspect failed', inputReceipt, inputStopReceipt })
+  expect(JSON.parse(report).inputStopReceipt).toEqual(inputStopReceipt)
   for (const ref of [
     { ...inputReceipt.ref, waitGeneration: 2 },
     { ...inputReceipt.ref, key: { ...inputReceipt.key, agentSessionId: 'other-session' } },
@@ -198,4 +198,111 @@ it.each(['admitted', 'not-applied'] as const)('reports the original %s receipt a
   }
   expect([...container.querySelectorAll('button')].some(button => button.textContent?.includes('重试'))).toBe(false)
   expect(retry).not.toHaveBeenCalled()
+})
+
+
+it('copies a compact source-labelled snapshot with exact input and machine reason, without stacks or duplicated waiting payloads', () => {
+  const inputReceipt = savedInput()
+  inputReceipt.control.waiting = { phase: 'native-environment', reason: 'original-environment-unconfirmed', wake: 'explicit-rejoin',
+    mechanism: 'unconfirmed', observation: { phase: 'native-peer', failure: { name: 'AgentMuxError', code: 'AGENT_NATIVE_INPUT_UNCONFIRMED',
+      message: 'Original channel is unconfirmed', detail: '{"phase":"native-peer","reason":"original-connection-absent"}', stack: 'STACK_MUST_STAY_IN_FULL' } } }
+  const error = inputReceipt.control.waiting.observation!.failure!
+  const report = messageDeliveryDiagnosticReport({ error, inputReceipt, logId })
+  expect(report).toContain(JSON.stringify(inputReceipt.ref.key))
+  expect(report.split('original-operation')).toHaveLength(2)
+  expect(report).toContain('等待代次: 1')
+  for (const value of ['status=waiting', 'control=enabled', 'persistence=confirmed', 'observation=rejoin-needed', 'native-peer（观察位置）',
+    'reason=original-environment-unconfirmed', 'mechanism=unconfirmed', 'original-connection-absent', 'error.detail（收到的原因字段）', logId]) expect(report).toContain(value)
+  expect(report).not.toContain('STACK_MUST_STAY_IN_FULL')
+  expect(report).not.toContain('waitingObservation')
+  expect(report).toContain('不代签此前未输入')
+})
+
+it('exports each received source once, references only the identical waiting error, and retains distinct equal errors and upstream truncation', () => {
+  const inputReceipt = savedInput(), original = inputReceipt.control.waiting!
+  if (original.phase !== 'observer') throw new Error('Fixture must use the actual observer receipt')
+  const error = original.failure, diagnostic = log()
+  const snapshot = JSON.parse(messageDeliveryDiagnosticExport({ error, inputReceipt, log: diagnostic }))
+  expect(snapshot.error).toEqual({ sourceRef: 'inputReceipt.control.waiting.failure' })
+  expect(snapshot.inputReceipt).toEqual(inputReceipt)
+  expect(snapshot.log).toEqual(diagnostic)
+  expect(messageDeliveryDiagnosticExport({ error, inputReceipt }).split('This operation was aborted')).toHaveLength(2)
+  const other = { ...error, truncated: true, detail: 'Received bounded detail' }
+  const distinct = JSON.parse(messageDeliveryDiagnosticExport({ error: other, inputReceipt }))
+  expect(distinct.error).toEqual(other)
+  expect(distinct.inputReceipt.control.waiting.failure).toEqual(error)
+  expect(distinct.error).not.toHaveProperty('sourceRef')
+  expect(distinct.scope).toContain('上游 truncated')
+})
+
+it('keeps received non-enumerable error fields, repeated shared objects, exact cause and cycles in full export', () => {
+  const shared = { machine: 'unchanged' }, cause = new Error('Inner cause')
+  const error = Object.assign(new Error('Original failure', { cause }), { detail: 'Received detail', left: shared, right: shared })
+  Object.assign(cause, { parent: error })
+  const exported = JSON.parse(messageDeliveryDiagnosticExport({ error }))
+  expect(exported.error).toMatchObject({ message: error.message, stack: error.stack, detail: error.detail, left: shared, right: shared,
+    cause: { message: cause.message, stack: cause.stack, parent: '[circular reference]' } })
+})
+
+it('invalidates a delayed copy when only full source changes, even while the summary is unchanged', async () => {
+  let release!: (copied: boolean) => void
+  const copy = vi.fn(() => new Promise<boolean>(resolve => { release = resolve }))
+  const first = Object.assign(new Error('Same visible cause'), { stack: 'first-source-stack' })
+  const second = Object.assign(new Error('Same visible cause'), { stack: 'second-source-stack' })
+  expect(messageDeliveryDiagnosticReport({ error: first })).toBe(messageDeliveryDiagnosticReport({ error: second }))
+  await render(<MessageDeliveryFailure error={first} copyText={copy} />)
+  await click('复制完整资料')
+  await render(<MessageDeliveryFailure error={second} copyText={copy} />)
+  await act(async () => release(true))
+  expect(container.querySelector('[data-copy-state]')!.getAttribute('data-copy-state')).toBe('idle')
+  expect(container.querySelector('[data-full-copy-state]')!.getAttribute('data-full-copy-state')).toBe('idle')
+})
+
+it('keeps the two Clipboard actions separate and rejects stale results from the other action', async () => {
+  let release!: (copied: boolean) => void
+  const copy = vi.fn<(text: string) => Promise<boolean>>().mockImplementationOnce(() => new Promise(resolve => { release = resolve })).mockResolvedValueOnce(true)
+  await render(<MessageDeliveryFailure error={failure()} copyText={copy} />)
+  await click()
+  await click('复制完整资料')
+  await act(async () => release(false))
+  expect(container.querySelector('[data-copy-state]')!.getAttribute('data-copy-kind')).toBe('full')
+  expect(container.querySelector('[data-full-copy-state]')!.textContent).toBe('完整资料已复制')
+  expect(container.querySelector('[aria-label="复制诊断摘要"]')!.textContent).toBe('复制诊断')
+  expect(copy.mock.calls[0]![0]).not.toContain('"stack"')
+  expect(JSON.parse(copy.mock.calls[1]![0]).error.stack).toBeDefined()
+})
+
+it.each(['summary', 'full'] as const)('does not report a non-Boolean Clipboard response as %s success', async kind => {
+  await render(<MessageDeliveryFailure error={failure()} copyText={async () => undefined as unknown as boolean} />)
+  await click(kind === 'summary' ? '复制诊断摘要' : '复制完整资料')
+  expect(container.querySelector('[data-copy-state]')!.getAttribute('data-copy-state')).toBe('failed')
+})
+
+
+it('exports DOMException name and message even when the platform stores them on its prototype', () => {
+  const error = new DOMException('Original native observation stopped', 'AbortError')
+  expect(JSON.parse(messageDeliveryDiagnosticExport({ error })).error).toMatchObject({ name: 'AbortError', message: 'Original native observation stopped' })
+})
+
+it('keeps partial and unknown evidence explicit in the brief, without calling the original input unsent', () => {
+  const inputReceipt = savedInput()
+  inputReceipt.control.state = 'dispatch-authorized'
+  const report = messageDeliveryDiagnosticReport({ error: { name: 'Original', message: 'attempt stopped', controlFailure: { disposition: 'unknown', confirmedInputBytes: 12 } }, inputReceipt, inputUnconfirmed: true })
+  expect(report).toContain('发送结果待核实')
+  expect(report).toContain('control=dispatch-authorized')
+  expect(report).toContain('"confirmedInputBytes":12')
+  expect(report).not.toContain('尚未写入输入')
+  expect(report).not.toContain('未被接纳')
+})
+
+
+it('keeps a distinct original Core failure beside a transport error without mistaking observation position for cause', () => {
+  const inputReceipt = savedInput()
+  inputReceipt.control.waiting = { phase: 'native-environment', reason: 'original-environment-unconfirmed', wake: 'explicit-rejoin',
+    observation: { phase: 'native-peer', failure: { name: 'AgentMuxError', message: 'Original native channel unavailable',
+      code: 'AGENT_NATIVE_INPUT_UNCONFIRMED', detail: '{"reason":"original-connection-absent"}' } } }
+  const report = messageDeliveryDiagnosticReport({ error: new DOMException('Short observer ended', 'AbortError'), inputReceipt })
+  expect(report).toContain('Short observer ended')
+  expect(report).toContain('inputReceipt.control.waiting.observation.failure.detail（收到的原因字段）: {"reason":"original-connection-absent"}')
+  expect(report).not.toContain('尚未写入输入')
 })
