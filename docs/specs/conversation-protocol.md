@@ -40,6 +40,12 @@ A checkpoint is a read continuation, never sharing or input authority. It contai
 
 The original `agent.history` and `agent.context` expose typed question and answer records. `agent.question.reply` remains the original exact reply owner, including its stable operation, Run and predecessor. Historical asynchronous questions are readable facts rather than synchronous pending requests. Client draft, in-flight and unknown reply intent remain with the existing client owner under [the original question and reading contract](../design/behavior/conversation-input.md#共同对话与原生记录); refreshing or projecting a question does not submit it.
 
+## Mailbox consumption
+
+The original Desktop Mailbox consumes Core input projection and `conversationItemRef` for the same Host, Session and native or captured record. Its mapper retains the original object and existing row/read-marker keys; known Agent authors and delivery status come from Core rather than another timeline interpretation. Typed native question answers retain their opaque IDs and original input-record reference. Missing original question pages do not manufacture a question target or acquire another reader. An unknown Host or incomplete source leaves the record readable without inventing a complete reference.
+
+Inbox, original user Outbox, System notices and the original A2A journal retain [their existing owners and reading behavior](../design/behavior/conversation-input.md#统一对话阅读与简明操作). Saved or dispatched input receipts, recorded native input and local read markers remain independent facts. The original `message.pending.*` and `agent.history` paths continue to expose the same queue and history; connector publication Outbox is a separate owner and is not inserted into user Pending.
+
 ## State, change and delivery
 
 A successful read proves what was observed in its stated range. It does not prove that a message was delivered, an input was adopted or a task completed. UI snapshots and observation cursors are not durable publishing checkpoints. External delivery must retain its own operation identity and confirmed platform mapping, and reconcile unknown effects through the original operation.
