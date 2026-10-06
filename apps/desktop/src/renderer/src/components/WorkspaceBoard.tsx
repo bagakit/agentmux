@@ -29,7 +29,7 @@ import { FanOutStrip } from './FanOutStrip'
 import { StatusDot } from './StatusDot'
 
 const ThemeObjectInboxIcon = semanticIconComponent('object.inbox')
-const ThemeObjectActivityIcon = semanticIconComponent('object.activity')
+const ThemeStatusWorkingIcon = semanticIconComponent('status.working')
 const ThemeStatusNotificationIcon = semanticIconComponent('status.notification')
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
 const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
@@ -54,7 +54,7 @@ const COLUMN_META: Record<ProjectBoardColumn, {
   icon: SemanticIconComponent
 }> = {
   inbox: { label: 'Inbox', description: BOARD_COLUMN_DESCRIPTIONS.inbox, icon: ThemeObjectInboxIcon },
-  working: { label: 'Working', description: BOARD_COLUMN_DESCRIPTIONS.working, icon: ThemeObjectActivityIcon },
+  working: { label: 'Working', description: BOARD_COLUMN_DESCRIPTIONS.working, icon: ThemeStatusWorkingIcon },
   'needs-you': { label: 'Needs You', description: BOARD_COLUMN_DESCRIPTIONS['needs-you'], icon: ThemeStatusNotificationIcon },
   done: { label: 'Done', description: BOARD_COLUMN_DESCRIPTIONS.done, icon: ThemeStatusCompletedIcon }
 }

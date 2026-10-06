@@ -32,7 +32,7 @@ export const FALLOUT_THEME: ThemeDocument = {
     'status.failed': { kind: 'paths', paths: [{ d: 'M7 3 L17 3 L21 7 L21 17 L17 21 L7 21 L3 17 L3 7 Z M8 8 L16 16 M16 8 L8 16' }] },
     'status.paused': { kind: 'paths', paths: [{ d: 'M4 4 L20 4 L20 20 L4 20 Z M9 8 L9 16 M15 8 L15 16' }] },
     'status.running': { kind: 'paths', paths: [{ d: 'M4 8 L8 4 L16 4 L20 8 L20 16 L16 20 L8 20 L4 16 Z M9 9 L15 9 L15 15 L9 15 Z' }] },
-    'status.working': { kind: 'paths', paths: [{ d: 'M3 12 L7 12 L10 5 L14 19 L17 12 L21 12' }] },
+    'status.working': { kind: 'glyph', glyph: 'work-writing' },
     'status.unknown': { kind: 'paths', paths: [{ d: 'M4 4 L20 4 L20 20 L4 20 Z M9 8 L9 7 L15 7 L15 11 L12 13 L12 14 M12 17 L12 18' }] },
     'status.warning': { kind: 'paths', paths: [{ d: 'M12 3 L22 21 L2 21 Z M12 9 L12 15 M12 18 L12 19' }] },
     'status.info': { kind: 'paths', paths: [{ d: 'M4 4 L20 4 L20 20 L4 20 Z M12 10 L12 17 M12 7 L12 8' }] },

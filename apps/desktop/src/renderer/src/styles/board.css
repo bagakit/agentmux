@@ -112,6 +112,7 @@
 .board-column-head { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap:var(--sp-1) var(--sp-4); padding:var(--sp-3) var(--sp-4); border-left: 1px solid var(--line-soft); }
 .board-column-head > span { min-width: 0; display: flex; align-items: center; gap:var(--sp-2); }
 .board-column-head > span > svg { color: var(--green-2); }
+.board-column-head > span > .semantic-icon-motion { color: var(--green-2); animation: none; will-change: auto; }
 .board-column-head strong { font-size: var(--fs-meta); }
 .board-column-head small { grid-column: 1; overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
 .board-column-head em { grid-column: 2; grid-row: 1 / 3; align-self: center; min-width: 21px; padding:var(--sp-1) var(--sp-3); border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); font-style: normal; text-align: center; }
