@@ -1,13 +1,11 @@
 import { act } from 'react'
-import { afterEach, beforeEach, expect, it } from 'vitest'
-import { GRAPHITE_THEME, mountThemeRuntime, previewTheme } from '@agentmux/client-ui/theme'
+import { afterEach, expect, it } from 'vitest'
+import { GRAPHITE_THEME, previewTheme } from '@agentmux/client-ui/theme'
 import { semanticIconHref } from '@agentmux/client-ui/icons'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { button, click, mount, mounted } from './conversation-fixture'
-let cleanup: () => void
-beforeEach(() => { cleanup = mountThemeRuntime(window) })
-afterEach(async () => { await act(async () => { for (const view of mounted.splice(0)) { view.root.unmount(); view.element.remove() } }); cleanup(); document.body.replaceChildren() })
+afterEach(async () => { await act(async () => { for (const view of mounted.splice(0)) { view.root.unmount(); view.element.remove() } }); document.body.replaceChildren() })
 it('the actual phone root and connection drawer retain actions and semantic references across root icon overrides', async () => {
   const overlay = document.createElement('div'); document.body.append(overlay)
   const view = await mount(<MobileApp client={null} connection={{ state: 'unavailable', message: 'Original Host not connected' }} platform={createBrowserPlatform({ overlayContainer: () => overlay })}/>)
