@@ -7,6 +7,7 @@
 **本页章节**
 
 - [Agent 输入行密度](#agent-输入行密度)
+- [Agent 群聊连接入口](#agent-群聊连接入口)
 - [Message Tool 输入历史列表](#message-tool-输入历史列表)
 - [System Reminder 的默认与本次控件](#system-reminder-的默认与本次控件)
 - [Explorer 与快捷输入区](#explorer-与快捷输入区)
@@ -44,6 +45,12 @@
 - Agent 身份的来源与行为按交互合同[《Agent Region 关闭与身份入口》](../behavior/spaces-and-layout.md#agent-region-关闭与身份入口)，顶栏呈现只按[《Agent Region 的关闭与动作密度》](spaces-and-layout.md#agent-region-的关闭与动作密度)执行；输入区仅保留原输入模式与动作密度，不重复名字或补一条身份 toolbar。
 - Terminal/Activity 视图切换使用一个 28px 左右的图标按钮，不使用常驻的双按钮分段控件；图标只表达下一步动作，焦点环和 tooltip 保留可发现性。
 - Scratch Topic 点击后右侧必须有内容面或明确的 loading/failed surface；不可用状态沿用同一 Region 几何，不留无文字、无动作的空白区域。
+
+## Agent 群聊连接入口
+
+Mote 内每个 Agent 的原对象菜单，在 Connector 启用后提供具名的「创建群聊」和「绑定已有群聊」，沿既有菜单的图标、键盘与焦点语言。连接后以群名称和轻量来源提示保持可发现，查看群、暂停、重新连接与投递问题集中在按需详情；正文和 Composer 保留阅读及草稿空间，不新增常驻连接工具栏或顶层聊天导航。
+
+创建面以群名称、准确成员／受众和共享范围为主，当前 Agent 与所选应用在同一面可辨。创建中、已创建待绑定、绑定失败和结果未知就地呈现并保留原输入；未知给出检查原操作入口。正常与窄窗保留主动作和完整错误说明，成功标记只对应已经确认的步骤。身份、授权与恢复边界唯一见[共同协议行为合同](../behavior/conversation-input.md#共同对话协议与外部交流入口)。
 
 ## Message Tool 输入历史列表
 
