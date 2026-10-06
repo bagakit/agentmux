@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { JSONRPCClient, type JSONRPCResponse } from 'json-rpc-2.0'
 import { AgentMuxError } from './errors.js'
+import { deliveryFailure, type DeliveryFailure } from './delivery-attempt.js'
 import { openNativeProcessImage } from './agent-native-process.js'
 import { resolveCoreBinPath } from './runtime-paths.js'
 import { runProcess } from './process-runner.js'
@@ -58,6 +59,39 @@ function failureObservation(value: unknown): NativeSocketFailureObservation | un
 function failure(phase: string, reason: string, observation?: NativeSocketFailureObservation): AgentMuxError {
   return new AgentMuxError('The original native socket is unconfirmed. The Agent and message remain available.',
     'AGENT_NATIVE_INPUT_UNCONFIRMED', JSON.stringify({ phase, reason, ...(observation ? { observation } : {}) }))
+}
+
+/** The two Native input owners retain preparation and cleanup as separate facts.
+ * Diagnostics grant no input/exit authority and never mutate the original Error. */
+export function nativeInputCleanupFailure(primary: unknown, cleanup: unknown): Error {
+  const original = deliveryFailure(primary)
+  // Provider and Core each quote this opaque detail once. Bound each record's
+  // encoded size before those projections, preserving valid JSON and both facts.
+  const diagnostic = (value: DeliveryFailure): DeliveryFailure => {
+    if (JSON.stringify(value).length <= 768) return value
+    const compact = (failure: DeliveryFailure): DeliveryFailure => {
+      const { stack, cause, ...fields } = failure
+      return { ...fields, ...(cause ? { cause: compact(cause) } : {}), ...(stack ? { truncated: true } : {}) }
+    }
+    const result = compact(value)
+    if (JSON.stringify(result).length > 768 && result.cause) { delete result.cause; result.truncated = true }
+    for (const key of ['detail', 'message', 'name', 'code'] as const) {
+      while (JSON.stringify(result).length > 768 && result[key]) {
+        result[key] = result[key]!.slice(0, Math.floor(result[key]!.length / 2)); result.truncated = true
+      }
+    }
+    return result
+  }
+  const detail = JSON.stringify({ primary: diagnostic(original), cleanup: diagnostic(deliveryFailure(cleanup)) })
+  const message = primary instanceof Error ? primary.message : original.message
+  const error = primary instanceof AgentMuxError
+    ? new AgentMuxError(message, primary.code, detail, primary.controlFailure, primary.logId)
+    : Object.assign(new Error(message), { name: original.name, detail,
+      ...(original.code === undefined ? {} : { code: original.code }),
+      ...(original.controlFailure === undefined ? {} : { controlFailure: original.controlFailure }),
+      ...(original.logId === undefined ? {} : { logId: original.logId }) })
+  Object.defineProperty(error, 'cause', { value: primary })
+  return error
 }
 function binding(value: unknown, runPid: number, endpoint: string): NativeSocketBinding {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw failure('native-peer', 'binding-shape')
@@ -186,5 +220,8 @@ export async function openNativeSocketChannel(runPid: number, endpoint: string, 
           finally { await image.file.close() }
         }
       }, close }
-  } catch (error) { await close(); throw error }
+  } catch (error) {
+    try { await close() } catch (cleanup) { throw nativeInputCleanupFailure(error, cleanup) }
+    throw error
+  }
 }
