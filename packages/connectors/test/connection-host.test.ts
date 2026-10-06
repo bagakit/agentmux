@@ -1,3 +1,4 @@
+import { DatabaseSync } from 'node:sqlite'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,6 +13,7 @@ import { ConnectionHost } from '../src/connection-host.js'
 const config: ConnectionConfig = { connectionId: 'connection-a', adapterId: 'sample', application: { domain: 'chat.example', appId: 'app-a' }, label: 'Team application', enabled: true, credentialRef: 'credential-a' }
 const observation: ConnectionObservation = { authentication: { state: 'ready' }, transport: { state: 'ready' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }
 const hosts: ConnectionHost[] = [], directories: string[] = [], servers: AgentMuxControlServer[] = []
+afterEach(() => vi.restoreAllMocks())
 afterEach(async () => { for (const server of servers.splice(0)) await server.stop(); for (const host of hosts.splice(0)) host.close(); for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }) })
 async function host(options: Partial<ConstructorParameters<typeof ConnectionHost>[0]> = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'connection-')); directories.push(directory)
@@ -21,6 +23,26 @@ async function host(options: Partial<ConstructorParameters<typeof ConnectionHost
 const create = (owner: ConnectionHost, operationId = 'save-a') => owner.configure({ operationId, expectedRevision: null, connection: config })
 
 describe('original connection owner', () => {
+  it('closes only an owned database after native schema initialization fails, preserving original data and safe errors', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'connection-construction-')); directories.push(directory)
+    const path = join(directory, 'connections.sqlite'), original = new DatabaseSync(path)
+    original.exec("CREATE TABLE preserved (value TEXT); INSERT INTO preserved VALUES ('original-data'); CREATE INDEX connection_configuration ON preserved(value)")
+    original.close()
+    const nativeExec = DatabaseSync.prototype.exec
+    let opened: DatabaseSync | undefined
+    vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function (this: DatabaseSync, sql: string) { opened = this; return nativeExec.call(this, sql) })
+    const failure = (() => { try { new ConnectionHost({ databasePath: path, secrets: { resolve: async () => null } }) } catch (error) { return error as Error & { code: string } } throw new Error('Expected native schema conflict') })()
+    expect(failure.code).toBe('CONNECTION_STORAGE_UNAVAILABLE')
+    expect(failure.message).not.toContain(path); expect(failure.message).not.toContain('connection_configuration')
+    expect(opened?.isOpen).toBe(false)
+    const shared = new DatabaseSync(path)
+    try {
+      expect(shared.prepare('SELECT value FROM preserved').get()?.value).toBe('original-data')
+      expect(() => new ConnectionHost({ database: shared, secrets: { resolve: async () => null } })).toThrowError(failure.message)
+      expect(shared.isOpen).toBe(true)
+      expect(shared.prepare('SELECT value FROM preserved').get()?.value).toBe('original-data')
+    } finally { shared.close() }
+  })
   it('atomically retains configuration operations, reconciles duplicates and preserves identity during rotation', async () => {
     const { owner, directory } = await host()
     const first = await create(owner)
