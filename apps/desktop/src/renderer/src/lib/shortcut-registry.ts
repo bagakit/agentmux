@@ -1,6 +1,8 @@
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-// The one place every keyboard binding lives — chord, stable id, scope, and the platform bottom line,
-// each expressed exactly once. Before this, the same "which key is which action" decision was scattered
+import { COMPOSER_KEYBOARD_BINDINGS } from '@agentmux/client-ui/composer-keyboard'
+// Desktop's complete shortcut inventory: local bindings plus declarations owned by shared surfaces.
+// Chord, stable id, scope, and the platform bottom line are each expressed exactly once at their owner.
+// Before this, the same "which key is which action" decision was scattered
 // across four libs (workbench / terminal / quick-switch / editor-save), each with its own platform split
 // and none carrying a stable id. A cheat-sheet, user rebinding, and a command palette all need one
 // enumerable table keyed by a durable id; this is that table.
@@ -20,6 +22,7 @@ export type ShortcutEvent = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 
  * - `terminal`— xterm's custom key handler, live while a terminal owns focus.
  * - `editor`  — Monaco's own keybinding table while the editor owns focus.
  * - `launcher`— the start page's own keydown handler, live only while that surface has focus.
+ * - `message-tool` — the shared Composer's editor and suggestion list; its own matcher dispatches these.
  * A binding belongs to exactly one scope; that is the model, not one flat if over every key.
  *
  * **A scope is where a binding is evaluated, NOT a claim that it is alone there.** `window` is co-active
@@ -44,7 +47,7 @@ export type ShortcutEvent = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 
  * shadows any future terminal/editor binding on the same chord. A scope keeps it reachable exactly where
  * it means something. `INNER_SCOPES` below is what makes the collision guard see it.
  */
-export const SHORTCUT_SCOPES = ['window', 'terminal', 'editor', 'launcher'] as const
+export const SHORTCUT_SCOPES = ['window', 'terminal', 'editor', 'launcher', 'message-tool'] as const
 export type ShortcutScope = (typeof SHORTCUT_SCOPES)[number]
 
 /**
@@ -98,6 +101,7 @@ export interface ShortcutBinding {
   keyClass: ShortcutKeyClass
   /** Human label for the cheat-sheet / command palette. */
   label: string
+  description?: string
   /** The chord on macOS. */
   mac: Chord
   /** The chord on every other platform. */
@@ -192,6 +196,10 @@ const SELECT_TAB_BINDINGS: ShortcutBinding[] = Array.from({ length: 9 }, (_, ind
  * guard keeps it that way.
  */
 export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
+  // The shared Composer is the dispatch owner; Desktop only projects its declaration for discovery.
+  ...COMPOSER_KEYBOARD_BINDINGS.map(({ chord, id, keyClass, label, description }): ShortcutBinding => ({
+    id, keyClass, label, description, scope: 'message-tool', mac: chord, other: chord
+  })),
   // --- window: global navigation (fires even while typing) ---
   {
     id: 'quick-switch.toggle',
