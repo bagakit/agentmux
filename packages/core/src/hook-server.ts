@@ -62,6 +62,7 @@ async function readBody(request: IncomingMessage): Promise<string> {
 
 function respond(response: ServerResponse, statusCode: number, body = ''): void {
   response.writeHead(statusCode, {
+    'x-agentmux-hook-mode': 'observer',
     ...(body ? { 'content-type': 'application/json' } : {}),
     ...(statusCode === 429 || statusCode === 503 ? { 'retry-after': String(HOOK_RETRY_DELAY_MS / 1_000) } : {})
   })
@@ -70,6 +71,7 @@ function respond(response: ServerResponse, statusCode: number, body = ''): void 
 
 type HookIngressEvent = {
   receiptId: string
+  decision?: true
   eventName?: string
   payload?: Record<string, unknown>
 }
@@ -81,6 +83,7 @@ function isIngressEvent(value: unknown): value is HookIngressEvent {
     typeof record.receiptId !== 'string' ||
     !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(record.receiptId)
   ) return false
+  if (record.decision !== undefined && record.decision !== true) return false
   if (record.eventName !== undefined && typeof record.eventName !== 'string') return false
   if (
     record.payload !== undefined &&
@@ -101,6 +104,17 @@ export type AgentHookBinding = {
   close(): Promise<void>
 }
 
+type PermissionCallback = {
+  response: ServerResponse
+  output: Promise<Record<string, unknown> | null>
+  resolve(output: Record<string, unknown> | null): void
+  finished: Promise<boolean>
+  state: 'open' | 'decided' | 'closed'
+  decisionSupplied?: boolean
+}
+
+type HookReceipt = { fingerprint: string; bytes: number; expiresAt: number; response?: Promise<void>; decision?: PermissionCallback }
+
 type PendingBinding = {
   token: string
   agentSessionId: string
@@ -111,7 +125,7 @@ type PendingBinding = {
   pendingDeliveries: number
   accepting: boolean
   closed: boolean
-  receipts: Map<string, { fingerprint: string; bytes: number; expiresAt: number; response?: Promise<void> }>
+  receipts: Map<string, HookReceipt>
 }
 
 export type HookDeliveryFailure = {
@@ -141,9 +155,11 @@ export class AgentHookServer {
     private readonly onEvent: (
       event: NativeHookEnvelope,
       signal: AbortSignal
-    ) => void | Promise<void>,
+    ) => void | { permissionCallbackAccepted: boolean } | Promise<void | { permissionCallbackAccepted: boolean }>,
     private readonly port = defaultAgentMuxHookPort(),
-    private readonly onFailure?: (failure: HookDeliveryFailure) => void
+    private readonly onFailure?: (failure: HookDeliveryFailure) => void,
+    private readonly supportsPermissionDecision?: (providerId: AgentProviderId, eventName: string | undefined) => boolean,
+    private readonly onPermissionCallbackClosed?: (agentSessionId: string, runId: string, receiptId: string, decided: boolean) => void
   ) {}
 
   async start(): Promise<HookServerEndpoint> {
@@ -192,6 +208,7 @@ export class AgentHookServer {
     for (const binding of this.bindings.values()) {
       binding.accepting = false
       binding.closed = true
+      this.abstain(binding)
     }
     const serverClosed = server
       ? new Promise<void>((resolve) => server.close(() => resolve()))
@@ -256,6 +273,7 @@ export class AgentHookServer {
         closed = true
         binding.accepting = false
         binding.closed = true
+        this.abstain(binding)
         if (this.bindings.get(token) === binding) this.bindings.delete(token)
         const drain = binding.tail
         this.retiring.add(drain)
@@ -266,6 +284,62 @@ export class AgentHookServer {
         }
       }
     }
+  }
+
+  private permissionCallback(agentSessionId: string, runId: string, receiptId: string): PermissionCallback | undefined {
+    for (const binding of this.bindings.values()) {
+      if (binding.agentSessionId === agentSessionId && binding.runId === runId && !binding.closed) {
+        const callback = binding.receipts.get(receiptId)?.decision
+        if (callback?.state === 'open' && !callback.response.destroyed) return callback
+      }
+    }
+    return undefined
+  }
+
+  hasPermissionCallback(agentSessionId: string, runId: string, receiptId: string): boolean {
+    return this.permissionCallback(agentSessionId, runId, receiptId) !== undefined
+  }
+
+  /** This writes only the original Hook response. A finish is not stdout or Native adoption. */
+  async respondPermission(agentSessionId: string, runId: string, receiptId: string, output: Record<string, unknown> | null): Promise<void> {
+    const callback = this.permissionCallback(agentSessionId, runId, receiptId)
+    if (!callback) throw new AgentMuxError('The original permission Hook callback is closed. Use the original terminal.', 'AGENT_INTERACTION_UNCONFIRMED')
+    callback.state = 'decided'
+    callback.decisionSupplied = output !== null
+    callback.resolve(output)
+    if (!await callback.finished) throw new AgentMuxError('The original permission Hook response delivery is unknown; it will not be resent.', 'AGENT_INTERACTION_UNCONFIRMED')
+  }
+
+  /** A locally proven pre-dispatch failure returns no decision on that exact original pipe. */
+  abstainPermission(agentSessionId: string, runId: string, receiptId: string): void {
+    const callback = this.permissionCallback(agentSessionId, runId, receiptId)
+    if (callback) { callback.state = 'closed'; callback.resolve(null) }
+  }
+
+  private abstain(binding: PendingBinding): void {
+    for (const receipt of binding.receipts.values()) if (receipt.decision?.state === 'open') {
+      receipt.decision.state = 'closed'
+      receipt.decision.resolve(null)
+    }
+  }
+
+  private openPermissionCallback(binding: PendingBinding, event: HookIngressEvent, response: ServerResponse): PermissionCallback {
+    let resolve!: PermissionCallback['resolve'], finish!: (delivered: boolean) => void
+    const output = new Promise<Record<string, unknown> | null>(done => { resolve = done })
+    const finished = new Promise<boolean>(done => { finish = done })
+    const callback: PermissionCallback = { response, output, resolve, finished, state: 'open' }
+    let returnedDecision = false
+    response.once('finish', () => { returnedDecision = callback.state === 'decided' && callback.decisionSupplied === true; finish(true) })
+    response.once('close', () => {
+      callback.state = 'closed'; callback.resolve(null); finish(false)
+      const receipt = binding.receipts.get(event.receiptId)
+      if (receipt) receipt.expiresAt = performance.now() + RECEIPT_RETRY_WINDOW_MS
+      if (binding.runId) {
+        try { this.onPermissionCallbackClosed?.(binding.agentSessionId, binding.runId, event.receiptId, returnedDecision) } catch { /* Observation cannot keep the original callback alive. */ }
+      }
+    })
+    if (response.destroyed) { callback.state = 'closed'; callback.resolve(null); finish(false) }
+    return callback
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -298,16 +372,27 @@ export class AgentHookServer {
       respond(response, 400, JSON.stringify({ error: 'invalid_hook_envelope' }))
       return
     }
-    const fingerprint = createHash('sha256').update(JSON.stringify({ eventName: parsed.eventName, payload: parsed.payload },
+    const fingerprint = createHash('sha256').update(JSON.stringify({ eventName: parsed.eventName, payload: parsed.payload, ...(parsed.decision ? { decision: true } : {}) },
       (_key, value: unknown) => value && typeof value === 'object' && !Array.isArray(value)
         ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value)).digest('hex')
     for (const [id, receipt] of binding.receipts) {
-      if (receipt.expiresAt < performance.now()) binding.receipts.delete(id)
+      if (receipt.decision?.state !== 'open' && receipt.expiresAt < performance.now()) binding.receipts.delete(id)
     }
+    // A willing stdout is not a capability declaration. Unsupported or not-yet-bound
+    // candidates remain the original passive observation, never a waiting callback.
+    const event: HookIngressEvent = { receiptId: parsed.receiptId,
+      ...(parsed.eventName === undefined ? {} : { eventName: parsed.eventName }),
+      ...(parsed.payload === undefined ? {} : { payload: parsed.payload }),
+      ...(parsed.decision && binding.runId && this.supportsPermissionDecision?.(binding.providerId, parsed.eventName) ? { decision: true as const } : {}) }
     const existing = binding.receipts.get(parsed.receiptId)
     if (existing) {
       if (existing.fingerprint !== fingerprint) {
         respond(response, 409, JSON.stringify({ error: 'hook_receipt_conflict', receiptId: parsed.receiptId }))
+        return
+      }
+      // A reconnect cannot replace the original callback pipe, even with the same receipt.
+      if (existing.decision) {
+        respond(response, 409, JSON.stringify({ error: 'permission_callback_already_observed' }))
         return
       }
       if (!existing.response) {
@@ -338,7 +423,7 @@ export class AgentHookServer {
         return
       }
       binding.receipts.set(parsed.receiptId, { fingerprint, bytes: receiptBytes, expiresAt: Infinity })
-      binding.events.push(parsed)
+      binding.events.push(event)
       respond(response, 202, JSON.stringify({ stage: 'pending_run', accepted: 'memory', receiptId: parsed.receiptId }))
       return
     }
@@ -346,11 +431,25 @@ export class AgentHookServer {
       this.fail(response, binding, parsed.receiptId, 'HOOK_DELIVERY_BACKPRESSURE', 'admission', false)
       return
     }
-    binding.receipts.set(parsed.receiptId, { fingerprint, bytes: receiptBytes, expiresAt: Infinity })
+    const decision = event.decision ? this.openPermissionCallback(binding, event, response) : undefined
+    binding.receipts.set(parsed.receiptId, { fingerprint, bytes: receiptBytes, expiresAt: Infinity, ...(decision ? { decision } : {}) })
     try {
-      await this.enqueue(binding, parsed)
-      respond(response, 204)
+      await this.enqueue(binding, event)
+      if (decision) {
+        // Mode is confirmed only after the original event owner adopted the exact callback.
+        // Flush before awaiting a person so the worker can leave its bounded observation phase.
+        if (decision.state !== 'closed' && !response.destroyed) {
+          response.writeHead(200, { 'content-type': 'application/json', 'x-agentmux-hook-mode': 'decision' })
+          response.flushHeaders()
+        }
+        const output = await decision.output
+        if (!response.destroyed) {
+          if (response.headersSent) response.end(JSON.stringify(output ?? {}))
+          else respond(response, 200, JSON.stringify(output ?? {}))
+        }
+      } else respond(response, 204)
     } catch (error) {
+      if (decision) { decision.state = 'closed'; decision.resolve(null) }
       this.deliveryFailed(response, binding, parsed.receiptId, error)
     }
   }
@@ -404,7 +503,7 @@ export class AgentHookServer {
     const receipt = binding.receipts.get(event.receiptId)
     if (receipt) {
       receipt.response = response
-      void response.then(() => { receipt.expiresAt = performance.now() + RECEIPT_RETRY_WINDOW_MS }, (error: unknown) => {
+      void response.then(() => { if (!receipt.decision) receipt.expiresAt = performance.now() + RECEIPT_RETRY_WINDOW_MS }, (error: unknown) => {
         // Keep the original response while work drains. Afterward only the
         // ingress-proven not-started case may execute again. Owner rejection or
         // abort is unknown, so preserve its fingerprint and outcome for retry.
@@ -428,6 +527,7 @@ export class AgentHookServer {
     }
     const envelope: NativeHookEnvelope = {
       receiptId: event.receiptId,
+      ...(event.decision ? { permissionCallback: true as const } : {}),
       agentSessionId: binding.agentSessionId,
       runId: binding.runId,
       providerId: binding.providerId,
@@ -435,14 +535,21 @@ export class AgentHookServer {
       ...(event.payload === undefined ? {} : { payload: event.payload })
     }
     const controller = new AbortController()
-    let delivery: void | Promise<void>
+    let delivery: void | { permissionCallbackAccepted: boolean } | Promise<void | { permissionCallbackAccepted: boolean }>
     try {
       delivery = this.onEvent(envelope, controller.signal)
     } catch (error) {
       const rejected = Promise.reject(error)
       return { response: rejected, drain: rejected }
     }
-    const drain = Promise.resolve(delivery)
+    const drain = Promise.resolve(delivery).then(result => {
+      const callback = binding.receipts.get(event.receiptId)?.decision
+      // Receipt processing is not adoption of a reply target. An unadopted callback must
+      // immediately return no decision, rather than hiding the Native reviewer for its deadline.
+      if (callback?.state === 'open' && !result?.permissionCallbackAccepted) {
+        callback.state = 'closed'; callback.resolve(null)
+      }
+    })
     return {
       response: withHookDeliveryDeadline(drain, controller, timeoutMs, () => { binding.accepting = false }),
       drain

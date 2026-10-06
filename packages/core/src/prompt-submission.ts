@@ -558,7 +558,10 @@ export class AgentPromptSubmissionCoordinator {
           transportQualification.nativeHandleIdentity !== JSON.stringify(current.nativeHandle ?? null))) {
         throw new AgentMuxError('The original native Session changed during input preparation.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
       }
-      if (current.pendingInteraction) throw new AgentMuxError(
+      const pending = current.pendingInteraction
+      const unanswered = pending && [pending.request, ...(pending.additionalRequests ?? [])].some(request =>
+        request.kind !== 'permission' || !request.permissionHook?.nativeTurnEnded)
+      if (unanswered) throw new AgentMuxError(
         'Answer the pending Agent interaction before submitting another prompt.', 'AGENT_INTERACTION_PENDING')
     }
     const beforeInput = control && (async (): Promise<void> => {

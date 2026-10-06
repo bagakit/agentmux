@@ -33,7 +33,7 @@ export const AGENTMUX_HOSTED_RUNTIME_METHODS = [
 export type AgentMuxHostedMethod = typeof AGENTMUX_HOSTED_METHODS[number]
 type HostedArguments<M extends AgentMuxHostedMethod> = M extends 'trustCreationSource'
   ? [input: Parameters<AgentMuxClient['trustCreationSource']>[0]]
-  : M extends 'submitAgentPrompt' | 'submitAgentMessage' | 'rejoinAgentInputWaiting'
+  : M extends 'submitAgentPrompt' | 'submitAgentMessage' | 'rejoinAgentInputWaiting' | 'respondAgentInteraction'
     ? [input: Parameters<AgentMuxClient[M]>[0]] : Parameters<AgentMuxClient[M]>
 export type AgentMuxHostedInvocation = { [M in AgentMuxHostedMethod]: {
   method: M; args: HostedArguments<M>

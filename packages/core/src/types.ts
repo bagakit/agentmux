@@ -1411,12 +1411,31 @@ export type AgentPostureControl = {
   modes: AgentPostureMode[]
 }
 
+/** Receipt for the original synchronous Hook callback; never a byte ACK or Native adoption. */
+export type AgentMuxHookPermissionResponse = {
+  value: Extract<AgentMuxInteractionResponse, { kind: 'permission' }>
+  operationId: string
+  responseDigest: string
+  delivery: 'saved' | 'unknown' | 'connection-written'
+}
+
 export type AgentMuxPermissionRequest = {
   kind: 'permission'
   id: string
   agentSessionId: string
   /** Actual Provider-native invocation identity; absent when the Hook does not report it. */
   nativeToolCallId?: string
+  /** Original callback identity. Its persisted presence is not current dispatch authority. */
+  permissionHook?: {
+    receiptId: string
+    nativeSessionId?: string
+    nativeTurnId?: string
+    closed?: 'abstained' | 'decision-returned'
+    /** Exact original Provider turn end, not adoption of our Hook decision. */
+    nativeTurnEnded?: { recordId: string; observedAt: number }
+    response?: AgentMuxHookPermissionResponse
+  }
+  responseUnavailableReason?: string
   title: string
   options: AgentMuxPermissionOption[]
   toolName?: string
@@ -1876,6 +1895,8 @@ export type AgentProviderResumeContext = {
 export type AgentProviderForkContext = AgentProviderResumeContext
 
 export type NativeHookEnvelope = {
+  /** Set by authenticated ingress only for the original synchronous HTTP callback. */
+  permissionCallback?: true
   receiptId: string
   agentSessionId: string
   runId: string

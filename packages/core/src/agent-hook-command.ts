@@ -1,5 +1,5 @@
 import process from 'node:process'
-import { sendHookReceipt } from './agent-hook-delivery.js'
+import { sendHookReceipt, requestHookPermissionDecision } from './agent-hook-delivery.js'
 import { randomUUID } from 'node:crypto'
 import {
   HOOK_PAYLOAD_USAGE_KEY,
@@ -133,13 +133,8 @@ export function isAgentMuxManagedHookEnvironment(env: NodeJS.ProcessEnv = proces
  * `{"decision":"ask"}` would cause. Emitting the Antigravity schema to any other provider is the
  * P0 bug this replaces.
  *
- * Claude's PermissionRequest hook CAN return a structured decision on stdout
- * (`{behavior:"allow",updatedPermissions}` / `{behavior:"deny"}`) — a real broader-scope grant with no
- * PTY keystroke. It is DEFERRED, not built: honoring it would require turning this fire-and-forget hook
- * into a blocking RPC that holds stdout open until the user clicks seconds later, a channel that does not
- * exist today. Claude therefore abstains with `{}`, its own numbered TUI prompt renders, and AgentMux
- * answers it by injecting the declared keystroke (see CLAUDE_PERMISSION_OPTIONS in agent-provider.ts) —
- * reusing the existing PTY transport with zero new protocol.
+ * Synchronous decisions are a separate, explicitly Provider-declared path below. All other hooks
+ * remain passive; a Provider sharing a name does not establish another Provider's decision schema.
  */
 export function hookResponseFor(provider: string | null, eventName: string | null): string {
   if (provider === 'antigravity') {
@@ -172,66 +167,82 @@ export async function runAgentHookCommand(): Promise<void> {
   // 事件名对唯一门控的那家恒来自 `--event` 旗标。这个前提是**判据**而不是注释里的担保——见
   // test/agent-hook-command.test.ts 的 describe「门控决策先于读 stdin」，其中一条从 provider 注册表
   // 算出哪些 Provider 是门控的（问 hookResponseFor 自己），再要求每一家的 eventNameSource 都是 flag。
-  process.stdout.write(hookResponseFor(resolveHookProvider(), flagEvent ?? envEvent))
-
-  // The command is stored in shared Provider config. A foreign Provider process may therefore
-  // execute it; keep the passive stdout contract, but never let that process read AgentMux
-  // credentials or send an ingress request. The marker is injected by AgentMux terminal env.
-  if (!isAgentMuxManagedHookEnvironment()) return
-
-  const chunks: Buffer[] = []
-  let bytes = 0
-  for await (const value of process.stdin) {
-    const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
-    bytes += chunk.byteLength
-    if (bytes > MAX_HOOK_INPUT_BYTES) throw new Error('Agent hook input exceeds the AgentMux limit.')
-    chunks.push(chunk)
+  // The worker offers its original stdout; only the authenticated Core owner chooses a
+  // decision mode from its current Provider declaration on this same HTTP response.
+  const earlyEvent = flagEvent ?? envEvent
+  let wroteResponse = false
+  const passive = () => {
+    if (!wroteResponse) { process.stdout.write(hookResponseFor(resolveHookProvider(), flagEvent ?? envEvent)); wroteResponse = true }
   }
+  if (!isAgentMuxManagedHookEnvironment() || hookResponseFor(resolveHookProvider(), earlyEvent) !== '{}\n') passive()
+  try {
 
-  const rawInput = Buffer.concat(chunks).toString('utf8').trim()
-  let payload: Record<string, unknown> = {}
-  if (rawInput.length > 0) {
-    try {
-      const parsed = JSON.parse(rawInput) as unknown
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        payload = parsed as Record<string, unknown>
-      } else {
-        payload = { raw: parsed }
-      }
-    } catch {
-      payload = { raw: rawInput }
+    // The command is stored in shared Provider config. A foreign Provider process may therefore
+    // execute it; keep the passive stdout contract, but never let that process read AgentMux
+    // credentials or send an ingress request. The marker is injected by AgentMux terminal env.
+    if (!isAgentMuxManagedHookEnvironment()) return
+
+    const chunks: Buffer[] = []
+    let bytes = 0
+    for await (const value of process.stdin) {
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
+      bytes += chunk.byteLength
+      if (bytes > MAX_HOOK_INPUT_BYTES) throw new Error('Agent hook input exceeds the AgentMux limit.')
+      chunks.push(chunk)
     }
-  }
 
-  // 显式旗标优先；payload 消费当前 Provider 交付的声明来源，缺席/空白/非字符串保持 unknown，不从其他合法字段猜名。
-  const source = resolveHookEventNameSource()
-  const eventName = resolveHookEventName(flagEvent ?? envEvent, payload, source)
-
-  const url = process.env.AGENTMUX_HOOK_URL
-  const token = process.env.AGENTMUX_HOOK_TOKEN
-
-  if (url && token) {
-    // 在收尾事件上，为声明了 usage 能力的 Provider 读一次 transcript 尾部，把本 turn 的真实 token 数并进
-    // 既有回执——usage 由此「随既有事件流到达」，不新增轮询、不新增通道。读失败/无用量一律不写，缺席保持缺席。
-    const usageCapability = resolveUsageCapability()
-    if (eventName && usageCapability && USAGE_FINALIZATION_EVENTS.has(eventName)) {
-      const transcriptPath = transcriptPathFromPayload(payload)
-      if (transcriptPath) {
-        const usage = await readTurnUsageFromTranscript(usageCapability, transcriptPath, Date.now())
-        if (usage) payload = { ...payload, [HOOK_PAYLOAD_USAGE_KEY]: usage }
+    const rawInput = Buffer.concat(chunks).toString('utf8').trim()
+    let payload: Record<string, unknown> = {}
+    if (rawInput.length > 0) {
+      try {
+        const parsed = JSON.parse(rawInput) as unknown
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          payload = parsed as Record<string, unknown>
+        } else {
+          payload = { raw: parsed }
+        }
+      } catch {
+        payload = { raw: rawInput }
       }
     }
-    const receiptId = randomUUID()
-    // 无法解析的 eventName 在 body 中省略（不能写 null，Ingress validator 只接受 undefined 或 string）。
-    const bodyObj: Record<string, unknown> = {
-      receiptId,
-      ...(eventName ? { eventName } : {}),
-      payload
+
+    // 显式旗标优先；payload 消费当前 Provider 交付的声明来源，缺席/空白/非字符串保持 unknown，不从其他合法字段猜名。
+    const source = resolveHookEventNameSource()
+    const eventName = resolveHookEventName(flagEvent ?? envEvent, payload, source)
+    const decision = !wroteResponse
+
+    const url = process.env.AGENTMUX_HOOK_URL
+    const token = process.env.AGENTMUX_HOOK_TOKEN
+
+    if (url && token) {
+      // 在收尾事件上，为声明了 usage 能力的 Provider 读一次 transcript 尾部，把本 turn 的真实 token 数并进
+      // 既有回执——usage 由此「随既有事件流到达」，不新增轮询、不新增通道。读失败/无用量一律不写，缺席保持缺席。
+      const usageCapability = resolveUsageCapability()
+      if (eventName && usageCapability && USAGE_FINALIZATION_EVENTS.has(eventName)) {
+        const transcriptPath = transcriptPathFromPayload(payload)
+        if (transcriptPath) {
+          const usage = await readTurnUsageFromTranscript(usageCapability, transcriptPath, Date.now())
+          if (usage) payload = { ...payload, [HOOK_PAYLOAD_USAGE_KEY]: usage }
+        }
+      }
+      const receiptId = randomUUID()
+      // 无法解析的 eventName 在 body 中省略（不能写 null，Ingress validator 只接受 undefined 或 string）。
+      const bodyObj: Record<string, unknown> = {
+        receiptId,
+        ...(decision ? { decision: true } : {}),
+        ...(eventName ? { eventName } : {}),
+        payload
+      }
+      try {
+        if (decision) {
+          const output = await requestHookPermissionDecision(url, token, JSON.stringify(bodyObj))
+          process.stdout.write(`${JSON.stringify(output)}\n`)
+          wroteResponse = true
+        } else await sendHookReceipt(url, token, JSON.stringify(bodyObj))
+      } catch (error) {
+        process.stderr.write(`[AgentMux Hook] receipt ${receiptId}: delivery unconfirmed; the Agent remains available. ${error instanceof Error ? error.message : String(error)}\n`)
+      }
     }
-    try {
-      await sendHookReceipt(url, token, JSON.stringify(bodyObj))
-    } catch (error) {
-      process.stderr.write(`[AgentMux Hook] receipt ${receiptId}: delivery unconfirmed; the Agent remains available. ${error instanceof Error ? error.message : String(error)}\n`)
-    }
-  }
+
+  } finally { passive() }
 }

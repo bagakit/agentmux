@@ -410,7 +410,7 @@ export function normalizeAgentInteractionResponse(
     if (response.kind !== 'permission') {
       throw new AgentMuxError('Permission response kind is invalid.', 'INVALID_AGENT_INTERACTION_RESPONSE')
     }
-    if (response.decision.outcome === 'cancelled') return structuredClone(response)
+    if (response.decision.outcome === 'cancelled') return { kind: 'permission', requestId: request.id, decision: { outcome: 'cancelled' } }
     if (response.decision.outcome !== 'selected') {
       throw new AgentMuxError('Permission response outcome is invalid.', 'INVALID_AGENT_INTERACTION_RESPONSE')
     }
@@ -419,7 +419,7 @@ export function normalizeAgentInteractionResponse(
     if (!option) {
       throw new AgentMuxError('Permission response selected an unknown option.', 'INVALID_AGENT_INTERACTION_RESPONSE')
     }
-    return structuredClone(response)
+    return { kind: 'permission', requestId: request.id, decision: { outcome: 'selected', optionId } }
   }
   if (request.responseUnavailableReason) {
     throw new AgentMuxError(request.responseUnavailableReason, 'AGENT_INTERACTION_UNSUPPORTED')

@@ -11,11 +11,34 @@ function hasNativeCompletion(pending: AgentMuxPendingInteraction): boolean {
 /** Current unanswered request; an ended request may still retain its earlier response receipt. */
 export function agentInteractionActiveRequest(pending: AgentMuxPendingInteraction | undefined): AgentMuxInteractionRequest | undefined {
   if (!pending) return undefined
-  return hasNativeCompletion(pending) ? pending.additionalRequests?.[0] : pending.request
+  const requests = [pending.request, ...(pending.additionalRequests ?? [])]
+  const openHook = requests.find(request => request.kind === 'permission' && request.permissionHook &&
+    !request.permissionHook.closed && !request.permissionHook.response && !request.permissionHook.nativeTurnEnded && !request.responseUnavailableReason)
+  if (openHook) return openHook
+  if (pending.request.kind === 'permission' && pending.request.permissionHook?.nativeTurnEnded) {
+    return pending.additionalRequests?.find(request => request.kind !== 'permission' || !request.permissionHook?.nativeTurnEnded)
+  }
+  return hasNativeCompletion(pending) ? pending.additionalRequests?.find(request =>
+    request.kind !== 'permission' || !request.permissionHook?.nativeTurnEnded) : pending.request
 }
 
 /** Explain why an observed request cannot currently be answered through typed terminal input. */
 export function agentInteractionResponseUnavailableReason(pending: AgentMuxPendingInteraction): string | undefined {
+  const request = agentInteractionActiveRequest(pending)
+  if (!request) return undefined
+  if (request.kind === 'permission' && request.permissionHook) {
+    const hook = request.permissionHook
+    if (hook.closed === 'abstained' && hook.response?.delivery === 'saved') return 'The choice was saved but was not dispatched. No permission decision was returned; continue in the original terminal.'
+    if (hook.response?.value.decision.outcome === 'cancelled') return hook.response.delivery === 'connection-written'
+      ? 'No permission decision was returned to the original Hook connection. Continue in the original terminal; no approval or denial is confirmed.'
+      : 'The request to abstain is saved or its delivery is unknown. Continue in the original terminal; it will not be replayed.'
+    if (hook.response) return hook.response.delivery === 'connection-written'
+      ? 'The decision was returned to the original Hook connection. Native adoption and tool completion are not yet confirmed; it will not be resent.'
+      : 'The original Hook decision is saved or its delivery is unknown; it will not be replayed on another callback.'
+    if (hook.closed || request.responseUnavailableReason) return request.responseUnavailableReason ??
+      'The original permission callback ended without a decision. Use the original terminal.'
+    return undefined
+  }
   if (hasNativeCompletion(pending)) return pending.response?.acknowledged
     ? 'The original typed response was acknowledged and the original native request completed; settlement is pending.'
     : pending.response ? 'The original native request has ended. Its earlier typed response has not been settled.'
