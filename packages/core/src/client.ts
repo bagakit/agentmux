@@ -94,6 +94,7 @@ import { runDisplayState } from './agent-run-status.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
 import {
   AgentPromptSubmissionCoordinator,
+  observePromptInput,
   promptPreparationFailure,
   beginPromptPreparationPhase,
   completePromptPreparationPhase,
@@ -5376,9 +5377,16 @@ export class AgentMuxClient {
       let targetChanged = false
       let dispatchDeclined = false
       let authorizationFailed = false
+      let dispatchAuthorized = false
       const authority = context.authority && { ...context.authority, assertCurrent: async () => {
-        try { await context.authority!.assertCurrent() }
-        catch (error) { authorizationFailed = true; throw error }
+        try {
+          // This is a restrict-only read, not a grant or a side effect. Once the
+          // original waiting generation stops, abandon its observer even when
+          // a foreign authority reader does not settle. Its late result cannot
+          // revive the old gate or authorize the next input.
+          if (dispatchAuthorized) await context.authority!.assertCurrent()
+          else await observePromptInput(context.controller.signal, () => context.authority!.assertCurrent())
+        } catch (error) { authorizationFailed = true; throw error }
       } }
       let preparationPhase: import('./agent-provider.js').AgentNativeInputPreparationPhase | 'input-coordination' = 'native-target'
       try {
@@ -5402,6 +5410,7 @@ export class AgentMuxClient {
         const current = await this.registry.refresh(key.agentSessionId, key.expectedRun)
         assertTarget(current)
         try { await authority?.assertCurrent() } catch (error) {
+          if (context.controller.signal.aborted) throw error
           await waiting({ phase: 'authorization', reason: 'author-authorization-needed', wake: 'explicit-rejoin', failure: deliveryFailure(error) })
           const receipt = await this.inspectAgentInput({ key })
           if (receipt) this.publisher.publish({ type: 'agent-input', receipt })
@@ -5425,6 +5434,7 @@ export class AgentMuxClient {
             { prepared, authorizeDispatch: async () => {
               const link = await this.messageQueue.authorizeInputDispatch(context.ref, context.controller.signal)
               dispatchDeclined = link === null
+              dispatchAuthorized = link !== null
               return link
             } })
           if (key.kind === 'message') await this.messageQueue.recordDelivery(key.messageId, 'delivered')

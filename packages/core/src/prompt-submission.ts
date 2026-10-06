@@ -131,7 +131,7 @@ function preparedInputByte(qualified: AgentPromptTransportQualification): number
 }
 
 /** Abandon only a read-only observation when its original preparation expires or is cancelled. */
-async function observePromptTransport<T>(signal: AbortSignal, read: () => Promise<T>): Promise<T> {
+export async function observePromptInput<T>(signal: AbortSignal, read: () => Promise<T>): Promise<T> {
   signal.throwIfAborted()
   let abort!: () => void
   const cancelled = new Promise<never>((_resolve, reject) => {
@@ -881,14 +881,14 @@ export class AgentPromptSubmissionCoordinator {
       const signals = [AbortSignal.timeout(Math.max(1, remaining)), ...(renderSignal ? [renderSignal] : []), ...(signal ? [signal] : [])]
       const context = { ...nativeContext, ...(nativeSourceId ? { nativeSourceId } : {}), signal: AbortSignal.any(signals) }
       beginPromptPreparationPhase(qualified?.protocolInput, 'native-transport-verifier')
-      const confirmed = await observePromptTransport(context.signal, async () => qualified
+      const confirmed = await observePromptInput(context.signal, async () => qualified
         ? await qualified.transport.verifyCurrentTransport(context)
         : !provider.verifyPromptExecutionTransport || await provider.verifyPromptExecutionTransport(context))
       completePromptPreparationPhase(qualified?.protocolInput)
       if (!confirmed) throw new AgentMuxError('The native input transport is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
       if (qualified) {
         beginPromptPreparationPhase(qualified.protocolInput, 'final-run-status')
-        const fresh = await observePromptTransport(context.signal, () => this.deps.kernel.status(run.runId))
+        const fresh = await observePromptInput(context.signal, () => this.deps.kernel.status(run.runId))
         completePromptPreparationPhase(qualified.protocolInput)
         this.deps.assertAgentRun(session, fresh)
         context.signal.throwIfAborted()
