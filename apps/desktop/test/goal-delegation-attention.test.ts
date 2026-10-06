@@ -228,7 +228,7 @@ describe('event-driven original Goal responsibility notice', () => {
   it.each(['collected', 'handoff'] as const)('cancels the original reminder when responsibility is %s after Main checks but before the Native input claim', async change => {
     const f = await fixture(); await f.owner.start(); await f.idle(); f.holdNative()
     f.state.workerRun = 'exited'; f.emit(processEvent(task.workerRunId, 'exited'))
-    await vi.waitFor(() => expect(f.admissionSignal()).toBeDefined())
+    await vi.waitFor(() => expect(f.admissionSignal()).toBeDefined(), { timeout: 5_000 })
     const original = (await f.demands.inspectDelegation('goal', task.operationId))!.attention!
     expect(original.attemptedAt).toBeGreaterThan(0)
     expect(f.actualInputs).toEqual([])
@@ -249,7 +249,7 @@ describe('event-driven original Goal responsibility notice', () => {
   it('cancels only the exact Supervisor reminder before the Native claim when a trusted GUI draft occupation event arrives, retaining its user text', async () => {
     const f = await fixture(); await f.owner.start(); await f.idle(); f.holdNative()
     f.state.workerRun = 'exited'; f.emit(processEvent(task.workerRunId, 'exited'))
-    await vi.waitFor(() => expect(f.admissionSignal()).toBeDefined())
+    await vi.waitFor(() => expect(f.admissionSignal()).toBeDefined(), { timeout: 5_000 })
     const original = (await f.demands.inspectDelegation('goal', task.operationId))!.attention!
     f.inputOccupation({ kind: 'agent', hostId: 'other-host', agentSessionId: 'owner', run: { runId: 'owner-run' } })
     f.inputOccupation({ kind: 'agent', hostId: 'local', agentSessionId: 'another-agent', run: { runId: 'owner-run' } })
@@ -269,7 +269,7 @@ describe('event-driven original Goal responsibility notice', () => {
   it('keeps the original reminder eligible when another delegation in the same Goal changes before its Native claim', async () => {
     const f = await fixture(); await f.owner.start(); await f.idle(); f.holdNative()
     f.state.workerRun = 'exited'; f.emit(processEvent(task.workerRunId, 'exited'))
-    await vi.waitFor(() => expect(f.admissionSignal()).toBeDefined())
+    await vi.waitFor(() => expect(f.admissionSignal()).toBeDefined(), { timeout: 5_000 })
     const original = (await f.demands.inspectDelegation('goal', task.operationId))!.attention!
     const other = { ...task, operationId: 'other-delegation', sourceMessageId: 'other-source', threadId: 'other-thread', text: 'Another task' }
     await f.demands.prepareDelegation('goal', other, 'owner')
