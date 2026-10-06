@@ -14,6 +14,7 @@ export interface WritableSecretPort extends SecretPort {
 }
 export interface ConnectionAdapter {
   readonly adapterId: string
+  readonly publication?: import('./publication-adapter.js').PublicationAdapter
   /** Return facts from the original adapter protocol; no implicit send or Agent execution. */
   test(config: ConnectionConfig, credential: string): Promise<ConnectionObservation>
 }
@@ -26,6 +27,7 @@ function unavailable(reason: 'credential-missing' | 'adapter-unavailable' | 'che
 /** Optional original Host owner. Configuration and its operation receipt commit in one SQLite transaction. */
 export class ConnectionHost implements ConnectionPort {
   bindings?: import('@agentmux/core/connections').RoomBindingsPort
+  delivery?: import('@agentmux/core/connections').ConnectionDeliveryPort
   readonly database: DatabaseSync
   private readonly adapters: Map<string, ConnectionAdapter>
   private readonly observations = new Map<string, { revision: number; value: ConnectionObservation }>()
@@ -115,6 +117,14 @@ export class ConnectionHost implements ConnectionPort {
     if (!current) throw new AgentMuxError('The exact connection is unknown.', 'UNKNOWN_CONNECTION')
     if (current.revision === record.revision) this.observations.set(input.connectionId, { revision: record.revision, value: observation })
     return { ...current, observation: current.revision === record.revision ? observation : current.observation }
+  }
+  publicationAdapter(connectionId: string): import('./publication-adapter.js').PublicationAdapter | null {
+    const config = this.readConfiguration(connectionId)?.config
+    return config?.enabled ? this.adapters.get(config.adapterId)?.publication ?? null : null
+  }
+  async resolvePublicationCredential(connectionId: string): Promise<string | null> {
+    const config = this.readConfiguration(connectionId)?.config
+    return config?.enabled ? this.options.secrets.resolve(config.credentialRef) : null
   }
   close(): void { if (!this.options.database) this.database.close() }
 }
