@@ -1,5 +1,6 @@
 import { parseConversationCheckpoint, parseConversationChangesPage, type ConversationCheckpoint, type ConversationChangesPage } from './conversation-changes.js'
 import type { AgentConversationReadPage } from './conversation.js'
+import { SessionHistoryObservationPool } from './session-history-observation-pool.js'
 import { createInputPerformanceRecorder, hostedCarrierPerformance, readInputObservation, readInputObservationField, type InputObservationReference, type ClientPerformanceDiagnostics, type InputPerformanceHandle } from './performance-diagnostics.js'
 import { DeliveryAttemptStore } from './delivery-attempt-store.js'
 import { deliveryFailure, newDeliveryLogId, type DeliveryAttempt, type DeliveryAttemptLookup, type DeliveryInputPhase } from './delivery-attempt.js'
@@ -931,6 +932,7 @@ export class AgentMuxClient {
   private readonly providerReads = new Set<AbortController>()
   /** Consumer-owned read-only resources; never occupy Provider page slots or Run lifecycle locks. */
   private readonly historyObservationControllers = new Map<string, Set<NativeHistoryObservationResource>>()
+  private readonly historyObservationPool = new SessionHistoryObservationPool()
   private providerReadsDisposed = false
   private readonly nativeIdentityCaptures = new Map<string, { controller: AbortController; run: AgentMuxRunRef }>()
   private readonly nativeIdentityPending: Array<() => void> = []
@@ -1874,6 +1876,7 @@ export class AgentMuxClient {
     this.reopensDisposed = true
     this.providerReadsDisposed = true
     this.cancelProviderReads()
+    this.historyObservationPool.dispose()
     for (const resources of this.historyObservationControllers.values()) {
       for (const resource of resources) resource.controller.abort(new AgentMuxError(
         'History observer client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED'))
@@ -2988,12 +2991,33 @@ export class AgentMuxClient {
   ): Promise<AgentSessionHistoryObservationHandle> {
     if (this.providerReadsDisposed) throw new AgentMuxError('History observer client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
     options.signal?.throwIfAborted()
+    const invocation = {
+      ...(options.commandOverride === undefined ? {} : { commandOverride: options.commandOverride }),
+      ...(options.args === undefined ? {} : { args: [...options.args] }),
+      ...(options.env === undefined ? {} : { env: { ...options.env } })
+    }
+    // Missing overrides and explicit empty overrides have different Executor-owner semantics.
+    const key = JSON.stringify([agentSessionId, invocation.commandOverride ?? null, invocation.args ?? null,
+      invocation.env === undefined ? null : Object.entries(invocation.env).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)])
+    return await this.historyObservationPool.observe(key, listener, options.signal, (signal, notify, released) =>
+      this.acquireSessionHistoryObservation(agentSessionId, notify, { ...invocation, signal }, released))
+  }
+
+  private async acquireSessionHistoryObservation(
+    agentSessionId: string,
+    listener: (observation: AgentSessionHistoryObservation) => void,
+    options: AgentSessionHistoryObservationOptions,
+    onRelease: (reason: unknown) => void
+  ): Promise<AgentSessionHistoryObservationHandle> {
+    options.signal?.throwIfAborted()
     const controller = new AbortController()
     const resources = this.historyObservationControllers.get(agentSessionId) ?? new Set<NativeHistoryObservationResource>()
     this.historyObservationControllers.set(agentSessionId, resources)
     const resource: NativeHistoryObservationResource = { controller, binding: null }
     resources.add(resource)
     let observer: AgentSessionHistoryObservationHandle | undefined
+    const sourceClosed = (): void => controller.abort(observer?.closed?.reason ?? new AgentMuxError(
+      'The native history observation resource was released.', 'AGENT_SESSION_HISTORY_CANCELLED'))
     let unsubscribe = (): void => {}
     const cancel = (): void => controller.abort(options.signal?.reason ??
       new AgentMuxError('History observation was cancelled.', 'AGENT_SESSION_HISTORY_CANCELLED'))
@@ -3009,12 +3033,14 @@ export class AgentMuxClient {
       if (released) return
       released = true
       clearTimeout(timer)
+      observer?.closed?.removeEventListener('abort', sourceClosed)
       observer?.dispose()
       unsubscribe()
       options.signal?.removeEventListener('abort', cancel)
       resource.binding = null
       resources.delete(resource)
       if (!resources.size) this.historyObservationControllers.delete(agentSessionId)
+      onRelease(controller.signal.reason)
     }
     controller.signal.addEventListener('abort', () => {
       release()
@@ -3098,6 +3124,10 @@ export class AgentMuxClient {
       }).then((handle) => {
         observer = handle
         if (controller.signal.aborted) handle.dispose()
+        else if (handle.closed) {
+          handle.closed.addEventListener('abort', sourceClosed, { once: true })
+          if (handle.closed.aborted) sourceClosed()
+        }
         return handle
       })
       const acquired = await Promise.race([acquiring, cancelled])
