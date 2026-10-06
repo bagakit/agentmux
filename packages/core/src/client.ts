@@ -7141,9 +7141,6 @@ export class AgentMuxClient {
       if (expectedByte === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
-      const idleObservationAt = source === 'user' && session.semanticStatus?.state === 'done' ? session.semanticStatus.observedAt : undefined
-      const idleEntryTime = session.semanticStatus?.state === 'done'
-        ? session.semanticStatus.stateEnteredAt : undefined
       // Save uncertainty before the side effect; a crash must not re-enable an old typed approval.
       const observeNativeInput = async (delivery: 'unknown' | 'accepted' | 'not_applied'): Promise<void> => {
         if (!requestId) return
@@ -7202,31 +7199,9 @@ export class AgentMuxClient {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
       this.agentInputCursors.set(session.agentSessionId, result.run.acceptedInputBytes)
-      const idleStatus = this.registry.findByRun(session.run)?.semanticStatus
-      if (idleObservationAt !== undefined && idleStatus?.state === 'done' &&
-          !(idleStatus.idleEvidenceConsumed && idleStatus.aggregateActivityAt === undefined) &&
-          idleStatus.observedAt === idleObservationAt && idleStatus.stateEnteredAt === idleEntryTime) {
-        try {
-          const next = await this.updateExactAgentSession(session.agentSessionId, session.run, (current) => {
-            const invalidated = invalidateAgentIdleEvidence(current, idleEntryTime)
-            return invalidated === current ? current : {
-              ...invalidated, updatedAt: Math.max(current.updatedAt, Date.now())
-            }
-          })
-          this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
-        } catch (error) {
-          // Ctxmux already accepted the bytes. A failed state write must not turn this ACK into
-          // an input failure, clear the real cursor, or cause the caller to send those bytes again.
-          // No second idle ledger: explain that the old durable clock cannot be trusted across restart.
-          this.publisher.publish({
-            type: 'agent-error',
-            // A scoped agent-error paints a healthy Agent as failed. This is a Store advisory.
-            code: 'AGENT_STATE_ENTRY_PERSIST_FAILED',
-            message: `Input was accepted for Agent ${session.agentSessionId} (Run ${session.run.runId}), but its idle evidence could not be invalidated durably. The saved idle time is unconfirmed; later native state evidence can re-establish it. ${error instanceof Error ? error.message : String(error)}`,
-            evidence: { source: 'user', observedAt: Date.now(), run: { ...session.run } }
-          })
-        }
-      }
+      // Raw bytes may edit a draft or control the terminal. Their ACK cannot revoke
+      // a native task state. Semantic submission owns completion consumption;
+      // Provider events own task transitions, independently of this input receipt.
       return {
         runId: session.run.runId,
         appliedByteRange: result.appliedByteRange,
