@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { createRoot } from 'react-dom/client'
 import { Terminal } from '@xterm/xterm'
@@ -25,13 +26,15 @@ Terminal.prototype.write = function (data, callback) {
 }
 Object.defineProperty(window, 'Notification', { configurable: true, value: class { constructor() { notifications.push('Notification'); throw new Error('Unexpected terminal notification') } } })
 const session: AgentMuxAgentSession = { kind: 'agent', agentSessionId: 'private-fixture-session', providerId: 'codex', executorId: 'local', hostId: 'private-fixture-host',
-  workspacePath: fixturePath("private/fixture"), run: { runId: 'private-fixture-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }
+  workspacePath: fixturePath("private/fixture"), run: { runId: 'private-fixture-run' }, retiredRuns: [], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1) }
 const attachment = (): AgentMuxRunAttachment => ({ run: { ...session.run, nativeService: null, kind: 'agent', agentSessionId: session.agentSessionId, providerId: 'codex', executorId: 'local', workspacePath: session.workspacePath,
-  pid: 1, state: 'running', cols, rows, observedAt: 1, latestOutputBytes: raw.length, acceptedInputBytes: 0 }, replay: [], gap: null, resizeRevision,
+  pid: 1, state: 'running', cols, rows, observedAt: _reshape_fixtureEpoch(0, 0, 1), latestOutputBytes: raw.length, acceptedInputBytes: 0 }, replay: [], gap: null, resizeRevision,
   terminal: { type: 'basic-vt', checkpoint: { runId: session.run.runId, throughByte: raw.length, resizeRevision, size: { cols, rows },
     restoreSize: { cols, rows }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
     restoreBytes: raw.length ? new Uint8Array(raw) : encoder.encode('\x1b[0m'), resizes: [] } })
 const finite = {
+  // This bounded SDK fixture has no observed public RPC owner; diagnostics remain unknown.
+  runtimeOwnerIdentity() { return null },
   runtimeIdentity() { return { hostId: 'local', instanceId: 'private-fixture-runtime', buildIdentity: 'fixture', protocolVersion: 1, processId: null } },
   agentSession(id: string) { if (id !== session.agentSessionId) throw new Error('Fixture Session mismatch'); return session },
   agentSessions() { return [session] },
@@ -82,7 +85,7 @@ function output(dataBytes: Uint8Array, startByte = raw.length, runId = session.r
     for (const byte of suffix) raw.push(byte)
   }
   emit({ type: 'terminal-output', run: { runId }, agentSessionId: session.agentSessionId, dataBytes, data: 'semantic observation must not be parsed',
-    evidence: { source: 'terminal-output', observedAt: 1, outputByteRange: { startByte, endByte: startByte + dataBytes.length } } })
+    evidence: { source: 'terminal-output', observedAt: _reshape_fixtureEpoch(0, 0, 1), outputByteRange: { startByte, endByte: startByte + dataBytes.length } } })
 }
 async function until(test: () => boolean, label: string) {
   const start = performance.now()
@@ -349,3 +352,22 @@ export async function renderControlVisualFixture(mode: 'watch' | 'control' | 'un
 }
 
 export function probeFacts() { return { calls, forbidden, copies, notifications, parsedWrites, listeners: listeners.size } }
+
+
+/** Actual maintained xterm, retained Viewer and original controller input bytes. */
+export async function runDirectionalIconProof() {
+  if (!document.querySelector('[data-control="control"]')) await renderControlVisualFixture('control')
+  const canvas = terminal
+  const before = calls.filter(call => call.method === 'writeAgent').length
+  const directions = [['↑', 'control.key-up', '\x1b[A'], ['↓', 'control.key-down', '\x1b[B'], ['←', 'control.key-left', '\x1b[D'], ['→', 'control.key-right', '\x1b[C']] as const
+  for (const [index, [label, icon, data]] of directions.entries()) {
+    const key = document.querySelector<HTMLButtonElement>(`[aria-label="终端 ${label}"]`)!
+    assert(key && key.querySelector(`[data-semantic-icon="${icon}"]`), 'Original directional key must have its product semantic drawing')
+    key.click()
+    await until(() => calls.filter(call => call.method === 'writeAgent').length === before + index + 1 && document.querySelector('.mobile-terminal-notice')!.textContent!.includes('Core 已确认'), 'original directional byte receipt')
+    const sent = calls.filter(call => call.method === 'writeAgent').at(-1)!.args[0] as AgentMuxAgentWriteInput
+    assert(sent.data === data && sent.agentSessionId === session.agentSessionId && sent.expectedRun.runId === session.run.runId && sent.source === 'user', 'Drawing change preserves the original key bytes and Run target')
+  }
+  assert(terminal === canvas, 'Directional drawing never remounts the original native canvas')
+  return { directions: directions.map(([label, icon, data]) => ({ label, icon, bytes: [...encoder.encode(data)] })), writes: calls.filter(call => call.method === 'writeAgent').slice(before), retainedNativeCanvas: terminal === canvas }
+}
