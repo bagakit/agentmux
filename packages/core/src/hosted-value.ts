@@ -165,8 +165,9 @@ function wireCount(value: unknown): number {
 export function parseHostedRuntimeOwnerIdentity(value: unknown): import('./hosted-client-contract.js').AgentMuxRuntimeOwnerIdentity {
   const p = wireRecord(value, ['runtimeId', 'ownerInstanceId', 'protocolVersion', 'processId', 'ctxmux', 'availability'])
   wireString(p.runtimeId); wireString(p.ownerInstanceId); wireCount(p.processId)
-  if (p.protocolVersion !== 1 || p.availability !== 'connected' && p.availability !== 'unverified') throw new AgentMuxError(
+  if (p.protocolVersion !== 2 || p.availability !== 'connected' && p.availability !== 'unverified') throw new AgentMuxError(
     'Runtime owner identity is malformed.', 'CONTROL_PROTOCOL_ERROR')
+  if (p.ctxmux === null) return p as unknown as import('./hosted-client-contract.js').AgentMuxRuntimeOwnerIdentity
   const native = wireRecord(p.ctxmux, ['hostId', 'instanceId', 'processId', 'buildIdentity', 'protocolVersion', 'ownership'])
   wireString(native.hostId); wireString(native.instanceId); wireString(native.buildIdentity); wireCount(native.protocolVersion)
   if (native.processId !== null) wireCount(native.processId)
@@ -184,10 +185,26 @@ export function parseHostedTransferChunk(value: unknown): AgentMuxHostedTransfer
   return p as AgentMuxHostedTransferChunk
 }
 export function parseHostedBootstrap(value: unknown): import('./hosted-client-contract.js').AgentMuxHostedBootstrap {
-  const p = wireRecord(value, ['owner', 'identity', 'storePath', 'hostProcessId', 'catalog', 'sessions', 'messageQueuePath'])
+  const p = wireRecord(value, ['owner', 'connection', 'storePath', 'hostProcessId', 'catalog', 'sessions', 'messageQueuePath'])
   parseHostedRuntimeOwnerIdentity(p.owner); wireCount(p.hostProcessId); wireString(p.messageQueuePath)
   if (p.storePath !== null) wireString(p.storePath)
-  if (!Array.isArray(p.sessions) || !Array.isArray(p.catalog) || !p.identity || typeof p.identity !== 'object') throw new AgentMuxError(
+  if (!Array.isArray(p.sessions) || !Array.isArray(p.catalog)) throw new AgentMuxError(
     'Runtime bootstrap is malformed.', 'CONTROL_PROTOCOL_ERROR')
+  if (p.connection !== null) parseHostedNativeConnection(p.connection)
   return p as unknown as import('./hosted-client-contract.js').AgentMuxHostedBootstrap
+}
+/** Only an exact typed Core/Native observation may change the current Native input identity. */
+export function parseHostedNativeConnection(value: unknown): Extract<import('./types.js').AgentMuxClientEvent, { type: 'connection-state' }> {
+  const connection = wireRecord(value, ['type', 'state', 'observationOrigin', 'diagnostic', 'evidence'])
+  const origin = wireRecord(connection.observationOrigin, ['kind', 'boundary'])
+  const evidence = wireRecord(connection.evidence, ['source', 'observedAt'])
+  if (connection.type !== 'connection-state' || typeof connection.state !== 'string' || !['lost', 'restored', 'retrying', 'unrecoverable'].includes(connection.state) ||
+    origin.kind !== 'runtime-connection' || origin.boundary !== 'core-ctxmux' ||
+    evidence.source !== 'run-process' && evidence.source !== 'agentmux') throw new AgentMuxError('Native connection observation is malformed.', 'CONTROL_PROTOCOL_ERROR')
+  wireCount(evidence.observedAt)
+  if (connection.diagnostic !== undefined) {
+    const diagnostic = wireRecord(connection.diagnostic, ['code', 'message'])
+    wireString(diagnostic.code); wireString(diagnostic.message)
+  }
+  return connection as unknown as Extract<import('./types.js').AgentMuxClientEvent, { type: 'connection-state' }>
 }

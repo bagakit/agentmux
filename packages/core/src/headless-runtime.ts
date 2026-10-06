@@ -50,9 +50,6 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
   const semanticLease = await acquireOwner(join(stateDirectory, 'semantic-owner.lock'))
   let endpointLease: FileHandle | undefined, client: AgentMuxClient | undefined, server: AgentMuxControlServer | undefined
   let hosted: AgentMuxHostedRuntimeService | undefined, stopping: Promise<void> | undefined
-  let resolveOwner!: (value: AgentMuxClient) => void, rejectOwner!: (error: unknown) => void
-  const ready = new Promise<AgentMuxClient>((resolve, reject) => { resolveOwner = resolve; rejectOwner = reject })
-  void ready.catch(() => {})
   try {
     endpointLease = await acquireOwner(socketPath + '.owner.lock')
     const identityPath = join(stateDirectory, 'semantic-runtime.json')
@@ -70,33 +67,38 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       await durableWriteFile(identityPath, JSON.stringify({ schema: 'agentmux.semantic-runtime.v1', runtimeId, authority }) + '\n')
     }
     const ownerInstanceId = randomUUID()
-    const ownerIdentity = (): AgentMuxRuntimeOwnerIdentity => ({ runtimeId, ownerInstanceId, protocolVersion: 1,
-      processId: process.pid, ctxmux: client!.runtimeIdentity(), availability: 'connected' })
+    const ownerIdentity = (): AgentMuxRuntimeOwnerIdentity => {
+      let ctxmux: AgentMuxRuntimeOwnerIdentity['ctxmux'] = null
+      try { ctxmux = client!.runtimeIdentity() }
+      catch (error) { if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_DISCONNECTED') throw error }
+      return { runtimeId, ownerInstanceId, protocolVersion: 2, processId: process.pid, ctxmux, availability: 'connected' }
+    }
     const stop = (): Promise<void> => stopping ??= (async () => {
       try { await server?.stop() }
       finally { try { try { await hosted?.dispose() } finally { await client?.dispose() } }
         finally { await endpointLease?.close(); await semanticLease.close() } }
     })()
-    // Reserve the endpoint before loading Store/Hook/Core. A workflow probe never displaces an old owner.
-    server = new AgentMuxControlServer({ ...options.service, socketPath, ...(options.http ? { http: options.http } : {}),
-      deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts'), { clientJournal: true }) },
-      diagnosticCoreAuthority: options.service?.diagnosticCoreAuthority ?? (() => ({ authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, status: 'verified', causeCode: null })),
-      coreClients: async () => [{ hostId: 'local', client: await ready }],
-      hostedRuntime: async () => { await ready; return hosted! },
-      onControlEndpointState: state => hosted?.publishControlEndpointState(state) })
-    await server.start()
+    // Both namespace leases are already held. One Client owns metadata and Native observation;
+    // a caller's unconfirmed Native startup must not dispose this semantic authority.
     client = new AgentMuxClient({ ...options, store, controlSocketPath: socketPath,
       hostExecutorOwner: options.hostExecutorOwner ?? new AgentMuxHostExecutorOwner({
         path: join(stateDirectory, 'host-executors.json'), runtimeId, catalog: () => client!.catalog()
       }),
       creationAuthority: options.creationAuthority ?? new AgentMuxCreationAuthority({ stateDirectory, runtimeId }) })
-    await client.connect()
     hosted = new AgentMuxHostedRuntimeService(client, storePath, ownerIdentity, stop)
+    server = new AgentMuxControlServer({ ...options.service, socketPath, ...(options.http ? { http: options.http } : {}),
+      deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts'), { clientJournal: true }) },
+      diagnosticCoreAuthority: options.service?.diagnosticCoreAuthority ?? (() => ({ authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, status: 'verified', causeCode: null })),
+      coreClients: () => [{ hostId: 'local', client: client! }],
+      hostedRuntime: () => hosted!,
+      onControlEndpointState: state => hosted?.publishControlEndpointState(state) })
+    await server.start()
     hosted.publishControlEndpointState(server.controlEndpointState())
-    resolveOwner(client)
+    // The Client publishes scoped failures and continues its original observation. Metadata
+    // and the public semantic owner are available before this independent Native work settles.
+    void client.connect().catch(() => {})
     return { client, hosted, server, socketPath, ownerIdentity, stop }
   } catch (error) {
-    rejectOwner(error)
     await server?.stop().catch(() => {}); await hosted?.dispose().catch(() => {}); await client?.dispose().catch(() => {})
     await endpointLease?.close().catch(() => {}); await semanticLease.close().catch(() => {})
     throw error

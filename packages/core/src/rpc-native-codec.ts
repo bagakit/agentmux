@@ -29,7 +29,7 @@ import { parseNameChangeRecord } from './display-label.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
 import { parseSessionHistoryResourceResult, type AgentSessionHistoryResourceParams } from './session-history-resource.js'
-import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
+import { parseHostedBootstrap } from './hosted-value.js'
 import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
 import { normalizeAgentSession, parsePromptSubmissionRecord } from './agent-session-store.js'
 import { agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
@@ -142,13 +142,7 @@ export function rpcSessionTargetMatches(selector: unknown, actual: string, crede
 }
 /** Host bootstrap is a read projection of the original SDK, never a new registry. */
 export function parseRpcHostedBootstrap(value: unknown): Record<string, unknown> {
-  const p = record(value, ['owner', 'identity', 'storePath', 'hostProcessId', 'catalog', 'sessions', 'messageQueuePath'])
-  parseHostedRuntimeOwnerIdentity(p.owner)
-  const identity = record(p.identity, ['ownership', 'hostId', 'buildIdentity', 'protocolVersion', 'processId', 'instanceId'])
-  for (const key of ['hostId', 'buildIdentity', 'instanceId']) string(identity[key])
-  count(identity.protocolVersion); count(identity.processId, true)
-  if (identity.ownership !== undefined) member(identity.ownership, ['owned', 'unverified'])
-  string(p.storePath, true); count(p.hostProcessId); string(p.messageQueuePath)
+  const p = parseHostedBootstrap(value) as unknown as Record<string, unknown>
   array(p.sessions, session => parseRpcAgentSession(session))
   array(p.catalog, item => { const entry = record(item)
     for (const key of ['id', 'label', 'executable', 'expectedProcess']) string(entry[key])

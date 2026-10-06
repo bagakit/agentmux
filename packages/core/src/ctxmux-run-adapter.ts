@@ -48,6 +48,10 @@ import {
   defaultCtxmuxStateDirectory
 } from './runtime-paths.js'
 
+/** Zero means no authoritative observation has been recorded. */
+const unobservedTimestamp = 0
+
+
 // CTXMUX_COMMIT / CTXMUX_VERSION are exported because they are the SHA-verified originals: this
 // module asserts them against the vendored manifest.json at load time (see verifyArtifacts —
 // manifest.source.commit === CTXMUX_COMMIT and manifest.product.version === CTXMUX_VERSION, guarded
@@ -817,6 +821,8 @@ export class CtxmuxRunAdapter {
   readonly stateDirectory = defaultCtxmuxStateDirectory()
   private client: CtxmuxClient | null = null
   private runtime: RuntimeIdentity | null = null
+  private observedActivation: DaemonActivation | null = null
+  private connectionAvailableListener: (() => void) | null = null
   /** Compatibility is independent of whether this process owns daemon cleanup rights. */
   private ownership: 'owned' | 'unverified' | null = null
   get runtimeOwnership(): 'owned' | 'unverified' | null {
@@ -889,6 +895,12 @@ export class CtxmuxRunAdapter {
     }
   }
 
+  /** The original spawned child's public readiness completed; no Run or input is created. */
+  onConnectionAvailable(listener: () => void): () => void {
+    this.connectionAvailableListener = listener
+    return () => { if (this.connectionAvailableListener === listener) this.connectionAvailableListener = null }
+  }
+
   /**
    * 把实时连接标记为丢失：拆掉所有 attachment、把 client/runtime 置空（于是 {@link isConnected} 如实
    * 报 false、后续控制操作经 requireClient 响亮失败、connect() 会重建），再通知 listener。
@@ -936,6 +948,12 @@ export class CtxmuxRunAdapter {
         'A CtxMux child is already starting at this socket for another state directory. Its process was kept.',
         'CTXMUX_OWNER_IDENTITY_UNPROVEN'
       )
+      if (this.observedActivation !== activation) {
+        this.observedActivation = activation
+        void activation.completion.then(() => {
+          if (this.observedActivation === activation && activation.phase === 'ready') this.connectionAvailableListener?.()
+        })
+      }
       let observationError: unknown = null
       try { await observeDaemonActivation(activation) } catch (error) { observationError = error }
       try {
@@ -1043,7 +1061,7 @@ export class CtxmuxRunAdapter {
   /** Read thin public pages directly: resource observation never needs launch specs or status hydration. */
   async resourceSnapshot(): Promise<AgentMuxRuntimeResourceSnapshot> {
     const snapshot: AgentMuxRuntimeResourceSnapshot = {
-      observedAt: 0,
+      observedAt: unobservedTimestamp,
       runCount: 0,
       runningRuns: 0,
       terminatedRuns: 0,

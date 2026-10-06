@@ -9,7 +9,7 @@ import { AGENTMUX_HOSTED_METHODS, type AgentMuxRuntimeOwnerIdentity, type AgentM
   type AgentMuxHostedBootstrap, type AgentMuxHostedMethod, type AgentMuxHostedInvocation,
   type AgentMuxHostedSubscription, type AgentMuxRuntimeFence, type AgentMuxHostedForwardRpc, type AgentMuxHostedSubscribeRpc,
   type AgentMuxHostedAttachmentTarget, type AgentMuxHostedStreamValue } from './hosted-client-contract.js'
-import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, parseHostedBootstrap, parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
+import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, parseHostedBootstrap, parseHostedRuntimeOwnerIdentity, parseHostedNativeConnection } from './hosted-value.js'
 import { parseSessionHistoryResourceOptions, parseSessionHistoryResourceReadResult } from './session-history-resource.js'
 import { parseOutputGapEvidence } from './output-gap-evidence.js'
 import { createHostedOutputObservation } from './hosted-output-observer.js'
@@ -351,10 +351,25 @@ export async function connectHostedAgentMux(options: {
                 if (observed.owner.runtimeId !== expected.runtimeId || observed.owner.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError('Runtime bootstrap belongs to another owner.', 'RUNTIME_OWNER_CHANGED')
                 if (options.expectedStorePath !== undefined && observed.storePath !== options.expectedStorePath) throw new AgentMuxError('This Host owns a different durable Session Store. The original workbench is retained.', 'CONTROL_OWNER_BUSY')
                 bootstrap = structuredClone(observed); initialSeen = true
+                acceptOwner(observed.owner)
                 for (const retained of bootstrap.sessions) emit({ type: 'agent-session', session: structuredClone(retained) })
+                if (bootstrap.connection) emit(structuredClone(bootstrap.connection))
                 resolveInitial()
               } else if (received.kind === 'event') {
                 if (!initialSeen) throw new AgentMuxError('Runtime mutation preceded its initial observation.', 'CONTROL_PROTOCOL_ERROR')
+                if (received.event.type === 'connection-state') {
+                  try { parseHostedNativeConnection(received.event) }
+                  catch (error) {
+                    // A damaged observation cannot revoke a confirmed Native or its reader.
+                    emit({ type: 'agent-error', code: 'CONTROL_PROTOCOL_ERROR', message: error instanceof Error ? error.message : String(error),
+                      evidence: { source: 'agentmux', observedAt: Date.now() } })
+                    return
+                  }
+                }
+                if (received.event.type === 'connection-state' && received.event.state !== 'restored') {
+                  acceptOwner({ ...controlOwner!, ctxmux: null })
+                  bootstrap!.owner = structuredClone(controlOwner!)
+                }
                 if (received.event.type === 'connection-state' && received.event.state === 'restored') {
                   const restored = parseHostedRuntimeOwnerIdentity(received.owner)
                   if (restored.runtimeId !== expected.runtimeId || restored.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError('Runtime restored facts belong to another semantic owner.', 'RUNTIME_OWNER_CHANGED')
@@ -362,7 +377,6 @@ export async function connectHostedAgentMux(options: {
                   // alive. Publish restored only after its current input fence is visible.
                   acceptOwner(restored)
                   bootstrap!.owner = structuredClone(restored)
-                  bootstrap!.identity = structuredClone(restored.ctxmux)
                 }
                 emit(received.event)
               }
@@ -377,54 +391,65 @@ export async function connectHostedAgentMux(options: {
       stream = { dispose: releaseAcquired }
       reconnectDelay = 100
       reconnectAttempts = 0
-      let projectionFailure: unknown
-      try {
-        const projectionResponse = await rpc.call('runtime.invoke', { consumerId, fence: fence(),
-          invocation: { method: 'runtimeProjection', args: [] } }, { signal: observationSignal() })
-        const projection = decodeHostedValue(projectionResponse.value) as Awaited<ReturnType<AgentMuxHostedClient['runtimeProjection']>>
-        for (const subject of projection.subjects) publisher.publishRunState(subject.run,
-          subject.kind === 'agent' ? subject.agentSession.agentSessionId : undefined)
-      } catch (error) {
-        projectionFailure = error
-        // Host/Store identity and process observation are separate facts. An unsuccessful read
-        // cannot discard the confirmed event lease or withhold writes which the original Core
-        // can still validate against the exact Session and Run. Never invent a process-state.
-        emit({ type: 'agent-error', code: error instanceof AgentMuxError ? error.code : 'CONTROL_UNAVAILABLE',
-          message: `The original Host and Session Store are confirmed; the current process projection is unconfirmed. Session metadata and the saved workbench remain retained. Actual operations are checked by the original Core. Refresh the original Session to confirm process facts. ${error instanceof Error ? error.message : String(error)}`,
-          evidence: { source: 'agentmux', observedAt: Date.now() } })
-      }
-      requireObservation()
-      if (previous) {
-        // Restore observation only. Never retry an input, Prompt or interaction write after lost ACK.
-        for (const reading of [...attached.values()]) {
+      // Metadata and this event lease are ready. Native projection and reattachment are
+      // separate cancellable observations; they cannot hold the durable opening hostage.
+      const observeProjection = async (): Promise<void> => {
+        let projectionFailure: unknown
+        try {
+          const projectionResponse = await rpc.call('runtime.invoke', { consumerId, fence: fence(),
+            invocation: { method: 'runtimeProjection', args: [] } }, { signal: observationSignal() })
           requireObservation()
-          await reading.recovering
-          if (attached.get(reading.run.runId) !== reading || !reading.unavailable) continue
-          try {
-            const value = await watchAttachment(reading.target, reading.afterByte, reading.view, true, undefined, reading.run.runId)
-            if (!attached.has(reading.run.runId)) continue
-            requireObservation()
-            const observation = 'attachment' in value ? value.attachment : value
-            emit({ type: 'terminal-snapshot', ...observation, afterByte: reading.afterByte,
-              ...('session' in value ? { agentSessionId: value.session.agentSessionId } : {}) })
-          } catch (error) {
-            if (attached.get(reading.run.runId) !== reading) continue
-            attachmentUnavailable(reading, error, 'Restoring the original Run observation did not complete')
-          }
-        }
-        for (const read of histories) {
+          const projection = decodeHostedValue(projectionResponse.value) as Awaited<ReturnType<AgentMuxHostedClient['runtimeProjection']>>
+          for (const subject of projection.subjects) publisher.publishRunState(subject.run,
+            subject.kind === 'agent' ? subject.agentSession.agentSessionId : undefined)
+        } catch (error) {
           requireObservation()
-          try { await openHistory(read) }
-          catch (error) {
-            notifyHistory(read, { kind: 'unavailable', agentSessionId: read.id,
-              ...(read.source ? { source: read.source } : {}), code: 'AGENT_SESSION_HISTORY_CONNECTION_UNCONFIRMED',
-              message: `The original native history watch could not be restored; the previous window remains. ${error instanceof Error ? error.message : String(error)} Explicitly refresh this source.` })
-            retryHistory(read)
-          }
+          projectionFailure = error
+          // Host/Store identity and process observation are separate facts. An unsuccessful read
+          // cannot discard the confirmed event lease or withhold writes which the original Core
+          // can still validate against the exact Session and Run. Never invent a process-state.
+          emit({ type: 'agent-error', code: error instanceof AgentMuxError ? error.code : 'CONTROL_UNAVAILABLE',
+            message: `The original Host and Session Store are confirmed; the current process projection is unconfirmed. Session metadata and the saved workbench remain retained. Actual operations are checked by the original Core. Refresh the original Session to confirm process facts. ${error instanceof Error ? error.message : String(error)}`,
+            evidence: { source: 'agentmux', observedAt: Date.now() } })
         }
         requireObservation()
-        connectionState('restored', projectionFailure)
-      } else if (connectionPhase !== undefined) connectionState('restored', projectionFailure)
+        if (previous) {
+          // Restore observation only. Never retry an input, Prompt or interaction write after lost ACK.
+          for (const reading of [...attached.values()]) {
+            requireObservation()
+            await reading.recovering
+            if (attached.get(reading.run.runId) !== reading || !reading.unavailable) continue
+            try {
+              const value = await watchAttachment(reading.target, reading.afterByte, reading.view, true, undefined, reading.run.runId)
+              if (!attached.has(reading.run.runId)) continue
+              requireObservation()
+              const observation = 'attachment' in value ? value.attachment : value
+              emit({ type: 'terminal-snapshot', ...observation, afterByte: reading.afterByte,
+                ...('session' in value ? { agentSessionId: value.session.agentSessionId } : {}) })
+            } catch (error) {
+              requireObservation()
+              if (attached.get(reading.run.runId) !== reading) continue
+              attachmentUnavailable(reading, error, 'Restoring the original Run observation did not complete')
+            }
+          }
+          for (const read of histories) {
+            requireObservation()
+            try { await openHistory(read) }
+            catch (error) {
+              requireObservation()
+              notifyHistory(read, { kind: 'unavailable', agentSessionId: read.id,
+                ...(read.source ? { source: read.source } : {}), code: 'AGENT_SESSION_HISTORY_CONNECTION_UNCONFIRMED',
+                message: `The original native history watch could not be restored; the previous window remains. ${error instanceof Error ? error.message : String(error)} Explicitly refresh this source.` })
+              retryHistory(read)
+            }
+          }
+          requireObservation()
+          connectionState('restored', projectionFailure)
+        } else if (connectionPhase !== undefined) connectionState('restored', projectionFailure)
+      }
+      void observeProjection().catch(error => {
+        if (!disposed && epoch === eventEpoch && !ended) connectionFailure(error)
+      })
     })().finally(() => { connecting = undefined })
     return connecting
   }
@@ -575,7 +600,11 @@ export async function connectHostedAgentMux(options: {
       return { catalog: structuredClone(catalog) }
     } },
     catalog: () => structuredClone(bootstrap?.catalog ?? []),
-    runtimeIdentity: () => structuredClone(requireBootstrap().identity),
+    runtimeIdentity: () => {
+      const native = controlOwner?.ctxmux
+      if (!native) throw new AgentMuxError('The original Native Runtime identity is unconfirmed. Durable Session metadata remains available.', 'CTXMUX_DISCONNECTED')
+      return structuredClone(native)
+    },
     agentSessions: () => structuredClone(bootstrap?.sessions ?? []), agentSession: session,
     resolveAgentSession: (lookup: Parameters<AgentMuxHostedClient['resolveAgentSession']>[0]) => {
       if (!stream) throw new AgentMuxError('Session lookup is unverified while its endpoint is unavailable.', 'RUNTIME_UNAVAILABLE')

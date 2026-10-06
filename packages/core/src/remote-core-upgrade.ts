@@ -38,7 +38,12 @@ type Launch = { node: string; cli: string; cwd: string; startTicks: string; env:
   stateDirectory: string; runtimeDirectory: string; storePath: string; nativeSha256: string; nativeProcessId: number; nativeStartTicks: string; platform: string; deploymentDigest: string | null }
 export type RemoteCoreUpgradeNativeRun = { runId: string; pid: number | null; state: AgentMuxRunState; outputBytes: number; inputBytes: number | null }
 type RunObservation = RemoteCoreUpgradeNativeRun & { agentSessionId: string }
-type Observed = { owner: AgentMuxRuntimeOwnerIdentity; bootstrap: Pick<AgentMuxHostedBootstrap, 'storePath' | 'hostProcessId'> & {
+type ConfirmedNativeOwner = AgentMuxRuntimeOwnerIdentity & { ctxmux: NonNullable<AgentMuxRuntimeOwnerIdentity['ctxmux']> }
+function confirmedNativeOwner(owner: AgentMuxRuntimeOwnerIdentity): ConfirmedNativeOwner {
+  if (owner.ctxmux === null) throw new AgentMuxError('The original Native Runtime identity is unconfirmed. This Core update was not admitted; existing Runs were retained.', 'CORE_UPGRADE_UNAVAILABLE')
+  return owner as ConfirmedNativeOwner
+}
+type Observed = { owner: ConfirmedNativeOwner; bootstrap: Pick<AgentMuxHostedBootstrap, 'storePath' | 'hostProcessId'> & {
   sessions: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run'>[] }; launch: Launch; runs: RunObservation[] }
 type RetainedOperation = { receipt: RemoteCoreUpgradeReceipt; observed?: Observed; releaseDirectory?: string; nativeRuns?: RemoteCoreUpgradeNativeRun[] }
 export type RemoteCoreUpgradeOptions = {
@@ -111,7 +116,7 @@ export class RemoteCoreUpgradeManager {
     try { return JSON.parse(result.stdout.trim()) as T }
     catch { throw new AgentMuxError('The maintenance command returned an unknown receipt.', 'CORE_UPGRADE_RESPONSE_UNKNOWN') }
   }
-  private async identity(input: RemoteCoreUpgradeHost): Promise<AgentMuxRuntimeOwnerIdentity> {
+  private async identity(input: RemoteCoreUpgradeHost): Promise<ConfirmedNativeOwner> {
     if (input.kind !== 'ssh' || !input.remoteCommand?.startsWith('/') || !input.remoteSocketPath?.startsWith('/') || !input.runtimeId) {
       throw new AgentMuxError('Save an explicit remote Core command, socket and verified Runtime identity before upgrading.', 'CORE_UPGRADE_UNAVAILABLE')
     }
@@ -120,9 +125,9 @@ export class RemoteCoreUpgradeManager {
     if (owner.runtimeId !== input.runtimeId || owner.availability !== 'connected') {
       throw new AgentMuxError('The exact original Runtime owner is not verified. Existing Runs were preserved.', 'CORE_UPGRADE_UNAVAILABLE')
     }
-    return owner
+    return confirmedNativeOwner(owner)
   }
-  private async observe(input: RemoteCoreUpgradeHost, identity?: AgentMuxRuntimeOwnerIdentity): Promise<Observed> {
+  private async observe(input: RemoteCoreUpgradeHost, identity?: ConfirmedNativeOwner): Promise<Observed> {
     const owner = identity ?? await this.identity(input)
     const bootstrap = parseHostedBootstrap(await this.call(input, 'runtime.bootstrap', {
       consumerId: 'core-upgrade-inspect-' + randomUUID(), fence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } }))
@@ -156,7 +161,7 @@ export class RemoteCoreUpgradeManager {
         state: run.state as AgentMuxRunState, outputBytes: run.latestOutputBytes as number, inputBytes: run.acceptedInputBytes as number | null })
     }
     const final = await this.call(input, 'runtime.owner.identity', { expectedRuntimeId: owner.runtimeId }) as { owner: unknown }
-    const finalOwner = parseHostedRuntimeOwnerIdentity(final.owner)
+    const finalOwner = confirmedNativeOwner(parseHostedRuntimeOwnerIdentity(final.owner))
     if (finalOwner.runtimeId !== owner.runtimeId || finalOwner.ownerInstanceId !== owner.ownerInstanceId || finalOwner.processId !== owner.processId || finalOwner.ctxmux.instanceId !== owner.ctxmux.instanceId) throw new AgentMuxError('The owner changed during its Run inventory.', 'CORE_UPGRADE_UNAVAILABLE')
     return { owner, bootstrap: { storePath: bootstrap.storePath, hostProcessId: bootstrap.hostProcessId,
       sessions: bootstrap.sessions.map(session => ({ agentSessionId: session.agentSessionId, run: structuredClone(session.run) })) }, launch, runs }
@@ -329,7 +334,7 @@ export class RemoteCoreUpgradeManager {
       value.receipt.stage = 'stopping'; value.receipt.detail = '正在停止原 Core 服务；Agent Run 保留。'; await this.save(value)
       mutation = true
       const response = await this.call(input, 'runtime.owner.shutdown', { fence: { runtimeId: expected.runtimeId, ownerInstanceId: expected.ownerInstanceId } }) as { accepted?: unknown; owner?: unknown }
-      const stoppedOwner = parseHostedRuntimeOwnerIdentity(response.owner)
+      const stoppedOwner = confirmedNativeOwner(parseHostedRuntimeOwnerIdentity(response.owner))
       if (response.accepted !== true || stoppedOwner.runtimeId !== expected.runtimeId || stoppedOwner.ownerInstanceId !== expected.ownerInstanceId || stoppedOwner.processId !== expected.processId || stoppedOwner.ctxmux.instanceId !== expected.nativeInstanceId) throw new AgentMuxError('Core shutdown has an unknown response.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
       let gone = false
       for (let attempt = 0; attempt < 80 && !gone; attempt++) {

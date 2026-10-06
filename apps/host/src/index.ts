@@ -15,5 +15,6 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {
   void host.dispose().then(() => process.exit(0), error => { console.error(error); process.exit(1) })
 })
 // RPC owns the process lifetime. Parent/consumer exits have no relationship to a Run lifetime.
-process.stdout.write(JSON.stringify({ protocol: 'jsonrpc-2.0', pid: process.pid, identity: host.client!.runtimeIdentity(),
+const { owner } = await host.hosted.call('runtime.owner.identity', {})
+process.stdout.write(JSON.stringify({ protocol: 'jsonrpc-2.0', pid: process.pid, owner,
   mobileAccess: host.mobileAccessState() }) + '\n')
