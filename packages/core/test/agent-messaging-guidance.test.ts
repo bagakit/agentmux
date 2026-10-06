@@ -10,14 +10,32 @@ import { AgentMuxClient as DefaultClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { composeAgentLaunchPrompt } from '../src/agent-outbound-message.js'
 import { AGENTMUX_AGENT_MESSAGING_RULES, AGENTMUX_AGENT_MESSAGING_GUIDANCE } from '../src/agent-messaging-guidance.js'
-import { AgentMuxControlServer } from '../src/control-host.js'
+import { AgentMuxControlServer as DefaultControlServer } from '../src/control-host.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 
 const exec = promisify(execFile)
 const AgentMuxClient: typeof DefaultClient = process.env.AGENTMUX_TEST_GUIDANCE_CLIENT
   ? (await import(process.env.AGENTMUX_TEST_GUIDANCE_CLIENT)).AgentMuxClient : DefaultClient
+const AgentMuxControlServer: typeof DefaultControlServer = process.env.AGENTMUX_TEST_GUIDANCE_SERVER
+  ? (await import(process.env.AGENTMUX_TEST_GUIDANCE_SERVER)).AgentMuxControlServer : DefaultControlServer
 const cli = process.env.AGENTMUX_TEST_GUIDANCE_CLI ?? fileURLToPath(new URL('../bin/amux', import.meta.url))
+const clientBin = fileURLToPath(new URL('../bin', process.env.AGENTMUX_TEST_GUIDANCE_CLIENT ?? import.meta.url))
 const daemon = process.env.AGENTMUX_TEST_GUIDANCE_DAEMON ?? fileURLToPath(new URL('../vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url))
+const assertBrowserPlacement = (guide: string) => {
+  const text = guide.replace(/\s+/gu, ' ')
+  expect(text).toContain("prefer AgentMux's embedded Browser and public CLI")
+  expect(text).toContain('Reuse the exact Browser already confirmed for this task')
+  expect(text).toContain("inspect your own actual Tab/Region and the whole Tab's visible layout")
+  expect(text).toContain('prefer a directional Region in that same Tab')
+  expect(text).toContain('Agent and page stay readable together')
+  expect(text).toContain('Choose the direction from actual geometry and content')
+  expect(text).toContain('crowded layout, a full workface for reading, an unsuitable capability or a user-specified Browser/tool')
+  expect(text).toContain('related new Tab or the specified tool')
+  expect(text).toContain('briefly explain the reason and location')
+  expect(text).toContain('does not authorize replacing existing content, changing focus, taking human control or bypassing refusal')
+  expect(text).toContain('Keep the original page, user input and unknown operation receipts')
+  expect(text).toContain('confirm the returned Browser, Tab, Region and navigation receipt')
+}
 it('real creation, whoami and compiled skill discover messaging and advisory opening guidance', async () => {
   const root = await mkdtemp(fixturePath("tmp/amux-messaging-guidance-")), storePath = join(root, 'sessions.json')
   for (const name of Object.keys(process.env)) {
@@ -57,8 +75,8 @@ it('real creation, whoami and compiled skill discover messaging and advisory ope
       expect(issued.capability.length).toBeGreaterThan(0)
     }, { timeout: 5000, interval: 20 })
     const assertCli = (child: Pick<typeof issued, 'cli' | 'path' | 'injected' | 'discovered'>) => {
-      expect(child.cli).toBe(fileURLToPath(new URL('../bin/amux', import.meta.url)))
-      expect(child.path.split(':')[0]).toBe(fileURLToPath(new URL('../bin', import.meta.url)))
+      expect(child.cli).toBe(join(clientBin, 'amux'))
+      expect(child.path.split(':')[0]).toBe(clientBin)
       for (const result of [child.injected, child.discovered]) {
         expect(result.status).toBe(0)
         expect(JSON.parse(result.stdout)).toMatchObject({ ok: true, operation: 'system.endpoint' })
@@ -81,14 +99,20 @@ it('real creation, whoami and compiled skill discover messaging and advisory ope
     expect(receivedContext).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
     expect(receivedContext).toMatch(/Before delegating[\s\S]*Provider-native subagent[\s\S]*independent AgentMux Session/)
     expect(receivedContext).toMatch(/opening an Agent or file[\s\S]*new Tab or directional Region[\s\S]*advisory opening playbook/)
-    const output = JSON.parse((await exec(process.execPath, [cli, 'whoami'], { timeout: 15_000,
-      env: { ...env, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: created.agentSessionId, AGENTMUX_AGENT_CAPABILITY: issued.capability } })).stdout)
+    assertBrowserPlacement(receivedContext)
+    const whoami = await exec(process.execPath, [cli, 'whoami'], { timeout: 15_000,
+      env: { ...env, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: created.agentSessionId, AGENTMUX_AGENT_CAPABILITY: issued.capability } })
+      .then(result => ({ ...result, code: 0 }), error => ({ stdout: error.stdout, stderr: error.stderr, code: error.code }))
+    expect(whoami.code, whoami.stderr).toBe(0)
+    const output = JSON.parse(whoami.stdout)
     expect(output).toMatchObject({ ok: true, operation: 'whoami', result: {
       session: { agentSessionId: created.agentSessionId, run: { runId: created.run.runId } },
       status: { run: { runId: created.run.runId }, capabilities: { terminal: true } },
       messaging: AGENTMUX_AGENT_MESSAGING_RULES } })
-    expect(Object.keys(output.result.messaging)).toEqual(['crossSession', 'source', 'nativeSubagents', 'authenticity'])
+    expect(Object.keys(output.result.messaging)).toEqual(['crossSession', 'source', 'deliveryIdentity', 'nativeSubagents', 'authenticity'])
     expect(output.result.messaging.crossSession).toContain('"$AGENTMUX_CLI" agent send')
+    expect(output.result.messaging.deliveryIdentity).toContain('Keep the original operationId and messageId while delivery is unknown or partial')
+    expect(output.result.messaging.deliveryIdentity).toContain('Core confirms the whole logical message was not applied')
     expect(JSON.stringify(output)).not.toContain(issued.capability)
     const skill = (await exec(process.execPath, [cli, '--skill'], { env })).stdout
     expect(skill).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
@@ -101,6 +125,7 @@ it('real creation, whoami and compiled skill discover messaging and advisory ope
     expect(opening).toMatch(/Agent or file[\s\S]*same-Tab split[\s\S]*new Tab/)
     expect(opening).toMatch(/real order[\s\S]*do not offer before\/after Tab flags/)
     expect(opening).toContain('advisory strategies')
+    assertBrowserPlacement(opening)
     for (const object of ['agent', 'file']) {
       const help = (await exec(process.execPath, [cli, '--help', object, 'open'], { env })).stdout
       expect(help).toContain(opening)
@@ -108,6 +133,8 @@ it('real creation, whoami and compiled skill discover messaging and advisory ope
     // This is the exact launch composition consumed by createAgentWithDelivery, with original body.
     const launch = composeAgentLaunchPrompt('original request', true)
     expect(launch.systemContext).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+    // Assert the current source composition too: an old compiled guide cannot make a missing rule pass.
+    assertBrowserPlacement(launch.systemContext!)
     expect(launch.text).toContain('"$AGENTMUX_CLI" whoami')
     expect(launch.text.endsWith('</amux>\n\noriginal request')).toBe(true)
   } finally {

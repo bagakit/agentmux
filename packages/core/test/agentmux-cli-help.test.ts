@@ -146,6 +146,22 @@ describe('compiled object-first CLI help and discovery', () => {
     expect(browser).toContain('browser inspect --operation-id')
   })
 
+  it('guides web pages into an exact reusable Browser or a readable Region in the Agent Tab', async () => {
+    const result = await run(['--skill'])
+    expect(result.code, result.stderr).toBe(0)
+    const guide = result.stdout.replace(/\s+/gu, ' ')
+    expect(guide).toContain("prefer AgentMux's embedded Browser and public CLI")
+    expect(guide).toContain('Reuse the exact Browser already confirmed for this task')
+    expect(guide).toContain('discover available targets with browser targets')
+    expect(guide).toContain('typed Browser identity with space inspect')
+    expect(guide).toContain("inspect your own actual Tab/Region and the whole Tab's visible layout")
+    expect(guide).toContain('prefer a directional Region in that same Tab')
+    expect(guide).toContain('Choose the direction from actual geometry and content')
+    expect(guide).toContain('crowded layout, a full workface for reading, an unsuitable capability or a user-specified Browser/tool')
+    expect(guide).toContain('does not authorize replacing existing content, changing focus, taking human control or bypassing refusal')
+    expect(guide).toContain('confirm the returned Browser, Tab, Region and navigation receipt')
+  })
+
   it('discovers a private endpoint while no server is listening and reports the package version', async () => {
     const endpoint = await run(['system', 'endpoint'])
     expect(endpoint.code, endpoint.stderr).toBe(0)

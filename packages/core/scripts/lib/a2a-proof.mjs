@@ -49,7 +49,7 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
     receipt.sourceBefore = await sourceHashes()
     await mkdir(core, { recursive: true })
     await cp(join(root, 'packages/core/dist'), dist, { recursive: true })
-    await writeFile(join(core, 'package.json'), '{"type":"module"}\n')
+    await cp(join(root, 'packages/core/package.json'), join(core, 'package.json'))
     for (const entry of ['vendor', 'bin', 'node_modules']) await symlink(join(root, 'packages/core', entry), join(core, entry))
     const projectTests = [...new Set(mutations.flatMap(mutation => mutation.projectTests ?? []))]
     if (projectTests.length) {

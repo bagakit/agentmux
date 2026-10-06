@@ -87,6 +87,20 @@ describe('启动提示路径经同一出口', () => {
     }
   })
 
+  it('网页优先准确的内置 Browser 和同 Tab 可读 Region，并保留人工边界', () => {
+    const guide = composeAgentLaunchPrompt(NASTY_USER, true).text
+    expect(guide).toContain("prefer AgentMux's embedded Browser and public CLI")
+    expect(guide).toContain('Reuse the exact Browser already confirmed for this task')
+    expect(guide).toContain("inspect your own actual Tab/Region and the whole Tab's visible layout")
+    expect(guide).toContain('prefer a directional Region in that same Tab')
+    expect(guide).toContain('Agent and page stay readable together')
+    expect(guide).toContain('crowded layout, a full workface for reading, an unsuitable capability or a user-specified Browser/tool')
+    expect(guide).toContain('does not authorize replacing existing content, changing focus, taking human control or bypassing refusal')
+    expect(guide).toContain('Keep the original page, user input and unknown operation receipts')
+    expect(guide).toContain('confirm the returned Browser, Tab, Region and navigation receipt')
+    expect(guide.endsWith(`</amux>\n\n${NASTY_USER}`)).toBe(true)
+  })
+
   it('关闭注入时不加任何 AgentMux 的话，用户原文原样返回', () => {
     expect(composeAgentLaunchPrompt(NASTY_USER, false).text).toBe(NASTY_USER)
     expect(composeAgentLaunchPrompt(undefined, false).text).toBe('')
@@ -224,16 +238,23 @@ describe('四条路径的接线守护：真的都改成调用同一出口', () =
   })
 
   it('send（submitAgentPrompt）经出口产出 outbound 再投递，不直传 content', () => {
-    const submit = clientSlice('async submitAgentPrompt(', 'await this.recordMessageAfterSideEffect(')
-    expect(submit).toContain('composeOutboundMessage({ user: content })')
+    const entry = clientSlice('async submitAgentPrompt(', 'async inspectAgentPromptSubmission(')
+    expect(entry).toContain('await this.submitPromptInternal(input,')
+    const submission = clientSlice('private async submitPromptInternal(', 'private async performPromptSubmission(')
+    expect(submission).toContain('await this.performPromptSubmission(')
+    const submit = clientSlice('private async performPromptSubmission(', 'private async recordInitialMessageDelivery(')
+    expect(submit).toContain('composeAgentPrompt(content, input.agentMuxNote)')
+    expect(submit).toContain('const outbound = composed.text')
     // 出口的产物 outbound 才是喂给 provider/记录的东西——不是原始 content。
-    expect(submit).toContain('planPromptInput(outbound)')
+    expect(submit).toContain('planPromptInput(outbound,')
     expect(submit).toMatch(/this\.promptSubmission\.submitInputPlan\(current,\s*run,\s*operationId,\s*outbound,\s*plan(?:,|\))/)
     expect(submit).not.toContain('planPromptInput(content)')
   })
 
-  it('resume（resumeAgentRun）经出口产出用户段文本，不直传 trimmedPrompt', () => {
-    const resume = clientSlice('private async resumeAgentRun(', 'const reservation = await this.registry.reserveExisting(')
-    expect(resume).toContain('composeOutboundMessage({ user: trimmedPrompt })')
+  it('resume（resumeAgentRun）经出口产出原用户段与显式系统上下文', () => {
+    const resume = clientSlice('private async resumeAgentRun(', 'let reservation =')
+    expect(resume).toContain('composeAgentPrompt(input.prompt, input.agentMuxNote)')
+    expect(resume).toContain('const prompt = composed.text || undefined')
+    expect(resume).toContain('systemContext: composed.systemContext')
   })
 })
