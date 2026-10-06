@@ -42,7 +42,7 @@ beforeEach(() => {
  calls.length = 0; vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('IntersectionObserver', TestObserver)
  container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
  useAppStore.setState({ config, activeWorkspaceId: 'project', sessions: [], recoveryCandidates: [], timelines: {}, agentNames: {},
- tabs: {}, layouts: {}, runtimeConnected: true, startupComplete: true, loading: false, warmTerminal: null })
+ tabs: {}, layouts: {}, runtimeConnected: true, startupComplete: true, loading: false, warmTerminals: {} })
  vi.spyOn(api.sessions, 'nativeSessions').mockImplementation(async input => ({ ...input, providerId: 'codex', availability: 'available',
  capabilities: { providerResume: true } as any, issues: [], sessions: sources.map((source, n) => ({ source, updatedAt: 3000 - n,
  ...(n === 2 ? {} : { title: 'Repeated real title' }) })) }))

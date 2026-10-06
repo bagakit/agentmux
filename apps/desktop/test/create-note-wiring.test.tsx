@@ -83,7 +83,7 @@ function warmShellSession(): SessionSnapshot {
 function assertStoreStateInvisibleToStaticMarkup(): void {
   workspaceFixture()
   useAppStore.setState({
-    warmTerminal: {
+    warmTerminals: { [warmTerminalKey('local', _hygiene_fixturePath("repo"))]: [{
       key: warmTerminalKey('local', _hygiene_fixturePath("repo")),
       // 归属必须真的落在这个挂载点上（`{ tabGroupId: 'pane' }` 没有 regionId，故 warmLauncherId
       // 算出 `group:pane`）。若这里给个不匹配的归属，下面那条 `not.toContain` 会因为「槽不归它」
@@ -91,7 +91,7 @@ function assertStoreStateInvisibleToStaticMarkup(): void {
       ownerLauncherId: 'group:pane',
       ready: Promise.resolve(null),
       session: warmShellSession()
-    } as never
+    } as never] }
   })
   const markup = renderToStaticMarkup(createElement(NewTabSurface, { tabGroupId: 'pane' }))
   // store 里几个条件齐全（含归属），热终端那条分支却渲染不出来——这正是 harness 的盲点。
@@ -269,10 +269,20 @@ describe('launcher Workspace 判定只有一处', () => {
   it('每个收 launcher 的 store action 都必须调 resolveLauncherWorkspaceId', () => {
     const source = readSource('store.ts')
     const lines = source.split('\n')
-    // 形参表里带 `launcher` 的 async action 声明。判形参而不是判名字：第七个动作叫什么都逃不掉。
+    function actionBody(index: number): string {
+      let end = lines.length
+      for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+        if (/^ {2}\},?$/.test(lines[cursor]!)) { end = cursor; break }
+      }
+      return lines.slice(index, end).join('\n')
+    }
+    // 判异步 action 的 launcher 形参；包装异步调用的同步方法也在此合同内。
+    // 仅改变 Launcher 配置的同步 setter 不属于资源创建动作。
     const declarations = lines
       .map((line, index) => ({ line, index }))
-      .filter(({ line }) => /^ {2}async \w+\([^)]*\blauncher\b/.test(line))
+      .filter(({ line }) => /^ {2}(?:async )?\w+\([^)]*\blauncher\b[^)]*\) \{$/.test(line))
+      .map(({ line, index }) => ({ line, body: actionBody(index) }))
+      .filter(({ body }) => /\basync\b|\bawait\b/.test(body))
 
     // 前提自检：这个正则必须真的抓到今天那五个。抓到 0 个（或漏掉某个）时下面的循环恒绿——
     // 正是这一条要防的形状。
@@ -280,7 +290,7 @@ describe('launcher Workspace 判定只有一处', () => {
     // 判「至少覆盖这五个」而不是「恰好是这五个」：后者会把第七个动作先撞在这条白名单上，红出来
     // 的原因就变成「清单该更新了」，而真正的原因是「你收了 launcher 却没调那个实现」。判据的红
     // 必须指向缺陷本身，所以在场性归这一条，是否调用全部交给下面的循环。
-    const names = declarations.map(({ line }) => line.trim().match(/async (\w+)/)![1]!)
+    const names = declarations.map(({ line }) => line.trim().match(/^(?:async )?(\w+)/)![1]!)
     expect(
       names.filter((name) => [
         'createBrowser', 'createNote', 'launchAgent', 'launchTerminal', 'promoteWarmTerminal'
@@ -288,14 +298,8 @@ describe('launcher Workspace 判定只有一处', () => {
       '收 launcher 形参的 action 没有全被抓到，判据对漏掉的那些失效'
     ).toEqual(['createBrowser', 'createNote', 'launchAgent', 'launchTerminal', 'promoteWarmTerminal'])
 
-    for (const { line, index } of declarations) {
-      const name = line.trim().match(/async (\w+)/)![1]
-      // 函数体到下一个同缩进的 `},` 为止。store 的 action 全是两空格缩进的对象方法。
-      let end = lines.length
-      for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-        if (/^ {2}\},?$/.test(lines[cursor]!)) { end = cursor; break }
-      }
-      const body = lines.slice(index, end).join('\n')
+    for (const { line, body } of declarations) {
+      const name = line.trim().match(/^(?:async )?(\w+)/)![1]
       expect(
         body.match(/resolveLauncherWorkspaceId\(/g) ?? [],
         `${name} 收了 launcher 却没有恰好一次走 resolveLauncherWorkspaceId——它在自己判 Workspace 归属`

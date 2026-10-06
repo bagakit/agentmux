@@ -13,6 +13,7 @@ import { bridge, owningBridge } from './helpers/first-execution-ipc-bridge'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 import { useAppStore } from '../src/renderer/src/store'
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
@@ -47,7 +48,7 @@ it('registered Main/preload and public Core preserve two original interactive sh
   owner = await owningBridge({ client: client as never, store: new AgentMuxFileAgentSessionStore(join(scope.root, 'desktop-sessions.json')), config, scratchTopics: new ScratchTopics() })
   const tabs = Object.fromEntries(['A','B','recovery'].map(id => [id, createWorkbenchTab(id, { regionId: `region-${id}`, kind: 'launcher', workspaceId: 'private' })]))
   useAppStore.setState({ config, activeWorkspaceId: 'private', tabs, layouts: { private: createWorkspaceLayout('private-group', ['A','B','recovery']) },
-    warmTerminal: null, sessions: [], unclaimedTerminalSessionIds: [], closingWorkbenchViews: {}, spaceZoneBindings: {}, spatialRequests: {},
+    warmTerminals: {}, sessions: [], unclaimedTerminalSessionIds: [], closingWorkbenchViews: {}, spaceZoneBindings: {}, spatialRequests: {},
     scratchTopicSnapshots: {}, topicCategories: [], projectGroups: [], workbenchSpaceSelection: null,
     agentComposerDrafts: { 'region-A': 'Original unsent private input' }, prewarmTerminal: original.prewarmTerminal,
     promoteWarmTerminal: original.promoteWarmTerminal, launchTerminal: original.launchTerminal, detectExecutors: vi.fn(async () => {}) })
@@ -68,7 +69,7 @@ it('registered Main/preload and public Core preserve two original interactive sh
   const openingA = useAppStore.getState().promoteWarmTerminal('private-group', { tabId: 'A', regionId: 'region-A' })
   expect(useAppStore.getState().promoteWarmTerminal('private-group', { tabId: 'A', regionId: 'region-A' })).toBe(openingA)
   await dom.render(<NewTabSurface tabGroupId="private-group" tabId="B" regionId="region-B" />)
-  const open = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Open Terminal'))!
+  const open = dom.container.querySelector<HTMLButtonElement>('[data-agentmux-action="claim-reusable-terminal"]')!
   expect(open).toBeDefined()
   await act(async () => { open.click(); await vi.waitFor(() => expect(useAppStore.getState().tabs.B?.regions['region-B']).toMatchObject({ phase: 'attached' }), { timeout: 15_000 }) })
   const B = useAppStore.getState().sessions.find(session => session.id !== A!.id)!
@@ -83,7 +84,7 @@ it('registered Main/preload and public Core preserve two original interactive sh
     releaseReceipt!(); await openingA
   })
   expect(useAppStore.getState().tabs.A).toBeUndefined()
-  expect(useAppStore.getState().warmTerminal?.session?.id).toBe(A!.id)
+  expect(warmCandidates(scope!.root)[0]?.session?.id).toBe(A!.id)
   expect(stop).not.toHaveBeenCalled()
   await act(async () => { await useAppStore.getState().promoteWarmTerminal('private-group', { tabId: 'recovery', regionId: 'region-recovery' }) })
   expect(launch).toHaveBeenCalledTimes(2)

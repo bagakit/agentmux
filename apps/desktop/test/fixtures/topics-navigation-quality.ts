@@ -36,6 +36,6 @@ export function seedTopicNavigation({ selected = 0, collapsed }: { selected?: nu
     workbenchSpaceSelection: selection, explorerCollapsed: collapsed === undefined ? {} : { [topicWorkspace.id]: collapsed },
     fileExplorerStates: {}, workspaceFileRevisions: {}, dirtyDocuments: {}, lastActiveFileByWorkspace: {}, scratchTopicOrder: [], pinnedItems: {},
     timelines: {}, agentNames: {}, spaceObjectIcons: {}, agentComposerDrafts: { 'topic-region-0': 'Original unsent draft' },
-    recentMoteAgents: {}, recoveryCandidates: [], pendingAgentLaunches: {}, warmTerminal: null })
+    recentMoteAgents: {}, recoveryCandidates: [], pendingAgentLaunches: {}, warmTerminals: {} })
   return { tabs, layout, selection }
 }

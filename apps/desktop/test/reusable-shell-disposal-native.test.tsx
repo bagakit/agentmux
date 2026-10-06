@@ -10,6 +10,7 @@ import { headlessFixture, until } from '../../../packages/core/test/helpers/head
 import { bridge, owningBridge } from './helpers/first-execution-ipc-bridge'
 import { initializeDisposal, disposalConfig, disposalTarget, removeOpeningPresentation } from './helpers/reusable-shell-disposal-fixture'
 import { useAppStore } from '../src/renderer/src/store'
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { api } from '../src/renderer/src/lib/api'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import type { SessionSnapshot, TerminalLaunchInput } from '../src/shared/contracts'
@@ -58,21 +59,21 @@ it('actual initialize dispose preserves original claimed Native Runs and still s
     delayReply = phase === 'pending' || phase === 'unused-pending'; arrived = undefined; release = undefined
     useAppStore.getState().prewarmTerminal('private', 'region:opening-region')
     await until(() => arrived, Boolean, 'actual original Native Run allocated before callback')
-    const session = arrived!, held = useAppStore.getState().warmTerminal!, request = requests.at(-1)!
+    const session = arrived!, held = warmCandidates(scope!.root)[0]!, request = requests.at(-1)!
     const before = (await client.readRunReplay({ runId: session.control.run.runId })).run
     const stopBefore = stop.mock.calls.length
     let opening: Promise<void> | undefined
     if (phase === 'pending' || phase === 'released-ready') {
       if (phase === 'released-ready') await held.ready
       opening = useAppStore.getState().promoteWarmTerminal('private-group', disposalTarget)
-      if (phase === 'released-ready') { removeOpeningPresentation(); await opening; expect(useAppStore.getState().warmTerminal?.claimToken).toBeUndefined() }
+      if (phase === 'released-ready') { removeOpeningPresentation(); await opening; expect(warmCandidates(scope!.root)[0]?.claimToken).toBeUndefined() }
     } else if (phase === 'unused-ready') await held.ready
-    const owned = useAppStore.getState().warmTerminal
+    const owned = warmCandidates(scope!.root)[0]
     initialized.dispose(); disposers.pop()
     if (phase === 'pending' || phase === 'released-ready') {
-      expect(useAppStore.getState().warmTerminal).toBe(owned)
+      expect(warmCandidates(scope!.root)[0]).toBe(owned)
       expect(stop.mock.calls.length).toBe(stopBefore)
-      expect(useAppStore.getState().warmTerminal?.creation?.request).toEqual(request)
+      expect(warmCandidates(scope!.root)[0]?.creation?.request).toEqual(request)
       const afterCallback = (await client.readRunReplay({ runId: session.control.run.runId })).run
       expect(afterCallback).toMatchObject({ runId: before.runId, pid: before.pid, state: 'running' })
       ;(release as (() => void) | undefined)?.(); await opening
@@ -81,7 +82,7 @@ it('actual initialize dispose preserves original claimed Native Runs and still s
       preserved.push({ request: { createOperationId: request.createOperationId!, workspacePath: request.workspacePath }, runId: before.runId, pid: before.pid! })
       callbacks.push({ phase, actualInitializeDisposeExecuted: true, request, before, afterCallback, stopCalls: 0 })
     } else {
-      expect(useAppStore.getState().warmTerminal).toBeNull()
+      expect(warmCandidates(scope!.root)).toEqual([])
       ;(release as (() => void) | undefined)?.(); await held.ready
       await vi.waitFor(() => expect(stop.mock.calls.slice(stopBefore).map(([control]) => control)).toEqual([session.control]))
       const ended = await until(() => client.readRunReplay({ runId: before.runId }), result => result.run.state !== 'running', 'never-claimed real Native Run stopped')

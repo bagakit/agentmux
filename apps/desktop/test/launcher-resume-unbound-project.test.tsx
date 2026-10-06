@@ -43,7 +43,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
   useAppStore.setState({ config, activeWorkspaceId: null, sessions: [], recoveryCandidates: [managed], timelines: {}, agentNames: {},
-    tabs: {}, layouts: {}, runtimeConnected: true, startupComplete: true, loading: false, warmTerminal: null })
+    tabs: {}, layouts: {}, runtimeConnected: true, startupComplete: true, loading: false, warmTerminals: {} })
   vi.spyOn(api.sessions, 'nativeSessions').mockImplementation(async input => catalogue(input))
   vi.spyOn(api.sessions, 'nativeHistoryPage').mockImplementation(async input => ({ ...input,
     nativeSource: input.source, source: { providerId: 'codex', nativeSessionId: input.source.nativeHandle.sessionId },

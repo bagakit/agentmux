@@ -1,3 +1,4 @@
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 // Source behavior only. DOM input here is not an OS/native focus or complete Desktop recovery receipt.
@@ -21,7 +22,7 @@ import type { AgentMuxRpcResult } from '../../../packages/core/src/public-rpc'
 import { AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../../../packages/core/src/agentmux-cli-help'
 import type { AppConfig, BrowserSnapshot, SessionSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
-import { useAppStore } from '../src/renderer/src/store'
+import { useAppStore, warmTerminalKey } from '../src/renderer/src/store'
 import { planControlOpen } from '../src/renderer/src/lib/control'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
@@ -263,7 +264,7 @@ describe('the real pending Launcher consumes Region input selection', () => {
     useAppStore.setState({ config: { ...config, executors: { codex: { label: 'Source Codex', providerId: 'codex',
       command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } } }, executorDetections: {},
       prewarmTerminal: prewarm, detectExecutors: detect,
-      warmTerminal: { key: ("local:" + _hygiene_fixturePath("background")), ownerLauncherId: 'region:original-warm', ready: Promise.resolve(warm), session: warm } })
+      warmTerminals: { [warmTerminalKey("local", _hygiene_fixturePath("background"))]: [{ key: warmTerminalKey("local", _hygiene_fixturePath("background")), ownerLauncherId: 'region:original-warm', ready: Promise.resolve(warm), session: warm }] } })
     let release!: (page: BrowserSnapshot) => void, issued = ''
     vi.mocked(api.browser.create).mockImplementation(id => { issued = id; return new Promise(resolve => { release = resolve }) })
     const pending = useAppStore.getState().executeControl(open({ kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'user-region' } }))
@@ -274,8 +275,8 @@ describe('the real pending Launcher consumes Region input selection', () => {
     try {
       expect([prewarm.mock.calls.length, detect.mock.calls.length, launch.mock.calls.length, stop.mock.calls.length,
         detection.mock.calls.length]).toEqual([0, 0, 0, 0, 0])
-      expect(useAppStore.getState().warmTerminal?.session).toBe(warm)
-      expect(useAppStore.getState().warmTerminal?.ownerLauncherId).toBe('region:original-warm')
+      expect(warmCandidates(_hygiene_fixturePath("background"))[0]?.session).toBe(warm)
+      expect(warmCandidates(_hygiene_fixturePath("background"))[0]?.ownerLauncherId).toBe('region:original-warm')
       expect(useAppStore.getState().sessions).toEqual([session])
     } finally { await dom.unmount(); release(page(issued)); await pending }
   })
@@ -286,14 +287,14 @@ describe('the real pending Launcher consumes Region input selection', () => {
     const launch = vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue(warm)
     const detection = vi.spyOn(api.executors, 'detect').mockRejectedValue(new Error('Source detection unconfirmed'))
     useLauncherState.setState({ sections: { user: { agents: 'expanded', terminal: 'expanded' } } })
-    useAppStore.setState(state => ({ tabs: { ...state.tabs, [target.id]: target }, regionCaretFocus: null, warmTerminal: null,
+    useAppStore.setState(state => ({ tabs: { ...state.tabs, [target.id]: target }, regionCaretFocus: null, warmTerminals: {},
       config: { ...config, executors: { codex: { label: 'Source Codex', providerId: 'codex', command: 'codex',
         args: [], env: {}, injectAgentMuxGuide: true } } }, executorDetections: {},
       prewarmTerminal: initial.prewarmTerminal, detectExecutors: initial.detectExecutors }))
     const dom = await mount(target.id, 'human-input')
     try {
       expect(launch).toHaveBeenCalledOnce(); expect(detection).toHaveBeenCalledOnce()
-      expect(useAppStore.getState().warmTerminal?.session).toBe(warm)
+      expect(warmCandidates(_hygiene_fixturePath("user"))[0]?.session).toBe(warm)
       expect(document.activeElement).toBe(dom.editor)
     } finally { await dom.unmount() }
   })

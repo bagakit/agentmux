@@ -47,7 +47,7 @@ beforeEach(() => {
       topicId: topic.id, directoryPath: topic.directoryPath, contentKind: 'topic', relations: { [category.spaceId]: true, [address.spaceId]: false } } },
     scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: scratchTopicsScope(scratchWorkspace), revision: 0, topics: [topic, other], reading: false, error: null } },
     workspaceFileRevisions: {}, workbenchSpaceSelection: null, retainedSpatialFocus: null, workbenchNavigationInputPolicy: null,
-    pendingAgentLaunches: {}, recoveryCandidates: [], error: null, warmTerminal: null,
+    pendingAgentLaunches: {}, recoveryCandidates: [], error: null, warmTerminals: {},
     agentComposerDrafts: { [target.layout.activeRegionId]: 'Original target draft', [neighbor.layout.activeRegionId]: 'Original neighbor draft' } })
   const catalog = workbenchSelectionCatalog(useAppStore.getState())
   useAppStore.setState({ workbenchSpaceSelection: { ...resolveDesktopSpaceSelection(useAppStore.getState(), catalog,

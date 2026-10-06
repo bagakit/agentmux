@@ -30,7 +30,7 @@ beforeEach(() => {
     activeWorkspaceId: 'workspace', tabs: { [tabId]: createWorkbenchTab(tabId, { regionId, kind: 'launcher', workspaceId: 'workspace' }) },
     layouts: { workspace: createWorkspaceLayout('input-group', [tabId]) },
     agentComposerDrafts: { [regionId]: 'Keep the complete request' }, launcherNameDrafts: {}, launcherOptionDrafts: {},
-    warmTerminal: null, detectExecutors: vi.fn().mockResolvedValue(undefined), prewarmTerminal: vi.fn(),
+    warmTerminals: {}, detectExecutors: vi.fn().mockResolvedValue(undefined), prewarmTerminal: vi.fn(),
     providerCatalog: providerCatalog as any, executorDetections: {}, pendingAgentLaunches: {},
     recoveryCandidates: [], error: null, errorNoticeContext: null })
 })

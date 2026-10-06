@@ -1,3 +1,4 @@
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, Profiler } from 'react'
@@ -19,7 +20,7 @@ beforeEach(async () => { await act(async () => { useLauncherState.setState({ sec
 afterEach(async () => { await act(async () => useLauncherState.setState(initial, true)) })
 async function mount() {
   const tab = createWorkbenchTab('launcher', { regionId: 'region', kind: 'launcher', workspaceId: 'workspace' })
-  useAppStore.setState({ tabs: { launcher: tab }, layouts: { workspace: createWorkspaceLayout('group', [tab.id]) }, activeWorkspaceId: 'workspace', agentComposerDrafts: { region: 'The complete request\nwith a second line' }, recoveryCandidates: [], warmTerminal: null, detectExecutors: vi.fn().mockResolvedValue(undefined), prewarmTerminal: vi.fn(), executorDetections: {} })
+  useAppStore.setState({ tabs: { launcher: tab }, layouts: { workspace: createWorkspaceLayout('group', [tab.id]) }, activeWorkspaceId: 'workspace', agentComposerDrafts: { region: 'The complete request\nwith a second line' }, recoveryCandidates: [], warmTerminals: {}, detectExecutors: vi.fn().mockResolvedValue(undefined), prewarmTerminal: vi.fn(), executorDetections: {} })
   await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={false} />)
 }
 async function input(selector: string, value: string) {
@@ -58,10 +59,10 @@ describe('actual Launcher utility surfaces', () => {
   it('Terminal collapsing/closing never stops the healthy warm Run, and expanding reuses the same original shell', async () => {
     await mount(); const session = { ...composerSession('warm'), kind: 'terminal' as const, providerId: null, control: { kind: 'terminal' as const, hostId: 'local', runId: 'healthy-warm-run', run: { runId: 'healthy-warm-run' } } }
     const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
-    await act(async () => useAppStore.setState({ warmTerminal: { key: warmTerminalKey('local', _hygiene_fixturePath("repo")), ownerLauncherId: 'region:region', session, ready: Promise.resolve(session) } }))
+    await act(async () => useAppStore.setState({ warmTerminals: { [warmTerminalKey('local', _hygiene_fixturePath("repo"))]: [{ key: warmTerminalKey('local', _hygiene_fixturePath("repo")), ownerLauncherId: 'region:region', session, ready: Promise.resolve(session) }] } }))
     expect(dom.container.querySelector('[data-warm-preview]')).not.toBeNull(); await dom.click('[aria-label="Collapse Terminal"]'); expect(dom.container.querySelector('[data-warm-preview]')).toBeNull()
     await dom.click('[aria-label="Expand Terminal"]'); expect(dom.container.querySelector('[data-warm-preview]')).not.toBeNull(); await dom.click('[aria-label="Close Terminal"]'); await dom.click('[aria-label="Restore Terminal"]')
-    expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('healthy-warm-run'); expect(stop).not.toHaveBeenCalled()
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session?.control.run.runId).toBe('healthy-warm-run'); expect(stop).not.toHaveBeenCalled()
   })
   it('Mote creation delegates through its original Launcher while preserving both drafts and navigation', async () => {
     await mount(); const mote = { ...createWorkbenchTab('mote', { regionId: 'mote-input', kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID }), topicId: PMO_TEAMS_TOPIC_ID }

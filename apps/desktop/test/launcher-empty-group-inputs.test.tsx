@@ -1,3 +1,4 @@
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, Profiler } from 'react'
@@ -46,7 +47,7 @@ beforeEach(() => {
     activeWorkspaceId: 'workspace', mainSurface: 'workbench', workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null,
     tabs: { [healthyTab.id]: healthyTab }, layouts: { workspace: createWorkspaceLayout(groupId), 'other-workspace': healthyLayout },
     agentComposerDrafts: { [healthy.id]: 'Healthy unsent message' }, launcherNameDrafts: {}, launcherOptionDrafts: {},
-    sessions: [healthy], warmTerminal: { key: warmTerminalKey('local', _hygiene_fixturePath("repo")), ownerLauncherId: groupOwner, session: warm, ready: Promise.resolve(warm) },
+    sessions: [healthy], warmTerminals: { [warmTerminalKey('local', _hygiene_fixturePath("repo"))]: [{ key: warmTerminalKey('local', _hygiene_fixturePath("repo")), ownerLauncherId: groupOwner, session: warm, ready: Promise.resolve(warm) }] },
     detectExecutors: vi.fn().mockResolvedValue(undefined), executorDetections: {}, pendingAgentLaunches: {}, recoveryCandidates: [],
     providerCatalog: [
       { id: 'codex', launchOptions: [{ id: 'mode', label: 'Mode', choices: [{ id: 'review', label: 'Review mode' }] }] },
@@ -104,7 +105,7 @@ function preservedWorkfaces() {
   expect(state.agentComposerDrafts[healthy.id]).toBe('Healthy unsent message')
   expect(state.activeWorkspaceId).toBe('workspace'); expect(state.mainSurface).toBe('workbench')
   expect(state.workbenchSpaceSelection).toBeNull(); expect(state.workbenchNavigationInputPolicy).toBeNull()
-  expect(state.warmTerminal?.session).toBe(warm)
+  expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session).toBe(warm)
   expect(api.sessions.stop).not.toHaveBeenCalled(); expect(api.sessions.launchTerminal).not.toHaveBeenCalled()
 }
 function launchResult(id: string) {

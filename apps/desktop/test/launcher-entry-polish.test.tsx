@@ -1,3 +1,4 @@
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -32,11 +33,15 @@ async function mount({ path = _hygiene_fixturePath("Users/alice/project"), home 
     workspaces: [{ ...composerConfig.workspaces[0]!, path, hostId: host!.id }] }, localHome: home,
     tabs: { launcher: createWorkbenchTab('launcher', { regionId: 'region', kind: 'launcher', workspaceId: 'workspace' }) },
     activeWorkspaceId: 'workspace', agentComposerDrafts: { region: 'Complete task\nPreserve this second line.' },
-    warmTerminal: { key: warmTerminalKey(host!.id, path), ownerLauncherId: 'region:region', session, ready: Promise.resolve(session) },
+    warmTerminals: { [warmTerminalKey(host!.id, path)]: [{ key: warmTerminalKey(host!.id, path), ownerLauncherId: 'region:region', session, ready: Promise.resolve(session) }] },
     recoveryCandidates: [], executorDetections: Object.fromEntries(Object.entries(detectionStates).map(([id, state]) => [
       executorDetectionKey(host!.id, id), { state, input: { executorId: id, providerId: executors[id]!.providerId, command: executors[id]!.command, host: host! } }
     ])), hostChecks: {}, detectExecutors: vi.fn().mockResolvedValue(undefined), prewarmTerminal: vi.fn() })
   await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={visible} />)
+}
+function originalWarm() {
+  const workspace = useAppStore.getState().config!.workspaces[0]!
+  return warmCandidates(workspace.path, workspace.hostId)[0]
 }
 async function openEnvironment() {
   // A retained Launcher cannot open a Portal. Activate this exact original mount first.
@@ -68,7 +73,7 @@ describe('the mounted Launcher entry polish', () => {
     expect(dom.container.querySelector('[aria-label="Browser address or search"]')).toBeNull()
     expect(dom.container.querySelector('[aria-label="Note draft"]')).toBeNull()
     expect(useLauncherState.getState().sections).toEqual({})
-    expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('original-shell')
+    expect(originalWarm()?.session?.control.run.runId).toBe('original-shell')
   })
 
   it('the recent choice only highlights its item in the full default catalog, including unconfirmed Executors', async () => {
@@ -101,7 +106,7 @@ describe('the mounted Launcher entry polish', () => {
     expect(picks.map(button => button.dataset.executorId)).toEqual(['codex', 'review'])
     expect(picks.map(button => button.getAttribute('aria-pressed'))).toEqual(['false', 'true'])
     expect(dom.draft('region')).toBe('Complete task\nPreserve this second line.')
-    expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('original-shell')
+    expect(originalWarm()?.session?.control.run.runId).toBe('original-shell')
   })
 
   it('explicit durable preferences and drafts outrank the fresh defaults without clearing or migrating them', async () => {
@@ -152,7 +157,7 @@ describe('the mounted Launcher entry polish', () => {
     expect(panel.textContent).toContain('Diagnostic unavailable')
     expect(panel.querySelector('.launcher-environment__directory')?.getAttribute('title')).toBe('~/project')
     await closeEnvironment()
-    expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('original-shell')
+    expect(originalWarm()?.session?.control.run.runId).toBe('original-shell')
   })
 
   it('an absent Host configuration does not claim a configured shell or abbreviate an unconfirmed local path', async () => {
@@ -163,7 +168,7 @@ describe('the mounted Launcher entry polish', () => {
     expect(panel.textContent).toContain('Host unconfirmed')
     expect(panel.textContent).toContain('Host not configured')
     expect(panel.textContent).not.toContain('Configured host shell')
-    expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('original-shell')
+    expect(originalWarm()?.session?.control.run.runId).toBe('original-shell')
   })
 
   it('the default editing context locates Options with input tools and groups Launch/Resume without altering the original resource parameters', async () => {
@@ -178,7 +183,7 @@ describe('the mounted Launcher entry polish', () => {
     expect(launch).toHaveBeenCalledOnce()
     expect(launch).toHaveBeenCalledWith('codex', 'Complete task\nPreserve this second line.', 'group', { tabId: 'launcher', regionId: 'region' }, {}, { agentName: undefined, tabName: undefined })
     expect(useAppStore.getState().config?.workspaces[0]?.path).toBe(_hygiene_fixturePath("Users/alice/project"))
-    expect(useAppStore.getState().warmTerminal?.key).toBe(warmTerminalKey('local', _hygiene_fixturePath("Users/alice/project")))
+    expect(originalWarm()?.key).toBe(warmTerminalKey('local', _hygiene_fixturePath("Users/alice/project")))
     await dom.click('[aria-label="Collapse Agents"]')
     expect(dom.container.querySelector('.launch-surface__footer')).toBeNull()
     expect(dom.draft('region')).toBe('Complete task\nPreserve this second line.')
@@ -221,7 +226,7 @@ describe('the mounted Launcher entry polish', () => {
       expect(JSON.parse(window.localStorage.getItem('agentmux-launcher')!).state.sections.workspace.browser).toBe('collapsed')
       expect(useLauncherState.getState().drafts['region:region']!.browser).toBe('Unsent search')
       expect(dom.draft('region')).toBe('Complete task\nPreserve this second line.')
-      expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('original-shell')
+      expect(originalWarm()?.session?.control.run.runId).toBe('original-shell')
     } finally { vi.useRealTimers() }
   })
 
@@ -246,6 +251,6 @@ describe('the mounted Launcher entry polish', () => {
     await dom.click('[aria-label="Close Browser"]')
     await dom.click('[aria-label="Restore Browser"]')
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Browser address or search"]')?.value).toBe('Local runtime search')
-    expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('original-shell')
+    expect(originalWarm()?.session?.control.run.runId).toBe('original-shell')
   })
 })
