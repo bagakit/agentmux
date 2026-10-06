@@ -7,7 +7,7 @@ app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessi
 // Only this private harness owns process exit; closing its window must not turn
 // an assertion failure into Electron's implicit successful quit.
 app.on('window-all-closed', () => {})
-const proof = { passed: false, cases: [], guardCases: [], lookupCases: [], calls: [], userRunTouched: false,
+const proof = { passed: false, cases: [], manualCases: [], guardCases: [], lookupCases: [], calls: [], userRunTouched: false,
   scope: 'Actual Electron Main registration/RuntimeController/product preload/RendererControl/public RPC/compiled CLI. Original Core Native preparation is exercised; Native transport/Run status and unknown/partial failure port are controlled, not vendor or user Run evidence.' }
 let win, release, runtime, client, rpc
 const flatten = error => ({ code: error.code, message: error.message, ...(error.detail === undefined ? {} : { detail: error.detail }),
@@ -26,13 +26,16 @@ app.whenReady().then(async () => {
     client.connect = async () => { client.connected = true }
     const originalRun = { runId, lifecycleOperationId: null, program: 'codex', args: [], workspacePath: privateRoot,
       pid: null, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0, nativeService: null }
-    Object.assign(client.kernel, { isConnected: () => true, status: async () => originalRun, list: async () => [originalRun] })
+    Object.assign(client.kernel, { isConnected: () => true, status: async () => originalRun, list: async () => [originalRun],
+      identity: () => ({ daemonInstanceId: 'private-original-runtime', protocolVersion: 1, buildIdentity: 'controlled-port' }) })
     let mode = 'native-wait', upstream
     const originalSubmit = client.submitAgentMessage.bind(client)
     client.submitAgentMessage = async input => {
-      proof.calls.push({ mode, messageId: input.envelope.messageId, operationId: input.envelope.operationId, runId: input.condition.expectedRun.runId, body: input.envelope.body })
+      proof.calls.push({ mode, messageId: input.envelope.messageId, operationId: input.envelope.operationId,
+        runId: (input.admissionIntent?.kind === 'manual-actor' ? input.admissionIntent.expectedRun : input.condition.expectedRun).runId,
+        admissionIntent: input.admissionIntent ?? null, condition: input.condition ?? null, body: input.envelope.body })
       try {
-        if (mode === 'native-wait') await originalSubmit(input)
+        if (mode === 'native-wait' || mode === 'manual-admission') await originalSubmit(input)
         else throw new product.AgentMuxError('Original unknown input outcome.', 'AGENT_PROMPT_INPUT_UNCONFIRMED',
           JSON.stringify({ originalBody: input.envelope.body, phase: 'controlled-original-Core-failure-port', outcome: 'unknown' }),
           { disposition: 'unknown', confirmedInputBytes: mode === 'partial' ? 3 : null }, 'AbCdEf123456')
@@ -53,6 +56,42 @@ app.whenReady().then(async () => {
     await win.webContents.executeJavaScript(`receiptProof.setup(${JSON.stringify(config)},${JSON.stringify(await runtime.refresh(control, config))})`)
     const endpoint = { transport: 'unix', path: product.desktopBusinessSocketPath() }
     rpc = await product.connectAgentMuxRpc({ endpoint })
+    // The actual public producer/registered Desktop consumer carries the explicit
+    // manual variant. Only this Provider machine port is controlled; Core claim,
+    // journal, original SDK and all IPC/RPC consumers remain the product owners.
+    mode = 'manual-admission'
+    const provider = client.providers.get('codex'), originalPrepare = provider.prepareNativePromptInput
+    const nativePlan = { kind: 'native-rpc', protocolId: 'controlled-native-contract', operation: 'start-or-steer',
+      sourceId: 'original-source', actorId: 'original-peer', threadId: 'original-thread' }
+    const dispatches = [], manualA = 'manual-original-unknown', manualB = 'manual-independent-after-unknown'
+    provider.prepareNativePromptInput = async () => ({ plan: nativePlan, assertCurrent: async () => {}, close: async () => {},
+      dispatch: async (_prompt, id) => { dispatches.push(id)
+        if (id === manualA) throw new Error('Controlled original Native receipt unavailable after dispatch')
+        return { outcome: 'admitted', turnId: 'original-turn' } } })
+    try {
+      const text = 'Original manual body\nDo not reconstruct {"human":true,"ready":true}.'
+      const first = { target: { kind: 'agent-session', agentSessionId: sid }, text, execution: 'immediate', operationId: 'control-' + manualA, messageId: manualA }
+      await assert.rejects(rpc.call('agent.send', first), error => error.code === 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+      const key = { kind: 'message', agentSessionId: sid, expectedRun: { runId }, messageId: manualA }
+      const unknown = await client.inspectAgentPromptSubmission(key)
+      assert.equal(unknown.admission.native.outcome, 'unknown')
+      const env = { ...process.env }; delete env.AGENTMUX_AGENT_CAPABILITY; delete env.AGENTMUX_AGENT_SESSION_ID
+      const child = spawn(process.env.AGENTMUX_RECEIPT_NODE, [cli, '--endpoint', 'unix:' + endpoint.path, 'agent', 'send', '--to-session', sid,
+        '--text', text, '--execution', 'immediate', '--operation-id', 'control-' + manualB, '--message-id', manualB], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+      let stdout = '', stderr = ''; child.stdout.on('data', data => stdout += data); child.stderr.on('data', data => stderr += data)
+      const code = await new Promise((yes, no) => { child.once('error', no); child.once('exit', yes) })
+      assert.equal(code, 0, 'The compiled CLI must admit the independent original manual input: ' + stderr)
+      assert.equal(JSON.parse(stdout).result.delivery.state, 'delivered')
+      assert.deepEqual((await rpc.call('agent.input.inspect', { key })).record, unknown)
+      await assert.rejects(rpc.call('agent.send', first), error => error.code === 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+      assert.deepEqual(dispatches, [manualA, manualB])
+      for (const input of proof.calls) {
+        assert.equal(input.body, text); assert.equal(input.runId, runId); assert.equal(input.condition, null)
+        assert.deepEqual(input.admissionIntent, { kind: 'manual-actor', expectedRun: { runId } })
+        proof.manualCases.push(input)
+      }
+      assert.equal(proof.manualCases.length, 3)
+    } finally { provider.prepareNativePromptInput = originalPrepare }
     for (const next of ['native-wait', 'unknown', 'partial']) {
       mode = next
       for (const consumer of ['rpc', 'cli']) {
@@ -80,7 +119,7 @@ app.whenReady().then(async () => {
         }
         assert.deepEqual(observed, upstream, 'Actual Desktop/RPC/compiled CLI retains every original Core failure field')
         assert.equal(proof.calls.at(-1).body, text, 'Original body is not reconstructed')
-        assert.equal(proof.calls.length, proof.cases.length + 1, 'One original input attempt per operation; diagnostics do not cause retries')
+        assert.equal(proof.calls.length, proof.manualCases.length + proof.cases.length + 1, 'One original input attempt per operation; diagnostics do not cause retries')
         proof.cases.push({ mode, consumer, upstream, observed, original: proof.calls.at(-1) })
       }
     }
@@ -111,7 +150,7 @@ app.whenReady().then(async () => {
       const observed = await rpc.call('agent.send', { target: { kind: 'agent-session', agentSessionId: sid }, text: 'Hostile reply does not authorize input.',
         execution: 'immediate', operationId: 'guard-' + name, messageId: 'guard-message-' + name }).then(() => null, flatten)
       assert.equal(observed?.code, expectedCode, 'Actual registered Main rejects malformed original failure data: ' + name)
-      assert.equal(proof.calls.length, 6, 'Neither a cause nor malformed facts authorize new Core input')
+      assert.equal(proof.calls.length, proof.manualCases.length + 6, 'Neither a cause nor malformed facts authorize new Core input')
       if (name === 'opaque-cause') assert.deepEqual(observed, cause, 'Original diagnostics remain opaque; legacy diagnostic ID is preserved')
       if (name === 'original-confirmation-only') assert.deepEqual(observed, error, 'Existing confirmation facts survive without the optional new cause')
       proof.guardCases.push({ name, expectedCode, observed })
@@ -125,7 +164,7 @@ app.whenReady().then(async () => {
       if (logId === proof.cases[0].upstream.logId) assert.equal(result.availability, 'found', 'Actual original Core Native preparation diagnostic remains readable')
       proof.lookupCases.push({ name: 'valid-original-lookup', logId, availability: result.availability })
     }
-    assert.equal(proof.calls.length, 6, 'Diagnostic lookup does not authorize Core input')
+    assert.equal(proof.calls.length, proof.manualCases.length + 6, 'Diagnostic lookup does not authorize Core input')
     proof.passed = true
   } catch (error) { proof.failure = { name: error.name, message: error.message, stack: error.stack } }
   finally {
