@@ -139,6 +139,8 @@ Focus 默认仍加载完整 Tab；用户明确选择“只看此 Region”时，
 
 - Project Rail 与 Workspace Tools 分别开关，不能共享状态或互相改变布局身份。
 
+- 共用侧栏调宽手势覆盖 Projects、Workspace Tools、Survey、Recall 与 Focus 时间线的名称列，不改变 Region 分割或 Session 生命周期。拖动时 Escape 可取消并恢复原持久宽度的受限呈现，临时宽度不写回；正常结束才提交，取消后松手不落旧草稿。IME 的 Escape 归原输入 owner，非拖动时不截取。句柄双击经原领域 setter 恢复各自已有默认宽度，原箭头／Home／End 保留；隐藏或卸载清临时帧、遮罩及指针样式，不变其他工作面或宽窗偏好。宽度持久化继续沿原 client owner，重启保原工作面及已确认宽度。
+
 ### Project 与 Workspace
 
 Project 是来源项目事实，Workspace 是特定 Host 上登记的实际工作目录；二者提供空间实体的资源上下文，其身份与 owner 见[概念词典](#统一概念与空间寻址)。资源 Host、目录、仓库根与分支不由展示位置改写。
