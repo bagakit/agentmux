@@ -1,8 +1,9 @@
+import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from '../conversation-changes.js'
 // Native record/role interpretation follows Paseo's convertClaudeHistoryEntry / normalizeHistoryBlocks.
 // Source: Paseo 3c6e4e39 (Apache-2.0, Copyright (c) 2025-present Mohamed Boudra). Modified for bounded, read-only pages,
 // exact ordered content/resources, neutral unknown activities and native UUID identity.
 import { AgentMuxError } from '../errors.js'
-import { NativeJsonlHistoryReader } from '../native-jsonl-history-reader.js'
+import { NativeJsonlHistoryReader, readNativeConversationChanges } from '../native-jsonl-history-reader.js'
 import {
   isNativeText,
   nativeJsonStringify,
@@ -140,5 +141,20 @@ export async function readClaudeSessionHistoryPage(context: AgentProviderSession
     }
     const nextCursor = await reader.nextCursor()
     return { source: context.source, items: await Promise.all(items.reverse().map(item => reader.materializeItem(item))), nextCursor, sourceSizeBytes: reader.sourceSizeBytes }
+  } finally { await reader.close() }
+}
+
+/** Append paging uses the same Provider converter and physical JSONL owner as history reading. */
+export async function readClaudeConversationChanges(context: ProviderConversationChangesContext): Promise<ProviderConversationChangesPage> {
+  const reader = await NativeJsonlHistoryReader.open(context)
+  try {
+    return await readNativeConversationChanges(reader, context, (row, start) => {
+      if (row.isSidechain === true) return null
+      if (row.sessionId !== context.source.nativeSessionId) {
+        if (row.sessionId === undefined && row.type !== 'user' && row.type !== 'assistant') return null
+        throw new AgentMuxError('Claude transcript belongs to another native Session.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+      }
+      return convert(row, start)
+    })
   } finally { await reader.close() }
 }

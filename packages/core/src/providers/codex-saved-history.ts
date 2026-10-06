@@ -1,6 +1,7 @@
+import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from '../conversation-changes.js'
 import { stat } from 'node:fs/promises'
 import { AgentMuxError } from '../errors.js'
-import { NativeJsonlHistoryReader } from '../native-jsonl-history-reader.js'
+import { NativeJsonlHistoryReader, readNativeConversationChanges } from '../native-jsonl-history-reader.js'
 import { SESSION_HISTORY_MAX_PAGE_BYTES } from '../session-history.js'
 import { isNativeText, nativeJsonStringify, type NativeHistoryContentPart, type NativeHistoryItem } from '../native-history-value.js'
 import { codexQuestionAnswers } from './codex-question.js'
@@ -161,4 +162,11 @@ export async function readCodexSavedSessionHistoryRecord(context: AgentProviderS
     }
     throw new AgentMuxError('The original saved Codex record is unavailable.', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')
   } finally { await reader.close() }
+}
+
+/** Resume the same saved rollout and original record converter after a durable cut. */
+export async function readCodexSavedConversationChanges(context: ProviderConversationChangesContext): Promise<ProviderConversationChangesPage> {
+  const reader = await open(context)
+  try { return await readNativeConversationChanges(reader, context, item) }
+  finally { await reader.close() }
 }

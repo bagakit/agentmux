@@ -72,3 +72,5 @@ export type ConversationRef = import('./session-history-read-codec.js').AgentSes
 /** Retain the original bounded envelope rather than duplicating scope or body bytes. */
 export type AgentConversationReadPage = import('./session-history-read-codec.js').AgentSessionHistoryReadPage
 export { parseAgentSessionHistoryReadPage as parseConversationReadPage } from './session-history-read-codec.js'
+
+export * from './conversation-changes.js'

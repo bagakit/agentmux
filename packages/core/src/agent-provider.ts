@@ -1,3 +1,4 @@
+import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from './conversation-changes.js'
 import type { AgentPromptPreparationWaitReason } from './prompt-preparation.js'
 import { AgentMuxError } from './errors.js'
 import {
@@ -169,6 +170,7 @@ export type AgentProvider = {
   /** Recheck only this exact selected source before starting its native resume. */
   assertNativeResumeSource?(context: AgentProviderNativeResumeContext): Promise<void>
   readSessionHistoryPage?(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage>
+  readConversationChanges?(context: ProviderConversationChangesContext): Promise<ProviderConversationChangesPage>
   readSessionHistoryRecord?(context: AgentProviderSessionHistoryRecordContext): Promise<AgentSessionHistoryItem>
   prepareSessionQuestionReply?(context: AgentProviderSessionQuestionReplyContext): Promise<string>
   observeSessionHistory?(context: AgentProviderSessionHistoryObservationContext): Promise<AgentSessionHistoryObservationHandle>
@@ -218,6 +220,7 @@ export type AgentProviderDefinition = {
   listNativeSessions?: AgentProvider['listNativeSessions']
   assertNativeResumeSource?: AgentProvider['assertNativeResumeSource']
   readSessionHistoryPage?: (context: AgentProviderSessionHistoryContext) => Promise<AgentProviderSessionHistoryPage>
+  readConversationChanges?: AgentProvider['readConversationChanges']
   readSessionHistoryRecord?: (context: AgentProviderSessionHistoryRecordContext) => Promise<AgentSessionHistoryItem>
   prepareSessionQuestionReply?: (context: AgentProviderSessionQuestionReplyContext) => Promise<string>
   observeSessionHistory?: (context: AgentProviderSessionHistoryObservationContext) => Promise<AgentSessionHistoryObservationHandle>
@@ -404,6 +407,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.discoverNativeSession ? { discoverNativeSession: definition.discoverNativeSession } : {}),
     ...(definition.listNativeSessions ? { listNativeSessions: definition.listNativeSessions } : {}),
     ...(definition.assertNativeResumeSource ? { assertNativeResumeSource: definition.assertNativeResumeSource } : {}),
+    ...(definition.readConversationChanges ? { readConversationChanges: definition.readConversationChanges } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
     ...(definition.readSessionHistoryRecord ? { readSessionHistoryRecord: definition.readSessionHistoryRecord } : {}),
     ...(definition.prepareSessionQuestionReply ? { prepareSessionQuestionReply: definition.prepareSessionQuestionReply } : {}),
