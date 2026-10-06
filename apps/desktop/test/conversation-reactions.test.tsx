@@ -116,6 +116,32 @@ describe('Saved Prompt → explicit lookup → exact reply card → original use
    expect((await flow.store.loadTimeline('agent-1')).items.filter(item=>item.kind==='user_message')).toHaveLength(1)
   } finally {await flow.close()}
  })
+ it('allows an explicit reaction after confirmed archived history while preserving that original record and the current draft',async()=>{
+  waitPermission();await mount();await press()
+  const original=structuredClone(queued()[0]!)
+  const key={kind:'prompt' as const,agentSessionId:'agent-1',expectedRun:{runId:'run-agent-1'},submissionId:original.operationId},ref={key,waitGeneration:1}
+  const historical={...original,archived:true as const,inputIntakeStarted:true as const,inputReceipt:{key,ref,persistence:'confirmed' as const,
+   status:'admitted' as const,observation:'closed' as const,admission:{agentSessionId:'agent-1',run:{runId:'run-agent-1'}},
+   control:{ref,state:'dispatch-authorized' as const,at:1,gateId:'original-gate'}}}
+  await act(async()=>useAppStore.setState({agentSteerQueues:{'agent-1':[historical]}}))
+  expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="回复：认可"]')!.disabled).toBe(false)
+  await press()
+  expect(queued()).toHaveLength(2)
+  expect(queued()[0]).toEqual(historical)
+  expect(queued()[1]).toMatchObject({text:original.text,reaction:original.reaction,promptCondition:null})
+  expect(queued()[1]!.operationId).not.toBe(original.operationId)
+  expect(dom.draft()).toBe('Keep my draft')
+  expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="回复：认可"]')!.disabled).toBe(true)
+ })
+ it('keeps an archived unknown reaction pending instead of turning archive into a new replay identity',async()=>{
+  waitPermission();await mount();await press()
+  const original={...structuredClone(queued()[0]!),archived:true as const,promptCondition:{expectedRun:{runId:'run-agent-1'},afterSubmissionId:null},error:'original ACK unknown'}
+  await act(async()=>useAppStore.setState({agentSteerQueues:{'agent-1':[original]}}))
+  expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="回复：认可"]')!.disabled).toBe(true)
+  await expect(sendConversationReaction('agent-1',definition,reply,()=>{})).rejects.toThrow('already in the Outbox')
+  expect(queued()).toEqual([original])
+  expect(dom.draft()).toBe('Keep my draft')
+ })
  it('keeps public lookup selectors exclusive and verifies the returned keyword against the requested target',()=>{
   const request=rpcControlRequest('settings.prompts.inspect',{keyword:'ok'})
   expect(request).toMatchObject({operation:'settings.resource.get',resource:'prompts',keyword:'ok'})
