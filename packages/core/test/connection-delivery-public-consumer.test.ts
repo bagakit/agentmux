@@ -6,7 +6,7 @@ import { AgentMuxError } from '../src/errors.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
-import type { ConnectionDelivery, ConnectionDeliveryPort, ConnectionPort, RoomBindingCallContext } from '../src/connections.js'
+import type { ConnectionDelivery, ConnectionDeliveryPort, ConnectionDeliveryObservation, ConnectionPort, RoomBindingCallContext } from '../src/connections.js'
 import { ObjectCliProbe, objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { deliveryFact } from './fixtures/connection-delivery.js'
 
@@ -17,14 +17,14 @@ async function fixture() {
   const first: ConnectionDelivery = { ...deliveryFact('z-original'), state: 'not-applied', reason: 'platform-rejected', receipt: { state: 'not-applied', reason: 'platform-rejected' } }
   const unknown: ConnectionDelivery = { ...deliveryFact('a-unknown'), state: 'unknown', reason: 'effect-unconfirmed', receipt: { state: 'unknown', reason: 'effect-unconfirmed' } }
   const facts = new Map([first, unknown].map(fact => [fact.operationId, fact])), calls: Array<{ method: string; operationId?: string; actor?: RoomBindingCallContext['actor'] }> = []
-  let authorized = true
+  let authorized = true, observation: ConnectionDeliveryObservation | undefined
   const delivery: ConnectionDeliveryPort = {
     inspect: async input => { calls.push({ method: 'inspect', ...input }); return { delivery: structuredClone(facts.get(input.operationId) ?? null) } },
     list: async input => {
       calls.push({ method: 'list' }); const all = [...facts.values()]
       const start = input.after === undefined ? 0 : all.findIndex(fact => fact.operationId === input.after) + 1
       const page = all.slice(start, start + (input.limit ?? 30))
-      return { deliveries: structuredClone(page), next: start + page.length < all.length ? page.at(-1)!.operationId : null }
+      return { deliveries: structuredClone(page), next: start + page.length < all.length ? page.at(-1)!.operationId : null, ...(observation ? { observation } : {}) }
     },
     retry: async (input, context) => {
       await context.assertCurrent?.(); calls.push({ method: 'retry', ...input, actor: context.actor })
@@ -40,7 +40,7 @@ async function fixture() {
   const socketPath = join(root, 'public.sock'), server = new AgentMuxControlServer({ socketPath, connections, coreClients: () => { throw new Error('Delivery inspection must not create or borrow another Runtime') } })
   await server.start(); close.push(() => server.stop())
   const env = objectCliEnvironment(root), cli = (args: string[]) => runCompiledObjectCli(['--endpoint', 'unix:' + socketPath, 'connection', 'delivery', ...args], env)
-  return { first, unknown, facts, calls, delivery, connections, root, env, socketPath, cli, revoke: () => { authorized = false } }
+  return { first, unknown, facts, calls, delivery, connections, root, env, socketPath, cli, revoke: () => { authorized = false }, observe: (value: ConnectionDeliveryObservation) => { observation = value } }
 }
 function result(output: { code: number; stdout: string; stderr: string }) { expect(output.code, output.stdout + output.stderr).toBe(0); return JSON.parse(output.stdout).result }
 
@@ -78,6 +78,14 @@ describe('compiled public delivery consumers', () => {
     delete f.connections.delivery
     await expect(service.call('connection.delivery.inspect', { operationId: f.first.operationId }, principal)).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
     expect(await service.call('connection.ls', {}, principal)).toEqual({ connections: [] })
+  }, 20_000)
+  it('reads a scoped source Gap before any effect exists, then reports current worker recovery without inventing delivery facts', async () => {
+    const f = await fixture(); f.facts.clear(); f.observe({ state: 'unknown', reason: 'source-gap' })
+    const args = ['ls', '--connection', f.first.target.connectionId, '--binding', f.first.bindingId, '--binding-revision', String(f.first.bindingRevision)]
+    expect(result(await f.cli(args))).toEqual({ deliveries: [], next: null, observation: { state: 'unknown', reason: 'source-gap' } })
+    f.observe({ state: 'ready' })
+    expect(result(await f.cli(args))).toEqual({ deliveries: [], next: null, observation: { state: 'ready' } })
+    expect(f.facts.size).toBe(0); expect(f.calls.every(call => call.method === 'list')).toBe(true)
   }, 20_000)
   it('generates complete usable help and rejects malformed original identities before consuming a wire response', async () => {
     const f = await fixture()
