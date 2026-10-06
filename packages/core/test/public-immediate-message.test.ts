@@ -12,16 +12,20 @@ import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllEnvs()})
 it('actual CLI and RPC bind execution to one original durable message and Core Provider plan',async()=>{
  const h=await rpcOwnerFixture(),path=join(h.root,'control.sock')
- const phase=vi.spyOn((h.client as any).promptSubmission,'submitInputPlan').mockImplementation(async (...args:any[])=>args[11])
+ h.inner.kernel.identity=()=>({daemonInstanceId:'fixture-runtime',protocolVersion:1,buildIdentity:'fixture'})
+ const phase=vi.fn(async(_prompt:string,_operationId:string)=>({outcome:'admitted' as const,turnId:'exact-turn'}))
+ const provider=(h.client as any).providers.get('codex')
+ vi.spyOn(provider,'prepareNativePromptInput').mockResolvedValue({plan:{kind:'native-rpc',protocolId:'fixture-steer',sourceId:'source',actorId:'actor',threadId:'thread',expectedTurnId:'exact-turn'},
+  assertCurrent:async()=>{},dispatch:phase,close:async()=>{}})
  const server=new AgentMuxControlServer({socketPath:path,coreClients:h.coreClients})
  await server.start();const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path},credentials:h.credentials})
  try{
   const args=['--endpoint','unix://'+path,'agent','send','--to-session','recipient','--text','exact immediate body','--execution','immediate','--operation-id','public-immediate-op']
   const cli=await runCompiledObjectCli(args,objectCliEnvironment(h.root,{AGENTMUX_AGENT_SESSION_ID:'caller',AGENTMUX_AGENT_CAPABILITY:h.capability}))
   expect(cli.code,cli.stderr).toBe(0);const result=JSON.parse(cli.stdout).result
-  expect(phase).toHaveBeenCalledOnce();expect(phase.mock.calls[0]![12]).toBe('immediate')
-  expect(phase.mock.calls[0]![4]).toMatchObject({kind:'render-then-submit'});expect(phase.mock.calls[0]![4]).not.toHaveProperty('prepare')
-  expect(phase.mock.calls[0]![3]).toBe('[Message from Agent caller]\nexact immediate body')
+  expect(phase).toHaveBeenCalledOnce()
+  expect((h.client.agentSession('recipient').promptCompletionAdmission?.intent)).toMatchObject({execution:'immediate',plan:{kind:'native-rpc'}})
+  expect(phase.mock.calls[0]![0]).toBe('[Message from Agent caller]\nexact immediate body')
   const params={sourceChannel:'cli' as const,target:{kind:'agent-session' as const,agentSessionId:'recipient'},text:'exact immediate body',execution:'immediate' as const,operationId:'public-immediate-op'}
   expect((await rpc.call('agent.send',params)).messageId).toBe(result.messageId);expect(phase).toHaveBeenCalledOnce()
   await expect(rpc.call('agent.send',{...params,execution:'default'})).rejects.toMatchObject({code:'MESSAGE_ID_CONFLICT'})

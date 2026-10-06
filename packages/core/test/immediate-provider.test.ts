@@ -1,3 +1,4 @@
+import { fixtureDay as reshapeFixtureDay } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
@@ -28,7 +29,8 @@ describe('Provider-owned immediate evidence',()=>{
  ])('does not guess from %s',async(_name,body)=>{const s=await frame(body);try{expect(inspectCodexPromptExecution(s.snapshot())).toBe('unavailable')}finally{s.dispose()}})
  it('contributes native steer and preserves authenticated canceled semantic end without changing default',()=>{
   const p=new AgentProviderRegistry().get('codex');expect(p.planPromptInput('owned')).not.toHaveProperty('prepare')
-  expect(p.catalog.capabilities.promptExecution).toEqual({immediate:'native-steer'});expect(p.planPromptInput('owned',{execution:'immediate'})).not.toHaveProperty('prepare')
+  expect(p.catalog.capabilities.promptExecution).toEqual({immediate:'native-steer'});expect(typeof p.prepareNativePromptInput).toBe('function')
+  expect(()=>p.planPromptInput('owned',{execution:'immediate'})).toThrow(/machine input environment/)
   const envelope={providerId:'codex',agentSessionId:'agent',runId:'run',receiptId:'receipt',eventName:'Interrupt',payload:{session_id:'native',turn_id:'native-turn'}}
   expect(p.normalizeHook(envelope,{processNativeHandle:{kind:'provider',providerId:'codex',sessionId:'native'}})).toMatchObject({semanticState:'unknown',lifecycleEvent:'turn-end',nativeTurnId:'native-turn',mainSubject:true})
   expect(p.normalizeHook(envelope,{})).toMatchObject({semanticState:'unknown',lifecycleEvent:null,mainSubject:false})
@@ -38,7 +40,7 @@ describe('Provider-owned immediate evidence',()=>{
  it('binds bounded native evidence and transport to this native Session',async()=>{
   const verifyCodexPromptExecutionTransport=createCodexPromptExecutionTransportVerifier()
   const root=await mkdtemp(join(tmpdir(),'amux-native-evidence-'));try{
-   const d=join(root,'sessions','2026','10','07');await mkdir(d,{recursive:true});const path=join(d,'rollout-private-native.jsonl')
+   const d=join(root, 'sessions', ...reshapeFixtureDay(1).split('-'));await mkdir(d,{recursive:true});const path=join(d,'rollout-private-native.jsonl')
    const c={args:[],workspacePath:root,nativeHandle:{kind:'provider' as const,providerId:'codex',sessionId:'native',transcriptPath:path}}
    const head={type:'session_meta',payload:{id:'native',session_id:'native',base_instructions:'x'.repeat(64*1024)}}
    const start={ordinal:1,type:'event_msg',payload:{type:'task_started',turn_id:'native-turn'}},end={ordinal:2,type:'event_msg',payload:{type:'turn_aborted',turn_id:'native-turn',reason:'interrupted'}}
