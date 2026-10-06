@@ -22,7 +22,8 @@ export function measureNoteCanvasBlockPorts(card: HTMLElement, body: HTMLElement
   for (const [blockId, held] of rows.byId) {
     if (held.length !== 1) continue
     const box = held[0]!.getBoundingClientRect()
-    const top = Math.max(box.top, viewport.top), bottom = Math.min(box.bottom, viewport.bottom)
+    const clip = held[0]!.closest<HTMLElement>('.note-reader-excerpt-clip')?.getBoundingClientRect()
+    const top = Math.max(box.top, viewport.top, clip?.top ?? -Infinity), bottom = Math.min(box.bottom, viewport.bottom, clip?.bottom ?? Infinity)
     if (box.width <= 0 || top >= bottom || box.right <= viewport.left || box.left >= viewport.right) continue
     ports.push({ blockId, top: ((top + bottom) / 2 - cardBox.top) / scale - card.clientTop })
   }

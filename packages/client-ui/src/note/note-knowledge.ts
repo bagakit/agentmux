@@ -6,7 +6,7 @@ import type { NoteGraphOccurrence, NoteGraphTarget } from '@agentmux/core/notebo
 import type { NoteLinkTarget } from '@agentmux/core/note-links'
 export type NoteFileDocument = { path: string; content: string; revision: string }
 export type NoteLocation = { workspaceId: string; path: string }
-export type NoteBlock = { blockId: string; content: JSONContent; text: string }
+export type NoteBlock = { blockId: string; content: JSONContent; text: string; list?: { type: string; attrs: Record<string, unknown>; index: number; item?: boolean } }
 export type NoteSource = { location: NoteLocation; note: NoteDocument; revision: string; blocks: ReadonlyMap<string, NoteBlock> }
 export type NoteBacklink = { source: NoteSource; blockId: string; occurrence: NoteGraphOccurrence; mode: 'reference' | 'embed' | 'link'; target: NoteGraphTarget }
 export type NoteKnowledge = {
@@ -46,9 +46,17 @@ export function noteKnowledge(documents: readonly { location: NoteLocation; docu
     if (!indexed) {
       const blocks = new Map<string, NoteBlock>(), forward: Omit<NoteBacklink, 'source'>[] = []
       const tree = noteContentSchema.nodeFromJSON(read.note.content)
-      tree.descendants(node => {
+      tree.descendants((node, _position, parent, index) => {
         const blockId: unknown = node.attrs.blockId
-        if (typeof blockId === 'string') blocks.set(blockId, { blockId, content: node.toJSON(), text: noteSemanticText(node) })
+        if (typeof blockId !== 'string') return
+        const position = tree.resolve(_position)
+        let list: NoteBlock['list']
+        if (node.type.name === 'listItem' && parent) list = { type: parent.type.name, attrs: { ...parent.attrs }, index, item: true }
+        else if (parent?.type.name === 'listItem' && position.depth >= 2) {
+          const originalList = position.node(position.depth - 1)
+          list = { type: originalList.type.name, attrs: { ...originalList.attrs }, index: position.index(position.depth - 1) }
+        }
+        blocks.set(blockId, { blockId, content: node.toJSON(), text: noteSemanticText(node), ...list ? { list } : {} })
       })
       forward.push(...indexNoteReferences(tree).map(reference => ({ ...reference, occurrence: reference.occurrence.kind === 'text' ? { ...reference.occurrence, revision: document.revision } : reference.occurrence })))
       indexed = { blocks, references: forward }
@@ -77,4 +85,21 @@ export function resolveNoteBlock(knowledge: NoteKnowledge, target: NoteBlockTarg
 export function noteBacklinks(knowledge: NoteKnowledge, target: NoteLinkTarget): readonly NoteBacklink[] {
   return knowledge.references.filter(reference => reference.target.kind !== 'unbound' && reference.target.noteId === target.noteId &&
     (target.blockId === undefined || reference.target.kind === 'block' && reference.target.blockId === target.blockId))
+}
+
+/** A reading projection; knowledge and identities always remain those of the complete original file. */
+export function projectNoteBlocks(source: NoteSource, ids: readonly string[]): { content: JSONContent; shownBlockIds: string[]; missingBlockIds: string[]; rootBlockIds: string[] } {
+  const requested = new Set(ids), covered = new Set<string>(), content: JSONContent[] = [], rootBlockIds: string[] = []
+  const cover = (node: JSONContent) => {
+    const id: unknown = node.attrs?.blockId
+    if (typeof id === 'string') covered.add(id)
+    node.content?.forEach(cover)
+  }
+  for (const block of source.blocks.values()) {
+    if (!requested.has(block.blockId) || covered.has(block.blockId)) continue
+    content.push(block.list ? { type: block.list.type, attrs: { ...block.list.attrs, ...(block.list.type === 'orderedList' ? { start: Number(block.list.attrs.start ?? 1) + block.list.index } : {}) }, content: [block.list.item ? block.content : { type: 'listItem', content: [block.content] }] } : block.content)
+    rootBlockIds.push(block.blockId)
+    cover(block.content)
+  }
+  return { content: { type: 'doc', content }, shownBlockIds: [...covered], rootBlockIds, missingBlockIds: ids.filter(id => !source.blocks.has(id)) }
 }

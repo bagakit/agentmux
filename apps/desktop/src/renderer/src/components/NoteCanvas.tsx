@@ -3,9 +3,9 @@ import { Background, BackgroundVariant, BaseEdge, EdgeLabelRenderer, Handle, Mar
 import { NoteReader, type NoteLinkOpenRequest } from '@agentmux/client-ui/components/NoteReader'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { NotebookPage } from '@agentmux/core/notebook-catalog'
-import type { NoteContentObservation } from '@agentmux/core'
+import { projectNoteBlocks, type NoteSource } from '@agentmux/client-ui/note/note-knowledge'
+import { useNoteCanvasContent, type CanvasContent } from '../lib/use-note-canvas-content'
 import { noteContentMatchesGraph, type NotebookGraphSnapshot } from '../../../shared/notebook-observation'
-import { api } from '../lib/api'
 import { projectNoteCanvas, initialCanvasPositions, attachNoteCanvasRelationships, noteCanvasBlockHandle, type CanvasNote, type CanvasAttachedRelationship, type CanvasReference } from '../lib/note-canvas-model'
 import type { NoteCanvasBlockPort } from '../lib/note-canvas-block-geometry'
 import { useNoteCanvasBlockPorts } from '../lib/use-note-canvas-block-ports'
@@ -25,38 +25,37 @@ const ArrangeIcon = semanticIconComponent('layout.balance'), PlusIcon = semantic
 const FocusIcon = semanticIconComponent('action.focus')
 const OpenIcon = semanticIconComponent('action.open-external'), CloseIcon = semanticIconComponent('action.close')
 type OpenNote = (page: NotebookPage, blockId?: string) => void
-type NoteNodeData = { item: CanvasNote; snapshot: NotebookGraphSnapshot; active: boolean; expanded: boolean; preview: boolean; blockIds: readonly string[]; onPorts(noteId: string, snapshot: NotebookGraphSnapshot, blockIds: readonly string[]): void; onOpen: OpenNote; onOpenLink(link: NoteLinkOpenRequest): void; onNeighbors(id: string): void; onPreview(id: string): void; onUnbound(id: string): void; refresh(): void }
+type NoteNodeData = { content?: CanvasContent | undefined; documents: Parameters<typeof NoteReader>[0]['documents']; source?: NoteSource | undefined; onRead(id: string): void; onVisible(id: string, visible: boolean): void; item: CanvasNote; snapshot: NotebookGraphSnapshot; active: boolean; expanded: boolean; preview: boolean; blockIds: readonly string[]; onPorts(noteId: string, snapshot: NotebookGraphSnapshot, blockIds: readonly string[]): void; onOpen: OpenNote; onOpenLink(link: NoteLinkOpenRequest): void; onNeighbors(id: string): void; onPreview(id: string): void; onUnbound(id: string): void; refresh(): void }
 type CanvasNode = Node<NoteNodeData, 'note'>
 type CanvasEdge = Edge<{ relationship: CanvasAttachedRelationship; inspect(relationship: CanvasAttachedRelationship): void; offset: number; labelBaseline: number; sourceTitle: string; targetTitle: string }, 'relationship'>
 const NO_BLOCK_IDS: readonly string[] = [], NO_PORTS: NoteCanvasBlockPort[] = []
 
-function SavedBody({ item, snapshot, active, blockIds, onPorts, onOpen, onOpenLink, refresh }: Pick<NoteNodeData, 'item' | 'snapshot' | 'active' | 'blockIds' | 'onOpen' | 'onOpenLink' | 'refresh'> & { onPorts(ports: NoteCanvasBlockPort[]): void }) {
+function SavedBody({ item, snapshot, active, blockIds, source, content: result, documents, preview, onRead, onPorts, onOpen, onOpenLink, refresh }: Pick<NoteNodeData, 'item' | 'snapshot' | 'active' | 'blockIds' | 'source' | 'content' | 'documents' | 'preview' | 'onRead' | 'onOpen' | 'onOpenLink' | 'refresh'> & { onPorts(ports: NoteCanvasBlockPort[]): void }) {
   const body = useRef<HTMLDivElement>(null)
-  const [result, setResult] = useState<{ snapshot: NotebookGraphSnapshot; value?: NoteContentObservation; issue?: string } | null>(null)
-  const [attempt, setAttempt] = useState(0), [selected, setSelected] = useState<string | undefined>()
-  useEffect(() => {
-    if (!active || !item.page) return
-    const controller = new AbortController()
-    void api.notebooks.content(item.id, { signal: controller.signal }).then(value => {
-      if (!controller.signal.aborted) setResult({ snapshot, value })
-    }).catch(error => { if (!controller.signal.aborted) setResult({ snapshot, issue: error instanceof Error ? error.message : String(error) }) })
-    return () => controller.abort()
-  }, [active, item.id, item.page?.resource, snapshot, attempt])
+  const [all, showAll] = useState(false), [selected, setSelected] = useState<string | undefined>()
   const ready = result?.snapshot === snapshot ? result : null, content = ready?.value
-  const confirmed = content?.status === 'read' && noteContentMatchesGraph(snapshot, content) ? content : null
-  const confirmedIds = useMemo(() => confirmed && !snapshot.graph.duplicateNoteIds.includes(item.id) ? blockIds.filter(id => confirmed.blockIds.includes(id)) : NO_BLOCK_IDS, [confirmed, blockIds, snapshot, item.id])
+  const ambiguous = snapshot.graph.duplicateNoteIds.includes(item.id)
+  const confirmed = content?.status === 'read' && noteContentMatchesGraph(snapshot, content) && !ambiguous ? content : null
+  const related = useMemo(() => source ? projectNoteBlocks(source, blockIds).rootBlockIds : NO_BLOCK_IDS, [source, blockIds])
+  const shown = useMemo(() => all ? related : related.slice(0, 3), [related, all])
+  const confirmedIds = useMemo(() => {
+    if (!confirmed || !source) return NO_BLOCK_IDS
+    if (preview) return blockIds
+    const displayed = new Set(projectNoteBlocks(source, shown).shownBlockIds)
+    return blockIds.filter(id => displayed.has(id))
+  }, [confirmed, source, preview, blockIds, shown])
   useNoteCanvasBlockPorts(body, active && Boolean(confirmed), confirmedIds, onPorts)
-  return <div ref={body} className="note-canvas-body nodrag nopan nowheel" onDoubleClick={event => event.stopPropagation()}>
-    {confirmed ? <><div className="note-canvas-saved-heading"><span>Saved original</span><span>Select a block to open it</span></div>
+  return <div className="note-canvas-saved-body"><div ref={body} className="note-canvas-body nodrag nopan nowheel" data-reading-mode={preview ? 'document' : 'related'} onDoubleClick={event => event.stopPropagation()}>
+    {confirmed ? <><div className="note-canvas-saved-heading"><span>{preview ? 'Full saved note' : `${related.length} related block${related.length === 1 ? '' : 's'}`}</span><span>Saved original</span></div>
       <div className="note-canvas-reader" data-selected-block={selected} onClick={event => {
         const block = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-block-id]') : null
         if (block && block.closest('.mobile-note-body') === event.currentTarget.querySelector('.mobile-note-body')) setSelected(block.dataset.blockId)
-      }}><NoteReader content={confirmed.content} path={confirmed.resource.path} workspaceId={confirmed.resource.workspaceId} revision={confirmed.revision} onOpenLink={onOpenLink} /></div>
+      }}><NoteReader content={confirmed.content} path={confirmed.resource.path} workspaceId={confirmed.resource.workspaceId} revision={confirmed.revision} documents={documents} blockIds={preview ? undefined : shown} readReference={target => onRead(target.noteId)} onOpenLink={onOpenLink} /></div>
       {selected && item.page ? <button type="button" className="note-canvas-open-block" onClick={() => onOpen(item.page!, selected)}><OpenIcon size={12} />Open selected block</button> : null}</>
-      : <div className="note-canvas-body-state" role="status">{!ready ? 'Reading saved original…' : content?.status === 'read' ? 'Saved snapshot changed. Refresh the graph to read the current original.' : ready.issue ?? (content && 'message' in content ? content.message : 'Original body is unconfirmed.')}
-        {ready && <button type="button" onClick={content?.status === 'read' ? refresh : () => setAttempt(value => value + 1)}>{content?.status === 'read' ? 'Refresh graph' : 'Retry original'}</button>}
+      : <div className="note-canvas-body-state" role="status">{ambiguous ? 'Multiple original files share this Note identity. Open the registered original or refresh to confirm the source.' : ready?.pending ? 'Reading related original blocks…' : !ready ? 'Automatic reading covers up to 6 notes in this saved graph. Read these related blocks to continue.' : content?.status === 'read' ? 'Saved snapshot changed. Refresh the graph to read the current original.' : ready.issue ?? (content && 'message' in content ? content.message : 'Original body is unconfirmed.')}
+        {!ready?.pending && <button type="button" onClick={content?.status === 'read' ? refresh : () => onRead(item.id)}>{content?.status === 'read' ? 'Refresh graph' : 'Read related blocks'}</button>}
       </div>}
-  </div>
+  </div>{confirmed && !preview && related.length > shown.length && <div className="note-canvas-reading-actions nodrag nopan"><button type="button" className="note-canvas-more" onClick={() => showAll(true)}>More {related.length - shown.length} related blocks</button></div>}</div>
 }
 
 function EndpointHandles({ kind, blockId }: { kind: 'page' | 'block'; blockId?: string }) {
@@ -67,7 +66,14 @@ const NoteCard = memo(function NoteCard({ data, selected }: NodeProps<CanvasNode
   const { item } = data
   const updateInternals = useUpdateNodeInternals()
   const [portState, setPortState] = useState<{ snapshot: NotebookGraphSnapshot; ports: NoteCanvasBlockPort[] } | null>(null)
-  const ports = data.active && data.preview && portState?.snapshot === data.snapshot ? portState.ports : NO_PORTS
+  const inView = useStore(state => {
+    const node = state.nodeLookup.get(item.id), [x, y, zoom] = state.transform
+    if (!node || !state.width || !state.height) return false
+    const point = node.internals.positionAbsolute, left = point.x * zoom + x, top = point.y * zoom + y
+    return left < state.width && top < state.height && left + (node.measured.width ?? 288) * zoom > 0 && top + (node.measured.height ?? 180) * zoom > 0
+  })
+  useEffect(() => { data.onVisible(item.id, data.active && inView && data.blockIds.length > 0); return () => data.onVisible(item.id, false) }, [item.id, data.active, inView, data.blockIds.length, data.onVisible])
+  const ports = data.active && portState?.snapshot === data.snapshot ? portState.ports : NO_PORTS
   const [mountedPorts, setMountedPorts] = useState<NoteCanvasBlockPort[]>([])
   const bounds = useStore(state => state.nodeLookup.get(item.id)?.internals.handleBounds)
   const usedHandles = useStore(state => JSON.stringify(state.edges.flatMap(edge => [
@@ -100,11 +106,11 @@ const NoteCard = memo(function NoteCard({ data, selected }: NodeProps<CanvasNode
         : <strong className="note-canvas-title" title={item.id}>{item.title}</strong>}
       {!item.page || item.observation?.status !== 'read' ? <span className="note-canvas-note-state" title={item.observation && 'message' in item.observation ? item.observation.message : item.id}>{item.observation?.status ?? 'Target not observed'}</span> : null}
     </header>
-    {data.preview && item.page ? <SavedBody item={item} snapshot={data.snapshot} active={data.active} blockIds={data.blockIds} onPorts={reportPorts} onOpen={data.onOpen} onOpenLink={data.onOpenLink} refresh={data.refresh} /> : null}
+    {item.page && (data.blockIds.length > 0 || data.preview) ? <SavedBody {...data} onPorts={reportPorts} /> : <p className="note-canvas-page-target">Page relationship · no specific block</p>}
     {mountedPorts.map(port => <div key={port.blockId} className="note-canvas-row-endpoint note-canvas-endpoint" data-port-block-id={port.blockId} title={`Original block: ${port.blockId}`} style={{ top: port.top, visibility: ports.some(visible => visible.blockId === port.blockId) ? 'visible' : 'hidden' }}><EndpointHandles kind="block" blockId={port.blockId} /></div>)}
     <div className="note-canvas-block-summary note-canvas-endpoint" data-endpoint-kind="block" title="Block endpoints are grouped here. Inspect a relationship to see its exact original blocks."><EndpointHandles kind="block" /><span>Blocks</span><span>Grouped endpoints</span></div>
     <div className="note-canvas-degrees" aria-label={`${item.incoming} incoming, ${item.outgoing} outgoing occurrences in the saved graph`} title="Saved links and references, including notes outside this view. Unmatched links count only as outgoing."><span>↓ {item.incoming} incoming</span><span>↑ {item.outgoing} outgoing</span></div>
-    <footer className="nodrag"><button type="button" aria-expanded={data.preview} aria-label={`${data.preview ? 'Collapse' : 'Read'} saved body: ${item.title}`} onClick={() => data.onPreview(item.id)} disabled={!item.page}><FileIcon size={12} />{data.preview ? 'Hide body' : 'Read body'}</button>
+    <footer className="nodrag"><button type="button" aria-expanded={data.preview} aria-label={`${data.preview ? 'Show related blocks' : 'Full note'}: ${item.title}`} onClick={() => { if (!data.content?.pending && (!data.content?.value || data.content.value.status !== 'read')) data.onRead(item.id); data.onPreview(item.id) }} disabled={!item.page}><FileIcon size={12} />{data.preview ? 'Related blocks' : 'Full note'}</button>
       <button type="button" aria-expanded={data.expanded} aria-label={`${data.expanded ? 'Collapse' : 'Expand'} relationships: ${item.title}`} onClick={() => data.onNeighbors(item.id)} disabled={!item.neighbors}><BranchIcon size={12} />{data.expanded ? 'Collapse' : 'Explore'}<small>{item.neighbors}</small></button>
     </footer>
   </article>
@@ -175,19 +181,27 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onTalk, seedNoteIds, 
       add(reference.source.noteId, reference.source.blockId)
       if (reference.resolution === 'resolved' && reference.target.kind === 'block') add(reference.target.noteId, reference.target.blockId)
     }
+    for (const reference of projection.unbound) add(reference.source.noteId, reference.source.blockId)
     return new Map([...result].map(([id, ids]) => [id, [...ids].sort()]))
-  }, [projection.relationships])
+  }, [projection.relationships, projection.unbound])
+  const [visibleNotes, setVisibleNotes] = useState<readonly string[]>([])
+  const reportVisibility = useCallback((id: string, visible: boolean) => setVisibleNotes(held => held.includes(id) === visible ? held : visible ? [...held, id] : held.filter(value => value !== id)), [])
+  const priority = useMemo(() => {
+    const edge = inspected?.kind === 'relationship' ? projection.relationships.find(edge => edge.id === inspected.id) : undefined
+    return edge ? [edge.source, edge.target] : scope.kind === 'note' && visibleNotes.includes(scope.noteId) ? [scope.noteId] : NO_BLOCK_IDS
+  }, [inspected, projection.relationships, scope, visibleNotes])
+  const bodies = useNoteCanvasContent(snapshot, active, visibleNotes, priority)
   const attachedRelationships = useMemo(() => attachNoteCanvasRelationships(projection.relationships, new Map(Object.entries(visibleBlocks)
-    .filter(([id, value]) => active && previews.has(id) && value.snapshot === snapshot && !snapshot?.graph.duplicateNoteIds.includes(id))
+    .filter(([id, value]) => active && value.snapshot === snapshot && !snapshot?.graph.duplicateNoteIds.includes(id))
     .map(([id, value]) => [id, new Set(value.ids)]))), [projection.relationships, visibleBlocks, active, previews, snapshot])
   useEffect(() => {
     if (!snapshot) return
     setNodes(held => {
       const byId = new Map(held.map(node => [node.id, node])), positions = initialCanvasPositions(projection.notes.map(item => item.id), refs.current.layout.positions)
       return projection.notes.map(item => ({ ...byId.get(item.id), id: item.id, type: 'note', position: byId.get(item.id)?.position ?? positions[item.id]!, dragHandle: '.note-canvas-drag',
-        data: { item, snapshot, active, expanded: expanded.has(item.id), preview: previews.has(item.id), blockIds: requestedBlocks.get(item.id) ?? NO_BLOCK_IDS, onPorts: recordPorts, onOpen, onOpenLink: linkNavigation.openLink, onNeighbors: toggleNeighbors, onPreview: togglePreview, onUnbound: inspectUnbound, refresh } }))
+        data: { item, snapshot, active, content: bodies.results[item.id], source: bodies.knowledge.sources.find(source => source.note.noteId === item.id), documents: bodies.documents, onRead: bodies.request, onVisible: reportVisibility, expanded: expanded.has(item.id), preview: previews.has(item.id), blockIds: requestedBlocks.get(item.id) ?? NO_BLOCK_IDS, onPorts: recordPorts, onOpen, onOpenLink: linkNavigation.openLink, onNeighbors: toggleNeighbors, onPreview: togglePreview, onUnbound: inspectUnbound, refresh } }))
     })
-  }, [projection, snapshot, active, expanded, previews, requestedBlocks, recordPorts, onOpen, linkNavigation.openLink, inspectUnbound, toggleNeighbors, togglePreview, refresh])
+  }, [projection, snapshot, active, expanded, previews, requestedBlocks, recordPorts, onOpen, linkNavigation.openLink, inspectUnbound, toggleNeighbors, togglePreview, refresh, bodies.results, bodies.knowledge, bodies.documents, bodies.request, reportVisibility])
   const edges = useMemo<CanvasEdge[]>(() => {
     const pairs = new Map<string, CanvasAttachedRelationship[]>(), pairKey = (source: string, target: string) => JSON.stringify([source, target].sort())
     for (const relationship of attachedRelationships) {
@@ -220,15 +234,22 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onTalk, seedNoteIds, 
     const frameInitial = () => {
       if (!flow || initialized.current || hadViewport.current || viewportTouched.current) return
       initialized.current = true
-      requestAnimationFrame(() => { if (viewportTouched.current || refs.current.layout.viewport) return; void flow.fitView({ padding: .15, maxZoom: 1, duration: 200 }) })
+      requestAnimationFrame(() => {
+        if (viewportTouched.current || refs.current.layout.viewport) return
+        const root = scope.kind === 'note' ? scope.noteId : projection.notes[0]!.id
+        const node = flow.getNode(root)
+        if (!node) { initialized.current = false; return }
+        // Read the current Note first. Explicit Fit remains available for an overview of every node.
+        void flow.setViewport({ x: 24 - node.position.x, y: 24 - node.position.y, zoom: 1 })
+      })
     }
     if (!force && projection.notes.every(note => held[note.id])) { frameInitial(); return }
     let worker: Worker
     try { worker = new Worker(new URL('../lib/note-canvas-layout.worker.ts', import.meta.url), { type: 'module' }) }
-    catch { setLayoutIssue('Automatic layout could not start. You can still move Notes; retry Arrange.'); return }
+    catch { setLayoutIssue('Automatic layout could not start. You can still move Notes; retry Arrange.'); frameInitial(); return }
     const id = crypto.randomUUID(), input: CanvasLayoutInput = { nodes: projection.notes.map(note => {
       const node = refs.current.nodes.find(node => node.id === note.id)
-      return { id: note.id, width: node?.measured?.width ?? 288, height: node?.measured?.height ?? (previews.has(note.id) ? 400 : 154) }
+      return { id: note.id, width: node?.measured?.width ?? 320, height: node?.measured?.height ?? 480 }
     }), edges: projection.relationships }
     let current = true
     const cancel = () => { current = false; worker.terminate(); setArranging(false) }
