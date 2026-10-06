@@ -22,7 +22,8 @@ const clientUiAliases = Object.entries(clientUi.exports).flatMap(([key, value]) 
 }).sort((a, b) => b.find.source.length - a.find.source.length)
 const mutations = {
   highlight: ['apps/desktop/src/renderer/src/components/WorkbenchTopology.tsx', 'data-subject-region={tab.highlightedRegionIds?.includes(region.regionId) || undefined}', 'data-subject-region={undefined}'],
-  consumer: ['apps/desktop/src/renderer/src/components/TopicRowPresence.tsx', '{ highlightedRegionIds: [subject.regionId] }', '{ highlightedRegionIds: undefined }']
+  consumer: ['apps/desktop/src/renderer/src/components/TopicRowPresence.tsx', '{ highlightedRegionIds: [subject.regionId] }', '{ highlightedRegionIds: undefined }'],
+  location: ['apps/desktop/src/renderer/src/components/WorkbenchTopology.tsx', '{inspected?.locationLabel ? <small>{inspected.locationLabel}</small> : null}', '{null}']
 } as const
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
  esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
