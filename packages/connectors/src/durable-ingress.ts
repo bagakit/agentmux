@@ -27,7 +27,7 @@ export type DurableIngressOptions = {
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 function fail(code: string): never { throw new AgentMuxError('This external intake cannot use the original target or authority. Existing Agents and inputs are retained.', code) }
 function verified(value: VerifiedIngressEvent): VerifiedIngressEvent {
-  const text = (v: unknown): string => { if (typeof v !== 'string' || !v.trim() || /[\u0000-\u001f\u007f]/u.test(v)) fail('INVALID_CONNECTION_INGRESS'); return v as string }
+  const text = (v: unknown): string => { if (typeof v !== 'string' || !v.trim() || v.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(v)) fail('INVALID_CONNECTION_INGRESS'); return v as string }
   if (typeof value.body !== 'string' || !['mention', 'reply', 'message'].includes(value.selection)) fail('INVALID_CONNECTION_INGRESS')
   return { eventId: text(value.eventId), messageId: text(value.messageId), externalConversationId: text(value.externalConversationId), actor: parseConnectionActor(value.actor), body: value.body, selection: value.selection }
 }
@@ -186,7 +186,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   async list(value: ConnectionIngressListInput) {
     const input = parseIngressParams('connection.ingress.ls', value)
     return this.safe(() => {
-      const after = input.afterIngressId ? this.database.prepare('SELECT sequence FROM connection_ingress_message WHERE ingress_id=? AND connection_id=?').get(input.afterIngressId, input.connectionId) : undefined
+      const after = input.afterIngressId ? this.database.prepare('SELECT sequence FROM connection_ingress_message WHERE ingress_id=? AND connection_id=?' + (input.bindingId ? " AND json_extract(record_json,'$.input.author.bindingId')=?" : '')).get(input.afterIngressId, input.connectionId, ...(input.bindingId ? [input.bindingId] : [])) : undefined
       if (input.afterIngressId && !after) fail('INGRESS_CURSOR_MISMATCH')
       const rows = this.database.prepare('SELECT record_json FROM connection_ingress_message WHERE connection_id=? AND sequence>? ' + (input.bindingId ? "AND json_extract(record_json,'$.input.author.bindingId')=? " : '') + 'ORDER BY sequence LIMIT ?').all(input.connectionId, Number(after?.sequence ?? 0), ...(input.bindingId ? [input.bindingId] : []), (input.limit ?? 25) + 1)
       const ingresses = rows.slice(0, input.limit ?? 25).map(row => parseConnectionIngressRecord(JSON.parse(String(row.record_json))))

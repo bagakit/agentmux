@@ -22,7 +22,7 @@ export type AgentExternalInputIntent = {
 export function parseAgentExternalMessageAuthor(value: unknown): AgentExternalMessageAuthor {
   const p = rpcRecord(value, ['kind', 'connectionId', 'actor', 'externalConversationId', 'externalMessageId', 'bindingId', 'bindingRevision', 'grantId', 'grantRevision'], 'INVALID_EXTERNAL_AUTHOR')
   const fail = (): never => { throw new AgentMuxError('External attribution is malformed.', 'INVALID_EXTERNAL_AUTHOR') }
-  const text = (v: unknown): string => { if (typeof v !== 'string' || !v.trim() || /[\u0000-\u001f\u007f]/u.test(v)) fail(); return v as string }
+  const text = (v: unknown): string => { if (typeof v !== 'string' || !v.trim() || v.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(v)) fail(); return v as string }
   const revision = (v: unknown): number => { if (!Number.isSafeInteger(v) || Number(v) < 1) fail(); return v as number }
   if (p.kind !== 'external') fail()
   return { kind: 'external', connectionId: text(p.connectionId), actor: parseConnectionActor(p.actor), externalConversationId: text(p.externalConversationId), externalMessageId: text(p.externalMessageId), bindingId: text(p.bindingId), bindingRevision: revision(p.bindingRevision), grantId: text(p.grantId), grantRevision: revision(p.grantRevision) }
