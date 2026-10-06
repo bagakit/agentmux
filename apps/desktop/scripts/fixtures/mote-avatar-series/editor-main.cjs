@@ -10,28 +10,31 @@ const sha = value => createHash('sha256').update(value).digest('hex')
 app.whenReady().then(async () => {
   console.log('editor-main: ready')
   let win, hold = false, releases = [], loseAckOnce = false, historicalChoiceOnce = null, holdReadKey = null, heldReads = [], holdSaveKey = null, heldSaves = [], failNativePublicationOnce = false, failFlushOnce = false, failFlushAt = null
+  const starter = scope === 'starter'
   try {
     Menu.setApplicationMenu(null)
     await fs.mkdir(path.join(app.getPath('home'), '.agentmux'), { recursive: true })
-    const { MoteAvatarSeriesOwner, MoteAvatarControl, createMoteAvatarWriter, ConfigStore, DEFAULT_CONFIG, ConfigOwner, ScratchTopics, directoryIdentity, CONFIG_CHANGED_CHANNEL, observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } = require(path.join(path.dirname(html), 'editor-native.cjs'))
-    const builtinRoot = path.join(directory, 'builtin'), userRoot = path.join(directory, 'avatars')
+    const { MoteAvatarSeriesOwner, MoteAvatarControl, createMoteAvatarWriter, ConfigStore, DEFAULT_CONFIG, ConfigOwner, ScratchTopics, directoryIdentity, CONFIG_CHANGED_CHANNEL, observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority, AgentMuxControlServer, senderTrust, assertSenderTrusted } = require(path.join(path.dirname(html), 'editor-native.cjs'))
+    const builtinRoot = path.join(directory, 'builtin'), userRoot = starter ? path.join(app.getPath('home'), '.agentmux', 'avatars') : path.join(directory, 'avatars')
     await fs.cp(originalBuiltin, builtinRoot, { recursive: true })
-    await fs.mkdir(path.join(userRoot, 'personal'), { recursive: true })
-    await fs.copyFile(path.join(builtinRoot, 'geometry/owl.png'), path.join(userRoot, 'personal/own.png'))
     // Existing face editing probes now use a real declared user collection. The
     // original bundled declaration remains unchanged for saved-choice recovery.
     const geometry = JSON.parse(await fs.readFile(path.join(builtinRoot, 'geometry/series.json'), 'utf8'))
     const originalFace = geometry.entries.find(entry => entry.definition.kind === 'face2d')
     assert.ok(originalFace, 'The actual original bundled face declaration is required')
     const presetRoot = path.join(userRoot, 'fixture-presets')
-    await fs.mkdir(presetRoot, { recursive: true })
-    await fs.copyFile(path.join(builtinRoot, 'geometry/owl.png'), path.join(presetRoot, 'portrait.png'))
     const userDeclaration = { schema: 'agentmux.avatar-series.v1', title: 'Personal presets', entries: [
       { id: 'quiet', title: 'Quiet · Your preset', definition: structuredClone(originalFace.definition) },
       { id: 'portrait', title: 'Owl · Your image', definition: { kind: 'image', file: 'portrait.png' } }
     ] }
-    await fs.writeFile(path.join(presetRoot, 'series.json'), JSON.stringify(userDeclaration))
-    result.userDeclaration = { path: path.join(presetRoot, 'series.json'), sha256: sha(JSON.stringify(userDeclaration)), declaration: userDeclaration }
+    if (!starter) {
+      await fs.mkdir(path.join(userRoot, 'personal'), { recursive: true })
+      await fs.copyFile(path.join(builtinRoot, 'geometry/owl.png'), path.join(userRoot, 'personal/own.png'))
+      await fs.mkdir(presetRoot, { recursive: true })
+      await fs.copyFile(path.join(builtinRoot, 'geometry/owl.png'), path.join(presetRoot, 'portrait.png'))
+      await fs.writeFile(path.join(presetRoot, 'series.json'), JSON.stringify(userDeclaration))
+    }
+    if (!starter) result.userDeclaration = { path: path.join(presetRoot, 'series.json'), sha256: sha(JSON.stringify(userDeclaration)), declaration: userDeclaration }
     const store = new ConfigStore(path.join(directory, 'config.json'))
     let config = scope === 'durable-reopen' ? await store.get() : await store.save({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: '__scratch__', hostId: 'local', path: path.join(app.getPath('home'), '.agentmux/scratch'), name: 'Private Motes', kind: 'folder' }] })
     const workspace = config.workspaces.find(value => value.id === '__scratch__')
@@ -61,7 +64,45 @@ app.whenReady().then(async () => {
       }
     }
     const sources = new MoteAvatarSeriesOwner({ userRoot, builtinRoot })
-    const control = new MoteAvatarControl(sources, ['durable', 'durable-reopen', 'request-label-delta', 'face-entry-delta'].includes(scope) ? createMoteAvatarWriter(owner, sources, topics, store) : undefined)
+    const control = new MoteAvatarControl(sources, ['durable', 'durable-reopen', 'request-label-delta', 'face-entry-delta', 'starter'].includes(scope) ? createMoteAvatarWriter(owner, sources, topics, store) : undefined,
+      starter ? async exactPath => { result.revealCalls.push({ path: exactPath, outcome: 'requested', boundary: 'Original OS folder port accepted this exact directory; no Finder window or focus claim.' }) } : undefined)
+    if (starter) {
+      result.createCalls = []; result.revealCalls = []; result.copyCalls = []; result.ipcTrust = []; result.attemptedSaves = 0
+      const sourceCall = control.call.bind(control)
+      control.call = async (method, input) => {
+        if (method !== 'space.mote.avatar.series.create' && method !== 'space.mote.avatar.series.reveal') return sourceCall(method, input)
+        const call = { method, input: structuredClone(input) }; result.createCalls.push(call)
+        if (method === 'space.mote.avatar.series.create' && result.seedNextCreateConflict) {
+          result.seedNextCreateConflict = false
+          const exactPath = path.join(userRoot, input.seriesId)
+          await fs.mkdir(exactPath)
+          await fs.writeFile(path.join(exactPath, 'sentinel.bin'), Buffer.from('Original GUI conflict bytes'))
+          result.seededCreateConflict = { seriesId: input.seriesId, path: exactPath,
+            bytes: sha(await fs.readFile(path.join(exactPath, 'sentinel.bin'))), boundary: 'Real trusted request identity seeds only the filesystem precondition; original source owner still executes.' }
+        }
+        try {
+          const value = await sourceCall(method, input); call.value = value
+          if (method === 'space.mote.avatar.series.create' && result.loseCreateAckOnce) {
+            result.loseCreateAckOnce = false
+            throw Object.assign(new Error('The original completed creation reply was withheld at the fixture IPC boundary.'), { code: 'FIXTURE_CREATE_REPLY_WITHHELD' })
+          }
+          return value
+        }
+        catch (error) { call.error = { code: error.code, message: error.message }; throw error }
+      }
+      for (const [channel, method] of [['moteAvatars:createSeries', 'space.mote.avatar.series.create'], ['moteAvatars:revealSeries', 'space.mote.avatar.series.reveal']]) {
+        ipcMain.handle(channel, async (event, input) => {
+          const trust = senderTrust(channel, event.sender, win.webContents)
+          result.ipcTrust.push({ channel, trusted: trust.trusted, sender: event.sender.id, original: win.webContents.id })
+          assertSenderTrusted(trust)
+          return control.call(method, input)
+        })
+      }
+      ipcMain.handle('ui:writeClipboardText', (event, text) => {
+        assert.equal(event.sender, win.webContents, 'The fixture clipboard port belongs to the original editor')
+        result.copyCalls.push({ text, boundary: 'Exact native clipboard text port request recorded; system clipboard retained.' })
+      })
+    }
     ipcMain.handle('moteAvatars:list', async () => {
       const value = await control.call('space.mote.avatar.list', {})
       result.sourceCalls.push({ method: 'list', roots: value.roots, series: value.series.map(item => ({ origin: item.origin, seriesId: item.seriesId, entries: item.entries.map(entry => entry.entryId) })) })
@@ -83,6 +124,7 @@ app.whenReady().then(async () => {
       return value
     })
     ipcMain.handle('moteAvatars:save', async (_event, input) => {
+      if (starter) result.attemptedSaves++
       if (!['durable', 'durable-reopen', 'request-label-delta'].includes(scope)) throw new Error('Only the explicit durable product scopes may save.')
       const kept = await win.webContents.executeJavaScript(`seriesEditorFixture.keptRequest(${JSON.stringify(input.target)})`)
       result.requestStorage.push({ operationId: input.operationId, kept, matched: JSON.stringify(kept) === JSON.stringify(input) })
@@ -146,7 +188,7 @@ app.whenReady().then(async () => {
     console.log('editor-main: loading product')
     await win.loadFile(html, { query: { targets: JSON.stringify(targets) } })
     console.log('editor-main: product loaded')
-    const read = script => win.webContents.executeJavaScript(script)
+    const read = script => { if (starter) new Function(script); return win.webContents.executeJavaScript(script) }
     const wait = async script => { for (let index = 0; index < 200; index++) { assert.ok(result.requestStorage.every(value => value.matched), 'The complete original request must survive storage before native Save.'); if (await read(script)) return; await pause(30) } throw new Error('Timed out: ' + script) }
     const key = async (keyCode, modifiers = []) => {
       win.focus(); win.webContents.focus()
@@ -218,6 +260,12 @@ app.whenReady().then(async () => {
     }
     await wait('!!window.seriesEditorFixture && window.seriesEditorFixture.facts().ready')
     console.log('editor-main: fixture mounted', await read('typeof window.seriesGPUFacts'))
+    if (starter) {
+      await require('./starter-main.cjs')({ app, BrowserWindow, fs, path, assert, sha, pause, win, read, wait, key, click, select, range, ready, png, settleSurface,
+        directory, html, builtinRoot, userRoot, targets, topics, workspace, store, control, AgentMuxControlServer, result })
+      result.passed = true
+      return
+    }
     if (scope === 'face-entry-delta') {
       await wait('document.querySelectorAll("[data-semantic-icon-sprite]").length===1')
       result.themeFacts = await read(`({spriteCount:document.querySelectorAll('[data-semantic-icon-sprite]').length,
@@ -699,7 +747,7 @@ app.whenReady().then(async () => {
     result.gpuAfterClose = await read('seriesGPUFacts()'); assert.equal(result.gpuAfterClose.at(-1).buffers, 0)
     result.passed = true
   } catch (error) {
-    result.error = { message: error.message, stack: error.stack }
-    if (win) { result.failedFrame = await win.webContents.executeJavaScript('({text:document.body.textContent,html:document.body.innerHTML})').catch(() => null); await fs.writeFile(path.join(directory, 'failed.png'), (await win.webContents.capturePage()).toPNG()) }
+    result.error = { message: error.message, stack: error.stack, ...(starter && error.code ? { code: error.code } : {}) }
+    if (win) { result.failedFrame = await win.webContents.executeJavaScript('({text:document.body.textContent,html:document.body.innerHTML})').catch(() => null); await fs.writeFile(path.join(directory, 'failed.png'), (await win.webContents.capturePage()).toPNG()); if (starter) result.images.push('failed.png') }
   } finally { await fs.writeFile(path.join(directory, scope === 'durable-reopen' ? 'reader-result.json' : 'renderer-result.json'), JSON.stringify(result, null, 2)); win?.destroy(); app.exit(result.passed ? 0 : 1) }
 })

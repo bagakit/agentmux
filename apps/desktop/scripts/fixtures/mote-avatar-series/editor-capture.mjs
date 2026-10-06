@@ -8,7 +8,10 @@ import { createHash, randomUUID } from 'node:crypto'
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
-const directory = path.join(root, '.local/state/mote-avatar-series-editor', randomUUID()), compiled = path.join(directory, 'compiled')
+const starterOptions = ['starter', 'starter-overwrite', 'starter-create-disconnected']
+const starterScope = starterOptions.includes(process.argv[2])
+const artifactRoot = starterScope ? await fs.realpath(path.join(root, ".local/state/mote-avatar-starter")) : path.join(root, '.local/state/mote-avatar-series-editor')
+const directory = path.join(artifactRoot, ...(starterScope ? ['runs'] : []), randomUUID()), compiled = path.join(directory, 'compiled')
 await fs.mkdir(compiled, { recursive: true })
 const receipt = { passed: false, aestheticReview: 'not-performed', source: {}, images: {},
   boundary: 'Production SpaceIconPicker/SeriesEditor/helper and default Desktop API/production preload consume actual isolated Electron Main MoteAvatarSeriesOwner + MoteAvatarControl + nativeImage. Fixture Mote targets and non-source environment are isolated; no live App/Session, save, persistence, installed package or final aesthetic claim.' }
@@ -16,10 +19,10 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 try {
   const option = process.argv.length > 2 ? process.argv[2] : null
   const faceEntryMutations = ['restoreduplicate', 'lose-saved-entry', 'missing-face-layout']
-  const mutationIds = ['stale-source', 'stale-frame', 'reused-target', 'skip-dispose', 'new-retry-id', 'lost-png-projection', 'lost-mobile-projection', 'forget-kept-request', ...faceEntryMutations]
-  assert.ok(option === null || option === 'visual-delta' || option === 'durable' || option === 'consumer-build' || option === 'request-label-delta' || option === 'face-entry-delta' || mutationIds.includes(option), 'Unknown editor scope or mutation')
+  const mutationIds = ['stale-source', 'stale-frame', 'reused-target', 'skip-dispose', 'new-retry-id', 'lost-png-projection', 'lost-mobile-projection', 'forget-kept-request', ...faceEntryMutations, 'starter-overwrite', 'starter-create-disconnected']
+  assert.ok(option === null || option === 'visual-delta' || option === 'durable' || option === 'consumer-build' || option === 'request-label-delta' || option === 'face-entry-delta' || starterOptions.includes(option) || mutationIds.includes(option), 'Unknown editor scope or mutation')
   const mutation = mutationIds.includes(option) ? option : null
-  receipt.scope = faceEntryMutations.includes(option) ? 'face-entry-delta' : option === 'visual-delta' || option === 'durable' || option === 'consumer-build' || option === 'request-label-delta' || option === 'face-entry-delta' ? option : ['new-retry-id', 'lost-png-projection', 'lost-mobile-projection', 'forget-kept-request'].includes(option) ? 'durable' : 'full'
+  receipt.scope = starterScope ? 'starter' : faceEntryMutations.includes(option) ? 'face-entry-delta' : option === 'visual-delta' || option === 'durable' || option === 'consumer-build' || option === 'request-label-delta' || option === 'face-entry-delta' ? option : ['new-retry-id', 'lost-png-projection', 'lost-mobile-projection', 'forget-kept-request'].includes(option) ? 'durable' : 'full'
   const edits = {
     'stale-source': ['apps/desktop/src/renderer/src/components/MoteAvatarSeriesEditor.tsx', 'if (!alive.current || request !== sourceRequest.current || originalTarget.current !== target) return', 'if (!alive.current || originalTarget.current !== target) return'],
     'stale-frame': ['apps/desktop/src/renderer/src/components/MoteAvatarSeriesEditor.tsx', 'const valid = () => alive.current && request === frameRequest.current && originalTarget.current === target', 'const valid = () => alive.current && originalTarget.current === target'],
@@ -32,6 +35,8 @@ try {
     'restoreduplicate': ['apps/desktop/src/renderer/src/components/MoteAvatarSeriesEditor.tsx', "selected.origin !== 'builtin' || entry.definition.kind !== 'face2d' ||", "true || selected.origin !== 'builtin' || entry.definition.kind !== 'face2d' ||"],
     'lose-saved-entry': ['apps/desktop/src/renderer/src/components/MoteAvatarSeriesEditor.tsx', '[initialChoice?.source, prepared?.source].some(source => source && locatorKey(source) === locatorKey({ ...selected, entryId: entry.entryId }))', 'false'],
     'missing-face-layout': ['apps/desktop/src/renderer/src/components/MoteAvatarSeriesEditor.tsx', 'original.querySelectorAll<HTMLElement | SVGElement>(layoutParts).forEach', ';[].forEach'],
+    'starter-overwrite': ['apps/desktop/src/main/mote-avatar-series.ts', 'const path = join(root, input.seriesId)\n    try { await mkdir(path, { mode: 0o700 }) }', 'const path = join(root, input.seriesId)\n    try { await mkdir(path, { mode: 0o700, recursive: true }) }'],
+    'starter-create-disconnected': ['apps/desktop/src/renderer/src/components/MoteAvatarSeriesCreateDialog.tsx', 'api.moteAvatars.createSeries(', '(() => Promise.reject(new Error("The bounded production creation wire was removed by this mutation.")))('],
   }
   const mutated = { name: 'bounded-production-mutation', setup(plugin) {
     if (!mutation) return
@@ -91,7 +96,7 @@ try {
     alias, conditions: ['production'], plugins: [mutated, uiSources, workers], loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff2': 'file', '.woff': 'file', '.ttf': 'file' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' } })
   const preload = await build({ absWorkingDir: root, entryPoints: [path.join(root, 'apps/desktop/src/preload/index.ts')], outfile: path.join(compiled, 'production-preload.cjs'),
-    platform: 'node', format: 'cjs', bundle: true, external: ['electron'], alias, metafile: true, logLevel: 'error' })
+    platform: 'node', format: 'cjs', bundle: true, external: ['electron'], alias, plugins: [uiSources], metafile: true, logLevel: 'error' })
   const nativeAlias = Object.fromEntries(Object.entries(alias).filter(([name]) => !name.startsWith('@agentmux/core')))
   const nativeCoreFiles = new Set()
   const nativeCore = { name: 'original-built-core-native-exports', setup(plugin) {
@@ -100,25 +105,34 @@ try {
       const file = path.resolve(args.resolveDir, args.path); nativeCoreFiles.add(file)
       return { path: file, external: true }
     })
-    plugin.onResolve({ filter: /^@agentmux\/core(?:\/.*)?$/ }, async args => {
-      const folder = path.join(root, 'packages/core'), manifest = JSON.parse(await fs.readFile(path.join(folder, 'package.json'), 'utf8'))
-      const subpath = args.path === '@agentmux/core' ? '.' : '.' + args.path.slice('@agentmux/core'.length)
+    plugin.onResolve({ filter: /^@agentmux\/(?:core|relay)(?:\/.*)?$/ }, async args => {
+      const parts = args.path.split('/'), folder = path.join(root, 'packages', parts[1]), manifest = JSON.parse(await fs.readFile(path.join(folder, 'package.json'), 'utf8'))
+      const subpath = parts.length === 2 ? '.' : './' + parts.slice(2).join('/')
       const exported = manifest.exports[subpath]?.import
       if (!exported) throw new Error('The original Core native export is unavailable: ' + args.path)
       const file = path.join(folder, exported); nativeCoreFiles.add(file)
       return { path: file, external: true }
     })
   } }
-  const nativeEntry = ['durable', 'consumer-build', 'request-label-delta', 'face-entry-delta'].includes(receipt.scope)
+  const nativeEntry = ['durable', 'consumer-build', 'request-label-delta', 'face-entry-delta', 'starter'].includes(receipt.scope)
     ? 'export { MoteAvatarSeriesOwner, MoteAvatarControl, createMoteAvatarWriter, ConfigStore, DEFAULT_CONFIG, ConfigOwner, ScratchTopics, directoryIdentity } from "./apps/desktop/scripts/fixtures/mote-avatar-series/writer-entry.ts";'
     : 'export { MoteAvatarSeriesOwner, MoteAvatarControl } from "./apps/desktop/scripts/fixtures/mote-avatar-series/source-entry.ts"; export { ConfigStore, DEFAULT_CONFIG } from "./apps/desktop/src/main/config-store.ts"; export { ConfigOwner } from "./apps/desktop/src/main/config-owner.ts"; export { ScratchTopics } from "./apps/desktop/src/main/scratch-topics.ts"; export { directoryIdentity } from "./apps/desktop/src/shared/space-addresses.ts";'
-  const native = await build({ absWorkingDir: root, stdin: { contents: nativeEntry + ' export { CONFIG_CHANGED_CHANNEL } from "./apps/desktop/src/shared/contracts.ts"; export { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from "./apps/desktop/src/main/workbench-storage-authority.ts";', resolveDir: root, sourcefile: 'original-source-entry.ts' },
-    outfile: path.join(compiled, 'editor-native.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], alias: nativeAlias, plugins: [nativeCore, uiSources], metafile: true, logLevel: 'error' })
-  for (const file of Object.keys({ ...built.metafile.inputs, ...preload.metafile.inputs, ...native.metafile.inputs, ...workerInputs })) {
+  const native = await build({ absWorkingDir: root, stdin: { contents: nativeEntry + ' export { CONFIG_CHANGED_CHANNEL } from "./apps/desktop/src/shared/contracts.ts"; export { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from "./apps/desktop/src/main/workbench-storage-authority.ts";' + (starterScope ? ' export { AgentMuxControlServer } from "@agentmux/core"; export { senderTrust, assertSenderTrusted } from "./apps/desktop/src/main/ipc-sender-trust.ts";' : ''), resolveDir: root, sourcefile: 'original-source-entry.ts' },
+    outfile: path.join(compiled, 'editor-native.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], alias: nativeAlias, plugins: [mutated, nativeCore, uiSources], metafile: true, logLevel: 'error' })
+  const host = starterScope ? await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'host-entry.ts')], outfile: path.join(compiled, 'host-entry.mjs'),
+    bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external', alias: nativeAlias, plugins: [nativeCore], metafile: true, logLevel: 'error' }) : null
+  for (const file of Object.keys({ ...built.metafile.inputs, ...preload.metafile.inputs, ...native.metafile.inputs, ...host?.metafile.inputs, ...workerInputs })) {
     if (file === 'original-source-entry.ts' || file.startsWith('original-worker:') || file.startsWith('original-url:') || file.startsWith('original-raw:')) continue
     receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
   }
   for (const file of ['editor-capture.mjs', 'editor-main.cjs', 'editor-preload.cjs']) receipt.source[path.relative(root, path.join(fixture, file))] = sha(await fs.readFile(path.join(fixture, file)))
+  if (starterScope) {
+    for (const file of ['starter-main.cjs', 'host-entry.ts', 'verify-starter.mjs']) receipt.source[path.relative(root, path.join(fixture, file))] = sha(await fs.readFile(path.join(fixture, file)))
+    for (const file of ['packages/core/src/mote-avatar-series.ts', 'packages/core/src/mote-avatar-write.ts', 'packages/core/src/public-rpc.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/rpc-native-codec.ts',
+      'packages/core/src/public-rpc-client.ts', 'packages/core/src/agentmux-cli-commands.ts', 'packages/core/src/agentmux-cli-help.ts', 'packages/core/src/agentmux.ts', 'packages/core/bin/amux',
+      'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/ipc-sender-trust.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/components/MoteAvatarSeriesCreateDialog.tsx',
+      'apps/desktop/native/workspace-move.c', 'apps/desktop/resources/bin/agentmux-workspace-move']) receipt.source[file] = sha(await fs.readFile(path.join(root, file)))
+  }
   const recordResources = async folder => {
     for (const entry of await fs.readdir(folder, { withFileTypes: true })) {
       const file = path.join(folder, entry.name)
@@ -128,11 +142,13 @@ try {
   }
   await recordResources(path.join(root, 'apps/desktop/resources/avatar-series'))
   await recordResources(path.join(root, 'packages/core/dist'))
+  if (starterScope) await recordResources(path.join(root, 'packages/relay/dist'))
   receipt.nativeCoreExports = Object.fromEntries(await Promise.all([...nativeCoreFiles].map(async file => [path.relative(root, file), sha(await fs.readFile(file))])))
   Object.assign(receipt.source, receipt.nativeCoreExports)
   receipt.boundary = ['durable', 'request-label-delta', 'face-entry-delta'].includes(receipt.scope)
     ? 'Production Picker/Editor/SpaceObjectIcon and default API/production preload consume the production Main source control + createMoteAvatarWriter factory, actual ScratchTopics/nativeImage bounded PNG owner, durable ConfigStore/ConfigOwner and original CONFIG_CHANGED channel. Writes and target replacements are confined to private fixture Motes; no fixed saved replies, live App/Session/layout preservation, installed-package or final aesthetic claim.'
     : receipt.boundary
+  if (starterScope) receipt.boundary = 'Production Picker/Series/creation tutorial, default API and production preload consume the original native source/control and sender trust. Actual default public Host forwarding and CLI consume the same Main owner over two real sockets. Native files/config and Mote targets stay within the private fixture home. OS reveal and clipboard record the exact original port requests; no Finder, installed App, live Session or final aesthetic claim.'
   for (const name of ['SpaceIconPicker.tsx', 'MoteAvatarSeriesEditor.tsx']) assert.ok(receipt.source['apps/desktop/src/renderer/src/components/' + name], 'Original production consumer must be compiled')
   assert.ok(receipt.source['apps/desktop/src/main/mote-avatar-series.ts']); assert.ok(receipt.source['apps/desktop/src/preload/index.ts'])
   if (mutation) assert.equal(receipt.mutation?.id, mutation, 'The selected production mutation must run')
@@ -146,7 +162,12 @@ try {
     console.log(path.join(directory, 'receipt.json'))
     process.exit(0)
   }
-  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
+  receipt.compiled = {}
+  if (starterScope) for (const name of await fs.readdir(compiled)) {
+    if (!(await fs.stat(path.join(compiled, name))).isFile()) continue
+    receipt.compiled[name] = sha(await fs.readFile(path.join(compiled, name)))
+  }
+  const env = { ...process.env, ...(starterScope ? { AGENTMUX_STARTER_NODE_BINARY: process.execPath } : {}) }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
   receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'editor-main.cjs'), path.join(compiled, 'index.html'), directory, path.join(root, 'apps/desktop/resources/avatar-series'), receipt.scope],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => { logs.push(line); console.log(line) } })
