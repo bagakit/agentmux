@@ -386,7 +386,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       {tool === 'pixelate' ? <label>Blocks<select aria-label="Pixel size" value={blockSize} disabled={busy} onChange={event => setBlockSize(Number(event.target.value))}>{[8,16,24,32].map(option => <option key={option} value={option}>{option}px</option>)}</select></label> : null}
       {tool === 'cover' || properties?.kind === 'cover' ? <span className="image-annotation-editor__hint">Opaque cover · Original stays editable</span> : null}
       {tool === 'crop' ? <><span className="image-annotation-editor__hint">Drag to keep an area</span>{documentState.crop ? <button type="button" disabled={busy} onClick={() => edit(doc => setCrop(doc, null))}>Reset crop</button> : null}</> : null}
-      {tool === 'select' ? <><span className="image-annotation-editor__hint">{selected ? 'Drag handles to resize · Arrow keys to nudge' : 'Click an annotation to edit'}</span>
+      {tool === 'select' ? <><span className="image-annotation-editor__hint">{selected ? (selectionHandles(selected).length ? 'Drag handles to resize · Arrow keys to nudge' : 'Drag to move · Arrow keys to nudge') : 'Click an annotation to edit'}</span>
         {selected?.kind === 'text' ? <button type="button" disabled={busy} onClick={() => beginText(selected)}>Edit text</button> : null}</> : null}
       {tool === 'erase' ? <span className="image-annotation-editor__hint">Drag over annotations to remove them</span> : null}
       {tool === 'note' ? <span className="image-annotation-editor__hint">Click a point or drag a region</span> : null}
