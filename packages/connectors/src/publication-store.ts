@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { parsePreparedPublication, type PreparedPublication, type PublicationPreparer } from './publication-wire.js'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError, type AgentSessionHistoryItem } from '@agentmux/core'
 import type { RoomBinding } from '@agentmux/core/connections'
@@ -15,6 +16,9 @@ export type PublicationPayload = {
 export type PublicationTarget = Pick<PublicationBoundary, 'connectionId' | 'application' | 'externalConversationId'>
 export type PublicationState = 'pending' | 'dispatching' | 'unknown' | 'confirmed' | 'not-applied' | 'cancelled' | 'superseded'
 export type PublicationMapping = { messageId: string; threadId?: string }
+const PUBLICATION_FAILURE_REASONS = ['effect-unconfirmed', 'platform-rejected', 'adapter-unavailable', 'platform-unavailable', 'rate-limited', 'thread-unavailable', 'unsupported-format'] as const
+export type PublicationFailureReason = typeof PUBLICATION_FAILURE_REASONS[number]
+export type PublicationReceipt = { state: 'confirmed'; mapping: PublicationMapping } | { state: 'unknown' | 'not-applied'; reason: PublicationFailureReason }
 export type PublicationOperation = {
   operationId: string
   projectionId: string
@@ -24,12 +28,23 @@ export type PublicationOperation = {
   reference: ConversationItemRef
   target: PublicationTarget
   payload: PublicationPayload
+  effect: 'upsert' | 'withdraw'
+  fragment: { ordinal: number; count: number }
   state: PublicationState
   predecessorOperationId?: string
   mapping?: PublicationMapping
   reason?: string
+  /** Queue fate can change without erasing the original platform outcome. */
+  receipt?: PublicationReceipt
+  /** Frozen before dispatch; private to this Host, never exposed in public delivery DTOs. */
+  prepared?: PreparedPublication
 }
 type Decision = { recordId: string; revision: string; payload?: PublicationPayload; reason?: 'not-assistant-speech' | 'no-public-text' }
+export type PublicationPageOptions = {
+  fragmentBytes?: number
+  /** Only the original Core resource reader supplies these verified text parts for this one accepted page. */
+  resolvedText?: ReadonlyMap<string, ReadonlyMap<number, Extract<AgentSessionHistoryItem['contentParts'][number], { kind: 'text' }>>>
+}
 // JSON object property order carries no source or platform identity.
 const encode = (value: unknown) => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item)
@@ -38,6 +53,37 @@ const sourceKey = (source: ConversationCheckpoint['source']) => encode([source.p
 const scopeKey = (boundary: PublicationBoundary) => [boundary.bindingId, boundary.revision] as const
 const ref = (boundary: PublicationBoundary): ConversationRef => ({ hostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId })
 const same = (a: unknown, b: unknown) => encode(a) === encode(b)
+function parseReceipt(value: unknown): PublicationReceipt {
+  const invalid = (): never => { throw new AgentMuxError('The adapter receipt does not describe this original publication outcome.', 'INVALID_PUBLICATION_RECEIPT') }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid()
+  const candidate = value as Record<string, unknown>
+  if (candidate.state === 'confirmed') {
+    if (Object.keys(candidate).some(key => !['state', 'mapping'].includes(key)) || !candidate.mapping || typeof candidate.mapping !== 'object' || Array.isArray(candidate.mapping)) return invalid()
+    const mapping = candidate.mapping as Record<string, unknown>
+    const id = (item: unknown) => typeof item === 'string' && item.length > 0 && item.length <= 16_384 && !/[\u0000-\u001f\u007f]/u.test(item)
+    if (Object.keys(mapping).some(key => !['messageId', 'threadId'].includes(key)) || !id(mapping.messageId) || mapping.threadId !== undefined && !id(mapping.threadId)) return invalid()
+    return { state: 'confirmed', mapping: { messageId: mapping.messageId as string, ...(mapping.threadId === undefined ? {} : { threadId: mapping.threadId as string }) } }
+  }
+  if (!['unknown', 'not-applied'].includes(String(candidate.state)) || Object.keys(candidate).some(key => !['state', 'reason'].includes(key)) || !PUBLICATION_FAILURE_REASONS.includes(candidate.reason as PublicationFailureReason)) return invalid()
+  return { state: candidate.state as 'unknown' | 'not-applied', reason: candidate.reason as PublicationFailureReason }
+}
+
+/** Exact UTF-8 text fragments. The adapter declares its supported payload budget before admission. */
+function fragments(payload: PublicationPayload, byteLimit: number): PublicationPayload[] {
+  if (!Number.isSafeInteger(byteLimit) || byteLimit < 4 || byteLimit > 128 * 1024)
+    throw new AgentMuxError('The adapter must declare a bounded publication text budget.', 'INVALID_PUBLICATION_REQUEST')
+  const texts: string[] = []
+  let text = '', bytes = 0
+  for (const character of payload.text) {
+    const size = Buffer.byteLength(character)
+    if (bytes + size > byteLimit) { texts.push(text); text = ''; bytes = 0 }
+    text += character; bytes += size
+  }
+  if (text || !texts.length) texts.push(text)
+  return texts.map((part, index) => ({ kind: 'speech', text: part,
+    ...(payload.phase === undefined ? {} : { phase: payload.phase }),
+    ...(index !== texts.length - 1 || payload.questions === undefined ? {} : { questions: payload.questions }) }))
+}
 
 /** Select typed original speech only. Native metadata, tool data, resources and reasoning never enter the payload. */
 function decide(item: AgentSessionHistoryItem): Decision {
@@ -68,6 +114,7 @@ export class PublicationStore {
       CREATE TABLE IF NOT EXISTS connector_publication_operation (
         ordinal INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT NOT NULL UNIQUE,
         projection_id TEXT NOT NULL, source_revision TEXT NOT NULL,
+        fragment_ordinal INTEGER NOT NULL,
         binding_id TEXT NOT NULL, binding_revision INTEGER NOT NULL,
         operation_json TEXT NOT NULL, state TEXT NOT NULL
       );
@@ -76,6 +123,8 @@ export class PublicationStore {
         WHERE state IN ('pending','dispatching','unknown','not-applied');
       CREATE INDEX IF NOT EXISTS connector_publication_audit
         ON connector_publication_operation(binding_id, binding_revision, ordinal);
+      CREATE INDEX IF NOT EXISTS connector_publication_fragments
+        ON connector_publication_operation(projection_id, fragment_ordinal, ordinal);
     `)
   }
   private transaction<T>(action: () => T): T {
@@ -115,9 +164,13 @@ export class PublicationStore {
     return JSON.parse(row.checkpoint_json as string)
   }
   /** Selection happens before BEGIN; all required effects, explicit skips and the next cut commit together. */
-  commitPage(boundary: PublicationBoundary, after: ConversationCheckpoint, value: ConversationChangesPage, authorized: () => boolean): void {
+  commitPage(boundary: PublicationBoundary, after: ConversationCheckpoint, value: ConversationChangesPage, authorized: () => boolean, options: PublicationPageOptions = {}): void {
     const page = parseConversationChangesPage(value, { ...ref(boundary), checkpoint: after, limit: 100 })
-    const decisions = page.items.map(decide), source = sourceKey(page.source)
+    const decisions = page.items.map(item => {
+      const decision = decide({ ...item, contentParts: item.contentParts.map((part, index) =>
+        part.kind === 'resource' && part.content?.kind === 'text' ? options.resolvedText?.get(item.id)?.get(index) ?? part : part) })
+      return { ...decision, fragments: decision.payload ? fragments(decision.payload, options.fragmentBytes ?? 8_192) : [] }
+    }), source = sourceKey(page.source)
     this.transaction(() => {
       if (!authorized()) throw new AgentMuxError('This exact Binding no longer authorizes publication. The original frontier is retained.', 'PUBLICATION_NOT_AUTHORIZED')
       const row = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?')
@@ -126,33 +179,47 @@ export class PublicationStore {
         throw new AgentMuxError('Publication continued from a different saved frontier. Read its original checkpoint.', 'PUBLICATION_CHECKPOINT_CONFLICT')
       for (const decision of decisions) {
         const projectionId = 'projection-' + digest([...scopeKey(boundary), page.source.providerId, page.source.nativeSessionId, decision.recordId, 'speech'])
-        const prior = this.read(this.database.prepare('SELECT operation_json, state FROM connector_publication_operation WHERE projection_id=? ORDER BY ordinal DESC LIMIT 1').get(projectionId))
+        const latest = this.database.prepare('SELECT operation_json, state FROM connector_publication_operation WHERE ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE projection_id=? GROUP BY fragment_ordinal) ORDER BY fragment_ordinal')
+          .all(projectionId).map(row => this.read(row)!)
         if (!decision.payload) {
-          if (prior?.state === 'pending') this.write({ ...prior, state: 'cancelled', reason: 'original-speech-withdrawn' })
           this.database.prepare('INSERT OR IGNORE INTO connector_publication_decision VALUES (?, ?, ?, ?, ?, ?)')
             .run(...scopeKey(boundary), source, decision.recordId, decision.revision, decision.reason!)
-          continue
         }
-        if (prior?.sourceRevision === decision.revision && prior.state !== 'cancelled') continue
-        // The same text can legitimately return after an intervening original revision.
-        // The retained predecessor and source content bind this operation without a clock or global sequence.
-        const operationId = 'publication-' + digest([projectionId, prior?.operationId ?? null, decision.revision])
-        const predecessor = prior?.state === 'pending' || prior?.state === 'cancelled' ? prior.predecessorOperationId : prior?.operationId
-        if (prior?.state === 'pending') this.database.prepare("UPDATE connector_publication_operation SET state='superseded' WHERE operation_id=? AND state='pending'").run(prior.operationId)
-        const operation: PublicationOperation = { operationId, projectionId, sourceRevision: decision.revision,
-          bindingId: boundary.bindingId, bindingRevision: boundary.revision,
-          reference: { ...ref(boundary), source: { kind: 'native', ...page.source, recordId: decision.recordId } },
-          target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },
-          payload: decision.payload, state: 'pending', ...(predecessor ? { predecessorOperationId: predecessor } : {}) }
-        this.database.prepare('INSERT INTO connector_publication_operation (operation_id, projection_id, source_revision, binding_id, binding_revision, operation_json, state) VALUES (?, ?, ?, ?, ?, ?, ?)')
-          .run(operationId, projectionId, decision.revision, ...scopeKey(boundary), encode(operation), operation.state)
+        if (decision.payload && latest.length && latest.every(operation => operation.sourceRevision === decision.revision && operation.state !== 'cancelled')) continue
+        const previous = new Map(latest.map(operation => [operation.fragment.ordinal, operation]))
+        const count = Math.max(decision.fragments.length, ...latest.map(operation => operation.fragment.ordinal + 1))
+        for (let ordinal = 0; ordinal < count; ordinal++) {
+          const prior = previous.get(ordinal), payload = decision.fragments[ordinal]
+          if (!payload && prior?.effect === 'withdraw' && prior.state !== 'cancelled') continue
+          const predecessor = this.appliedPredecessor(prior)
+          if (prior?.state === 'pending' || prior?.state === 'not-applied')
+            this.write({ ...prior, state: payload ? 'superseded' : 'cancelled', ...(!payload ? { reason: 'original-speech-withdrawn' } : {}) })
+          if (!payload && (!predecessor || predecessor.effect === 'withdraw')) continue
+          const effect = payload ? 'upsert' as const : 'withdraw' as const
+          // A genuine content reversion has a new retained predecessor, never a clock-based key.
+          const operationId = 'publication-' + digest([projectionId, ordinal, prior?.operationId ?? null, decision.revision, effect])
+          const operation: PublicationOperation = { operationId, projectionId, sourceRevision: decision.revision,
+            bindingId: boundary.bindingId, bindingRevision: boundary.revision,
+            reference: { ...ref(boundary), source: { kind: 'native', ...page.source, recordId: decision.recordId } },
+            target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },
+            payload: payload ?? { kind: 'speech', text: '' }, effect, fragment: { ordinal, count: decision.fragments.length }, state: 'pending',
+            ...(predecessor ? { predecessorOperationId: predecessor.operationId } : {}) }
+          this.database.prepare('INSERT INTO connector_publication_operation (operation_id, projection_id, source_revision, fragment_ordinal, binding_id, binding_revision, operation_json, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(operationId, projectionId, decision.revision, ordinal, ...scopeKey(boundary), encode(operation), operation.state)
+        }
       }
       this.database.prepare('UPDATE connector_publication_frontier SET checkpoint_json=? WHERE binding_id=? AND binding_revision=? AND source_key=?')
         .run(encode(page.checkpoint), ...scopeKey(boundary), source)
     })
   }
+  private appliedPredecessor(value: PublicationOperation | undefined): PublicationOperation | null {
+    let original = value ?? null
+    while (original && ['pending', 'cancelled', 'superseded', 'not-applied'].includes(original.state))
+      original = original.predecessorOperationId ? this.inspect(original.predecessorOperationId) : null
+    return original
+  }
   /** Save the exact effect identity before any adapter call. Unknown work blocks this audience alone. */
-  claimNext(boundary: PublicationBoundary, authorized: () => boolean): PublicationOperation | null {
+  claimNext(boundary: PublicationBoundary, authorized: () => boolean, adapter: PublicationPreparer): PublicationOperation | null {
     return this.transaction(() => {
       if (!authorized()) return null
       const first = this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') ORDER BY ordinal LIMIT 1")
@@ -160,8 +227,17 @@ export class PublicationStore {
       if (!first || first.state !== 'pending') return null
       const predecessor = first.predecessorOperationId ? this.inspect(first.predecessorOperationId) : null
       if (predecessor && (predecessor.state !== 'confirmed' || !predecessor.mapping)) return null
-      const claimed = { ...first, state: 'dispatching' as const,
-        ...(predecessor?.mapping ? { mapping: predecessor.mapping } : {}) }
+      const original = { ...first, ...(predecessor?.mapping && predecessor.effect !== 'withdraw' ? { mapping: predecessor.mapping } : {}) }
+      let candidate: unknown = original.prepared
+      if (!candidate) {
+        try { candidate = adapter.prepare(JSON.parse(encode(original))) }
+        catch { throw new AgentMuxError('The adapter could not prepare the original request. No platform effect was dispatched.', 'PUBLICATION_PREPARATION_UNCONFIRMED') }
+      }
+      const prepared = parsePreparedPublication(candidate, adapter)
+      if (!original.prepared && prepared.renderVersion !== adapter.renderVersion)
+        throw new AgentMuxError('The adapter must prepare its declared current render version.', 'PUBLICATION_PREPARATION_UNCONFIRMED')
+      if (!authorized()) return null
+      const claimed = { ...original, prepared, state: 'dispatching' as const }
       this.write(claimed)
       return claimed
     })
@@ -170,7 +246,8 @@ export class PublicationStore {
     this.database.prepare('UPDATE connector_publication_operation SET operation_json=?, state=? WHERE operation_id=?')
       .run(encode(operation), operation.state, operation.operationId)
   }
-  settle(operationId: string, result: { state: 'confirmed'; mapping: PublicationMapping } | { state: 'unknown' | 'not-applied'; reason: string }): PublicationOperation {
+  settle(operationId: string, value: PublicationReceipt): PublicationOperation {
+    const result = parseReceipt(value)
     return this.transaction(() => {
       const original = this.inspect(operationId)
       if (!original) throw new AgentMuxError('The original publication operation is unknown.', 'UNKNOWN_PUBLICATION_OPERATION')
@@ -186,8 +263,24 @@ export class PublicationStore {
         original.mapping && !same(original.mapping, result.mapping)))
         throw new AgentMuxError('The platform did not confirm the original exact message mapping.', 'PUBLICATION_RECEIPT_CONFLICT')
       const { reason: _reason, ...retained } = original
-      const settled: PublicationOperation = { ...retained, ...result }
+      let settled: PublicationOperation = result.state === 'confirmed'
+        ? { ...retained, state: 'confirmed', mapping: result.mapping, receipt: result }
+        : { ...retained, state: result.state, reason: result.reason, receipt: result }
       this.write(settled)
+      if (result.state === 'not-applied') {
+        const successors = this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE projection_id=? AND fragment_ordinal=? AND state='pending' AND json_extract(operation_json,'$.predecessorOperationId')=? ORDER BY ordinal")
+          .all(original.projectionId, original.fragment.ordinal, original.operationId).map(row => this.read(row)!)
+        if (successors.length) {
+          const earlier = this.appliedPredecessor(settled)
+          for (const successor of successors) {
+            const { predecessorOperationId: _predecessor, ...next } = successor
+            this.write({ ...next, ...(earlier ? { predecessorOperationId: earlier.operationId } : {}),
+              ...(next.effect === 'withdraw' && (!earlier || earlier.effect === 'withdraw') ? { state: 'cancelled' as const, reason: 'original-speech-withdrawn' } : {}) })
+          }
+          settled = { ...settled, state: 'superseded' }
+          this.write(settled)
+        }
+      }
       return settled
     })
   }
