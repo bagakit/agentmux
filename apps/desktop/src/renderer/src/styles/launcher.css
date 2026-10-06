@@ -229,3 +229,12 @@ button.launcher-mote__target:hover { color: var(--text); background: var(--surfa
 
 .launch-refine__panel[data-state='open'], .launch-refine__choice-menu[data-state='open'] { animation-name: launch-choice-in; }
 @keyframes launch-choice-in { from { opacity: 0; } to { opacity: 1; } }
+
+.launch-refine__help { min-width: 0; color: var(--text-2); font-size: var(--fs-meta); }
+.launch-refine__help > summary { display: inline-flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2); margin-inline-start: calc(-1 * var(--sp-2)); border-radius: var(--radius-sm); cursor: pointer; list-style: none; }
+.launch-refine__help > summary::-webkit-details-marker { display: none; }
+.launch-refine__help > summary:hover { color: var(--text); background: var(--surface-3); }
+.launch-refine__help[open] > summary > svg { transform: rotate(90deg); }
+.launch-refine__help dl { display: grid; gap: var(--sp-3); margin: var(--sp-3) 0 0; }
+.launch-refine__help dt { color: var(--text); font-weight: 600; }
+.launch-refine__help dd { margin: var(--sp-1) 0 0; color: var(--text-3); overflow-wrap: anywhere; line-height: 1.4; }
