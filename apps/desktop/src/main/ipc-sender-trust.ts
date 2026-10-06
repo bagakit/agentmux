@@ -62,6 +62,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'spaceObjects:readAvatar': 'object image read',
   'notesStorage:inspect': 'notes directory',
   'notesStorage:change': 'notes directory changes',
+  'notebook:actor': 'notebook actor',
   'notebook:read': 'notebook directory',
   'notebook:apply': 'notebook changes',
   'spatial:read': 'spatial state',

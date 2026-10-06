@@ -371,6 +371,7 @@ const mockApi: AgentMuxDesktopApi = {
   },
   topics: { call: async () => { throw new Error('The original Topic filesystem owner is unavailable in the web preview. Open the Desktop to read or save Topic content.') } },
   notebooks: {
+    actor: async () => ({ kind: 'user', id: 'web-preview-user' }),
     read: async () => structuredClone(mockNotebookState),
     apply: async input => {
       mockNotebookState = applyNotebookChange(mockNotebookState, input, { kind: 'user', id: 'web-preview-user' }, Date.now())

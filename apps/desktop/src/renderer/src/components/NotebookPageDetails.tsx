@@ -2,7 +2,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { notebookFingerprint, notebookPageArchiveRoot, type NotebookPage } from '@agentmux/core/notebook-catalog'
+import { notebookFingerprint, notebookPageArchiveRoot, type NotebookActor, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { useNotebookLibrary } from '../lib/notebook-library'
@@ -14,6 +14,7 @@ import { spatialSources } from '../../../shared/space-addresses'
 import { NotebookOperationIssue, useNotebookOperation } from './NotebookOperation'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
+import { api } from '../lib/api'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeActionOpenFolderIcon = semanticIconComponent('action.open-folder')
@@ -24,6 +25,8 @@ const ThemeActionRestoreIcon = semanticIconComponent('action.restore')
 const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
 const ThemeActionSaveIcon = semanticIconComponent('action.save')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeObjectBookmarkIcon = semanticIconComponent('object.bookmark')
+const ThemeObjectTeamIcon = semanticIconComponent('object.team')
 
 
 export function NotebookPageDetails({ page }: { page: NotebookPage }) {
@@ -36,7 +39,22 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
   const topicNames = useMemo(() => new Map(spatialSources(config, scratchTopicsForWorkspace(snapshots,
     config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []).spaces.map(space => [space.spaceId, space.name])), [config, snapshots])
   const operation = useNotebookOperation(), [title, setTitle] = useState(page.title), [editing, setEditing] = useState(false)
-  const [panel, setPanel] = useState<'move' | 'sources' | 'history' | null>(null)
+  const [panel, setPanel] = useState<'move' | 'sources' | 'history' | 'followers' | null>(null)
+  const followOperation = useNotebookOperation()
+  const [self, setSelf] = useState<NotebookActor | null>(null), [actorIssue, setActorIssue] = useState<string | null>(null)
+  const agentNames = useAppStore(state => state.agentNames)
+  const followers = page.followers ?? []
+  const following = self !== null && followers.some(f => f.actor.kind === self.kind && f.actor.id === self.id)
+  async function refreshActor() {
+    try { setSelf(await api.notebooks.actor()); setActorIssue(null) }
+    catch (error) { setSelf(null); setActorIssue(presentError(error)) }
+  }
+  useEffect(() => {
+    if (!visible) return
+    let active = true
+    void api.notebooks.actor().then(actor => { if (active) { setSelf(actor); setActorIssue(null) } }, error => { if (active) { setSelf(null); setActorIssue(presentError(error)) } })
+    return () => { active = false }
+  }, [visible])
   const [destination, setDestination] = useState(page.notebookId), [parentId, setParentId] = useState(page.parentNoteId ?? '')
   const [sourceIssue, setSourceIssue] = useState<string | null>(null)
   const cancelTitle = useRef(false)
@@ -71,7 +89,7 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
   const archiveRoot = library ? notebookPageArchiveRoot(library.pages, page.noteId) : undefined
   const restoreLabel = archiveRoot && archiveRoot.noteId !== page.noteId ? 'Restore parent page' : 'Restore page'
   const events = library?.trail.filter(event => event.noteId === page.noteId).slice().reverse() ?? []
-  const labels = { created: 'Created', moved: 'Moved', renamed: 'Renamed', 'source-added': 'Source added', organized: 'Added to Topic', relocated: 'File moved', archived: 'Archived', restored: 'Restored' }
+  const labels = { created: 'Created', moved: 'Moved', renamed: 'Renamed', 'source-added': 'Source added', organized: 'Added to Topic', relocated: 'File moved', archived: 'Archived', restored: 'Restored', followed: 'Followed', unfollowed: 'Unfollowed' }
   return <header className="notebook-page-heading" aria-label="Page details">
     <button className="notebook-breadcrumb" onClick={() => { const state = useAppStore.getState(); state.setRecallNotebook(page.notebookId); state.setRecallZoneSelection(null); state.setMainSurface('recall') }}>{book?.name ?? page.notebookId}<ThemeNavigationDisclosureIcon size={12} /></button>
     <TextInput className="notebook-page-title" aria-label="Page title" value={title} placeholder="Untitled note" disabled={operation.busy || Boolean(operation.issue)}
@@ -82,6 +100,13 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
       return <button className="note-text-button" key={kind} aria-label={kind === 'move' ? 'Move page' : kind === 'sources' ? 'Page sources' : 'Page history'} aria-expanded={panel === kind}
         onClick={() => { if (kind === 'move') { setDestination(page.notebookId); setParentId(page.parentNoteId ?? '') } setPanel(panel === kind ? null : kind) }}><Icon size={13} /><span>{kind === 'move' ? 'Move' : kind === 'sources' ? `Sources${page.sources.length ? ` · ${page.sources.length}` : ''}` : 'History'}</span></button>
     })}
+      <button type="button" className="note-text-button notebook-follow-action" aria-label={following ? 'Unfollow page' : 'Follow page'} aria-pressed={self === null ? undefined : following}
+        disabled={followOperation.busy || Boolean(followOperation.issue)} onClick={() => void followOperation.run({ kind: following ? 'unfollow' : 'follow', noteId: page.noteId })}>
+        <ThemeObjectBookmarkIcon size={13} /><span>{following ? 'Following' : 'Follow'}</span>
+      </button>
+      <button type="button" className="note-text-button" aria-label="Page followers" aria-expanded={panel === 'followers'} onClick={() => setPanel(panel === 'followers' ? null : 'followers')}>
+        <ThemeObjectTeamIcon size={13} /><span>Followers{followers.length ? ` · ${followers.length}` : ''}</span>
+      </button>
       <Menu.Root modal={false} open={visible && menuOpen} onOpenChange={setMenuOpen}><Menu.Trigger asChild><button type="button" className="note-text-button" aria-label="Page options" title="Page options"><ThemeActionMoreIcon size={15} /></button></Menu.Trigger>
         <Menu.Portal container={resolveOverlayContainer()}><Menu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
           <Menu.Item className="tab-context-menu__item" disabled={operation.busy || Boolean(operation.issue)} title={archiveRoot?.title}
@@ -95,6 +120,21 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
       <button type="button" className="note-text-button" title={archiveRoot.title} disabled={operation.busy || Boolean(operation.issue)} onClick={() => void operation.run({ kind: 'restore', noteId: archiveRoot.noteId })}><ThemeActionRestoreIcon size={13} />{restoreLabel}</button>
     </div> : null}
     <NotebookOperationIssue operation={operation} />
+    <NotebookOperationIssue operation={followOperation} />
+    {panel === 'followers' ? <section className="notebook-page-panel notebook-followers" aria-label="Note followers">
+      {followers.length ? <ul>{followers.map(follower => {
+        const actor = follower.actor, isSelf = self !== null && actor.kind === self.kind && actor.id === self.id
+        return <li key={notebookFingerprint(actor)}><span title={`${actor.kind} · ${actor.id}`}>
+          <strong>{isSelf ? 'You' : actor.kind === 'agent' ? `Agent · ${agentNames[actor.id] ?? actor.id}` : actor.kind === 'device' ? `Device · ${actor.id}` : actor.id}</strong>
+          {actor.kind === 'agent' && agentNames[actor.id] ? <small>{actor.id}</small> : null}
+        </span><time dateTime={new Date(follower.followedAt).toISOString()} title={new Date(follower.followedAt).toLocaleString()}>Since {new Date(follower.followedAt).toLocaleDateString()}</time></li>
+      })}</ul> : <p>No one is following this page yet.</p>}
+      <p>Following is saved until you unfollow. It does not indicate who is viewing this page.</p>
+      {self === null ? <div className="notebook-change-issue" role="status">Your follow state is unknown. {actorIssue ?? 'Confirming your identity.'}
+        <div className="notebook-follow-recovery"><button type="button" className="note-text-button" onClick={() => void refreshActor()}>Refresh identity</button>
+          <button type="button" className="note-text-button" disabled={followOperation.busy || Boolean(followOperation.issue)} onClick={() => void followOperation.run({ kind: 'unfollow', noteId: page.noteId })}>Unfollow myself</button></div>
+      </div> : null}
+    </section> : null}
     {panel === 'move' ? <form className="notebook-page-panel notebook-move" aria-label="Move Note page" onSubmit={event => { event.preventDefault(); void move() }}>
       <label>Notebook<select aria-label="Destination notebook" value={destination} disabled={operation.busy || Boolean(operation.issue)} onChange={event => { setDestination(event.target.value); setParentId('') }}>
         {Object.values(library?.notebooks ?? {}).map(book => <option key={book.notebookId} value={book.notebookId}>{book.name}</option>)}</select></label>

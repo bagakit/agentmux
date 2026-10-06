@@ -1065,10 +1065,12 @@ export async function registerIpc(args: {
   const disposeNotebook = notebookStore.subscribe(observation => {
     if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('notebook:changed', observation)
   })
+  const notebookActor = { kind: 'user' as const, id: 'local-user:' + (process.getuid?.() ?? 'current') }
+  handleWithEvent('notebook:actor', async event => { requireTrustedSender('notebook:actor', event); return notebookActor })
   handleWithEvent('notebook:read', async event => { requireTrustedSender('notebook:read', event); await notesStorageReady; return notebookStore.read() })
   handleWithEvent('notebook:apply', async (event, input: NotebookWrite) => {
     requireTrustedSender('notebook:apply', event)
-    return notebookStore.apply(input, { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') })
+    return notebookStore.apply(input, notebookActor)
   })
   const moteAvatarSources = new MoteAvatarSeriesOwner({ userRoot: join(homedir(), '.agentmux', 'avatars'), builtinRoot: join(app.getAppPath(), 'resources', 'avatar-series') })
   const moteAvatarWriter = createMoteAvatarWriter(configOwner,moteAvatarSources,args.scratchTopics,args.configStore)

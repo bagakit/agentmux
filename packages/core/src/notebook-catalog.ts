@@ -2,6 +2,7 @@
 export const DEFAULT_NOTEBOOK_ID = 'quick-notes'
 export const DEFAULT_NOTEBOOK_NAME = '随手记'
 export type NotebookActor = { kind: 'user' | 'agent' | 'device'; id: string }
+export type NotebookFollower = { actor: NotebookActor; followedAt: number }
 export type NotebookWorkface = { zoneId: string; workspaceId: string }
 export type NoteResource = { hostId: string; workspaceId: string; workspacePath: string; path: string }
 export type NoteSource = { sourceId: string; url: string; title: string | null; recordedAt: number;
@@ -9,9 +10,9 @@ export type NoteSource = { sourceId: string; url: string; title: string | null; 
 export type Notebook = { notebookId: string; name: string; createdAt: number; workface?: NotebookWorkface }
 export type NotebookPage = { noteId: string; notebookId: string; parentNoteId: string | null; title: string;
   resource: NoteResource; workface?: NotebookWorkface; createdAt: number; updatedAt: number; archivedAt?: number; sources: NoteSource[];
-  topics: { spaceId: string; topicId?: string }[] }
+  topics: { spaceId: string; topicId?: string }[]; followers?: NotebookFollower[] }
 export type NoteTrailEvent = { eventId: string; operationId: string; noteId: string; at: number; actor: NotebookActor;
-  action: 'created' | 'moved' | 'renamed' | 'source-added' | 'organized' | 'relocated' | 'archived' | 'restored';
+  action: 'created' | 'moved' | 'renamed' | 'source-added' | 'organized' | 'relocated' | 'archived' | 'restored' | 'followed' | 'unfollowed';
   before: { notebookId: string; notebookName?: string; parentNoteId: string | null; title: string; resource: NoteResource; archivedAt?: number } | null;
   after: { notebookId: string; notebookName?: string; parentNoteId: string | null; title: string; resource: NoteResource; archivedAt?: number };
   source?: NoteSource; topic?: { spaceId: string; topicId?: string } }
@@ -24,7 +25,7 @@ export type NotebookChange =
       resource: NoteResource; workface?: NotebookWorkface; source?: NoteSource }
   | { kind: 'move'; noteId: string; notebookId: string; parentNoteId: string | null }
   | { kind: 'rename-page'; noteId: string; title: string }
-  | { kind: 'archive' | 'restore'; noteId: string }
+  | { kind: 'archive' | 'restore' | 'follow' | 'unfollow'; noteId: string }
   | { kind: 'source'; noteId: string; source: NoteSource }
   | { kind: 'organize'; noteId: string; topic: { spaceId: string; topicId?: string } }
   | { kind: 'relocate'; noteId: string; resource: NoteResource; from?: NoteResource }
@@ -33,7 +34,7 @@ export type NotebookState = { schemaVersion: 1; revision: number; notebooks: Rec
   pages: Record<string, NotebookPage>; trail: NoteTrailEvent[];
   operations: Record<string, { fingerprint: string; actor: NotebookActor }> }
 export type NotebookObservation = { state: NotebookState } | { issue: string }
-export type NotebookApi = { read(): Promise<NotebookState>; apply(input: NotebookWrite): Promise<NotebookState>;
+export type NotebookApi = { actor(): Promise<NotebookActor>; read(): Promise<NotebookState>; apply(input: NotebookWrite): Promise<NotebookState>;
   onChange(listener: (event: NotebookObservation) => void): () => void }
 export function emptyNotebookState(): NotebookState {
   return { schemaVersion: 1, revision: 0, notebooks: { [DEFAULT_NOTEBOOK_ID]: { notebookId: DEFAULT_NOTEBOOK_ID,
@@ -69,6 +70,10 @@ function actor(value: unknown): NotebookActor {
   const a = object(value, ['kind', 'id'])
   if (!['user', 'agent', 'device'].includes(a.kind)) invalid('The recording actor is unconfirmed.')
   return { kind: a.kind, id: text(a.id, 'actor ID') }
+}
+function follower(value: unknown): NotebookFollower {
+  const f = object(value, ['actor', 'followedAt'])
+  return { actor: actor(f.actor), followedAt: timestamp(f.followedAt) }
 }
 function source(value: unknown): NoteSource {
   const s = object(value, ['sourceId', 'url', 'title', 'recordedAt', 'operator', 'position']), url = text(s.url, 'source URL')
@@ -107,14 +112,19 @@ export function parseNotebookState(value: unknown): NotebookState {
   if (notebooks[DEFAULT_NOTEBOOK_ID]?.name !== DEFAULT_NOTEBOOK_NAME) invalid('The original 随手记 Notebook is missing.')
   for (const [id, n] of Object.entries(notebooks)) { if (object(n, ['notebookId', 'name', 'createdAt', 'workface']).notebookId !== id) invalid('A Notebook identity is ambiguous.'); text(n.name, 'Notebook name'); timestamp(n.createdAt); if(n.workface) workface(n.workface) }
   for (const [id, p] of Object.entries(pages)) {
-    if (object(p, ['noteId', 'notebookId', 'parentNoteId', 'title', 'resource', 'workface', 'createdAt', 'updatedAt', 'archivedAt', 'sources', 'topics']).noteId !== id || !notebooks[p.notebookId]) invalid('A page or Notebook identity is unconfirmed.')
+    if (object(p, ['noteId', 'notebookId', 'parentNoteId', 'title', 'resource', 'workface', 'createdAt', 'updatedAt', 'archivedAt', 'sources', 'topics', 'followers']).noteId !== id || !notebooks[p.notebookId]) invalid('A page or Notebook identity is unconfirmed.')
     text(p.title, 'page title'); resource(p.resource); timestamp(p.createdAt); timestamp(p.updatedAt); if (p.archivedAt !== undefined) timestamp(p.archivedAt); if(p.workface) workface(p.workface)
     if (!Array.isArray(p.sources) || !Array.isArray(p.topics)) invalid('A page has invalid source or Topic records.')
+    if (p.followers !== undefined) {
+      if (!Array.isArray(p.followers)) invalid('A page has invalid follower records.')
+      const followers = p.followers.map(follower)
+      if (new Set(followers.map((f: NotebookFollower) => notebookFingerprint(f.actor))).size !== followers.length) invalid('A follower identity is duplicated.')
+    }
     p.sources.forEach(source); p.topics.forEach(topic); parent(s as NotebookState, id, p.notebookId, p.parentNoteId)
     if (new Set(p.sources.map((s: NoteSource) => s.sourceId)).size !== p.sources.length) invalid('A source identity is duplicated.')
   }
   const events = new Set<string>()
-  for (const e of s.trail) { object(e, ['eventId', 'operationId', 'noteId', 'at', 'actor', 'action', 'before', 'after', 'source', 'topic']); if(!pages[e.noteId] || events.has(text(e.eventId,'event ID'))) invalid('A Note history identity is invalid.');events.add(e.eventId);text(e.operationId,'operation ID');timestamp(e.at);actor(e.actor);if(!['created','moved','renamed','source-added','organized','relocated','archived','restored'].includes(e.action))invalid('Unknown Note history action.');for (const point of e.before === null ? [e.after] : [e.before, e.after]) { object(point, ['notebookId', 'notebookName', 'parentNoteId', 'title', 'resource', 'archivedAt']); if (point.notebookName !== undefined) text(point.notebookName, 'recorded Notebook name'); if (point.archivedAt !== undefined) timestamp(point.archivedAt); text(point.notebookId, 'Notebook ID'); if (point.parentNoteId !== null) text(point.parentNoteId, 'parent Note ID'); text(point.title, 'page title'); resource(point.resource) }if(e.source)source(e.source);if(e.topic)topic(e.topic) }
+  for (const e of s.trail) { object(e, ['eventId', 'operationId', 'noteId', 'at', 'actor', 'action', 'before', 'after', 'source', 'topic']); if(!pages[e.noteId] || events.has(text(e.eventId,'event ID'))) invalid('A Note history identity is invalid.');events.add(e.eventId);text(e.operationId,'operation ID');timestamp(e.at);actor(e.actor);if(!['created','moved','renamed','source-added','organized','relocated','archived','restored','followed','unfollowed'].includes(e.action))invalid('Unknown Note history action.');for (const point of e.before === null ? [e.after] : [e.before, e.after]) { object(point, ['notebookId', 'notebookName', 'parentNoteId', 'title', 'resource', 'archivedAt']); if (point.notebookName !== undefined) text(point.notebookName, 'recorded Notebook name'); if (point.archivedAt !== undefined) timestamp(point.archivedAt); text(point.notebookId, 'Notebook ID'); if (point.parentNoteId !== null) text(point.parentNoteId, 'parent Note ID'); text(point.title, 'page title'); resource(point.resource) }if(e.source)source(e.source);if(e.topic)topic(e.topic) }
   for (const [id, o] of Object.entries(operations)) { text(id,'operation ID');text(object(o, ['fingerprint', 'actor']).fingerprint,'original operation');actor(o.actor) }
   const result = structuredClone(s) as NotebookState
   for (const map of [result.notebooks, result.pages, result.operations]) Object.setPrototypeOf(map, null)
@@ -123,7 +133,7 @@ export function parseNotebookState(value: unknown): NotebookState {
 /** One semantic writer shared by Node persistence and the explicitly labelled Renderer preview. */
 export function applyNotebookChange(state: NotebookState, input: NotebookWrite, recordedBy: NotebookActor, at: number): NotebookState {
   object(input, ['operationId', 'expectedRevision', 'change'])
-  const fields: Record<string, readonly string[]> = { create: ['notebookId', 'name', 'workface'], rename: ['notebookId', 'name'], delete: ['notebookId'], bind: ['notebookId', 'workface'], register: ['noteId', 'notebookId', 'parentNoteId', 'title', 'resource', 'workface', 'source'], move: ['noteId', 'notebookId', 'parentNoteId'], 'rename-page': ['noteId', 'title'], archive: ['noteId'], restore: ['noteId'], source: ['noteId', 'source'], organize: ['noteId', 'topic'], relocate: ['noteId', 'resource', 'from'] }
+  const fields: Record<string, readonly string[]> = { create: ['notebookId', 'name', 'workface'], rename: ['notebookId', 'name'], delete: ['notebookId'], bind: ['notebookId', 'workface'], register: ['noteId', 'notebookId', 'parentNoteId', 'title', 'resource', 'workface', 'source'], move: ['noteId', 'notebookId', 'parentNoteId'], 'rename-page': ['noteId', 'title'], archive: ['noteId'], restore: ['noteId'], follow: ['noteId'], unfollow: ['noteId'], source: ['noteId', 'source'], organize: ['noteId', 'topic'], relocate: ['noteId', 'resource', 'from'] }
   const changeKind = object(input.change).kind
   if (!Object.hasOwn(fields, changeKind)) invalid('Unknown Notebook action. Original knowledge is kept.')
   object(input.change, ['kind', ...fields[changeKind]!])
@@ -180,6 +190,16 @@ export function applyNotebookChange(state: NotebookState, input: NotebookWrite, 
       if (change.kind === 'archive') page.archivedAt = at
       else delete page.archivedAt
       event(page, change.kind === 'archive' ? 'archived' : 'restored', before)
+      break
+    }
+    case 'follow':
+    case 'unfollow': {
+      const page = getPage(change.noteId), followers = page.followers ?? []
+      const index = followers.findIndex(f => f.actor.kind === recorded.kind && f.actor.id === recorded.id)
+      if (change.kind === 'follow' ? index !== -1 : index === -1) break
+      const before = location(page)
+      page.followers = change.kind === 'follow' ? [...followers, { actor: recorded, followedAt: at }] : followers.filter((_, i) => i !== index)
+      event(page, change.kind === 'follow' ? 'followed' : 'unfollowed', before)
       break
     }
     case 'source': {const p=getPage(change.noteId),added=source(change.source),old=p.sources.find(s=>s.sourceId===added.sourceId);if(old){if(notebookFingerprint(old)!==notebookFingerprint(added))invalid('The original source identity cannot be overwritten.');break}const before=location(p);p.sources.push(added);event(p,'source-added',before,{source:added});break}
