@@ -3,6 +3,8 @@ export { ICON_GLYPHS, ICON_GLYPH_IDS, type IconGlyphId } from './icon-glyphs.js'
 
 /** IDs describe product meaning. Library glyph IDs are only the default drawing choice. */
 export const SEMANTIC_ICON_CATALOG = {
+  'object.model-3d': { label: '3D model', glyph: 'box' },
+  'action.reset-options': { label: 'Reset adjustments', glyph: 'rotate-ccw' },
   'control.checkbox-checked': { label: 'Checked checkbox', glyph: 'check' },
   'control.radio-checked': { label: 'Selected radio', glyph: 'status-dot' },
   'control.select-open': { label: 'Open selection options', glyph: 'chevron-down' },
