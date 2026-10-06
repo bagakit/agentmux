@@ -736,7 +736,7 @@ export type AgentMuxControlResult =
   | { operation: 'open.terminal'; region: AgentMuxTerminalRegion }
   | { operation: 'open.browser'; region: AgentMuxBrowserRegion }
   | ({ operation: 'open.git' } & GitOpenResult)
-  | { operation: 'send'; agentSessionId: string }
+  | { operation: 'send'; agentSessionId: string; inputReceipt?: import('./agent-input-wait.js').AgentInputSubmissionReceipt }
   | AgentMuxDesktopFocusResult
   | { operation: 'arrange'; tab: AgentMuxInspectedTab }
   // Where the promoted Region now lives: a brand-new Tab, same regionId (kept, not minted) and workspace.

@@ -1119,6 +1119,8 @@ export type AgentMuxAgentSession = {
   promptCompletionAdmission?: {
     /** Exact producer identity captured only by the original new input admission. */
     inputKey?: import('./agent-prompt-condition.js').AgentPromptInputKey
+    /** Original journal gate acknowledged before this new Native claim. */
+    inputDispatch?: import('./agent-input-wait.js').AgentInputDispatchLink
     /** Logical identity when captured at admission; operationId always binds the Run and bytes. */
     submissionId?: string
     completionId?: string
@@ -1562,6 +1564,7 @@ export type AgentMuxObservationOrigin =
   | { kind: 'runtime-connection'; boundary: 'core-ctxmux' | 'consumer-core' }
 
 export type AgentMuxClientEvent = (
+  | { type: 'agent-input'; receipt: import('./agent-input-wait.js').AgentInputSubmissionReceipt }
   | (import('./control-endpoint-state.js').AgentMuxControlEndpointState & {
       type: 'control-endpoint-state'
       evidence: AgentMuxEvidence
@@ -1662,6 +1665,7 @@ export type AgentMuxClientEvent = (
       code: string
       message: string
       evidence: AgentMuxEvidence
+      failure?: import('./delivery-attempt.js').DeliveryFailure
     }
   | {
       /**

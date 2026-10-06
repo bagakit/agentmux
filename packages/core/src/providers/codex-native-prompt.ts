@@ -57,6 +57,7 @@ export async function prepareCodexNativePromptInput(context: Parameters<NonNulla
   // that alias only selects a candidate; original FD/peer/source checks grant authority.
   const endpoint = advertised ? await realpath(advertised) : ''
   const channel = await openNativeSocketChannel(context.processId, endpoint, signal).catch(error => {
+    if (signal.aborted && error === signal.reason) throw error
     const reported = waiting('native-peer', 'original-channel-unconfirmed')
     const observed = deliveryFailure(error)
     const failure = new AgentMuxError(reported.message, reported.code, JSON.stringify({ phase: 'native-peer', reason: 'original-channel-unconfirmed',

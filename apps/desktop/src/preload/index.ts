@@ -480,6 +480,9 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo, goalDispatch),
     replyQuestion: (session, input) => ipcRenderer.invoke('sessions:replyQuestion', session, input),
     submitMessage: (session, message) => ipcRenderer.invoke('sessions:submitMessage', session, message),
+    inspectInput: (session, key) => ipcRenderer.invoke('sessions:inspectInput', session, key),
+    stopInputWaiting: (session, ref, cancelOperationId) => ipcRenderer.invoke('sessions:stopInputWaiting', session, ref, cancelOperationId),
+    rejoinInputWaiting: (session, ref) => ipcRenderer.invoke('sessions:rejoinInputWaiting', session, ref),
     respondInteraction: (session, response) =>
       ipcRenderer.invoke('sessions:respondInteraction', session, response),
     setPosture: (session: AgentSessionControl, modeId: string) =>

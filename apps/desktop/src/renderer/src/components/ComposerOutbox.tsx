@@ -1,4 +1,5 @@
 import type { PromptPreparationRetryProgress } from '../lib/prompt-preparation-retry'
+import type { AgentInputSubmissionReceipt, AgentInputWaitStopReceipt } from '@agentmux/core'
 import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
 import { messageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { MailboxLocationContext } from './MailboxLocationContext'
@@ -31,6 +32,8 @@ export type ComposerQueuedMessage = {
   editable?: boolean
   immediateSend?: boolean
   preparationWait?: PromptPreparationRetryProgress
+  inputReceipt?: AgentInputSubmissionReceipt
+  inputStopReceipt?: AgentInputWaitStopReceipt
   preparing?: boolean
   sending?: boolean
   unconfirmed?: boolean
@@ -44,6 +47,26 @@ export type ComposerQueuedMessage = {
 
 /** Labels describe the queue owner's facts, not native CLI rendering or model progress. */
 export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteraction = false) {
+  if (entry.inputReceipt && !entry.archived) {
+    const input = entry.inputReceipt
+    if (entry.inputStopReceipt?.ref.waitGeneration === input.ref.waitGeneration && entry.inputStopReceipt.outcome === 'stopped-before-dispatch') {
+      return { label: '已停止等待', detail: 'Core 已确认停止这一代等待，原消息保留。刷新观察失败不会撤销这条停止回执；再次发送会重新确认原消息。', busy: false }
+    }
+    if (input.status === 'waiting') {
+      const wait = input.control.waiting
+      return { label: wait?.phase === 'runtime' ? '已保存 · 等待连接' : '已保存 · 等待确认',
+        detail: wait?.wake === 'runtime-restored' ? '原消息已由 Core 保存；原 Runtime 连接恢复后继续确认这条消息。可停止等待。'
+          : wait?.phase === 'authorization' ? '原消息已保存；需要原作者的当前授权才能继续确认。不会自动派发，可停止等待。'
+          : wait?.phase === 'observer' ? '本次观察已结束，原消息保留。可重新确认原环境，或停止这一代等待；这不是撤回输入的回执。'
+          : wait?.phase === 'service' ? '原消息已保存；输入观察服务未完成，原原因保留在详情中。不会自动重试，可继续确认或停止等待。'
+          : wait?.phase === 'native-environment' && wait.mechanism === 'unavailable' ? '原消息已保存；当前 Provider 未提供本次输入的机器接口。等待不会新建通道；可继续核实原环境，原终端仍可用。'
+          : '原消息已保存；原生输入环境尚未确认。不会自动重试或新建通道；可查看原原因后继续确认，或停止等待。', busy: Boolean(entry.preparing || entry.sending) }
+    }
+    if (input.status === 'stopped') return { label: '已停止等待', detail: 'Core 已停止这一代等待，原消息保留。点击发送可重新确认这条消息；不会投递到其他 Run。', busy: false }
+    if (input.status === 'admitted') return { label: '输入已确认', detail: '原消息已由 Native 接纳；这不是 Agent 完成任务的回执。', busy: false }
+    if (input.status === 'not-applied') return { label: '原输入未接纳', detail: '原 Native 明确拒绝了这条输入，原消息与回执保留。需要替换时创建一条明确的新消息。', busy: false }
+    return { label: '已保存 · 结果待核实', detail: '原消息已保存，派发或回执仍未确认。这条原操作不会自动重放；可检查原终端与回执。', busy: false }
+  }
   if (entry.archived) return { label: entry.confirmed ? '已归档 · 输入已确认' : '已归档', detail: entry.confirmed ? '原输入已由 Core 确认；归档不会撤回输入。可在 History 读取原记录，不能恢复为待发。' : `这条原消息已退出待发队列，不会自动发送。${entry.unconfirmed ? '\n此前是否已输入仍待核实；归档保留原操作，恢复也不会重建或重发。' : ''}${entry.error ? `\n此前记录：${entry.error}` : ''}`, busy: false }
   if (entry.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED' && !entry.preparing && !entry.sending) return { label: '发送条件已变化', detail: '本次尝试未写入输入；原消息此前的投递结果仍需核对。查看对话后，可移至草稿，作为新消息编辑。', busy: false }
   if (entry.preparationWait) {
@@ -96,15 +119,20 @@ function CopyQueuedMessage({ entry, onCopy }: { entry: ComposerQueuedMessage; on
     }}>{accepted ? <ThemeStatusCopiedIcon size={14} /> : accepted === false ? <ThemeStatusWarningIcon size={14} /> : <ThemeActionCopyIcon size={14} />}</button>
 }
 
-function QueuedDeliveryFailure({ entry, copy }: { entry: ComposerQueuedMessage; copy?: ((text: string) => Promise<boolean>) | undefined }) {
-  const logId = entry.logId
+export function queuedInputFailure(entry: ComposerQueuedMessage) {
+  const waiting = entry.inputReceipt?.control.waiting
+  return waiting?.phase === 'native-environment' ? waiting.observation?.failure : waiting?.failure
+}
+
+export function QueuedDeliveryFailure({ entry, copy }: { entry: ComposerQueuedMessage; copy?: ((text: string) => Promise<boolean>) | undefined }) {
+  const original = queuedInputFailure(entry), logId = original?.logId ?? entry.logId
   const [log, setLog] = useState(() => logId ? messageDeliveryDiagnostics.get(logId) : undefined)
   useEffect(() => {
     const update = () => setLog(logId ? messageDeliveryDiagnostics.get(logId) : undefined)
     update()
     return messageDeliveryDiagnostics.subscribe(update)
   }, [logId])
-  return <MessageDeliveryFailure compact error={entry.error ?? '投递没有确认完成。'} errorCode={entry.errorCode}
+  return <MessageDeliveryFailure compact error={original ? { ...original, inputRef: entry.inputReceipt!.ref, waitingObservation: entry.inputReceipt!.control.waiting } : entry.error ?? '投递没有确认完成。'} errorCode={original?.code ?? entry.errorCode}
     logId={logId} log={log?.record.logId === logId ? log : undefined} inputUnconfirmed={entry.unconfirmed}
     preparationReason={entry.preparationWait?.reason} copyText={copy ?? (async () => false)} />
 }
@@ -150,7 +178,7 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
               setFailure(null)
               try { await onMoveToDraft(entry.id, entry.text) } catch (error) { setFailure({ id: entry.id, text: entry.text, message: presentError(error) }) }
             }}>移至草稿</button> : null}
-            {entry.preparationWait?.state === 'waiting' && onCancelPreparation ? <button type="button" className="composer-tool" onClick={() => onCancelPreparation(entry.id)}>停止等待</button> : null}
+            {(entry.preparationWait?.state === 'waiting' || entry.inputReceipt?.status === 'waiting') && onCancelPreparation ? <button type="button" className="composer-tool" onClick={() => onCancelPreparation(entry.id)}>停止等待</button> : null}
             {onCopy ? <CopyQueuedMessage key="copy" entry={entry} onCopy={onCopy} /> : null}
             {!entry.archived && onEdit ? <button key="edit" type="button" className="composer-tool" aria-label="编辑这条待发消息" title="编辑原消息，保存不会发送"
               disabled={!entry.editable || Boolean(editingId)} onClick={event => { onSelect(entry.id,event); setEditingId(entry.id) }}><ThemeActionEditIcon size={14} /></button> : null}
@@ -169,8 +197,8 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
           {ownFailure ? <p role="alert" className="composer-mailbox__risk">{ownFailure}</p> : null}
           {selected ? <MailboxLocationContext sessionId={sessionId} pending>{(_summary,executionDetails) => <article className="composer-outbox__inline" data-record-key={`queue:${entry.id}`}>
             {editingId === entry.id && onEdit ? <ComposerQueuedMessageEditor key={entry.id} entry={entry} onSave={onEdit} onCancel={() => setEditingId(null)} /> : null}
-            {entry.error || entry.logId || entry.unconfirmed ? <QueuedDeliveryFailure entry={entry} copy={onCopy} /> : !entry.preparationWait && (state.busy || !entry.deliverable || entry.archived) ? <p className={entry.archived && (entry.confirmed || !entry.unconfirmed) ? 'composer-mailbox__record-note' : 'composer-mailbox__risk'} data-kind={state.busy ? 'working' : 'attention'}>{state.detail}</p> : null}
-            {entry.preparationWait ? <p className="composer-pending__retry" role="status">{state.detail}</p> : null}
+            {queuedInputFailure(entry) || entry.error || entry.logId || entry.unconfirmed ? <QueuedDeliveryFailure entry={entry} copy={onCopy} /> : !entry.preparationWait && (state.busy || !entry.deliverable || entry.archived) ? <p className={entry.archived && (entry.confirmed || !entry.unconfirmed) ? 'composer-mailbox__record-note' : 'composer-mailbox__risk'} data-kind={state.busy ? 'working' : 'attention'}>{state.detail}</p> : null}
+            {entry.preparationWait || entry.inputReceipt ? <p className="composer-pending__retry" role="status">{state.detail}</p> : null}
             <ConversationMessage {...reading} compact recordedIdentity messageId={`queue:${entry.id}`} speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} content={entry.text}
               {...(entry.enqueuedAt === undefined ? {} : {createdAt:entry.enqueuedAt})} {...(onCopy ? {onCopy} : {})}
               messageDetails={<><dl className="composer-mailbox__record-facts"><dt>Record</dt><dd>{entry.archived ? 'Archived original message' : 'Pending original message'}</dd><dt>Enqueued</dt><dd><MailboxTime value={entry.enqueuedAt} complete /></dd><dt>Delivery</dt><dd>{state.detail}</dd>{entry.errorCode ? <><dt>Code</dt><dd>{entry.errorCode}</dd></> : null}</dl>{executionDetails}</>} />

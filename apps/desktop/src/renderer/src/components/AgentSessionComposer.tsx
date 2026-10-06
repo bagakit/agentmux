@@ -281,14 +281,17 @@ export function AgentSessionComposer({
           id: entry.operationId,
           text: entry.text,
           ...(entry.archived ? { archived: true as const } : {}),
-          confirmed: Boolean(confirmedSteerDelivery(timeline, session?.kind === 'agent' ? session.control : undefined, entry.operationId)),
+          confirmed: entry.inputReceipt?.status === 'admitted' || Boolean(confirmedSteerDelivery(timeline, session?.kind === 'agent' ? session.control : undefined, entry.operationId)),
+          ...(entry.inputReceipt ? { inputReceipt: entry.inputReceipt } : {}),
+          ...(entry.inputStopReceipt ? { inputStopReceipt: entry.inputStopReceipt } : {}),
           ...(entry.enqueuedAt !== undefined ? { enqueuedAt: entry.enqueuedAt } : {}),
           status: entry.status,
           editable: agentSteerCanEdit(entry, sendingId),
           immediateSend: session?.kind === 'agent' && agentSteerExecution(entry, session.capabilities) === 'immediate',
           preparing: entry.operationId === sendingId && sendingPhase !== 'submitting',
           sending: entry.operationId === sendingId && sendingPhase === 'submitting',
-          unconfirmed: entry.promptCondition !== null && !entry.preparationInputNotApplied && (entry.status === 'deferred' || entry.status === 'failed'),
+          unconfirmed: entry.inputReceipt ? entry.inputReceipt.status === 'unknown'
+            : Boolean(entry.inputIntakeStarted) || entry.promptCondition !== null && !entry.preparationInputNotApplied && (entry.status === 'deferred' || entry.status === 'failed'),
           ...(entry.awaitingExplicitSend ? { awaitingExplicitSend: true as const } : {}),
           deliverable: session?.kind === 'agent' && (entry.runId === undefined ||
             steerQueueCanEverDrain(session.processState) && (steerEntryTargetsRun(entry, session.control.run.runId) ||
@@ -308,7 +311,7 @@ export function AgentSessionComposer({
         sendImmediately={session?.kind === 'agent' && queuedEntries.some(entry => agentSteerExecution(entry, session.capabilities) === 'immediate')}
         pendingInteraction={session?.kind === 'agent' && Boolean(session.pendingInteraction)}
         {...(!readOnly ? { onSendQueued: (operationId: string) => { void feedback.run(async () => { await sendQueuedAgentSteer(sessionId, operationId) }) } } : {})}
-        {...(!readOnly ? { onCancelQueuedPreparation: (operationId: string) => { useAppStore.getState().cancelAgentSteerPreparation(sessionId, operationId) } } : {})}
+        {...(!readOnly ? { onCancelQueuedPreparation: (operationId: string) => { void feedback.run(async () => { await useAppStore.getState().cancelAgentSteerPreparation(sessionId, operationId) }) } } : {})}
         {...(!disabled && !readOnly ? { onEditQueued: async (id: string, expectedText: string, nextText: string) => {
           feedback.dismiss()
           try { useAppStore.getState().editQueuedAgentSteer(sessionId, id, expectedText, nextText) }

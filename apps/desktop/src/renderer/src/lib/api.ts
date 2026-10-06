@@ -1,6 +1,6 @@
 import { serializeThemeFile } from '@agentmux/client-ui/theme'
 import { mintObjectId } from '@agentmux/core/object-id'
-import { unwrapSessionInputWriteResult } from '../../../shared/session-input-result'
+import { unwrapSessionInputWriteResult, unwrapSessionInputOperationResult } from '../../../shared/session-input-result'
 import { applyNotebookChange, emptyNotebookState, type NotebookObservation } from '@agentmux/core/notebook-catalog'
 import type {
   AgentExecutorConfig,
@@ -1076,6 +1076,9 @@ const mockApi: AgentMuxDesktopApi = {
     },
     replyQuestion: async () => { throw new Error('Native question replies require the original Desktop Core.') },
     submitMessage: async () => { throw new Error('Authenticated Agent messaging requires the Desktop Runtime.') },
+    inspectInput: async () => { throw new Error('Original durable input inspection requires the Desktop Runtime.') },
+    stopInputWaiting: async () => { throw new Error('Original durable waiting control requires the Desktop Runtime.') },
+    rejoinInputWaiting: async () => { throw new Error('Original durable waiting control requires the Desktop Runtime.') },
     respondInteraction: async (control, response) => {
       const session = mockSnapshot.sessions.find((item) => item.id === control.agentSessionId)
       if (!session || session.kind !== 'agent') throw new Error(`Session not found: ${control.agentSessionId}`)
@@ -1430,10 +1433,13 @@ function requireDesktopApi(): AgentMuxDesktopApi {
     control: createRendererControlApi(preload.control),
     sessions: {
       ...preload.sessions,
-      write: (...args) => preload.sessions.write(...args).then(unwrapSessionInputWriteResult),
-      paste: (...args) => preload.sessions.paste(...args).then(unwrapSessionInputWriteResult),
+      write: (...args) => preload.sessions.write(...args).then(result => { unwrapSessionInputWriteResult(result) }),
+      paste: (...args) => preload.sessions.paste(...args).then(result => { unwrapSessionInputWriteResult(result) }),
       submitPrompt: (...args) => preload.sessions.submitPrompt(...args).then(unwrapSessionInputWriteResult),
       submitMessage: (...args) => preload.sessions.submitMessage(...args).then(unwrapSessionInputWriteResult),
+      inspectInput: (...args) => preload.sessions.inspectInput(...args).then(unwrapSessionInputOperationResult),
+      stopInputWaiting: (...args) => preload.sessions.stopInputWaiting(...args).then(unwrapSessionInputOperationResult),
+      rejoinInputWaiting: (...args) => preload.sessions.rejoinInputWaiting(...args).then(unwrapSessionInputOperationResult),
       observeHistory: createRendererHistoryObservation(preload.sessions.observeHistory),
       onEvent: createRendererSessionEvents(preload.sessions.onEvent)
     }

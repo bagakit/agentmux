@@ -146,8 +146,13 @@ export function runtimeDiagnosticNotice(
     if (named.length > 0) {
       const current = named.filter(item => item.hostId === event.hostId && (!run || sameRun(item.control.run, run)))
       // An explicit Agent identity cannot be reassigned to another Session by its Run.
-      if (current.length !== 1) return null
-      session = current[0]
+      if (current.length !== 1) {
+        // A complete failure of an original operation remains readable after
+        // that Run changes. It is not a state or subject of the replacement.
+        // Existing identity/source notices still settle with their original Run.
+        if (!core.failure || core.code === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' ||
+          core.code === 'AGENT_NATIVE_SOURCE_UNCONFIRMED') return null
+      } else session = current[0]
     }
   } else if (run) {
     const current = state.sessions.filter(item => item.hostId === event.hostId && sameRun(item.control.run, run))
@@ -181,7 +186,8 @@ export function runtimeDiagnosticNotice(
     : ''
   const summary = `${scope}${run ? `; Run "${run.runId}"` : ''}: ${core.code}: ${core.message}`
   return {
-    message: `${summary}\n\nDiagnostic:\nSource: ${core.evidence.source}. ${mode}${observation}\n${recovery}`,
+    message: `${summary}\n\nDiagnostic:\nSource: ${core.evidence.source}. ${mode}${observation}\n${recovery}` +
+      (core.failure ? `\n\nOriginal failure:\n${JSON.stringify(core.failure, null, 2)}` : ''),
     summary,
     ...(confirmed ? { subject: confirmed.control } : {}),
     // Only an absent main identity has this success condition. Source conflicts and failed

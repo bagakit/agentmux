@@ -2,6 +2,7 @@ import type { AgentPromptPreparationRetryProgress } from './prompt-preparation.j
 import { validateDeliveryLogId } from './delivery-attempt.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
+import { validateAgentInputWaitRef, type AgentInputWaitRef, type AgentInputWaitStopReceipt } from './agent-input-wait.js'
 
 /** Client-owned intent, including archived records; this is not the Core envelope delivery queue. */
 export type AgentMuxPendingMessage = {
@@ -17,6 +18,9 @@ export type AgentMuxPendingMessage = {
   error: string | null
   logId?: string
   preparationWait?: AgentPromptPreparationRetryProgress
+  /** Projection of the original Core waiting control, never a client dispatch grant. */
+  inputWait?: { ref: AgentInputWaitRef; status: 'waiting' | 'stopped' | 'admitted' | 'not-applied' | 'unknown';
+    observation: 'owned' | 'rejoin-needed' | 'closed'; controlState: 'enabled' | 'stopped-before-dispatch' | 'dispatch-authorized'; stop?: AgentInputWaitStopReceipt }
   /** The original intent is retained, but is not eligible for active queue delivery. */
   archived: boolean
 }
@@ -43,7 +47,7 @@ export function isPendingMessageOperation(value: unknown): value is PendingMessa
 
 /** Validate the business result before a transport carries it to any client. */
 export function parsePendingMessage(value: unknown): AgentMuxPendingMessage {
-  const source = rpcRecord(value, ['pendingId', 'text', 'runId', 'enqueuedAt', 'status', 'phase', 'editable', 'delivery', 'errorCode', 'error', 'logId', 'preparationWait', 'archived'])
+  const source = rpcRecord(value, ['pendingId', 'text', 'runId', 'enqueuedAt', 'status', 'phase', 'editable', 'delivery', 'errorCode', 'error', 'logId', 'preparationWait', 'inputWait', 'archived'])
   const identifier = (input: unknown): input is string => typeof input === 'string' && Boolean(input.trim()) && !/[\0\r\n]/u.test(input)
   if (!identifier(source.pendingId) || typeof source.text !== 'string' || source.text.includes('\0') ||
       source.runId !== null && !identifier(source.runId) ||
@@ -67,5 +71,18 @@ export function parsePendingMessage(value: unknown): AgentMuxPendingMessage {
     }
   }
   if (source.logId !== undefined) validateDeliveryLogId(source.logId)
+  if (source.inputWait !== undefined) {
+    const wait = rpcRecord(source.inputWait, ['ref', 'status', 'observation', 'controlState', 'stop']), ref = validateAgentInputWaitRef(wait.ref)
+    if (ref.key.kind !== 'prompt' || ref.key.submissionId !== source.pendingId || ref.key.expectedRun.runId !== source.runId || source.editable ||
+        !['waiting', 'stopped', 'admitted', 'not-applied', 'unknown'].includes(wait.status as string) ||
+        !['owned', 'rejoin-needed', 'closed'].includes(wait.observation as string) ||
+        !['enabled', 'stopped-before-dispatch', 'dispatch-authorized'].includes(wait.controlState as string)) throw new AgentMuxError('Pending Core input projection is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    if (wait.stop !== undefined) {
+      const stop = rpcRecord(wait.stop, ['ref', 'cancelOperationId', 'outcome', 'at']), stopped = validateAgentInputWaitRef(stop.ref)
+      if (stopped.key.kind !== 'prompt' || stopped.key.submissionId !== source.pendingId || stopped.key.agentSessionId !== ref.key.agentSessionId ||
+          stopped.key.expectedRun.runId !== source.runId || !identifier(stop.cancelOperationId) || !Number.isSafeInteger(stop.at) || Number(stop.at) < 0 ||
+          !['stopped-before-dispatch', 'observation-stopped', 'already-settled', 'stale-generation'].includes(stop.outcome as string)) throw new AgentMuxError('Pending Core stop receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    }
+  }
   return source as AgentMuxPendingMessage
 }

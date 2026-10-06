@@ -1108,9 +1108,11 @@ export type ProviderCatalogObservation = {
 }
 
 /** Electron does not preserve custom Error fields; this carries Core's exact write facts. */
-export type SessionInputWriteResult = { ok: true } | { ok: false; error: {
+export type SessionInputWriteResult = { ok: true; inputReceipt?: import('@agentmux/core').AgentInputSubmissionReceipt } | { ok: false; error: {
   code: string; message: string; detail?: string; controlFailure?: AgentMuxControlFailure; logId?: string
 } }
+/** The same plain error owner carries read/control results through Electron. */
+export type SessionInputOperationResult<T> = { ok: true; value: T } | { ok: false; error: import('@agentmux/core/delivery-attempt').DeliveryFailure & { code: string } }
 /** Launch outcome crosses Electron as data; a rejected invoke alone cannot prove no start. */
 export type SessionAgentLaunchResult = { ok: true; result: AgentLaunchResult } | { ok: false; error: {
   code: string; message: string; detail?: string; controlFailure: AgentMuxControlFailure
@@ -1817,9 +1819,12 @@ export type AgentMuxDesktopApi = {
     // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint
     // a fresh one — used only by test callers, never by the UI, which always decides the id itself.
     recordDeliveryFailure(record: DeliveryAttempt): Promise<DeliveryAttemptLookup>
-    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('./goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference): Promise<void>
+    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: import('@agentmux/core').AgentPromptInputBinding, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('./goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference): Promise<void | import('@agentmux/core').AgentInputSubmissionReceipt>
     replyQuestion(session: AgentSessionControl, input: SessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt>
-    submitMessage(session: AgentSessionControl, message: AgentMuxAgentMessageSubmission): Promise<void>
+    submitMessage(session: AgentSessionControl, message: AgentMuxAgentMessageSubmission): Promise<void | import('@agentmux/core').AgentInputSubmissionReceipt>
+    inspectInput(session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey): Promise<import('@agentmux/core').AgentInputSubmissionReceipt | null>
+    stopInputWaiting(session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef, cancelOperationId: string): Promise<import('@agentmux/core').AgentInputWaitStopReceipt>
+    rejoinInputWaiting(session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef): Promise<import('@agentmux/core').AgentInputSubmissionReceipt>
     respondInteraction(
       session: AgentSessionControl,
       response: AgentMuxInteractionResponse
@@ -1973,12 +1978,15 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
   scratch: Omit<AgentMuxDesktopApi['scratch'], 'listTopics'> & {
     listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicListResponse>
   }
-  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'write' | 'paste' | 'submitPrompt' | 'submitMessage'> & {
+  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'write' | 'paste' | 'submitPrompt' | 'submitMessage' | 'inspectInput' | 'stopInputWaiting' | 'rejoinInputWaiting'> & {
     /** Plain envelopes cross both IPC and contextBridge; Renderer restores typed failures. */
     write(...args: Parameters<AgentMuxDesktopApi['sessions']['write']>): Promise<SessionInputWriteResult>
     paste(...args: Parameters<AgentMuxDesktopApi['sessions']['paste']>): Promise<SessionInputWriteResult>
     submitPrompt(...args: Parameters<AgentMuxDesktopApi['sessions']['submitPrompt']>): Promise<SessionInputWriteResult>
     submitMessage(...args: Parameters<AgentMuxDesktopApi['sessions']['submitMessage']>): Promise<SessionInputWriteResult>
+    inspectInput(...args: Parameters<AgentMuxDesktopApi['sessions']['inspectInput']>): Promise<SessionInputOperationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['inspectInput']>>>>
+    stopInputWaiting(...args: Parameters<AgentMuxDesktopApi['sessions']['stopInputWaiting']>): Promise<SessionInputOperationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['stopInputWaiting']>>>>
+    rejoinInputWaiting(...args: Parameters<AgentMuxDesktopApi['sessions']['rejoinInputWaiting']>): Promise<SessionInputOperationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['rejoinInputWaiting']>>>>
     /** Raw native transport. Renderer owns scoped subscriptions and its single bridge callback. */
     onEvent(listener: (event: RuntimeEvent) => void): () => void
     /** Functions cross contextBridge; AbortSignal and its prototype stay in Renderer. */

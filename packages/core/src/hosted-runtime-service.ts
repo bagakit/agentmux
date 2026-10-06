@@ -15,7 +15,7 @@ const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory', 'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource',
   'clientPerformanceDiagnostics',
   'listHostExecutors', 'configureHostExecutor',
-  'readDeliveryAttempt', 'inspectAgentPromptSubmission', 'resolveAgentCreationSessionId',
+  'readDeliveryAttempt', 'inspectAgentPromptSubmission', 'inspectAgentInput', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId',
   'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff'
 ])
@@ -191,7 +191,9 @@ export class AgentMuxHostedRuntimeService {
     const original = this.consumers.get(id)
     context.signal?.throwIfAborted()
     if (RUNTIME_METHODS.has(invocation.method)) await observe(this.client.connectRuntime(), context.signal)
-    else if (!OFFLINE_METHODS.has(invocation.method)) await observe(this.client.connect(), context.signal)
+    else if (!OFFLINE_METHODS.has(invocation.method) && !(
+      (invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage') &&
+      (invocation.args[0] as { admissionIntent?: { kind?: string } } | undefined)?.admissionIntent?.kind === 'manual-actor')) await observe(this.client.connect(), context.signal)
     context.signal?.throwIfAborted(); this.assertFence(p.fence)
     if (attachment && this.consumers.get(id) !== original) throw new AgentMuxError('Attachment observation changed while reconnecting its original Core.', 'CONTROL_CANCELLED')
     if (context.signal && (invocation.method === 'submitAgentPrompt' || invocation.method === 'replySessionQuestion')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }

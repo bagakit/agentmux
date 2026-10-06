@@ -7,6 +7,21 @@ export type AgentPromptCondition = {
   afterSubmissionId: string | null
 }
 
+/** Host intake binding: explicit new manual input or the original exact condition. */
+export type AgentPromptInputBinding = AgentPromptCondition |
+  { expectedRun: AgentMuxRunRef; admissionIntent: { kind: 'manual-actor' }; afterSubmissionId?: never }
+
+export function validateAgentPromptInputBinding(value: unknown): AgentPromptInputBinding {
+  const input = value as AgentPromptInputBinding | undefined
+  if (input && 'admissionIntent' in input) {
+    if (Object.keys(input).some(key => !['expectedRun', 'admissionIntent'].includes(key)) ||
+        !inputRun(input.expectedRun) || !input.admissionIntent || input.admissionIntent.kind !== 'manual-actor' ||
+        Object.keys(input.admissionIntent).some(key => key !== 'kind')) throw new AgentMuxError('The original manual input binding is invalid.', 'INVALID_AGENT_PROMPT')
+    return { expectedRun: { ...input.expectedRun }, admissionIntent: { kind: 'manual-actor' } }
+  }
+  return validateAgentPromptCondition(value)
+}
+
 /** Explicit caller intent. A coordination predecessor never supplies manual authority. */
 export type AgentPromptAdmissionIntent =
   | { kind: 'exact-condition'; condition: AgentPromptCondition }

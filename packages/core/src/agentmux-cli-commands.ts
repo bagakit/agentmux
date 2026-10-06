@@ -312,7 +312,13 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     'JSON carries agentSessionId, source, turnId, recordId, answers [{questionId,answer}], operationId and the original expectedRun/afterSubmissionId condition. Read agent history first. Submitted input is not proof of an observed native answer; no Agent message envelope or Hook confirmation is created.'),
   command('agent.input.inspect', '--input FILE|-', 'Read one original input claim without preparing or replaying it.', { '--input': 'data' },
     async f => await readControlJsonInput(value(f, '--input', true)!, 'Original input key') as Record<string, unknown>,
-    'JSON carries key {kind:prompt|message,agentSessionId,expectedRun:{runId},submissionId|messageId}. Missing legacy fields remain unknown; history is read from the original Session owner, independent of the latest prompt projection.'),
+    'JSON carries key {kind:prompt|message,agentSessionId,expectedRun:{runId},submissionId|messageId}, or kind:message-control plus originalControlOperationId at the original semantic endpoint. Returns its original admission and any acknowledged waiting reference; never resolves a new spatial target.'),
+  command('agent.input.stop', '--input FILE|-', 'Stop this original waiting generation; a dispatched input cannot be recalled.', { '--input': 'data' },
+    async f => await readControlJsonInput(value(f, '--input', true)!, 'Original input stop') as Record<string, unknown>,
+    'JSON carries ref {key,waitGeneration} and cancelOperationId. The original Core action receipt distinguishes stopped-before-dispatch from observation-stopped; no Run interruption occurs.'),
+  command('agent.input.rejoin', '--input FILE|-', 'Explicitly rejoin the original enabled or stopped input with current author authorization.', { '--input': 'data' },
+    async f => await readControlJsonInput(value(f, '--input', true)!, 'Original input rejoin') as Record<string, unknown>,
+    'JSON carries ref {key,waitGeneration}. An unresolved gate/claim is read only and never dispatched again. A stopped-before-dispatch generation may be explicitly enabled as the next generation.'),
   command('agent.send', '(--to-session ID|--to-region ID|--to-tab ID) --text TEXT [--execution default|immediate] [message identity]', 'Queue and deliver one exact semantic Agent message.', { '--to-session': 'data', '--to-region': 'data', '--to-tab': 'data', '--text': 'data', '--execution': 'value', '--message-id': 'data', '--thread': 'data', '--correlation': 'data', '--reply-to': 'data', ...OP }, f => {
     const selected = one(f, ['--to-session', '--to-region', '--to-tab'], 'Agent send')
     const execution = value(f,'--execution')

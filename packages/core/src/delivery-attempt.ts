@@ -110,6 +110,11 @@ function parseFailure(value: unknown, depth = 0): void {
   }
   if (f.cause !== undefined) { if (depth >= 2) fail(); parseFailure(f.cause, depth + 1) }
 }
+/** Reuse the original bounded failure DTO without granting input authority. */
+export function parseDeliveryFailure(value: unknown): DeliveryFailure {
+  parseFailure(value)
+  return value as DeliveryFailure
+}
 export function parseDeliveryInputObservation(value: unknown): NonNullable<DeliveryAttempt['observation']> {
     const o = rpcRecord(value, ['source', 'observedAt', 'runId', 'submissionId', 'admissionAcknowledged', 'payload', 'submit'])
     if (o.source !== 'core-session-projection') fail()

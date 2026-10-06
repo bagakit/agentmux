@@ -4,7 +4,8 @@ import { parseDiagnosticEvidenceResult } from './diagnostic-evidence-codec.js'
 import { parseControlEndpointState } from './control-endpoint-state.js'
 import { parseNotesStorageOperation } from './notes-storage.js'
 import { parseControlDemandActivity } from './control-codec.js'
-import { parseDeliveryAttemptLookup } from './delivery-attempt.js'
+import { parseDeliveryAttemptLookup, parseDeliveryFailure } from './delivery-attempt.js'
+import { validateAgentInputWaitRef, type AgentInputSubmissionReceipt } from './agent-input-wait.js'
 
 import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult } from './public-rpc-files.js';
 
@@ -54,6 +55,45 @@ function timestamp(value: unknown): void { if (typeof value !== 'number' || !Num
 function bool(value: unknown): void { if (typeof value !== 'boolean') fail() }
 function member(value: unknown, values: readonly unknown[]): void { if (!values.includes(value)) fail() }
 function array(value: unknown, consume: (item: unknown) => void): void { if (!Array.isArray(value)) return fail(); for (const item of value) consume(item) }
+function inputReceipt(value: unknown): AgentInputSubmissionReceipt {
+  const p = record(value, ['key', 'ref', 'originalControlOperationId', 'persistence', 'control', 'admission', 'status', 'observation'])
+  const key = validateAgentPromptInputKey(p.key), ref = validateAgentInputWaitRef(p.ref)
+  if (!isDeepStrictEqual(key, ref.key) || p.persistence !== 'confirmed') fail()
+  member(p.observation, ['owned', 'rejoin-needed', 'closed'])
+  if (p.originalControlOperationId !== undefined) string(p.originalControlOperationId)
+  const control = record(p.control, ['ref', 'state', 'at', 'waiting', 'gateId'])
+  if (!isDeepStrictEqual(validateAgentInputWaitRef(control.ref), ref)) fail()
+  member(control.state, ['enabled', 'stopped-before-dispatch', 'dispatch-authorized']); timestamp(control.at)
+  if (control.state === 'dispatch-authorized') string(control.gateId)
+  else if (control.gateId !== undefined) fail()
+  if (control.waiting !== undefined) {
+    const waiting = record(control.waiting, ['phase', 'reason', 'wake', 'failure', 'mechanism', 'observation'])
+    if (waiting.phase === 'runtime') { if (waiting.reason !== 'runtime-unavailable' || waiting.wake !== 'runtime-restored') fail() }
+    else if (waiting.phase === 'authorization') { if (waiting.reason !== 'author-authorization-needed' || waiting.wake !== 'explicit-rejoin') fail() }
+    else if (waiting.phase === 'observer') { if (waiting.reason !== 'observer-stopped' || waiting.wake !== 'explicit-rejoin' || waiting.failure === undefined) fail() }
+    else if (waiting.phase === 'service') { if (waiting.reason !== 'observation-failed' || waiting.wake !== 'explicit-rejoin' || waiting.failure === undefined) fail() }
+    else { if (waiting.phase !== 'native-environment' || !['original-environment-unconfirmed', 'original-target-changed'].includes(String(waiting.reason)) || waiting.wake !== 'explicit-rejoin') fail() }
+    if (waiting.failure !== undefined) parseDeliveryFailure(waiting.failure)
+    if (waiting.mechanism !== undefined) member(waiting.mechanism, ['unconfirmed', 'unavailable'])
+    if (waiting.observation !== undefined) {
+      const observed = record(waiting.observation, ['phase', 'failure']); string(observed.phase)
+      if (observed.failure !== undefined) parseDeliveryFailure(observed.failure)
+      else if (waiting.phase === 'native-environment') fail()
+    }
+  }
+  const admission = p.admission === null ? null : parsePromptSubmissionRecord(p.admission)
+  if (admission && (admission.agentSessionId !== key.agentSessionId || admission.run.runId !== key.expectedRun.runId ||
+      admission.admission?.inputKey && !isDeepStrictEqual(admission.admission.inputKey, key) ||
+      (admission.admission?.submissionId ?? admission.terminalPromptSubmission?.submissionId ?? admission.admission?.operationId) !== agentPromptInputId(key))) fail()
+  const native = admission?.admission
+  const linked = native?.transport === 'native' && native.inputDispatch && control.state === 'dispatch-authorized' &&
+    isDeepStrictEqual(native.inputDispatch.ref, ref) && native.inputDispatch.gateId === control.gateId
+  const status = native?.transport === 'native' && linked ? native.native.outcome === 'admitted' && native.acknowledged ? 'admitted'
+    : native.native.outcome === 'not-applied' && native.notApplied ? 'not-applied' : 'unknown'
+    : admission || control.state === 'dispatch-authorized' ? 'unknown' : control.state === 'stopped-before-dispatch' ? 'stopped' : 'waiting'
+  if (p.status !== status) fail()
+  return value as AgentInputSubmissionReceipt
+}
 function promptExecution(value: unknown): void {
   if (value === undefined) return
   const capability = record(value, ['immediate'])
@@ -354,8 +394,15 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (binding.role !== input.role || input.workspacePath !== undefined && binding.workspacePath !== input.workspacePath ||
           method === 'agent.role.register' && credentials && binding.agentSessionId !== credentials.agentSessionId) fail(); break }
       case 'agent.input.inspect': {
-        record(p, ['record'])
+        record(p, ['record', 'input'])
+        const observed = p.input === null || p.input === undefined ? null : inputReceipt(p.input)
+        if (input.kind === 'message-control') {
+          if (observed && observed.originalControlOperationId !== input.originalControlOperationId || p.record !== null && !observed ||
+              observed && !isDeepStrictEqual(p.record, observed.admission)) fail()
+          break
+        }
         const key = validateAgentPromptInputKey(input.key)
+        if (observed && (!isDeepStrictEqual(observed.key, key) || !isDeepStrictEqual(p.record, observed.admission))) fail()
         if (p.record !== null) {
           const original = parsePromptSubmissionRecord(p.record)
           if (original.agentSessionId !== key.agentSessionId || original.run.runId !== key.expectedRun.runId ||
@@ -364,11 +411,28 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         }
         break
       }
+      case 'agent.input.stop': {
+        record(p, ['ref', 'cancelOperationId', 'outcome', 'at'])
+        if (!isDeepStrictEqual(validateAgentInputWaitRef(p.ref), validateAgentInputWaitRef(input.ref)) || p.cancelOperationId !== input.cancelOperationId) fail()
+        member(p.outcome, ['stopped-before-dispatch', 'observation-stopped', 'already-settled', 'stale-generation']); timestamp(p.at)
+        break
+      }
+      case 'agent.input.rejoin': {
+        const receipt = inputReceipt(p), original = validateAgentInputWaitRef(input.ref)
+        if (!isDeepStrictEqual(receipt.key, original.key) || ![original.waitGeneration, original.waitGeneration + 1].includes(receipt.ref.waitGeneration)) fail()
+        break
+      }
       case 'agent.send': {
-        record(p, ['queueId', 'receiptId', 'messageId', 'sequence', 'envelope', 'delivery', 'promptCondition', 'agentSessionId', 'sourceChannel', 'sourceDevice', 'admissionIntent'])
+        record(p, ['queueId', 'receiptId', 'messageId', 'sequence', 'envelope', 'delivery', 'promptCondition', 'agentSessionId', 'sourceChannel', 'sourceDevice', 'admissionIntent', 'inputReceipt'])
         if (p.sourceChannel !== undefined) normalizeMessageChannel(p.sourceChannel)
         if (p.sourceDevice !== undefined) normalizeOperationDevice(p.sourceDevice)
         const envelope = message(p)
+        if (p.inputReceipt !== undefined) {
+          const receipt = inputReceipt(p.inputReceipt)
+          if (receipt.key.kind !== 'message' || receipt.key.messageId !== envelope.messageId || receipt.originalControlOperationId !== envelope.operationId ||
+              receipt.key.agentSessionId !== envelope.recipientSessionId || receipt.key.expectedRun.runId !== envelope.recipientRunId ||
+              p.delivery && (p.delivery as { state?: string }).state === 'delivered' && receipt.status !== 'admitted') fail()
+        }
         if (p.admissionIntent !== undefined) {
           const intent = validateAgentPromptAdmissionIntent(p.admissionIntent)
           if (intent.kind !== 'manual-actor' || input.execution !== 'immediate' || intent.expectedRun.runId !== envelope.recipientRunId) fail()
