@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -5,7 +6,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { freezeMobileGoalUpdateRequest } from '../src/recovery/goal-drafts'
-import { button, click, deferred, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { openTreeSession, button, click, deferred, editor, fixture, mount, mounted, paste } from './conversation-fixture'
 const native = vi.hoisted(() => ({ back: null as (() => void) | null }))
 vi.mock('../src/platform/native/device', async importOriginal => ({ ...await importOriginal<Record<string, unknown>>(),
   bindNativeDevice: vi.fn((options: { onBack(): void }) => { native.back = options.onBack; return { dispose: async () => { native.back = null } } }) }))
@@ -26,7 +27,7 @@ function originalClient() {
       conversation: { hostId: 'host-original', sessionId: 'session-original', displayWorkspaceId: 'original-workspace', groupId: 'original-zone', tabId: 'original-tab', regionId: 'original-region' } }]
   }
   f.client.forwardRpc = vi.fn().mockImplementation(async (method: string, params: any) => {
-    if (method === 'file.read') return { resource: params.expectedResource, result: { status: 'read', document: { path: params.path, content: '# 原合作方式\n原依据保留。', revision: 'sha256:' + 'a'.repeat(64) } } }
+    if (method === 'file.read') return { resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: params.expectedResource.workspacePath, path: params.path }, result: { status: 'read', document: { path: params.path, content: '# 原合作方式\n原依据保留。', revision: 'sha256:' + 'a'.repeat(64) } } }
     if (method === 'goal.ls') return { goals: [], unavailable: [] }
     if (method === 'topic.category.ls') return { categories: [], unavailable: [] }
     if (method === 'topic.ls') return { topics: [], unavailable: [] }
@@ -48,10 +49,10 @@ describe('actual phone primary workfaces', () => {
     const f = originalClient()
     const owner = getDeviceWorkface()
     const scope = { origin: location.origin, runtimeId: 'original-goal-runtime', deviceHostId: null }
-    const request = freezeMobileGoalUpdateRequest({ goalId: 'original-goal', operationId: 'original-unknown-save', expectedUpdatedAt: 7, patch: { description: '原未知保存正文' } })
+    const request = freezeMobileGoalUpdateRequest({ goalId: 'original-goal', operationId: 'original-unknown-save', expectedUpdatedAt: _reshape_fixtureEpoch(0, 0, 7), patch: { description: '原未知保存正文' } })
     await owner.updatePresentation({ selectedSessionId: null, hostUrl: '', panel: 'conversation' }, { primary: 'goals', showSession: false, showGoalWork: false, identity: null, profile: null,
       goals: { goalId: 'original-goal', mode: 'edit', discussion: null } })
-    await owner.editGoalDraft(null, { goalId: 'original-goal', scope, title: '原目标', description: '离线仍可编辑的完整草稿', baseline: { title: '原目标', description: '原意', updatedAt: 7 },
+    await owner.editGoalDraft(null, { goalId: 'original-goal', scope, title: '原目标', description: '离线仍可编辑的完整草稿', baseline: { title: '原目标', description: '原意', updatedAt: _reshape_fixtureEpoch(0, 0, 7) },
       operations: [{ request, ownerInstanceId: 'original-process', phase: 'sending', issue: null }] }, owner.recordIdentity())
     const originalRecordId = owner.recordIdentity()
     const view = await mount(<MobileApp client={null} connection={{ state: 'disconnected', message: '原Host离线' }} platform={createBrowserPlatform()} />)
@@ -76,7 +77,7 @@ describe('actual phone primary workfaces', () => {
 
   it('toolbar return from the original Goal Agent discussion restores its exact Goal and body rather than a residual Tab zone', async () => {
     const f = originalClient(), original = f.client.forwardRpc!
-    const goal = { id: 'original-goal', title: '原Goal', description: '原目标正文', status: 'backlog', priority: 'normal', sessionIds: ['session-original'], assigneeSessionIds: ['session-original'], supervisorSessionId: 'session-original', participations: [], activityLog: [], source: 'session', createdAt: 1, updatedAt: 7 }
+    const goal = { id: 'original-goal', title: '原Goal', description: '原目标正文', status: 'backlog', priority: 'normal', sessionIds: ['session-original'], assigneeSessionIds: ['session-original'], supervisorSessionId: 'session-original', participations: [], activityLog: [], source: 'session', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 7) }
     f.client.runtimeOwnerIdentity = () => ({ runtimeId: 'original-runtime', ownerInstanceId: 'original-process', availability: 'connected' })
     f.client.forwardRpc = vi.fn(async (method, params) => {
       if (method === 'goal.ls') return { goals: [goal] }
@@ -124,7 +125,7 @@ describe('actual phone primary workfaces', () => {
     const f = originalClient(), platform = createBrowserPlatform()
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={platform} />)
     await click(button(nav(view.element), 'Mote'))
-    await click(view.element.querySelector('.mobile-spatial-panel > .mobile-session-list button')!)
+    await openTreeSession(view.element)
     const originalEditor = editor(view.element)
     await paste(view.element, '原 Mote 的未保存草稿')
     expect(current(view.element)).toBe('Mote')
@@ -135,7 +136,7 @@ describe('actual phone primary workfaces', () => {
       expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')
     }
     await click(button(nav(view.element), 'Mote'))
-    await click(view.element.querySelector('.mobile-spatial-panel > .mobile-session-list button')!)
+    await openTreeSession(view.element)
     expect(editor(view.element)).toBe(originalEditor)
     expect(view.element.querySelector('.mobile-mote-heading')).not.toBeNull()
     expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
@@ -150,7 +151,7 @@ describe('actual phone primary workfaces', () => {
     const f = originalClient(), overlay = document.createElement('div'); document.body.append(overlay)
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
     await click(button(nav(view.element), 'Mote'))
-    await click(view.element.querySelector('.mobile-spatial-panel > .mobile-session-list button')!)
+    await openTreeSession(view.element)
     const original = editor(view.element)
     await paste(view.element, '被面板遮住的原草稿')
     const releases = f.disposeHistory.mock.calls.length
@@ -191,13 +192,13 @@ describe('actual phone primary workfaces', () => {
     f.submit.mockRejectedValueOnce(new Error('Acknowledgement is unknown after dispatch'))
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
     await click(button(nav(view.element), 'Mote'))
-    await click(view.element.querySelector('.mobile-spatial-panel > .mobile-session-list button')!)
+    await openTreeSession(view.element)
     await paste(view.element, '不能因为切换而重发的原输入')
     await click(button(view.element, 'Send'))
     const original = f.submit.mock.calls[0]![0]
     for (const label of order) await click(button(nav(view.element), label))
     await click(button(nav(view.element), 'Mote'))
-    await click(view.element.querySelector('.mobile-spatial-panel > .mobile-session-list button')!)
+    await openTreeSession(view.element)
     // The original-request retry remains reachable; navigation never authorizes it.
     expect(button(view.element, 'Send').disabled).toBe(false)
     expect(editor(view.element).textContent).toBe('不能因为切换而重发的原输入')
@@ -226,6 +227,7 @@ describe('actual phone primary workfaces', () => {
       : method === 'space.ls' ? Promise.resolve({ catalog }) : ordinary(method, params))
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
     await click(button(view.element, '手机设置与连接')); await click(button(overlay, 'Survey研究与笔记'))
+    await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, 'Original Research原研究选择'))
     await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, 'Original Topic'))
     expect(f.client.forwardRpc).toHaveBeenCalledWith('space.inspect', { target: { spaceId: 'topic-space' } })
     await click(button(nav(view.element), 'Goals'))
@@ -239,7 +241,7 @@ describe('actual phone primary workfaces', () => {
   it.each(['browser', 'native'])('%s Back exits the original source, Profile, result and chat one layer at a time while keeping the same editor and input guard', async mode => {
     const f = originalClient(), overlay = document.createElement('div'); document.body.append(overlay)
     const view = await mount(<MobileApp client={f.client} connection={connected} native={mode === 'native'} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
-    await click(button(nav(view.element), 'Mote')); await click(view.element.querySelector('.mobile-spatial-panel > .mobile-session-list button')!)
+    await click(button(nav(view.element), 'Mote')); await openTreeSession(view.element)
     const originalEditor = editor(view.element)
     await paste(view.element, '逐层返回保留的原草稿')
     f.submit.mockRejectedValueOnce(new Error('original acknowledgement unknown'))
@@ -276,7 +278,7 @@ describe('actual phone primary workfaces', () => {
     const f = originalClient(), overlay = document.createElement('div'); document.body.append(overlay)
     const platform = createBrowserPlatform({ overlayContainer: () => overlay })
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={platform} />)
-    await click(button(nav(view.element), 'Mote')); await click(view.element.querySelector('.mobile-spatial-panel > .mobile-session-list button')!)
+    await click(button(nav(view.element), 'Mote')); await openTreeSession(view.element)
     await paste(view.element, '刷新之前的原草稿')
     await click(view.element.querySelector('.mobile-mote-heading')!); await click(button(overlay, '合作方式 · BEHAVIOR.md'))
     const original = getDeviceWorkface().snapshot().record

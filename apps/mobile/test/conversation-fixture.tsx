@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -7,17 +8,17 @@ import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentMuxClientEvent, AgentSessionHistoryObservation, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
-export const evidence = { source: 'native-hook' as const, observedAt: 1, run: { runId: 'run-original' } }
+export const evidence = { source: 'native-hook' as const, observedAt: _reshape_fixtureEpoch(0, 0, 1), run: { runId: 'run-original' } }
 export function session(id = 'session-original'): AgentMuxAgentSession {
   return { kind: 'agent', agentSessionId: id, providerId: 'codex', executorId: 'local', hostId: 'host-original',
     workspacePath: fixturePath("workspace"), run: { runId: id === 'session-original' ? 'run-original' : `run-${id}` },
-    retiredRuns: [], createdAt: 1, updatedAt: 1 }
+    retiredRuns: [], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1) }
 }
 export function history(id = 'session-original'): AgentSessionHistoryPage {
   return { agentSessionId: id, source: { providerId: 'codex', nativeSessionId: `native-${id}` }, nextCursor: 'older-opaque',
     items: [
-      { id: 'native-input', kind: 'user-message', startedAt: 900, contentParts: [{ kind: 'text', text: '原生输入 [文档](https://example.test/docs)' }] },
-      { id: 'native-answer', kind: 'assistant-message', startedAt: 100, contentParts: [{ kind: 'text', text: '原生回答' }] }
+      { id: 'native-input', kind: 'user-message', startedAt: _reshape_fixtureEpoch(0, 0, 900), contentParts: [{ kind: 'text', text: '原生输入 [文档](https://example.test/docs)' }] },
+      { id: 'native-answer', kind: 'assistant-message', startedAt: _reshape_fixtureEpoch(0, 0, 100), contentParts: [{ kind: 'text', text: '原生回答' }] }
     ] }
 }
 export function fixture() {
@@ -82,4 +83,14 @@ export function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (error: unknown) => void
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
   return { promise, resolve, reject }
+}
+
+/** Directory disclosure is presentation; entering a Session requires its explicit original Tab row. */
+export async function openTreeSession(element: HTMLElement): Promise<void> {
+  const branch = element.querySelector<HTMLButtonElement>('.mobile-space-row')
+  expect(branch, 'Original tree branch').not.toBeNull()
+  if (branch!.getAttribute('aria-expanded') !== 'true') await click(branch!)
+  const target = element.querySelector<HTMLButtonElement>('.mobile-spatial-tab .mobile-session-list button')
+  expect(target, 'Original Tab Session row').not.toBeNull()
+  await click(target!)
 }

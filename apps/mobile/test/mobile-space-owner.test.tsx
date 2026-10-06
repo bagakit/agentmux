@@ -170,7 +170,7 @@ describe('T-007 original Space selected content frame', () => {
     await view.click('刷新空间目录'); await view.stepBack(); await view.stepBack()
     await act(async () => resolve(observed))
     expect(view.changed).toHaveBeenLastCalledWith({ spaceId: null, tabId: null, regionId: null })
-    expect(view.element.querySelector('.mobile-spatial-panel > .mobile-session-list')).not.toBeNull()
+    expect(view.element.querySelector('.mobile-space-directory .mobile-space-tree')).not.toBeNull()
     expect(view.element.querySelector('.mobile-spatial-tab')).toBeNull()
     expect(view.fileRead.mock.calls.map(call => call[1])).toEqual(['docs/original.md'])
   })
