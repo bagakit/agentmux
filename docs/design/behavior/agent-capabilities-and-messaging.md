@@ -215,6 +215,8 @@ Message Tools 的形态、工具入口与启动页编辑行为只由[快捷输�
 
 ## Provider 与人机交互的分层收敛
 
+交互模式与外部连接器共同消费对话、更新与原动作的目标边界见[《共同对话协议与外部交流入口》](conversation-input.md#共同对话协议与外部交流入口)；本节继续持有 Provider 资格、原请求与回执的准确合同。
+
 - AgentMux 接入多个 harness，不自行接管各 harness 的模型循环、工具执行、上下文压缩或内部任务真值。Provider 负责协议差异；Core 负责跨 Provider 的 Session、投递、交互与恢复语义；Client 负责呈现和用户手势；ctxmux 继续独占 Run/PTY/Replay 等运行时事实。
 - 观测必须区分运行时存活、Provider 执行状态、输入可消费状态、等待用户和业务任务状态。缺失、过期、互相矛盾的证据有来源与时间，不能合并为一个 busy 布尔值，也不能以进程输出或 CPU 代替语义。Provider 特有的工具、goal 或 workflow 事件只按已声明能力呈现。
 - 人机交互由 AgentMux 统一承接：Provider 描述原生权限/问题及可回答选项，Core 绑定精确 Session、Run 与 request 身份并维护其生命周期，Client 复用对应交互面。普通消息、排队、steer、回答权限/问题、interrupt 当前轮、stop 执行、pause loop 的意图必须区分；共享身份、投递与回执规则不等于共用一种写入语义。
