@@ -87,7 +87,8 @@ export function EditorPane({
   visible = true,
   preview,
   onTogglePreview,
-  extraActions
+  extraActions,
+  previewHasNoteAttribution = false
 }: {
   tabId: string
   surface: FileWorkbenchSurface
@@ -96,6 +97,7 @@ export function EditorPane({
   preview?: ReactNode
   onTogglePreview?: () => void
   extraActions?: ReactNode
+  previewHasNoteAttribution?: boolean
 }) {
   const key = documentKey(surface.workspaceId, surface.path)
   const document = useAppStore((state) => {
@@ -207,8 +209,8 @@ export function EditorPane({
         </div>
       </header>
       <div className="editor-file-notices">
-        {document.noteProvenance?.status === 'unconfirmed' && document.noteWriteAttribution?.status !== 'unconfirmed' ? <div className="editor-file-notice" role="status">Block authorship is unconfirmed: {document.noteProvenance.reason} Your Note remains readable and editable. <button className="small-button" onClick={() => void refresh(surface.workspaceId, surface.path)}>Check original file</button></div> : null}
-        {document.noteWriteAttribution?.status === 'unconfirmed' ? <div className="editor-file-notice" role="status">The Note was saved. Block authorship is unconfirmed: {document.noteWriteAttribution.reason} Your Note remains editable; a later save with a confirmed author records its changed blocks.</div> : null}
+        {!previewHasNoteAttribution && document.noteProvenance?.status === 'unconfirmed' && document.noteWriteAttribution?.status !== 'unconfirmed' ? <div className="editor-file-notice" role="status">Block authorship is unconfirmed: {document.noteProvenance.reason} Your Note remains readable and editable. <button className="small-button" onClick={() => void refresh(surface.workspaceId, surface.path)}>Check original file</button></div> : null}
+        {!previewHasNoteAttribution && document.noteWriteAttribution?.status === 'unconfirmed' ? <div className="editor-file-notice" role="status">The Note was saved. Block authorship is unconfirmed: {document.noteWriteAttribution.reason} Your Note remains editable; a later save with a confirmed author records its changed blocks.</div> : null}
         {formatResult?.message ? <div className="editor-file-notice" role={formatResult.status === 'failed' ? 'alert' : 'status'}>{formatResult.message}</div> : null}
         <RetainedDocumentDraftNotice tabId={tabId} surface={surface} />
         {issue ? (

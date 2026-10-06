@@ -135,7 +135,7 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
         void useAppStore.getState().openHttpLink({ workspaceId: reference.displayWorkspaceId, tabGroupId: reference.groupId, tabId, regionId: surface.regionId }, url, 'tab').catch(reportError)
       }} /> : null : null
   return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="File" title="Loading file" detail="Loading file content" />}>
-    <EditorPane tabId={tabId} surface={surface} released={released} visible={visible}
+    <EditorPane tabId={tabId} surface={surface} released={released} visible={visible} previewHasNoteAttribution={Boolean(note && preview && !overBudget)}
       {...(format.sourcePreview ? { preview, onTogglePreview: () => { void setRegionMode(surface.regionId, surface.workspaceId, surface.path, previewing ? 'edit' : 'preview') } } : {})}
       {...(html ? { extraActions: <>
         <DropdownMenu.Item className="tab-context-menu__item" title="Open the saved file in Browser; keep the current source draft" disabled={!isLocal} onSelect={() => void previewSavedHtml(false)}><ThemeActionRevealIcon size={13} />Preview saved file</DropdownMenu.Item>
