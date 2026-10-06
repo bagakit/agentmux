@@ -165,7 +165,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
       {agentSessionId && (inputState.mode === 'watch' ? <button className="mobile-terminal-mode" disabled={!client || connection.state !== 'connected' || inputState.phase === 'unknown'} onClick={enableControl}><SemanticIcon name="object.keyboard" size={16} />控制终端</button>
         : <button className="mobile-terminal-mode" onClick={() => control.current?.watch()}><SemanticIcon name="action.reveal" size={16} />回到观看</button>)}
       <button aria-label="最新输出" onClick={() => { terminal.current?.scrollToBottom(); if (container.current) container.current.scrollTop = container.current.scrollHeight }}><SemanticIcon name="navigation.down" size={18} /></button>
-      <button className="mobile-terminal-reading-trigger" aria-label="终端阅读与状态" aria-haspopup="dialog" data-notice={Boolean(serviceMessage)} title={serviceMessage ? noticeSummary(serviceMessage) : '阅读设置与输出详情'} onClick={() => { if (control.current?.facts().mode === 'control') control.current.watch(); setReadingOpen(true) }}>Aa{serviceMessage && <i aria-label="有待核实事项" />}</button>
+      <button className="mobile-terminal-reading-trigger" aria-label="终端阅读与状态" aria-haspopup="dialog" data-notice={Boolean(serviceMessage)} title={serviceMessage ? noticeSummary(serviceMessage) : '阅读设置与输出详情'} onClick={() => { if (control.current?.facts().mode === 'control') control.current.watch(); setReadingOpen(true) }}><SemanticIcon name="action.read-terminal" size={18} />{serviceMessage && <span className="mobile-terminal-reading-notice" aria-label="有待核实事项"><SemanticIcon name="status.terminal-notice" size={6} /></span>}</button>
     </div>
     {inputState.mode === 'control' && <div className="mobile-terminal-keys" aria-label="终端常用按键">
       <button aria-expanded={sizeOpen} onClick={() => { setCols(String(terminal.current?.cols ?? 80)); setRows(String(terminal.current?.rows ?? 24)); setSizeOpen(value => !value) }}>PTY 尺寸</button>
@@ -183,9 +183,9 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
         <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>终端阅读</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭终端阅读"><SemanticIcon name="action.close" size={19} /></Dialog.Close></div>
         <Dialog.Description>缩放只改变手机显示，原 Run 的网格保持不变。</Dialog.Description>
         <div className="mobile-terminal-reading-tools" aria-label="本机终端阅读">
-          <button aria-label="缩小终端文字" onClick={() => gestures.current?.zoom(fontSize - 1)}>A−</button>
+          <button aria-label="缩小终端文字" onClick={() => gestures.current?.zoom(fontSize - 1)}><SemanticIcon name="action.decrease-font-size" size={18} /></button>
           <button aria-label="恢复终端文字大小" onClick={() => gestures.current?.zoom(MOBILE_TERMINAL_FONT_DEFAULT)}>{fontSize}px</button>
-          <button aria-label="放大终端文字" onClick={() => gestures.current?.zoom(fontSize + 1)}>A+</button>
+          <button aria-label="放大终端文字" onClick={() => gestures.current?.zoom(fontSize + 1)}><SemanticIcon name="action.increase-font-size" size={18} /></button>
         </div>
         <div className="mobile-terminal-reading-actions"><button onClick={() => { void copy() }}><SemanticIcon name="action.copy" size={16} />复制选中文字</button><button onClick={() => { void reader.current?.retry() }}><SemanticIcon name="action.refresh" size={16} />重新核实输出</button></div>
         <div className="mobile-terminal-details">

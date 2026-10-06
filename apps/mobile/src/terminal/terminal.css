@@ -4,11 +4,11 @@
 .mobile-terminal .mobile-terminal-canvas .xterm { min-height: 0; }
 /* Healthy details stay on demand; the marked toolbar entry owns service visibility. */
 .mobile-terminal-notice { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); border: 0; }
-.mobile-terminal-reading-trigger { position: relative; font-size: 15px; letter-spacing: -.6px; }
-.mobile-terminal-reading-trigger > i { position: absolute; right: 5px; top: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
+.mobile-terminal-reading-trigger { position: relative; display: inline-flex; align-items: center; justify-content: center; }
+.mobile-terminal-reading-notice { position: absolute; right: 5px; top: 8px; display: flex; width: 6px; height: 6px; color: var(--amber); }
 .mobile-terminal-reading-trigger[data-notice='true'] { color: var(--amber-text); }
 .mobile-terminal-reading-sheet .mobile-terminal-reading-tools { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 10px 0; background: var(--surface-2); border-radius: var(--radius); }
-.mobile-terminal-reading-tools button { min-width: 64px; min-height: 44px; padding: 0 10px; background: transparent; color: var(--text-2); font-size: 14px; font-variant-numeric: tabular-nums; }
+.mobile-terminal-reading-tools button { display: inline-flex; align-items: center; justify-content: center; min-width: 64px; min-height: 44px; padding: 0 10px; background: transparent; color: var(--text-2); font-size: 14px; font-variant-numeric: tabular-nums; }
 .mobile-terminal-reading-actions { display: flex; gap: 8px; margin: 8px 0 16px; }
 .mobile-terminal-reading-actions > button, .mobile-terminal-details button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; background: var(--surface-2); color: var(--text-2); border-radius: var(--radius); font-size: 12px; }
 .mobile-terminal-reading-actions > button { flex: 1; }

@@ -4,6 +4,7 @@ import { closeNoteWikiHistory } from '@agentmux/client-ui/note/note-wiki-input'
 import { parseNoteWikiPrefix, type NoteInlineLinkAttributes, type NoteLinkTarget, type NotePageCandidate, type NotebookResolveResult, type NoteWikiQuery } from '@agentmux/core/note-links'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 
 type Trigger = { from: number; to: number; text: string; query: NoteWikiQuery }
 type Search = Extract<NotebookResolveResult, { mode: 'search' }>
@@ -117,7 +118,7 @@ export function useNoteWikiCompletion(editor: Editor | null, active: boolean, so
     {!busy && !options.length ? <p className="note-scope">{issue ?? (lookup?.result.status !== 'resolved' ? lookup?.result.message : null) ?? 'No target is confirmed for this query. Keep typing or close the suggestions.'}</p> : null}
     {search?.truncated ? <p className="note-scope">{search.total} pages match. Refine this query to see more.</p> : null}
     {issue ? <button type="button" className="note-text-button" onMouseDown={event => event.preventDefault()} onClick={() => setRetry(value => value + 1)}>Retry lookup</button> : null}
-    <p className="note-wiki-completion__help">↑↓ choose · Enter insert · Esc keep text</p>
+    <p className="note-wiki-completion__help"><span role="img" aria-label="Up and down arrow keys"><SemanticIcon name="control.key-up" size={10} /><SemanticIcon name="control.key-down" size={10} /></span> choose · <SemanticIcon name="control.key-enter" size={10} /> Enter insert · Esc keep text</p>
   </section> : null
   return { popup, keyDown, created }
 }
