@@ -359,8 +359,9 @@ describe('Browser bar contract', () => {
   it('renders an explicit release state without pretending a hidden Browser still owns WebContents', () => {
     const markup = renderToStaticMarkup(<BrowserPane tab={tab} visible={false} released />)
     expect(markup).toContain('Browser parked')
-    expect(markup).toContain('restore the browser')
-    expect(markup).not.toContain('Browser address')
+    expect(markup).toContain('restore the original page')
+    expect(markup).toContain('Browser address')
+    expect(markup).toContain('You can edit the address or open it in your external browser')
   })
 
   it('keeps Browser Tools as the recovery surface when More is hidden', () => {
