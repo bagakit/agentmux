@@ -13,6 +13,7 @@ import { desktopElementVisible } from '../lib/desktop-presentation'
 import { SettingsNavigation } from './SettingsNavigation'
 import { runtimeEndpointNotice } from '../lib/runtime-endpoint-notice'
 
+const ThemeStatusUnreadIcon = semanticIconComponent('status.unread')
 const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
 const ThemeLayoutCollapseIcon = semanticIconComponent('layout.collapse')
 
@@ -172,7 +173,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       popoverTarget={id} popoverTargetAction="toggle">
       <ThemeObjectNotificationsIcon size={14} aria-hidden="true" />
       {notices.length ? <span aria-hidden="true">{notices.length}</span> : null}
-      {unread ? <span className="global-system-notices__dot" aria-hidden="true" /> : null}
+      {unread ? <ThemeStatusUnreadIcon size={5} className="global-system-notices__dot" aria-hidden="true" /> : null}
     </button>
     <div ref={detailsRef} id={id} popover="auto" className="global-system-notices__details" aria-label="System notifications"
       data-state={open ? 'open' : 'closed'}

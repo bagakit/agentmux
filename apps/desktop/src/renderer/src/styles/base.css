@@ -131,7 +131,7 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .global-system-notices__trigger { display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; anchor-name: --global-system-notices; }
 .global-system-notices__trigger:hover { color: var(--text); background: var(--surface-2); }
 .global-system-notices__trigger[data-unread="true"] > svg { color: var(--amber); }
-.global-system-notices__dot { width: 5px; height: 5px; border-radius: 50%; background: var(--red); }
+.global-system-notices__trigger > svg.global-system-notices__dot { width: 5px; height: 5px; color: var(--red); }
 .global-system-notices__details { position: fixed; inset: auto; margin: 0; visibility: hidden; width: min(420px, 90vw); max-height: 70vh; overflow-y: auto; padding: var(--sp-3); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); }
 .global-system-notices__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); font-size: var(--fs-meta); }
 .global-system-notices__details .service-window { margin: 0; padding: var(--sp-2) 0; border: 0; background: transparent; box-shadow: none; }

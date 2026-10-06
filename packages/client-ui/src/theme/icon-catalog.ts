@@ -46,6 +46,10 @@ export const SEMANTIC_ICON_CATALOG = {
   'conversation.range': { label: 'Message range', glyph: 'arrow-right' },
   'status.workflow-running': { label: 'Workflow in progress', glyph: 'workflow-progress' },
   'status.dirty': { label: 'Unsaved changes', glyph: 'status-dot' },
+  'status.unread': { label: 'Unread notices', glyph: 'status-dot' },
+  'status.prompt-saved': { label: 'Prompt saved', glyph: 'status-dot' },
+  'status.prompt-unsaved': { label: 'Prompt unsaved', glyph: 'status-dot' },
+  'status.prompt-invalid': { label: 'Prompt needs attention', glyph: 'status-dot' },
   'status.named': { label: 'Custom names', glyph: 'status-dot' },
 
   'object.activity': { label: 'Activity', glyph: 'activity' },
