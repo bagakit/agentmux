@@ -4,12 +4,12 @@ import { join } from 'node:path'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
-import { ScreenshotEditor } from '../src/renderer/src/components/browser-screenshot/ScreenshotEditor'
-import { SCREENSHOT_COLORS, SCREENSHOT_WIDTHS, SCREENSHOT_FONT_SIZES } from '../src/renderer/src/components/browser-screenshot/drawing-model'
+import { ImageAnnotationEditor } from '../src/renderer/src/components/image-annotation/ImageAnnotationEditor'
+import { SCREENSHOT_COLORS, SCREENSHOT_WIDTHS, SCREENSHOT_FONT_SIZES } from '../src/renderer/src/components/image-annotation/drawing-model'
 
 // No browser process or rasterization: exercise real controls, sizing and source CSS.
 // Actual pointer hits, wrapping geometry and native painting remain in the product probe.
-vi.mock('../src/renderer/src/components/browser-screenshot/canvas-render', () => ({
+vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({
   renderCommittedLayer() {}, renderScreenshotScene() {}
 }))
 let root: Root | undefined
@@ -36,11 +36,11 @@ async function mount(busy = false) {
     disconnect() {}
   })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    if (this.classList.contains('browser-screenshot-editor__canvas-area')) return rect(available.width, available.height)
-    if (this.classList.contains('browser-screenshot-editor__viewport')) return rect(Number.parseFloat(this.style.width), Number.parseFloat(this.style.height))
+    if (this.classList.contains('image-annotation-editor__canvas-area')) return rect(available.width, available.height)
+    if (this.classList.contains('image-annotation-editor__viewport')) return rect(Number.parseFloat(this.style.width), Number.parseFloat(this.style.height))
     return rect(240, 300)
   })
-  const css = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/browser.css'), 'utf8')
+  const css = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/image-annotation/image-annotation.css'), 'utf8')
   const style = document.createElement('style')
   style.textContent = ':root{--sp-1:2px;--sp-2:4px;--sp-3:6px;--sp-4:8px;--sp-6:12px;}\n'+css
   document.head.append(style)
@@ -48,8 +48,8 @@ async function mount(busy = false) {
   const anchor = document.createElement('div'); anchor.dataset.nativeBrowserStage = ''; document.body.append(anchor)
   const props = { image: { mimeType: 'image/png' as const, dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 }, busy, onCancel: vi.fn(), onComplete: vi.fn() }
   root = createRoot(node)
-  await act(async () => root!.render(<ScreenshotEditor {...props} />))
-  const editor = document.querySelector<HTMLElement>('.browser-screenshot-editor')!
+  await act(async () => root!.render(<ImageAnnotationEditor {...props} />))
+  const editor = document.querySelector<HTMLElement>('.image-annotation-editor')!
   expect(editor).not.toBeNull()
   return { editor, props }
 }
@@ -61,8 +61,8 @@ function button(editor: HTMLElement, name: string): HTMLButtonElement {
 
 it('fits the original image to the remaining Canvas area, not the complete editor behind controls', async () => {
   const { editor } = await mount()
-  const area = editor.querySelector('.browser-screenshot-editor__canvas-area')
-  const viewport = editor.querySelector<HTMLElement>('.browser-screenshot-editor__viewport')!
+  const area = editor.querySelector('.image-annotation-editor__canvas-area')
+  const viewport = editor.querySelector<HTMLElement>('.image-annotation-editor__viewport')!
   expect(area).not.toBeNull()
   expect(viewport.parentElement).toBe(area)
   expect(viewport.style.width).toBe('160px')
@@ -72,13 +72,13 @@ it('fits the original image to the remaining Canvas area, not the complete edito
 
 it('updates image fit when controls reduce available height while the outer editor is unchanged', async () => {
   const { editor } = await mount()
-  const area = editor.querySelector('.browser-screenshot-editor__canvas-area')!
+  const area = editor.querySelector('.image-annotation-editor__canvas-area')!
   const related = observers.find(o => o.nodes.includes(area))
   expect(related).toBeDefined()
   expect(editor.getBoundingClientRect()).toMatchObject({ width: 240, height: 300 })
   available.height = 90
   await act(async () => related!.callback([], {} as ResizeObserver))
-  const viewport = editor.querySelector<HTMLElement>('.browser-screenshot-editor__viewport')!
+  const viewport = editor.querySelector<HTMLElement>('.image-annotation-editor__viewport')!
   expect(viewport.style.width).toBe('120px')
   expect(viewport.style.height).toBe('90px')
   expect(editor.getBoundingClientRect()).toMatchObject({ width: 240, height: 300 })
@@ -87,7 +87,7 @@ it('updates image fit when controls reduce available height while the outer edit
 it('keeps the real palette, width, text size, drawing history, Copy and Cancel handlers', async () => {
   const { editor, props } = await mount()
   expect(SCREENSHOT_COLORS.length).toBeGreaterThan(0)
-  expect([...editor.querySelectorAll('.browser-screenshot-toolbar__colors button')].map(b => b.getAttribute('aria-label'))).toEqual(SCREENSHOT_COLORS.map(c => `Color ${c}`))
+  expect([...editor.querySelectorAll('.image-annotation-toolbar__colors button')].map(b => b.getAttribute('aria-label'))).toEqual(SCREENSHOT_COLORS.map(c => `Color ${c}`))
   const selected = SCREENSHOT_COLORS.at(-1)!
   await act(async () => button(editor, `Color ${selected}`).click())
   expect(button(editor, `Color ${selected}`).getAttribute('aria-pressed')).toBe('true')
@@ -116,22 +116,22 @@ it('keeps the real palette, width, text size, drawing history, Copy and Cancel h
 it('keeps completion actions and relevant parameters outside the independent canvas area', async () => {
   const { editor } = await mount()
   const sheet = document.styleSheets[0]!
-  const rules = [...sheet.cssRules].filter(r => r.cssText.includes('browser-screenshot-toolbar'))
+  const rules = [...sheet.cssRules].filter(r => r.cssText.includes('image-annotation-toolbar'))
   expect(rules.length).toBeGreaterThan(0)
   const toolbar = editor.querySelector<HTMLElement>('[role=toolbar]')!
-  const tools = toolbar.querySelector<HTMLElement>('.browser-screenshot-toolbar__tools')!
-  const properties = editor.querySelector<HTMLElement>('.browser-screenshot-editor__properties')!
-  const colors = properties.querySelector<HTMLElement>('.browser-screenshot-toolbar__colors')!
+  const tools = toolbar.querySelector<HTMLElement>('.image-annotation-toolbar__tools')!
+  const properties = editor.querySelector<HTMLElement>('.image-annotation-editor__properties')!
+  const colors = properties.querySelector<HTMLElement>('.image-annotation-toolbar__colors')!
   expect(getComputedStyle(editor).display).toBe('flex')
   expect(getComputedStyle(editor).flexDirection).toBe('column')
   expect(getComputedStyle(toolbar).position).toBe('relative')
   expect(getComputedStyle(toolbar).flexWrap).toBe('wrap')
-  expect(properties.closest('.browser-screenshot-editor__canvas-area')).toBeNull()
+  expect(properties.closest('.image-annotation-editor__canvas-area')).toBeNull()
   expect(getComputedStyle(tools).flexWrap).toBe('wrap')
   expect(getComputedStyle(colors).flexShrink).toBe('0')
   expect(getComputedStyle(colors).maxWidth).toBe('100%')
   expect(getComputedStyle(colors).flexWrap).toBe('wrap')
-  const actions = editor.querySelector<HTMLElement>('.browser-screenshot-toolbar__actions')!
+  const actions = editor.querySelector<HTMLElement>('.image-annotation-toolbar__actions')!
   expect(getComputedStyle(actions).flexWrap).toBe('wrap')
   expect(getComputedStyle(actions).maxWidth).toBe('100%')
   expect(getComputedStyle(properties.querySelector('select')!).flexShrink).toBe('0')

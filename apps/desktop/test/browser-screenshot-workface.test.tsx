@@ -24,7 +24,7 @@ vi.mock('../src/renderer/src/store', () => ({
 }))
 // Raster output and PNG encoding have native proof. Keep the real Pane, Editor, input handlers,
 // history and copy/cancel token here; only the Canvas implementation and async encoder are replaced.
-vi.mock('../src/renderer/src/components/browser-screenshot/canvas-render', () => ({
+vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({
   renderCommittedLayer: fixture.committed, renderScreenshotScene: fixture.paint
 }))
 vi.mock('../src/renderer/src/components/browser-screenshot/compose', async importOriginal => ({
@@ -87,7 +87,7 @@ beforeEach(() => {
   vi.stubGlobal('cancelAnimationFrame', vi.fn((id: number) => { frames.delete(id) }))
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (this.hasAttribute('data-native-browser-stage')) return rect(80, 120, 400, 300)
-    if (this.classList.contains('browser-screenshot-editor__viewport')) {
+    if (this.classList.contains('image-annotation-editor__viewport')) {
       return rect(0, 0, Number.parseFloat(this.style.width), Number.parseFloat(this.style.height))
     }
     return rect(0, 0, 400, 300)
@@ -477,7 +477,7 @@ describe('original Browser screenshot workface', () => {
     const opened = await openScreenshot(method === 'Escape' ? 'more' : 'toolbar')
     expect(captureScreenshot).toHaveBeenCalledExactlyOnceWith(page.browserId)
     expect(opened.closest('[data-native-browser-stage]')).toBe(stage)
-    expect(document.querySelector('[data-overlay-host] .browser-screenshot-editor')).toBeNull()
+    expect(document.querySelector('[data-overlay-host] .image-annotation-editor')).toBeNull()
     expect(bounds).toHaveBeenLastCalledWith(page.browserId, null)
     expect(button(opened, 'Cancel').disabled).toBe(false)
     await cancel(method)

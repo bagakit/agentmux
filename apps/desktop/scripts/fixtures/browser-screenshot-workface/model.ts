@@ -1,6 +1,6 @@
 import { composeScreenshot } from '../../../src/renderer/src/components/browser-screenshot/compose'
-import { drawScreenshotShapes } from '../../../src/renderer/src/components/browser-screenshot/drawing-renderer'
-import { commitShape, createScreenshotDocument, hitTestShape, moveShape, removeShapes, replaceShape, setCrop, undoShape, type ScreenshotShape } from '../../../src/renderer/src/components/browser-screenshot/drawing-model'
+import { drawScreenshotShapes } from '../../../src/renderer/src/components/image-annotation/drawing-renderer'
+import { commitShape, createScreenshotDocument, hitTestShape, moveShape, removeShapes, replaceShape, setCrop, undoShape, type ScreenshotShape } from '../../../src/renderer/src/components/image-annotation/drawing-model'
 
 function check(value: unknown, message: string): asserts value { if (!value) throw new Error(message) }
 function canvas(width: number, height: number) {

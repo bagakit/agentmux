@@ -47,7 +47,7 @@ const root = createRoot(document.getElementById('root')!)
 root.render(<Fixture />)
 ;(window as any).screenshotProbe = {
   read() {
-    const editor = document.querySelector('.browser-screenshot-editor'), canvas = editor?.querySelector('canvas')
+    const editor = document.querySelector('.image-annotation-editor'), canvas = editor?.querySelector('canvas')
     const box = (node: Element | null) => { const r = node?.getBoundingClientRect(); return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null }
     return { editor: !!editor, bounds: box(editor), canvas: box(canvas ?? null), canvasPixels: canvas ? [canvas.width, canvas.height] : null,
       withinStage: !!editor?.closest('[data-native-browser-stage]'), imageLoaded: !!editor?.querySelector<HTMLImageElement>('img')?.complete,
@@ -59,7 +59,7 @@ root.render(<Fixture />)
       overlay: rendererPerformance.snapshot().overlay }
   },
   inkPixels() {
-    const canvas = document.querySelector('.browser-screenshot-editor canvas') as HTMLCanvasElement
+    const canvas = document.querySelector('.image-annotation-editor canvas') as HTMLCanvasElement
     if (!canvas || canvas.width <= 0 || canvas.height <= 0) throw new Error('The actual screenshot canvas is absent')
     const pixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data
     let count = 0, changed = 0, left = canvas.width, top = canvas.height, right = 0, bottom = 0
@@ -75,13 +75,13 @@ root.render(<Fixture />)
     return { count, changed, width: canvas.width, height: canvas.height, redBounds: count ? { x: left, y: top, width: right - left + 1, height: bottom - top + 1 } : null }
   },
   rememberPixels() {
-    const canvas = document.querySelector('.browser-screenshot-editor canvas') as HTMLCanvasElement
+    const canvas = document.querySelector('.image-annotation-editor canvas') as HTMLCanvasElement
     if (!canvas || canvas.width <= 0 || canvas.height <= 0) throw new Error('Actual base Canvas is absent')
     referencePixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data
     return { width: canvas.width, height: canvas.height }
   },
   patchStats(rect: { x: number; y: number; width: number; height: number }) {
-    const canvas = document.querySelector('.browser-screenshot-editor canvas') as HTMLCanvasElement, bounds = canvas.getBoundingClientRect()
+    const canvas = document.querySelector('.image-annotation-editor canvas') as HTMLCanvasElement, bounds = canvas.getBoundingClientRect()
     const sx = canvas.width / bounds.width, sy = canvas.height / bounds.height
     const x = Math.floor(rect.x * sx), y = Math.floor(rect.y * sy), width = Math.floor(rect.width * sx), height = Math.floor(rect.height * sy)
     if (width < 10 || height < 10) throw new Error('The actual pixelation source patch is nonempty')

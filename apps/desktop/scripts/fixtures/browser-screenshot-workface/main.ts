@@ -46,7 +46,7 @@ async function mouse(type: string, x: number, y: number, button?: string) {
     ...(button ? { button, clickCount: 1 } : {}), ...(type === 'mouseMoved' && button ? { buttons: 1 } : {}) })
 }
 async function click(name: string, insideEditor = false) {
-  const point = await evaluate(`(()=>{const root=${insideEditor ? "document.querySelector('.browser-screenshot-editor')" : 'document'},button=[...root.querySelectorAll('button,[role="menuitem"]')].find(b=>(b.getAttribute('aria-label')===${JSON.stringify(name)}||b.textContent.trim()===${JSON.stringify(name)})&&b.getBoundingClientRect().width>0);if(!button)return null;const r=button.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,disabled:button.disabled}})()`)
+  const point = await evaluate(`(()=>{const root=${insideEditor ? "document.querySelector('.image-annotation-editor')" : 'document'},button=[...root.querySelectorAll('button,[role="menuitem"]')].find(b=>(b.getAttribute('aria-label')===${JSON.stringify(name)}||b.textContent.trim()===${JSON.stringify(name)})&&b.getBoundingClientRect().width>0);if(!button)return null;const r=button.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,disabled:button.disabled}})()`)
   assert.ok(point, 'The actual mounted button exists: ' + name)
   await mouse('mouseMoved', point.x, point.y)
   await mouse('mousePressed', point.x, point.y, 'left'); await mouse('mouseReleased', point.x, point.y, 'left')

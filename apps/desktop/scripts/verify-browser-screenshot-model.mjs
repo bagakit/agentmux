@@ -7,11 +7,16 @@ import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 const require = createRequire(resolve('apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
-const root = resolve('apps/desktop/src/renderer/src/components/browser-screenshot')
+const sourcePaths = {
+  'drawing-model.ts': 'apps/desktop/src/renderer/src/components/image-annotation/drawing-model.ts',
+  'geometry.ts': 'apps/desktop/src/renderer/src/components/image-annotation/geometry.ts',
+  'drawing-renderer.ts': 'apps/desktop/src/renderer/src/components/image-annotation/drawing-renderer.ts',
+  'compose.ts': 'apps/desktop/src/renderer/src/components/browser-screenshot/compose.ts'
+}
 const output = resolve('.local/browser-screenshot-workface/model-proof'), work = await mkdtemp(join(tmpdir(), 'amx-screenshot-model-'))
 await mkdir(output, { recursive: true })
 await rm(join(output, 'receipt.json'), { force: true })
-const sources = Object.fromEntries(await Promise.all(['drawing-model.ts', 'drawing-renderer.ts', 'compose.ts'].map(async file => [file, await readFile(join(root, file), 'utf8')])))
+const sources = Object.fromEntries(await Promise.all(Object.entries(sourcePaths).map(async ([file, path]) => [file, await readFile(path, 'utf8')])))
 const evidence = { passed: false, sourceHashes: Object.fromEntries(Object.entries(sources).map(([file, source]) => [file, createHash('sha256').update(source).digest('hex')])), cases: [] }
 const proofInputs = ['apps/desktop/scripts/verify-browser-screenshot-model.mjs', 'apps/desktop/scripts/fixtures/browser-screenshot-workface/model.ts']
 evidence.proofInputs = Object.fromEntries(await Promise.all(proofInputs.map(async file => [file, createHash('sha256').update(await readFile(file)).digest('hex')])))
@@ -22,8 +27,9 @@ async function run(label, mutation) {
   const plugins = mutation ? [{ name: label, setup(build) { build.onLoad({ filter: /(?:drawing-model|drawing-renderer|compose)\.ts$/ }, args => {
     const name = args.path.split('/').at(-1), source = sources[name]
     if (name !== mutation.file) return
+    assert.equal(args.path, resolve(sourcePaths[name]), 'The mutation belongs to the original source owner')
     assert.equal(source.split(mutation.find).length, 2, 'Actual source mutation must be unique: ' + label)
-    return { contents: source.replace(mutation.find, mutation.replace), loader: 'ts', resolveDir: root }
+    return { contents: source.replace(mutation.find, mutation.replace), loader: 'ts', resolveDir: dirname(resolve(sourcePaths[name])) }
   }) } }] : []
   await build({ bundle: true, logLevel: 'silent', absWorkingDir: process.cwd(), platform: 'browser', format: 'iife', plugins,
     entryPoints: ['apps/desktop/scripts/fixtures/browser-screenshot-workface/model.ts'], outfile: join(compiled, 'model.js') })
@@ -60,7 +66,7 @@ try {
     await run('move-omitted', { file: 'drawing-model.ts', find: 'const move = (at: ScreenshotPoint) => ({ x: at.x + dx, y: at.y + dy })', replace: 'const move = (at: ScreenshotPoint) => at', failure: /move must preserve/ })
     await run('restored-source')
   }
-  for (const [file, source] of Object.entries(sources)) assert.equal(await readFile(join(root, file), 'utf8'), source, 'Model source changed during native verification: ' + file)
+  for (const [file, source] of Object.entries(sources)) assert.equal(await readFile(sourcePaths[file], 'utf8'), source, 'Model source changed during native verification: ' + file)
   for (const [file, hash] of Object.entries(evidence.proofInputs)) assert.equal(createHash('sha256').update(await readFile(file)).digest('hex'), hash, 'Model proof changed during verification: ' + file)
   evidence.passed = true; await writeFile(join(output, 'receipt.json'), JSON.stringify(evidence, null, 2))
 } finally { await rm(work, { recursive: true, force: true }) }

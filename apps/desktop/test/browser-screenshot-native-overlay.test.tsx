@@ -17,8 +17,8 @@ vi.mock('../src/renderer/src/lib/browser-stage-geometry', () => ({
 }))
 // Canvas rasterization has its own native proof. These tests exercise the actual editor handlers,
 // original stage DOM, source CSS, and the one overlay collector, without starting Electron.
-vi.mock('../src/renderer/src/components/browser-screenshot/canvas-render', () => ({ renderCommittedLayer() {}, renderScreenshotScene() {} }))
-const browserCss = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/browser.css'), 'utf8')
+vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer() {}, renderScreenshotScene() {} }))
+const imageAnnotationCss = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/image-annotation/image-annotation.css'), 'utf8')
 const agentCss = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/agent.css'), 'utf8')
 let root: Root | undefined
 let overlays: ReturnType<typeof observeNativeOverlayRegions> | undefined
@@ -34,10 +34,10 @@ function rect(x: number, y: number, width: number, height: number): DOMRect {
   return { x, y, width, height, left: x, top: y, right: x + width, bottom: y + height, toJSON() {} }
 }
 function prepareCss(): void {
-  expect(browserCss).toContain('.browser-screenshot-editor {')
+  expect(imageAnnotationCss).toContain('.image-annotation-editor {')
   expect(agentCss).toContain('.surface-navigation__tooltip {')
   const style = document.createElement('style')
-  style.textContent = ':root { --bg: rgb(30, 31, 32); --surface-2: rgb(40, 49, 45); --layer-dialog: 100; --layer-tooltip: 200; }\n' + browserCss + agentCss
+  style.textContent = ':root { --bg: rgb(30, 31, 32); --surface-2: rgb(40, 49, 45); --layer-dialog: 100; --layer-tooltip: 200; }\n' + imageAnnotationCss + agentCss
   document.head.append(style)
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -50,14 +50,14 @@ it('the screenshot editor uses its original stage DOM without native bitmap proj
   let stage = rect(80, 90, 400, 300)
   anchor.getBoundingClientRect = () => stage
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    if (this.classList.contains('browser-screenshot-editor')) return rect(Number.parseFloat(this.style.left), Number.parseFloat(this.style.top), Number.parseFloat(this.style.width), Number.parseFloat(this.style.height))
+    if (this.classList.contains('image-annotation-editor')) return rect(Number.parseFloat(this.style.left), Number.parseFloat(this.style.top), Number.parseFloat(this.style.width), Number.parseFloat(this.style.height))
     return rect(0, 0, 400, 300)
   })
   const cancel = vi.fn(), complete = vi.fn()
   const mount = document.createElement('div'); container.append(mount)
   root = createRoot(mount)
   await act(async () => root!.render(<ScreenshotEditor image={{ mimeType: 'image/png', dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 }} busy={false} onCancel={cancel} onComplete={complete} />))
-  const editor = container.querySelector<HTMLElement>('.browser-screenshot-editor')
+  const editor = container.querySelector<HTMLElement>('.image-annotation-editor')
   expect(editor).not.toBeNull()
   expect(anchor.isConnected).toBe(true)
   expect(editor!.closest('[data-overlay-host]')).toBeNull()
@@ -83,7 +83,7 @@ it('the screenshot editor uses its original stage DOM without native bitmap proj
   expect(cancel).toHaveBeenCalledTimes(1)
   await act(async () => root!.unmount()); root = undefined
   expect(geometry.stop).not.toHaveBeenCalled()
-  expect(document.querySelector('.browser-screenshot-editor')).toBeNull()
+  expect(document.querySelector('.image-annotation-editor')).toBeNull()
 })
 
 it('the source tooltip surface is opaque and accepted by the same collector', () => {
@@ -104,7 +104,7 @@ async function mountGestureEditor() {
   const complete = vi.fn(), cancel = vi.fn()
   const mount = document.createElement('div'); container.append(mount); root = createRoot(mount)
   await act(async () => root!.render(<ScreenshotEditor image={{ mimeType: 'image/png', dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 }} busy={false} onCancel={cancel} onComplete={complete} />))
-  const editor = container.querySelector<HTMLElement>('.browser-screenshot-editor')!
+  const editor = container.querySelector<HTMLElement>('.image-annotation-editor')!
   expect(editor).not.toBeNull()
   await act(async () => editor.querySelector('img')!.dispatchEvent(new Event('load')))
   const canvas = editor.querySelector('canvas')!
