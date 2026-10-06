@@ -1,3 +1,4 @@
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentMuxRpcResult } from '@agentmux/core'
@@ -9,6 +10,7 @@ import '@agentmux/client-ui/styles/mote-identity.css'
 import { SPACE_ICON_CATALOG } from '@agentmux/client-ui/space-icon-catalog'
 import { MoteIcon as MoteMark } from '@agentmux/client-ui/components/MoteIcon'
 import defaultAvatar from './mote-avatar.png'
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
 export type MobileObjectIdentity = { name: string; project: string; context?: AgentMuxSpaceAddress;
   mote?: { spaceId: string; name?: string; conversationName?: string | undefined; contentReference?: AgentMuxMotePresentation['content']; facts?: AgentMuxMotePresentation | undefined; appearance?: NonNullable<Catalog['appearance']>[number] | undefined } }
@@ -85,6 +87,6 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
       : selected?.image ? image && image.spaceId === spaceId && image.revision === selected.image.revision ? <img className="space-object-icon__avatar" src={image.dataUrl} alt="" /> : <MoteMark size={size - 8} />
       : selected?.glyph ? Glyph ? <Glyph size={size - 8} /> : <MoteMark size={size - 8} /> : selected?.preset === 'primary-mote' ? <img className="space-object-icon__avatar" src={defaultAvatar} alt="" /> : <MoteMark size={size - 8} />}</span>
       : <span>{Array.from(identity.project || identity.name).slice(0, 1).join('').toLocaleUpperCase()}</span>}
-    {(issue || selected?.issue) && <span className="mobile-avatar-issue" aria-label={issue || selected?.issue}>!</span>}
+    {(issue || selected?.issue) && <span className="mobile-avatar-issue" aria-label={issue || selected?.issue}><ThemeStatusWarningIcon size={10} /></span>}
   </span>
 }
