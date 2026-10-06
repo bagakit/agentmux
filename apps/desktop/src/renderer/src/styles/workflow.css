@@ -3,6 +3,13 @@
 .wf-gallery { min-height: 100%; overflow: auto; padding: var(--sp-7) var(--sp-6) var(--sp-8); background: var(--bg); color: var(--text); font-size: var(--fs-body); line-height: 1.5; }
 .wf-gallery__bar, .wf-gallery__section, .wf-gallery__intro, .wf-gallery__map { width: min(880px, 100%); margin-inline: auto; }
 .wf-gallery__bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-7); }
+.wf-gallery__inspect { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); width: min(880px, 100%); margin: 0 auto var(--sp-6); color: var(--text-2); font-size: var(--fs-meta); }
+.wf-gallery__inspect label { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.wf-gallery__inspect input { margin: 0; accent-color: var(--blue); }
+.wf-gallery__inspect :is(select, button) { border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3); color: var(--text-2); background: var(--surface-1); font: inherit; }
+.wf-gallery__inspect :is(input, select, button):focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.wf-gallery__examples { width: min(880px, 100%); max-width: 100%; margin-inline: auto; }
+.wf-gallery__examples[data-inspect-bounds='true'] :where(*:not(:focus-visible)) { outline: 1px solid color-mix(in srgb, var(--blue) 32%, transparent); outline-offset: -1px; }
 .wf-gallery__brand { font-size: var(--fs-title); font-weight: 620; }
 .wf-gallery__brand span { color: var(--text-3); font-weight: 400; }
 .wf-gallery__theme { display: inline-flex; gap: var(--sp-1); margin-left: auto; padding: var(--sp-1); border: 1px solid var(--line-soft); border-radius: 999px; background: var(--surface-1); }
