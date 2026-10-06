@@ -111,6 +111,10 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-sheet-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .mobile-sheet-title h2 { font-weight: 550; letter-spacing: -.6px; font-size: 17px; margin: 4px 0 8px; }
 .mobile-icon-button { width: 44px; min-height: 44px; display: grid; place-items: center; background: transparent; color: var(--text-2); }
+.mobile-page-header { display: flex; align-items: center; gap: 6px; min-height: 44px; }
+.mobile-page-header > :is(h1, div) { flex: 1; min-width: 0; }
+.mobile-page-header > .mobile-settings-button { flex: none; margin-left: -4px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.mobile-app[data-page-header='inline'] .mobile-main { padding-top: env(safe-area-inset-top); }
 .mobile-sheet p { color: var(--text-2); margin: 4px 0 18px; font-size: var(--fs-meta); line-height: 1.6; }
 .mobile-address-label { display: block; font-size: 11px; color: var(--text-2); margin: 25px 0 9px; }
 .mobile-address-input { width: 100%; min-height: 48px; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; margin-bottom: 13px; background: var(--surface-0); color: var(--text); font-size: 16px; }
