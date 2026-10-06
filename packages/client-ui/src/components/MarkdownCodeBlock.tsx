@@ -4,6 +4,7 @@ import { ContentCopyButton } from './ContentCopyButton.js'
 import { useVisibleWork } from '../lib/use-visible-work.js'
 import { requestMarkdownRender } from '../lib/markdown-render-job.js'
 import type { MarkdownRenderResult } from '../lib/markdown-render.js'
+import { useHorizontalReading } from '../lib/use-horizontal-reading.js'
 
 export function MarkdownCodeBlock({ code, language, visible = true, readOnly = false }: { code: string; language?: string | null; visible?: boolean; readOnly?: boolean }) {
   const { ref, visible: inView } = useVisibleWork<HTMLDivElement>(visible)
@@ -22,13 +23,14 @@ export function MarkdownCodeBlock({ code, language, visible = true, readOnly = f
     return () => lifetime.abort()
   }, [owner, code, normalized, diagram, inView])
   const ready = inView && result?.owner === owner ? result.value : null
+  const reading = useHorizontalReading<HTMLPreElement>(inView, ready?.html ?? code)
   return <div ref={ref} className="md-code-container">
     {!diagram && !readOnly && copyText ? <div className="md-code-toolbar">
       <span className="md-code-toolbar__language" title={language?.trim() || 'Text'}>{language?.trim() || 'Text'}</span>
       <ContentCopyButton text={code} identity={language} label="Copy code" className="md-code-toolbar__copy" />
     </div> : null}
     {inView && diagram && renderDiagram ? renderDiagram({ code, language: diagram as MarkdownDiagramInput['language'], visible: inView }) :
-      <pre className="md-block-code" {...(language ? { 'data-language': language } : {})}>
+      <pre className="md-block-code md-horizontal-reading" {...reading} aria-label={reading.tabIndex === 0 ? 'Scrollable code' : undefined} {...(language ? { 'data-language': language } : {})}>
         {ready?.html !== undefined ? <code dangerouslySetInnerHTML={{ __html: ready.html }} /> : <code>{code}</code>}
       </pre>}
     {ready?.message && <span className="md-math-error" role="status">{ready.message}</span>}
