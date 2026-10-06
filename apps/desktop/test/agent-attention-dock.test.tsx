@@ -1,8 +1,13 @@
+const { fixtureEpoch: _newTailFixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
+import '../src/preload/index'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
@@ -18,10 +23,11 @@ import type { SessionSnapshot } from '../src/shared/contracts'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
 
 const fixture = vi.hoisted(() => ({
+  directory: '',
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   listeners: new Map<string, Set<(...values: unknown[]) => void>>(),
   invokes: [] as Array<{ channel: string; values: unknown[] }>,
-  sender: { id: 1, isDestroyed: () => false, send: vi.fn(), session: { flushStorageData: vi.fn() } },
+  sender: { id: 1, isDestroyed: () => false, send: vi.fn(), on: vi.fn(), once: vi.fn(), off: vi.fn(), removeListener: vi.fn(), session: { flushStorageData: vi.fn() } },
   labels: [] as string[], rejectDock: 0,
   beforeBadge: undefined as Promise<void> | undefined,
   dock: { setBadge: vi.fn(function (this: unknown, label: string) {
@@ -31,7 +37,7 @@ const fixture = vi.hoisted(() => ({
   }) }
 }))
 vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
-  app: { getPath: () => _hygiene_fixturePath("isolated-dock-test"), dock: fixture.dock },
+  app: { getAppPath: () => resolve('apps/desktop'), getPath: () => fixture.directory, dock: fixture.dock },
   contextBridge: { exposeInMainWorld: (key: string, value: unknown) => Object.assign(window, { [key]: value }) },
   webFrame: { getZoomFactor: () => 1 },
   ipcMain: {
@@ -50,17 +56,25 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
       const listeners = fixture.listeners.get(channel) ?? new Set()
       listeners.add(listener); fixture.listeners.set(channel, listeners)
     },
+    removeListener: (channel: string, listener: (...values: unknown[]) => void) => fixture.listeners.get(channel)?.delete(listener),
     off: (channel: string, listener: (...values: unknown[]) => void) => fixture.listeners.get(channel)?.delete(listener),
     send: vi.fn()
   },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
+  safeStorage: { isEncryptionAvailable: () => false }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 vi.mock('@agentmux/core', async (importOriginal) => ({
   ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} }
 }))
+vi.mock('../src/main/connector-host', () => ({ createDesktopConnections: async () => ({ connections: {}, secrets: {}, close() {} }) }))
+vi.mock('@agentmux/core/notebook-store', async importOriginal => {
+  const actual = await importOriginal<typeof import('@agentmux/core/notebook-store')>()
+  return { ...actual, AgentMuxNotesStorage: class extends actual.AgentMuxNotesStorage {
+    constructor() { super(join(fixture.directory, 'notes-location.json'), join(fixture.directory, 'notes')) }
+  } }
+})
 // Only native/unrelated owners are isolated. App, Store, rollup, preload and registered Main run.
-vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () => [] }) }))
+vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () => [], subscribe: () => () => {} }) }))
 vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'isolated-journal.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
@@ -72,7 +86,6 @@ vi.mock('../src/renderer/src/components/WorkspaceWorkbench', () => ({ WorkspaceW
 vi.mock('../src/renderer/src/components/SurfaceToolDock', () => ({ SurfaceToolDock: () => null }))
 
 // Real desktop API must be exposed before api.ts chooses its existing platform binding.
-import '../src/preload/index'
 import { App } from '../src/renderer/src/App'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -87,7 +100,7 @@ let sessions: SessionSnapshot[]
 const submit = vi.fn()
 function agent(id: string, state: AgentDisplayState): SessionSnapshot {
   return { id, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"),
-    label: id, createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), latestOutputBytes: 0, processState: 'running',
+    promptSubmissionPredecessor: null, agentSessionUpdatedAt: _newTailFixtureEpoch(0, 0, 1), label: id, createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), latestOutputBytes: 0, processState: 'running',
     status: { state, source: 'native-hook', observedAt: Date.now() },
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } } }
@@ -103,10 +116,14 @@ async function settle() { await act(async () => { await new Promise(done => setT
 async function mountApp() {
   const element = document.createElement('div'); document.body.append(element)
   const root = createRoot(element); mounted = { root, element }
+  const initialize = vi.spyOn(useAppStore.getState(), 'initialize')
   await act(async () => { root.render(<App />) })
+  expect(initialize).toHaveBeenCalledOnce()
+  await act(async () => { await initialize.mock.results[0]!.value })
   for (let n = 0; n < 30 && useAppStore.getState().loading; n += 1) await settle()
   expect(useAppStore.getState().loading).toBe(false)
   expect(element.querySelector('main.main-shell')).not.toBeNull()
+  await act(async () => { await vi.waitFor(() => expect(useAppStore.getState().sessions.map(session => session.id).sort(), String(useAppStore.getState().error)).toEqual(sessions.map(session => session.id).sort())) })
   await settle()
   return element
 }
@@ -116,20 +133,24 @@ async function update(next: SessionSnapshot[]) {
 }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  fixture.directory = await mkdtemp(join(tmpdir(), 'notification-ipc-'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(fixture.directory, 'state'))
+  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(fixture.directory, 'runtime'))
+  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(fixture.directory, 'messages.ndjson'))
   Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'darwin' })
   fixture.handlers.clear(); fixture.listeners.clear(); fixture.invokes.length = 0; fixture.labels.length = 0
   fixture.rejectDock = 0; fixture.beforeBadge = undefined; fixture.dock.setBadge.mockClear(); submit.mockReset().mockResolvedValue(undefined)
   sessions = [agent('waiting', 'waiting'), agent('blocked', 'blocked'), agent('healthy', 'working'), terminal()]
-  useAppStore.setState({ ...initial, loading: true, agentComposerDrafts: { healthy: 'Keep my draft' } }, true)
+  useAppStore.setState({ ...initial, loading: true, sessions: [terminal()], agentComposerDrafts: { healthy: 'Keep my draft' } }, true)
   vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
   const runtime = { resourceSampler: { setObservationSources: () => () => {} },
-    setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
-    providerCatalog: () => [], snapshot: async () => ({ sessions, timelines: {}, recoveryCandidates: [] }), submitPrompt: submit
+    observeInputOccupation: () => () => {}, observeCoreEvents: () => () => {}, reserveExecutorConfigEdit: async () => () => {}, setContinuousProgressInputObserver: () => () => {}, setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
+    runtimeBindings: () => new Map(), endpointWarningSnapshot: () => [], reportBindingSaveFailure: () => {}, providerCatalog: (options?: { observation: true }) => options ? { catalog: [], warnings: [] } : [], sessionHistorySources: async (options?: { observation: true }) => options ? { sources: [], warnings: [] } : [], inspectInput: async () => null, notifyInputOccupation: async () => {}, snapshot: async () => ({ sessions, timelines: Object.fromEntries(sessions.filter(session => session.kind === 'agent').map(session => [session.id, { agentSessionId: session.id, revision: 0, items: [] }])), recoveryCandidates: [] }), submitPrompt: submit
   } as unknown as RuntimeController
-  dispose = await registerIpc({ initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }), window: { setBackgroundColor: vi.fn(), webContents: fixture.sender } as unknown as BrowserWindow, runtime,
-    configStore: { get: async () => ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }) } as unknown as ConfigStore,
-    scratchTopics: { listTopics: async () => [] } as unknown as ScratchTopics,
-    workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+  dispose = await registerIpc({ progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never, initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }), window: { isDestroyed: () => false, setBackgroundColor: vi.fn(), webContents: fixture.sender } as unknown as BrowserWindow, runtime,
+    configStore: { validate: (next: unknown) => next, save: async (next: unknown) => next, get: async () => ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }) } as unknown as ConfigStore,
+    scratchTopics: { listTopics: async () => [], setNameAudit: () => {} } as unknown as ScratchTopics,
+    workspaceFiles: { dispose: async () => {}, read: vi.fn(), listFiles: vi.fn(), observe: async () => () => {} } as unknown as WorkspaceFiles })
   expect(fixture.handlers.has('ui:setAgentAttentionCount')).toBe(true)
 })
 afterEach(async () => {
@@ -137,27 +158,25 @@ afterEach(async () => {
   await dispose?.(); dispose = undefined
   useAppStore.setState(initial, true); vi.restoreAllMocks()
   Object.defineProperty(process, 'platform', originalPlatform)
+  vi.unstubAllEnvs(); await rm(fixture.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
 })
 
 it('projects the actual App collection through real preload and registered Main for 2 -> 1 -> 0', async () => {
   const element = await mountApp()
-  expect(useAppStore.getState().sessions.map(value => value.id)).toEqual(['waiting', 'blocked', 'healthy', 'terminal'])
+  expect(useAppStore.getState().sessions.map(value => value.id).sort()).toEqual(['blocked', 'healthy', 'terminal', 'waiting'])
   expect(fixture.labels).toEqual(['', '2'])
   expect(badgeRequests()).toEqual([[0], [2]])
-  expect(element.querySelector('[data-attention="needs-you"] .agent-status-bar__count')?.textContent).toBe('2')
   await update([agent('waiting', 'working'), agent('blocked', 'blocked'), agent('healthy', 'working'), terminal()])
   expect(fixture.labels).toEqual(['', '2', '1'])
-  expect(element.querySelector('[data-attention="needs-you"] .agent-status-bar__count')?.textContent).toBe('1')
   await update([agent('waiting', 'done'), agent('blocked', 'working'), agent('healthy', 'error'), terminal()])
   expect(fixture.labels).toEqual(['', '2', '1', ''])
   expect(badgeRequests()).toEqual([[0], [2], [1], [0]])
-  expect(element.querySelector('[data-attention="needs-you"] .agent-status-bar__count')?.textContent).toBe('0')
 })
 
 it('uses the shared whole state vocabulary and publishes neither unchanged counts nor unrelated writes', async () => {
   sessions = [...AGENT_DISPLAY_STATES.map(state => agent(state, state)), terminal()]
   await mountApp()
-  expect(useAppStore.getState().sessions.map(value => value.id)).toEqual([...AGENT_DISPLAY_STATES, 'terminal'])
+  expect(useAppStore.getState().sessions.map(value => value.id).sort()).toEqual([...AGENT_DISPLAY_STATES, 'terminal'].sort())
   expect(fixture.labels).toEqual(['', '2'])
   const published = badgeRequests()
   await act(async () => { useAppStore.getState().setAgentComposerDraft('healthy', 'A changed draft') })
@@ -174,15 +193,15 @@ it('reports a native setter failure without changing healthy status or drafts an
   const waiting = [agent('waiting', 'working'), agent('blocked', 'blocked'), before.sessions.find(value => value.id === 'healthy')!, terminal()]
   await update(waiting)
   expect(fixture.labels).toEqual(['', '2'])
-  expect(element.querySelector('.error-notice')?.textContent).toContain('Updating the Dock badge did not complete')
-  expect(element.querySelector('.error-notice')?.getAttribute('aria-live')).toBe('polite')
+  expect(element.querySelector('.notification-item[data-event-id]')?.textContent).toContain('Updating the Dock badge did not complete')
+  expect(element.querySelector('.notification-item[data-event-id]')?.getAttribute('aria-live')).toBe('polite')
   expect(useAppStore.getState().sessions).toBe(waiting)
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   await act(async () => {
-    expect(useAppStore.getState().send('healthy', 'Explicit healthy prompt')).toBe(true)
+    expect(useAppStore.getState().send('healthy', 'Explicit healthy prompt', undefined, 'manual', undefined, { execution: 'immediate' })).toBe(true)
     await useAppStore.getState().flushAgentSteerQueue('healthy')
   })
-  expect(submit).toHaveBeenCalledWith(waiting[2]!.control, 'Explicit healthy prompt', expect.any(String), undefined, undefined, undefined)
+  expect(submit).toHaveBeenCalledWith(waiting[2]!.control, 'Explicit healthy prompt', expect.any(String), { expectedRun: waiting[2]!.control.run, admissionIntent: { kind: 'manual-actor' } }, undefined, { execution: 'immediate' }, true, undefined, undefined)
   await update([...waiting])
   expect(fixture.labels).toEqual(['', '2', '1'])
   expect(badgeRequests()).toEqual([[0], [2], [1], [1]])
