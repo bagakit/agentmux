@@ -11,6 +11,8 @@ import { AgentMuxControlServer, connectAgentMuxRpc } from '../../../packages/cor
 import { themeObservation } from '../../desktop/src/main/theme-observation.js'
 import { configOwnerFixture } from '../../desktop/test/helpers/config-owner-fixture.js'
 import { useHostAppearance, observedTerminalPalette } from '../src/appearance/useHostAppearance'
+import { MobileApp } from '../src/MobileApp'
+import { createBrowserPlatform } from '../src/platform/browser'
 
 const cleanup: Array<() => void | Promise<void>> = []
 let root: Root, container: HTMLDivElement, media: EventTarget & { matches: boolean }
@@ -130,4 +132,39 @@ it('projects Workspace ANSI from the phone Root system mode through the real Mai
   await until(() => container.querySelector('output')!.textContent === '#000000')
   await act(async () => { media.matches = true; media.dispatchEvent(new Event('change')) })
   expect(container.querySelector('output')!.textContent).toBe('#000000')
+})
+
+it('the actual MobileApp owns one root and consumes committed theme and icon changes over the original public watch', async () => {
+  const { f, client, subscribeRpc } = await actualHost()
+  // Only unrelated Session/navigation reads are finite; appearance is the real
+  // Main ConfigOwner -> Core Unix RPC -> hosted SDK stream used by the product.
+  const hosted = { ...client, agentSessions: () => [], onEvent: () => () => {} } as unknown as AgentMuxHostedClient
+  const platform = createBrowserPlatform({ overlayContainer: () => container })
+  await act(async () => root.render(<MobileApp client={hosted} connection={{ state: 'connected', message: 'Private original appearance transport' }} platform={platform} />))
+  await until(() => subscribeRpc.mock.calls.length === 1)
+  const menu = container.querySelector<HTMLButtonElement>('[aria-label="手机设置与连接"]')!
+  expect(menu, 'original retained Mobile root menu').not.toBeNull()
+  const custom = themeValue(structuredClone(GRAPHITE_THEME))
+  custom.variants.light.colors.background = '#faf0ce'
+  custom.icons['action.menu'] = { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z' }] }
+  await act(async () => { await f.owner.update(config => ({ ...config, appearance: { ...config.appearance,
+    appAppearance: 'light', themeId: 'custom.actual-phone', customThemes: { 'custom.actual-phone': custom }, terminalTheme: 'workspace' } })) })
+  await until(() => document.documentElement.dataset.theme === 'custom.actual-phone')
+  expect(document.documentElement.dataset.appearance).toBe('light')
+  expect(document.documentElement.style.getPropertyValue('--bg')).toBe('#faf0ce')
+  expect(document.getElementById('agentmux-icon-action.menu')?.querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')
+  expect(container.querySelector('[aria-label="手机设置与连接"]')).toBe(menu)
+  expect(window.matchMedia).toHaveBeenCalledTimes(1)
+  expect(container.textContent).not.toContain('Theme runtime is already mounted')
+  expect(subscribeRpc).toHaveBeenCalledExactlyOnceWith('settings.appearance.watch', {}, expect.any(Object))
+})
+
+it('actual MobileApp keeps its workface usable while reporting an unavailable appearance read service', async () => {
+  const client = { agentSessions: () => [], onEvent: () => () => {} } as unknown as AgentMuxHostedClient
+  await act(async () => root.render(<MobileApp client={client} connection={{ state: 'connected', message: 'Retained transport' }}
+    platform={createBrowserPlatform({ overlayContainer: () => container })} />))
+  await until(() => Boolean(container.querySelector('.mobile-service-notice')?.textContent?.includes('这个 Mac 尚未提供主题同步')))
+  expect(container.querySelector('.mobile-service-notice')?.textContent).toContain('保留最后确认的主题和原工作面')
+  expect(container.querySelector('[aria-label="手机设置与连接"]')).not.toBeNull()
+  expect(window.matchMedia).toHaveBeenCalledTimes(1)
 })
