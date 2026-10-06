@@ -103,6 +103,8 @@ AgentMux 提供的对话与分享外框在此集中导航：平台说明、对�
 - **交接的目标用与位置无关的 Session 身份寻址**。多态寻址（Region/Tab）要过 Control 面解析成 Session，把一个原子动作拆成两跳，还让它依赖 Desktop 活着——而交出所有权不该有这个前提。
 - **交接回执不冒任务所有权记录。** `handOff()` 的本次返回值只表达 `ownerAgentSessionId`／`originAwaits`；准确合同以[Core handoff](../../../packages/core/src/agent-handoff.ts)为准。未取得持久任务 owner 确认时，界面不能从自由 `taskId` 或一次返回值宣称“任务当前归谁”，也不另存无法核对的 owner 字段。外部任务与 Goal/Demand 的实际关系沿其原 owner。
 
+原监督协作链可在 Session 邮箱内只读查看：以准确 Host 与参与 Session 读取 Core 原 Dispatch 分页，再按原 sourceMessageId 展开原消息、回复及监督事件。原双方 Session／Run、operation、thread 与 replyTo 保留；投递、通信监督、执行与 Goal 业务验收各自独立，`worker_done` 不代签结果接受。未建立 Dispatch 的普通消息不冒监督链，有真实 Goal 委派绑定才沿原 Goal 证据入口表达归属。读取失败与身份观测缺口明确未知，保原记录及健康 Agent，允许同源显式重读，不自动重发或另派。界面不从捕获 submissionId、正文来源头或时间猜消息关联；公共 RPC／CLI 与客户端共用原 Core 消息 owner。
+
 ## 持久消息的显式消费与派发等待
 
 - Core、默认 Provider 与非历史 CLI 的启动不得激活当前操作无关的原生读取依赖；未执行的读取不得以副作用污染当前结构化回执。真实历史读取仍保留原协议、只读与失败表达。
