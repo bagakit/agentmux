@@ -5,11 +5,11 @@ import assert from 'node:assert/strict'
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.CODE_COPY_MUTATION
 const changes = {
-  bytes: ['packages/client-ui/src/components/MarkdownCodeBlock.tsx', 'await copyText(code,', 'await copyText(code.trim(),'],
-  receipt: ['packages/client-ui/src/components/MarkdownCodeBlock.tsx', "accepted && !failed ? 'copied' : 'failed'", "'copied'"],
-  source: ['packages/client-ui/src/components/MarkdownCodeBlock.tsx', '[code, language, copyText, readOnly]', '[copyText, readOnly]'],
-  action: ['packages/client-ui/src/components/MarkdownCodeBlock.tsx', 'copyAction.current === action', 'true'],
-  pending: ['packages/client-ui/src/components/MarkdownCodeBlock.tsx', '(copyAction.current?.owner === copyOwner && copyAction.current.pending)', 'false'],
+  bytes: ['packages/client-ui/src/components/ContentCopyButton.tsx', 'await copyText(text,', 'await copyText(text.trim(),'],
+  receipt: ['packages/client-ui/src/components/ContentCopyButton.tsx', "accepted && !failed ? 'copied' : 'failed'", "'copied'"],
+  source: ['packages/client-ui/src/components/ContentCopyButton.tsx', '[text, identity, copyText]', '[copyText]'],
+  action: ['packages/client-ui/src/components/ContentCopyButton.tsx', 'actionRef.current === action', 'true'],
+  pending: ['packages/client-ui/src/components/ContentCopyButton.tsx', '(actionRef.current?.owner === owner && actionRef.current.pending)', 'false'],
   readonly: ['packages/client-ui/src/components/AgentMarkdown.tsx', 'readOnly={context.readOnly} />', 'readOnly={false} />'],
 } as const
 export default defineConfig({ root, plugins: [{ name: 'actual-code-copy-mutation', enforce: 'pre', transform(source, id) {
