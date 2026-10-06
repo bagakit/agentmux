@@ -809,7 +809,12 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const observedFocusSession = useRef(currentSessionId)
   useEffect(() => {
     cancelPreviewIntent()
-    if (currentSessionId !== null && observedFocusSession.current !== currentSessionId) { setPreview(null); setReaderOpen(false) }
+    const selected = currentSessionId ? sessionPresentationById(useAppStore.getState().sessions).get(currentSessionId) : undefined
+    const inspected = previewRef.current
+    // An explicit return must retain the original body and any unavailable diagnosis.
+    const returningToOriginal = inspected?.interactive && inspected.message?.agentSessionId === currentSessionId &&
+      selected?.kind === 'agent' && inspected.message.executionHostId === selected.control.hostId
+    if (currentSessionId !== null && observedFocusSession.current !== currentSessionId && !returningToOriginal) { setPreview(null); setReaderOpen(false) }
     else setPreview(current => current?.interactive ? current : null)
     observedFocusSession.current = currentSessionId
   }, [currentSessionId, cancelPreviewIntent])
