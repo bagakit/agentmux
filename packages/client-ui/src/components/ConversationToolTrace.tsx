@@ -1,11 +1,13 @@
+import { ContentCopyButton } from './ContentCopyButton.js'
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 import { SemanticIcon } from '../theme/icons.js'
-import { memo, useId, useState } from 'react'
+import { memo, useId, useMemo, useState } from 'react'
 import { stepTitle } from '../lib/activity-step-summary.js'
 
 export type ConversationToolTraceProps = {
   part: ToolPart
   workspaceRoot?: string
+  copyIdentity?: object
   traceId?: string
   expanded?: boolean
   onToggle?: (open: boolean) => void
@@ -15,12 +17,14 @@ type ToolPart = Extract<AgentSessionHistoryContentPart, { kind: 'tool-call' | 't
 
 /** One observed part, in the host's original order. Calls and results are never paired here. */
 export const ConversationToolTrace = memo(function ConversationToolTrace({
-  part, workspaceRoot = '', traceId, expanded, onToggle
+  part, workspaceRoot = '', traceId, copyIdentity, expanded, onToggle
 }: ConversationToolTraceProps) {
   const [localOpen, setLocalOpen] = useState(false)
   const open = expanded ?? localOpen
   const panelId = useId()
+  const identity = useMemo(() => ({}), [part, traceId, copyIdentity])
   const isCall = part.kind === 'tool-call'
+  const text = isCall ? part.input : part.output
   const failed = part.kind === 'tool-result' && part.failed === true
   const name = part.name ?? 'Tool result'
   const title = stepTitle(name, isCall ? part.name : undefined, isCall ? part.input : undefined, workspaceRoot)
@@ -40,8 +44,11 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
         <SemanticIcon name="navigation.disclosure" className="conversation-tool-trace__chevron" size={12} aria-hidden="true" />
       </button>
       {open ? <div id={panelId} className="conversation-tool-trace__payload">
+        <div className="conversation-detail-actions">
         {part.callId ? <span className="conversation-tool-trace__identity">Call <code>{part.callId}</code></span> : null}
-        <pre>{isCall ? part.input : part.output}</pre>
+        {text.length > 0 ? <ContentCopyButton text={text} identity={identity} label={isCall ? 'Copy tool input' : 'Copy tool output'} /> : null}
+        </div>
+        <pre>{text}</pre>
       </div> : null}
     </div>
   )

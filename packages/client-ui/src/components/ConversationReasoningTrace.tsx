@@ -1,5 +1,6 @@
+import { ContentCopyButton } from './ContentCopyButton.js'
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
-import { memo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown.js'
 import type { ReadPastedImage } from './ConversationImage.js'
 
@@ -7,6 +8,7 @@ const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
 export type ConversationReasoningTraceProps = {
   part: Extract<AgentSessionHistoryContentPart, { kind: 'reasoning' }>
+  copyIdentity?: object
   traceId?: string
   expanded?: boolean
   onToggle?: (open: boolean) => void
@@ -25,6 +27,7 @@ export type ConversationReasoningTraceProps = {
 export const ConversationReasoningTrace = memo(function ConversationReasoningTrace({
   part,
   traceId,
+  copyIdentity,
   expanded,
   onToggle,
   workspaceRoot = '',
@@ -35,6 +38,7 @@ export const ConversationReasoningTrace = memo(function ConversationReasoningTra
 }: ConversationReasoningTraceProps) {
   const [localOpen, setLocalOpen] = useState(false)
   const open = expanded ?? localOpen
+  const identity = useMemo(() => ({}), [part, traceId, copyIdentity])
 
   const handleToggle = (event: React.SyntheticEvent<HTMLDetailsElement>) => {
     const nextOpen = event.currentTarget.open
@@ -55,6 +59,7 @@ export const ConversationReasoningTrace = memo(function ConversationReasoningTra
       <summary className="log-turn__trace-summary">Reasoning</summary>
       {open ? (
         <div className="log-turn__trace-payload">
+          {!part.redacted && part.text.length > 0 ? <div className="conversation-detail-actions"><ContentCopyButton text={part.text} identity={identity} label="Copy reasoning" /></div> : null}
           {part.redacted ? (
             <pre className="log-turn__trace-redacted">Reasoning content redacted.</pre>
           ) : part.text.length === 0 ? (
