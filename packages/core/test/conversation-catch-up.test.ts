@@ -155,3 +155,19 @@ it('compiled CLI watch follows the original source and Ctrl-C releases only its 
   const checkpoint = await f.client.conversationCheckpoint(f.reference.agentSessionId)
   expect(checkpoint.source.nativeSessionId).toBe('original-native')
 })
+
+it('public watch ends only after its actual original observation resource terminates', async () => {
+  const f = await historyReaderFixture(true, true); close.push(f.close)
+  const socketPath = join(f.root, 'control.sock'), server = new core.AgentMuxControlServer({ socketPath, coreClients: () => [{ hostId: 'local', client: f.client }] })
+  await server.start(); close.push(() => server.stop())
+  const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } }); close.push(() => rpc.dispose())
+  const events = vi.fn()
+  const sub = await rpc.subscribe('agent.conversation.watch', f.reference, { onInitial() {}, onEvent: events })
+  close.push(() => sub.dispose())
+  await rename(f.transcript, join(f.root, 'retained-observed.jsonl'))
+  await writeFile(f.transcript, row('replacement'))
+  await vi.waitFor(() => expect(events.mock.calls.map(call => call[0])).toEqual(expect.arrayContaining([
+    expect.objectContaining({ type: 'snapshot', data: expect.objectContaining({ observation: expect.objectContaining({ kind: 'unavailable' }) }) }),
+    { type: 'end', data: { reason: 'source-observation-released' } }
+  ])))
+})
