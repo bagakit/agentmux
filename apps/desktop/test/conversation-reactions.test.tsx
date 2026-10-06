@@ -1,3 +1,4 @@
+import { fixtureEpoch as _newTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { join, resolve } from 'node:path'
@@ -71,14 +72,16 @@ describe('Saved Prompt → explicit lookup → exact reply card → original use
  })
  it('uses the original queue and public Core admission to persist the selected body and note as one human message',async()=>{
   const publicFlow=await reactionPublicClientFixture('agent-1','run-agent-1')
-  const unlisten=publicFlow.client.onEvent(event=>useAppStore.getState().applyEvent({hostId:'local',event}))
+  const unlisten=publicFlow.client.onEvent(event=>useAppStore.getState().applyEvent({type:'core',hostId:'local',event}))
   try {
    const target=composerSession('agent-1','traex')
-   useAppStore.setState({sessions:[{...target,pendingInteraction:{kind:'permission',requestId:'original-permission',agentSessionId:'agent-1',run:{runId:'run-agent-1'},source:'hook',title:'Explicit approval',options:[]}}]})
+   useAppStore.setState({sessions:[{...target,pendingInteraction:{kind:'permission',id:'original-permission',agentSessionId:'agent-1',evidence:{run:{runId:'run-agent-1'},source:'native-hook',observedAt:_newTailFixtureEpoch(0, 0, 1)},title:'Explicit approval',options:[]}}]})
    vi.spyOn(api.sessions,'refresh').mockImplementation(async()=>({...target,promptSubmissionPredecessor:agentPromptCondition(publicFlow.client.agentSession('agent-1')).afterSubmissionId}))
    vi.spyOn(api.sessions,'inspectInput').mockImplementation(async (_control, key) => publicFlow.client.inspectAgentInput({key}))
    const submitted=vi.spyOn(api.sessions,'submitPrompt').mockImplementation(async(control,prompt,operationId,condition,_choice,human,agentMuxNote,sourceChannel)=>{
-    return await publicFlow.client.submitAgentPrompt({agentSessionId:control.agentSessionId,prompt,operationId,...condition,..._choice,authorHuman:human!,...(agentMuxNote===undefined?{}:{agentMuxNote}),...(sourceChannel===undefined?{}:{sourceChannel})})
+    if(!('admissionIntent' in condition)||_choice?.execution!=='immediate') throw new Error('Expected the original immediate manual reaction binding')
+    expect(condition).toEqual({expectedRun:control.run,admissionIntent:{kind:'manual-actor'}});expect(_choice).toEqual({execution:'immediate'})
+    return await publicFlow.client.submitAgentPrompt({agentSessionId:control.agentSessionId,prompt,operationId,expectedRun:condition.expectedRun,admissionIntent:condition.admissionIntent,execution:_choice.execution,authorHuman:human!,...(agentMuxNote===undefined?{}:{agentMuxNote}),...(sourceChannel===undefined?{}:{sourceChannel})})
    })
    await mount();await press();await useAppStore.getState().flushAgentSteerQueue('agent-1')
    const original=structuredClone(queued()[0]!)
@@ -114,7 +117,9 @@ describe('Saved Prompt → explicit lookup → exact reply card → original use
    vi.spyOn(api.sessions,'refresh').mockImplementation(async()=>({...composerSession('agent-1','traex'),promptSubmissionPredecessor:agentPromptCondition(flow.client.agentSession('agent-1')).afterSubmissionId}))
    let first=true
    const submit=vi.spyOn(api.sessions,'submitPrompt').mockImplementation(async(control,prompt,operationId,condition,_choice,human,agentMuxNote,sourceChannel)=>{
-    const receipt = await flow.client.submitAgentPrompt({agentSessionId:control.agentSessionId,prompt,operationId,...condition,..._choice,authorHuman:human!,...(agentMuxNote===undefined?{}:{agentMuxNote}),...(sourceChannel===undefined?{}:{sourceChannel})})
+    if(!('admissionIntent' in condition)||_choice?.execution!=='immediate') throw new Error('Expected the original immediate manual reaction binding')
+    expect(condition).toEqual({expectedRun:control.run,admissionIntent:{kind:'manual-actor'}});expect(_choice).toEqual({execution:'immediate'})
+    const receipt = await flow.client.submitAgentPrompt({agentSessionId:control.agentSessionId,prompt,operationId,expectedRun:condition.expectedRun,admissionIntent:condition.admissionIntent,execution:_choice.execution,authorHuman:human!,...(agentMuxNote===undefined?{}:{agentMuxNote}),...(sourceChannel===undefined?{}:{sourceChannel})})
     if(first){first=false;throw new Error('Response lost after acceptance')}
     return receipt
    })
