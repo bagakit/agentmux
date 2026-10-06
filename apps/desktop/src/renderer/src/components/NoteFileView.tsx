@@ -25,13 +25,13 @@ function observeRevealDOM(handle: NoteEditorHandle, attempt: () => boolean): () 
 }
 
 /** Presentation of the original FileDocument. Invalid source remains available through Source. */
-export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, revealBlock, onRevealed, focusRequest, canFocus, onFocused, restoredBlock, onSelectedBlock, resource, onOpenPage, dirty }: {
+export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, revealBlock, onRevealed, focusRequest, canFocus, onFocused, restoredBlock, onSelectedBlock, resource, onOpenPage, dirty, onCheckOriginal }: {
   resource?: NoteResource; document: FileDocument; knowledge: NoteKnowledge; onChange: (raw: string) => void; onSave: () => void
   onOpen: (source: NoteSource, blockId: string) => void; revealBlock?: NoteBlockTarget; onRevealed?: () => void
   focusRequest?: number; canFocus?: () => boolean; onFocused?: (nonce: number) => void
   restoredBlock?: NoteBlockTarget; onSelectedBlock?: (target: NoteBlockTarget) => void
   onOpenPage?: (page: NotebookPage, blockId?: string) => Promise<void> | void
-  dirty?: boolean
+  dirty?: boolean; onCheckOriginal?: () => void
 }) {
   const catalog = useNotebookLibrary(state => state.state)
   const presentation = useWorkbenchBrowserPresentation()
@@ -134,7 +134,10 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     sourceIdentity)
   if (read.status === 'invalid') return <div className="note-invalid" role="status"><strong>Note source needs attention</strong>
     <p>{read.message}</p><p>The original source is preserved. Use Source to inspect it; no block identities have been repaired.</p></div>
+  const attribution = document.noteWriteAttribution?.status === 'unconfirmed' ? document.noteWriteAttribution
+    : document.noteProvenance?.status === 'unconfirmed' ? document.noteProvenance : null
   return <div className="note-file-view">
+    {attribution ? <div className="note-knowledge-notice" role="status">{document.noteWriteAttribution?.status === 'unconfirmed' ? 'The Note was saved. ' : ''}Block authorship is unconfirmed: {attribution.reason} Your Note remains readable and editable. {onCheckOriginal ? <button className="small-button" onClick={onCheckOriginal}>Check original file</button> : null}</div> : null}
     {restoreIssue || issue ? <div className="note-knowledge-notice" role="status">{restoreIssue || issue}</div> : null}
     {resource && catalog?.pages[read.note.noteId] && sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <NotebookPageDetails key={read.note.noteId} page={catalog.pages[read.note.noteId]!} /> : null}
     {resource && catalog?.pages[read.note.noteId] && !sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <p className="note-knowledge-notice" role="status">This file has a different recorded Note location. Editing stays available; recover its Notebook history or inspect the original resource.</p> : null}
