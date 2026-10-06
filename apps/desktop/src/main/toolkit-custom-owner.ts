@@ -20,7 +20,7 @@ type Tool = { id: string; loading: Promise<void> | null; latest: ToolkitConfirme
 type Execution = { capture: CapturedToolkitPackage | null; tool: Tool; admission: ToolkitAdmission; port: ToolkitRunPort | null; cursor: number; rawBytes: number
   decoder: TextDecoder; replayText: string | null; failure: string | null; creating: boolean; attaching: boolean; ended: boolean; stopRequested: boolean
   terminalHint: boolean; uncertain: boolean; done: Promise<void>; complete(): void
-  finishing: Promise<void> | null; starting: Promise<void> | null; stopSubmission: Promise<void> | null }
+  finishing: Promise<'running' | void> | null; starting: Promise<void> | null; stopSubmission: Promise<void> | null }
 type LaneReceipt = { latestConfirmed: ToolkitConfirmedResult | null; admission: ToolkitAdmission | null; lastSucceeded?: ToolkitConfirmedResult }
 type Receipt = LaneReceipt & { display?: LaneReceipt }
 // A code unit may cost six JSON bytes; leave room for the fixed owner explanation.
@@ -400,14 +400,23 @@ export class CustomToolkitOwner {
     }).finally(() => { execution.starting = null })
     await execution.starting
   }
-  private async attach(execution: Execution): Promise<AgentMuxRunAttachment> {
+  private async requireObservationOwner(execution: Execution): Promise<void> {
+    if (execution.tool.live === execution && !execution.ended && !this.closed) return
+    // A replacement execution owns its own observation. Only this still
+    // current, closing owner may release the attachment it just acquired.
+    if (this.closed && execution.tool.live === execution && !execution.ended) await execution.port!.release(ref(execution))
+    throw new AgentMuxError('Tool observation owner changed during attachment.', 'CONTROL_CANCELLED')
+  }
+  private async attach(execution: Execution, requireCurrentObserver = false): Promise<AgentMuxRunAttachment> {
     execution.attaching = true
     try {
       let attached = await execution.port!.attach(ref(execution), 0, event => this.accept(execution, event))
+      if (requireCurrentObserver) await this.requireObservationOwner(execution)
       this.snapshot(execution, attached)
       if (execution.terminalHint && attached.run.state === 'running') {
         execution.terminalHint = false
         attached = await execution.port!.replay(ref(execution), execution.cursor)
+        if (requireCurrentObserver) await this.requireObservationOwner(execution)
         this.snapshot(execution, attached)
       }
       execution.terminalHint = false
@@ -485,14 +494,15 @@ export class CustomToolkitOwner {
     } catch (error) { execution.failure = message(error); throw error }
     this.publish(execution.tool)
   }
-  private async finish(execution: Execution, initial?: AgentMuxRunAttachment): Promise<void> {
+  private async finish(execution: Execution, initial?: AgentMuxRunAttachment): Promise<'running' | void> {
     if (execution.ended || execution.tool.live !== execution) return
     if (execution.finishing) return await execution.finishing
     execution.finishing = (async () => {
       try {
         const final = initial ?? await execution.port!.replay(ref(execution), execution.cursor)
+        if (execution.tool.live !== execution || execution.ended) return
         this.snapshot(execution, final)
-        if (final.run.state === 'running') return
+        if (final.run.state === 'running') return 'running' as const
         if (execution.cursor !== final.run.latestOutputBytes) throw new AgentMuxError('Tool terminal output is incomplete.', 'CONTROL_PROTOCOL_ERROR')
         if (!execution.failure) {
           try { this.append(execution, execution.decoder.decode()) }
@@ -502,6 +512,7 @@ export class CustomToolkitOwner {
         // An exit event can arrive inside Core Stop, before its acceptance is known.
         // Wait only for that submission, never for Stop's later call back into finish.
         try { await execution.stopSubmission } catch { /* Rejected Stop leaves the natural terminal fact authoritative. */ }
+        if (execution.tool.live !== execution || execution.ended) return
         const state = execution.failure ? 'failed' : execution.stopRequested ? 'stopped' : final.run.exitCode === 0 ? 'succeeded' : 'failed'
         const reason = execution.failure ?? (state === 'succeeded' ? null : state === 'stopped' ? 'Stopped explicitly.' : 'Script exited unsuccessfully.')
         await this.confirm(execution, state, reason, final.run.exitCode ?? null)
@@ -568,12 +579,23 @@ export class CustomToolkitOwner {
       execution.admission.state = 'stopping'; execution.admission.reason = 'Stop confirmation pending.'; this.publish(tool)
       try { await submission }
       catch (error) {
-        await this.finish(execution)
-        if (tool.live !== execution || execution.ended) return this.current(tool)
+        const observedState = await this.finish(execution)
+        if (execution.ended && tool.admission === null && tool.latest?.executionId === execution.admission.executionId) return this.current(tool)
+        if (tool.live !== execution) throw error
         const observed = this.current(tool)
         const observedScript = observed.kind === 'package-unavailable' ? observed.retained : observed.kind === 'script' ? observed : null
         const outcome = observedScript?.state === 'unknown' ? observedScript.reason : null
-        this.unknown(execution, 'Stop unconfirmed: ' + message(error) + (outcome ? '; ' + outcome : ''))
+        const reason = 'Stop unconfirmed: ' + message(error) + (outcome ? '; ' + outcome : '')
+        this.unknown(execution, reason)
+        // Core Stop detaches before submission, including a rejected one.
+        // Restore only the same confirmed live Run's observation, once; the
+        // original Stop remains rejected and no new execution is admitted.
+        if (observedState === 'running' && !this.closed) {
+          try {
+            const attached = await this.attach(execution, true)
+            if (tool.live === execution && !execution.ended && !this.closed && attached.run.state !== 'running') await this.finish(execution, attached)
+          } catch (observationError) { this.unknown(execution, reason + '; observation unconfirmed: ' + message(observationError)) }
+        }
         throw error
       } finally { if (execution.stopSubmission === submission) execution.stopSubmission = null }
     }
