@@ -13,6 +13,7 @@ import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, par
 import { parseSessionHistoryResourceOptions, parseSessionHistoryResourceReadResult } from './session-history-resource.js'
 import { parseOutputGapEvidence } from './output-gap-evidence.js'
 import { createHostedOutputObservation } from './hosted-output-observer.js'
+import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-read-codec.js'
 
 function isAbortSignal(value: unknown): value is AbortSignal {
   return typeof AbortSignal !== 'undefined' && value instanceof AbortSignal
@@ -179,7 +180,7 @@ export async function connectHostedAgentMux(options: {
         signal = cancellation; wireArgs = [value, ...args.slice(1)]
       }
     }
-    if (method === 'sessionHistoryPage' || method === 'sessionHistoryResource') {
+    if (method === 'sessionHistoryPage' || method === 'sessionHistoryResource' || method === 'readAgentSessionHistory') {
       const input = args[1] as Parameters<AgentMuxHostedClient['sessionHistoryPage']>[1]
       if (input && isAbortSignal(input.signal)) {
         const { signal: cancellation, ...value } = input
@@ -196,6 +197,7 @@ export async function connectHostedAgentMux(options: {
         throw new AgentMuxError('Invalid recorded resource reply.', 'CONTROL_PROTOCOL_ERROR')
       return parseSessionHistoryResourceReadResult(decoded, wireArgs[0], request)
     }
+    if (method === 'readAgentSessionHistory') return parseAgentSessionHistoryReadPage(decoded, wireArgs[0] as AgentSessionHistoryReadInput)
     return decoded
   }
   const notifyHistory = (read: HistoryRead, observation: AgentSessionHistoryObservation): void => {

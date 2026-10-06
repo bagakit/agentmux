@@ -10,6 +10,14 @@ const syntax = (entry: AgentMuxCliCommand) => `amux ${entry.method.replaceAll('.
 const entries = (path: string) => AGENTMUX_CLI_COMMANDS.filter(entry => entry.method === path || entry.method.startsWith(path + '.'))
 const list = (selected: readonly AgentMuxCliCommand[]) => selected.map(entry => `  ${syntax(entry)}\n    ${entry.summary}`).join('\n')
 const NATIVE_RESUME_GUIDE = `Discover original Provider conversations with agent native ls --host HOST --executor EXECUTOR.
+Query a retained Agent's inputs with agent history --host HOST --session SESSION --source captured|native
+--kind user-message --query TEXT. Queries are literal and case-sensitive; --limit counts matches,
+--scan-limit counts examined original records. A zero-match page with nextCursor is not an empty history.
+Follow that cursor with the same Host, Agent, source and query. Current appends do not move this window.
+The typed userMessages retain original source/author/channel facts; Native role=user does not prove Terminal.
+Read complete text resources with the original recorded resource API before copying or reusing their full text.
+Query leases are bounded readonly snapshots, not a new history ledger. Expiry asks for a fresh first page;
+it never removes the Agent or input. Raw non-query history and its exact fragment protocol stay available.
 Use --workspace-path PATH to filter their original execution directory; listing starts no Run.
 Read saved conversation details with agent native history --input FILE|- using JSON containing
 hostId, executorId and that exact source; limit and cursor page the original Provider history.

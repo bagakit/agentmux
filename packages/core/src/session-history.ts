@@ -114,7 +114,7 @@ export function normalizeSessionHistoryPage(
     (page.nextCursor !== null && (typeof page.nextCursor !== 'string' || !page.nextCursor))) return invalid()
   // Invalid optional size metadata must not prevent an otherwise valid history page from being read.
   const { sourceSizeBytes: _sourceSizeBytes, ...pageBody } = page
-  if (Buffer.byteLength(JSON.stringify(pageBody)) > SESSION_HISTORY_MAX_PAGE_BYTES) {
+  if (new TextEncoder().encode(JSON.stringify(pageBody)).byteLength > SESSION_HISTORY_MAX_PAGE_BYTES) {
     throw new AgentMuxError('Native history page exceeds its byte budget.', 'AGENT_SESSION_HISTORY_TOO_LARGE')
   }
   const ids = new Set<string>()

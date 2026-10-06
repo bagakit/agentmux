@@ -26,7 +26,7 @@ export function sessionHistoryTextForReading(part: Extract<AgentSessionHistoryCo
   return part.readingRange === undefined ? part.text : part.text.slice(part.readingRange.start, part.readingRange.end)
 }
 
-function extractUserMessageText(contentParts: readonly AgentSessionHistoryContentPart[], questionAnswers?: readonly AgentSessionHistoryQuestionAnswer[]): string {
+export function sessionUserMessageText(contentParts: readonly AgentSessionHistoryContentPart[], questionAnswers?: readonly AgentSessionHistoryQuestionAnswer[]): string {
   const texts: string[] = []
   const answerText = questionAnswers?.length ? questionAnswers.map(answer => answer.answer).join('\n\n') : undefined
   let answersPlaced = false
@@ -65,7 +65,7 @@ export function projectSessionUserMessages(params: {
       if (seenNativeIds.has(stableId)) continue
       seenNativeIds.add(stableId)
 
-      const content = extractUserMessageText(item.contentParts, item.questionAnswers) || item.title || ''
+      const content = sessionUserMessageText(item.contentParts, item.questionAnswers) || item.title || ''
       const author: AgentSessionUserMessageAuthor = { kind: 'unknown' }
       const source: AgentSessionUserMessageSource = {
         kind: 'native',

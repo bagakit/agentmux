@@ -30,7 +30,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxMessageTargetCandidates, agent
   type AgentMuxControlCaller, type AgentMuxDemand } from './control.js'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from './control-codec.js'
 import { AgentMuxError } from './errors.js'
-import { readAgentSessionHistory, validateSessionHistoryReadInput } from './session-history-reader.js'
+import { readAgentSessionHistory, validateSessionHistoryReadInput, isUserMessageHistoryRead } from './session-history-reader.js'
 import { parseSessionHistoryResourceParams, parseSessionHistoryResourceResult } from './session-history-resource.js'
 import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
 import { classifySelfViewFailure, SELF_CONTEXT_TOPIC_HINT } from './agent-self-context.js'
@@ -62,7 +62,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
-  'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'readAgentSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
@@ -149,7 +149,7 @@ const NATIVE_FIELDS = {
   'agent.context': ['hostId', 'agentSessionId', 'cursor', 'limit'],
   'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel'],
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes'],
-  'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes'],
+  'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes', 'kind', 'query', 'scanLimit'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
   'agent.input.inspect': ['key', 'kind', 'originalControlOperationId'],
@@ -625,7 +625,11 @@ export class AgentMuxRpcService {
         const page = await client.forwardRpc('agent.history', { ...input, hostId: 'local' }, readContext)
         return { ...page, hostId: input.hostId } as AgentMuxRpcResult<M>
       }
-      return await readAgentSessionHistory(client, input) as AgentMuxRpcResult<M>
+      if (isUserMessageHistoryRead(input)) {
+        const page = await client.readAgentSessionHistory({ ...input, hostId: 'local' }, context.signal ? { signal: context.signal } : {})
+        return { ...page, hostId: input.hostId } as AgentMuxRpcResult<M>
+      }
+      return await readAgentSessionHistory(client, input, context.signal ? { signal: context.signal } : {}) as AgentMuxRpcResult<M>
     }
     if (caller?.client.forwardRpc && ['agent.role.ls', 'agent.role.register', 'agent.role.resolve',
       'agent.discuss', 'agent.handoff', 'message.inbox.check', 'message.inbox.ack',
