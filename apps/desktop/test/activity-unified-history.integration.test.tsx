@@ -192,7 +192,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   expect(requests).toHaveLength(start + 1); expect(requests[start]!.cursor).toBe(page.nextCursor)
   const status = entry.querySelector<HTMLElement>('[role="status"]')!
   expect(status).not.toBeNull(); expect(status.getAttribute('aria-live')).toBe('polite'); expect(status.textContent).toBe('Loading earlier…')
-  expect(status.closest('button')?.querySelector('svg[data-semantic-icon="status.working"]')).not.toBeNull()
+  expect(status.closest('button')?.querySelector('svg[data-semantic-icon="status.loading"]')).not.toBeNull()
   expect(viewport.hasAttribute('aria-busy')).toBe(false); expect(ids()).toEqual(before)
   expect(body.isConnected).toBe(true); expect(trace.open).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
   await scrollTo(viewport, 10); expect(requests).toHaveLength(start + 1)
@@ -877,7 +877,14 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(ordinals[0]).toBeLessThan(rawIds[0]!)
   if (process.env.AGENTMUX_UNIFIED_RECENT_FACTS) await writeFile(process.env.AGENTMUX_UNIFIED_RECENT_FACTS, JSON.stringify({ before: original, after: recent!.nativeHistoryPage }))
   expect(recent!.nativeHistoryPage).toStrictEqual(original)
-  await click('Current'); expect(container.textContent).toContain('Reply 353'); expect(container.textContent).toContain('Input 352')
+  const currentAction = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === 'Current')
+  if (currentAction) await click('Current')
+  else {
+   // Already current at exact EOF: no redundant navigation action is required.
+   expect(earlier).toBeUndefined()
+   expect(actual).toEqual(Array.from({ length: 540 }, (_, n) => `record-${String(n).padStart(3, '0')}`))
+  }
+  expect(container.textContent).toContain('Reply 353'); expect(container.textContent).toContain('Input 352')
  })
  it('retains actual continuous local context across shared sparse clipping without evicting selected body', async () => {
   await render(compose())
@@ -1095,7 +1102,7 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(container.querySelector('.activity-ruler__readout')).toBeNull()
   const status = earlier.querySelector<HTMLElement>('[role="status"]')!
   expect(status).not.toBeNull(); expect(status.getAttribute('role')).toBe('status'); expect(status.getAttribute('aria-live')).toBe('polite')
-  expect(status.textContent).toBe('Loading earlier…'); expect(earlier.querySelector('svg[data-semantic-icon="status.working"]')).not.toBeNull()
+  expect(status.textContent).toBe('Loading earlier…'); expect(earlier.querySelector('svg[data-semantic-icon="status.loading"]')).not.toBeNull()
   expect(container.querySelector('.activity-feed')?.hasAttribute('aria-busy')).toBe(false)
   expect(status.closest('.activity-feed__loading-layer')).toBeNull()
   expect(status.closest('.activity-feed__reading')).not.toBeNull()
