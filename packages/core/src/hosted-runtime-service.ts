@@ -270,7 +270,7 @@ export class AgentMuxHostedRuntimeService {
       const target: AgentMuxHostedAttachmentTarget = invocation.method === 'reattachAgent'
         ? { kind: 'agent-session', agentSessionId: invocation.args[0] }
         : { kind: 'terminal-run', runId: invocation.method === 'attachTerminal' ? invocation.args[0] : invocation.args[0].runId }
-      const runId = target.kind === 'agent-session' ? this.client.agentSession(target.agentSessionId).run.runId : target.runId
+      const runId = target.kind === 'agent-session' ? (await observe(this.client.metadata.resolveRaw(target.agentSessionId), context.signal)).run.runId : target.runId
       const events = original?.events
       if (!events || events.closed) throw new AgentMuxError('This invocation needs an output destination. Open the exact Attachment reader; general Session observation is optional.', 'CONTROL_UNAVAILABLE')
       const previous = original!.runs.get(runId)
@@ -296,7 +296,8 @@ export class AgentMuxHostedRuntimeService {
   }
   private async acquire(target: AgentMuxHostedAttachmentTarget, afterByte: number, view: 'raw' | 'terminal',
     refresh: boolean, operationId: string | undefined, destination: Reader, fence: AgentMuxRuntimeFence, signal?: AbortSignal) {
-    const session = target.kind === 'agent-session' ? this.client.agentSession(target.agentSessionId) : undefined
+    const session = target.kind === 'agent-session' ? await observe(this.client.metadata.resolveRaw(target.agentSessionId), signal) : undefined
+    signal?.throwIfAborted(); this.assertFence(fence)
     const runId = session?.run.runId ?? (target as { runId: string }).runId
     if (!runId || target.runId !== undefined && target.runId !== runId) throw new AgentMuxError('The Session now refers to another Run.', 'STALE_AGENT_SESSION_BINDING')
     let entry = this.runs.get(runId)
@@ -432,7 +433,8 @@ export class AgentMuxHostedRuntimeService {
     if (p.view !== 'raw' && p.view !== 'terminal' || target.kind !== 'agent-session' && target.kind !== 'terminal-run') throw new AgentMuxError('Invalid Attachment target or view.', 'INVALID_CONTROL_REQUEST')
     if (target.kind === 'agent-session' && typeof target.agentSessionId !== 'string' || target.kind === 'terminal-run' && typeof target.runId !== 'string') throw new AgentMuxError('Invalid Attachment identity.', 'INVALID_CONTROL_REQUEST')
     if (method === 'runtime.replay-watch') {
-      const session = target.kind === 'agent-session' ? this.client.agentSession(target.agentSessionId) : undefined
+      const session = target.kind === 'agent-session' ? await observe(this.client.metadata.resolveRaw(target.agentSessionId), context.signal) : undefined
+      context.signal?.throwIfAborted(); this.assertFence(p.fence)
       const runId = session?.run.runId ?? target.runId!
       if (target.runId !== undefined && runId !== target.runId) throw new AgentMuxError('The Session now refers to another Run.', 'STALE_AGENT_SESSION_BINDING')
       const attachment = await observe(this.client.readRunReplay({ runId }, afterByte, p.view), context.signal)

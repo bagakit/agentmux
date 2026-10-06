@@ -105,27 +105,37 @@ export class AgentMuxAgentSessionRegistry {
   async load(hostId: string, assertCurrent?: () => void): Promise<void> {
     await Promise.allSettled([...this.writeDrains.values()].map((drain) => drain.promise))
     assertCurrent?.()
+    // This read can overlap exact metadata admission/writes. Existing object
+    // identity is the CAS cut; no second revision or Session owner is needed.
+    const before = new Map(this.sessions)
+    const retiredBefore = new Map(this.retiredAgentSessions)
+    const unboundBefore = new Set(this.unboundRetiredRuns)
     const [sessions, retiredRuns, retiredAgentSessions] = await Promise.all([
       loadAgentSessionMetadata(this.store),
       this.store.loadRetiredRuns(),
       this.store.loadRetiredAgentSessions()
     ])
     assertCurrent?.()
+    const current = sessions.filter(session => session.hostId === hostId &&
+      this.sessions.get(session.agentSessionId) === before.get(session.agentSessionId) &&
+      !this.unconfirmedDurability.has(session.agentSessionId))
+    for (const session of this.sessions.values()) if (session.hostId === hostId &&
+      (session !== before.get(session.agentSessionId) || this.unconfirmedDurability.has(session.agentSessionId))) current.push(session)
+    const retired = retiredAgentSessions.filter(session => session.hostId === hostId &&
+      this.retiredAgentSessions.get(session.agentSessionId) === retiredBefore.get(session.agentSessionId))
+    for (const session of this.retiredAgentSessions.values()) if (session.hostId === hostId &&
+      session !== retiredBefore.get(session.agentSessionId)) retired.push(session)
+    const unbound = retiredRuns.filter(run => !unboundBefore.has(run.runId) || this.unboundRetiredRuns.has(run.runId))
+    for (const runId of this.unboundRetiredRuns) if (!unboundBefore.has(runId)) unbound.push({ runId })
     this.sessions.clear()
     this.providerIdByRun.clear()
     this.providerIdByRetiredRun.clear()
     this.unboundRetiredRuns.clear()
     this.retiredAgentSessions.clear()
     this.providerIdByNative.clear()
-    for (const session of sessions) {
-      if (session.hostId === hostId) this.remember(session)
-    }
-    for (const run of retiredRuns) this.unboundRetiredRuns.add(run.runId)
-    for (const session of retiredAgentSessions) {
-      if (session.hostId === hostId) {
-        this.retiredAgentSessions.set(session.agentSessionId, structuredClone(session))
-      }
-    }
+    for (const session of current) this.remember(session)
+    for (const run of unbound) this.unboundRetiredRuns.add(run.runId)
+    for (const session of retired) this.retiredAgentSessions.set(session.agentSessionId, structuredClone(session))
   }
 
   list(): AgentMuxStoredAgentSession[] {
@@ -158,6 +168,28 @@ export class AgentMuxAgentSessionRegistry {
       throw new AgentMuxError(`Unknown Agent Session: ${agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
     }
     return session
+  }
+
+  /** Adopt one exact durable binding only when this owner has not loaded it yet. */
+  async resolveMetadata(agentSessionId: string, hostId: string, assertCurrent: () => void): Promise<AgentMuxStoredAgentSession> {
+    const requireHost = (session: AgentMuxStoredAgentSession | null | undefined): AgentMuxStoredAgentSession => {
+      if (!session || session.hostId !== hostId) throw new AgentMuxError('Agent Session is unknown on this Host.', 'UNKNOWN_AGENT_SESSION')
+      return session
+    }
+    assertCurrent()
+    if (this.sessions.has(agentSessionId)) return requireHost(this.sessions.get(agentSessionId))
+    return await this.enqueue(agentSessionId, async () => {
+      assertCurrent()
+      // A predecessor on this same metadata queue may have published the binding.
+      if (this.sessions.has(agentSessionId)) return requireHost(this.sessions.get(agentSessionId))
+      const session = requireHost(await this.store.readMetadata(agentSessionId))
+      assertCurrent()
+      // A concurrent global read may already have admitted this exact subject.
+      // This late read cannot replace that owner's published binding.
+      if (this.sessions.has(agentSessionId)) return requireHost(this.sessions.get(agentSessionId))
+      this.remember(session)
+      return this.get(agentSessionId)
+    })
   }
 
   resolve(lookup: AgentMuxAgentSessionLookup): AgentMuxStoredAgentSession {
