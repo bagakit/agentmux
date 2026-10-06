@@ -1,3 +1,4 @@
+import { connectionsSettingsModule } from './modules/connections'
 import { createSettingsCatalog } from './settings-catalog'
 import { appearanceSettingsModule } from './modules/appearance'
 import { notificationsSettingsModule } from './modules/notifications'
@@ -37,7 +38,8 @@ export const settingsModules = [
   toolkitSettingsModule,
   agentsSettingsModule,
   hostsSettingsModule,
-  devicesSettingsModule
+  devicesSettingsModule,
+  connectionsSettingsModule
 ] as const
 
 export type SettingsSectionId = typeof settingsModules[number]['id']
