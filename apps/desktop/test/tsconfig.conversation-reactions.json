@@ -1,1 +1,1 @@
-{"extends":"../tsconfig.json","include":["../src/renderer/src/global.d.ts","conversation-reactions.test.tsx","conversation-reaction-ipc.test.tsx","helpers/reaction-public-client-fixture.ts"]}
+{"extends":"../tsconfig.json","include":["../src/renderer/src/global.d.ts","conversation-reactions.test.tsx","conversation-reaction-ipc.test.tsx","session-pane-reactions.integration.test.tsx","helpers/reaction-public-client-fixture.ts"]}
