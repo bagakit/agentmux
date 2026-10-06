@@ -14,6 +14,7 @@ import { exportPublicKey } from '@agentmux/relay/e2ee'
 import { loadOrCreateRelayKeyPair } from '@agentmux/core/relay-identity'
 import { loadMobileAssets } from './mobile-assets.js'
 import { createDeviceAdministration } from './device-administration.js'
+import { createDesktopExternalInputAuthority } from './external-input-authority.js'
 export type AgentMuxHostOptions = {
   store: AgentMuxAgentSessionStore
   providers?: readonly AgentProvider[]
@@ -21,6 +22,7 @@ export type AgentMuxHostOptions = {
   desktopSocketPath?: string
   mobileBuildDirectory?: string
   mobilePort?: number
+  externalInputAuthority?: import('@agentmux/core').AgentExternalInputAuthorityPort
 }
 
 /** The Node Host owns the original Core. Desktop and phones only own client connections. */
@@ -130,7 +132,8 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     // Reserve the public endpoint before constructing/loading any Core owner. A live old owner
     // is never displaced or adopted by speculative workflow probes.
     runtime = await startHeadlessAgentMux({ store: options.store, socketPath: path,
-      ...(options.providers ? { providers: options.providers } : {}), service })
+      ...(options.providers ? { providers: options.providers } : {}), service,
+      externalInputAuthority: options.externalInputAuthority ?? createDesktopExternalInputAuthority({ desktopSocketPath: desktopPath, executionHostId: 'local' }) })
     if (options.store instanceof AgentMuxFileAgentSessionStore) {
       try {
         authority = await DeviceAuthority.open(join(dirname(options.store.path), 'agentmux-devices.json'))
