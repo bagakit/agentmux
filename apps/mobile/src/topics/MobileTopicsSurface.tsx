@@ -13,7 +13,6 @@ const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
 const ThemeObjectTopicIcon = semanticIconComponent('object.notebook')
 
 export type MobileTopicsSurfaceProps = { rpc: TopicsRpc; visible?: boolean; topicId?: string | null; onOpenTopic(topic: KnowledgeTopic): void | Promise<void>;
-  leadingAction?: ReactNode;
   client?: AgentMuxHostedClient | null; connected?: boolean;
   initialKnowledge?: MobileKnowledgeReference; onKnowledgeChange?(reference: MobileKnowledgeReference): void;
   renderWorkface(topic: KnowledgeTopic, visible: boolean): ReactNode; openSource(source: TopicKnowledgeSource): void | Promise<void>;
@@ -23,7 +22,7 @@ export type MobileTopicsSurfaceProps = { rpc: TopicsRpc; visible?: boolean; topi
 /** Presentation references only; all category and Topic facts still come from their original owner. */
 export type MobileTopicsContext = { categoryId: string | null; topicId: string | null; mode: 'discussion' | 'knowledge' }
 /** Content discovery only; the host callback owns exact workface navigation and lifecycle. */
-export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, renderWorkface, openSource, openHttpLink, onBackChange, initialContext, onContextChange, initialKnowledge, onKnowledgeChange, onLeaveTopic, topicBackLabel, leadingAction, visible = true, topicId }: MobileTopicsSurfaceProps) {
+export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, renderWorkface, openSource, openHttpLink, onBackChange, initialContext, onContextChange, initialKnowledge, onKnowledgeChange, onLeaveTopic, topicBackLabel, visible = true, topicId }: MobileTopicsSurfaceProps) {
   const initial = useRef(initialContext ?? { categoryId: null, topicId: null, mode: 'discussion' as const })
   const [categories, setCategories] = useState<TopicCategory[]>([]), [categoryId, setCategoryId] = useState(initial.current.categoryId)
   const category = categories.find(value => value.categoryId === categoryId) ?? null
@@ -122,7 +121,7 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
   const matchesTopic = (value: KnowledgeTopic) => `${value.title} ${value.summary}`.toLocaleLowerCase().includes(normalizedQuery)
   const matchingCategories = categories.filter(value => matchesCategory(value) || (topicDirectories[value.categoryId] ?? []).some(matchesTopic))
   return <section className="mobile-topics" aria-label="Topics" hidden={!visible}>
-    <header className="mobile-topics-actions mobile-page-header">{leadingAction}
+    <header className="mobile-topics-actions mobile-page-header">
       {inTopic ? <button aria-label={topicBackLabel ?? '返回分类目录'} onClick={backToCategory}>{topicBackLabel ?? '返回'}</button>
         : categoryId && <button aria-label="返回所有分类" onClick={backToAllCategories}>返回</button>}
       <div className="mobile-topics-heading">{inTopic && <small>{category?.title ?? 'Topics'}</small>}<h1>{inTopic ? currentTopic?.title ?? '原 Topic 尚未确认' : 'Topics'}</h1></div>
