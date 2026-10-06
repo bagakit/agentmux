@@ -532,6 +532,9 @@ export function SessionPane({
   // directory; a null return means "not a readable pasted image", and the renderer falls back to the
   // plain-text reference. Stable identity so the thumbnail's load effect does not re-fire each render.
   const readPastedImage = useCallback((path: string) => api.ui.readPastedImage(path), [])
+  const readHistoryResource = useMemo(() => executionHostId === undefined ? undefined
+    : (input: Parameters<typeof api.sessions.historyResource>[1]) => api.sessions.historyResource({ hostId: executionHostId, agentSessionId: sessionId }, input),
+  [executionHostId, sessionId])
   // File and HTTP links share the saved Focus destination and explicit modifier gestures.
   const linkRequest = linkOpening.request
   const canSplit = linkOpening.canSplit
@@ -815,7 +818,7 @@ export function SessionPane({
             {metadata ? `${identityLabel}. This Session is closed; its original conversation remains readable.`
               : 'Core confirmed this Session was closed. Its saved identity is retained.'}</div>}
           workspaceRoot={metadata?.workspacePath ?? ''} homeDir={fileContext.homeDir}
-          readPastedImage={readPastedImage} openWorkspaceFile={openWorkspaceFile}
+          readPastedImage={readPastedImage} readHistoryResource={readHistoryResource} openWorkspaceFile={openWorkspaceFile}
           openHttpLink={onProseLinkClick} describeSpeaker={describeSpeaker} />
     return retainPresentations(target => cloneElement(retainedConversation, { conversationReading: {
       ...retainedConversation.props.conversationReading, enabled: target.visible !== false && !parked
@@ -921,7 +924,7 @@ export function SessionPane({
     displayState: session.status.state, workspaceRoot: fileContext.workspaceRoot, homeDir: fileContext.homeDir,
     fileReferenceNotice,
     ...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {}),
-    readPastedImage, openHttpLink: onProseLinkClick,
+    readPastedImage, readHistoryResource, openHttpLink: onProseLinkClick,
     ...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {}), describeSpeaker,
     moteConversation: moteOwner !== null, renderMessageActions,
     ...(hasAgentComposer ? { onReplyQuestion: input => replyConversationQuestion(session.control, input),

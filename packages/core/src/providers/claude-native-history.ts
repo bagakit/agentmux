@@ -13,7 +13,7 @@ import {
   type NativeHistoryContentPart as AgentSessionHistoryContentPart,
   type NativeHistoryItem as AgentSessionHistoryItem
 } from '../native-history-value.js'
-import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPage } from '../types.js'
+import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPage, AgentProviderSessionHistoryRecordContext, AgentSessionHistoryItem as MaterializedHistoryItem } from '../types.js'
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
@@ -124,6 +124,16 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
   }
 }
 
+function mainRecord(record: Record<string, unknown>, start: number, nativeSessionId: string): AgentSessionHistoryItem | null {
+  if (record.isSidechain === true) return null
+  if (record.sessionId !== nativeSessionId) {
+    // Claude bookkeeping can lack a Session ID. Such records have no main-conversation identity.
+    if (record.sessionId === undefined && record.type !== 'user' && record.type !== 'assistant') return null
+    throw new AgentMuxError('Claude transcript belongs to another native Session.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+  }
+  return convert(record, start)
+}
+
 export async function readClaudeSessionHistoryPage(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage> {
   const reader = await NativeJsonlHistoryReader.open(context)
   try {
@@ -131,16 +141,26 @@ export async function readClaudeSessionHistoryPage(context: AgentProviderSession
     while (items.length < context.limit) {
       const entry = await reader.readPrevious()
       if (!entry) break
-      if (entry.value.isSidechain === true) continue
-      if (entry.value.sessionId !== context.source.nativeSessionId) {
-        // Claude bookkeeping can lack a Session ID. Such records have no main-conversation identity.
-        if (entry.value.sessionId === undefined && entry.value.type !== 'user' && entry.value.type !== 'assistant') continue
-        throw new AgentMuxError('Claude transcript belongs to another native Session.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-      }
-      items.push(convert(entry.value, entry.start))
+      const item = mainRecord(entry.value, entry.start, context.source.nativeSessionId)
+      if (item) items.push(item)
     }
     const nextCursor = await reader.nextCursor()
     return { source: context.source, items: await Promise.all(items.reverse().map(item => reader.materializeItem(item))), nextCursor, sourceSizeBytes: reader.sourceSizeBytes }
+  } finally { await reader.close() }
+}
+
+/** Locate the original resource-bearing record using the same source rules as page reading. */
+export async function readClaudeSessionHistoryRecord(context: AgentProviderSessionHistoryRecordContext): Promise<MaterializedHistoryItem> {
+  const reader = await NativeJsonlHistoryReader.open({ ...context, limit: 1 })
+  try {
+    for (let entry = await reader.readPrevious(); entry; entry = await reader.readPrevious()) {
+      const item = mainRecord(entry.value, entry.start, context.source.nativeSessionId)
+      if (item?.id === context.recordId && (context.turnId === undefined || item.turnId === context.turnId)) {
+        await reader.verifyUnchanged()
+        return await reader.materializeItem(item)
+      }
+    }
+    throw new AgentMuxError('The original Claude record is unavailable.', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')
   } finally { await reader.close() }
 }
 
@@ -148,13 +168,6 @@ export async function readClaudeSessionHistoryPage(context: AgentProviderSession
 export async function readClaudeConversationChanges(context: ProviderConversationChangesContext): Promise<ProviderConversationChangesPage> {
   const reader = await NativeJsonlHistoryReader.open(context)
   try {
-    return await readNativeConversationChanges(reader, context, (row, start) => {
-      if (row.isSidechain === true) return null
-      if (row.sessionId !== context.source.nativeSessionId) {
-        if (row.sessionId === undefined && row.type !== 'user' && row.type !== 'assistant') return null
-        throw new AgentMuxError('Claude transcript belongs to another native Session.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-      }
-      return convert(row, start)
-    })
+    return await readNativeConversationChanges(reader, context, (row, start) => mainRecord(row, start, context.source.nativeSessionId))
   } finally { await reader.close() }
 }

@@ -384,6 +384,7 @@ export function ActivityView({
   displayState,
   openWorkspaceFile,
   readPastedImage,
+  readHistoryResource,
   openHttpLink,
   workspaceRoot = '',
   homeDir = '',
@@ -413,6 +414,7 @@ export function ActivityView({
   openWorkspaceFile?: OpenWorkspaceFile
   /** Absent means pasted-image references stay plain text (a text link, as before). */
   readPastedImage?: ReadPastedImage
+  readHistoryResource?: ComponentProps<typeof ConversationView>['readHistoryResource']
   /** Absent means an http(s) link in agent prose raises no menu. Set by the host that owns the
    *  destination menu and the Region origin (SessionPane), never resolved here. */
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
@@ -968,6 +970,11 @@ export function ActivityView({
           located={locatedMessageKey === conversationMessageSourceKey(sessionId, entry.message.source)}
           {...(describeSpeaker ? { describeSpeaker } : {})}
           content={entry.message.contentParts.length > 0 ? entry.message.contentParts : entry.message.content}
+          {...(entry.message.source.kind === 'native' ? {
+            nativeResourceRecord: { source: { providerId: entry.message.source.providerId, nativeSessionId: entry.message.source.nativeSessionId },
+              recordId: entry.message.source.recordId, ...(entry.message.turnId === undefined ? {} : { turnId: entry.message.turnId }) },
+            ...(readHistoryResource ? { readHistoryResource } : {})
+          } : {})}
           {...(entry.message.questionAnswers ? { questionAnswers: entry.message.questionAnswers } : {})}
           {...(entry.message.questionDiagnostic ? { questionDiagnostic: entry.message.questionDiagnostic } : {})}
           {...(entry.message.deliveryStatus ? { status: entry.message.deliveryStatus } : {})}
@@ -1087,6 +1094,7 @@ export function ActivityView({
         {...(describeSpeaker ? { describeSpeaker } : {})}
         {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
         {...(readPastedImage ? { readPastedImage } : {})}
+        {...(readHistoryResource ? { readHistoryResource } : {})}
         {...(openHttpLink ? { openHttpLink } : {})}
         {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
       /> : null}
