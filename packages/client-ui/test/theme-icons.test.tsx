@@ -8,6 +8,8 @@ import { ICON_GLYPHS, SEMANTIC_ICON_CATALOG, SEMANTIC_ICON_IDS } from '../src/th
 import { SemanticIcon, semanticIconHref, createSemanticIconElement, iconMaskDataUrl, iconShapes } from '../src/theme/icons.js'
 import { mountThemeRuntime, previewTheme, updateThemeSelection } from '../src/theme/runtime.js'
 import { WorkflowSemanticIcon } from '../../../apps/desktop/src/renderer/src/components/semantic-icons/index.js'
+import { ConversationReactionActions } from '../src/components/ConversationReactionActions.js'
+import { PROMPT_REACTION_STARTERS } from '@agentmux/core/prompt-reaction'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 function getSymbol(name: Parameters<typeof semanticIconHref>[0]) { return document.getElementById(semanticIconHref(name).slice(1))! }
@@ -127,5 +129,25 @@ describe('shared semantic icon owner', () => {
     expect(mask).toContain('d="M3 12L21 12"')
     expect(mask).toContain('viewBox="0 0 24 24"')
     expect(mask).not.toMatch(/<script|<foreignObject|href=|onload=/)
+  })
+
+  it('a retained original reaction control uses the theme pen while preserving its reply target and hit size', async () => {
+    runtime()
+    const reply = { kind: 'native' as const, agentSessionId: 'agent-1', providerId: 'codex', nativeSessionId: 'original-native', recordId: 'reply-original' }
+    const definition = PROMPT_REACTION_STARTERS[0]!
+    const onSend = vi.fn(async () => true)
+    const host = mount(<ConversationReactionActions definitions={[definition]} source={reply} onSend={onSend} />)
+    const button = host.querySelector<HTMLButtonElement>('button')!
+    const svg = button.querySelector<SVGSVGElement>('svg')!
+    const before = { label: button.getAttribute('aria-label'), width: svg.getAttribute('width'), href: svg.querySelector('use')!.getAttribute('href') }
+    expect(svg.style.strokeWidth).toBe('var(--icon-stroke-width, 1.75)')
+    previewTheme({ ...GRAPHITE_THEME, iconStyle: { strokeWidth: 2.5, linecap: 'butt', linejoin: 'miter' } })
+    expect(document.documentElement.style.getPropertyValue('--icon-stroke-width')).toBe('2.5')
+    expect(svg.style.strokeLinecap).toBe('var(--icon-linecap, round)')
+    expect(svg.style.strokeLinejoin).toBe('var(--icon-linejoin, round)')
+    expect(button.querySelector('svg')).toBe(svg)
+    expect({ label: button.getAttribute('aria-label'), width: svg.getAttribute('width'), href: svg.querySelector('use')!.getAttribute('href') }).toEqual(before)
+    await act(async () => button.click())
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(definition, reply, expect.any(Function))
   })
 })
