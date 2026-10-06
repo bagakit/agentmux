@@ -1,3 +1,4 @@
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import { TIMELINE_MARKER_HEIGHT, TIMELINE_MARKER_SIZE } from '../lib/timeline-marker-layout'
 import { focusMessageMarkers } from '../lib/focus-message-markers'
@@ -39,6 +40,9 @@ import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { FocusHierarchyFacts, FocusProjectLane } from '../lib/focus-project-lanes'
 import { FOCUS_WINDOW_HOURS, HOUR_MS, focusTimePosition, focusTimeSegments, focusTimeWindow, focusWheelTimeDelta, focusWindowLabel, focusWorkSegment, type FocusTimeSegment, type FocusTimeWindow } from '../lib/focus-time-window'
+
+const ThemeStatusPresenceRunningIcon = semanticIconComponent('status.presence-running')
+const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 
 // Subscribe only to the canonical authors in this mounted input surface. Session
 // output/status and other senders cannot re-render it or start avatar reads.
@@ -435,10 +439,10 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
         {...hoverEvent(`work:${track.key}:${segment.run.runId}:${segment.startAt}`, () => focusWorkingFacts(segment, time, workIdentity, context ? { name, ...(segment.end === 'current' ? { project } : {}) } : undefined, now))}
         onClick={event => segment.end === 'current' && context ? onSelect(context.id) : onInspectWork(segment, track, event.currentTarget)}
         onContextMenu={event => { event.preventDefault(); onInspectWork(segment, track, event.currentTarget) }} />)}
-      {gapVisible ? <span className="recent-focus__work-gap" tabIndex={0} role="img" style={{ left: `${focusTimePosition(gapAt!, window)}%` }} aria-label={`${name}, working history observation gap; working start and end not recorded`} {...hoverEvent(`gap:${track.key}:${gapAt}`, () => focusGapFacts(name, gapAt, time))}>?</span> : null}
+      {gapVisible ? <span className="recent-focus__work-gap" tabIndex={0} role="img" style={{ left: `${focusTimePosition(gapAt!, window)}%` }} aria-label={`${name}, working history observation gap; working start and end not recorded`} {...hoverEvent(`gap:${track.key}:${gapAt}`, () => focusGapFacts(name, gapAt, time))}><ThemeStatusUnknownIcon size={6} /></span> : null}
       {liveNow && context ? <button type="button" className={`recent-focus__live${working ? ' is-working' : ''}`} data-run-state="running" data-run-id={context.runId}
         style={{ left: `${position}%` }} aria-label={`Return to ${name}, ${currentFact}, current time ${clock(now)}`}
-        {...hoverEvent(`live:${track.key}`, () => focusLiveFacts(name, currentStateLabel, project, now, time))} onClick={() => onSelect(context.id)} /> : null}
+        {...hoverEvent(`live:${track.key}`, () => focusLiveFacts(name, currentStateLabel, project, now, time))} onClick={() => onSelect(context.id)}><ThemeStatusPresenceRunningIcon size={6} /></button> : null}
       {segments.map((item, index) => <button key={`${item.focusedAt}:${index}`} type="button" className={`recent-focus__segment${selected ? ' is-current' : ''}${item.end === undefined ? ' is-open' : ''}`}
         style={{ left: `${item.left}%`, width: item.width === undefined ? undefined : `${item.width}%` }}
         data-focused-at={item.focusedAt} data-known-end={item.end} aria-current={selected ? 'true' : undefined}
@@ -518,7 +522,7 @@ function FocusTimelineLegend({ reading, sources, serviceNotice, latestIncomplete
           <dt><i data-focus-fact="now" />Now</dt><dd>The current moment, not an activity interval.</dd>
           <dt><i data-focus-fact="working" />Working</dt><dd>A confirmed current working state with a known start. Recorded work bands come from accepted state observations. Missing older observations are not reconstructed from messages or focus visits.</dd>
           <dt><i data-focus-fact="focus" />Focused</dt><dd>When a Context received focus. This is not its execution duration.</dd>
-          <dt><i data-focus-fact="alive" />Running</dt><dd>A live Run at Now. Being online does not mean it is working.</dd>
+          <dt><ThemeStatusPresenceRunningIcon size={7} data-focus-fact="alive" />Running</dt><dd>A live Run at Now. Being online does not mean it is working.</dd>
         </dl>
         <section className="recent-focus__legend-coverage" aria-label="Input coverage">
           <strong>{read} {read === 1 ? 'source' : 'sources'} read · {sources} available</strong>
@@ -1021,7 +1025,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
       onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); drag.current = { y: event.clientY, height, next: height }; document.body.style.cursor = 'row-resize'; document.body.style.userSelect = 'none' }}
       onKeyDown={event => { const next = event.key === 'ArrowUp' ? height + 16 : event.key === 'ArrowDown' ? height - 16 : event.key === 'Home' ? minimum : event.key === 'End' ? maximum : null; if (next !== null) { event.preventDefault(); saveHeight(Math.min(maximum, Math.max(minimum, next))) } }} /> : null}
     <header ref={headerRef} className="recent-focus__header">
-      <span className="recent-focus__title"><History size={12} /><strong>Recent Focus</strong><span className="recent-focus__range" title="Work bands show proven working states; the blue line marks the current moment; hollow dots mark live Runs; thin clips show focus visits. Run start times are unknown. Conversation markers use recorded times from Core. Unknown-time records and incomplete native coverage are available through conversation records. Shows up to 2000 retained focus switches within 512 KiB of serialized UTF-16 history; older observations may be outside retention.">{dateClock(range.start)} — {dateClock(range.end)}</span>{mode !== 'collapsed' ? <span className="recent-focus__legend-key" aria-label="Timeline marks"><span><i data-focus-fact="now" />Now</span><span><i data-focus-fact="working" />Working</span><span title="When you viewed this Context"><i data-focus-fact="focus" />Focused</span><span title="Run is online now; this does not imply working"><i data-focus-fact="alive" />Running</span></span> : null}</span>
+      <span className="recent-focus__title"><History size={12} /><strong>Recent Focus</strong><span className="recent-focus__range" title="Work bands show proven working states; the blue line marks the current moment; Run markers show live Runs; thin clips show focus visits. Run start times are unknown. Conversation markers use recorded times from Core. Unknown-time records and incomplete native coverage are available through conversation records. Shows up to 2000 retained focus switches within 512 KiB of serialized UTF-16 history; older observations may be outside retention.">{dateClock(range.start)} — {dateClock(range.end)}</span>{mode !== 'collapsed' ? <span className="recent-focus__legend-key" aria-label="Timeline marks"><span><i data-focus-fact="now" />Now</span><span><i data-focus-fact="working" />Working</span><span title="When you viewed this Context"><i data-focus-fact="focus" />Focused</span><span title="Run is online now; this does not imply working"><ThemeStatusPresenceRunningIcon size={7} data-focus-fact="alive" />Running</span></span> : null}</span>
       <span className="recent-focus__controls" onPointerDownCapture={event => {
         const control = event.target instanceof Element ? event.target.closest('[data-focus-window-control]') : null
         if (!control) return
