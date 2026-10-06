@@ -90,6 +90,42 @@ describe('original room binding and grants', () => {
     expect((await f.bindings.inspect({ bindingId: f.input.bindingId })).grants).toEqual([])
     expect((await f.bindings.inspect({ operationId: input.operationId })).operation).toEqual(granted)
   })
+  it('releases only stale grant routing after explicit relink while retaining original grant identity and receipt', async () => {
+    const f = await fixture(); await f.bindings.bind(f.input, context)
+    const actor = { application: config.application, idType: 'open_id', userId: 'original-actor' }
+    const grant = { operationId: 'grant-original', bindingId: f.input.bindingId, expectedBindingRevision: 1, grantId: 'original-grant', expectedRevision: null, actor, capabilities: ['input'] as ['input'], state: 'active' as const }
+    const first = await f.bindings.grant(grant, context)
+    await f.connections.configure({ operationId: 'configure-other', expectedRevision: null, connection: { ...config, connectionId: 'other-connection' } })
+    await f.bindings.relink({ ...f.input, operationId: 'move-audience', expectedRevision: 1, connectionId: 'other-connection', externalConversationId: 'other-group' }, context)
+    const scope = { connectionId: config.connectionId, externalConversationId: f.input.externalConversationId, actor }
+    expect(f.bindings.findGrant(scope)).toBeNull()
+    const secondInput = { ...f.input, operationId: 'new-binding', bindingId: 'new-binding' }
+    expect(await f.bindings.bind(secondInput, context)).toMatchObject({ state: 'applied' })
+    const second = await f.bindings.grant({ ...grant, operationId: 'new-grant', bindingId: secondInput.bindingId, grantId: 'new-grant' }, context)
+    expect(second).toMatchObject({ state: 'applied', grant: { grantId: 'new-grant', bindingId: 'new-binding' } })
+    expect(f.bindings.findGrant(scope)?.grantId).toBe('new-grant')
+    expect(f.bindings.readGrant('original-grant')).toEqual(first.state === 'applied' ? first.grant : null)
+    expect(f.bindings.readGrant('original-grant', 1)).toEqual(first.state === 'applied' ? first.grant : null)
+    expect((await f.bindings.inspect({ operationId: grant.operationId })).operation).toEqual(first)
+    expect((await f.bindings.inspect({ operationId: f.input.operationId })).binding?.revision).toBe(1)
+    await f.unchanged()
+  })
+  it('renews grants explicitly after a Binding revision and permits only one competing valid actor grant', async () => {
+    const f = await fixture(); await f.bindings.bind(f.input, context)
+    const actor = { application: config.application, idType: 'open_id', userId: 'actor' }
+    const input = { operationId: 'original-grant', bindingId: f.input.bindingId, expectedBindingRevision: 1, grantId: 'original-grant', expectedRevision: null, actor, capabilities: ['input'] as ['input'], state: 'active' as const }
+    const first = await f.bindings.grant(input, context)
+    await f.bindings.relink({ ...f.input, operationId: 'new-revision', expectedRevision: 1 }, context)
+    const scope = { connectionId: config.connectionId, externalConversationId: f.input.externalConversationId, actor }
+    expect(f.bindings.findGrant(scope)).toBeNull()
+    const attempts = await Promise.all(['grant-a', 'grant-b'].map(grantId => f.bindings.grant({ ...input, operationId: grantId, grantId, expectedBindingRevision: 2 }, context)))
+    expect(attempts.filter(op => op.state === 'applied')).toHaveLength(1)
+    expect(attempts.filter(op => op.state === 'refused')).toEqual([expect.objectContaining({ code: 'ROOM_GRANT_ACTOR_CONFLICT' })])
+    expect(f.bindings.findGrant(scope)?.bindingRevision).toBe(2)
+    expect(f.bindings.readGrant(input.grantId)).toEqual(first.state === 'applied' ? first.grant : null)
+    expect((await f.bindings.inspect({ operationId: input.operationId })).operation).toEqual(first)
+    await f.unchanged()
+  })
   it('refuses unsupported or changed sources only at the new sharing boundary, preserving configuration and Agent', async () => {
     const f = await fixture(false)
     expect(await f.bindings.bind(f.input, context)).toMatchObject({ state: 'refused', code: 'ROOM_BINDING_SOURCE_UNAVAILABLE' })
