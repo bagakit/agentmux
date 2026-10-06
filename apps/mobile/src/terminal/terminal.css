@@ -12,6 +12,8 @@
 .mobile-terminal-details dt { color: var(--text-3); }
 .mobile-terminal-details dd { margin: 0; overflow-wrap: anywhere; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .mobile-terminal-detail-hint { margin-left: 4px; color: var(--text-3); }
+.mobile-terminal-toolbar .mobile-terminal-mode { display: inline-flex; align-items: center; gap: 6px; padding: 0 6px; white-space: nowrap; font-size: 12px; }
+.mobile-terminal-toolbar .mobile-terminal-mode:disabled { opacity: .45; }
 .mobile-terminal .mobile-terminal-canvas { touch-action: none; }
 .mobile-terminal .mobile-terminal-canvas .xterm { min-height: 0; }
 .mobile-terminal-reading-tools { display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--mobile-border); }
