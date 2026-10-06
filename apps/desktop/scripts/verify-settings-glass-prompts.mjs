@@ -50,6 +50,8 @@ async function reviewedProof(directory) {
 export async function qualify(directory, materialsOnly = false, preview = false, options = {}) {
   await fs.mkdir(directory, { recursive: true })
   const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-settings-prompts-'))
+  const dependencyLink = path.join(directory, 'node_modules')
+  let dependencyLinked = false
   const receipt = { captureOnly: true, aestheticReview: 'not-performed', boundary: 'Actual App Renderer; private IPC ConfigOwner/ConfigStore seam; no user config, Runtime, Run, native activation or installation. CSS reduced preferences are emulated known signals, not OS bridge facts.', source: {}, assets: [], compiled: [], processes: [], privateRoot }
   const inputs = new Map()
   const originalInputs = new Map()
@@ -77,7 +79,7 @@ export async function qualify(directory, materialsOnly = false, preview = false,
     const viteFile = require.resolve('vite')
     const { build, loadConfigFromFile } = await import(pathToFileURL(viteFile).href)
     const { config } = await loadConfigFromFile({ command: 'build', mode: 'production' }, path.join(fixture, 'vitest.config.mts'), root)
-    await build({ configFile: false, root: fixture, base: './', logLevel: 'warn', resolve: config.resolve, define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
+    await build({ configFile: false, root: fixture, base: './', logLevel: 'warn', resolve: config.resolve, worker: { format: 'es' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
       plugins: [{ name: 'bind-proof-source', enforce: 'pre', async transform(code, id) {
         const filename = id.split('?')[0]
         if (/\.(png|svg|jpe?g|webp|woff2?|ttf)$/.test(filename)) {
@@ -103,6 +105,10 @@ export async function qualify(directory, materialsOnly = false, preview = false,
         return { contents, loader: event.path.endsWith('.ts') ? 'ts' : 'js' }
       })
     } }] })
+    // Source owners retain createRequire(import.meta.url) for their native dependencies. Assemble the
+    // private bundle beside that package's real dependency directory; do not replace the native owner.
+    await fs.symlink(path.join(root, 'packages/core/node_modules'), dependencyLink, 'dir')
+    dependencyLinked = true
     for (const filename of ['main.cjs', 'preload.cjs', 'index.html', 'vitest.config.mts']) await bind(path.join(fixture, filename), await fs.readFile(path.join(fixture, filename)))
     await bind(fileURLToPath(import.meta.url), await fs.readFile(fileURLToPath(import.meta.url)))
     for (const filename of options.sources ?? []) await bind(path.resolve(root, filename), await fs.readFile(path.resolve(root, filename)))
@@ -124,6 +130,8 @@ export async function qualify(directory, materialsOnly = false, preview = false,
       assert.equal(result.completed, true)
     }
     if (!options.modes && !materialsOnly && !preview) assert.equal(new Set(receipt.processes.map(p => p.pid)).size, 3, 'Three ordinary processes must read the same private durable store')
+    await fs.unlink(dependencyLink)
+    dependencyLinked = false
     receipt.originalInputs = Object.fromEntries(originalInputs)
     for (const [relative, consumed] of inputs) assert.equal(hash(await fs.readFile(path.join(root, relative))), (originalInputs.get(relative) ?? consumed).sha256, 'Proof input changed: ' + relative)
     receipt.png = (await files(directory)).filter(record => record.file.endsWith('.png') && !record.file.startsWith('compiled/'))
@@ -133,6 +141,9 @@ export async function qualify(directory, materialsOnly = false, preview = false,
   } catch (error) {
     receipt.failure = { name: error.name, message: error.message, stack: error.stack }
   } finally {
+    if (dependencyLinked) await fs.unlink(dependencyLink).catch(error => {
+      if (error.code !== 'ENOENT') receipt.dependencyCleanupFailure = { code: error.code, message: error.message }
+    })
     receipt.remainingPrivateProcesses = await listProbeProcesses(-1, privateRoot)
     await fs.rm(privateRoot, { recursive: true, force: true }); receipt.privateRootRemoved = true
     await fs.writeFile(path.join(directory, 'receipt.json'), JSON.stringify(receipt, null, 2))
