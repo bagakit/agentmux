@@ -16,8 +16,12 @@ import type { AgentMuxStoredAgentSession } from '../../src/types.js'
 import type { CtxmuxAdapterObservationEvent, CtxmuxAdapterRun } from '../../src/ctxmux-run-adapter.js'
 
 /** Real Core registry, authorization and queue; only the Native transport is a deterministic fixture. */
-export async function rpcOwnerFixture(ids = ['caller', 'recipient']) {
-  const root = await mkdtemp(fixturePath("tmp/amx-rpc-owner-")), store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
+export async function rpcOwnerFixture(ids = ['caller', 'recipient'], ownerModule?: {
+  AgentMuxClient: typeof SourceClient; AgentMuxFileAgentSessionStore: typeof SourceStore
+}) {
+  const Client = ownerModule?.AgentMuxClient ?? AgentMuxClient
+  const Store = ownerModule?.AgentMuxFileAgentSessionStore ?? AgentMuxFileAgentSessionStore
+  const root = await mkdtemp(fixturePath("tmp/amx-rpc-owner-")), store = new Store(join(root, 'sessions.json'))
   const capability = issueAgentCapability()
   for (const [key] of Object.entries(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', root); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
@@ -28,7 +32,7 @@ export async function rpcOwnerFixture(ids = ['caller', 'recipient']) {
       hookBindingId: 'fixture-hook', hookToken: 'fixture-token', capabilityHash: hashAgentCapability(capability), createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
     await store.compareAndSwap(null, record)
   }
-  const client = new AgentMuxClient({ store })
+  const client = new Client({ store })
   const inner = client as unknown as { connected: boolean; registry: { load(hostId: string): Promise<void> }; kernel: Record<string, unknown> }
   await inner.registry.load('local'); inner.connected = true; inner.kernel.isConnected = () => true
   const run = (runId: string): CtxmuxAdapterRun => ({ runId, lifecycleOperationId: null, program: 'codex', args: [], workspacePath: root,

@@ -128,6 +128,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'goal.activity.append': ['--goal', ids.goal, '--kind', 'review', '--message', 'Original evidence', '--operation-id', 'ACTIVITY'],
     'goal.activity.inspect': ['--goal', ids.goal, '--operation-id', 'ACTIVITY'],
     'message.inbox.check': ['--limit', '5'], 'message.inbox.ack': ['--generation', '3', '--reader-run', 'RUN'],
+    'message.read': ['--operation-id', 'ORIGINAL', '--host', 'local'],
     'message.dispatch.open': ['--source-message', 'M'], 'message.dispatch.inspect': ['--source-message', 'M'],
     'message.dispatch.report': ['--source-message', 'M', '--reply-message', 'REPLY', '--kind', 'worker_done'],
     'app.inspect': [], 'app.snapshot': [], 'app.focus': ['--surface', 'space'], 'mote.playbook.pmo': [],
