@@ -88,7 +88,7 @@ export function noteBacklinks(knowledge: NoteKnowledge, target: NoteLinkTarget):
 }
 
 /** A reading projection; knowledge and identities always remain those of the complete original file. */
-export function projectNoteBlocks(source: NoteSource, ids: readonly string[]): { content: JSONContent; shownBlockIds: string[]; missingBlockIds: string[]; rootBlockIds: string[] } {
+export function projectNoteBlocks(source: NoteSource, ids: readonly string[], priorityIds: readonly string[] = []): { content: JSONContent; shownBlockIds: string[]; missingBlockIds: string[]; rootBlockIds: string[] } {
   const requested = new Set(ids), covered = new Set<string>(), content: JSONContent[] = [], rootBlockIds: string[] = []
   const cover = (node: JSONContent) => {
     const id: unknown = node.attrs?.blockId
@@ -101,5 +101,8 @@ export function projectNoteBlocks(source: NoteSource, ids: readonly string[]): {
     rootBlockIds.push(block.blockId)
     cover(block.content)
   }
-  return { content: { type: 'doc', content }, shownBlockIds: [...covered], rootBlockIds, missingBlockIds: ids.filter(id => !source.blocks.has(id)) }
+  const priority = new Set(priorityIds)
+  const containsSelected = (node: JSONContent): boolean => priority.has(String(node.attrs?.blockId)) || Boolean(node.content?.some(containsSelected))
+  const ordered = content.map((node, index) => ({ node, index, selected: containsSelected(node) })).sort((a, b) => Number(b.selected) - Number(a.selected) || a.index - b.index)
+  return { content: { type: 'doc', content: ordered.map(item => item.node) }, shownBlockIds: [...covered], rootBlockIds, missingBlockIds: ids.filter(id => !source.blocks.has(id)) }
 }

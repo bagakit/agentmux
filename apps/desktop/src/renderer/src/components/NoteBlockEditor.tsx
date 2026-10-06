@@ -2,6 +2,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type Ref } from 'react'
 import { Decoration, Extension, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEditorState, type NodeViewProps } from '@tiptap/react'
+import { desktopElementVisible } from '../lib/desktop-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { NOTE_BLOCK_TYPES, NoteBlockReferenceNode, NoteInlineLinkNode, noteContentExtensions, noteIdentityExtensions } from '../../../shared/note-content-schema'
 import { NoteInlineLink, type NoteLinkOpenRequest } from '@agentmux/client-ui/components/NoteInlineLink'
@@ -88,7 +89,7 @@ function ReadOnlyBlock({ content }: { content: JSONContent }) {
   return <EditorContent editor={editor} />
 }
 
-export type NoteEditorHandle = { editor: Editor; focusBlock: (blockId: string, focus?: boolean) => boolean; bindLink: (link: NoteLinkOpenRequest, target: NoteLinkTarget) => boolean }
+export type NoteEditorHandle = { editor: Editor; focusBlock: (blockId: string, focus?: boolean, reveal?: boolean) => boolean; bindLink: (link: NoteLinkOpenRequest, target: NoteLinkTarget) => boolean }
 export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onIssue, handleRef, onSelectedBlock, onOpenLink, active = true, showBacklinks = true, sourceIdentity = note.noteId }: {
   note: NoteDocument; knowledge: NoteKnowledge; onChange: (raw: string) => void; onOpen: (source: NoteSource, blockId: string) => void
   onSave: () => void; onIssue: (message: string | null) => void; handleRef?: Ref<NoteEditorHandle | null>; onSelectedBlock?: (target: NoteBlockTarget) => void
@@ -178,14 +179,33 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
         if (position === null) return false
         editor.view.dispatch(editor.state.tr.setNodeMarkup(position, undefined, { referenceId: link.referenceId, text: link.text, target }).setMeta('addToHistory', false))
         return true
-      }, focusBlock(blockId, focus = true) {
+      }, focusBlock(blockId, focus = true, reveal = false) {
         if (editor.isDestroyed) return false
-        let position: number | null = null, textblock = false
-        editor.state.doc.descendants((node, pos) => { if (node.attrs.blockId === blockId) { position = node.isTextblock ? pos + 1 : pos; textblock = node.isTextblock; return false } })
+        let position: number | null = null, blockPosition: number | null = null, textblock = false
+        editor.state.doc.descendants((node, pos) => { if (node.attrs.blockId === blockId) { blockPosition = pos; position = node.isTextblock ? pos + 1 : pos; textblock = node.isTextblock; return false } })
         if (position === null) return false
+        if (reveal && !desktopElementVisible(editor.view.dom)) return false
+        let unfolded = false
+        if (reveal) {
+          const at = editor.state.doc.resolve(position)
+          for (let depth = at.depth; depth > 0; depth--) {
+            const id: unknown = at.node(depth).attrs.blockId
+            if (typeof id === 'string' && folded.current.delete(id)) unfolded = true
+          }
+          const id: unknown = editor.state.doc.nodeAt(blockPosition!)?.attrs.blockId
+          if (typeof id === 'string' && folded.current.delete(id)) unfolded = true
+        }
         const selection = editor.chain().setMeta('noteSelectionRestore', true)
+        if (unfolded) { selection.setMeta('noteFold', true); setFoldRevision(value => value + 1) }
         if (textblock) selection.setTextSelection(position); else selection.setNodeSelection(position)
         selection.run()
+        // ProseMirror intentionally ignores scrollToSelection while DOM focus is elsewhere.
+        // Explicit navigation reveals the DOM for the exact confirmed model position without taking caret focus.
+        if (reveal && blockPosition !== null) {
+          const element = editor.view.nodeDOM(blockPosition)
+          if (!(element instanceof HTMLElement) || !desktopElementVisible(element)) return false
+          element.scrollIntoView({ block: 'center', inline: 'nearest' })
+        }
         if (!focus) return true
         editor.view.focus()
         return editor.view.dom === document.activeElement || editor.view.dom.contains(document.activeElement)

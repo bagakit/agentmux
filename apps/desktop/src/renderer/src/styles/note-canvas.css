@@ -153,3 +153,30 @@
 
 .note-canvas-reading-actions { padding: 0 15px 8px; background: var(--surface-2); }
 .note-canvas-reading-actions .note-canvas-more { padding: 8px 0 4px; }
+
+/* Relationship reading: content and exact original navigation lead, machine locations stay under details. */
+.note-canvas-card[data-relationship-selected="true"] { border-color: var(--blue); }
+.note-canvas-card[data-page-selected="true"] > header { background: color-mix(in srgb, var(--blue) 9%, transparent); border-radius: 8px 8px 0 0; }
+.note-canvas-reader [data-note-selected-block] { background: color-mix(in srgb, var(--blue) 10%, transparent); border-radius: 3px; outline: 1px solid color-mix(in srgb, var(--blue) 25%, transparent); outline-offset: 2px; }
+.note-canvas .react-flow__edge-path.is-muted { opacity: .32; }
+.note-canvas .react-flow__edge-path.is-selected { stroke-width: 2.3; }
+.note-canvas-edge-label[data-muted="true"] { opacity: .45; }
+.note-canvas-edge-label[data-selected="true"] { border-color: var(--blue); background: var(--surface-2); color: var(--text); }
+.note-canvas-edge-label:hover, .note-canvas-edge-label:focus-visible { opacity: 1; }
+.note-canvas-inspector { width: 360px; }
+.note-canvas-inspector > ol > li { padding-block: 14px; border-top: 1px solid var(--line-soft); }
+.note-canvas-inspector .note-canvas-comparison h4 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 8px; margin: 12px 0 9px; color: var(--text); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.note-canvas-inspector .note-canvas-comparison h4 > span { color: var(--text-3); font-size: 10px; font-weight: 500; }
+.note-canvas-comparison h4 > small { width: 100%; font-size: 10px; color: var(--text-3); font-weight: 400; }
+.note-canvas-comparison-content { max-height: 240px; overflow: auto; padding: 3px 4px; margin: 0 -4px 8px; }
+.note-canvas-inspector .note-canvas-reader :is(ol,ul) { list-style: revert; margin: 0 0 10px; padding-inline-start: 20px; }
+.note-canvas-inspector .note-canvas-reader li { padding-block: 0; border: 0; }
+.note-canvas-inspector .note-canvas-reader li > div:first-child { display: block; }
+.note-canvas-comparison-to { margin-top: 15px; padding-top: 1px; border-top: 1px solid var(--line-soft); }
+.note-canvas-location-details { margin-top: 14px; color: var(--text-3); font-size: 10px; }
+.note-canvas-location-details > summary { cursor: pointer; }
+.note-canvas-location-details dl { margin-block: 12px; }
+.note-canvas-whole-page { padding: 12px; border-radius: 5px; color: var(--text-2); background: var(--wash-1); line-height: 1.6; }
+
+.note-canvas-comparison .note-canvas-inspector-actions { margin: 0 0 7px; }
+.note-canvas-comparison-to .note-canvas-comparison-content { margin-bottom: 0; }
