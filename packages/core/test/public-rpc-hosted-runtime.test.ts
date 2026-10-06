@@ -16,6 +16,7 @@ import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { AgentMuxRpcDispatcher, AgentMuxRpcError, type AgentMuxRpcConnection, type AgentMuxRpcFrame } from '../src/public-rpc-wire.js'
 import { connectHostedAgentMux } from '../src/hosted-client.js'
+import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 
 const AgentMuxControlServer: typeof SourceServer = process.env.AGENTMUX_TEST_RPC_SERVER_ENTRY
   ? (await import(/* @vite-ignore */ pathToFileURL(process.env.AGENTMUX_TEST_RPC_SERVER_ENTRY).href)).AgentMuxControlServer : SourceServer
@@ -54,6 +55,43 @@ async function endpoint(options: AgentMuxControlServerOptions = {}) {
   return { owner, path, url: () => `http://127.0.0.1:${owner.httpAddress!.port}/` }
 }
 describe('one public service borrowed by a long-lived Runtime Host', () => {
+  it('carries durable Dispatch notifications and exact source reads through the original Hosted consumer', async () => {
+    const f = await hostedFixture()
+    const queue = new DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath())
+    const source = { messageId: 'dispatch-source', operationId: 'dispatch-source-operation', createdAt: reshapeFixtureEpoch(0, 0, 100),
+      sender: { kind: 'agent-session' as const, agentSessionId: 'source-agent' },
+      recipient: { kind: 'agent-session' as const, agentSessionId: 'recipient-agent' },
+      senderSessionId: 'source-agent', senderRunId: 'run-source-agent', recipientSessionId: 'recipient-agent', recipientRunId: 'run-recipient-agent',
+      threadId: 'original-thread', correlationId: 'original-correlation', replyTo: null, workspaceId: null, body: 'Original task' }
+    await queue.append(source)
+    await queue.append({ ...source, messageId: 'dispatch-result', operationId: 'dispatch-result-operation',
+      sender: source.recipient, recipient: source.sender, senderSessionId: 'recipient-agent', senderRunId: 'run-recipient-agent',
+      recipientSessionId: 'source-agent', recipientRunId: 'run-source-agent', replyTo: source.messageId, body: 'Original report' })
+    const h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted })
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: h.path } }); cleanups.push(() => rpc.dispose())
+    const reader = await connectHostedAgentMux({ rpc }); cleanups.push(() => reader.dispose())
+    const received: AgentMuxClientEvent[] = []
+    reader.onEvent(event => { if (event.type === 'dispatch-changed') received.push(event) })
+    await f.client.openDispatch({ callerAgentSessionId: 'source-agent', capability: f.capability, sourceMessageId: source.messageId })
+    await f.client.recordDispatchEvent({ callerAgentSessionId: 'recipient-agent', capability: f.capability,
+      sourceMessageId: source.messageId, replyMessageId: 'dispatch-result', kind: 'worker_done' })
+    await vi.waitFor(() => expect(received).toHaveLength(2))
+    expect(received[1]).toMatchObject({ type: 'dispatch-changed', sourceMessageId: source.messageId,
+      ownerAgentSessionId: 'source-agent', workerAgentSessionId: 'recipient-agent', event: { replyMessageId: 'dispatch-result', kind: 'worker_done' } })
+    const observed = await reader.readDispatch({ sourceMessageId: source.messageId })
+    expect(observed.source.envelope.body).toBe('Original task')
+    expect(observed.replies[0]!.envelope.body).toBe('Original report')
+    const publicRead = await rpc.call('message.dispatch.read', { hostId: 'local', sourceMessageId: source.messageId })
+    expect(publicRead).toEqual({ ...observed, hostId: 'local' })
+    const catalogue = await rpc.call('message.dispatch.ls', { hostId: 'local', participantSessionId: 'source-agent' })
+    expect(catalogue.dispatches).toEqual([observed.dispatch])
+    expect(f.inputs).toEqual([])
+    expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+    // Rejoin through a fresh consumer and exact original refs; no event replay or input retry.
+    await reader.dispose()
+    const rejoined = await connectHostedAgentMux({ rpc }); cleanups.push(() => rejoined.dispose())
+    expect(await rejoined.readDispatch({ sourceMessageId: source.messageId })).toEqual(observed)
+  })
   it('preserves a large retained Session bootstrap through the real Hosted consumer', async () => {
     const ids = Array.from({ length: 127 }, (_, index) => `session-${String(index).padStart(3, '0')}`)
     const f = await hostedFixture(ids)
