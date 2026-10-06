@@ -50,6 +50,12 @@ type AgentSessionWriteDrain = {
   resolve(): void
 }
 
+type AgentSessionLoadCut = {
+  sessions: Set<string>
+  retirements: Set<string>
+  runs: Set<string>
+}
+
 export class AgentMuxAgentSessionRegistry {
   private readonly sessions = new Map<string, AgentMuxStoredAgentSession>()
   private readonly providerIdByRun = new Map<string, string>()
@@ -60,6 +66,7 @@ export class AgentMuxAgentSessionRegistry {
   private readonly writeQueues = new Map<string, AgentSessionWrite[]>()
   private readonly activeWrites = new Set<string>()
   private readonly writeDrains = new Map<string, AgentSessionWriteDrain>()
+  private readonly metadataLoadCuts = new Set<AgentSessionLoadCut>()
   private readonly lifecycleOwnerId = randomUUID()
   private static readonly lifecycleLeaseMs = 30_000
   private readonly unconfirmedDurability = new Set<string>()
@@ -105,37 +112,51 @@ export class AgentMuxAgentSessionRegistry {
   async load(hostId: string, assertCurrent?: () => void): Promise<void> {
     await Promise.allSettled([...this.writeDrains.values()].map((drain) => drain.promise))
     assertCurrent?.()
-    // This read can overlap exact metadata admission/writes. Existing object
-    // identity is the CAS cut; no second revision or Session owner is needed.
-    const before = new Map(this.sessions)
-    const retiredBefore = new Map(this.retiredAgentSessions)
-    const unboundBefore = new Set(this.unboundRetiredRuns)
-    const [sessions, retiredRuns, retiredAgentSessions] = await Promise.all([
-      loadAgentSessionMetadata(this.store),
-      this.store.loadRetiredRuns(),
-      this.store.loadRetiredAgentSessions()
-    ])
-    assertCurrent?.()
-    const current = sessions.filter(session => session.hostId === hostId &&
-      this.sessions.get(session.agentSessionId) === before.get(session.agentSessionId) &&
-      !this.unconfirmedDurability.has(session.agentSessionId))
-    for (const session of this.sessions.values()) if (session.hostId === hostId &&
-      (session !== before.get(session.agentSessionId) || this.unconfirmedDurability.has(session.agentSessionId))) current.push(session)
-    const retired = retiredAgentSessions.filter(session => session.hostId === hostId &&
-      this.retiredAgentSessions.get(session.agentSessionId) === retiredBefore.get(session.agentSessionId))
-    for (const session of this.retiredAgentSessions.values()) if (session.hostId === hostId &&
-      session !== retiredBefore.get(session.agentSessionId)) retired.push(session)
-    const unbound = retiredRuns.filter(run => !unboundBefore.has(run.runId) || this.unboundRetiredRuns.has(run.runId))
-    for (const runId of this.unboundRetiredRuns) if (!unboundBefore.has(runId)) unbound.push({ runId })
-    this.sessions.clear()
-    this.providerIdByRun.clear()
-    this.providerIdByRetiredRun.clear()
-    this.unboundRetiredRuns.clear()
-    this.retiredAgentSessions.clear()
-    this.providerIdByNative.clear()
-    for (const session of current) this.remember(session)
-    for (const run of unbound) this.unboundRetiredRuns.add(run.runId)
-    for (const session of retired) this.retiredAgentSessions.set(session.agentSessionId, structuredClone(session))
+    // Record only changes during this read. Object equality cannot distinguish
+    // an initially absent binding admitted and then removed before the reply.
+    const cut: AgentSessionLoadCut = { sessions: new Set(), retirements: new Set(), runs: new Set() }
+    this.metadataLoadCuts.add(cut)
+    try {
+      const [sessions, retiredRuns, retiredAgentSessions] = await Promise.all([
+        loadAgentSessionMetadata(this.store),
+        this.store.loadRetiredRuns(),
+        this.store.loadRetiredAgentSessions()
+      ])
+      assertCurrent?.()
+      const current = sessions.filter(session => session.hostId === hostId &&
+        !cut.sessions.has(session.agentSessionId) && !this.unconfirmedDurability.has(session.agentSessionId))
+      for (const session of this.sessions.values()) if (session.hostId === hostId &&
+        (cut.sessions.has(session.agentSessionId) || this.unconfirmedDurability.has(session.agentSessionId))) current.push(session)
+      const retired = retiredAgentSessions.filter(session => session.hostId === hostId && !cut.retirements.has(session.agentSessionId))
+      for (const session of this.retiredAgentSessions.values()) if (session.hostId === hostId && cut.retirements.has(session.agentSessionId)) retired.push(session)
+      const unbound = retiredRuns.filter(run => !cut.runs.has(run.runId))
+      for (const runId of this.unboundRetiredRuns) if (cut.runs.has(runId)) unbound.push({ runId })
+      // Publishing this cut also changes the same owner for other in-flight reads.
+      for (const id of this.sessions.keys()) this.noteMetadataChange('sessions', id)
+      for (const id of this.retiredAgentSessions.keys()) this.noteMetadataChange('retirements', id)
+      for (const id of this.unboundRetiredRuns) this.noteMetadataChange('runs', id)
+      this.sessions.clear()
+      this.providerIdByRun.clear()
+      this.providerIdByRetiredRun.clear()
+      this.unboundRetiredRuns.clear()
+      this.retiredAgentSessions.clear()
+      this.providerIdByNative.clear()
+      for (const session of current) this.remember(session)
+      for (const run of unbound) {
+        this.noteMetadataChange('runs', run.runId)
+        this.unboundRetiredRuns.add(run.runId)
+      }
+      for (const session of retired) {
+        this.noteMetadataChange('retirements', session.agentSessionId)
+        this.retiredAgentSessions.set(session.agentSessionId, structuredClone(session))
+      }
+    } finally {
+      this.metadataLoadCuts.delete(cut)
+    }
+  }
+
+  private noteMetadataChange(kind: keyof AgentSessionLoadCut, id: string): void {
+    for (const cut of this.metadataLoadCuts) cut[kind].add(id)
   }
 
   list(): AgentMuxStoredAgentSession[] {
@@ -343,12 +364,18 @@ export class AgentMuxAgentSessionRegistry {
     retiredRuns: readonly AgentMuxRunRef[] = []
   ): Promise<void> {
     await this.store.releaseLifecycle(reservation, retiredRuns)
-    for (const run of retiredRuns) this.unboundRetiredRuns.add(run.runId)
+    for (const run of retiredRuns) {
+      this.noteMetadataChange('runs', run.runId)
+      this.unboundRetiredRuns.add(run.runId)
+    }
   }
 
   async retireRuns(runs: readonly AgentMuxRunRef[]): Promise<void> {
     await this.store.retireRuns(runs)
-    for (const run of runs) this.unboundRetiredRuns.add(run.runId)
+    for (const run of runs) {
+      this.noteMetadataChange('runs', run.runId)
+      this.unboundRetiredRuns.add(run.runId)
+    }
   }
 
   async commitLifecycle(
@@ -363,6 +390,7 @@ export class AgentMuxAgentSessionRegistry {
       if (!normalized) {
         if (reservation.kind === 'stop' && previous) {
           for (const run of [...previous.retiredRuns, previous.run]) {
+            this.noteMetadataChange('runs', run.runId)
             this.unboundRetiredRuns.add(run.runId)
           }
           const retired = (await this.store.loadRetiredAgentSessions()).find(
@@ -374,13 +402,17 @@ export class AgentMuxAgentSessionRegistry {
               'INVALID_AGENT_SESSION_STORE'
             )
           }
+          this.noteMetadataChange('retirements', retired.agentSessionId)
           this.retiredAgentSessions.set(retired.agentSessionId, structuredClone(retired))
         }
+        this.noteMetadataChange('sessions', reservation.agentSessionId)
         this.sessions.delete(reservation.agentSessionId)
         return null
       }
       if (reservation.kind === 'reopen') {
+        this.noteMetadataChange('retirements', normalized.agentSessionId)
         this.retiredAgentSessions.delete(normalized.agentSessionId)
+        this.noteMetadataChange('runs', reservation.expectedRetirement.run.runId)
         this.unboundRetiredRuns.delete(reservation.expectedRetirement.run.runId)
       }
       this.remember(normalized)
@@ -622,6 +654,7 @@ export class AgentMuxAgentSessionRegistry {
   private remember(session: AgentMuxStoredAgentSession): void {
     this.assertAvailable(session)
     const copy = structuredClone(agentSessionMetadata(session))
+    this.noteMetadataChange('sessions', copy.agentSessionId)
     this.sessions.set(copy.agentSessionId, copy)
     this.providerIdByRun.set(copy.run.runId, copy.agentSessionId)
     for (const retired of copy.retiredRuns) {
@@ -664,6 +697,7 @@ export class AgentMuxAgentSessionRegistry {
   }
 
   private forget(session: AgentMuxStoredAgentSession): void {
+    this.noteMetadataChange('sessions', session.agentSessionId)
     if (this.providerIdByRun.get(session.run.runId) === session.agentSessionId) {
       this.providerIdByRun.delete(session.run.runId)
     }
