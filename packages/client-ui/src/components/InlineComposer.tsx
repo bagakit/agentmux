@@ -1,8 +1,9 @@
-import { insertComposerContent, replaceComposerRange, type ComposerInsertionHandle, type ComposerPasteImage } from '../lib/composer-insertion.js'
+import { insertComposerContent, replaceComposerDraft, replaceComposerRange, type ComposerInsertionHandle, type ComposerPasteImage } from '../lib/composer-insertion.js'
 import { createContext, useContext, useEffect, useLayoutEffect, useImperativeHandle, useMemo, useRef, type Ref } from 'react'
 import { Decoration, Extension, Node, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type NodeViewProps } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import { EditorState, TextSelection } from '@tiptap/pm/state'
 import { ConversationImage, type ReadPastedImage } from './ConversationImage.js'
 import { splitPastedImageReferences } from '../lib/pasted-image-reference.js'
 import { composerKeywordMatches } from '../lib/composer-keywords.js'
@@ -143,11 +144,12 @@ export type InlineComposerProps = {
   autoFocus?: boolean
   readPastedImage?: ReadPastedImage
   value: string
+  historyNavigation?: 'browsing' | 'restored'
   onValueChange(value: string): void
   disabled: boolean
   placeholder: string
   'aria-label': string
-  onKeyDown(event: KeyboardEvent, caret: number): void
+  onKeyDown(event: KeyboardEvent, caret: number, selectionEmpty: boolean): void
   onPasteImage?: ComposerPasteImage
   insertionRef?: Ref<ComposerInsertionHandle>
   onActivateReference?: (reference: ComposerSemanticReference) => void
@@ -169,6 +171,7 @@ export function InlineComposer(props: InlineComposerProps) {
     return uniqueImageReferences(references)
   }, [draftContent])
   const editorRef = useRef<Editor | null>(null)
+  const historyOrigin = useRef<{ editor: Editor; state: EditorState; draft: string } | null>(null)
   const latest = useRef(props)
   latest.current = props
   const extensions = useMemo(() => composerExtensions(
@@ -181,7 +184,7 @@ export function InlineComposer(props: InlineComposerProps) {
     handleKeyDown: (view: any, event: KeyboardEvent) => {
       if (view.composing || event.isComposing || event.keyCode === 229) return false
       const before = view.state.doc.cut(0, view.state.selection.from)
-      latest.current.onKeyDown(event, documentDraft(before.toJSON()).length)
+      latest.current.onKeyDown(event, documentDraft(before.toJSON()).length, view.state.selection.empty)
       return event.defaultPrevented
     },
     handlePaste: (_view: any, event: ClipboardEvent) => {
@@ -225,6 +228,10 @@ export function InlineComposer(props: InlineComposerProps) {
     })
   }, [editor, props.disabled, platform])
   useImperativeHandle(props.insertionRef, () => ({
+    replace: (value) => {
+      if (!editor || editor.isDestroyed || !editor.view.dom.isConnected) throw Object.assign(new Error('The message editor is unavailable. The saved draft was not changed.'), { code: 'COMPOSER_EDITOR_UNAVAILABLE' })
+      replaceComposerDraft(editor, draftDocument(value))
+    },
     insert: async (resolve, options) => {
       if (editor && !editor.isDestroyed) await insertComposerContent(editor, resolve, draftDocument, options)
     }
@@ -237,14 +244,30 @@ export function InlineComposer(props: InlineComposerProps) {
     // React node views flush synchronously. Apply external drafts after this effect has committed.
     let cancelled = false
     queueMicrotask(() => {
-      if (!cancelled && !editor.isDestroyed && documentDraft(editor.getJSON()) !== props.value && !editor.view.composing) {
+      if (cancelled || editor.isDestroyed || editor.view.composing) return
+      const current = documentDraft(editor.getJSON())
+      if (props.historyNavigation === 'browsing') {
+        historyOrigin.current ??= { editor, state: editor.state, draft: current }
+        if (current !== props.value) {
+          const doc = editor.schema.nodeFromJSON(draftContent)
+          // Preview through the maintained editor, with no prompt replacements in its undo stack.
+          editor.view.updateState(EditorState.create({ schema: editor.schema, doc,
+            selection: TextSelection.atEnd(doc), plugins: editor.state.plugins }))
+        }
+        return
+      }
+      const origin = historyOrigin.current
+      historyOrigin.current = null
+      if (props.historyNavigation === 'restored' && origin?.editor === editor && origin.draft === props.value) {
+        editor.view.updateState(origin.state)
+      } else if (current !== props.value) {
         const wasEmpty = editor.isEmpty
         editor.chain().setMeta('addToHistory', false).setContent(draftContent, { emitUpdate: false }).run()
         if (wasEmpty) editor.commands.setTextSelection(editor.state.doc.content.size - 1)
       }
     })
     return () => { cancelled = true }
-  }, [editor, props.value])
+  }, [editor, props.value, props.historyNavigation])
   // 改了设置页的 keyword 之后重算装饰。默认的 `update: 'document'` 只在**文档**变化时重跑，而这里变的
   // 是配置：不推这一下，用户新加的 keyword 要等到下次打字才划线，看起来就是"加了没用"。
   // 依赖用 join 出来的字符串而不是数组本身：取值层每次筛选都产出新数组，挂数组等于每次渲染都重算。

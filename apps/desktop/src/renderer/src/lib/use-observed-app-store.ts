@@ -15,7 +15,7 @@ const sharedFacts = {
 } as const satisfies Record<ConsumerKind, readonly (keyof State)[]>
 const navigationFacts = ['retainedSpatialFocus', 'workbenchNavigationInputPolicy', 'mainSurface', 'activeWorkspaceId', 'workbenchSpaceSelection'] as const
 const sessionFacts = [
-  'agentComposerDrafts', 'agentSteerInFlight', 'agentSteerInFlightPhase', 'agentSteerQueues', 'agentNames',
+  'agentComposerDrafts', 'agentComposerHistoryNavigation', 'agentSteerInFlight', 'agentSteerInFlightPhase', 'agentSteerQueues', 'agentNames',
   'pendingAgentLaunches', 'viewModes', 'timelines', 'questionReplies', 'questionReplyDrafts'
 ] as const satisfies readonly (keyof State)[]
 type ConsumerFacts<K extends ConsumerKind> = Pick<State, typeof sharedFacts[K][number] | typeof sessionFacts[number] | 'sessions' | 'recoveryCandidates' | (K extends 'sessionPane' ? 'tabs' | typeof navigationFacts[number] : never)>

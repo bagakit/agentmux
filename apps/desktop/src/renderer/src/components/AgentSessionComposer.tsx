@@ -87,6 +87,9 @@ export function AgentSessionComposer({
   useEffect(() => { void reportMessageDeliveryDiagnostics() }, [])
   const feedback = useComposerFeedback(sessionId)
   const text = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentComposerDrafts[sessionId] ?? '')
+  const historyNavigation = useObservedAppStore('composer', visible, consumerScope, state => state.agentComposerHistoryNavigation[sessionId])
+  const historyPhase = historyNavigation ? historyNavigation.entries && historyNavigation.cursor < historyNavigation.entries.length
+    ? 'browsing' as const : 'restored' as const : undefined
   const setAgentComposerDraft = useAppStore.getState().setAgentComposerDraft
   const clearAgentComposerDraftIfUnchanged = useAppStore.getState().clearAgentComposerDraftIfUnchanged
   const enqueueAgentSteer = useAppStore.getState().enqueueAgentSteer
@@ -207,15 +210,15 @@ export function AgentSessionComposer({
     useAppStore.getState().recordAgentComposerHistory(sessionId, value)
   }
 
-  // Shell-style up/down history recall. The multiline resolution: recall only fires at the line boundary
-  // (ArrowUp on the first line, ArrowDown on the last line), so a bare arrow inside a multi-line draft
-  // still moves the caret. The reducer preserves the half-typed draft: arrowing up stashes it, arrowing
-  // back down to the live position restores it verbatim. Returns the value to place, or null to fall
-  // through to caret movement. Everything decidable lives in the two pure lib modules.
+  // Enter history only at the editing boundary. Once browsing, every plain arrow navigates,
+  // including a multiline entry whose editor selection is at its end.
   function historyRecall(direction: 'older' | 'newer', draft: string, caret: number): string | null {
-    if (direction === 'older' && !caretAtFirstLine(draft, caret)) return null
-    if (direction === 'newer' && !caretAtLastLine(draft, caret)) return null
-    return useAppStore.getState().recallAgentComposerHistory(sessionId, direction, draft)
+    const state = useAppStore.getState()
+    const navigation = state.agentComposerHistoryNavigation[sessionId]
+    const browsing = navigation?.entries && navigation.cursor < navigation.entries.length
+    if (!browsing && direction === 'older' && !caretAtFirstLine(draft, caret)) return null
+    if (!browsing && direction === 'newer' && !caretAtLastLine(draft, caret)) return null
+    return state.recallAgentComposerHistory(sessionId, direction, draft)
   }
 
 
@@ -369,6 +372,7 @@ export function AgentSessionComposer({
       placeholder={submitMode.placeholder}
       primaryAction={submitMode.primaryAction}
       onHistoryRecall={historyRecall}
+      {...(historyPhase ? { historyNavigation: historyPhase } : {})}
       {...(activeFile ? { activeFile } : {})}
       onChange={(value) => setAgentComposerDraft(sessionId, value)}
       // Interrupt rides `primaryAction`, NOT `canSubmit`. They answer different questions and

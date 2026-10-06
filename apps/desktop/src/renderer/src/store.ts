@@ -695,7 +695,7 @@ type AppState = {
   browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
   agentComposerDrafts: Record<string, string>
   agentComposerHistory: Record<string, readonly string[]>
-  agentComposerHistoryNavigation: Record<string, Omit<HistoryState, 'entries'>>
+  agentComposerHistoryNavigation: Record<string, Omit<HistoryState, 'entries'> & { entries?: readonly string[] }>
   /** Launcher producer context shares the draft's durable Region owner; editing only changes body. */
   agentComposerNotes: Record<string, string>
   agentSteerInFlight: Record<string, string>
@@ -1188,7 +1188,7 @@ type AppState = {
   deleteBrowserAnnotation(browserId: string, annotationId: string): void
   clearBrowserAnnotations(browserId: string): void
   recordAgentComposerHistory(sessionId: string, text: string): void
-  recallAgentComposerHistory(sessionId: string, direction: 'older' | 'newer', draft: string): string | null
+  recallAgentComposerHistory(sessionId: string, direction: 'older' | 'newer', draft: string, entries?: readonly string[]): string | null
   setAgentComposerDraft(sessionId: string, text: string): void
   /**
    * 写启动对话框的一格名字。`field` 只有 'agentName' | 'tabName' 两种，两格共用一条 action：
@@ -9041,13 +9041,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     })
   },
-  recallAgentComposerHistory(sessionId, direction, draft) {
-    const state = get(), entries = state.agentComposerHistory[sessionId] ?? []
-    const navigation = state.agentComposerHistoryNavigation[sessionId] ?? { cursor: entries.length, stash: null }
-    const result = navigateHistory({ entries, ...navigation }, direction, draft)
+  recallAgentComposerHistory(sessionId, direction, draft, candidates) {
+    const state = get(), navigation = state.agentComposerHistoryNavigation[sessionId]
+    const browsing = navigation?.entries && navigation.cursor < navigation.entries.length
+    const entries = browsing ? navigation.entries! : [...(candidates ?? state.agentComposerHistory[sessionId] ?? [])]
+    const result = navigateHistory({ entries, cursor: browsing ? navigation.cursor : entries.length,
+      stash: browsing ? navigation.stash : null }, direction, draft)
     if (!result) return null
-    set({ agentComposerHistoryNavigation: { ...state.agentComposerHistoryNavigation,
-      [sessionId]: { cursor: result.state.cursor, stash: result.state.stash } } })
+    set({ agentComposerDrafts: state.agentComposerDrafts[sessionId] === result.value ? state.agentComposerDrafts
+        : { ...state.agentComposerDrafts, [sessionId]: result.value },
+      agentComposerHistoryNavigation: { ...state.agentComposerHistoryNavigation,
+        [sessionId]: { cursor: result.state.cursor, stash: result.state.stash,
+          ...(result.state.cursor < entries.length ? { entries } : {}) } } })
     return result.value
   },
   setAgentComposerDraft(sessionId, text) {
@@ -9055,9 +9060,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!state.agentComposerDrafts[sessionId]?.trim() && text.trim() && session?.kind === 'agent') {
       void api.continuousProgress.pauseForInput(session.control).catch(error => get().reportError(error))
     }
-    set((state) => ({
-      agentComposerDrafts: { ...state.agentComposerDrafts, [sessionId]: text }
-    }))
+    const { [sessionId]: _navigation, ...navigation } = state.agentComposerHistoryNavigation
+    set({ agentComposerDrafts: { ...state.agentComposerDrafts, [sessionId]: text },
+      agentComposerHistoryNavigation: navigation })
   },
   setLauncherExecutionWorkspace(launcher, workspaceId, executorId) {
     const state = get()
