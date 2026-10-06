@@ -1,8 +1,9 @@
-import { DEFAULT_THEME_ID, getThemeCatalog } from '@agentmux/client-ui/theme'
+import { ThemeEditor } from './ThemeEditor'
+import { DEFAULT_THEME_ID, getThemeCatalog, type ThemeCatalogItem } from '@agentmux/client-ui/theme'
 import { TextInput } from '@agentmux/client-ui/input'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { SemanticIcon, type SemanticIconId } from '@agentmux/client-ui/icons'
-import { useId } from 'react'
+import { useId, useState } from 'react'
 import { useSettingDraft } from './use-setting-draft'
 import { readAppEditorFontSize } from '../../hooks/useEditorTypography'
 import {
@@ -25,11 +26,13 @@ const APP_APPEARANCE_COPY = {
   system: { title: 'System', description: 'Follow your device', icon: 'object.display' }
 } satisfies Record<AppAppearanceId, { title: string; description: string; icon: SemanticIconId }>
 
-export function AppearanceSettingsPane({ appearance, onSave }: {
+export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
+  active?: boolean
   appearance: AppearanceConfig
   onSave: (appearance: AppearanceConfig, expected: AppearanceConfig) => Promise<void>
 }) {
   const choiceId = useId()
+  const [editingTheme, setEditingTheme] = useState<ThemeCatalogItem | null>(null)
   const theme = useSettingDraft(appearance.themeId ?? DEFAULT_THEME_ID)
   const catalog = getThemeCatalog(appearance.customThemes)
   const app = useSettingDraft<AppAppearanceId>(appearance.appAppearance ?? APP_APPEARANCE_DEFAULT)
@@ -82,7 +85,7 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
   }
 
   return (
-    <div className="settings-pane-stack">
+    <div className="settings-pane-stack" data-theme-editing={editingTheme ? '' : undefined}>
       <section className="settings-group">
         <header><span>Workspace theme</span><small>{catalog.items.length} themes</small></header>
         <div className="settings-theme-grid" role="radiogroup" aria-label="Workspace theme">
@@ -100,8 +103,14 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
         </div>
         {catalog.issues.map(issue => <p className="settings-error" key={issue.id}><strong>{issue.id}</strong> — {issue.message}</p>)}
         {!catalog.items.some(item => item.id === theme.value) ? <p className="settings-error">Selected theme “{theme.value}” is unavailable. Its data is retained; choose a theme to restore the selection.</p> : null}
+        <div className="theme-editor__secondary"><button type="button" className="small-button" disabled={!catalog.items.some(item => item.id === theme.value)} onClick={() => {
+          if (editingTheme) { document.querySelector<HTMLElement>('.theme-editor')?.scrollIntoView({ block: 'start' }); return }
+          const selected = catalog.items.find(item => item.id === theme.value)
+          if (selected) setEditingTheme(selected)
+        }}>Customize selected theme</button></div>
         <p className="settings-hint">Each theme includes dark and light surfaces. Application appearance below chooses the brightness; your terminal palette stays independent.</p>
       </section>
+      {editingTheme ? <ThemeEditor key={editingTheme.id} item={editingTheme} appearance={appearance} active={active} onSave={onSave} onClose={() => setEditingTheme(null)} /> : null}
       <section className="settings-group">
         <header><span>Application appearance</span><small>Window</small></header>
         <div className="settings-appearance-modes" role="radiogroup" aria-label="Application appearance">
