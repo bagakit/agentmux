@@ -35,3 +35,13 @@ it('compares exact block identities without interpolating them into selectors or
   row.dataset.blockId = 'same ["title"] #精确'; row.textContent = 'A different displayed title'
   expect(measureNoteCanvasBlockPorts(card, body, findNoteCanvasBlockRows(body, ['same ["title"] #精确']))).toEqual([{ blockId: 'same ["title"] #精确', top: 69 }])
 })
+it('attaches only within an excerpt reading window and keeps clipped descendants at the summary', () => {
+  const { card, body } = fixture(), row = body.querySelector<HTMLElement>('[data-block-id="visible"]')!
+  const clip = document.createElement('div'); clip.className = 'note-reader-excerpt-clip'
+  row.replaceWith(clip); clip.append(row)
+  clip.getBoundingClientRect = () => box(40, 220, 400, 50)
+  row.getBoundingClientRect = () => box(40, 220, 400, 2000)
+  expect(measureNoteCanvasBlockPorts(card, body, findNoteCanvasBlockRows(body, ['visible']))).toEqual([{ blockId: 'visible', top: 71.5 }])
+  row.getBoundingClientRect = () => box(40, 300, 400, 30)
+  expect(measureNoteCanvasBlockPorts(card, body, findNoteCanvasBlockRows(body, ['visible']))).toEqual([])
+})
