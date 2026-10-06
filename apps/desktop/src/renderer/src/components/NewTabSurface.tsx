@@ -10,7 +10,7 @@ import { useAppStore, warmTerminalKey } from '../store'
 import { useWorkbenchBrowserPresentation, useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { mainRegionReference } from '../lib/desktop-focus-navigation'
 import { currentHostCheck } from '../lib/host-check'
-import { applyCopyPathStyle } from '../lib/copy-path-display'
+import { formatPathForDisplay } from '../lib/copy-path-display'
 import { hostExecutorInventoryMatches, executorsForHost } from '../lib/executors'
 import { executorDetectionLabel } from '../lib/executor-detection'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -157,7 +157,7 @@ export function NewTabSurface({
   const host = workspace ? config?.hosts.find((candidate) => candidate.id === workspace.hostId) : undefined
   const inventory = useAppStore(state => workspace ? state.hostExecutorInventories[workspace.hostId] : undefined)
   const localHome = useAppStore(state => state.localHome)
-  const displayPath = workspace ? applyCopyPathStyle(workspace.path, {
+  const displayPath = workspace ? formatPathForDisplay(workspace.path, {
     home: host?.kind === 'local' ? localHome : '', copyPathsAsAbsolute: config?.copyPathsAsAbsolute
   }) : ''
   const storedHostCheck = useAppStore((state) => workspace ? state.hostChecks[workspace.hostId] : undefined)
