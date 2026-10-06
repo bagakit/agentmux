@@ -1,0 +1,11 @@
+body { margin: 0; font-family: var(--font-sans); color: var(--text); background: var(--bg); }
+main { padding: var(--sp-5); max-width: 900px; margin: auto; min-width: 0; }
+nav { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-6); font-size: var(--fs-meta); }
+nav span { flex: 1; color: var(--text-3); }
+nav button { color: var(--text-2); background: var(--surface-2); border: 0; border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-4); }
+section { padding: var(--sp-5); margin-bottom: var(--sp-6); border-radius: var(--radius); background: var(--surface-1); min-width: 0; }
+h2 { font-size: var(--fs-meta); color: var(--text-3); font-weight: 500; }
+output { display: block; margin-top: var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+section { padding: var(--sp-3); margin-bottom: var(--sp-3); }
+nav { margin-bottom: var(--sp-3); }
+#source-change { color: var(--text-3); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--sp-2); }
