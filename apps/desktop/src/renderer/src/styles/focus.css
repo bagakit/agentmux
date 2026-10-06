@@ -124,6 +124,7 @@
 .focus-context-hover__workbench > small { color: var(--text-3); font-size: var(--fs-micro); }
 .focus-context-hover__workbench > section { display: grid; gap: 5px; }
 .focus-context-hover__workbench > section > strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }
+.focus-context-hover__position-label { color: var(--text-3); font-size: var(--fs-micro); }
 .focus-context__open { flex: none; opacity: 0; color: var(--text-3); }
 .focus-context:hover .focus-context__open, .focus-context:focus-visible .focus-context__open { opacity: 1; }
 .focus-context.is-menu-open .focus-context__open { opacity: 1; }
