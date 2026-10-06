@@ -4,6 +4,7 @@ import { conversationReplySourceKey, promptReactionDefinitions, promptReactionMe
 import { resolveComposerShortcuts } from '../../../shared/composer-shortcut-library'
 import { api } from './api'
 import { useAppStore, type AgentSteerQueueEntry } from '../store'
+import { pendingSteerInput } from './steer-queue-delivery'
 const NO_PENDING: readonly AgentSteerQueueEntry[] = Object.freeze([])
 
 /** Explicit click reads the current ConfigOwner snapshot; background rendering does no I/O. */
@@ -26,7 +27,7 @@ export async function sendConversationReaction(sessionId: string, expected: Prom
     current.processState !== 'running') {
     throw new Error('The Agent changed while preparing this reply. Nothing was queued.')
   }
-  if (state.agentSteerQueues[sessionId]?.some(entry => entry.reaction?.code === selected.keyword &&
+  if (state.agentSteerQueues[sessionId]?.some(entry => pendingSteerInput(entry) && entry.reaction?.code === selected.keyword &&
     conversationReplySourceKey(entry.reaction.replySource) === conversationReplySourceKey(source))) {
     throw new Error('This reply is already in the Outbox. Check its status there before retrying.')
   }
@@ -53,7 +54,7 @@ export function useConversationReactions(sessionId: string, enabled: boolean) {
     sendConversationReaction(sessionId, definition, source, rejected), [sessionId])
   return useCallback((source: ConversationReplySource) => enabled && definitions.length
     ? <ConversationReactionActions definitions={definitions} source={source} onSend={onSend}
-      pending={queue.flatMap(entry => entry.reaction && conversationReplySourceKey(entry.reaction.replySource) === conversationReplySourceKey(source)
+      pending={queue.flatMap(entry => pendingSteerInput(entry) && entry.reaction && conversationReplySourceKey(entry.reaction.replySource) === conversationReplySourceKey(source)
         ? [{code: entry.reaction.code, status: entry.status, ...(entry.error === undefined ? {} : {error: entry.error})}] : [])} /> : null,
     [enabled, definitions, onSend, queue])
 }

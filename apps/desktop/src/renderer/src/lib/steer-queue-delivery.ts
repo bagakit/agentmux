@@ -1,5 +1,20 @@
-import type { AgentTimelineSnapshot } from '@agentmux/core'
+import type { AgentInputSubmissionReceipt, AgentPromptCondition, AgentTimelineSnapshot } from '@agentmux/core'
 import type { AgentSessionControl, SessionSnapshot } from '../../../shared/contracts'
+
+/** Archive is presentation, not an input outcome. Unknown original operations remain
+ * pending; confirmed history or an original intent proven not dispatched does not. */
+export function pendingSteerInput(entry: {
+  archived?: true
+  inputReceipt?: Pick<AgentInputSubmissionReceipt, 'status' | 'control'>
+  inputIntakeStarted?: true
+  promptCondition?: AgentPromptCondition | null
+}): boolean {
+  if (!entry.archived) return true
+  if (entry.inputReceipt) return entry.inputReceipt.status !== 'admitted' && entry.inputReceipt.status !== 'not-applied' &&
+    entry.inputReceipt.control.state !== 'stopped-before-dispatch'
+  if (entry.inputIntakeStarted) return true
+  return entry.promptCondition !== null
+}
 
 export function confirmedSteerDelivery(timeline: AgentTimelineSnapshot | undefined, control: AgentSessionControl | undefined, operationId: string): boolean {
   const agentSessionId = control?.agentSessionId

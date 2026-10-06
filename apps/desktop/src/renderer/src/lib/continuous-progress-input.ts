@@ -1,18 +1,23 @@
 import type { AgentSessionControl, SessionSnapshot } from '../../../shared/contracts'
 import type { ContinuousProgressInputRequest, ContinuousProgressInputResult } from '../../../shared/continuous-progress'
 import { agentSessionPresentationIndex } from './session-presentation'
+import { pendingSteerInput } from './steer-queue-delivery'
 
 export type AgentInputOccupationState = {
   loading: boolean
   sessions: SessionSnapshot[]
   agentComposerDrafts: Record<string, string>
-  agentSteerQueues: Record<string, readonly unknown[]>
+  agentSteerQueues: Record<string, readonly (Parameters<typeof pendingSteerInput>[0] & { operationId: string })[]>
   agentSteerInFlight: Record<string, string>
 }
 
 /** Both observation and change notification read the same existing input owners. */
 export function agentInputOccupied(state: AgentInputOccupationState, sessionId: string): boolean {
-  return Boolean(state.agentComposerDrafts[sessionId]?.trim() || state.agentSteerQueues[sessionId]?.length || state.agentSteerInFlight[sessionId])
+  const queue = state.agentSteerQueues[sessionId] ?? []
+  const inFlight = state.agentSteerInFlight[sessionId]
+  const original = inFlight ? queue.find(entry => entry.operationId === inFlight) : undefined
+  return Boolean(state.agentComposerDrafts[sessionId]?.trim() || queue.some(pendingSteerInput) ||
+    inFlight && (!original || pendingSteerInput(original)))
 }
 
 /** One lifecycle subscription; unrelated Runtime events do not read the Session index. */
