@@ -90,6 +90,11 @@
   color: hsl(var(--folder-icon-hue) 32% 40%); background-color: hsl(var(--folder-icon-hue) 32% 40% / .11);
 }
 
+:root[data-appearance="light"] .conversation-avatar--agent {
+  color: hsl(var(--speaker-hue) 48% 30%);
+  background: hsl(var(--speaker-hue) 40% 40% / .12);
+}
+
 .conversation-avatar--system { color: var(--text-3); background: var(--surface-2); }
 
 /* The project leads the message identity; its Agent remains a small distinct corner mark. */
