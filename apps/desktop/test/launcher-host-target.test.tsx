@@ -1,3 +1,4 @@
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -35,7 +36,7 @@ async function mount(empty = false) {
     agentComposerDrafts: { input: 'Keep the complete\nunsent request', sibling: 'Independent draft' },
     launcherNameDrafts: { input: { agentName: 'Reviewer', tabName: 'Investigation' } },
     launcherOptionDrafts: { input: { codex: { model: 'selected-model' } } },
-    warmTerminal: { key: warmTerminalKey('local', _hygiene_fixturePath("repo")), ownerLauncherId: empty ? 'group:group' : 'region:input', session: warm, ready: Promise.resolve(warm) },
+    warmTerminals: { [warmTerminalKey('local', _hygiene_fixturePath("repo"))]: [{ key: warmTerminalKey('local', _hygiene_fixturePath("repo")), ownerLauncherId: empty ? 'group:group' : 'region:input', session: warm, ready: Promise.resolve(warm) }] },
     detectExecutors: vi.fn().mockResolvedValue(undefined), prewarmTerminal: vi.fn()
   })
   await dom.render(<NewTabSurface tabGroupId="group" {...(empty ? {} : { tabId: 'launcher', regionId: 'input' })} />)
@@ -70,7 +71,7 @@ describe('the real Launcher execution target consumer', () => {
     expect(state.layouts).toBe(before.layouts)
     expect(state.activeWorkspaceId).toBe('workspace')
     expect({ prompt: state.agentComposerDrafts, names: state.launcherNameDrafts, options: state.launcherOptionDrafts }).toEqual(beforeInputs)
-    expect(state.warmTerminal).toBe(before.warmTerminal)
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session).toBe(warm)
     expect(stop).not.toHaveBeenCalled()
     expect(vi.mocked(state.prewarmTerminal).mock.calls).toHaveLength(originalWarmCalls)
     expect(vi.mocked(state.detectExecutors)).toHaveBeenLastCalledWith('farm')
@@ -87,7 +88,7 @@ describe('the real Launcher execution target consumer', () => {
     expect(document.querySelector('.launcher-target__manage')?.textContent).toContain('Manage projects')
     expect(document.querySelectorAll('.launcher-target__project')).toHaveLength(0)
     expect(useAppStore.getState().tabs).toBe(before.tabs)
-    expect(useAppStore.getState().warmTerminal).toBe(before.warmTerminal)
+    expect(useAppStore.getState().warmTerminals).toBe(before.warmTerminals)
   })
 
   it('materializes the empty Group in its original display and transfers every unsent input before choosing execution', async () => {
@@ -124,7 +125,7 @@ describe('the real Launcher execution target consumer', () => {
     expect(state.tabs.launcher?.workspaceId).toBe('workspace')
     expect(state.tabs.launcher?.regions.input).toMatchObject({ kind: 'terminal', workspaceId: 'flowlens' })
     expect(state.sessions.find(session => session.id === (state.tabs.launcher?.regions.input as { sessionId: string }).sessionId)?.control.hostId).toBe('farm')
-    expect(state.warmTerminal?.session).toBe(warm)
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session).toBe(warm)
     expect(stop).not.toHaveBeenCalled()
   })
 

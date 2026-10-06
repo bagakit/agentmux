@@ -23,7 +23,7 @@ beforeEach(() => {
     tabs: { [tabId]: createWorkbenchTab(tabId, { regionId, kind: 'launcher', workspaceId: 'workspace' }) },
     layouts: { workspace: createWorkspaceLayout('quality-group', [tabId]) },
     agentComposerDrafts: { [regionId]: 'Keep my complete request' }, launcherNameDrafts: {}, launcherOptionDrafts: {},
-    warmTerminal: null, detectExecutors: vi.fn().mockResolvedValue(undefined), prewarmTerminal: vi.fn(),
+    warmTerminals: {}, detectExecutors: vi.fn().mockResolvedValue(undefined), prewarmTerminal: vi.fn(),
     providerCatalog: [], recoveryCandidates: [], error: null, errorNoticeContext: null })
 })
 const launcher = () => <NewTabSurface tabGroupId="quality-group" tabId={tabId} regionId={regionId} />

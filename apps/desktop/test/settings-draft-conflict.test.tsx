@@ -214,7 +214,7 @@ describe('Settings drafts across external commits', () => {
 
   it('does not let a delayed startup get replace a newer Main commit in the Store', async () => {
     const baseline = { ...composerConfig, appearance: initial, copyPathsAsAbsolute: false }
-    useAppStore.setState({ config: baseline, loading: true, restoredWorkbench: null, warmTerminal: null })
+    useAppStore.setState({ config: baseline, loading: true, restoredWorkbench: null, warmTerminals: {} })
     let finish!: (config: typeof baseline) => void
     vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
     const read = vi.spyOn(api.config, 'get').mockImplementation(() => new Promise((resolve) => { finish = resolve }))

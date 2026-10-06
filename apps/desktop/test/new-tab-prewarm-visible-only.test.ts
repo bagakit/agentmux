@@ -9,53 +9,8 @@ import {
   readAndParse
 } from './helpers/effect-reachability.js'
 
-/**
- * 初始页只有在**可见**时才可以预热终端。
- *
- * `warmTerminal` 是全局单槽（一个 key、一个 session，见 store.ts 的 prewarmTerminal）。泊车的
- * （隐藏的）workspace 槽仍然挂载着；如果它们也预热，每个泊车 workspace 都会 spawn 一个 PTY 并
- * 互相踢掉对方那唯一的槽。所以不变量是：`prewarmTerminal` 的**调用只能在 `visible` 为真时发生**。
- *
- * 承载它的是 NewTabSurface.tsx 的这段 effect：
- *
- *     useEffect(() => {
- *       if (workspace && visible) prewarmTerminal(workspace.id)
- *     }, [prewarmTerminal, visible, workspace?.id])
- *
- * 本仓**没有任何 DOM 测试环境**（无 jsdom / happy-dom，vitest.config 里 `environment:` 零命中），
- * 渲染只有 `renderToStaticMarkup`，它**不跑 useEffect**。所以「组件挂载后 effect 有没有以正确极性
- * 调用 prewarm」这件事没法用行为测试守——只能守形状。
- *
- * 但守形状的旧写法是一条**文本断言**（workspace-workbench-registry.test.ts）：
- *
- *     expect(newTab).toContain('if (workspace && visible) prewarmTerminal(workspace.id)')
- *
- * 它被实测绕过：**保留那行字面量不动**，在它上面加一行 `if (workspace) prewarmTerminal(workspace.id)`
- * （无条件），结果每个泊车 workspace 都会预热，而该文件 6 条全绿、`tsc --noEmit` 也干净。这是本仓
- * 反复记录的同族洞——「数符号名守不住别的拼法」「grep 守卫看不见早退」：字面量在场 ≠ 语义正确。
- *
- * 所以这条守卫的判据由三块组成：
- *
- *   1. 整个文件里 `prewarmTerminal(` 的**调用点恰好只有一处**。
- *   2. 那一处调用落在一个以 `visible` 为**必要条件**的 `if` 的 then 分支里
- *      （把守护条件按 `&&` 摊平后，其中一个合取项是裸标识符 `visible`）。
- *   3. 那一处调用**可达**：它之前、同一条 effect 体内没有任何提前离开的出口。
- *
- * 第 1、3 两块（找调用、数出口、可达性）现在共用 test/helpers/effect-reachability.ts —— 那份判据在本仓
- * 多处 effect 上重复出现，抽成一处避免每个守卫各写一份、各漏一角。本文件只在其上再叠加**本 effect 专属**
- * 的第 2 块：`visible` 极性。
- *
- * 为什么这三块合起来能抓住每种变异：
- *   - 取反 `!visible`：`!visible` 是 PrefixUnary 不是裸 `visible` 合取项 → 第 2 条红。
- *   - 另加一个无条件调用：调用点变两处 → 第 1 条红。
- *   - 在 effect 第一行插 `if (launcherId) return`（launcherId 恒非空 → 无条件早退）：调用点仍一处、
- *     仍在 `visible` 分支里，前两条完全失明 → 只有第 3 条（可达性）红。
- * 单独任一条都只抓一种；三条一起才都抓得住。
- *
- * 为什么天然免疫「把代码移进注释」这种恒真陷阱：判据读的是 AST 的**调用节点**，注释掉的代码在
- * 语法树里根本不产生 CallExpression。注释掉那行 → 调用点变 0 处 → 第 1 条红。判据不依赖「文件里
- * 出现过某个字符串」，所以没有可以被注释掉而恒真的东西。
- */
+/** Hidden retained Launchers do not start speculative PTYs. Real mounted behavior,
+ * including independent visible previews, is covered by launcher-reusable-terminal-visibility. */
 
 const SOURCE_PATH = new URL(
   '../src/renderer/src/components/NewTabSurface.tsx',
@@ -114,7 +69,7 @@ function callGuardedByVisible(call: ts.CallExpression): boolean {
   return false
 }
 
-describe('创建页只在可见时预热终端（否则每个泊车 workspace 都会抢那唯一的热终端槽）', () => {
+describe('创建页只在可见时预热终端', () => {
   const parse = (source: string): ts.SourceFile => parseTsx('NewTabSurface.tsx', source)
 
   it('整个文件里 prewarmTerminal 的调用点恰好只有一处', () => {

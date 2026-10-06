@@ -1,3 +1,4 @@
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -76,7 +77,7 @@ async function mount() {
     agentComposerDrafts: { region: '完整请求\nkeep the second line' }, launcherNameDrafts: { region: { agentName: 'Keep name', tabName: 'Keep tab' } },
     executorDetections: {}, providerCatalog: [], hostChecks: {}, recoveryCandidates: [],
     prewarmTerminal: vi.fn(), detectExecutors: vi.fn().mockResolvedValue(undefined),
-    warmTerminal: { key: warmTerminalKey('local', _hygiene_fixturePath("repo")), ownerLauncherId: 'region:region', session, ready: Promise.resolve(session) } })
+    warmTerminals: { [warmTerminalKey('local', _hygiene_fixturePath("repo"))]: [{ key: warmTerminalKey('local', _hygiene_fixturePath("repo")), ownerLauncherId: 'region:region', session, ready: Promise.resolve(session) }] } })
   await render()
 }
 async function clickPortal(selector: string) {
@@ -152,7 +153,7 @@ describe('the original mounted Launcher interaction and motion owners', () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
     expect(panel.isConnected).toBe(false)
     expect(document.activeElement).toBe(input)
-    expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('same-warm-run')
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session?.control.run.runId).toBe('same-warm-run')
   })
 
   it('Options rapid reopening ignores an old exit and its original name draft and current focus stay intact', async () => {
@@ -192,7 +193,7 @@ describe('the original mounted Launcher interaction and motion owners', () => {
     expect(document.querySelector('.launcher-environment__panel')).toBeNull()
     expect(useLauncherState.getState().drafts['region:region']).toEqual({ browser: 'kept browser', note: 'kept note' })
     expect(dom.draft('region')).toBe('完整请求\nkeep the second line')
-    expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('same-warm-run')
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session?.control.run.runId).toBe('same-warm-run')
   })
 
   it('document visibility releases an exiting Portal and stops decoration while keeping the original work surface', async () => {
@@ -209,7 +210,7 @@ describe('the original mounted Launcher interaction and motion owners', () => {
     hidden.mockReturnValue(false)
     await act(async () => document.dispatchEvent(new Event('visibilitychange')))
     expect(lens().hidden).toBe(false)
-    expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('same-warm-run')
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session?.control.run.runId).toBe('same-warm-run')
   })
 
   it.each(['120ms', '.12s'])('Browser saves collapse now and releases its visual exit at the real token duration: %s', async duration => {

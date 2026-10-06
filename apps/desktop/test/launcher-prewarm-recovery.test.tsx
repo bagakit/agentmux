@@ -7,6 +7,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ session }: any) => <div data-warm-run={session.id} /> }))
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 import { useAppStore, warmTerminalKey } from '../src/renderer/src/store'
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
@@ -21,7 +22,7 @@ const unknown = (code = 'CTXMUX_IO') => Object.assign(new Error('The original sh
 })
 beforeEach(() => {
   const tab = createWorkbenchTab('launcher', { regionId: 'input', kind: 'launcher', workspaceId: 'workspace' })
-  useAppStore.setState({ activeWorkspaceId: 'workspace', mainSurface: 'workbench', warmTerminal: null,
+  useAppStore.setState({ activeWorkspaceId: 'workspace', mainSurface: 'workbench', warmTerminals: {},
     tabs: { launcher: tab }, layouts: { workspace: createWorkspaceLayout('group', [tab.id]) },
     workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, runtimeEndpointWarnings: [],
     prewarmTerminal: original.prewarmTerminal, retryWarmTerminal: original.retryWarmTerminal,
@@ -37,7 +38,7 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
     const launch = vi.spyOn(api.sessions, 'launchTerminal').mockRejectedValueOnce(unknown())
       .mockImplementation(() => new Promise(() => {}))
     await render()
-    const held = useAppStore.getState().warmTerminal!
+    const held = warmCandidates(_hygiene_fixturePath("repo"))[0]!
     expect(held.creation?.request).toEqual(launch.mock.calls[0]![0])
     expect(held.creation?.issue).toMatchObject({ code: 'CTXMUX_IO', message: 'The original shell receipt was lost.',
       detail: 'start receipt unavailable', controlFailure: { disposition: 'unknown' } })
@@ -50,7 +51,7 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
     expect(launch).toHaveBeenCalledTimes(2)
     expect(launch.mock.calls[1]![0]).toEqual(launch.mock.calls[0]![0])
     expect(dom.container.querySelector('[data-warm-run="same-original-run"]')).not.toBeNull()
-    expect(useAppStore.getState().warmTerminal?.creation?.issue).toBeUndefined()
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.creation?.issue).toBeUndefined()
     expect(dom.draft('input')).toBe('Complete original task\nKeep the second line')
     expect(useAppStore.getState().sessions[0]!.id).toBe('agent-1')
   })
@@ -67,20 +68,24 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
     expect(dom.container.querySelector('.launcher-terminal-recovery-actions button')?.hasAttribute('disabled')).toBe(false)
   })
 
-  it.each(['CTXMUX_IO', 'CONTROL_CANCELLED'])('Open Terminal confirms the same %s creation before attaching its original Run', async code => {
-    const launch = vi.spyOn(api.sessions, 'launchTerminal').mockRejectedValueOnce(unknown(code)).mockResolvedValue(shell() as never)
-    vi.spyOn(api.sessions, 'refresh').mockResolvedValue(shell() as never)
+  it.each(['CTXMUX_IO', 'CONTROL_CANCELLED'])('Open Terminal opens independently after %s automatic receipt loss and keeps the original request', async code => {
+    const launch = vi.spyOn(api.sessions, 'launchTerminal').mockRejectedValueOnce(unknown(code)).mockResolvedValue(shell('new-explicit-run') as never)
+    vi.spyOn(api.sessions, 'refresh').mockResolvedValue(shell('new-explicit-run') as never)
     await render()
     expect(launch).toHaveBeenCalledOnce()
-    expect(useAppStore.getState().warmTerminal?.creation).toMatchObject({
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.creation).toMatchObject({
       request: { createOperationId: expect.any(String) }, issue: { code, controlFailure: { disposition: 'unknown', confirmedInputBytes: null } }
     })
     expect(launch.mock.calls[0]![0].createOperationId).not.toBe('')
     await dom.click('.launcher-terminal-recovery-actions button:last-child')
     expect(launch).toHaveBeenCalledTimes(2)
-    expect(launch.mock.calls[1]![0]).toEqual(launch.mock.calls[0]![0])
-    expect(useAppStore.getState().tabs.launcher?.regions.input).toMatchObject({ kind: 'terminal', sessionId: 'same-original-run' })
-    expect(useAppStore.getState().sessions.filter(item => item.id === 'same-original-run')).toHaveLength(1)
+    expect(launch.mock.calls[1]![0]).toMatchObject({ hostId: 'local', workspacePath: _hygiene_fixturePath("repo") })
+    expect(launch.mock.calls[1]![0].createOperationId).not.toBe(launch.mock.calls[0]![0].createOperationId)
+    expect(useAppStore.getState().tabs.launcher?.regions.input).toMatchObject({ kind: 'terminal', sessionId: 'new-explicit-run' })
+    expect(useAppStore.getState().sessions.filter(item => item.id === 'new-explicit-run')).toHaveLength(1)
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.creation).toMatchObject({ request: launch.mock.calls[0]![0],
+      issue: { code, controlFailure: { disposition: 'unknown', confirmedInputBytes: null } } })
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.explicitOpening).toBeUndefined()
     expect(dom.draft('input')).toBe('Complete original task\nKeep the second line')
   })
 
@@ -96,8 +101,8 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
       await expect(promotion).rejects.toMatchObject({ code: 'CTXMUX_IO', controlFailure: { disposition: 'unknown' } })
     })
     expect(launch).toHaveBeenCalledOnce()
-    expect(useAppStore.getState().warmTerminal?.creation?.request).toEqual(originalRequest)
-    expect(useAppStore.getState().warmTerminal?.creation?.issue?.code).toBe('CTXMUX_IO')
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.creation?.request).toEqual(originalRequest)
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.creation?.issue?.code).toBe('CTXMUX_IO')
     expect(useAppStore.getState().tabs.launcher?.regions.input?.kind).toBe('launcher')
     launch.mockResolvedValue(shell() as never)
     await dom.click('.launcher-terminal-recovery-actions button')
@@ -110,15 +115,15 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
       .mockImplementationOnce(() => new Promise(yes => { resolve = yes }))
     const stop = vi.spyOn(api.sessions, 'stop')
     await render()
-    let promotion!: Promise<void>
-    await act(async () => { promotion = useAppStore.getState().promoteWarmTerminal('group', { tabId: 'launcher', regionId: 'input' }) })
+    let confirmation!: ReturnType<typeof original.retryWarmTerminal>
+    await act(async () => { confirmation = useAppStore.getState().retryWarmTerminal('workspace', 'region:input') })
     await act(async () => {
       useAppStore.setState({ tabs: {} })
       resolve(shell() as never)
-      await promotion
+      await confirmation
     })
     expect(useAppStore.getState().tabs.launcher).toBeUndefined()
-    expect(useAppStore.getState().warmTerminal?.session?.id).toBe('same-original-run')
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session?.id).toBe('same-original-run')
     expect(launch.mock.calls[1]![0]).toEqual(launch.mock.calls[0]![0])
     expect(stop).not.toHaveBeenCalled()
   })
@@ -126,6 +131,7 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
   it('retains its original pending request while a competing Region independently opens', async () => {
     let reject!: (error: Error) => void
     const launch = vi.spyOn(api.sessions, 'launchTerminal').mockImplementationOnce(() => new Promise((_yes, no) => { reject = no }))
+      .mockResolvedValueOnce({ ...shell('foreign-independent-run'), workspacePath: _hygiene_fixturePath("other") } as never)
       .mockResolvedValue(shell('second-independent-run') as never)
     vi.spyOn(api.sessions, 'refresh').mockResolvedValue(shell('second-independent-run') as never)
     await render()
@@ -136,17 +142,19 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
       workspaces: [...useAppStore.getState().config!.workspaces, { id: 'foreign', name: 'Foreign', hostId: 'local', path: _hygiene_fixturePath("other"), kind: 'folder' }] } }))
     let promotion!: Promise<void>
     await act(async () => { promotion = useAppStore.getState().promoteWarmTerminal('group', { tabId: 'launcher', regionId: 'input' }) })
-    expect(useAppStore.getState().warmTerminal?.creation?.request).toEqual(originalRequest)
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.creation?.request).toEqual(originalRequest)
     await act(async () => useAppStore.getState().prewarmTerminal('foreign', 'region:foreign'))
     await act(async () => { await useAppStore.getState().promoteWarmTerminal('group', { tabId: other.id, regionId: 'other' }) })
     expect(useAppStore.getState().tabs[other.id]?.regions.other).toMatchObject({ kind: 'terminal', phase: 'attached', sessionId: 'second-independent-run' })
-    expect(launch.mock.calls[1]![0]).toMatchObject({ hostId: 'local', workspacePath: _hygiene_fixturePath("repo") })
-    expect(launch.mock.calls[1]![0].createOperationId).not.toBe(originalRequest.createOperationId)
+    expect(launch.mock.calls[1]![0]).toMatchObject({ hostId: 'local', workspacePath: _hygiene_fixturePath("other") })
+    expect(launch.mock.calls[2]![0]).toMatchObject({ hostId: 'local', workspacePath: _hygiene_fixturePath("repo") })
+    expect(launch.mock.calls[2]![0].createOperationId).not.toBe(originalRequest.createOperationId)
     await act(async () => { reject(unknown()); await expect(promotion).rejects.toMatchObject({ code: 'CTXMUX_IO' }) })
-    expect(launch).toHaveBeenCalledTimes(2)
-    expect(useAppStore.getState().warmTerminal?.creation?.request).toEqual(originalRequest)
-    expect(useAppStore.getState().warmTerminal?.creation?.issue?.code).toBe('CTXMUX_IO')
-    expect(useAppStore.getState().warmTerminal?.claimToken).toBeUndefined()
+    expect(launch).toHaveBeenCalledTimes(3)
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.creation?.request).toEqual(originalRequest)
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.creation?.issue?.code).toBe('CTXMUX_IO')
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.claimToken).toBeUndefined()
+    expect(warmCandidates(_hygiene_fixturePath("other"))[0]?.session?.id).toBe('foreign-independent-run')
     expect(dom.container.querySelector('.launcher-terminal-recovery-actions button')).not.toBeNull()
   })
 
@@ -158,14 +166,15 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
     vi.spyOn(api.sessions, 'refresh').mockResolvedValue(shell() as never)
     await render()
     const other = createWorkbenchTab('other-launcher', { regionId: 'other', kind: 'launcher', workspaceId: 'workspace' })
-    let first!: Promise<void>
+    let confirmation!: ReturnType<typeof original.retryWarmTerminal>
     await act(async () => {
       useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, [other.id]: other }, layouts: { workspace: createWorkspaceLayout('group', ['launcher', other.id]) } })
-      first = useAppStore.getState().promoteWarmTerminal('group', { tabId: 'launcher', regionId: 'input' })
+      confirmation = useAppStore.getState().retryWarmTerminal('workspace', 'region:input')
       await useAppStore.getState().promoteWarmTerminal('group', { tabId: other.id, regionId: 'other' })
       expect(useAppStore.getState().tabs[other.id]?.regions.other).toMatchObject({ kind: 'terminal', sessionId: 'second-independent-run' })
       resolve(shell() as never)
-      await first
+      await confirmation
+      await useAppStore.getState().promoteWarmTerminal('group', { tabId: 'launcher', regionId: 'input' })
     })
     expect(launch).toHaveBeenCalledTimes(3)
     expect(launch.mock.calls[1]![0]).toEqual(launch.mock.calls[0]![0])
@@ -175,33 +184,43 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
     expect(stop).not.toHaveBeenCalled()
   })
 
-  it('explains a foreign healthy slot and preserves its exact Run without requesting another preview', async () => {
-    const foreign = shell('foreign-healthy-run')
-    useAppStore.setState({ warmTerminal: { key: warmTerminalKey('local', _hygiene_fixturePath("other")), ownerLauncherId: 'region:other',
-      session: foreign, ready: Promise.resolve(foreign as never) } })
-    const launch = vi.spyOn(api.sessions, 'launchTerminal'), stop = vi.spyOn(api.sessions, 'stop')
+  it('shows this project preview while preserving the foreign project original Run', async () => {
+    const foreign = { ...shell('foreign-healthy-run'), workspacePath: _hygiene_fixturePath("other") }
+    const foreignKey = warmTerminalKey('local', foreign.workspacePath)
+    const foreignCandidate = { key: foreignKey, ownerLauncherId: 'region:other',
+      session: foreign, ready: Promise.resolve(foreign as never) }
+    useAppStore.setState({ warmTerminals: { [foreignKey]: [foreignCandidate] } })
+    const launch = vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue(shell('project-preview') as never)
+    const stop = vi.spyOn(api.sessions, 'stop')
     await render()
-    expect(dom.container.querySelector('.launcher-terminal-pending')?.textContent).toContain('another project')
-    expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+    expect(dom.container.querySelector('[data-warm-run="project-preview"]')).not.toBeNull()
+    expect(dom.container.querySelector('.launcher-terminal-pending')).toBeNull()
+    expect(warmCandidates(foreign.workspacePath)).toEqual([foreignCandidate])
+    expect(launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ hostId: 'local', workspacePath: _hygiene_fixturePath("repo") }))
+    expect(stop).not.toHaveBeenCalled()
     useAppStore.getState().prewarmTerminal('workspace', 'region:input')
-    expect(useAppStore.getState().warmTerminal?.session).toBe(foreign)
-    expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session?.id).toBe('project-preview')
+    expect(warmCandidates(foreign.workspacePath)).toEqual([foreignCandidate])
+    expect(launch).toHaveBeenCalledOnce(); expect(stop).not.toHaveBeenCalled()
   })
 
-  it('explains a sibling preview and claims the same Run without attaching another live preview', async () => {
+  it('shows its own preview and opens its own Run while preserving a sibling preview', async () => {
     const retained = shell()
-    useAppStore.setState({ tabs: { launcher: { ...useAppStore.getState().tabs.launcher!, layout: {
-      ...useAppStore.getState().tabs.launcher!.layout, activeRegionId: 'another-selected-region' } } },
-      warmTerminal: { key: warmTerminalKey('local', _hygiene_fixturePath("repo")), ownerLauncherId: 'region:sibling',
-        session: retained, ready: Promise.resolve(retained as never) } })
-    const launch = vi.spyOn(api.sessions, 'launchTerminal')
+    const key = warmTerminalKey('local', _hygiene_fixturePath("repo"))
+    const sibling = { key, ownerLauncherId: 'region:sibling', session: retained, ready: Promise.resolve(retained as never) }
+    useAppStore.setState({ warmTerminals: { [key]: [sibling] } })
+    const own = shell('independent-input-run')
+    const launch = vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue(own as never)
+    const stop = vi.spyOn(api.sessions, 'stop')
     await render()
-    expect(dom.container.querySelector('.launcher-terminal-pending')?.textContent).toContain('another region')
-    expect(dom.container.querySelector('[data-warm-run]')).toBeNull()
-    vi.spyOn(api.sessions, 'refresh').mockResolvedValue(retained as never)
-    await dom.click('.launcher-terminal-pending .small-button')
-    expect(useAppStore.getState().tabs.launcher?.regions.input).toMatchObject({ kind: 'terminal', sessionId: retained.id })
-    expect(launch).not.toHaveBeenCalled()
+    expect(dom.container.querySelector('[data-warm-run="independent-input-run"]')).not.toBeNull()
+    expect(dom.container.querySelector('[data-warm-run="same-original-run"]')).toBeNull()
+    expect(warmCandidates(_hygiene_fixturePath("repo"))).toEqual([sibling, expect.objectContaining({ ownerLauncherId: 'region:input', session: own })])
+    vi.spyOn(api.sessions, 'refresh').mockResolvedValue(own as never)
+    await dom.click('[data-agentmux-action="claim-reusable-terminal"]')
+    expect(useAppStore.getState().tabs.launcher?.regions.input).toMatchObject({ kind: 'terminal', sessionId: own.id })
+    expect(warmCandidates(_hygiene_fixturePath("repo"))).toEqual([sibling])
+    expect(launch).toHaveBeenCalledOnce(); expect(stop).not.toHaveBeenCalled()
   })
 
   it('a real restored Host event advances the original operation at most once; unrelated snapshots do not', async () => {
@@ -221,7 +240,7 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
     expect(launch.mock.calls[1]![0]).toEqual(originalRequest)
     await act(async () => { useAppStore.getState().applyEvent(restored('local')); await Promise.resolve() })
     expect(launch).toHaveBeenCalledTimes(2)
-    expect(useAppStore.getState().warmTerminal?.creation?.issue?.controlFailure.disposition).toBe('unknown')
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.creation?.issue?.controlFailure.disposition).toBe('unknown')
     expect(dom.container.querySelector('.launcher-terminal-recovery-actions button')?.textContent).toBe('Check again')
   })
 })

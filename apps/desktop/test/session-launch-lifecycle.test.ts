@@ -1,3 +1,4 @@
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -1650,11 +1651,14 @@ describe('Warm terminal pool', () => {
     first.resolve(firstSession)
 
     await vi.waitFor(() => {
-      expect(useAppStore.getState().warmTerminal?.session).toEqual(firstSession)
-      expect(useAppStore.getState().unclaimedTerminalSessionIds).toEqual(['first-workspace-run'])
+      expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session).toEqual(firstSession)
+      expect(warmCandidates(_hygiene_fixturePath("other"))[0]?.session).toEqual(secondSession)
+      expect(useAppStore.getState().unclaimedTerminalSessionIds).toEqual(expect.arrayContaining([
+        'first-workspace-run', 'second-workspace-run'
+      ]))
     })
     expect(stop).not.toHaveBeenCalled()
-    expect(api.sessions.launchTerminal).toHaveBeenCalledOnce()
+    expect(api.sessions.launchTerminal).toHaveBeenCalledTimes(2)
   })
 
   it('tracks a resolved inline terminal until the user claims it', async () => {
@@ -1663,12 +1667,12 @@ describe('Warm terminal pool', () => {
     vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue(warm)
 
     useAppStore.getState().prewarmTerminal('workspace', warmOwner)
-    expect(useAppStore.getState().warmTerminal?.session).toBeNull()
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session).toBeNull()
 
-    await useAppStore.getState().warmTerminal?.ready
+    await warmCandidates(_hygiene_fixturePath("repo"))[0]?.ready
     await Promise.resolve()
 
-    expect(useAppStore.getState().warmTerminal?.session).toEqual(warm)
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session).toEqual(warm)
     expect(useAppStore.getState().sessions).toEqual([])
     expect(useAppStore.getState().unclaimedTerminalSessionIds).toEqual(['warm-run'])
   })
@@ -1701,7 +1705,8 @@ describe('Warm terminal pool', () => {
     vi.spyOn(api.sessions, 'refresh').mockResolvedValue(fresh)
 
     useAppStore.getState().prewarmTerminal('workspace', warmOwner)
-    await useAppStore.getState().warmTerminal?.ready
+    await warmCandidates(_hygiene_fixturePath("repo"))[0]?.ready
+    await useAppStore.getState().retryWarmTerminal('workspace', warmOwner)
     await useAppStore.getState().promoteWarmTerminal('pane', {
       tabId: launcher.id,
       regionId: launcher.layout.activeRegionId
@@ -1715,7 +1720,7 @@ describe('Warm terminal pool', () => {
     expect(useAppStore.getState().error).toBeNull()
   })
 
-  it('stops the promoted PTY if the Launcher Region vanished mid-warm', async () => {
+  it('keeps the promoted PTY reusable if the Launcher Region vanished mid-warm', async () => {
     const launcher = launcherFixture()
     const pending = deferred<SessionSnapshot>()
     vi.spyOn(api.sessions, 'launchTerminal').mockImplementation(async () => await pending.promise)
@@ -1731,13 +1736,14 @@ describe('Warm terminal pool', () => {
     pending.resolve(warm)
     await promote
 
-    expect(stop).toHaveBeenCalledWith(warm.control)
+    expect(stop).not.toHaveBeenCalled()
     expect(useAppStore.getState().tabs[launcher.id]).toBeUndefined()
     expect(useAppStore.getState().sessions).toEqual([])
-    expect(useAppStore.getState().unclaimedTerminalSessionIds).toEqual([])
+    expect(useAppStore.getState().unclaimedTerminalSessionIds).toEqual([warm.id])
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]).toMatchObject({ session: warm, ownerLauncherId: null })
   })
 
-  it('stops a warm Terminal that resolves while its Launcher View is closing', async () => {
+  it('keeps a warm Terminal that resolves while its Launcher View is closing', async () => {
     const launcher = launcherFixture()
     const tab = addWorkbenchRegion(
       launcher,
@@ -1768,16 +1774,16 @@ describe('Warm terminal pool', () => {
     await promote
 
     try {
-      expect(stop).toHaveBeenCalledWith(warm.control)
+      expect(stop).not.toHaveBeenCalled()
       expect(useAppStore.getState().tabs[tab.id]?.regions[launcher.layout.activeRegionId])
         .toMatchObject({ kind: 'terminal', phase: 'launching' })
     } finally { pendingBrowserClose.resolve(); await close }
     await expect(close).resolves.toBe(true)
     expect(useAppStore.getState().tabs[tab.id]).toBeUndefined()
     expect(useAppStore.getState().closingWorkbenchViews).toEqual({})
-    expect(useAppStore.getState().warmTerminal).toBeNull()
-    expect(useAppStore.getState().unclaimedTerminalSessionIds).toEqual([])
-    expect(stop.mock.calls.map(([control]) => control)).toEqual([warm.control])
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session).toEqual(warm)
+    expect(useAppStore.getState().unclaimedTerminalSessionIds).toEqual([warm.id])
+    expect(stop).not.toHaveBeenCalled()
     expect(useAppStore.getState().layouts.workspace!.groups.flatMap(group => group.tabOrder)).not.toContain(tab.id)
   })
 

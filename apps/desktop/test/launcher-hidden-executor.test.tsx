@@ -16,7 +16,7 @@ beforeEach(() => {
     drafts: {}, executors: {}, persistenceIssue: null })
   useAppStore.setState({ config: { ...composerConfig, hosts: [remote], workspaces: [{ ...composerConfig.workspaces[0]!, hostId: remote.id }] },
     activeWorkspaceId: 'workspace', mainSurface: 'workbench', tabs: {}, layouts: { workspace: createWorkspaceLayout('group', []) },
-    workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, warmTerminal: null,
+    workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, warmTerminals: {},
     hostExecutorInventories: {}, executorDetections: {}, hostChecks: {}, recoveryCandidates: [],
     detectExecutors: vi.fn().mockResolvedValue(undefined), prewarmTerminal: vi.fn() })
 })

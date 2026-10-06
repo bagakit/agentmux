@@ -1,3 +1,4 @@
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
@@ -17,10 +18,14 @@ beforeEach(async () => { await act(async () => useLauncherState.setState({ secti
 afterEach(async () => { await act(async () => useLauncherState.setState(launcherBefore, true)) })
 
 async function mount(mode: 'ready' | 'pending' | 'sibling' = 'ready') {
+  const key = warmTerminalKey('local', _hygiene_fixturePath("repo"))
+  const current = { ...session, id: 'current-warm-run', control: { ...session.control,
+    runId: 'current-warm-run', run: { runId: 'current-warm-run' } } }
   useAppStore.setState({ activeWorkspaceId: 'workspace', recoveryCandidates: [], hostChecks: {}, executorDetections: {},
     prewarmTerminal: vi.fn(), detectExecutors: vi.fn().mockResolvedValue(undefined),
-    warmTerminal: { key: warmTerminalKey('local', _hygiene_fixturePath("repo")), ownerLauncherId: mode === 'sibling' ? 'region:someone-else' : 'group:group',
-      ready: Promise.resolve(session), session: mode === 'pending' ? null : session } })
+    warmTerminals: { [key]: [{ key, ownerLauncherId: mode === 'sibling' ? 'region:someone-else' : 'group:group',
+      ready: Promise.resolve(session), session: mode === 'pending' ? null : session },
+      ...(mode === 'sibling' ? [{ key, ownerLauncherId: 'group:group', ready: Promise.resolve(current), session: current }] : [])] } })
   await dom.render(createElement(NewTabSurface, { tabGroupId: 'group' }))
 }
 const claim = () => dom.container.querySelector<HTMLButtonElement>(`[${DESKTOP_ACTION_ATTRIBUTE}="${DESKTOP_ACTIONS.claimReusableTerminal}"]`)!
@@ -46,13 +51,13 @@ describe('New Tab resource action contract through its original mounted work sur
     expect(dom.container.querySelector('.launcher-terminal-pending')?.textContent).toContain('Preparing a reusable host shell')
   })
 
-  it('does not advertise the warm Session when the slot belongs to a sibling Launcher', async () => {
+  it('advertises its own reusable Session while preserving the sibling Launcher candidate', async () => {
     await mount('sibling')
     expect(claim()).not.toBeNull()
-    expect(claim().hasAttribute(DESKTOP_SESSION_ATTRIBUTE)).toBe(false)
-    expect(dom.container.querySelector('.launcher-terminal-pending')?.textContent).toContain('The shell preview is not available.')
-    expect(dom.container.querySelector('.launcher-terminal-pending')?.textContent).not.toContain('Preparing a reusable host shell')
-    expect(useAppStore.getState().warmTerminal?.ownerLauncherId).toBe('region:someone-else')
-    expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('warm-run')
+    expect(claim().getAttribute(DESKTOP_SESSION_ATTRIBUTE)).toBe('current-warm-run')
+    expect(claim().disabled).toBe(false)
+    expect(warmCandidates(_hygiene_fixturePath("repo"))).toHaveLength(2)
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.ownerLauncherId).toBe('region:someone-else')
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session?.control.run.runId).toBe('warm-run')
   })
 })

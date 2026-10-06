@@ -1,3 +1,4 @@
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { execFile } from 'node:child_process'
@@ -52,7 +53,7 @@ it('actual mounted opening and closeRegion keep a late cold Run discoverable bes
   const B = addWorkbenchRegion(createWorkbenchTab('B', { regionId: 'region-B', kind: 'launcher', workspaceId: 'private' }), 'region-B', 'right',
     { regionId: 'survivor-B', kind: 'launcher', workspaceId: 'private' })
   useAppStore.setState({ config, activeWorkspaceId: 'private', tabs: { A, B }, layouts: { private: createWorkspaceLayout('private-group', ['A', 'B']) },
-    warmTerminal: null, sessions: [], unclaimedTerminalSessionIds: [], closingWorkbenchViews: {}, spaceZoneBindings: {}, spatialRequests: {},
+    warmTerminals: {}, sessions: [], unclaimedTerminalSessionIds: [], closingWorkbenchViews: {}, spaceZoneBindings: {}, spatialRequests: {},
     scratchTopicSnapshots: {}, topicCategories: [], projectGroups: [], workbenchSpaceSelection: null,
     agentComposerDrafts: { 'region-B': 'Original unsent private input' }, prewarmTerminal: original.prewarmTerminal,
     promoteWarmTerminal: original.promoteWarmTerminal, launchTerminal: original.launchTerminal, detectExecutors: vi.fn(async () => {}) })
@@ -70,8 +71,10 @@ it('actual mounted opening and closeRegion keep a late cold Run discoverable bes
   useAppStore.getState().prewarmTerminal('private', 'region:region-A')
   await until(() => allocated[0], Boolean, 'private warm Run allocated')
   const openingA = useAppStore.getState().promoteWarmTerminal('private-group', { tabId: 'A', regionId: 'region-A' })
-  const held = useAppStore.getState().warmTerminal!
+  const held = warmCandidates(scope!.root)[0]!
   expect(held.claimToken).toBeDefined()
+  // Exercise the explicit cold opening without B's optional background prewarm.
+  useAppStore.setState({ prewarmTerminal: vi.fn() })
   await dom.render(<NewTabSurface tabGroupId="private-group" tabId="B" regionId="region-B" />)
   const button = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(element => element.textContent?.includes('Open Terminal'))
   expect(button).toBeDefined()
@@ -90,7 +93,7 @@ it('actual mounted opening and closeRegion keep a late cold Run discoverable bes
   expect(useAppStore.getState().sessions).toContainEqual(late)
   expect(useAppStore.getState().tabs).toBe(closed)
   expect(useAppStore.getState().tabs.B?.regions['region-B']).toBeUndefined()
-  expect(useAppStore.getState().warmTerminal).toBe(held)
+  expect(warmCandidates(scope!.root)[0]).toBe(held)
   await act(async () => { releases[0]!(); await openingA })
   await act(async () => { useAppStore.getState().selectSession(late.id, 'private-group') })
   const restored = Object.values(useAppStore.getState().tabs).flatMap(tab => Object.values(tab.regions)).filter(region => region.kind === 'terminal' && region.sessionId === late.id)

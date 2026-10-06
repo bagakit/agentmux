@@ -16,6 +16,7 @@ import {
   createWorkspaceLayout
 } from '@agentmux/layout'
 import { useAppStore, warmTerminalKey } from '../src/renderer/src/store.js'
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 
 // ---------------------------------------------------------------------------
 // 落点不在场时不许留孤儿 Tab（#307）。
@@ -65,7 +66,7 @@ function prepare(): void {
     activeWorkspaceId: workspace.id,
     tabs: {},
     layouts: { [workspace.id]: createWorkspaceLayout('pane') },
-    warmTerminal: null,
+    warmTerminals: {},
     unclaimedTerminalSessionIds: [],
     error: null
   })
@@ -132,7 +133,7 @@ describe('启动落点不在场时响亮失败，不留孤儿 Tab', () => {
     const launch = vi.spyOn(api.sessions, 'launchAgent')
     await expect(
       useAppStore.getState().launchAgent('codex', 'go', 'no-such-group', undefined)
-    ).rejects.toThrow(/Tab Group/)
+    ).rejects.toThrow(/exact Agent display position/)
     expect(orphanTabIds(), 'launchAgent 留下了永不显示的孤儿 Tab').toEqual([])
     // 落点判定要排在真正启动之前：否则 agent 已经跑起来了却无处安放。
     expect(launch, '落点不在场却已经把 agent 启动了').not.toHaveBeenCalled()
@@ -143,18 +144,17 @@ describe('启动落点不在场时响亮失败，不留孤儿 Tab', () => {
     const create = vi.spyOn(api.browser, 'create')
     await expect(
       useAppStore.getState().createBrowser('no-such-group', undefined)
-    ).rejects.toThrow(/Tab Group/)
+    ).rejects.toThrow(/exact Browser display position/)
     expect(orphanTabIds(), 'createBrowser 留下了永不显示的孤儿 Tab').toEqual([])
     expect(create, '落点不在场却已经建了 BrowserView').not.toHaveBeenCalled()
   })
 
-  it('promoteWarmTerminal：抛之外还要把已取出的 PTY 停掉', async () => {
+  it('promoteWarmTerminal：拒绝失效落点但保留原候选与健康 PTY', async () => {
     prepare()
     const session = terminalSession('warm-1')
-    // 泊车的那个 shell 已经起好了。promoteWarmTerminal 会先把它从全局单槽里取出（消费掉），
-    // 所以落点不在场时它没有别的归宿——必须停掉，否则那个进程泄漏且用户永远看不到它。
+    // 展示位置缺失不能撤销已启动 shell；候选仍可由后续的有效落点认领。
     useAppStore.setState({
-      warmTerminal: { key: warmTerminalKey('local', _hygiene_fixturePath("repo")), ownerLauncherId: 'group:group', ready: Promise.resolve(session), session },
+      warmTerminals: { [warmTerminalKey('local', _hygiene_fixturePath("repo"))]: [{ key: warmTerminalKey('local', _hygiene_fixturePath("repo")), ownerLauncherId: 'group:group', ready: Promise.resolve(session), session }] },
       unclaimedTerminalSessionIds: [session.id],
       sessions: [session]
     })
@@ -162,14 +162,12 @@ describe('启动落点不在场时响亮失败，不留孤儿 Tab', () => {
 
     await expect(
       useAppStore.getState().promoteWarmTerminal('no-such-group', undefined)
-    ).rejects.toThrow(/Tab Group/)
+    ).rejects.toThrow(/exact Terminal display position/)
 
     expect(orphanTabIds(), 'promoteWarmTerminal 留下了永不显示的孤儿 Tab').toEqual([])
-    expect(stop, '落点不在场时泊车的 PTY 没被停掉——进程泄漏').toHaveBeenCalledWith(session.control)
-    expect(
-      useAppStore.getState().unclaimedTerminalSessionIds,
-      '停掉了却还记在未认领清单里'
-    ).not.toContain(session.id)
+    expect(stop).not.toHaveBeenCalled()
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session).toBe(session)
+    expect(useAppStore.getState().unclaimedTerminalSessionIds).toContain(session.id)
   })
 })
 

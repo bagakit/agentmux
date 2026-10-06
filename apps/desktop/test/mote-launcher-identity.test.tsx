@@ -64,7 +64,7 @@ function protectedFacts() {
   expect(state.agentComposerDrafts[sleepingPrimary.layout.activeRegionId]).toBe('Primary nonempty draft')
   expect(state.agentComposerDrafts[sleepingCustom.layout.activeRegionId]).toBe('Custom nonempty draft')
   return { tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts, sessions: state.sessions,
-    focus: state.agentFocus, queues: state.agentSteerQueues, config: state.config, warm: state.warmTerminal,
+    focus: state.agentFocus, queues: state.agentSteerQueues, config: state.config, warm: state.warmTerminals,
     activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface }
 }
 async function mount(tab: WorkbenchTab = sleepingCustom, regionId = tab.layout.activeRegionId) {

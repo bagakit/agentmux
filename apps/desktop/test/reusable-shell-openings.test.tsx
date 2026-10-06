@@ -8,6 +8,7 @@ import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 const dom = composerDOM()
@@ -20,7 +21,7 @@ const pending = <T,>() => { let resolve!: (value: T) => void, reject!: (error: u
 beforeEach(() => {
   const first = createWorkbenchTab(target.tabId, { regionId: target.regionId, kind: 'launcher', workspaceId: 'workspace' })
   const second = createWorkbenchTab('second', { regionId: 'second-region', kind: 'launcher', workspaceId: 'workspace' })
-  useAppStore.setState({ activeWorkspaceId: 'workspace', warmTerminal: null,
+  useAppStore.setState({ activeWorkspaceId: 'workspace', warmTerminals: {},
     tabs: { first, second }, layouts: { workspace: createWorkspaceLayout('group', ['first', 'second']) },
     closingWorkbenchViews: {}, workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null,
     agentComposerDrafts: { 'first-region': 'Keep original draft' }, unclaimedTerminalSessionIds: [],
@@ -37,13 +38,13 @@ it('real mounted Launcher B completes while A keeps its pending original creatio
   useAppStore.getState().prewarmTerminal('workspace', 'region:first-region')
   const A = useAppStore.getState().promoteWarmTerminal('group', target)
   await dom.render(<NewTabSurface tabGroupId="group" tabId="second" regionId="second-region" />)
-  const open = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Open Terminal'))!
+  const open = dom.container.querySelector<HTMLButtonElement>('[data-agentmux-action="claim-reusable-terminal"]')!
   expect(open).toBeDefined()
   await act(async () => { open.click(); await vi.waitFor(() => expect(useAppStore.getState().tabs.second?.regions['second-region']).toMatchObject({ sessionId: 'B', phase: 'attached' })) })
   expect(launch).toHaveBeenCalledTimes(2)
   expect(launch.mock.calls[1]![0]).toMatchObject({ hostId: 'local', workspacePath: _hygiene_fixturePath("repo") })
   expect(launch.mock.calls[1]![0].createOperationId).not.toBe(launch.mock.calls[0]![0].createOperationId)
-  expect(useAppStore.getState().warmTerminal?.creation?.request).toEqual(launch.mock.calls[0]![0])
+  expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.creation?.request).toEqual(launch.mock.calls[0]![0])
   expect(dom.draft('first-region')).toBe('Keep original draft')
   await act(async () => { receipt.resolve(shell('A')); await A })
   expect(useAppStore.getState().tabs.first?.regions['first-region']).toMatchObject({ sessionId: 'A', phase: 'attached' })
@@ -101,9 +102,9 @@ it.each(['closed', 'replaced'] as const)('late warm success preserves its Run wh
     await replacementOpening
   }
   receipt.resolve(shell('original')); await first
-  expect(useAppStore.getState().warmTerminal?.session?.id).toBe('original')
-  expect(useAppStore.getState().warmTerminal?.creation?.request).toEqual(originalRequest)
-  expect(useAppStore.getState().warmTerminal?.claimToken).toBeUndefined()
+  expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session?.id).toBe('original')
+  expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.creation?.request).toEqual(originalRequest)
+  expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.claimToken).toBeUndefined()
   expect(useAppStore.getState().unclaimedTerminalSessionIds).toContain('original')
   if (mode === 'closed') expect(useAppStore.getState().tabs.first).toBeUndefined()
   else expect(useAppStore.getState().tabs.first?.regions['first-region']).toMatchObject({ sessionId: 'replacement' })
@@ -137,7 +138,7 @@ it('an unavailable exact target refuses this opening without consuming or stoppi
   try { await useAppStore.getState().promoteWarmTerminal('absent-group', target) } catch (error) { rejection = error }
   expect(rejection).toBeInstanceOf(Error)
   expect((rejection as Error).message).toContain('exact Terminal display position')
-  expect(useAppStore.getState().warmTerminal?.session?.id).toBe('original')
+  expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session?.id).toBe('original')
   expect(useAppStore.getState().tabs.first?.regions['first-region']?.kind).toBe('launcher')
   expect(launch).toHaveBeenCalledOnce(); expect(stop).not.toHaveBeenCalled()
 })
@@ -169,17 +170,20 @@ it('the actual ordinary Topic creation opens independently while another Region 
   expect(useAppStore.getState().tabs.first?.regions['first-region']).toMatchObject({ sessionId: 'A', phase: 'attached' })
 })
 
-it('preview owner transfer during a claim does not transfer its original request or block the sibling opening', async () => {
+it('a sibling preview keeps its own Run while the original preview is claimed', async () => {
   const receipt = pending<any>()
   const launch = vi.spyOn(api.sessions, 'launchTerminal').mockImplementationOnce(() => receipt.promise).mockResolvedValue(shell('B') as never)
   useAppStore.getState().prewarmTerminal('workspace', 'region:first-region')
   const A = useAppStore.getState().promoteWarmTerminal('group', target)
-  const before = useAppStore.getState().warmTerminal!
+  const before = warmCandidates(_hygiene_fixturePath("repo"))[0]!
   useAppStore.getState().prewarmTerminal('workspace', 'region:second-region')
-  expect(useAppStore.getState().warmTerminal).toMatchObject({ ownerLauncherId: 'region:second-region', claimToken: before.claimToken,
-    ready: before.ready, creation: before.creation })
+  expect(warmCandidates(_hygiene_fixturePath("repo"))).toHaveLength(2)
+  expect(warmCandidates(_hygiene_fixturePath("repo"))[0]).toBe(before)
+  expect(before).toMatchObject({ ownerLauncherId: 'region:first-region', claimToken: expect.any(Object) })
+  expect(warmCandidates(_hygiene_fixturePath("repo"))[1]).toMatchObject({ ownerLauncherId: 'region:second-region' })
   await dom.render(<NewTabSurface tabGroupId="group" tabId="second" regionId="second-region" />)
-  expect(dom.container.querySelectorAll('[data-warm-run]')).toHaveLength(0)
+  expect(dom.container.querySelectorAll('[data-warm-run]')).toHaveLength(1)
+  expect(dom.container.querySelector('[data-warm-run="B"]')).not.toBeNull()
   await act(async () => { await useAppStore.getState().promoteWarmTerminal('group', { tabId: 'second', regionId: 'second-region' })
     receipt.resolve(shell('A')); await A })
   expect(useAppStore.getState().tabs.first?.regions['first-region']).toMatchObject({ sessionId: 'A' })
@@ -201,24 +205,26 @@ it('settling an obsolete opening cannot erase the pending replacement flight at 
   expect(launch).toHaveBeenCalledTimes(2)
   receiptB.resolve(shell('B')); await B
   expect(useAppStore.getState().tabs.first?.regions['first-region']).toMatchObject({ sessionId: 'B' })
-  expect(useAppStore.getState().warmTerminal?.session?.id).toBe('A')
+  expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session?.id).toBe('A')
 })
 
 it('a removed exact target during original-operation confirmation rejects stale opens without changing the original request', async () => {
-  const receipt = pending<any>()
-  const launch = vi.spyOn(api.sessions, 'launchTerminal').mockRejectedValueOnce(Object.assign(new Error('lost'), { code: 'CTXMUX_IO' }))
+  const receipt = pending<any>(), originalReceipt = pending<any>()
+  const launch = vi.spyOn(api.sessions, 'launchTerminal').mockImplementationOnce(() => originalReceipt.promise)
     .mockImplementationOnce(() => receipt.promise)
   useAppStore.getState().prewarmTerminal('workspace', 'region:first-region')
-  await Promise.resolve(); await Promise.resolve()
   const originalRequest = launch.mock.calls[0]![0]
+  const claimed = useAppStore.getState().promoteWarmTerminal('group', target)
+  originalReceipt.reject(Object.assign(new Error('lost'), { code: 'CTXMUX_IO' }))
+  await expect(claimed).rejects.toMatchObject({ code: 'CTXMUX_IO' })
   const opening = useAppStore.getState().promoteWarmTerminal('group', target)
   useAppStore.setState({ tabs: { second: useAppStore.getState().tabs.second! } })
   const stale = useAppStore.getState().promoteWarmTerminal('group', target)
   expect(stale).not.toBe(opening)
   await expect(stale).rejects.toThrow('Launcher Region is no longer available')
   receipt.resolve(shell('original')); await opening
-  expect(useAppStore.getState().warmTerminal?.session?.id).toBe('original')
-  expect(useAppStore.getState().warmTerminal?.creation?.request).toEqual(originalRequest)
+  expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session?.id).toBe('original')
+  expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.creation?.request).toEqual(originalRequest)
   expect(useAppStore.getState().tabs.first).toBeUndefined()
   expect(launch).toHaveBeenCalledTimes(2)
 })

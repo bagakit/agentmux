@@ -37,7 +37,7 @@ const onSave = vi.fn(async () => {})
 beforeEach(() => {
   useAppStore.setState({ config, executorDetections: seed(), activeWorkspaceId: 'workspace', hostChecks: {},
     providerCatalog: new AgentProviderRegistry().catalog(),
-    detectExecutors: vi.fn(async () => {}), checkHost: vi.fn(async () => {}), prewarmTerminal: vi.fn(async () => {}), warmTerminal: null })
+    detectExecutors: vi.fn(async () => {}), checkHost: vi.fn(async () => {}), prewarmTerminal: vi.fn(async () => {}), warmTerminals: {} })
   onSave.mockClear()
 })
 const card = () => dom.container.querySelector<HTMLDetailsElement>('#executor-settings-codex')!

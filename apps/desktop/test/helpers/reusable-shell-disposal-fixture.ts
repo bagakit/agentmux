@@ -23,7 +23,7 @@ export async function initializeDisposal(path: string, snapshot?: () => Promise<
   const recovery = createWorkbenchTab('recovery', { regionId: 'recovery-region', kind: 'launcher', workspaceId: 'private' })
   useAppStore.setState({ config, loading: true, restoredWorkbench: null, activeWorkspaceId: 'private',
     tabs: { opening: tab, recovery }, layouts: { private: createWorkspaceLayout('private-group', ['opening', 'recovery']) },
-    sessions: [], warmTerminal: null, unclaimedTerminalSessionIds: [], closingWorkbenchViews: {},
+    sessions: [], warmTerminals: {}, unclaimedTerminalSessionIds: [], closingWorkbenchViews: {},
     agentNames: {}, agentComposerDrafts: { 'opening-region': 'Retain private draft' }, agentSteerQueues: {},
     spaceZoneBindings: {}, spatialRequests: {}, scratchTopicSnapshots: {}, topicCategories: [], projectGroups: [],
     workbenchSpaceSelection: null, prewarmTerminal: actions.prewarmTerminal, retryWarmTerminal: actions.retryWarmTerminal,

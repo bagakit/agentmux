@@ -10,6 +10,7 @@ import type { SessionSnapshot } from '../src/shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { App } from '../src/renderer/src/App'
 import { useAppStore } from '../src/renderer/src/store'
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { api } from '../src/renderer/src/lib/api'
 import { PMO_FLOATING_TAB_SLOT_PREFIX } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
@@ -209,8 +210,11 @@ it('protects only the projected visible Tab from resource parking while its base
 
 it('claims the in-flight reusable shell without the actual launcher prewarming another Terminal', async () => {
   const h = seed()
-  useAppStore.setState({ tabs: {}, sessions: [], layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('group') },
-    warmTerminal: null, prewarmTerminal: initial.prewarmTerminal })
+  const launcher = createWorkbenchTab('warm-launcher', { regionId: 'warm-region', kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID })
+  useAppStore.setState({ tabs: { [launcher.id]: launcher }, sessions: [],
+    layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('group', [launcher.id]) },
+    workbenchSpaceSelection: null, retainedSpatialFocus: null, workbenchNavigationInputPolicy: null,
+    warmTerminals: {}, prewarmTerminal: initial.prewarmTerminal })
   let finish!: (one: SessionSnapshot) => void
   const launch = vi.spyOn(api.sessions, 'launchTerminal').mockImplementation(() => new Promise(resolve => { finish = resolve }))
   const allocated = session('original-prewarmed-run')
@@ -222,11 +226,11 @@ it('claims the in-flight reusable shell without the actual launcher prewarming a
   })
   await act(async () => h.root.render(createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID })))
   expect(launch).toHaveBeenCalledTimes(1)
-  const originalWarm = useAppStore.getState().warmTerminal
-  expect(originalWarm).not.toBeNull()
-  const topic = await api.scratch.ensureTopic(SCRATCH_WORKSPACE_ID, 'launcher:claim-warm')
+  const originalWarm = warmCandidates(_hygiene_fixturePath("topics"))[0]
+  expect(originalWarm).toBeDefined()
   let opening!: Promise<void>
-  await act(async () => { opening = useAppStore.getState().openScratchTopic(topic.id); await Promise.resolve(); await Promise.resolve() })
+  await act(async () => { opening = useAppStore.getState().promoteWarmTerminal('group', { tabId: launcher.id,
+    regionId: launcher.layout.activeRegionId }); await Promise.resolve(); await Promise.resolve() })
   const created = Object.values(useAppStore.getState().tabs)
   expect(created).toHaveLength(1)
   expect(Object.values(created[0]!.regions)).toEqual([expect.objectContaining({ kind: 'terminal', phase: 'launching' })])
@@ -237,7 +241,7 @@ it('claims the in-flight reusable shell without the actual launcher prewarming a
   ])
   expect(useAppStore.getState().sessions.map(one => one.id)).toEqual(['original-prewarmed-run'])
   expect(launch).toHaveBeenCalledTimes(1)
-  expect(useAppStore.getState().warmTerminal).toBeNull()
+  expect(warmCandidates(_hygiene_fixturePath("topics"))).toEqual([])
   expect(refresh).toHaveBeenCalledExactlyOnceWith(allocated.control)
 })
 

@@ -35,12 +35,12 @@ function seed({ scratch = false, topicId, empty = false }: { scratch?: boolean; 
     control: { kind: 'terminal' as const, hostId: workspace.hostId, runId: 'original-shell', run: { runId: 'original-shell' } } }
   useAppStore.setState({ tabs: empty ? {} : { [tabId]: tab }, layouts: { [workspaceId]: createWorkspaceLayout(groupId, empty ? [] : [tabId]) },
     activeWorkspaceId: workspaceId, agentComposerDrafts: { [regionId]: 'Original task\nKeep its second line.' },
-    warmTerminal: { key: warmTerminalKey(workspace.hostId, workspace.path), ownerLauncherId: empty ? `group:${groupId}` : `region:${regionId}`,
-      session, ready: Promise.resolve(session) } })
+    warmTerminals: { [warmTerminalKey(workspace.hostId, workspace.path)]: [{ key: warmTerminalKey(workspace.hostId, workspace.path), ownerLauncherId: empty ? `group:${groupId}` : `region:${regionId}`,
+      session, ready: Promise.resolve(session) }] } })
 }
 function protectedFacts() {
   const state = useAppStore.getState()
-  return { tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts, warm: state.warmTerminal, sessions: state.sessions }
+  return { tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts, warm: state.warmTerminals, sessions: state.sessions }
 }
 function terminal(mode: 'expanded' | 'collapsed' | 'hidden', parent: ParentNode = dom.container) {
   const modules = parent.querySelectorAll<HTMLElement>('[data-section="terminal"]')

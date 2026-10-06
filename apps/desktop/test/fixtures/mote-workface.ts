@@ -63,7 +63,7 @@ export function seedMoteWorkface({ directory = true }: { directory?: boolean } =
     activeWorkspaceId: 'project', mainSurface: 'board', projectRailOpen: false, toolsOpen: false,
     agentFocus: { execution: { sessionId: executionAgent.id, history: [{ sessionId: executionAgent.id, focusedAt: 123 }] }, pmo: { sessionId: defaultAgent.id } },
     agentComposerDrafts: { [defaultAgent.id]: 'Default unsent', [customAgent.id]: 'Analyst unsent', 'quiet-region': 'Launcher unsent', [executionAgent.id]: 'Execution unsent' },
-    spaceObjectIcons: {}, launcherNameDrafts: {}, agentSteerQueues: {}, agentSteerInFlight: {}, warmTerminal: null })
+    spaceObjectIcons: {}, launcherNameDrafts: {}, agentSteerQueues: {}, agentSteerInFlight: {}, warmTerminals: {} })
 }
 
 /** DOM host boundary only. Actual Chromium/native top-layer proof belongs to Root. */

@@ -1,3 +1,4 @@
+import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -5,7 +6,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { composerConfig } from './helpers/composer-dom-fixture'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab, addWorkbenchRegion, replaceWorkbenchRegion } from '../src/renderer/src/lib/workbench-tabs'
-import { useAppStore } from '../src/renderer/src/store'
+import { useAppStore, warmTerminalKey } from '../src/renderer/src/store'
 import type { SessionSnapshot } from '../src/shared/contracts'
 
 const original = useAppStore.getState()
@@ -29,7 +30,7 @@ beforeEach(() => {
     hosts: [{ id: 'local', kind: 'local', label: 'Local' }],
     workspaces: [{ id: 'workspace', kind: 'folder', name: 'Project', hostId: 'local', path: _hygiene_fixturePath("repo") }] },
     activeWorkspaceId: 'workspace', tabs: { opening }, layouts: { workspace: createWorkspaceLayout('group', ['opening']) },
-    sessions: [], warmTerminal: null, unclaimedTerminalSessionIds: [], closingWorkbenchViews: {},
+    sessions: [], warmTerminals: {}, unclaimedTerminalSessionIds: [], closingWorkbenchViews: {},
     agentComposerDrafts: { 'survivor-region': 'Keep the other work' } }, true)
   vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => shell(control.run.runId))
 })
@@ -42,10 +43,10 @@ it.each((['cold', 'busy-cache'] as const).flatMap(mode => (['region', 'tab', 're
     const openingTab = addWorkbenchRegion(createWorkbenchTab(target.tabId, { regionId: target.regionId,
       kind: 'launcher', workspaceId: 'workspace' }), target.regionId, 'right', {
       regionId: 'survivor-region', kind: 'launcher', workspaceId: 'workspace' })
-    const unrelated = { key: ("local:" + _hygiene_fixturePath("repo")), ownerLauncherId: 'unrelated', ready: Promise.resolve(shell('unrelated')),
+    const unrelated = { key: warmTerminalKey("local", _hygiene_fixturePath("repo")), ownerLauncherId: 'unrelated', ready: Promise.resolve(shell('unrelated')),
       session: shell('unrelated'), claimToken: {}, explicitOpening: true as const }
     useAppStore.setState({ tabs: { opening: openingTab }, layouts: { workspace: createWorkspaceLayout('group', ['opening']) },
-      warmTerminal: mode === 'busy-cache' ? unrelated : null })
+      warmTerminals: mode === 'busy-cache' ? { [unrelated.key]: [unrelated] } : {} })
     const reply = deferred<SessionSnapshot>()
     const create = vi.spyOn(api.sessions, 'launchTerminal').mockImplementationOnce(() => reply.promise)
     const opening = mode === 'cold'
@@ -66,7 +67,7 @@ it.each((['cold', 'busy-cache'] as const).flatMap(mode => (['region', 'tab', 're
     expect(stop).not.toHaveBeenCalled()
     expect(useAppStore.getState().sessions).toContainEqual(run)
     expect(useAppStore.getState().tabs).toBe(presentation)
-    expect(useAppStore.getState().warmTerminal).toBe(mode === 'busy-cache' ? unrelated : null)
+    expect(warmCandidates(_hygiene_fixturePath("repo"))[0]).toBe(mode === 'busy-cache' ? unrelated : undefined)
     expect(useAppStore.getState().agentComposerDrafts).toEqual(before.agentComposerDrafts)
     expect(create).toHaveBeenCalledOnce()
 })
@@ -80,8 +81,8 @@ it.each(['cold', 'busy-cache'] as const)('a closing attached sibling does not au
     expect(control).toEqual(known.control); await stopReply.promise
   })
   vi.spyOn(api.sessions, 'launchTerminal').mockImplementationOnce(() => late.promise)
-  const unrelated = { key: 'elsewhere', ownerLauncherId: 'unrelated', ready: Promise.resolve(shell('unrelated')), session: shell('unrelated'), claimToken: {} }
-  if (mode === 'busy-cache') useAppStore.setState({ warmTerminal: unrelated })
+  const unrelated = { key: warmTerminalKey("local", _hygiene_fixturePath("elsewhere")), ownerLauncherId: 'unrelated', ready: Promise.resolve(shell('unrelated')), session: shell('unrelated'), claimToken: {} }
+  if (mode === 'busy-cache') useAppStore.setState({ warmTerminals: { [unrelated.key]: [unrelated] } })
   const open = mode === 'cold' ? useAppStore.getState().launchTerminal('group', target)
     : useAppStore.getState().promoteWarmTerminal('group', target)
   const close = useAppStore.getState().closeTab('workspace', 'group', 'opening')
