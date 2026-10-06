@@ -49,15 +49,11 @@ export function wrapBracketedPasteText(text: string): string {
   return `${BRACKETED_PASTE_START}${sanitizeBracketedPasteText(text)}${BRACKETED_PASTE_END}`
 }
 
-/**
- * 送一条 prompt 进 PTY 的字节。
- *
- * 只有多行才包 bracket：单行文本不存在「中途被当成回车提交」的问题，而包装本身要求对端开了
- * bracketed paste 模式，没开的话那两个序列会原样显示出来。两条路都消毒——**这是本函数的不变量**：
- * 无论走哪个分支，ESC 都不会以原字节到达 PTY。
+/** Encode a paste for Providers that support the bracketed-paste protocol.
+ * Single-line text is still a paste: treating it as rapid typing can leave a
+ * large body in the native burst buffer after its separately acknowledged Enter.
+ * Providers without this protocol keep their own ordinary input encoding.
  */
 export function buildPromptInputPayload(prompt: string): string {
-  return /[\r\n]/.test(prompt)
-    ? wrapBracketedPasteText(prompt)
-    : sanitizeBracketedPasteText(prompt)
+  return wrapBracketedPasteText(prompt)
 }
