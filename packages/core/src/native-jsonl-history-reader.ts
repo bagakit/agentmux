@@ -1,3 +1,4 @@
+import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from './conversation-changes.js'
 import { constants } from 'node:fs'
 import { open, stat, type FileHandle } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
@@ -89,6 +90,8 @@ export class NativeJsonlHistoryReader {
   private cut: number
   private lastRecordEnd: number | undefined
   private forwardPosition = 0
+  private lastForwardStart: number | undefined
+  private readonly birth: number
   private cache: Buffer = Buffer.alloc(0)
   private cacheStart = 0
   private head = ''
@@ -102,7 +105,7 @@ export class NativeJsonlHistoryReader {
   private constructor(
     private readonly context: AgentProviderSessionHistoryContext,
     private readonly file: FileHandle,
-    { dev, ino }: { dev: number; ino: number },
+    { dev, ino, birthtimeMs }: { dev: number; ino: number; birthtimeMs: number },
     size: number,
     cursor: Cursor | undefined,
     budget: NativeHistoryReadBudget
@@ -110,6 +113,7 @@ export class NativeJsonlHistoryReader {
     this.budget = budget
     this.permitsPartialTail = cursor === undefined
     this.identity = { dev, ino }
+    this.birth = birthtimeMs
     this.cut = cursor?.cut ?? size
     this.position = cursor?.before ?? size
     this.continuation = cursor?.continuation
@@ -327,14 +331,66 @@ export class NativeJsonlHistoryReader {
           this.forwardPosition = end + 1
           if (end === start) break
           const value = await this.parseRange(start, end)
-          if (value) return { value, start }
+          if (value) { this.lastForwardStart = start; return { value, start } }
           break
         }
         position += block.length
       }
-      if (position === this.cut) { this.forwardPosition = this.cut; return null }
+      if (position === this.cut) return null
     }
     return null
+  }
+
+  /** Reuse the physical source boundary for durable append reads, independently of UI page cursors. */
+  async seekChanges(after?: string, tail = false): Promise<void> {
+    if (after !== undefined) {
+      let saved: { version: number; providerId: string; nativeSessionId: string; dev: number; ino: number; birth: number; offset: number; head: string; tail: string }
+      try { saved = JSON.parse(Buffer.from(after, 'base64url').toString('utf8')) as typeof saved }
+      catch { return failure('INVALID_CURSOR', 'Conversation checkpoint is malformed.') }
+      if (!saved || typeof saved !== 'object' || saved.version !== 1 || saved.providerId !== this.context.source.providerId || saved.nativeSessionId !== this.context.source.nativeSessionId ||
+          saved.dev !== this.identity.dev || saved.ino !== this.identity.ino || saved.birth !== this.birth ||
+          !Number.isSafeInteger(saved.offset) || saved.offset < 0 || saved.offset > this.cut) {
+        return failure('SOURCE_CHANGED', 'The original conversation source was replaced, truncated or changed.')
+      }
+      const fingerprints = await this.prefixFingerprints(saved.offset)
+      if (saved.head !== fingerprints.head || saved.tail !== fingerprints.tail) return failure('SOURCE_CHANGED', 'The saved conversation source boundary changed.')
+      if (saved.offset && (await this.read(saved.offset - 1, 1))[0] !== 10) return failure('INVALID_CURSOR', 'Conversation checkpoint is not a complete record boundary.')
+      this.forwardPosition = saved.offset
+    } else if (tail) {
+      // A JSONL record becomes eligible only when its delimiter has been durably recorded.
+      let end = this.cut
+      while (end) {
+        const start = Math.max(0, end - 64 * 1024), block = await this.read(start, end - start), newline = block.lastIndexOf(10)
+        if (newline !== -1) { this.forwardPosition = start + newline + 1; return }
+        end = start
+      }
+      this.forwardPosition = 0
+    }
+    await this.verifyUnchanged()
+  }
+
+  repeatNext(): void {
+    if (this.lastForwardStart === undefined) return failure('INVALID_CURSOR', 'Read an original record before repeating it.')
+    this.forwardPosition = this.lastForwardStart
+  }
+
+  async hasMoreChanges(): Promise<boolean> {
+    for (let start = this.forwardPosition; start < this.cut; start += 64 * 1024) {
+      const block = await this.read(start, Math.min(64 * 1024, this.cut - start))
+      if (block.includes(10)) return true
+    }
+    return false
+  }
+
+  private async prefixFingerprints(offset: number): Promise<{ head: string; tail: string }> {
+    const length = Math.min(128, offset), hash = (data: Buffer) => createHash('sha256').update(data).digest('hex')
+    return { head: hash(await this.read(0, length)), tail: hash(await this.read(offset - length, length)) }
+  }
+
+  async changesCursor(): Promise<string> {
+    await this.verifyUnchanged()
+    return Buffer.from(JSON.stringify({ version: 1, ...this.context.source, ...this.identity, birth: this.birth,
+      offset: this.forwardPosition, ...await this.prefixFingerprints(this.forwardPosition) })).toString('base64url')
   }
 
   private async fingerprints(): Promise<{ head: string; tail: string }> {
@@ -367,4 +423,25 @@ export class NativeJsonlHistoryReader {
   }
 
   async close(): Promise<void> { await this.file.close() }
+}
+
+/** Physical append iteration is shared; the original Provider alone interprets each row. */
+export async function readNativeConversationChanges(reader: NativeJsonlHistoryReader, context: ProviderConversationChangesContext,
+  convert: (row: Record<string, unknown>, start: number) => NativeHistoryItem | null): Promise<ProviderConversationChangesPage> {
+  await reader.seekChanges(context.after, context.tail === true)
+  const items: AgentSessionHistoryItem[] = []
+  let bytes = 0
+  if (!context.tail) for (let scanned = 0; scanned < context.limit; scanned++) {
+    const entry = await reader.readNext()
+    if (!entry) break
+    const original = convert(entry.value, entry.start)
+    if (!original) continue
+    const item = await reader.materializeItem(original), size = Buffer.byteLength(JSON.stringify(item))
+    if (bytes + size > SESSION_HISTORY_MAX_PAGE_BYTES - 64 * 1024) {
+      if (!items.length) throw new AgentMuxError('The original change cannot fit its materialized page.', 'AGENT_SESSION_HISTORY_TOO_LARGE')
+      reader.repeatNext(); break
+    }
+    items.push(item); bytes += size
+  }
+  return { source: context.source, items, cursor: await reader.changesCursor(), more: context.tail ? false : await reader.hasMoreChanges() }
 }

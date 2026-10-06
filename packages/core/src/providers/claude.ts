@@ -1,6 +1,6 @@
 import { inspectHookDisableSetting } from './shared.js'
 import { listClaudeNativeSessions, assertClaudeNativeResumeSource } from './claude-native-catalog.js'
-import { readClaudeSessionHistoryPage } from './claude-native-history.js'
+import { readClaudeSessionHistoryPage, readClaudeConversationChanges } from './claude-native-history.js'
 import { discoverClaudeNativeSession } from './claude-native-session.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import { isAbsolute } from 'node:path'
@@ -121,6 +121,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
   return defineAgentProvider({
     planManagedHooks: ({ workspacePath }) => createClaudeManagedHookPlan(workspacePath),
     readSessionHistoryPage: readClaudeSessionHistoryPage,
+    readConversationChanges: readClaudeConversationChanges,
     discoverNativeSession: discoverClaudeNativeSession,
     listNativeSessions: listClaudeNativeSessions,
     assertNativeResumeSource: assertClaudeNativeResumeSource,
