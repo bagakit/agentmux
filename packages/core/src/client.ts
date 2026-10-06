@@ -117,6 +117,7 @@ import { AgentMuxError } from './errors.js'
 import { parseSessionHistoryResourceOptions, SESSION_HISTORY_IMAGE_MAX_BYTES } from './session-history-resource.js'
 import { readRecordedImage } from './session-history-resource-read.js'
 import { isNativeContentReference, nativeContentNeedsRevalidation, readNativeContentResource, revalidateNativeContentReference } from './native-history-content.js'
+import { readAgentSessionHistory, type AgentSessionHistoryReadInput, type AgentSessionHistoryReadPage } from './session-history-reader.js'
 import { removeHostColorSignals } from './terminal-environment-policy.js'
 import { deriveAgentSessionId, mintAgentSessionId } from './agent-session-id.js'
 import {
@@ -2293,6 +2294,16 @@ export class AgentMuxClient {
   async sessionTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
     await this.historyDescriptor(agentSessionId)
     return await this.store.loadTimeline(agentSessionId)
+  }
+
+  /** Query the original semantic Host's retained history; no Runtime connection or input authority. */
+  async readAgentSessionHistory(input: AgentSessionHistoryReadInput, options: { signal?: AbortSignal } = {}): Promise<AgentSessionHistoryReadPage> {
+    // The receiver is already the selected semantic Host. Its route-local namespace
+    // is distinct from the execution Host retained in its own durable descriptor.
+    const descriptor = input.hostId === 'local' ? await this.historyDescriptor(input.agentSessionId) : undefined
+    const page = await readAgentSessionHistory(this, descriptor ? { ...input, hostId: descriptor.hostId } : input,
+      { ...options, resolveSource: id => this.historyDescriptor(id) })
+    return descriptor ? { ...page, hostId: input.hostId } : page
   }
 
   /** Discover bounded retained sources without connecting to or controlling Runtime. */
