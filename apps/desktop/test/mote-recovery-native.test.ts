@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile, symlink, chmod, readFile } from 'node:fs
 import { resolve, join } from 'node:path'
 import { createRequire } from 'node:module'
 import { headlessFixture, until } from '../../../packages/core/test/helpers/headless-runtime-fixture'
+import { connectAgentMuxRpc, type AgentMuxRpcClient } from '../../../packages/core/src/public-rpc-client'
 
 it('original public continuity keeps durable SID/native handle after private owner and native process restart, with one resumed Run', async () => {
   const repository = resolve(import.meta.dirname, '../../..')
@@ -15,13 +16,24 @@ it('original public continuity keeps durable SID/native handle after private own
   const entry = join(directory, 'compiled/owner.mjs'), out = process.env.MOTE_RECOVERY_NATIVE_RECEIPT
   const old = process.env.AGENTMUX_TEST_OWNER_ENTRY
   let scope: Awaited<ReturnType<typeof headlessFixture>> | undefined
+  let rpc: AgentMuxRpcClient | undefined, releaseObservation = () => {}
   try {
     await build({ entryPoints: [join(repository, 'packages/core/test/fixtures/headless-runtime-worker.mjs')], outfile: entry,
       bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'error',
       plugins: [{ name: 'exact-original-core-source', setup(plugin) { plugin.onResolve({ filter: /^\.\.\/\.\.\/dist\/index\.js$/ }, () => ({ path: join(repository, 'packages/core/src/index.ts') })) } }] })
     process.env.AGENTMUX_TEST_OWNER_ENTRY = entry
     scope = await headlessFixture()
-    const client = await scope.client(), command = join(scope.root, 'native-fixture.mjs')
+    rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: scope.socketPath } })
+    const transport = rpc
+    let holdRestartObservation = false, observationHeld = false
+    const restartObservation = new Promise<void>(resolve => { releaseObservation = resolve })
+    const client = await scope.client({ call: transport.call.bind(transport), dispose: transport.dispose.bind(transport),
+      async subscribe(method, params, options) {
+        if (method === 'runtime.events' && holdRestartObservation) {
+          holdRestartObservation = false; observationHeld = true; await restartObservation
+        }
+        return await transport.subscribe(method, params, options)
+      } }), command = join(scope.root, 'native-fixture.mjs')
     // The existing fixture CLI predates process-witness admission. Hold an actual
     // private main record open, so the original Provider discovers the real PID/FD.
     await writeFile(command, '#!/usr/bin/env node\n' + `import * as nativeFixtureFs from 'node:fs';import {join as nativeFixtureJoin} from 'node:path';
@@ -36,8 +48,16 @@ const nativeFixtureTurn='private-fixture-turn-'+process.pid;let nativeFixtureOrd
     const native = await until(() => client.agentSession(original.agentSessionId), s => Boolean(s.nativeHandle) && s.semanticStatus?.state === 'done', 'original native identity and completed turn')
     const transcript = await readFile(native.nativeHandle!.kind === 'provider' ? native.nativeHandle!.transcriptPath! : '', 'utf8')
     const owner = client.runtimeOwnerIdentity()!
+    holdRestartObservation = true
     await scope.restartNativeDaemon(); await scope.restart()
     await until(() => client.runtimeOwnerIdentity(), s => s.availability === 'connected' && s.ownerInstanceId !== owner.ownerInstanceId, 'reconnected private owner')
+    // Owner discovery precedes the original Session observation. Make that real
+    // transport interval deterministic instead of mistaking identity for readiness.
+    expect(observationHeld).toBe(true)
+    expect(() => client.agentSession(original.agentSessionId)).toThrow(expect.objectContaining({ code: 'RUNTIME_UNAVAILABLE' }))
+    const observation = client.connect()
+    releaseObservation()
+    await observation
     const saved = await client.agentSession(original.agentSessionId)
     expect(saved.agentSessionId).toBe(original.agentSessionId); expect(saved.nativeHandle).toEqual(native.nativeHandle)
     const request = { agentSessionId: original.agentSessionId, expectedRun: original.run, commandOverride: command, env: {}, operationId: 'mote-private-native-continuity' }
@@ -51,9 +71,10 @@ const nativeFixtureTurn='private-fixture-turn-'+process.pid;let nativeFixtureOrd
     expect(current.nativeHandle).toEqual(native.nativeHandle); expect(current.agentSessionId).toBe(original.agentSessionId)
     expect((await client.listRuns()).filter(run => run.agentSessionId === original.agentSessionId && run.state === 'running')).toHaveLength(1)
     expect(current.run.runId).not.toBe(original.run.runId)
-    if (out) await writeFile(out, JSON.stringify({ passed: true, boundary: 'Private original Core/Hosted/native ctxmux process restart and fixture CLI; no models/auth/live user Runs.', originalSid: original.agentSessionId, nativeHandle: native.nativeHandle, originalRun: original.run, resumedRun: current.run, ownerRestarted: true, nativeDaemonRestarted: true, calls: 2, originalContinuationOperationIds: 1, results: results.map(r => r.kind), runningRuns: 1, originalTranscriptPrefixRetained: true, duplicateOldRunReceipt: 'session-run-changed' }, null, 2))
+    if (out) await writeFile(out, JSON.stringify({ passed: true, boundary: 'Private original Core/Hosted/native ctxmux process restart and fixture CLI; no models/auth/live user Runs.', originalSid: original.agentSessionId, nativeHandle: native.nativeHandle, originalRun: original.run, resumedRun: current.run, ownerRestarted: true, nativeDaemonRestarted: true, ownerIdentityPrecededSessionObservation: observationHeld, observationAdmissionAwaited: true, calls: 2, originalContinuationOperationIds: 1, results: results.map(r => r.kind), runningRuns: 1, originalTranscriptPrefixRetained: true, duplicateOldRunReceipt: 'session-run-changed' }, null, 2))
   } finally {
+    releaseObservation()
     if (old === undefined) delete process.env.AGENTMUX_TEST_OWNER_ENTRY; else process.env.AGENTMUX_TEST_OWNER_ENTRY = old
-    await scope?.cleanup(); await rm(directory, { recursive: true, force: true })
+    await scope?.cleanup(); await rpc?.dispose(); await rm(directory, { recursive: true, force: true })
   }
 }, 90_000)
