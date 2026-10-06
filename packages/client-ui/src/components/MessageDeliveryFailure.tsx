@@ -13,7 +13,7 @@ export type MessageDeliveryFailureProps = MessageDeliveryDiagnostic & {
 
 export function MessageDeliveryFailure({ copyText, onRetry, onDismiss, compact = false, ...diagnostic }: MessageDeliveryFailureProps) {
   const summary = presentMessageDeliveryFailure(diagnostic)
-  const informational = summary.kind === 'saved-waiting' || summary.kind === 'stopped' || summary.kind === 'admitted'
+  const informational = summary.kind === 'saved-waiting' || summary.kind === 'stopped' || summary.kind === 'admitted' || summary.kind === 'terminal-confirmed'
   const compactCause = 'compactCause' in summary ? summary.compactCause : undefined
   const report = messageDeliveryDiagnosticReport(diagnostic)
   const fullReport = messageDeliveryDiagnosticExport(diagnostic)
@@ -41,7 +41,7 @@ export function MessageDeliveryFailure({ copyText, onRetry, onDismiss, compact =
     {!compact ? <><div className="message-delivery-failure__state" role={informational ? 'status' : 'alert'}>{summary.state}</div>
       <p className="message-delivery-failure__next">{summary.action}</p></> : null}
     <div className="message-delivery-failure__actions">
-      {onRetry && !['condition-changed', 'admitted', 'not-applied'].includes(summary.kind) ? <button type="button" onClick={onRetry}>{summary.kind === 'saved-waiting' || summary.kind === 'stopped' ? '继续确认' : compact ? '重试' : '重试此操作'}</button> : null}
+      {onRetry && !['condition-changed', 'terminal-confirmed', 'admitted', 'not-applied'].includes(summary.kind) ? <button type="button" onClick={onRetry}>{summary.kind === 'saved-waiting' || summary.kind === 'stopped' ? '继续确认' : compact ? '重试' : '重试此操作'}</button> : null}
       <button type="button" className="message-delivery-failure__copy" onClick={() => void copyReport('summary')} disabled={copy.kind === 'summary' && copy.state === 'copying'} aria-label="复制诊断摘要">
         <SemanticIcon name={copy.kind === 'summary' && copy.state === 'copied' ? 'action.confirm' : 'action.copy'} size={13} aria-hidden="true" />{copyLabel('summary')}</button>
       {onDismiss ? <button type="button" className="message-delivery-failure__dismiss" onClick={onDismiss} aria-label="关闭操作说明" title="关闭操作说明"><SemanticIcon name="action.close" size={14} /></button> : null}

@@ -5,7 +5,7 @@ import type { AgentSessionHistoryQuestionAnswer } from '@agentmux/core'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { withDeviceStorageLock, DEVICE_WORKFACE_KEY } from './device-storage-lock'
 import { validateDeliveryLogId } from '@agentmux/core/delivery-attempt'
-import { validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
+import { validateAgentPromptCondition, validateAgentPromptInputBinding, validateAgentPromptInputKey } from '@agentmux/core/prompt-condition'
 import { isLocalNetworkHost } from '@agentmux/relay/offer'
 import type { PromptAttempt, ResponseAttempt } from '../conversation/local-drafts'
 import { parseMobileFileUpload, type MobileFileUpload } from '../conversation/attachments'
@@ -113,6 +113,7 @@ export function parseDraftRecord(value: unknown): DraftRecord {
     if (item && typeof item === 'object' && Object.hasOwn(item, 'originalRuntimeId')) keys.push('originalRuntimeId')
     if (item && typeof item === 'object' && Object.hasOwn(item, 'originalHostId')) keys.push('originalHostId')
     if (item && typeof item === 'object' && Object.hasOwn(item, 'explicit')) keys.push('explicit')
+    if (item && typeof item === 'object' && Object.hasOwn(item, 'manualInput')) keys.push('manualInput')
     const attempt = record(item, keys)
     if (!id(attempt.operationId) || !(attempt.runId === null || id(attempt.runId))
       || !body(attempt.draft) || !phase(attempt.phase)) throw invalid()
@@ -121,6 +122,27 @@ export function parseDraftRecord(value: unknown): DraftRecord {
     if (attempt.explicit !== undefined && typeof attempt.explicit !== 'boolean') throw invalid()
     if (attempt.originalRuntimeId !== undefined && !(attempt.originalRuntimeId === null || id(attempt.originalRuntimeId))) throw invalid()
     if (attempt.originalHostId !== undefined && !(attempt.originalHostId === null || id(attempt.originalHostId))) throw invalid()
+    if (attempt.manualInput !== undefined) {
+      if (attempt.request !== undefined || attempt.explicit !== true) throw invalid()
+      const input = record(attempt.manualInput, ['agentSessionId', 'expectedRun', 'runtimeId',
+        ...['stopIntent', 'stopReceipt'].filter(key => Object.hasOwn(attempt.manualInput ?? {}, key))])
+      const binding = validateAgentPromptInputBinding({ expectedRun: input.expectedRun, admissionIntent: { kind: 'manual-actor' } })
+      if (!id(input.agentSessionId) || binding.expectedRun.runId !== attempt.runId || !(input.runtimeId === null || id(input.runtimeId))) throw invalid()
+      const checkRef = (value: unknown) => {
+        const ref = record(value, ['key', 'waitGeneration']), key = validateAgentPromptInputKey(ref.key)
+        if (key.kind !== 'prompt' || key.agentSessionId !== input.agentSessionId || key.submissionId !== attempt.operationId ||
+            key.expectedRun.runId !== attempt.runId || !Number.isSafeInteger(ref.waitGeneration) || Number(ref.waitGeneration) < 1) throw invalid()
+      }
+      if (input.stopIntent !== undefined) {
+        const stop = record(input.stopIntent, ['ref', 'cancelOperationId']); checkRef(stop.ref)
+        if (!id(stop.cancelOperationId)) throw invalid()
+      }
+      if (input.stopReceipt !== undefined) {
+        const stop = record(input.stopReceipt, ['ref', 'cancelOperationId', 'outcome', 'at']); checkRef(stop.ref)
+        if (!id(stop.cancelOperationId) || !['stopped-before-dispatch', 'observation-stopped', 'already-settled', 'stale-generation'].includes(String(stop.outcome)) ||
+            !Number.isSafeInteger(stop.at) || Number(stop.at) < 0) throw invalid()
+      }
+    }
     if (attempt.request !== undefined) {
       const r = record(attempt.request, ['condition', 'execution', 'explicit', 'runtimeId'])
       const c = record(r.condition, ['expectedRun', 'afterSubmissionId'])

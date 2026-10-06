@@ -1,4 +1,4 @@
-import type { AgentInputSubmissionReceipt, AgentPromptCondition, AgentTimelineSnapshot } from '@agentmux/core'
+import type { AgentInputSubmissionReceipt, AgentPromptCondition, AgentPromptInputBinding, AgentTimelineSnapshot } from '@agentmux/core'
 import type { AgentSessionControl, SessionSnapshot } from '../../../shared/contracts'
 
 /** Archive is presentation, not an input outcome. Unknown original operations remain
@@ -10,7 +10,7 @@ export function pendingSteerInput(entry: {
   promptCondition?: AgentPromptCondition | null
 }): boolean {
   if (!entry.archived) return true
-  if (entry.inputReceipt) return entry.inputReceipt.status !== 'admitted' && entry.inputReceipt.status !== 'not-applied' &&
+  if (entry.inputReceipt) return entry.inputReceipt.status !== 'admitted' && entry.inputReceipt.status !== 'terminal-confirmed' && entry.inputReceipt.status !== 'not-applied' &&
     entry.inputReceipt.control.state !== 'stopped-before-dispatch'
   if (entry.inputIntakeStarted) return true
   return entry.promptCondition !== null
@@ -23,10 +23,10 @@ export function confirmedSteerDelivery(timeline: AgentTimelineSnapshot | undefin
     item.id === `prompt:${operationId}`)
 }
 
-/** Core records prompt:<operationId> only after the input side effect succeeds. A lost IPC reply
- * or renderer restart must not turn that durable delivery back into a retryable local draft. */
+/** Reconcile legacy exact queue records from their captured timeline contract.
+ * Controlled input keeps its typed receipt owner, including across lost replies or restart. */
 export function reconcileDeliveredSteers<State extends {
-  agentSteerQueues: Record<string, Array<{ operationId: string; archived?: true; goalDispatch?: { goalId: string; operationId: string }; goalPmo?: { creationOperationId?: string } }>>
+  agentSteerQueues: Record<string, Array<{ operationId: string; archived?: true; directInputBinding?: AgentPromptInputBinding; goalDispatch?: { goalId: string; operationId: string }; goalPmo?: { creationOperationId?: string } }>>
   timelines: Record<string, AgentTimelineSnapshot>
   sessions: SessionSnapshot[]
 }>(state: State, sessionId: string): State {
@@ -38,9 +38,11 @@ export function reconcileDeliveredSteers<State extends {
   const delivered = new Set(timeline.items
     .filter((item) => item.agentSessionId === agentSessionId && item.kind === 'user_message' && item.status === 'complete')
     .map((item) => item.id))
+  // A controlled input keeps its exact key until its typed receipt; authored timeline
+  // arrival can precede the terminal ACK and cannot replace that outcome.
   // Original input confirmation does not confirm the first Goal source write. Keep its
   // exact existing queue reference until the caller reconciles that owner without input.
-  const pending = queue.filter((entry) => entry.archived || entry.goalDispatch !== undefined || entry.goalPmo?.creationOperationId !== undefined || !delivered.has(`prompt:${entry.operationId}`))
+  const pending = queue.filter((entry) => entry.archived || entry.directInputBinding !== undefined || entry.goalDispatch !== undefined || entry.goalPmo?.creationOperationId !== undefined || !delivered.has(`prompt:${entry.operationId}`))
   if (pending.length === queue.length) return state
   const agentSteerQueues = { ...state.agentSteerQueues }
   if (pending.length) agentSteerQueues[sessionId] = pending

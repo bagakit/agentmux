@@ -281,8 +281,8 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     return new Set(messages.filter((item) => item.status === 'complete').map((item) => item.id))
   }, [messages])
 
-  const pending = queued.filter((item) => !item.archived && !deliveredIds.has(item.id) && !deliveredIds.has(`prompt:${item.id}`))
-  const archived = queued.filter(item => item.archived).map(item => ({...item,confirmed: item.confirmed || deliveredIds.has(`prompt:${item.id}`)}))
+  const pending = queued.filter((item) => !item.archived && (item.inputControlled || !deliveredIds.has(item.id) && !deliveredIds.has(`prompt:${item.id}`)))
+  const archived = queued.filter(item => item.archived).map(item => ({...item,confirmed: item.confirmed || !item.inputControlled && deliveredIds.has(`prompt:${item.id}`)}))
   const counts = { inbox: incoming.length, outbox: pending.length + archived.length + sent.length, system: system.notices.length }
   // Re-evaluate priority only on opening. A new arrival never moves the reader's selected folder.
   function openFolder(): Folder {

@@ -1,3 +1,6 @@
+import { projectInputReceipt } from '@agentmux/client-ui/input-receipt-projection'
+import { presentMessageDeliveryFailure } from '@agentmux/client-ui/message-delivery-presentation'
+import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { mobileQuestionReplyState, observeMobileQuestionAnswers, replyMobileQuestion } from './question-replies'
 import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
@@ -7,7 +10,7 @@ import { initFollowState, onContentChange, onScroll, shouldShowJumpToLatest } fr
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
-import type { AgentMuxAgentSession, AgentMuxInteractionResponse } from '@agentmux/core'
+import type { AgentInputSubmissionReceipt, AgentInputWaitRef, AgentMuxAgentSession, AgentMuxInteractionResponse } from '@agentmux/core'
 import { agentPromptCondition, agentPromptNotApplied, validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import {
@@ -28,16 +31,6 @@ import { appendNamedFileReference } from '@agentmux/client-ui/composer-file-refe
 import './conversation.css'
 
 export type { MobileConnection } from './use-hosted-conversation'
-function promptExecutionFor(client: AgentMuxHostedClient, session: AgentMuxAgentSession) {
-  try {
-    const provider = client.catalog().find(entry => entry.id === session.providerId)
-    if (!provider) return { execution: 'default' as const, supported: undefined, issue: '公共能力目录未包含原 Session 的 Provider。' }
-    const supported = provider.capabilities.promptExecution?.immediate === 'interrupt-before-input' || provider.capabilities.promptExecution?.immediate === 'native-steer'
-    return { execution: supported ? 'immediate' as const : 'default' as const, supported }
-  } catch (error) {
-    return { execution: 'default' as const, supported: undefined, issue: `公共能力目录读取失败：${errorMessage(error)}` }
-  }
-}
 function originalPromptRequest(session: AgentMuxAgentSession | null | undefined, agentSessionId: string | null,
   attempt: PromptAttempt | undefined) {
   if (attempt?.request && attempt.phase !== 'sending' && attempt.phase !== 'confirmed' && attempt.operationId && attempt.draft.trim()) {
@@ -63,6 +56,9 @@ function originalPromptRequest(session: AgentMuxAgentSession | null | undefined,
 }
 function originalPromptRefused(session: AgentMuxAgentSession | null | undefined, agentSessionId: string | null,
   attempt: PromptAttempt | undefined, runtimeId: string | null | undefined): boolean {
+  if (attempt?.manualInput && attempt.inputReceipt?.status === 'not-applied') return session?.agentSessionId === agentSessionId &&
+    session.run.runId === attempt.manualInput.expectedRun.runId && session.hostId === attempt.originalHostId &&
+    Boolean(runtimeId && runtimeId === attempt.manualInput.runtimeId)
   const request = attempt?.request, originalRuntime = request?.runtimeId ?? attempt?.originalRuntimeId
   if (!session || !attempt || attempt.inputRequested !== true || !request || !originalRuntime || originalRuntime !== runtimeId
     || session.agentSessionId !== agentSessionId || !attempt.originalHostId || session.hostId !== attempt.originalHostId
@@ -123,10 +119,6 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const responses = useRef(local.responses)
   const [revision, redraw] = useState(0)
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
-  const [inputCapabilities, setInputCapabilities] = useState<Record<string, { sessionId: string; runId: string; execution: 'default' | 'immediate'; supported?: boolean | undefined; issue?: string | undefined }>>({})
-  const inputCapability = agentSessionId ? inputCapabilities[agentSessionId] : undefined
-  const setInputCapability = (value: NonNullable<typeof inputCapability>) =>
-    setInputCapabilities(current => ({ ...current, [value.sessionId]: value }))
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef({ client, agentSessionId })
@@ -146,9 +138,123 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     local.save()
     if (mounted.current) redraw(value => value + 1)
   }
+  function observeInputReceipt(key: string, original: PromptAttempt, next: AgentInputSubmissionReceipt) {
+    const input = original.manualInput, target = next.key
+    if (!mounted.current || attempts.current.get(key) !== original || !input || target.kind !== 'prompt' ||
+        target.agentSessionId !== input.agentSessionId || target.expectedRun.runId !== input.expectedRun.runId ||
+        target.submissionId !== original.operationId) return false
+    if (original.phase === 'confirmed' && !original.inputReceipt && next.status !== 'terminal-confirmed' && next.status !== 'admitted') {
+      throw Object.assign(new Error('当前观察与这条原输入先前的确认记录冲突；先前记录保留，请核对原 Core 回执。'), { code: 'CONTROL_REQUEST_CONFLICT' })
+    }
+    const receipt = projectInputReceipt(original.inputReceipt, next)
+    if (receipt === original.inputReceipt) return true
+    original.inputReceipt = receipt
+    const summary = presentMessageDeliveryFailure({ error: null, inputReceipt: receipt, inputStopReceipt: input.stopReceipt })
+    if (receipt.status === 'terminal-confirmed' || receipt.status === 'admitted') {
+      confirmPrompt(key, original, summary.state)
+      return true
+    }
+    original.phase = receipt.status === 'not-applied' ? 'rejected' : 'unknown'
+    original.message = `${summary.state} ${summary.action}`
+    void local.save(); redraw(value => value + 1)
+    return true
+  }
+  function manualKey(original: PromptAttempt) {
+    const input = original.manualInput!
+    return { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: original.operationId }
+  }
+  function originalManualClient(original: PromptAttempt) {
+    const input = original.manualInput, originalClient = client
+    if (!input || !originalClient) throw Object.assign(new Error('原消息尚未连接到 Core；正文和身份保留。'), { code: 'CONTROL_UNAVAILABLE' })
+    let currentSession: ReturnType<AgentMuxHostedClient['agentSession']> | undefined
+    try { currentSession = originalClient.agentSession(input.agentSessionId) } catch { /* Observation absence does not replace or revoke the captured key. */ }
+    const currentRuntimeId = originalClient.runtimeOwnerIdentity?.()?.runtimeId
+    if (input.runtimeId && currentRuntimeId && currentRuntimeId !== input.runtimeId ||
+        original.originalHostId && currentSession?.hostId && currentSession.hostId !== original.originalHostId) throw Object.assign(
+      new Error('当前连接与原 Runtime 或 Mac 不一致；原消息保留，不会转向另一处重投。'), { code: 'STALE_AGENT_SESSION' })
+    return originalClient
+  }
+  function manualSeed(original: PromptAttempt) {
+    return Object.freeze({ ...startDeliveryAttempt({ agentSessionId: original.manualInput!.agentSessionId, operationId: original.operationId,
+      hostId: original.originalHostId ?? null, prompt: expandSemanticReferences(original.draft) }), expectedRunId: original.runId, execution: 'immediate' as const })
+  }
+  async function retryManualInput(key: string, original: PromptAttempt) {
+    try {
+      const source = originalManualClient(original), input = original.manualInput!
+      const observed = await source.inspectAgentInput({ key: manualKey(original) })
+      if (observed && !observeInputReceipt(key, original, observed)) throw Object.assign(
+        new Error('Core 返回了另一条输入的观察；原记录保留。'), { code: 'CONTROL_PROTOCOL_ERROR' })
+      if (attempts.current.get(key) !== original) return
+      if (observed && (observed.status !== 'stopped' && (observed.status !== 'waiting' ||
+          observed.observation !== 'rejoin-needed' && observed.control.waiting?.wake !== 'explicit-rejoin'))) return
+      if (!await local.save() || attempts.current.get(key) !== original) return
+      original.inputRequested = true
+      if (!await local.save() || attempts.current.get(key) !== original) return
+      const receipt = observed ? await source.rejoinAgentInputWaiting({ ref: observed.ref })
+        : await source.submitAgentPrompt({ agentSessionId: input.agentSessionId, operationId: original.operationId,
+          expectedRun: input.expectedRun, admissionIntent: { kind: 'manual-actor' }, prompt: expandSemanticReferences(original.draft),
+          execution: 'immediate', authorHuman: true })
+      if (receipt && !observeInputReceipt(key, original, receipt)) throw Object.assign(
+        new Error('Core 返回了另一条输入的回执；原记录保留。'), { code: 'CONTROL_PROTOCOL_ERROR' })
+      if (!receipt) throw Object.assign(new Error('原操作尚未返回 Core 输入回执；原正文和身份保留。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+    } catch (error) { await retainFailure(original, manualSeed(original), error, 'input-observation', client, key, true) }
+  }
+  async function stopManualInput(key: string, original: PromptAttempt) {
+    try {
+      const source = originalManualClient(original), input = original.manualInput!
+      const receipt = original.inputReceipt ?? await source.inspectAgentInput({ key: manualKey(original) })
+      if (!receipt) throw Object.assign(new Error('原等待代次尚未确认，未发起停止；原消息保留。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+      if (!observeInputReceipt(key, original, receipt)) throw Object.assign(
+        new Error('Core 返回了另一条等待的观察；原记录保留。'), { code: 'CONTROL_PROTOCOL_ERROR' })
+      const ref = receipt.ref
+      const stop = input.stopIntent?.ref.waitGeneration === ref.waitGeneration ? input.stopIntent
+        : { ref: structuredClone(ref), cancelOperationId: randomClientRequestId() }
+      input.stopIntent = stop
+      if (!await local.save() || attempts.current.get(key) !== original) return
+      const stopped = await source.stopAgentInputWaiting(stop)
+      if (attempts.current.get(key) !== original || input.stopIntent !== stop) return
+      const stoppedKey = stopped.ref.key, originalKey = manualKey(original)
+      if (stopped.cancelOperationId !== stop.cancelOperationId || stopped.ref.waitGeneration !== stop.ref.waitGeneration ||
+          stoppedKey.kind !== 'prompt' || stoppedKey.agentSessionId !== originalKey.agentSessionId ||
+          stoppedKey.expectedRun.runId !== originalKey.expectedRun.runId || stoppedKey.submissionId !== originalKey.submissionId) {
+        throw Object.assign(new Error('停止回执不属于这条原输入；未采用该回执，原等待身份保留。'), { code: 'CONTROL_PROTOCOL_ERROR' })
+      }
+      input.stopReceipt = stopped
+      void local.save(); redraw(value => value + 1)
+      // The stop ACK stands independently if this follow-up observation is unavailable.
+      const after = await source.inspectAgentInput({ key: manualKey(original) })
+      if (after) observeInputReceipt(key, original, after)
+    } catch (error) { await retainFailure(original, manualSeed(original), error, 'input-stop', client, key, true) }
+  }
+  useEffect(() => {
+    if (!client || !agentSessionId || !visible || connection.state !== 'connected') return
+    let live = true
+    const inspect = () => {
+      const currentRuntimeId = client.runtimeOwnerIdentity?.()?.runtimeId
+      for (const [key, original] of promptAttemptsForSession(attempts.current, agentSessionId)) {
+        if (!original.manualInput || original.manualInput.runtimeId !== null && currentRuntimeId && original.manualInput.runtimeId !== currentRuntimeId) continue
+        void client.inspectAgentInput({ key: manualKey(original) }).then(receipt => {
+          if (live && receipt) observeInputReceipt(key, original, receipt)
+        }).catch(error => { if (live) void retainFailure(original, manualSeed(original), error, 'input-observation', client, key, true) })
+      }
+    }
+    const unlisten = client.onEvent(event => {
+      if (!live) return
+      if (event.type === 'connection-state' && event.state === 'restored') inspect()
+      if (event.type !== 'agent-input' || event.receipt.key.agentSessionId !== agentSessionId) return
+      const currentRuntimeId = client.runtimeOwnerIdentity?.()?.runtimeId
+      for (const [key, original] of promptAttemptsForSession(attempts.current, agentSessionId)) {
+        if (!original.manualInput || original.manualInput.runtimeId !== null && currentRuntimeId && original.manualInput.runtimeId !== currentRuntimeId) continue
+        try { observeInputReceipt(key, original, event.receipt) }
+        catch (error) { void retainFailure(original, manualSeed(original), error, 'input-observation', client, key, true) }
+      }
+    })
+    inspect()
+    return () => { live = false; unlisten() }
+  }, [client, agentSessionId, visible, connection.state])
   useEffect(() => {
     for (const [key, pending] of promptAttemptsForSession(attempts.current, agentSessionId)) {
-      if (pending.phase !== 'unknown') continue
+      if (pending.phase !== 'unknown' || pending.manualInput) continue
       if (originalPromptRefused(reading.session, agentSessionId, pending, client?.runtimeOwnerIdentity?.()?.runtimeId)) {
         pending.phase = 'rejected'
         pending.message = 'Core 已确认原输入未应用；草稿保留，可由你重新发送。'
@@ -178,11 +284,15 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   useEffect(() => { if (connection.state === 'connected') reportDiagnostics(client) }, [client, connection.state])
   async function retainFailure(original: PromptAttempt, seed: DeliveryAttemptSeed, error: unknown, stage: string,
     originalClient: AgentMuxHostedClient | null, key: string, retry: boolean) {
-    const owner = original.request?.runtimeId ? `runtime:${original.request.runtimeId}` : diagnosticOwner(originalClient)
+    const ownerId = original.manualInput?.runtimeId ?? original.request?.runtimeId
+    const owner = ownerId ? `runtime:${ownerId}` : diagnosticOwner(originalClient)
     const log = await diagnostics.failed(seed, error, stage, owner)
     reportDiagnostics(originalClient)
     if (!mounted.current || attempts.current.get(key) !== original) return
     // A refusal of this click cannot settle an older unknown logical message.
+    if (original.phase === 'confirmed' || original.inputReceipt?.status === 'terminal-confirmed' || original.inputReceipt?.status === 'admitted') {
+      original.logId = log.record.logId; local.save(); redraw(value => value + 1); return
+    }
     original.phase = original.inputRequested === false ? 'rejected'
       : retry && original.phase !== 'rejected' ? 'unknown' : deliveryOutcome(error, 'prompt')
     original.logId = log.record.logId
@@ -194,7 +304,8 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     const existing = attempts.current.get(selectedKey)
     const body = originalBody?.draft ?? draft
     if (existing?.phase === 'sending' || !body.trim() || originalBody && originalBody !== existing) return
-    const refused = originalPromptRefused(reading.session, agentSessionId, existing, client?.runtimeOwnerIdentity?.()?.runtimeId)
+    const refused = existing?.manualInput ? existing.inputReceipt?.status === 'not-applied'
+      : originalPromptRefused(reading.session, agentSessionId, existing, client?.runtimeOwnerIdentity?.()?.runtimeId)
     if (originalBody && !refused) return
     // An identical unresolved input keeps its original identity, even after another
     // draft became active. A distinct explicit body is a new intent for Core to qualify.
@@ -223,25 +334,33 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     try {
       if (!available || !originalClient || !originalId) throw Object.assign(new Error(
         `原会话当前不能投递：${connection.issue ?? connection.message}${reading.disconnected ? '；会话连接已断开' : ''}。草稿已保留，可继续点击发送重试。`), { code: 'CONTROL_UNAVAILABLE' })
-      const originalSession = originalClient.agentSession(originalId), condition = agentPromptCondition(originalSession)
-      const capability = originalBody?.request ? { execution: originalBody.request.execution }
-        : explicit ? promptExecutionFor(originalClient, originalSession) : { execution: 'default' as const }
-      setInputCapability({ sessionId: originalId, runId: condition.expectedRun.runId, ...capability })
-      original.runId = condition.expectedRun.runId
-      original.request = { condition: structuredClone(condition), execution: capability.execution, explicit,
-        runtimeId: originalClient.runtimeOwnerIdentity?.()?.runtimeId ?? null }
-      seed = Object.freeze({ ...seed, expectedRunId: original.runId, afterSubmissionId: condition.afterSubmissionId,
-        conditionAvailable: true, execution: capability.execution })
+      const originalSession = originalClient.agentSession(originalId)
+      original.runId = originalSession.run.runId
+      if (explicit) {
+        original.manualInput = { agentSessionId: originalId, expectedRun: { ...originalSession.run },
+          runtimeId: originalClient.runtimeOwnerIdentity?.()?.runtimeId ?? null }
+      } else {
+        original.request = { condition: structuredClone(agentPromptCondition(originalSession)), execution: 'default', explicit: false,
+          runtimeId: originalClient.runtimeOwnerIdentity?.()?.runtimeId ?? null }
+      }
+      seed = Object.freeze({ ...seed, expectedRunId: original.runId,
+        afterSubmissionId: original.request?.condition.afterSubmissionId ?? null,
+        conditionAvailable: Boolean(original.request), execution: explicit ? 'immediate' : 'default' })
       if (!await local.save()) throw new Error('设备工作面已被替换；本次未请求输入，原正文保留。')
       redraw(value => value + 1)
       if (attempts.current.get(originalKey) !== original) throw new Error('另一页面已保全原消息；本次未请求输入，请核对原请求和两份正文。')
       stage = 'core-submit'
       original.inputRequested = true; if (!await local.save()) throw new Error('设备工作面已被替换；本次未请求输入。')
       if (attempts.current.get(originalKey) !== original) throw new Error('原消息记录已改变；本次未请求输入，请核对原记录。')
-      await originalClient.submitAgentPrompt({ agentSessionId: originalId, operationId: original.operationId,
-        prompt: expandSemanticReferences(original.draft), authorHuman: true, ...condition,
-        ...(explicit ? { allowUncertainTurn: true, ...(capability.execution === 'immediate' ? { execution: 'immediate' as const } : {}) } : {}) })
-      confirmPrompt(originalKey, original, capability.execution === 'immediate' ? 'Core 已确认立即执行输入。' : 'Core 已确认普通输入。')
+      const receipt = await originalClient.submitAgentPrompt({ agentSessionId: originalId, operationId: original.operationId,
+        prompt: expandSemanticReferences(original.draft), authorHuman: true,
+        ...(original.manualInput ? { expectedRun: original.manualInput.expectedRun, admissionIntent: { kind: 'manual-actor' as const }, execution: 'immediate' as const }
+          : { ...original.request!.condition, execution: original.request!.execution }) })
+      if (original.manualInput) {
+        if (receipt && !observeInputReceipt(originalKey, original, receipt)) throw Object.assign(
+          new Error('Core 返回了另一条输入的回执；原记录保留。'), { code: 'CONTROL_PROTOCOL_ERROR' })
+        if (!receipt) throw Object.assign(new Error('原消息的 Core 保存或输入回执尚未确认；原正文和身份保留，可核对原请求。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+      } else confirmPrompt(originalKey, original)
       if (mounted.current && current.current.client === originalClient && current.current.agentSessionId === originalId) void reading.refresh()
     } catch (error) { await retainFailure(original, seed, error, stage, originalClient, originalKey, false) }
   }
@@ -249,6 +368,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   async function retryOriginalPrompt(selectedKey = draftKey): Promise<void> {
     const original = attempts.current.get(selectedKey)
     if (!original || original.phase === 'sending' || original.phase === 'confirmed') return
+    if (original.manualInput) { await retryManualInput(selectedKey, original); return }
     if (originalPromptRefused(reading.session, agentSessionId, original, client?.runtimeOwnerIdentity?.()?.runtimeId)) {
       await submit(original.request!.explicit, original, selectedKey)
       return
@@ -277,10 +397,18 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         }
         if (original.explicit === undefined) throw Object.assign(new Error(
           '原消息最初的执行选择无法核实；本次未请求输入，原消息保留。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
-        const condition = agentPromptCondition(originalSession), capability = original.explicit
-          ? promptExecutionFor(originalClient, originalSession) : { execution: 'default' as const }
+        if (original.explicit) {
+          original.runId = originalSession.run.runId
+          original.originalHostId = originalSession.hostId ?? null
+          original.manualInput = { agentSessionId: originalId, expectedRun: { ...originalSession.run },
+            runtimeId: originalClient.runtimeOwnerIdentity?.()?.runtimeId ?? null }
+          if (!await local.save() || attempts.current.get(originalKey) !== original) return
+          await retryManualInput(originalKey, original)
+          return
+        }
+        const condition = agentPromptCondition(originalSession)
         original.runId = condition.expectedRun.runId
-        original.request = { condition: structuredClone(condition), execution: capability.execution, explicit: original.explicit,
+        original.request = { condition: structuredClone(condition), execution: 'default', explicit: false,
           runtimeId: originalClient.runtimeOwnerIdentity?.()?.runtimeId ?? null }
         if (!await local.save()) throw new Error('设备工作面已被替换；本次未请求输入。')
         if (attempts.current.get(originalKey) !== original) throw new Error('原消息记录已改变；本次未请求输入。')
@@ -359,9 +487,29 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       appendQuote(`引用会话 ${JSON.stringify(agentSessionId)}，消息 ${JSON.stringify(messageId)}：\n${quote.split('\n').map(line => `> ${line}`).join('\n')}`)
   }
   const retainedAttempts = promptAttemptsForSession(attempts.current, agentSessionId).filter(([key, original]) => key !== draftKey && original.phase !== 'confirmed')
-  const renderPromptAttempt = ([key, original]: [string, PromptAttempt]) => <aside
-          className="mobile-send-status" key={key} data-phase={original.phase} data-retained={key !== draftKey || undefined}
+  const renderPromptAttempt = ([key, original]: [string, PromptAttempt]) => {
+    const waiting = original.inputReceipt?.control.waiting
+    const failure = waiting?.phase === 'native-environment' ? waiting.observation?.failure : waiting?.failure
+    return <aside
+          className="mobile-send-status" key={key} data-phase={original.phase} data-manual={Boolean(original.manualInput) || undefined} data-retained={key !== draftKey || undefined}
           data-original-operation={original.operationId} aria-live="polite">
+          {original.manualInput ? <>
+            {original.phase === 'sending' && !original.inputReceipt ? <p role="status">正在保存这条原消息…</p>
+              : original.phase === 'confirmed' && !original.inputReceipt ? <p role="status">先前输入已确认；当前 Core 回执观察待恢复。这不代表任务完成。</p>
+              : <MessageDeliveryFailure compact error={failure ?? diagnostics.get(original.logId ?? '')?.record.error ?? original.message}
+              logId={original.logId} log={original.logId ? diagnostics.get(original.logId) : undefined}
+              inputReceipt={original.inputReceipt} inputStopReceipt={original.manualInput.stopReceipt}
+              onRetry={original.phase === 'confirmed' ? undefined : () => { void retryOriginalPrompt(key) }}
+              copyText={text => platform.copyText(text, error => setCopyNotice(errorMessage(error)))} />}
+            {original.inputReceipt?.status === 'waiting' ? <button type="button" onClick={() => { void stopManualInput(key, original) }}>
+              {original.manualInput.stopIntent && !original.manualInput.stopReceipt ? '重试停止等待' : '停止等待'}</button> : null}
+            {original.inputReceipt?.status === 'not-applied' ? <button type="button" onClick={() => { void submit(true, original, key) }}>重新发送原正文</button> : null}
+            <details className="mobile-send-status__diagnosis"><summary>原消息与身份</summary><pre>{original.draft}</pre>
+              <button type="button" onClick={() => { void platform.copyText(original.draft, error => setCopyNotice(errorMessage(error))) }}>复制原正文</button>
+              <dl><dt>原操作</dt><dd>{original.operationId}</dd><dt>原 Run</dt><dd>{original.runId}</dd></dl>
+              {onShowTerminal ? <button type="button" onClick={onShowTerminal}>终端</button> : null}
+            </details>
+          </> : <>
           <div className="mobile-send-status__summary">
             <span>{original.phase === 'sending' ? '正在发送…' : key !== draftKey
               ? original.phase === 'unknown' ? '先前消息结果未确认 · 原记录保留' : '先前消息未发送 · 原记录保留'
@@ -379,8 +527,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
             <p role="alert">{original.message}</p>
             {original.logId ? <DeliveryLogDetails log={diagnostics.get(original.logId)} logId={original.logId} copyText={text => platform.copyText(text, error => setCopyNotice(errorMessage(error)))} /> : null}
             {onShowTerminal ? <button type="button" onClick={onShowTerminal}>终端</button> : null}
-          </details> : null}
+          </details> : null}</>}
         </aside>
+  }
   return <ClientUiProvider platform={platform}>
     <section className="mobile-conversation" aria-label="会话" data-agent-surface-mode="activity" data-agent-session-id={agentSessionId ?? ''}>
       {!available || connection.issue ? <p className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前发送暂不可用。' : ''}</p> : null}
@@ -452,24 +601,6 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         {responseAttempt ? <p role="status">{responseAttempt.message}</p> : null}
       </div> : null}
       <div className="mobile-conversation__composer">
-        {inputCapability?.sessionId === agentSessionId && inputCapability.runId === session?.run.runId ?
-          <aside className="mobile-conversation__input-state" data-issue={Boolean(inputCapability.issue)} role="status">
-            {inputCapability.execution === 'immediate' ? '立即执行输入' : inputCapability.issue ? '普通输入 · 立即执行能力未确认' : inputCapability.supported === false ? '普通输入 · 不支持立即执行' : '普通输入'}
-            {attempt?.phase === 'confirmed' ? <span> · {attempt.message}</span> : null}
-            {inputCapability.issue ? <><p>{inputCapability.issue} 原会话与当前草稿保留；本次选择普通输入，未尝试立即执行。</p>
-              <button type="button" onClick={() => {
-                if (!client || !agentSessionId) return
-                try {
-                  const original = client.agentSession(agentSessionId)
-                  if (original.agentSessionId !== inputCapability.sessionId || original.run.runId !== inputCapability.runId) return
-                  const observed = promptExecutionFor(client, original)
-                  // Read-only recovery updates the service window, never the captured input mode.
-                  setInputCapability({ ...inputCapability, supported: observed.supported, issue: observed.issue })
-                } catch (error) {
-                  setInputCapability({ ...inputCapability, issue: `原 Session 能力读取失败：${errorMessage(error)}` })
-                }
-              }}>重新读取能力目录</button></> : null}
-          </aside> : null}
         <AgentComposer insertionRef={insertion} aboveInput={<MobileAttachments client={client} session={session ?? null}
           connected={connection.state === 'connected' && !reading.disconnected} controls={attachmentControls}
           promptOperationId={attempt?.operationId ?? null} promptConfirmed={attempt?.phase === 'confirmed'}
@@ -497,7 +628,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           onChange={setDraft} {...(attempt?.phase !== 'sending' ? { onSubmit: () => void submit(), onQueue: () => void submit(false) } : {})}
           onAttach={onAttach ?? (() => { void attachmentControls.current?.choose() })} {...(readPastedImage ? { readPastedImage } : {})}
           />
-        {attempt && attempt.phase !== 'confirmed' ? renderPromptAttempt([draftKey, attempt]) : null}
+        {attempt && (attempt.phase !== 'confirmed' || attempt.manualInput) ? renderPromptAttempt([draftKey, attempt]) : null}
         {retainedAttempts.length ? <details className="mobile-retained-prompts"><summary>保留的原消息 ({retainedAttempts.length})</summary>
           {retainedAttempts.map(renderPromptAttempt)}
         </details> : null}
