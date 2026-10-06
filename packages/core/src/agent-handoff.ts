@@ -1,4 +1,4 @@
-import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
+import type { AgentMuxMessageEnvelope, DurableAgentMuxMessage } from './agent-global-message-queue.js'
 import { AgentMuxError } from './errors.js'
 
 /** A caller's declared communication handoff; this does not transfer an external Task. */
@@ -41,6 +41,28 @@ export type Dispatch = {
   readonly openedAt: number
   readonly originAwaits: boolean
   readonly events: readonly DispatchEvent[]
+}
+
+/** Recorded communication remains readable when today's participant observation is unavailable. */
+export type DispatchIdentityDiagnostic = {
+  readonly agentSessionId: string
+  readonly runId: string
+  readonly code: 'DISPATCH_IDENTITY_UNAVAILABLE' | 'AGENT_SESSION_STORE_READ_UNCONFIRMED'
+  readonly message: string
+}
+
+export type DispatchObservation = {
+  readonly dispatch: Dispatch
+  /** Original immutable journal records, including their original delivery facts. */
+  readonly source: DurableAgentMuxMessage
+  readonly replies: readonly DurableAgentMuxMessage[]
+  readonly identityDiagnostics: readonly DispatchIdentityDiagnostic[]
+}
+
+export type DispatchPage = {
+  readonly participantSessionId: string
+  readonly dispatches: readonly Dispatch[]
+  readonly nextSourceMessageId: string | null
 }
 
 export function assertDispatchEventKind(value: unknown): asserts value is DispatchEventKind {

@@ -75,6 +75,9 @@ import {
   handOff,
   type Dispatch,
   type DispatchEventKind,
+  type DispatchObservation,
+  type DispatchIdentityDiagnostic,
+  type DispatchPage,
   type HandoffResult
 } from './agent-handoff.js'
 import { advanceDelivery, type AgentThread } from './agent-message.js'
@@ -3608,8 +3611,12 @@ export class AgentMuxClient {
     this.requireConnected()
     const caller = await this.currentStoredAgentSession(input.callerAgentSessionId)
     const author = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, caller)
-    return await this.messageQueue.openDispatch({ callerAgentSessionId: author, sourceMessageId: input.sourceMessageId },
+    const dispatch = await this.messageQueue.openDispatch({ callerAgentSessionId: author, sourceMessageId: input.sourceMessageId },
       async (messages) => { await this.assertDispatchAdmission(input.capability, author, caller.run, messages) })
+    this.publisher.publish({ type: 'dispatch-changed', sourceMessageId: dispatch.sourceMessageId,
+      ownerAgentSessionId: dispatch.ownerAgentSessionId, workerAgentSessionId: dispatch.workerAgentSessionId,
+      threadId: dispatch.threadId, evidence: { source: 'agentmux', observedAt: Date.now(), run: caller.run } })
+    return dispatch
   }
 
   /** Each actual reply is one durable event; only an authorized worker_done settles waiting. */
@@ -3623,9 +3630,14 @@ export class AgentMuxClient {
     this.requireConnected()
     const caller = await this.currentStoredAgentSession(input.callerAgentSessionId)
     const author = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, caller)
-    return await this.messageQueue.recordDispatchEvent({ callerAgentSessionId: author,
+    const dispatch = await this.messageQueue.recordDispatchEvent({ callerAgentSessionId: author,
       sourceMessageId: input.sourceMessageId, replyMessageId: input.replyMessageId, kind: input.kind },
     async (messages) => { await this.assertDispatchAdmission(input.capability, author, caller.run, messages) })
+    this.publisher.publish({ type: 'dispatch-changed', sourceMessageId: dispatch.sourceMessageId,
+      ownerAgentSessionId: dispatch.ownerAgentSessionId, workerAgentSessionId: dispatch.workerAgentSessionId,
+      threadId: dispatch.threadId, event: dispatch.events.find(event => event.replyMessageId === input.replyMessageId)!,
+      evidence: { source: 'agentmux', observedAt: Date.now(), run: caller.run } })
+    return dispatch
   }
 
   async showDispatch(input: {
@@ -3638,6 +3650,47 @@ export class AgentMuxClient {
     const author = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, caller)
     return await this.messageQueue.showDispatch({ callerAgentSessionId: author, sourceMessageId: input.sourceMessageId },
       async (messages) => { await this.assertDispatchAdmission(input.capability, author, caller.run, messages) })
+  }
+
+  /** SDK callers are trusted Host readers; managed authority is checked again under the journal lock. */
+  async readDispatch(input: { sourceMessageId: string; caller?: { agentSessionId: string; capability: string } }): Promise<DispatchObservation> {
+    const caller = input.caller
+    return this.messageQueue.readDispatch({ sourceMessageId: input.sourceMessageId,
+      ...(caller ? { callerAgentSessionId: caller.agentSessionId } : {}) }, async messages => {
+      if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
+      return this.dispatchIdentityDiagnostics(messages)
+    })
+  }
+
+  async listDispatches(input: { participantSessionId: string; afterSourceMessageId?: string; limit?: number;
+    caller?: { agentSessionId: string; capability: string } }): Promise<DispatchPage> {
+    const caller = input.caller
+    if (caller && caller.agentSessionId !== input.participantSessionId) throw new AgentMuxError(
+      'An Agent can only list its own Dispatch participation.', 'DISPATCH_PARTICIPANT_MISMATCH')
+    return this.messageQueue.listDispatches(input, async () => {
+      if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
+    })
+  }
+
+  private async dispatchIdentityDiagnostics(messages: readonly AgentMuxMessageEnvelope[]): Promise<readonly DispatchIdentityDiagnostic[]> {
+    const participants = new Map<string, Set<string>>()
+    for (const message of messages) for (const [id, runId] of [
+      [message.senderSessionId, message.senderRunId], [message.recipientSessionId, message.recipientRunId]
+    ]) {
+      if (id && runId) { const runs = participants.get(id) ?? new Set<string>(); runs.add(runId); participants.set(id, runs) }
+    }
+    const observations = await Promise.all([...participants].map(async ([agentSessionId, runs]) => {
+      try {
+        const session = await this.store.readMetadata(agentSessionId)
+        return [...runs].flatMap(runId => session?.hostId === 'local' && (session.run.runId === runId || session.retiredRuns.some(run => run.runId === runId))
+          ? [] : [{ agentSessionId, runId, code: 'DISPATCH_IDENTITY_UNAVAILABLE' as const,
+            message: 'This recorded participant Run is not confirmed by the current retained Session history. Keep the original communication and inspect its identity.' }])
+      } catch (error) {
+        return [...runs].map(runId => ({ agentSessionId, runId, code: 'AGENT_SESSION_STORE_READ_UNCONFIRMED' as const,
+          message: `Current participant identity could not be read: ${error instanceof Error ? error.message : String(error)}. Recorded communication remains available.` }))
+      }
+    }))
+    return observations.flat()
   }
 
   private async assertDispatchAdmission(

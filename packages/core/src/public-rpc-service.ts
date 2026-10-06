@@ -64,7 +64,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
-  'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'recordDispatchEvent' |
+  'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
@@ -153,6 +153,8 @@ const NATIVE_FIELDS = {
   'message.delivery.inspect': ['logId', 'hostId'], 'message.delivery.report': ['hostId', 'record'],
   'message.inbox.check': ['limit'], 'message.inbox.ack': ['generation', 'readerRun'],
   'message.dispatch.open': ['sourceMessageId'], 'message.dispatch.inspect': ['sourceMessageId'],
+  'message.dispatch.read': ['sourceMessageId', 'hostId'],
+  'message.dispatch.ls': ['hostId', 'participantSessionId', 'afterSourceMessageId', 'limit'],
   'message.dispatch.report': ['sourceMessageId', 'replyMessageId', 'kind'],
   'app.snapshot': ['projectId', 'workspaceId', 'topicId', 'agentSessionId', 'goalId', 'executorId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit', 'include'],
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
@@ -1007,6 +1009,27 @@ export class AgentMuxRpcService {
         result = await owner.client.handOff({ capability: owner.capability, callerAgentSessionId: owner.agentSessionId,
           toAgentSessionId: (await this.owner(rpcString(p.toAgentSessionId, 'Recipient Session ID'))).agentSessionId,
           taskId: rpcString(p.taskId, 'Task ID') }); break
+      }
+      case 'message.dispatch.read': case 'message.dispatch.ls': {
+        if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id.trim())) throw new AgentMuxError(
+          'Dispatch reading requires an authenticated Agent participant or a transport-approved user/device. Original communication and Runs are retained.', 'CONTROL_PERMISSION_DENIED')
+        const hostId = p.hostId === undefined ? caller?.hostId : rpcString(p.hostId, 'Original Dispatch Host ID')
+        if (hostId === undefined) throw new AgentMuxError('A trusted reader must select the exact original Dispatch Host.', 'INVALID_CONTROL_REQUEST')
+        if (caller && caller.hostId !== hostId) throw new AgentMuxError('Agent authority cannot read another semantic Host journal.', 'CONTROL_PERMISSION_DENIED')
+        const scopes = caller ? [caller] : (await this.clients()).filter(scope => scope.hostId === hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('The exact Dispatch Host owner is unavailable or ambiguous. Keep the original source reference.', 'CONTROL_UNAVAILABLE')
+        const owner = scopes[0]!
+        if (owner.client.forwardRpc) {
+          result = { ...await owner.client.forwardRpc(method, { ...p, hostId: 'local' } as AgentMuxRpcParams<M>, context), hostId }; break
+        }
+        const auth = caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}
+        if (method === 'message.dispatch.read') result = { ...await owner.client.readDispatch({
+          sourceMessageId: rpcString(p.sourceMessageId, 'Source message ID'), ...auth }), hostId }
+        else result = { ...await owner.client.listDispatches({
+          participantSessionId: p.participantSessionId === undefined ? this.requireCaller(caller).agentSessionId : rpcString(p.participantSessionId, 'Participant Session ID'),
+          ...(p.afterSourceMessageId === undefined ? {} : { afterSourceMessageId: rpcString(p.afterSourceMessageId, 'Original page source message ID') }),
+          limit: rpcCount(p.limit, 50, 100), ...auth }), hostId }
+        break
       }
       case 'message.inbox.check': case 'message.inbox.ack':
       case 'message.dispatch.open': case 'message.dispatch.inspect': case 'message.dispatch.report': {
