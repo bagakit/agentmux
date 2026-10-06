@@ -1816,6 +1816,8 @@ export type AgentMuxDesktopApi = {
     historySources(): Promise<AgentSessionHistoryDescriptor[]>
     timeline(session: SessionHistoryReference): Promise<AgentTimelineSnapshot>
     historyPage(session: SessionHistoryReference, options?: SessionHistoryPageOptions): Promise<AgentSessionHistoryPage>
+    readHistory(session: SessionHistoryReference, options: Omit<import('@agentmux/core').AgentSessionHistoryReadInput, 'hostId' | 'agentSessionId'>,
+      context?: { signal?: AbortSignal }): Promise<import('@agentmux/core').AgentSessionHistoryReadPage>
     historyResource(session: SessionHistoryReference, input: AgentSessionHistoryResourceRequest): Promise<AgentSessionHistoryResourceReadResult>
     confirmNativeSession(session: AgentSessionControl, input: AgentMuxNativeSessionConfirmationInput): Promise<AgentMuxNativeSessionConfirmation>
     observeHistory(session: SessionHistoryReference, listener: (observation: AgentSessionHistoryObservation) => void,
@@ -1991,7 +1993,7 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
   scratch: Omit<AgentMuxDesktopApi['scratch'], 'listTopics'> & {
     listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicListResponse>
   }
-  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'write' | 'paste' | 'submitPrompt' | 'submitMessage' | 'inspectInput' | 'stopInputWaiting' | 'rejoinInputWaiting'> & {
+  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'readHistory' | 'write' | 'paste' | 'submitPrompt' | 'submitMessage' | 'inspectInput' | 'stopInputWaiting' | 'rejoinInputWaiting'> & {
     /** Plain envelopes cross both IPC and contextBridge; Renderer restores typed failures. */
     write(...args: Parameters<AgentMuxDesktopApi['sessions']['write']>): Promise<SessionInputWriteResult>
     paste(...args: Parameters<AgentMuxDesktopApi['sessions']['paste']>): Promise<SessionInputWriteResult>
@@ -2003,6 +2005,8 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
     /** Raw native transport. Renderer owns scoped subscriptions and its single bridge callback. */
     onEvent(listener: (event: RuntimeEvent) => void): () => void
     /** Functions cross contextBridge; AbortSignal and its prototype stay in Renderer. */
+    readHistory(session: SessionHistoryReference, options: Omit<import('@agentmux/core').AgentSessionHistoryReadInput, 'hostId' | 'agentSessionId'>,
+      context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').AgentSessionHistoryReadPage>>
     observeHistory(session: SessionHistoryReference, listener: (observation: AgentSessionHistoryObservation) => void,
       options?: { onAbort?: (abort: () => void) => () => void }): Promise<AgentSessionHistoryObservationHandle>
   }

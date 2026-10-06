@@ -440,6 +440,12 @@ const api: AgentMuxPreloadApi = {
     timeline: (session: import('../shared/contracts.js').SessionHistoryReference) => ipcRenderer.invoke('sessions:timeline', session),
     historyPage: (session: import('../shared/contracts.js').SessionHistoryReference, options?: AgentSessionHistoryPageOptions) =>
       ipcRenderer.invoke('sessions:historyPage', session, options),
+    readHistory: async (reference, options, context) => {
+      const token = crypto.randomUUID()
+      const pending = ipcRenderer.invoke('sessions:readHistory', token, reference, options)
+      const release = context?.onAbort?.(() => { void ipcRenderer.invoke('sessions:cancelHistoryRead', token).catch(() => {}) })
+      try { return await pending } finally { release?.() }
+    },
     historyResource: (session, input) => ipcRenderer.invoke('sessions:historyResource', session, input),
     observeHistory: async (session, listener, options) => {
       const token = crypto.randomUUID()

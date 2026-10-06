@@ -36,6 +36,7 @@ import { LAUNCH_OPTIONS_BY_PROVIDER_ID, describeLaunchOptions } from '@agentmux/
 import { createRendererControlApi } from './control-api'
 import { createRendererSessionEvents } from './session-events'
 import { createRendererHistoryObservation } from './history-observation'
+import { createRendererHistoryRead } from './history-read'
 import {
   DEFAULT_TOPIC_WIKI,
   MOTE_SOUL_PATH,
@@ -985,6 +986,9 @@ const mockApi: AgentMuxDesktopApi = {
       return structuredClone(timeline)
     },
     historySources: mockHistorySources,
+    readHistory: async () => {
+      throw new Error('Host input history queries are unavailable in the web preview. The current draft and existing records are kept.')
+    },
     historyPage: async () => {
       throw new Error('Native conversation history is unavailable in the web preview.')
     },
@@ -1450,6 +1454,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
       stopInputWaiting: (...args) => preload.sessions.stopInputWaiting(...args).then(unwrapSessionInputOperationResult),
       rejoinInputWaiting: (...args) => preload.sessions.rejoinInputWaiting(...args).then(unwrapSessionInputOperationResult),
       observeHistory: createRendererHistoryObservation(preload.sessions.observeHistory),
+      readHistory: createRendererHistoryRead(preload.sessions.readHistory),
       onEvent: createRendererSessionEvents(preload.sessions.onEvent)
     }
   }
