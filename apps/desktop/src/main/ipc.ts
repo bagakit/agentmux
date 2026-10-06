@@ -1,3 +1,4 @@
+import { observeTerminalBrightness, terminalPaletteChanged, terminalPaletteForAppearance } from './terminal-theme.js'
 import { exportThemeFile, writeThemeFile } from './theme-file-export.js'
 import { themeObservation } from './theme-observation.js'
 import { MoteAvatarSeriesOwner } from './mote-avatar-series.js'
@@ -78,6 +79,7 @@ import {
   dialog,
   ipcMain,
   nativeImage,
+  nativeTheme,
   shell,
   type BrowserWindow,
   type IpcMainEvent,
@@ -141,7 +143,6 @@ import type { AgentMuxControlErrorCode, AgentMuxInteractionResponse } from '@age
 import type { SessionHistoryPageOptions } from '../shared/contracts.js'
 import { BROWSER_PNG_MAX_BASE64_CHARS, AGENT_ATTENTION_ACTIVATE_CHANNEL, CONTROL_CANCEL_CHANNEL, CONTROL_REQUEST_CHANNEL, CONTROL_RESPONSE_CHANNEL, SESSION_HISTORY_OBSERVATION_CHANNEL, WORKSPACE_FILE_INVALIDATED_CHANNEL } from '../shared/contracts.js'
 import { PASTED_IMAGE_EXTENSIONS, PASTED_IMAGE_MAX_BYTES } from '@agentmux/client-ui/pasted-images'
-import { terminalPalette } from '../shared/terminal-palettes.js'
 import { createAgentNotifier } from './agent-notifier.js'
 import { ExternalBrowserBridge } from './browser-external-bridge.js'
 import { ExternalBrowserOwner } from './browser-external-owner.js'
@@ -235,11 +236,16 @@ export async function registerIpc(args: {
   const nameAudit = new NameChangeAudit(spatialState)
   args.scratchTopics.setNameAudit(nameAudit)
   let config = await args.configStore.get()
-  const initialPalette = terminalPalette(config.appearance.terminalTheme)
+  const initialPalette = terminalPaletteForAppearance(config.appearance, nativeTheme.shouldUseDarkColors)
   args.runtime.setTerminalViewColors({
     foreground: initialPalette.foreground,
     background: initialPalette.background
   })
+  const updateTerminalBrightness = () => {
+    if (config.appearance.terminalTheme !== 'workspace') return
+    const palette = terminalPaletteForAppearance(config.appearance, nativeTheme.shouldUseDarkColors)
+    args.runtime.setTerminalViewColors({ foreground: palette.foreground, background: palette.background })
+  }
   const initialRuntime = await args.runtime.prepare(config)
   let initialBindingError: unknown
   try {
@@ -270,7 +276,7 @@ export async function registerIpc(args: {
       } catch (cause) { release(); throw cause }
     },
     publish: (saved) => {
-      const paletteChanged = saved.appearance.terminalTheme !== config.appearance.terminalTheme
+      const paletteChanged = terminalPaletteChanged(saved.appearance, config.appearance)
       for (const previous of config.workspaces) {
         const next = saved.workspaces.find(item => item.id === previous.id)
         if (!next || next.hostId !== previous.hostId || next.path !== previous.path) fileBuilds?.invalidateWorkspace(previous.id)
@@ -280,7 +286,7 @@ export async function registerIpc(args: {
       releaseExecutorConfigEdit?.()
       releaseExecutorConfigEdit = undefined
       if (paletteChanged) {
-        const palette = terminalPalette(saved.appearance.terminalTheme)
+        const palette = terminalPaletteForAppearance(saved.appearance, nativeTheme.shouldUseDarkColors)
         args.runtime.setTerminalViewColors({ foreground: palette.foreground, background: palette.background })
       }
       if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send(CONFIG_CHANGED_CHANNEL, saved)
@@ -1857,9 +1863,11 @@ export async function registerIpc(args: {
     }
   }, desktopBusinessSocketPath())
   await control.start()
+  const disposeTerminalBrightness = observeTerminalBrightness(nativeTheme, updateTerminalBrightness)
   return async () => {
     acceptingControl = false
     await runOwnerDisposals([
+      { owner: 'terminal-brightness', dispose: disposeTerminalBrightness },
       { owner: 'spatial', dispose: () => disposeSpatial() },
       { owner: 'notebook', dispose: () => disposeNotebook() },
       { owner: 'toolkit-ipc', dispose: () => disposeToolkitIpc() },

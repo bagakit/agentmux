@@ -1,56 +1,15 @@
 import type { TerminalThemeId } from './contracts.js'
 
-export type TerminalPalette = Readonly<{
-  background: string
-  foreground: string
-  cursor: string
-  cursorAccent: string
-  selectionBackground: string
-  selectionForeground: string
-  black: string
-  red: string
-  green: string
-  yellow: string
-  blue: string
-  magenta: string
-  cyan: string
-  white: string
-  brightBlack: string
-  brightRed: string
-  brightGreen: string
-  brightYellow: string
-  brightBlue: string
-  brightMagenta: string
-  brightCyan: string
-  brightWhite: string
-  /** The 240 indexed ANSI colors (16–255), supplied explicitly to xterm. */
-  // xterm's ITheme type is mutable, but the shared palette is frozen at construction.
-  extendedAnsi: string[]
-}>
+import { TERMINAL_EXTENDED_ANSI, type TerminalPalette } from '@agentmux/client-ui/theme'
+export type { TerminalPalette } from '@agentmux/client-ui/theme'
 
-function xtermExtendedAnsiPalette(): string[] {
-  const colors: string[] = []
-  const levels = [0, 95, 135, 175, 215, 255]
-  for (const red of levels) {
-    for (const green of levels) {
-      for (const blue of levels) {
-        colors.push('#' + red.toString(16).padStart(2, '0') + green.toString(16).padStart(2, '0') + blue.toString(16).padStart(2, '0'))
-      }
-    }
-  }
-  for (let gray = 8; gray <= 238; gray += 10) {
-    colors.push('#' + gray.toString(16).padStart(2, '0').repeat(3))
-  }
-  return Object.freeze(colors) as unknown as string[]
-}
-
-const EXTENDED_ANSI = xtermExtendedAnsiPalette()
+const EXTENDED_ANSI = TERMINAL_EXTENDED_ANSI
 
 // Keep a proven ANSI role palette, but use a true-black terminal work area
 // so Codex's own gray composer and message surfaces remain visibly distinct.
 // The main process also uses these foreground/background values to answer a
 // Run's OSC 10/11 color queries while no Renderer is attached.
-const TERMINAL_PALETTES: Readonly<Record<TerminalThemeId, TerminalPalette>> = Object.freeze({
+const TERMINAL_PALETTES: Readonly<Record<Exclude<TerminalThemeId, 'workspace'>, TerminalPalette>> = Object.freeze({
   graphite: Object.freeze({
     background: '#000000',
     foreground: '#ffffff',
@@ -103,7 +62,7 @@ const TERMINAL_PALETTES: Readonly<Record<TerminalThemeId, TerminalPalette>> = Ob
   })
 })
 
-export function terminalPalette(themeId: TerminalThemeId): TerminalPalette {
+export function terminalPalette(themeId: Exclude<TerminalThemeId, 'workspace'>): TerminalPalette {
   const palette = TERMINAL_PALETTES[themeId]
   if (!palette) throw new Error(`Unknown terminal theme: ${String(themeId)}`)
   return palette

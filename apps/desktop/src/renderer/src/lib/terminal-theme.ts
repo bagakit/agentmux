@@ -1,3 +1,4 @@
+import { readResolvedTheme, resolveTheme, workspaceTerminalPalette, type ResolvedTheme } from '@agentmux/client-ui/theme'
 import type { ITheme, ITerminalOptions, Terminal } from '@xterm/xterm'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import type { TerminalThemeId } from '../../../shared/contracts'
@@ -17,6 +18,10 @@ export type TerminalThemeDefinition = {
 // terminal work area.
 export const TERMINAL_THEME_CATALOG: readonly TerminalThemeDefinition[] = Object.freeze([
   {
+    id: 'workspace', label: 'Workspace theme', description: 'Follow this window’s theme and brightness · semantic ANSI colors',
+    get theme() { return workspaceTerminalPalette(typeof window === 'undefined' ? resolveTheme() : readResolvedTheme()) }
+  },
+  {
     id: 'graphite',
     label: 'Graphite',
     description: 'AgentMux default · crisp neutral work area',
@@ -30,7 +35,8 @@ export const TERMINAL_THEME_CATALOG: readonly TerminalThemeDefinition[] = Object
   }
 ])
 
-export function terminalTheme(themeId: TerminalThemeId): Readonly<ITheme> {
+export function terminalTheme(themeId: TerminalThemeId, workspace?: ResolvedTheme): Readonly<ITheme> {
+  if (themeId === 'workspace') return workspaceTerminalPalette(workspace ?? readResolvedTheme())
   const definition = TERMINAL_THEME_CATALOG.find((candidate) => candidate.id === themeId)
   if (!definition) throw new Error(`Unknown terminal theme: ${String(themeId)}`)
   return definition.theme

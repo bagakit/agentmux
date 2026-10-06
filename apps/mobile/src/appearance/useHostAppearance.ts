@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { mountThemeRuntime, updateObservedTheme, type AppAppearanceId, type ThemeDocument } from '@agentmux/client-ui/theme'
+import { useEffect, useRef, useState } from 'react'
+import { observeResolvedTheme, readResolvedTheme, workspaceTerminalPalette, mountThemeRuntime, updateObservedTheme, type AppAppearanceId, type ThemeDocument } from '@agentmux/client-ui/theme'
 import { parseAppearanceObservation, type AgentMuxAppearanceObservation, type AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ITheme } from '@xterm/xterm'
 
@@ -22,11 +22,18 @@ export function observedTerminalPalette(value: unknown): ITheme {
 export function useHostAppearance(client: AgentMuxHostedClient | null, connectionState: string) {
   const [issue, setIssue] = useState<string | null>(null)
   const [terminalPalette, setTerminalPalette] = useState<ITheme | undefined>()
+  const terminalChoice = useRef<ITheme | 'workspace' | undefined>(undefined)
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     try { const release = mountThemeRuntime(window); setMounted(true); return release }
     catch (cause) { setIssue(`主题呈现暂时不可用。${retained} ${cause instanceof Error ? cause.message : ''}`) }
   }, [])
+  useEffect(() => {
+    if (!mounted) return
+    return observeResolvedTheme(theme => {
+      if (terminalChoice.current === 'workspace') setTerminalPalette(workspaceTerminalPalette(theme))
+    })
+  }, [mounted])
   useEffect(() => {
     if (!mounted || !client || connectionState !== 'connected') return
     if (!client.subscribeRpc) { setIssue(`这个 Mac 尚未提供主题同步。${retained}`); return }
@@ -40,10 +47,12 @@ export function useHostAppearance(client: AgentMuxHostedClient | null, connectio
         // Advance the protocol cursor even for an unsupported client document. Never reapply stale data.
         previous = snapshot
         const values = snapshot.values
-        const palette = observedTerminalPalette(values.terminalPalette)
+        const choice = values.terminalTheme === 'workspace' ? 'workspace' : observedTerminalPalette(values.terminalPalette)
         const result = updateObservedTheme({ ...(values.theme as object), id: values.themeId } as ThemeDocument,
           values.appAppearance as AppAppearanceId, window)
         if (!result.applied) throw new Error(result.reason ?? 'Host 主题格式不受支持。')
+        terminalChoice.current = choice
+        const palette = choice === 'workspace' ? workspaceTerminalPalette(readResolvedTheme()) : choice
         setTerminalPalette(previous => JSON.stringify(previous) === JSON.stringify(palette) ? previous : palette)
         setIssue(snapshot.issues.length ? `${snapshot.issues.map(item => item.message).join(' ')} 原工作面仍可使用。` : null)
       } catch (cause) {

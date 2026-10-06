@@ -304,7 +304,7 @@ export function isScratchWorkspaceId(id: string | null | undefined): boolean {
  * schema from this one tuple removes the second declaration point. The sibling `notifications` field in
  * the same schema was already derived from `NOTIFICATION_TIERS` this way; `terminalTheme` was the copy.
  */
-export const TERMINAL_THEME_IDS = ['graphite', 'catppuccin-mocha'] as const
+export const TERMINAL_THEME_IDS = ['graphite', 'catppuccin-mocha', 'workspace'] as const
 
 /**
  * The terminal appearance theme id. DERIVED from `TERMINAL_THEME_IDS` so the direction is forced: a
