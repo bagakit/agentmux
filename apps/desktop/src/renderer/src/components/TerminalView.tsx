@@ -15,7 +15,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { ChevronDown, ChevronUp, LoaderCircle, Search, X } from 'lucide-react'
+import { SemanticIcon, semanticIconComponent, type SemanticIconId } from '@agentmux/client-ui/icons'
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionControl, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
@@ -110,6 +110,12 @@ import type { MouseTrackingMode } from '../lib/terminal-selection-mode'
 import { regionCaretFocusTargets } from '../lib/region-focus'
 import { isMacPlatform } from '../lib/host-platform'
 
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeNavigationUpIcon = semanticIconComponent('navigation.up')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
+
 function terminalWrite(terminal: Terminal, data: string | Uint8Array): Promise<void> {
   return new Promise((resolve) => terminal.write(data, resolve))
 }
@@ -124,11 +130,11 @@ const MAX_PENDING_OUTPUT_BYTES = 512 * 1024
 const SEARCH_TOGGLES: ReadonlyArray<{
   key: keyof TerminalSearchToggles
   label: string
-  glyph: string
+  icon: SemanticIconId
 }> = Object.freeze([
-  { key: 'caseSensitive', label: 'Match case', glyph: 'Aa' },
-  { key: 'regex', label: 'Use regular expression', glyph: '.*' },
-  { key: 'wholeWord', label: 'Match whole word', glyph: 'ab|' }
+  { key: 'caseSensitive', label: 'Match case', icon: 'editor.match-case' },
+  { key: 'regex', label: 'Use regular expression', icon: 'editor.match-regexp' },
+  { key: 'wholeWord', label: 'Match whole word', icon: 'editor.match-word' }
 ])
 
 type TerminalLinkRequest = OpenDestinationRequest & { terminalGeneration: number; origin: OpenHttpLinkOrigin; presentation: Pick<WorkbenchPresentation, 'surface' | 'onSelectRegion'> }
@@ -1930,7 +1936,7 @@ export function TerminalView({
               onRedraw={redrawCurrentScreen} /> : historyNotice ? <ServiceWindowNotice notice={historyNotice.notice} /> : null} />
           {searchOpen ? (
             <div className="terminal-search" role="search">
-              <Search size={13} />
+              <ThemeActionSearchIcon size={13} />
               <TextInput
                 ref={searchInputRef}
                 value={searchQuery}
@@ -1951,12 +1957,12 @@ export function TerminalView({
               <span className="terminal-search__count" role="status" hidden={!searchCount}>
                 {searchCount ?? ''}
               </span>
-              <button type="button" title="Previous match" onClick={() => searchWith(searchQuery, searchToggles, true)}><ChevronUp size={13} /></button>
-              <button type="button" title="Next match" onClick={() => searchWith(searchQuery, searchToggles)}><ChevronDown size={13} /></button>
+              <button type="button" title="Previous match" onClick={() => searchWith(searchQuery, searchToggles, true)}><ThemeNavigationUpIcon size={13} /></button>
+              <button type="button" title="Next match" onClick={() => searchWith(searchQuery, searchToggles)}><ThemeNavigationDownIcon size={13} /></button>
               {/* 三个开关。能力本来就在 addon 里，这里只是把它露出来。翻转后**立刻按新条件重搜**
                   ——留着上一次的结果会让开关看起来没生效，那比没有开关更糟。
                   aria-pressed 而非颜色单独承载状态：色觉差异下仍读得出哪个开着。 */}
-              {SEARCH_TOGGLES.map(({ key, label, glyph }) => (
+              {SEARCH_TOGGLES.map(({ key, label, icon }) => (
                 <button
                   key={key}
                   type="button"
@@ -1970,9 +1976,9 @@ export function TerminalView({
                     setSearchToggles(next)
                     searchWith(searchQuery, next)
                   }}
-                >{glyph}</button>
+                ><SemanticIcon name={icon} size={13} /></button>
               ))}
-              <button type="button" title="Close find" onClick={closeSearch}><X size={13} /></button>
+              <button type="button" title="Close find" onClick={closeSearch}><ThemeActionCloseIcon size={13} /></button>
               {/* live region **常驻**，只换里面的文字。读屏软件播报的是已存在区域内的**内容变化**；
                   连同区域一起插进来的文字，好几款读屏都不会念——那等于这句话只对看得见的人说。
                   没话说时用 hidden 收起来，区域还在，但不占位、不画那层玻璃背景。 */}
