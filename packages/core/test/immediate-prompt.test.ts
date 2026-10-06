@@ -268,11 +268,12 @@ describe('declared native steering', () => {
    f.fault('ack')
    await expect(f.submit()).rejects.toMatchObject({code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED'})
    const before = structuredClone(f.registry.get('private-immediate').promptCompletionAdmission!.intent!)
-   f.provider.catalog.capabilities.promptExecution = {immediate: 'native-steer'}
+   f.provider.catalog.capabilities.promptExecution = {immediate: 'terminal-submit'}
    // Only the new plan changes; the coordinator must consume the saved one.
    f.provider.planPromptInput = prompt => ({kind: 'render-then-submit',payload: prompt,renderedText: prompt,submit: '\r'})
    f.restart()
-   await expect(f.submit()).resolves.toBeDefined()
+   const resumed = await f.submit().then(() => true, error => error)
+   expect(resumed).toBe(true)
    expect(f.writes).toEqual(['\x1b', 'ONLY_AUTHORIZED_MESSAGE', '\r'])
    expect(f.registry.get('private-immediate').promptCompletionAdmission!.intent).toEqual(before)
    await expect(f.submit('default')).rejects.toMatchObject({code: 'AGENT_PROMPT_OPERATION_CONFLICT'})

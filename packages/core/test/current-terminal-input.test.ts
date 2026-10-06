@@ -72,6 +72,21 @@ it.each(['codex', 'claude', 'kimi'])('submits on the original %s terminal withou
   } finally { await h.close() }
 })
 
+it('manual intent cannot inherit interrupt authorization from a Provider catalog', async () => {
+  const h = await fixture(), provider = h.client.providers.get('codex')
+  const originalCapability = provider.catalog.capabilities.promptExecution
+  provider.catalog.capabilities.promptExecution = { immediate: 'interrupt-before-input' }
+  const plan = vi.spyOn(provider, 'planPromptInput')
+  try {
+    await h.client.submitAgentPrompt(h.input('manual-with-legacy-catalog'))
+    await h.settled('manual-with-legacy-catalog')
+    expect(plan).toHaveBeenCalledWith('Original body\n原文', undefined)
+    expect([...h.accepted.values()].map(op => op.data)).toEqual(['\u001b[200~Original body\n原文\u001b[201~', '\r'])
+    expect(h.display).not.toHaveBeenCalled()
+    expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+  } finally { provider.catalog.capabilities.promptExecution = originalCapability; await h.close() }
+})
+
 it('continues an original saved pre-dispatch wait without requiring its old Native locator observation', async () => {
   const h = await fixture(), input = h.input('original-saved-wait')
   const queue = new DurableAgentMuxMessageQueue(h.client.agentMessageQueuePath())
