@@ -1687,6 +1687,8 @@ export type AgentMuxDesktopApi = {
     decision(id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>): Promise<import('@agentmux/demand').DemandReceipt>
   }
   ui: {
+    /** Original Main appearance captured once before this document's first paint. */
+    initialTheme: import('./theme-bootstrap').ThemeBootstrap | null
     nativeBrowserVisibility(): Promise<import('./native-overlay').NativeBrowserVisibility>
     onNativeBrowserVisibility(listener: (visibility: import('./native-overlay').NativeBrowserVisibility) => void): () => void
     publishNativeOverlays(regions: import('./native-overlay').NativeOverlayRegion[]): Promise<import('./native-overlay').NativeOverlayReceipt>

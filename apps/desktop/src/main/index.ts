@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto'
 import { RendererUpdates } from './renderer-updates.js'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app, BrowserWindow, crashReporter, dialog, Menu, shell } from 'electron'
+import { app, BrowserWindow, crashReporter, dialog, Menu, nativeTheme, shell } from 'electron'
+import { resolveTheme } from '@agentmux/client-ui/theme'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { applicationMenuTemplate } from './application-menu.js'
@@ -166,6 +167,7 @@ function startPrimaryInstance(): void {
 
   async function buildWindow(appReadyAtMs: number = Date.now()): Promise<void> {
     const environmentWarning = await environmentReady
+    const initialConfig = await configStore.get()
     const windowCreationStartedAtMs = Date.now()
     // The window reopens where it was last left. Only a first launch (or a corrupt record) falls back
     // to the default size — the fixed 1480×940 literal is no longer the every-launch size. A saved
@@ -181,7 +183,7 @@ function startPrimaryInstance(): void {
       minHeight: 660,
       icon: appIconPath,
       titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-      backgroundColor: '#0b0d0f',
+      backgroundColor: resolveTheme(initialConfig.appearance, nativeTheme.shouldUseDarkColors).variant.colors.background,
       webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '../preload/index.cjs'))
     })
     workbenchWindow = window
@@ -258,7 +260,7 @@ function startPrimaryInstance(): void {
     })
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
-    disposeIpc = await registerIpc({ window, configStore, runtime, progressLoops, demands, scratchTopics, workspaceFiles, spatialLinks,
+    disposeIpc = await registerIpc({ window, configStore, initialConfig, runtime, progressLoops, demands, scratchTopics, workspaceFiles, spatialLinks,
       loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, ...(environmentWarning ? { environmentWarning } : {}) })

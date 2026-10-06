@@ -168,6 +168,8 @@ import { pastedDirectory } from './pasted-directory.js'
 import { readPastedImage } from './pasted-image-read.js'
 import { ConfigStore } from './config-store.js'
 import { ConfigOwner } from './config-owner.js'
+import { registerThemeBootstrap } from './theme-bootstrap.js'
+import { resolveTheme } from '@agentmux/client-ui/theme'
 import { executeSettingsControl } from './settings-control.js'
 import { checkSettingsHost, executeSettingsHostsControl } from './settings-hosts-control.js'
 import { readHostCreationTrust, approveHostCreationTrust } from './settings-host-creation-trust.js'
@@ -219,6 +221,7 @@ export async function openExternalFromRenderer(
 export async function registerIpc(args: {
   window: BrowserWindow
   configStore: ConfigStore
+  initialConfig: AppConfig
   runtime: RuntimeController
   demands?: DemandStore
   progressLoops: ContinuousProgressLoopManager
@@ -235,13 +238,14 @@ export async function registerIpc(args: {
   const spatialState = new AgentMuxSpatialStateStore()
   const nameAudit = new NameChangeAudit(spatialState)
   args.scratchTopics.setNameAudit(nameAudit)
-  let config = await args.configStore.get()
+  let config = args.initialConfig
   const initialPalette = terminalPaletteForAppearance(config.appearance, nativeTheme.shouldUseDarkColors)
   args.runtime.setTerminalViewColors({
     foreground: initialPalette.foreground,
     background: initialPalette.background
   })
   const updateTerminalBrightness = () => {
+    args.window.setBackgroundColor(resolveTheme(config.appearance, nativeTheme.shouldUseDarkColors).variant.colors.background)
     if (config.appearance.terminalTheme !== 'workspace') return
     const palette = terminalPaletteForAppearance(config.appearance, nativeTheme.shouldUseDarkColors)
     args.runtime.setTerminalViewColors({ foreground: palette.foreground, background: palette.background })
@@ -282,6 +286,7 @@ export async function registerIpc(args: {
         if (!next || next.hostId !== previous.hostId || next.path !== previous.path) fileBuilds?.invalidateWorkspace(previous.id)
       }
       config = saved
+      args.window.setBackgroundColor(resolveTheme(saved.appearance, nativeTheme.shouldUseDarkColors).variant.colors.background)
       toolkit.configurationChanged()
       releaseExecutorConfigEdit?.()
       releaseExecutorConfigEdit = undefined
@@ -1863,6 +1868,7 @@ export async function registerIpc(args: {
     }
   }, desktopBusinessSocketPath())
   await control.start()
+  const disposeThemeBootstrap = registerThemeBootstrap(ipcMain, args.window, () => config.appearance, () => nativeTheme.shouldUseDarkColors)
   const disposeTerminalBrightness = observeTerminalBrightness(nativeTheme, updateTerminalBrightness)
   return async () => {
     acceptingControl = false
@@ -1875,6 +1881,7 @@ export async function registerIpc(args: {
       { owner: 'spatial-links', dispose: () => args.spatialLinks?.unavailable() },
       { owner: 'metrics-listener', dispose: () => { args.window.webContents.off('destroyed', closeMetrics) } },
       { owner: 'metrics', dispose: () => metrics.dispose() },
+      { owner: 'theme-bootstrap', dispose: disposeThemeBootstrap },
       { owner: 'control-listener', dispose: () => { ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl) } },
       { owner: 'progress-input', dispose: () => disposeProgressInput() },
       { owner: 'progress-changes', dispose: () => disposeProgressChanges() },

@@ -789,6 +789,7 @@ const mockApi: AgentMuxDesktopApi = {
     }
   },
   ui: {
+    initialTheme: null,
     onNativeBrowserInput: () => () => {},
     nativeBrowserVisibility: async () => ({ revision: 0, bounds: [] }),
     onNativeBrowserVisibility: () => () => {},
