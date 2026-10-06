@@ -184,7 +184,10 @@ app.whenReady().then(async () => {
     await win.loadFile(html); win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await until(() => win.webContents.executeJavaScript('window.ready===true'), x => x, 'Native Renderer did not load')
-    for (const distribution of [variant]) {
+    if (phase === 'service-fanout' || phase === 'service-global-reference') {
+      await win.webContents.executeJavaScript('setDistribution("esm")')
+      await require('./service-cases.cjs').verifyServiceFanout({ win, mount, drain, info, until, phase, result, privateRoot })
+    } else for (const distribution of [variant]) {
       await win.webContents.executeJavaScript(`setDistribution(${JSON.stringify(distribution)})`)
       if (phase !== 'old-distance') for (const c of cases) {
         stage(distribution + ':' + c.name)
