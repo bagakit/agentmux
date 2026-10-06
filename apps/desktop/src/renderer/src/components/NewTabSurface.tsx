@@ -20,7 +20,7 @@ import { appendFileReferences } from '@agentmux/client-ui/composer-file-referenc
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
 import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
-import { warmLauncherId, warmTerminalPreview } from '../lib/warm-terminal-preview'
+import { warmLauncherId, warmTerminalForLauncher, warmTerminalPreview } from '../lib/warm-terminal-preview'
 import { InlineComposer } from '@agentmux/client-ui/components/InlineComposer'
 import { LaunchRefine } from './LaunchOptionControls'
 import { isMacPlatform } from '../lib/host-platform'
@@ -131,6 +131,7 @@ export function NewTabSurface({
   const detectExecutors = useAppStore((state) => state.detectExecutors)
   const launchAgent = useAppStore((state) => state.launchAgent)
   const prewarmTerminal = useAppStore((state) => state.prewarmTerminal)
+  const releaseWarmTerminal = useAppStore(state => state.releaseWarmTerminal)
   const controlNavigation = useAppStore(state => state.workbenchNavigationInputPolicy !== null ||
     state.workbenchSpaceSelection !== null && state.workbenchSpaceSelection.tabId === null)
   // A visible Tab can contain an unselected Launcher created by Control. Only its
@@ -142,7 +143,6 @@ export function NewTabSurface({
     return reference ? reference.tabId === tabId && reference.regionId === regionId
       : !presentation.surface && state.tabs[tabId]?.layout.activeRegionId === regionId
   })
-  const warmTerminal = useAppStore((state) => state.warmTerminal)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const terminalFontSize = useAppStore(
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
@@ -165,7 +165,8 @@ export function NewTabSurface({
   // Only show a warm shell created for this exact host and working directory.
   // It remains outside the ordinary Session list until the user claims it.
   const warmKey = workspace ? warmTerminalKey(workspace.hostId, workspace.path) : null
-  const automaticWarmAttempt = useRef<string | null>(null)
+  const warmTerminal = useAppStore(state => warmTerminalForLauncher(
+    warmKey === null ? undefined : state.warmTerminals[warmKey], launcherId))
   // 「这次启动来自哪个 launcher Region」——五个动作共用的同一个实参，只在这里算一次。
   // 手抄五遍时任何一处写成 `regionId ? …`（漏掉 tabId）都会让那一个动作静默丢掉 launcher 上下文，
   // 于是它按活动 Workspace 解析——正是 createNote 已经犯过的那个缺陷的另一种入口。
@@ -241,27 +242,19 @@ export function NewTabSurface({
   }, [selectedProviderId])
 
   useEffect(() => {
-    // The create page owns the prewarm trigger.
-    //
-    // 依赖里带上 `warmSlotHeld`（而不是只有 workspace 与 visible）：promote 会把槽清空，若只依赖后
-    // 两者，仍然在场的同胞 launcher 此后永远看不到热 shell——它的 Terminal 卡片静默退化成冷路径，
-    // 本次会话再不恢复。槽空了就重新预热一个。
-    //
-    // 依赖必须是**与归属无关**的「槽在不在」，不能是带归属的 session/pending：归属会在同胞之间转移，
-    // 若依赖跟着归属翻动，失去归属的那个立刻重新预热去夺回来，对方随即再夺回——两个同时在场的
-    // launcher 之间无限 ping-pong。prewarmTerminal 对同 key 是幂等的（只转移归属，不重开 PTY），
-    // 所以这条 effect 多跑几次不会攒出多余进程。
-    // A failed speculative warm clears its slot. That is not a new request to
-    // launch again; retain the ordinary cold launch and the current input.
-    if (warmSlotHeld && warmTerminal?.session) automaticWarmAttempt.current = null
-    // A target choice must not stop another project's healthy reusable shell.
-    // The ordinary explicit Terminal action remains available for this exact target.
-    if (workspace && (!warmTerminal || warmSlotHeld) && visible && presentationActive && inputRegionActive && !controlNavigation && sections.terminal === 'expanded' &&
-      (warmSlotHeld || automaticWarmAttempt.current !== warmKey)) {
-      if (!warmSlotHeld) automaticWarmAttempt.current = warmKey
+    // Acquisition is idempotent for this Launcher. Retaining its original candidate
+    // also keeps an unknown request from being retried by ordinary rendering.
+    if (workspace && visible && presentationActive && inputRegionActive && !controlNavigation && sections.terminal === 'expanded') {
       prewarmTerminal(workspace.id, launcherId)
     }
-  }, [prewarmTerminal, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, warmTerminal?.session?.id, Boolean(warmTerminal), warmKey, sections.terminal])
+  }, [prewarmTerminal, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, warmTerminal?.session?.id, warmKey, sections.terminal])
+
+  useEffect(() => {
+    if (!workspace || !visible || !presentationActive || sections.terminal !== 'expanded') return
+    // Losing input focus leaves the visible preview intact. Only removing its
+    // presentation makes this still-unused candidate available to another Launcher.
+    return () => releaseWarmTerminal(workspace.id, launcherId)
+  }, [releaseWarmTerminal, workspace?.id, warmKey, launcherId, visible, presentationActive, sections.terminal])
 
   useEffect(() => {
     if (sections.agents === 'hidden') return

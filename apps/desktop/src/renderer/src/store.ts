@@ -42,7 +42,7 @@ import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
 import { useLauncherState } from './lib/launcher-state'
 import { noteBlockSelectionKey, restoreNoteBlockSelections, type NoteBlockPresentation } from './lib/note-block-selection'
 import { noteKnowledge, parseNoteFile } from './lib/note-knowledge'
-import { warmLauncherId, type WarmTerminalCreation } from './lib/warm-terminal-preview'
+import { warmLauncherId, warmTerminalForLauncher, type WarmTerminalCreation } from './lib/warm-terminal-preview'
 import { NOTE_FILE_EXTENSION, newNoteDocument, readNoteDocument } from '../../shared/note-document'
 import { noteCreationTarget, noteCreationDisplayWorkspace, noteCreationResourceMatches, noteFilePlacement, type NoteCreationReceipt } from './lib/note-creation'
 import type { NoteBlockTarget } from '../../shared/note-document'
@@ -670,7 +670,7 @@ type AppState = {
   recoveryCandidates: AgentSessionRecoveryCandidate[]
   // The create page can render this shell directly, but it stays outside the ordinary
   // Session projection until the user claims it.
-  warmTerminal: WarmTerminal | null
+  warmTerminals: Record<string, WarmTerminal[]>
   unclaimedTerminalSessionIds: string[]
   timelines: Record<string, import('./lib/session-state').RendererAgentTimelineSnapshot>
   pendingAgentLaunches: Record<string, PendingAgentLaunch>
@@ -1191,12 +1191,9 @@ type AppState = {
     launcher?: { tabId: string; regionId: string },
     workspacePath?: string
   ): Promise<void>
-  // Idempotent for one host + cwd. Failures stay local to the create page.
-  //
-  // `ownerLauncherId` 是**哪个 launcher 挂载点在请求**。槽只有一个而 launcher 每个挂载点一个（分屏、
-  // 每个 group 的空占位），归属必须由槽记着、不能由各个 launcher 各自推断，否则它们会同时挂
-  // TerminalView 到同一个 PTY 上并对着它轮流 resize。同 key 再请求会把归属**转移**过来（不重开 PTY）。
+  // Reuse an idle candidate for this exact target, or create an independent shell.
   prewarmTerminal(workspaceId: string, ownerLauncherId: string): void
+  releaseWarmTerminal(workspaceId: string, ownerLauncherId: string): void
   retryWarmTerminal(workspaceId: string, ownerLauncherId: string, hostRestored?: boolean): Promise<SessionSnapshot | null>
   // Claims the exact warm shell or uses the ordinary Terminal launch path if none exists.
   promoteWarmTerminal(
@@ -2470,23 +2467,10 @@ function startSessionMembershipResync(
 type WarmTerminal = {
   // Prevents a shell from being reused for the wrong host or working directory.
   key: string
-  /**
-   * 哪个 launcher 挂载点拥有这个槽——只有它渲染 live preview。
-   *
-   * 槽是**全局单个**（一台机器上不该为没人认领的 shell 攒 N 个 PTY），而 launcher 是**每个挂载点
-   * 一个**：分屏能在同一个 Tab 里开出好几个，空分组占位又能在每个 group 里各有一个，它们的 warmKey
-   * 完全一样（同 host 同 cwd）。没有 owner 这个字段时，每个 launcher 都认为
-   * `warmTerminal.key === warmKey` 成立，于是**都**挂一个 TerminalView 到同一个 run 上。attach 那侧
-   * 不会抛（同一个 identity 走 readRunReplay），所以没有任何报错——但两个 view 各有自己的 FitAddon
-   * 与 ResizeObserver，尺寸不同就对着同一个 PTY 轮流 resize，网格来回跳、两边的 xterm 都在错误的
-   * 行列上重排。
-   *
-   * 所以「谁拥有」必须是槽自己的一部分，而不是各个 launcher 各自推断。取值来自组件侧的
-   * `warmLauncherId({ tabGroupId, regionId })`（见 `lib/warm-terminal-preview.ts`）：每个挂载点都有、
-   * 同胞之间互不相同、且跨重渲染稳定。**不可直接用 regionId**——空分组占位没有 region，而那恰是新建
-   * workspace 的第一眼，可缺席的字段当不了归属键；那个函数缺 region 时退到所属 group 并各自加前缀。
-   */
-  ownerLauncherId: string
+  /** A visible preview owns this candidate; null makes an unused shell reusable. */
+  ownerLauncherId: string | null
+  /** A hidden pending preview keeps its original recovery owner until its receipt settles. */
+  previewReleased?: true
   ready: Promise<SessionSnapshot | null>
   session: SessionSnapshot | null
   /** Retained until its original creation is confirmed; absent on an already known Run. */
@@ -2508,6 +2492,23 @@ async function stopTerminalSession(session: SessionSnapshot): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+function updateWarmTerminal(
+  terminals: Record<string, WarmTerminal[]>, key: string,
+  matches: (candidate: WarmTerminal) => boolean,
+  update: (candidate: WarmTerminal) => WarmTerminal | null
+): Record<string, WarmTerminal[]> {
+  const candidates = terminals[key]
+  if (!candidates?.some(matches)) return terminals
+  const next = candidates.flatMap(candidate => {
+    if (!matches(candidate)) return [candidate]
+    const updated = update(candidate)
+    return updated ? [updated] : []
+  })
+  if (next.length) return { ...terminals, [key]: next }
+  const { [key]: _released, ...rest } = terminals
+  return rest
 }
 
 async function stopWarmTerminal(held: WarmTerminal | null): Promise<string | null> {
@@ -3602,7 +3603,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   sessionNameMetadata: {},
   sessionNameMetadataWarning: null,
   recoveryCandidates: [],
-  warmTerminal: null,
+  warmTerminals: {},
   unclaimedTerminalSessionIds: [],
   timelines: {},
   pendingAgentLaunches: {},
@@ -3873,19 +3874,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       disposeSpatialLinkIssues()
       disposeFileInvalidations()
       disposeNotesStorage()
-      const warm = get().warmTerminal
-      // Observation cleanup may release unused prewarming, never an explicit opening.
-      if (!warm?.explicitOpening) {
-        void stopWarmTerminal(warm).then((sessionId) => {
+      const candidates = Object.values(get().warmTerminals).flat()
+      // Observation cleanup releases speculative candidates, never explicit openings.
+      for (const warm of candidates) {
+        if (warm.explicitOpening) continue
+        void stopWarmTerminal(warm).then(sessionId => {
           if (!sessionId) return
-          set((state) => ({
-            unclaimedTerminalSessionIds: forgetUnclaimedTerminalSession(
-              state.unclaimedTerminalSessionIds,
-              sessionId
-            )
-          }))
+          set(state => ({ unclaimedTerminalSessionIds: forgetUnclaimedTerminalSession(
+            state.unclaimedTerminalSessionIds, sessionId) }))
         })
-        set({ warmTerminal: null })
+        set(state => ({ warmTerminals: updateWarmTerminal(state.warmTerminals, warm.key,
+          candidate => candidate.ready === warm.ready && !candidate.explicitOpening, () => null) }))
       }
     }
     try {
@@ -8460,80 +8459,87 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   prewarmTerminal(workspaceId, ownerLauncherId) {
-    const workspace = get().config?.workspaces.find((item) => item.id === workspaceId)
+    const workspace = get().config?.workspaces.find(item => item.id === workspaceId)
     if (!workspace) return
     const key = warmTerminalKey(workspace.hostId, workspace.path)
-    const existing = get().warmTerminal
-    if (existing?.key === key) {
-      // 同 host 同 cwd 的 shell 可以复用，不必再起一个——但**归属要转过来**。分屏里两个 launcher
-      // 的 key 完全一样，若这里直接 return，槽的 owner 就永远停在第一个挂载的那个 launcher 上，而
-      // 后挂载的那个（用户刚点出来、正在看的那个）只能显示冷卡片。转移归属让「最后一个请求预热的
-      // launcher 拥有预览」，同时仍然只有一个 PTY、仍然只有一个 view 挂在上面。
-      if (existing.ownerLauncherId !== ownerLauncherId) {
-        set((state) => (
-          state.warmTerminal === existing
-            ? { warmTerminal: { ...existing, ownerLauncherId } }
-            : {}
-        ))
-      }
+    const existing = warmTerminalForLauncher(get().warmTerminals[key], ownerLauncherId)
+    if (existing) {
+      if (existing.ownerLauncherId !== ownerLauncherId || existing.previewReleased) set(state => ({
+        warmTerminals: updateWarmTerminal(state.warmTerminals, key, candidate => candidate === existing,
+          candidate => {
+            const { previewReleased: _released, ...retained } = candidate
+            return { ...retained, ownerLauncherId }
+          })
+      }))
       return
     }
-    // Changing the visible project is not permission to stop another healthy shell.
-    if (existing) return
     const request: TerminalLaunchInput = {
       hostId: workspace.hostId,
       workspacePath: workspace.path,
       createOperationId: crypto.randomUUID()
     }
     const creation: WarmTerminalCreation = { request, inFlight: true }
-    const ready = api.sessions.launchTerminal(request).catch((error) => {
+    const ready = api.sessions.launchTerminal(request).catch(error => {
       creation.inFlight = false
       creation.issue = sessionLaunchFailure(error)
-      if (get().warmTerminal?.ready === ready) set((state) => ({
-        warmTerminal: state.warmTerminal ? { ...state.warmTerminal } : null
-      }))
+      set(state => ({ warmTerminals: updateWarmTerminal(state.warmTerminals, key,
+        candidate => candidate.ready === ready, candidate => ({ ...candidate })) }))
       return null
     })
-    void ready.then((session) => {
+    void ready.then(session => {
       if (!session) return
       creation.inFlight = false
       delete creation.issue
-      set((state) => ({
-        warmTerminal: state.warmTerminal?.ready === ready
-          ? { ...state.warmTerminal, session }
-          : state.warmTerminal,
+      set(state => ({
+        warmTerminals: updateWarmTerminal(state.warmTerminals, key,
+          candidate => candidate.ready === ready, candidate => ({ ...candidate, session,
+            ...(candidate.previewReleased && !candidate.explicitOpening ? { ownerLauncherId: null } : {}) })),
         unclaimedTerminalSessionIds: trackUnclaimedTerminalSession(state.unclaimedTerminalSessionIds, session.id)
       }))
     })
-    set({ warmTerminal: { key, ownerLauncherId, ready, session: null, creation } })
+    set(state => ({ warmTerminals: { ...state.warmTerminals,
+      [key]: [...state.warmTerminals[key] ?? [], { key, ownerLauncherId, ready, session: null, creation }] } }))
+  },
+  releaseWarmTerminal(workspaceId, ownerLauncherId) {
+    const workspace = get().config?.workspaces.find(item => item.id === workspaceId)
+    if (!workspace) return
+    const key = warmTerminalKey(workspace.hostId, workspace.path)
+    set(state => ({ warmTerminals: updateWarmTerminal(state.warmTerminals, key,
+      candidate => candidate.ownerLauncherId === ownerLauncherId && !candidate.claimToken,
+      candidate => candidate.session
+        ? { ...candidate, ownerLauncherId: null }
+        : { ...candidate, previewReleased: true }) }))
   },
   async retryWarmTerminal(workspaceId, ownerLauncherId, hostRestored = false) {
-    const workspace = get().config?.workspaces.find((item) => item.id === workspaceId)
-    const held = get().warmTerminal
-    if (!workspace || !held || held.key !== warmTerminalKey(workspace.hostId, workspace.path)) return null
+    const workspace = get().config?.workspaces.find(item => item.id === workspaceId)
+    if (!workspace) return null
+    const key = warmTerminalKey(workspace.hostId, workspace.path)
+    const held = warmTerminalForLauncher(get().warmTerminals[key], ownerLauncherId)
+    if (!held) return null
     const creation = held.creation
     if (held.session || !creation?.issue || creation.inFlight) return await held.ready
     if (hostRestored && creation.hostRecoveryAttempted) return null
-    // This operation may already have created a Run. Confirm its original exact request;
-    // replacing the UUID or reconstructing its parameters would be another creation.
+    // Confirm the same original request after an unknown receipt; never replay with a new identity.
     const request = creation.request
     creation.inFlight = true
     creation.hostRecoveryAttempted ||= hostRestored
-    const ready = api.sessions.launchTerminal(request).catch((error) => {
+    const ready = api.sessions.launchTerminal(request).catch(error => {
       creation.inFlight = false
       creation.issue = sessionLaunchFailure(error)
-      if (get().warmTerminal?.ready === ready) set((state) => ({
-        warmTerminal: state.warmTerminal ? { ...state.warmTerminal } : null
-      }))
+      set(state => ({ warmTerminals: updateWarmTerminal(state.warmTerminals, key,
+        candidate => candidate.ready === ready, candidate => ({ ...candidate })) }))
       return null
     })
-    set({ warmTerminal: { ...held, ownerLauncherId, ready } })
+    set(state => ({ warmTerminals: updateWarmTerminal(state.warmTerminals, key,
+      candidate => candidate === held, candidate => ({ ...candidate, ownerLauncherId, ready })) }))
     const session = await ready
     if (session) {
       creation.inFlight = false
       delete creation.issue
-      set((state) => ({
-        warmTerminal: state.warmTerminal?.ready === ready ? { ...state.warmTerminal, session } : state.warmTerminal,
+      set(state => ({
+        warmTerminals: updateWarmTerminal(state.warmTerminals, key,
+          candidate => candidate.ready === ready, candidate => ({ ...candidate, session,
+            ...(candidate.previewReleased && !candidate.explicitOpening ? { ownerLauncherId: null } : {}) })),
         unclaimedTerminalSessionIds: trackUnclaimedTerminalSession(state.unclaimedTerminalSessionIds, session.id)
       }))
     }
@@ -8571,26 +8577,30 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspace.id
       const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
       if (!layout || !groupIds(layout.root).includes(tabGroupId) || !findGroup(layout, tabGroupId) || launcherTab && !findGroup(layout, tabGroupId)!.tabOrder.includes(launcherTab.id)) throw new Error('The exact Terminal display position is unavailable')
-      if (state.warmTerminal?.key !== key || state.warmTerminal.claimToken) {
-        // Cache contention changes only whether this opening reuses a candidate.
+      const ownerLauncherId = warmLauncherId({ tabGroupId, regionId: launcher?.regionId })
+      let held = warmTerminalForLauncher(state.warmTerminals[key], ownerLauncherId) ??
+        state.warmTerminals[key]?.find(candidate => (candidate.ownerLauncherId === null || candidate.previewReleased) && !candidate.claimToken) ?? null
+      if (!held || held.claimToken || held.creation?.issue && !held.explicitOpening) {
+        // Speculative cache failure cannot block a new explicit opening. Check again
+        // keeps the original unknown request; this action has its own creation identity.
         const opening = get().launchTerminal(tabGroupId, launcher)
         if (launcher) flight.pendingSurface = get().tabs[launcher.tabId]?.regions[launcher.regionId]
         await opening
         return
       }
-      let held = state.warmTerminal
       const claimToken = {}
+      const candidateReady = held.ready
       held = { ...held, explicitOpening: true }
-      set({ warmTerminal: { ...held, claimToken } })
+      set(current => ({ warmTerminals: updateWarmTerminal(current.warmTerminals, key,
+        candidate => candidate.ready === candidateReady, candidate => ({ ...candidate, ownerLauncherId, explicitOpening: true, claimToken })) }))
       try {
         if (held.creation?.issue) {
-          const ownerLauncherId = warmLauncherId({ tabGroupId, regionId: launcher?.regionId })
           const confirmed = await get().retryWarmTerminal(workspace.id, ownerLauncherId)
           if (!confirmed) {
-            const issue = get().warmTerminal?.creation?.issue ?? held.creation.issue
+            const issue = get().warmTerminals[key]?.find(candidate => candidate.claimToken === claimToken)?.creation?.issue ?? held.creation.issue
             throw Object.assign(new Error(issue.message), issue)
           }
-          const live = get().warmTerminal
+          const live = get().warmTerminals[key]?.find(candidate => candidate.claimToken === claimToken)
           if (!live || live.key !== key || live.session?.id !== confirmed.id || live.claimToken !== claimToken) return
           held = live
           // A late confirmation belongs to the original Launcher, never a replacement View.
@@ -8664,7 +8674,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           if (launcher) {
             bound = true
             return {
-              warmTerminal: current.warmTerminal?.claimToken === claimToken ? null : current.warmTerminal,
+              warmTerminals: updateWarmTerminal(current.warmTerminals, key,
+                candidate => candidate.claimToken === claimToken, () => null),
               tabs: nextTabs,
               sessions: nextSessions,
               unclaimedTerminalSessionIds: nextUnclaimedIds
@@ -8680,7 +8691,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           }
           bound = true
           return {
-            warmTerminal: current.warmTerminal?.claimToken === claimToken ? null : current.warmTerminal,
+            warmTerminals: updateWarmTerminal(current.warmTerminals, key,
+                candidate => candidate.claimToken === claimToken, () => null),
             tabs: nextTabs,
             layouts: { ...current.layouts, [workspace.id]: nextLayout },
             sessions: nextSessions,
@@ -8696,9 +8708,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         void get().refreshSession(session.id)
       } finally {
         set((current) => {
-          if (current.warmTerminal?.claimToken !== claimToken) return current
-          const { claimToken: _claim, ...retained } = current.warmTerminal
-          return { warmTerminal: retained }
+          return { warmTerminals: updateWarmTerminal(current.warmTerminals, key,
+            candidate => candidate.claimToken === claimToken, candidate => {
+              const { claimToken: _claim, ...retained } = candidate
+              const liveSurface = launcher ? current.tabs[launcher.tabId]?.regions[launcher.regionId] : undefined
+              const presentationGone = launcher
+                ? liveSurface !== launcherSurface && liveSurface !== flight.pendingSurface
+                : !displayWorkspaceId || !current.layouts[displayWorkspaceId] || !findGroup(current.layouts[displayWorkspaceId]!, tabGroupId)
+              return presentationGone
+                ? { ...retained, ownerLauncherId: null } : retained
+            }) }
         })
       }
     }
@@ -10236,11 +10255,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { runtimeEndpointWarnings, sessions: projectRuntimeEndpointSessions(state.sessions, runtimeEndpointWarnings) }
     })
     if (core.type === 'connection-state' && core.state === 'restored') {
-      const warm = get().warmTerminal
-      const request = warm?.creation?.request
-      if (warm?.creation?.issue && request?.hostId === event.hostId) {
-        const workspace = get().config?.workspaces.find(item => item.hostId === request.hostId && item.path === request.workspacePath)
-        if (workspace) void get().retryWarmTerminal(workspace.id, warm.ownerLauncherId, true)
+      for (const candidates of Object.values(get().warmTerminals)) {
+        for (const warm of candidates) {
+          const request = warm.creation?.request
+          if (!warm.creation?.issue || request?.hostId !== event.hostId || warm.ownerLauncherId === null) continue
+          const workspace = get().config?.workspaces.find(item => item.hostId === request.hostId && item.path === request.workspacePath)
+          if (workspace) void get().retryWarmTerminal(workspace.id, warm.ownerLauncherId, true)
+        }
       }
       startSessionMembershipResync(event, { recoverSavedAgents: true, restoredHostId: event.hostId })
       return
