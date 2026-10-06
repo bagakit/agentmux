@@ -246,6 +246,7 @@ for authority. The original public history retains that same attribution.
 ```sh
 amux connection ingress ls --connection application-connection --limit 25
 amux connection ingress inspect --ingress original-ingress
+amux connection ingress authority --operation-id original-input-operation
 ```
 
 These readonly methods use the actual connection owner. Listing is bounded to one
@@ -279,11 +280,23 @@ page cannot starve later retained records. Claimed or unknown input is never
 copied into a second queue or automatically submitted again. Transport service
 facts overlay the original Connection observation, independently of publication.
 
-`createDesktopConnections` can compose this intake owner on its original shared
-database when supplied the original executing Core port. Private authorization
-callbacks belong at that execution owner; ordinary Hosted RPC arguments cannot
-carry them or authenticate external authors. Cross-process composition must keep
-that authority check on the original semantic Host rather than treating a client
-projection as an in-process Core. The integration fixture exercises the actual
-connection composition with a signed HTTP protocol and replay ledger; those test
-leaves do not claim a production webhook listener or platform delivery.
+Desktop composes this intake owner on its original shared database and borrows
+the original Hosted execution transport through `createHostedIngressCorePort`.
+Private authorization callbacks belong at that execution owner; ordinary Hosted
+RPC arguments cannot carry them or authenticate external authors.
+
+The product Node Host injects `AgentExternalInputAuthorityPort` into its existing
+Headless Runtime. Its default local adapter reads `connection.ingress.authority`
+from the protected original Desktop business endpoint. That pure database lookup
+returns the original claim and current Binding/grant observation without reading
+Core receipts, dispatching, or creating another lease or Store. The executing
+adapter compares exact Host, Session, Run, operation, message, body and author with
+Core's actual frozen intent before approving that operation. A `current` response
+alone is not serialized permission. A remote embedding supplies its own original
+authority port; a missing owner retains the original claim and limits only the
+external action, without falling back to local manual input.
+
+The integration fixture starts the actual Node Host and original Desktop
+connection composition with a signed HTTP protocol and replay ledger. Native
+connect and ordered byte I/O are controlled test ports; those leaves do not claim
+a production webhook listener, live native CLI acknowledgement or platform delivery.
