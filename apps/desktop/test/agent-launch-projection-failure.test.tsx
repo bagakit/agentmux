@@ -4,9 +4,11 @@ import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, mkdir, readFile, rm, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
+import '../src/preload/index'
+import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient, AgentMuxError, AgentMuxMemoryAgentSessionStore, AgentProviderRegistry, defineAgentProvider,
@@ -17,7 +19,7 @@ import type { ConfigStore } from '../src/main/config-store'
 import type { WorkspaceFiles } from '../src/main/workspace-files'
 import { AgentHookServer } from '../../../packages/core/src/hook-server'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
-const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
+const bridge = vi.hoisted(() => ({ directory: '', api: null as AgentMuxPreloadApi | null,
   invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>(),
   listeners: new Map<string, Set<(...args: any[]) => void>>() }))
 // Electron transport and unrelated startup services are isolated. The target's Renderer, Store,
@@ -29,22 +31,28 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
   ipcRenderer: { invoke: bridge.invoke, on: (channel: string, listener: (...args: any[]) => void) => {
     const callbacks = bridge.listeners.get(channel) ?? new Set(); callbacks.add(listener); bridge.listeners.set(channel, callbacks)
   }, off: (channel: string, listener: (...args: any[]) => void) => bridge.listeners.get(channel)?.delete(listener), send: vi.fn() },
-  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => _hygiene_fixturePath("private-explicit-steer") },
+  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.directory || _hygiene_fixturePath('isolated-launch'), getAppPath: () => resolve('apps/desktop') },
   ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
+  safeStorage: { isEncryptionAvailable: () => false }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} }
 }))
-vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
+vi.mock('../src/main/connector-host', () => ({ createDesktopConnections: async () => ({ connections: {}, secrets: {}, close() {} }) }))
+vi.mock('@agentmux/core/notebook-store', async importOriginal => {
+  const actual = await importOriginal<typeof import('@agentmux/core/notebook-store')>()
+  return { ...actual, AgentMuxNotesStorage: class extends actual.AgentMuxNotesStorage {
+    constructor() { super(join(dir, 'notes-location.json'), join(dir, 'notes')) }
+  } }
+})
+vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () => [], subscribe: () => () => {} }) }))
 vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
-import '../src/preload/index'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { registerIpc } from '../src/main/ipc'
@@ -53,7 +61,6 @@ import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
-import { TransientErrorNotice } from '../src/renderer/src/components/TransientErrorNotice'
 import { createWorkbenchTab, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 
@@ -71,6 +78,7 @@ const launcherId = 'projection-launcher', regionId = initialWorkbenchRegionId(la
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   dir = await mkdtemp(join(tmpdir(), 'amx-launch-projection-'))
+  bridge.directory = dir
   await mkdir(join(dir, 'home'), { mode: 0o700 })
   vi.stubEnv('CODEX_HOME', join(dir, 'home'))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(dir, 'runtime'))
@@ -78,8 +86,9 @@ beforeEach(async () => {
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(dir, 'messages.ndjson'))
   starts = []; runs = new Map(); writes = []; destroyed = false
   const template = new AgentProviderRegistry().get('codex')
+  const { providerFork: _nativeFork, ...capabilities } = template.catalog.capabilities
   const provider = defineAgentProvider({
-    catalog: { ...template.catalog, id: 'projection-fixture', label: 'Projection fixture',
+    catalog: { ...template.catalog, capabilities, id: 'projection-fixture', label: 'Projection fixture',
       executable: 'projection-fixture', expectedProcess: 'projection-fixture', hookStrategy: { kind: 'none' },
       readySignal: { kind: 'foreground-process', expectedProcess: 'projection-fixture' } },
     hook: { rules: [], eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' } },
@@ -128,10 +137,10 @@ beforeEach(async () => {
   const sender = Object.assign(new EventEmitter(), { id: 9981, isDestroyed: () => destroyed,
     send: vi.fn((channel: string, ...args: any[]) => { for (const listener of bridge.listeners.get(channel) ?? []) listener({}, ...args) }),
     session: { flushStorageData: vi.fn() } })
-  disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
-    configStore: { get: async () => config } as unknown as ConfigStore,
+  disposeIpc = await registerIpc({ initialConfig: config, window: { isDestroyed: () => destroyed, setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
+    configStore: { validate: (next: AppConfig) => next, save: async (next: AppConfig) => (config = next), get: async () => config } as unknown as ConfigStore,
     progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never,
-    scratchTopics: topics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+    scratchTopics: topics, workspaceFiles: { dispose: async () => {}, read: vi.fn(), listFiles: vi.fn(), observe: async () => () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return handler!({ sender } as unknown as IpcMainInvokeEvent, ...values)
@@ -150,7 +159,7 @@ afterEach(async () => {
   const results = await Promise.allSettled([disposeIpc?.(), runtime.dispose()])
   disposeIpc = undefined
   useAppStore.setState(initial, true); bridge.invoke.mockReset(); vi.restoreAllMocks(); vi.unstubAllEnvs()
-  await rm(dir, { recursive: true, force: true })
+  await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
   for (const result of results) if (result.status === 'rejected') failures.push(result.reason)
   expect(failures).toEqual([])
 })
@@ -286,8 +295,7 @@ it('Native persistence refusal is visible through actual creation while the orig
   expect(stop).not.toHaveBeenCalled()
   await api.sessions.write(sibling.session!.control, 'still available', 'user')
   expect(writes).toEqual(['still available'])
-  await act(async () => root.render(<TransientErrorNotice error={state.error} dismissed={state.errorDismissed}
-    lastError={state.lastError} onDismiss={state.dismissError} onReopen={state.reopenError} />))
+  await act(async () => root.render(<GlobalSystemNotices />))
   expect(container.querySelector('[role="status"]')?.getAttribute('aria-live')).toBe('polite')
   expect(container.textContent).toContain(refusal.message)
 })
