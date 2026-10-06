@@ -185,13 +185,11 @@
 .workbench-topology:focus-visible .workbench-topology__inspector,
 .workbench-topology:focus-within .workbench-topology__inspector { display: grid; gap: var(--sp-3); }
 .workbench-topology__inspector-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--sp-3);
+  display: grid;
+  gap: 2px;
   min-width: 0;
-
 }
+.workbench-topology__inspector-head > small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
 .workbench-topology__inspector-head > span { min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-2); }
 .workbench-topology__inspector-head strong { min-width: 0; overflow: hidden; color: var(--text); font-size: var(--fs-meta); text-overflow: ellipsis; white-space: nowrap; }
 .workbench-topology__inspector-head svg { flex: 0 0 auto; color: var(--green-2); }
