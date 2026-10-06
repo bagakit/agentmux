@@ -1,3 +1,4 @@
+import { parseConversationCheckpoint, parseConversationChangesPage } from './conversation-changes.js'
 import { sanitizeInputObservationArguments } from './performance-diagnostics.js'
 import { parseControlEndpointState } from './control-endpoint-state.js'
 import { randomClientRequestId } from './client-request-id.js'
@@ -196,6 +197,16 @@ export async function connectHostedAgentMux(options: {
       if (typeof wireArgs[0] !== 'string' || !decoded || typeof decoded !== 'object' || Array.isArray(decoded))
         throw new AgentMuxError('Invalid recorded resource reply.', 'CONTROL_PROTOCOL_ERROR')
       return parseSessionHistoryResourceReadResult(decoded, wireArgs[0], request)
+    }
+    if (method === 'conversationCheckpoint') {
+      const checkpoint = parseConversationCheckpoint(decoded)
+      if (checkpoint.agentSessionId !== wireArgs[0]) throw new AgentMuxError('Checkpoint belongs to another original Session.', 'CONTROL_PROTOCOL_ERROR')
+      return checkpoint
+    }
+    if (method === 'readConversationChanges') {
+      const request = wireArgs[1] as Parameters<AgentMuxHostedClient['readConversationChanges']>[1]
+      return parseConversationChangesPage(decoded, { hostId: 'local', agentSessionId: wireArgs[0] as string, checkpoint: request.checkpoint,
+        ...(request.limit === undefined ? {} : { limit: request.limit }) })
     }
     if (method === 'readAgentSessionHistory') return parseAgentSessionHistoryReadPage(decoded, wireArgs[0] as AgentSessionHistoryReadInput)
     return decoded
