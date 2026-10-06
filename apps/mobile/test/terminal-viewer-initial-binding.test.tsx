@@ -7,6 +7,7 @@ import type { MobileTerminalReading } from '../src/terminal/reader'
 import { MobileTerminalViewer } from '../src/terminal/MobileTerminalViewer'
 
 const canvases = vi.hoisted(() => [] as Array<{ options: Record<string, unknown>; textarea: HTMLTextAreaElement }>)
+const selectedText = vi.hoisted(() => ({ value: 'Retained terminal selection' }))
 const unicodeRefusal = vi.hoisted(() => ({ active: false }))
 const readings = vi.hoisted(() => [] as Array<(reading: MobileTerminalReading) => void>)
 
@@ -23,6 +24,7 @@ vi.mock('@xterm/xterm', () => ({ Terminal: class {
   parser = { registerOscHandler: () => ({ dispose() {} }) }
   constructor(options: Record<string, unknown>) { this.options = options; canvases.push(this) }
   open(container: HTMLElement) { this.element = container; container.appendChild(this.textarea) }
+  getSelection() { return selectedText.value }
   scrollToLine() {}
   focus() {}
   onUserInput() { return { dispose() {} } }
@@ -38,7 +40,7 @@ const key = 'agentmux-mobile-terminal-intent-v1:initial-original-session'
 const connection = { state: 'connected' as const, message: '原连接' }
 const platform = { copyText: async () => true, overlayContainer: () => document.body } as Parameters<typeof MobileTerminalViewer>[0]['platform']
 const roots: ReturnType<typeof createRoot>[] = []
-beforeEach(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; unicodeRefusal.active = false })
+beforeEach(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; unicodeRefusal.active = false; selectedText.value = 'Retained terminal selection' })
 afterEach(async () => { for (const root of roots.splice(0)) await act(async () => root.unmount()); document.body.innerHTML = ''; localStorage.clear(); canvases.length = 0; readings.length = 0 })
 
 function port() {
@@ -188,4 +190,37 @@ it('keeps the retained terminal and explicit control available when Unicode conf
   expect(canvases[0]).toBe(original); expect(canvases).toHaveLength(1)
   expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
   warn.mockRestore()
+})
+
+it('marks only actual clipboard failure and clears that mark after a confirmed retry without changing the retained terminal', async () => {
+  const p = port(), view = await mount(p.client), original = canvases[0]
+  const clipboard = vi.spyOn(platform, 'copyText').mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+  const details = await openReading(view.node)
+  const copy = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(button => button.textContent === '复制选中文字')!
+  await act(async () => copy.click())
+  expect(view.node.querySelector('[aria-label="终端阅读与状态"]')?.getAttribute('data-notice')).toBe('true')
+  expect(details.textContent).toContain('复制未完成')
+  await act(async () => copy.click())
+  expect(details.textContent).toContain('选中文字已复制')
+  expect(view.node.querySelector('[aria-label="终端阅读与状态"]')?.getAttribute('data-notice')).toBe('false')
+  expect(view.node.querySelector('.mobile-terminal-notice')).toBeNull()
+  expect(clipboard.mock.calls.map(call => call[0])).toEqual([selectedText.value, selectedText.value])
+  expect(canvases[0]).toBe(original); expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
+})
+
+it('keeps original observation issues after successful copy and treats an empty selection as local guidance', async () => {
+  const p = port(), view = await mount(p.client)
+  const clipboard = vi.spyOn(platform, 'copyText').mockResolvedValue(true)
+  await act(async () => readings.at(-1)!({ phase: 'reading', message: '原输出可继续读', historyBoundary: null, notice: '原输出核实未完成' }))
+  const details = await openReading(view.node)
+  const copy = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(button => button.textContent === '复制选中文字')!
+  await act(async () => copy.click())
+  expect(details.textContent).toContain('选中文字已复制')
+  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toBe('原输出核实未完成')
+  await act(async () => readings.at(-1)!({ phase: 'reading', message: '已核实原输出', historyBoundary: null, notice: null }))
+  selectedText.value = ''
+  await act(async () => copy.click())
+  expect(details.textContent).toContain('请先选中需要复制的终端文字')
+  expect(view.node.querySelector('.mobile-terminal-notice')).toBeNull()
+  expect(clipboard).toHaveBeenCalledTimes(1); expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
 })
