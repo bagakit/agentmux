@@ -217,7 +217,7 @@ export function AttentionRequestPanel({
     })
   }
 
-  async function respond(response: AgentMuxInteractionResponse): Promise<void> {
+  async function respond(response: AgentMuxInteractionResponse, intent: import('@agentmux/core').AgentMuxInteractionOperationIntent): Promise<void | import('@agentmux/core').AgentMuxInteractionOperationReceipt> {
     if (!session || session.kind !== 'agent' || !request || submitted) return
     const claim = { hostId: session.hostId, requestId: request.id, runId: interactionRunId(session, request) }
     submittedRef.current = claim
@@ -225,7 +225,7 @@ export function AttentionRequestPanel({
     setActionError(null)
     setCaughtUp(false)
     try {
-      await respondInteraction(activeSessionId, response)
+      return await respondInteraction(activeSessionId, response, intent)
     } catch (error) {
       if (submittedRef.current !== claim) return
       // A replacement can arrive at the same time as a rejected old response. Read the latest
@@ -315,6 +315,7 @@ export function AttentionRequestPanel({
         selectSession(session.id)
       }}
       disabled={session.processState !== 'running' || session.status.state === 'disconnected' || submitting}
+      onInspect={operationId => useAppStore.getState().inspectInteraction(activeSessionId, operationId)}
       onRespond={respond}
     />
   ) : null

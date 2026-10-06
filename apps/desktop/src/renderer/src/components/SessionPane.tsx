@@ -1070,7 +1070,8 @@ export function SessionPane({
             // same terms as the composer below it — otherwise a dead Run still shows live buttons and
             // answering it fails on a Run that can no longer accept input.
             disabled={!visible || session.processState !== 'running' || session.status.state === 'disconnected' || Boolean(session.pendingInteraction.evidence.run && session.pendingInteraction.evidence.run.runId !== session.control.run.runId)}
-            onRespond={async (response) => await respondInteraction(session.id, response)}
+            onInspect={async operationId => await useAppStore.getState().inspectInteraction(session.id, operationId)}
+            onRespond={async (response, intent) => await respondInteraction(session.id, response, intent)}
           />
           </div>
           ) : null}

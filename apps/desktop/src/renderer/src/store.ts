@@ -1211,7 +1211,8 @@ type AppState = {
   cancelAgentSteerPreparation(sessionId: string, operationId: string): Promise<boolean>
   flushAgentSteerQueue(sessionId: string, explicitOperationId?: string): Promise<void>
   send(sessionId: string, text: string, onRejected?: (error: unknown) => void, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
-  respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
+  inspectInteraction(sessionId: string, operationId: string): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt | null>
+  respondInteraction(sessionId: string, response: AgentMuxInteractionResponse, intent: import('@agentmux/core').AgentMuxInteractionOperationIntent): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt>
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
   refreshSession(sessionId: string): Promise<SessionSnapshot | undefined>
@@ -9797,13 +9798,25 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     void get().sendQueuedAgentSteer(sessionId, operationId).catch(error => (onRejected ?? get().reportError)(error))
     return true
   },
-  async respondInteraction(sessionId, response) {
+  async inspectInteraction(sessionId, operationId) {
+    const session = get().sessions.find(item => item.id === sessionId)
+    if (!session || session.kind !== 'agent') throw new Error('The original Agent Session is unavailable.')
+    return await api.sessions.inspectInteraction(session.control, operationId)
+  },
+  async respondInteraction(sessionId, response, intent) {
     const session = get().sessions.find((item) => item.id === sessionId)
-    if (!session || session.kind !== 'agent') return
+    if (!session || session.kind !== 'agent') throw new Error('The original Agent Session is unavailable.')
     // Each mounted answer surface owns its local failure. A rejected answer is not a new
     // window-level Agent error, and a late result must not paint onto another request.
-    await api.sessions.respondInteraction(session.control, response)
+    let receipt: import('@agentmux/core').AgentMuxInteractionOperationReceipt
+    try { receipt = await api.sessions.respondInteraction(session.control, response, intent) }
+    catch (error) {
+      const original = await api.sessions.inspectInteraction(session.control, intent.operationId).catch(() => null)
+      if (!original || original.delivery === 'saved') throw error
+      receipt = original
+    }
     await get().flushAgentSteerQueue(sessionId)
+    return receipt
   },
   async setPosture(sessionId, modeId) {
     // A fire-and-forget SET: Core resolves the Provider's declared keystroke and writes it in-band. We

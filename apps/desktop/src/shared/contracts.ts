@@ -1852,8 +1852,10 @@ export type AgentMuxDesktopApi = {
     rejoinInputWaiting(session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef): Promise<import('@agentmux/core').AgentInputSubmissionReceipt>
     respondInteraction(
       session: AgentSessionControl,
-      response: AgentMuxInteractionResponse
-    ): Promise<void>
+      response: AgentMuxInteractionResponse,
+      intent: import('@agentmux/core').AgentMuxInteractionOperationIntent
+    ): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt>
+    inspectInteraction(session: AgentSessionControl, operationId: string): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt | null>
     // Set the Agent's live security posture in-band. The renderer sends the picked mode id; Core resolves
     // the Provider's declared keystroke and writes it over the PTY-input transport (bytes never cross IPC).
     setPosture(session: AgentSessionControl, modeId: string): Promise<void>

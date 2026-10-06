@@ -498,7 +498,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const responseDisabled = !available || request?.agentSessionId !== session?.agentSessionId
     || requestRun?.runId !== session?.run.runId || Boolean(responseUnavailableReason)
     || responseAttempt?.phase === 'unknown' || responseAttempt?.phase === 'sending' || responseAttempt?.phase === 'confirmed'
-  async function respond(response: AgentMuxInteractionResponse): Promise<void> {
+  async function respond(response: AgentMuxInteractionResponse, intent: import('@agentmux/core').AgentMuxInteractionOperationIntent): Promise<void | import('@agentmux/core').AgentMuxInteractionOperationReceipt> {
     if (!client || !session || !request || !requestRun || !requestKey || responseDisabled) return
     const previous = responses.current.get(requestKey)
     if (previous?.phase === 'sending' || previous?.phase === 'unknown' || previous?.phase === 'confirmed') return
@@ -509,9 +509,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     redraw(value => value + 1)
     try {
       if (!retained || responses.current.get(originalKey) !== original) throw new Error('另一页面已保全这个请求的答复；本次未重复回答。')
-      await client.respondAgentInteraction({ agentSessionId: session.agentSessionId, expectedRun: requestRun, response })
+      const receipt = await client.respondAgentInteraction({ agentSessionId: session.agentSessionId, expectedRun: requestRun, response, ...intent })
       if (!mounted.current) return
-      original.phase = 'confirmed'; original.message = 'Core 已确认答复，等待原请求更新。'
+      original.phase = receipt.delivery === 'unknown' ? 'unknown' : 'confirmed'; original.message = receipt.delivery === 'unknown' ? '答复回执未知；请查询原操作。' : 'Core 已确认答复，等待原请求更新。'
+      return receipt
     } catch (error) {
       if (!mounted.current) throw error
       original.phase = deliveryOutcome(error, 'interaction')
