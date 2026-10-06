@@ -1,9 +1,15 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Bot, NotebookPen } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { AgentMuxZoneFact } from '@agentmux/core/control'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { currentDisplayNameRevision } from '../store'
+
+const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
+const ThemeActionConfirmIcon = semanticIconComponent('action.confirm')
+const ThemeActionEditNoteIcon = semanticIconComponent('action.edit-note')
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+
 
 /** Both navigation and shortcuts address this row’s original Zone. */
 export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing = false, onRename, onEdit, onSelect, onNewNote, onNewAgent, onContextMenu }: {
@@ -42,12 +48,12 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
     {editing ? <form className="survey-item-name" onSubmit={async event => { event.preventDefault(); if (saving.current) return; saving.current = true; const generation = editGeneration.current, baseline = revision.current; try { if (await onRename?.(draft, baseline.revision) && revision.current === baseline) { ++baseline.revision; if (generation === editGeneration.current) { ++editGeneration.current; onEdit?.(false) } } } finally { saving.current = false } }}>
       <TextInput autoFocus aria-label="Exploration name" value={draft} placeholder="Name this exploration" onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onFocus={event => event.target.select()}
         onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); ++editGeneration.current; onEdit?.(false) } }} />
-      <button type="submit" aria-label="Save exploration name">✓</button>
-      <button type="button" aria-label="Cancel rename" onClick={() => { ++editGeneration.current; onEdit?.(false) }}>×</button>
+      <button type="submit" aria-label="Save exploration name"><ThemeActionConfirmIcon size={12} /></button>
+      <button type="button" aria-label="Cancel rename" onClick={() => { ++editGeneration.current; onEdit?.(false) }}><ThemeActionCancelIcon size={12} /></button>
     </form> : onContextMenu ? <ContextMenu.Trigger asChild onContextMenu={event => { event.currentTarget.focus(); onContextMenu(event.currentTarget) }}>{item}</ContextMenu.Trigger> : item}
     {!editing ? <div className="survey-item-shortcuts" aria-label={`Create from ${title}`}>
-      {onNewNote ? <button type="button" aria-label={`New note in Recall from ${title}`} title="New note in Recall" onClick={() => onNewNote(zone.zoneId)}><NotebookPen size={14} /></button> : null}
-      {onNewAgent ? <button type="button" aria-label={`New agent in ${title}`} title="New agent" onClick={() => onNewAgent(zone.zoneId)}><Bot size={14} /></button> : null}
+      {onNewNote ? <button type="button" aria-label={`New note in Recall from ${title}`} title="New note in Recall" onClick={() => onNewNote(zone.zoneId)}><ThemeActionEditNoteIcon size={14} /></button> : null}
+      {onNewAgent ? <button type="button" aria-label={`New agent in ${title}`} title="New agent" onClick={() => onNewAgent(zone.zoneId)}><ThemeObjectAgentIcon size={14} /></button> : null}
     </div> : null}
   </div>
 }

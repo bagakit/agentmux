@@ -92,7 +92,7 @@
 .launch-refine__count[data-tier='danger'] { color: var(--red-text); background: var(--red-bg); }
 .launch-refine__count[data-tier='caution'] { color: var(--amber-text); background: var(--amber-bg); }
 .launch-refine__count[data-unconfirmed='true'] { display: inline-flex; }
-.launch-refine__named { width: 4px; height: 4px; border-radius: 50%; background: var(--text-2); }
+.launch-refine__named { width: 4px; height: 4px; color: var(--text-2); }
 .launch-refine__panel { position: fixed; z-index: var(--layer-popover); width: min(400px, calc(100vw - 24px)); max-height: min(480px, calc(100vh - 32px)); overflow: auto; padding: var(--sp-5); border: 1px solid var(--line); border-radius: var(--radius-lg); color: var(--text); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); outline: none; container-type: inline-size; container-name: launch-options; }
 .launch-refine__panel > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .launch-refine__panel h2 { margin: 0; font-size: var(--fs-title); font-weight: 600; }
