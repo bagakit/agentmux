@@ -71,12 +71,12 @@ describe('wrapBracketedPasteText：包装不等于转义', () => {
   })
 })
 
-describe('buildPromptInputPayload：两条分支都消毒（本函数的不变量）', () => {
-  it('单行不包 bracket——对端没开 bracketed paste 时那两个序列会原样显示出来', () => {
-    expect(buildPromptInputPayload('one line')).toBe('one line')
+describe('buildPromptInputPayload：按 paste 协议编码并消毒正文', () => {
+  it('单行也按 paste 编码，不冒充快速键入', () => {
+    expect(buildPromptInputPayload('one line')).toBe(wrapBracketedPasteText('one line'))
   })
 
-  it('多行才包 bracket（避免中途被当成回车提交）', () => {
+  it('多行内容保持完整 paste frame', () => {
     expect(buildPromptInputPayload('a\nb')).toBe(wrapBracketedPasteText('a\nb'))
   })
 
@@ -85,10 +85,9 @@ describe('buildPromptInputPayload：两条分支都消毒（本函数的不变�
     expect(buildPromptInputPayload('a\nb').startsWith(BRACKETED_PASTE_START)).toBe(true)
   })
 
-  it('单行分支同样消毒——不变量是「无论走哪条分支，ESC 都不以原字节到达 PTY」', () => {
-    // 这条独立于多行那条：把单行分支从 sanitize 改成直接返回 prompt，只有它会红。
-    const single = buildPromptInputPayload(`${ESC}[31m`)
-    expect(single.includes(ESC), '单行分支漏了消毒').toBe(false)
+  it('单行正文中的控制字节也不会闭合 paste frame', () => {
+    const single = buildPromptInputPayload(`${ESC}[31m`).slice(BRACKETED_PASTE_START.length, -BRACKETED_PASTE_END.length)
+    expect(single.includes(ESC), '单行正文漏了消毒').toBe(false)
     expect(single).toBe(`${VISIBLE_ESC}[31m`)
   })
 
