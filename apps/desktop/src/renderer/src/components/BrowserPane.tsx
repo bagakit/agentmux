@@ -29,6 +29,7 @@ import {
   type BrowserAnnotation
 } from '../lib/browser-annotations'
 import { composeScreenshot } from './browser-screenshot/compose'
+import { formatScreenshotContext } from './browser-screenshot/context'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { BrowserOperationHistory, BrowserOperationStatus, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
 import { BrowserStartPage } from './BrowserStartPage'
@@ -329,6 +330,8 @@ function BrowserPaneContent({
   }
   const [screenshot, setScreenshot] = useState<BrowserScreenshotCapture | null>(null)
   const [screenshotBusy, setScreenshotBusy] = useState(false)
+  const [screenshotCopied, setScreenshotCopied] = useState<string | null>(null)
+  const screenshotEdited = useCallback(() => setScreenshotCopied(null), [])
   const [elementSelection, setElementSelection] = useState<BrowserElementSelection | null>(null)
   const [selectionBusy, setSelectionBusy] = useState(false)
   // 「记住」的勾选是**这一问的草稿**，不是已保存的状态——真正记住发生在主进程，由回答那一次带过去。
@@ -573,6 +576,7 @@ function BrowserPaneContent({
   async function beginScreenshot(): Promise<void> {
     if (elementSelection || selectionBusy || screenshot || screenshotBusy || busy || tab.url === 'about:blank') return
     const token = ++screenshotToken.current
+    setScreenshotCopied(null)
     setScreenshotBusy(true)
     try {
       const captured = await api.browser.captureScreenshot(tab.browserId)
@@ -641,25 +645,29 @@ function BrowserPaneContent({
     screenshotToken.current += 1
     setScreenshotBusy(false)
     setScreenshot(null)
+    setScreenshotCopied(null)
   }
 
-  async function copyScreenshot(input: ScreenshotCompleteInput): Promise<void> {
+  async function copyScreenshot(input: ScreenshotCompleteInput, kind: 'png' | 'context' = 'png'): Promise<void> {
     const captured = screenshot
     if (!captured || screenshotBusy) return
     const token = screenshotToken.current
     setScreenshotBusy(true)
+    setScreenshotCopied(null)
     try {
       const image = await composeScreenshot({
         image: input.image,
         displayWidth: input.displayWidth,
         displayHeight: input.displayHeight,
-        outputScale: window.devicePixelRatio || 1,
-        shapes: input.shapes
+        outputScale: 1,
+        shapes: input.shapes,
+        crop: input.crop
       })
       if (screenshotToken.current !== token) return
-      await api.ui.writeClipboardImage(image)
+      if (kind === 'png') await api.ui.writeClipboardImage(image)
+      else if (!await copyTextToClipboard(formatScreenshotContext(captured, input, image), error => { if (screenshotToken.current === token) reportError(error) })) return
       if (screenshotToken.current !== token) return
-      setScreenshot(null)
+      setScreenshotCopied(kind === 'png' ? 'PNG copied' : 'Context copied')
     } catch (error) {
       if (screenshotToken.current === token) reportError(error)
     } finally {
@@ -926,12 +934,17 @@ function BrowserPaneContent({
           {restoreError ? <button className="small-button" type="button" disabled={released || restoring}
             onClick={retryConnection}>Retry connection</button> : null}
         </div> : screenshot ? (
-          visible && !released && !restoring ?
+          !released && !restoring ?
           <ScreenshotEditor
             image={screenshot.image}
+            active={visible}
             busy={screenshotBusy}
+            copied={screenshotCopied}
             onCancel={cancelScreenshot}
             onComplete={(input) => void copyScreenshot(input)}
+            onCopyContext={(input) => void copyScreenshot(input, 'context')}
+            onEdited={screenshotEdited}
+            onError={reportError}
           /> : null
         ) : elementSelection ? (
           <section className="browser-selection-result" aria-label="Selected element context">
