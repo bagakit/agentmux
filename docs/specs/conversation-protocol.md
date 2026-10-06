@@ -46,8 +46,16 @@ The original Desktop Mailbox consumes Core input projection and `conversationIte
 
 Inbox, original user Outbox, System notices and the original A2A journal retain [their existing owners and reading behavior](../design/behavior/conversation-input.md#统一对话阅读与简明操作). Saved or dispatched input receipts, recorded native input and local read markers remain independent facts. The original `message.pending.*` and `agent.history` paths continue to expose the same queue and history; connector publication Outbox is a separate owner and is not inserted into user Pending.
 
+## External input attribution and admission
+
+An external author is a structured Core fact with its original application, actor ID type, conversation, platform message and binding/grant references. The original envelope, input journal, captured record and user-message projection preserve it. The Desktop reader presents this source separately from a local human or Agent. Visible headers are reading aids and never authorize an input.
+
+The optional executing-Host [durable intake owner](../../packages/connectors/README.md#durable-external-intake) authenticates through its registered adapter, saves the complete event before ACK, and freezes the original Host, Session, Core Run and operation/message IDs before a possible Core call. Core accepts external attribution only with the live in-process Host author context. That owner compares the actual input with its original claim and checks current authorization at possible admission and explicit rejoin; a persisted grant snapshot cannot supply that authority.
+
+`connection.ingress.ls` and `connection.ingress.inspect` expose bounded original intake facts and the original Core receipt without submitting. An absent receipt or unavailable read keeps a claimed operation unknown. Further dispatch and restart do not replace its IDs, target or body. Existing `agent.history` and input inspection retain their original owners; `agent.send` does not accept caller-supplied external authorship. No second Agent queue, observation or Runtime is introduced.
+
 ## State, change and delivery
 
 A successful read proves what was observed in its stated range. It does not prove that a message was delivered, an input was adopted or a task completed. UI snapshots and observation cursors are not durable publishing checkpoints. External delivery must retain its own operation identity and confirmed platform mapping, and reconcile unknown effects through the original operation.
 
-The source model and protected behavior are defined by [the conversation contract](../design/behavior/conversation-input.md#共同对话协议与外部交流入口). This page documents implemented reading, observation, catch-up and asynchronous question composition; connector capabilities are described as their owning implementations land.
+The source model and protected behavior are defined by [the conversation contract](../design/behavior/conversation-input.md#共同对话协议与外部交流入口). This page documents implemented reading, observation, catch-up, asynchronous questions and external input admission; connector capabilities are described as their owning implementations land.

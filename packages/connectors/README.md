@@ -188,3 +188,67 @@ A low-level `PublicationAdapter` prepares a bounded request synchronously inside
 Every dispatch attempt has a private durable receipt correlation under the same operation and platform key. A late outcome updates its original attempt rather than certifying a later retry. An authoritative non-application permits an explicit same-ID retry; an unknown effect is inspected without replay, a new key or group-level fallback. Each Binding has an independent read/effect lane, so a slow or unknown effect does not occupy another Binding or the original Core input lane.
 
 Public `connection.delivery.inspect` and bounded `connection.delivery.ls` expose the original safe receipt and exact source reference, excluding body, prepared wire and credentials. The scoped list can report a source gap before any effect exists. Source replacement retains its old frontier for explicit relinking; storage or authority uncertainty retains the original work and reports the failed service step. Closing this publication owner releases only its readers and external-effect observation, preserving original Agents and durable operations.
+
+## Durable external intake
+
+`DurableIngressHost` borrows the original connection database, binding read port
+and exact executing Host client. A Host registers an `IngressAuthenticator` for
+each adapter. That private port verifies the original transport proof and issuer,
+then supplies normalized actor, event, message, body and addressing facts. No
+public caller can declare itself authenticated or turn a body header into an
+external author. Platform adapters own verification; this package does not claim
+that registering configuration has authenticated an event.
+
+```ts
+import { DurableIngressHost } from '@agentmux/connectors'
+
+const ingress = new DurableIngressHost({ connections, bindings, authenticators, core: originalCoreForHost })
+connections.ingress = ingress
+const received = await ingress.receive({ connectionId, raw }, acknowledgeTransport)
+await ingress.dispatch(received.ingress.ingressId)
+```
+
+`receive` commits the complete raw event and normalized business facts before
+calling the transport ACK. Event and message identities each include issuer
+domain and App ID, so local aliases share application identities while unrelated
+applications do not collide. Another verified transport attempt may carry new
+metadata; the original complete event remains retained. A new event for the same
+message reuses the original intake only for the same body, actor, conversation
+and addressing facts. The same body in two distinct messages remains two inputs.
+Authentication or storage failure does not ACK; a lost ACK is reconciled by the
+same original event identity.
+
+`dispatch` authorizes the current exact binding and actor grant. Before any
+possible Core input call, it saves a claim with the original Host, Session, Core
+Run and stable operation/message IDs. Core receives structured external authorship
+through its existing message envelope and input journal. The in-process Host
+callback compares Core's actual frozen input with the original claim, then reads
+current binding and grant revisions before possible admission or explicit rejoin.
+Stored attribution is not a grant, and external actors are not local humans,
+devices or Agent authors. Region position never routes this input.
+
+A claimed intake means that a Core call may have happened. Further dispatch calls
+and restart inspect that original operation; an absent receipt does not authorize
+replay, retargeting or a new ID. `rejoin` is an explicit Host action only for a
+positively saved original Core wait, using current authority. It does not replay
+an unknown effect. Later independent platform messages can use the same Session's
+current Run. Refusing one actor or conversation does not stop the original Agent
+or remove ordinary local input.
+
+The original message and input queues remain the only Agent delivery owners.
+Intake records are transport facts, independent of connector publication Outbox,
+user Pending, local read markers and native adoption. The original Desktop reader
+shows the structured external actor and source without parsing the visible wrapper
+for authority. The original public history retains that same attribution.
+
+```sh
+amux connection ingress ls --connection application-connection --limit 25
+amux connection ingress inspect --ingress original-ingress
+```
+
+These readonly methods use the actual connection owner. Listing is bounded to one
+exact connection, with optional binding and original-intake continuation. Details
+retain business body, actor, safe refusal code and original input references;
+inspection reads the original Core receipt without dispatch. Raw payloads and
+transport proofs remain private to the Host. An unavailable optional intake owner
+limits these reads only; the original connection and Agents remain available.
