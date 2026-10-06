@@ -1,3 +1,4 @@
+import { GOAL_DELEGATION_METHODS, type GoalDelegationParamsMap, type GoalDelegationResultMap } from './goal-delegation.js'
 import { AGENTMUX_RPC_MOTE_AVATAR_WRITE_METHODS, type MoteAvatarParameterMap, type MoteAvatarResultMap, type MoteAvatarMethod } from './mote-avatar-write.js'
 import { AGENTMUX_RPC_MOTE_AVATAR_METHODS } from './mote-avatar-series.js'
 import { AGENTMUX_RPC_TOPIC_METHODS } from './public-rpc-topics.js'
@@ -178,7 +179,7 @@ export type AgentMuxRpcOutputInitial = {
   session: ReturnType<AgentMuxClient['agentSession']>
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
-type NativeParams = MoteAvatarParameterMap & TopicParameterMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+type NativeParams = GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
   'settings.appearance.watch': Record<string, never>
   'notebook.ls': Record<string, never>
   'notebook.inspect': { notebookId?: string; noteId?: string; operationId?: string }
@@ -230,7 +231,7 @@ type NativeParams = MoteAvatarParameterMap & TopicParameterMap & HostSettingsPar
   'system.endpoint': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
 }
-type NativeResult = MoteAvatarResultMap & TopicResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & ScheduleResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+type NativeResult = GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & ScheduleResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
   'settings.appearance.watch': never
   'notebook.ls': { state: import('./notebook-catalog.js').NotebookState }
   'notebook.inspect': { state: import('./notebook-catalog.js').NotebookState; notebook: import('./notebook-catalog.js').Notebook | null; pages: import('./notebook-catalog.js').NotebookPage[]; trail: import('./notebook-catalog.js').NoteTrailEvent[]; recordedOperation: import('./notebook-catalog.js').NotebookState['operations'][string] | null; storageOperation?: import('./notes-storage.js').NotesStorageOperation | null }
@@ -300,6 +301,7 @@ export type AgentMuxRpcSpacePresentation = {
 }
 
 export const AGENTMUX_RPC_NATIVE_METHODS = {
+  ...GOAL_DELEGATION_METHODS,
   ...AGENTMUX_RPC_MOTE_AVATAR_METHODS,
   ...AGENTMUX_RPC_MOTE_AVATAR_WRITE_METHODS,
   ...AGENTMUX_RPC_TOPIC_METHODS,

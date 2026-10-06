@@ -1418,6 +1418,7 @@ function demandRecordFromFilesystem(demand: FilesystemDemand, retained?: DemandR
     parentDemandId: demand.parentDemandId,
     phaseIndex: demand.phaseIndex,
     activityLog: demand.activities.map((activity) => `${activity.kind}: ${activity.message}`),
+    delegations: [...(demand.delegations ?? [])],
     dispatches: [...(demand.dispatches ?? [])],
     activities: demand.activities,
     decisions: demand.decisions,

@@ -1,3 +1,4 @@
+import { isGoalDelegationMethod, parseGoalDelegationParams, parseGoalDelegationResult } from './goal-delegation.js'
 import { isMoteAvatarWriteMethod, parseMoteAvatarWriteParams, parseMoteAvatarWriteResult } from './mote-avatar-write.js'
 import { isMoteAvatarSeriesMethod, parseMoteAvatarSeriesParams, parseMoteAvatarSeriesResult } from './mote-avatar-series.js'
 import { parseDiagnosticEvidenceResult } from './diagnostic-evidence-codec.js'
@@ -242,6 +243,7 @@ function activity(value: unknown): void {
 export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, params: unknown,
   credentials?: AgentMuxRpcCredentials): Record<string, unknown> {
   try {
+    if (isGoalDelegationMethod(method)) return parseGoalDelegationResult(value, parseGoalDelegationParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteAvatarWriteMethod(method)) return parseMoteAvatarWriteResult(method, value, parseMoteAvatarWriteParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteAvatarSeriesMethod(method)) return parseMoteAvatarSeriesResult(method, value, parseMoteAvatarSeriesParams(method, params)) as unknown as Record<string, unknown>
     if (isGitMethod(method)) return parseGitResult(method, value, parseGitParams(method, params)) as unknown as Record<string, unknown>

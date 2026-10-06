@@ -1,3 +1,4 @@
+import { isGoalDelegationMethod, parseGoalDelegationParams, parseGoalDelegationResult, type GoalDelegationsOwner } from './goal-delegation.js'
 import { isMoteAvatarWriteMethod, parseMoteAvatarWriteParams, parseMoteAvatarWriteResult, type AgentMuxRpcMoteAvatarsOwner, type MoteAvatarWriteMethod } from './mote-avatar-write.js'
 import { parseAppearanceObservation, type AgentMuxAppearanceObservationPort } from './public-rpc-settings-observation.js'
 import { isMoteAvatarSeriesMethod, parseMoteAvatarSeriesParams, parseMoteAvatarSeriesResult, type MoteAvatarSeriesMethod } from './mote-avatar-series.js'
@@ -74,6 +75,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   }
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
+  goalDelegations?: GoalDelegationsOwner
   moteContext?: import('./diagnostic-evidence.js').AgentMuxMoteContextEvidencePort
   deliveryAttempts?: { hostId: string; store: DeliveryAttemptStore }
   /** Original semantic owner identity; never ctxmux identity or a route alias. */
@@ -128,6 +130,7 @@ export type AgentMuxRpcServiceSubscription<M extends AgentMuxRpcStreamMethod = A
   initial: AgentMuxRpcStreamInitial<M>; start?(): void | Promise<void>; dispose(): void | Promise<void>
 }
 const NATIVE_FIELDS = {
+  'goal.delegation.prepare': ['goalId', 'intent', 'materials'], 'goal.delegations': ['goalId'],
   'settings.appearance.watch': [],
   'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId'], 'notebook.apply': ['expectedRevision','operationId','change'],
   'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval','removedProjectGroupIds'],
@@ -431,6 +434,20 @@ export class AgentMuxRpcService {
       }
     }
     const caller = await this.authenticated(context)
+    if (isGoalDelegationMethod(method)) {
+      const input = parseGoalDelegationParams(method, params)
+      if (!this.ports.goalDelegations) {
+        if (this.ports.forwardControl) return await this.ports.forwardControl(method, input as AgentMuxRpcParams<M>, context) as AgentMuxRpcResult<M>
+        throw new AgentMuxError('The original Goal delegation owner is unavailable. Original work and message identities remain available.', 'CONTROL_UNAVAILABLE')
+      }
+      const actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId }
+        : context.principal && ['user', 'device'].includes(context.principal.kind) ? context.principal : null
+      if (!actor) throw new AgentMuxError('Goal delegation requires its authenticated Agent, person or device.', 'CONTROL_PERMISSION_DENIED')
+      return parseGoalDelegationResult(await this.ports.goalDelegations.call(method, input, context,
+        { actor: actor as { kind: 'agent' | 'user' | 'device'; id: string },
+          ...(caller ? { hostId: caller.hostId, runId: caller.session.run.runId } : {}) }), input) as AgentMuxRpcResult<M>
+    }
+
     if (isGitMethod(method)) {
       const input = parseGitParams(method, params)
       context.signal?.throwIfAborted()

@@ -1,3 +1,4 @@
+import { GoalDelegationOwner } from './goal-delegation-owner.js'
 import { observeTerminalBrightness, terminalPaletteChanged, terminalPaletteForAppearance } from './terminal-theme.js'
 import { exportThemeFile, writeThemeFile } from './theme-file-export.js'
 import { themeObservation } from './theme-observation.js'
@@ -1855,6 +1856,7 @@ export async function registerIpc(args: {
 
     schedules: args.progressLoops,
     notebookStore,
+    goalDelegations: new GoalDelegationOwner(demands, args.runtime, input => publicFiles.read(input)),
     coreClients: () => args.runtime.rpcClients(),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
     nativeAgentSessions: params => args.runtime.nativeAgentSessions({ hostId: params.hostId, executorId: params.executorId,

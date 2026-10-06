@@ -213,6 +213,10 @@
     "./mote-avatar-write": {
       "types": "./dist/mote-avatar-write.d.ts",
       "import": "./dist/mote-avatar-write.js"
+    },
+    "./goal-delegation": {
+      "types": "./dist/goal-delegation.d.ts",
+      "import": "./dist/goal-delegation.js"
     }
   },
   "bin": {
