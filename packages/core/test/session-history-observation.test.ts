@@ -150,7 +150,7 @@ it('live observations do not consume the four Provider page-read slots', async (
   expect(handles).toHaveLength(5)
   expect((await fixture.client.sessionHistoryPage('private-agent', { limit: 30 })).items.map(item => item.id)).toEqual(['initial'])
   for (const handle of handles) handle.dispose()
-  expect(watched.closes.map(close => close.mock.calls.length)).toEqual([1, 1, 1, 1, 1])
+  expect(watched.closes.map(close => close.mock.calls.length)).toEqual([1])
 })
 
 it('ordinary Session updatedAt does not change a watch; a precise native binding change releases it', async () => {
@@ -183,7 +183,7 @@ for (const provider of ['claude', 'pi'] as const) for (const count of [1, 16]) {
     const handles = []
     for (let n = 0; n < count; n++) handles.push(await fixture.client.observeSessionHistory('private-agent', events))
     expect(handles).toHaveLength(count)
-    expect(watched.closes).toHaveLength(count)
+    expect(watched.closes).toHaveLength(1)
     dispatch.mockClear()
     const publisher = (fixture.client as unknown as { publisher: AgentMuxClientEventPublisher }).publisher
     publisher.publishRunEvent({ type: 'data', runId: 'unrelated-run', startByte: 0, endByte: 4,
@@ -195,7 +195,7 @@ for (const provider of ['claude', 'pi'] as const) for (const count of [1, 16]) {
     expect(events).toHaveBeenCalledTimes(count)
     expect(events.mock.calls.every(([event]) => event.code === 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')).toBe(true)
     for (const handle of handles) handle.dispose()
-    expect(watched.closes.map(close => close.mock.calls.length)).toEqual(Array(count).fill(1))
+    expect(watched.closes.map(close => close.mock.calls.length)).toEqual([1])
   })
 }
 

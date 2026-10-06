@@ -70,9 +70,13 @@ it('keeps the exact watch after a bounded revision read fails and recovers on th
   cleanup.push(async () => handle.dispose()); await settle()
   fail = true; f.commit('second')
   await expect.poll(() => f.events.some(e => e.kind === 'unavailable')).toBe(true)
+  expect(handle.closed?.aborted).toBe(false)
   f.commit('third')
   await new Promise(resolve => setTimeout(resolve, 100))
   expect(f.events.some(e => e.kind === 'invalidated')).toBe(true)
+  expect(handle.closed?.aborted).toBe(false)
+  handle.dispose()
+  expect(handle.closed?.aborted).toBe(true)
 })
 
 it('confirms a native revision changed between the initial read and installing the exact file watch', async () => {

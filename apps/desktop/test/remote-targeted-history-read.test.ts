@@ -66,6 +66,21 @@ it('Main reads only the requested remote SID with 1/16 unrelated active/retired/
   }
   expect(counts[1]).toBe(counts[0])
 })
+it('two actual Desktop history Consumers share the Core Provider watch and independently leave', async () => {
+  const f = await fixture(), first = new AbortController(), second = new AbortController()
+  const watch = vi.spyOn(f.client.providers.get('claude'), 'observeSessionHistory')
+  const [a, b] = await Promise.all([
+    f.main.observeSessionHistory(f.control, () => {}, f.config, first.signal),
+    f.main.observeSessionHistory(f.control, () => {}, f.config, second.signal)
+  ])
+  expect(watch).toHaveBeenCalledTimes(1)
+  first.abort(); a.dispose()
+  expect(watch.mock.calls[0]![0].signal.aborted).toBe(false)
+  second.abort(); b.dispose()
+  expect(watch.mock.calls[0]![0].signal.aborted).toBe(true)
+  expect(f.connect).not.toHaveBeenCalled()
+  for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+})
 it('lets the original Core reject an unknown SID without scanning or contacting another owner', async () => {
   const f = await fixture(), control = { ...f.control, agentSessionId: 'unknown' }
   const calls = [() => f.main.sessionTimeline(control), () => f.main.sessionHistoryPage(control, {}, f.config),
