@@ -4,11 +4,8 @@ import { mintObjectId } from '@agentmux/core/object-id'
 // Copyright (c) 2026 Lovecast Inc., MIT License. See THIRD_PARTY_NOTICES.md.
 
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { BrowserPng } from '../../../../shared/contracts'
-import { WindowOverlayPortal } from '../WindowOverlayHost'
-import { observeBrowserStageGeometry } from '../../lib/browser-stage-geometry'
-import { hasPositiveBrowserStageGeometry } from '../../lib/browser-bounds-sync'
 import { renderCommittedLayer, renderScreenshotScene } from './canvas-render'
 import {
   canRedo,
@@ -70,26 +67,24 @@ export type ScreenshotCompleteInput = {
 }
 
 export function ScreenshotEditor({
-  anchor,
   image,
   busy,
   onCancel,
   onComplete
 }: {
-  anchor: HTMLElement | null
   image: BrowserPng
   busy: boolean
   onCancel(): void
   onComplete(input: ScreenshotCompleteInput): void
 }) {
-  const [bounds, setBounds] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  // Continuous pointer events can finish before React renders their queued preview.
-  // The current gesture owns input; inProgress is only its canvas projection.
+  // Pointer samples belong to this gesture. React only sees completed edits;
+  // live canvas painting is coalesced on the owning animation frame.
   const currentGestureRef = useRef<ScreenshotShape | null>(null)
+  const paintFrame = useRef(0)
   const committedLayerRef = useRef<HTMLCanvasElement | null>(null)
   const textInputRef = useRef<HTMLInputElement>(null)
   if (!committedLayerRef.current && typeof document !== 'undefined') {
@@ -97,24 +92,14 @@ export function ScreenshotEditor({
   }
   const [loaded, setLoaded] = useState(false)
   const [size, setSize] = useState<EditorSize>({ width: 0, height: 0, dpr: 1 })
+  const paintSize = useRef(size)
+  paintSize.current = size
   const [documentState, setDocumentState] = useState<ScreenshotDocument>(() => createScreenshotDocument())
-  const [inProgress, setInProgress] = useState<ScreenshotShape | null>(null)
   const [pendingText, setPendingText] = useState<PendingText | null>(null)
   const [tool, setTool] = useState<ScreenshotTool>('pen')
   const [color, setColor] = useState(DEFAULT_SCREENSHOT_COLOR)
   const [width, setWidth] = useState(DEFAULT_SCREENSHOT_WIDTH)
   const [fontSize, setFontSize] = useState(DEFAULT_SCREENSHOT_FONT_SIZE)
-
-  useLayoutEffect(() => {
-    if (!anchor) return
-    const update = (): void => {
-      const rect = anchor.getBoundingClientRect()
-      setBounds(hasPositiveBrowserStageGeometry(rect)
-        ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-        : null)
-    }
-    return observeBrowserStageGeometry(anchor, update, true)
-  }, [anchor])
 
   useEffect(() => {
     const container = containerRef.current
@@ -141,7 +126,17 @@ export function ScreenshotEditor({
       observer.disconnect()
       window.removeEventListener('resize', measure)
     }
-  }, [image.height, image.width, bounds?.width, bounds?.height])
+  }, [image.height, image.width])
+
+  const schedulePaint = useCallback(() => {
+    if (paintFrame.current) return
+    paintFrame.current = requestAnimationFrame(() => {
+      paintFrame.current = 0
+      const canvas = canvasRef.current, committed = committedLayerRef.current
+      const size = paintSize.current
+      if (canvas && committed) renderScreenshotScene(canvas, committed, currentGestureRef.current, size.width, size.height, size.dpr)
+    })
+  }, [])
 
   useEffect(() => {
     const committed = committedLayerRef.current
@@ -159,11 +154,12 @@ export function ScreenshotEditor({
     const canvas = canvasRef.current
     const committed = committedLayerRef.current
     if (!canvas || !committed) return
-    const frame = requestAnimationFrame(() => {
-      renderScreenshotScene(canvas, committed, inProgress, size.width, size.height, size.dpr)
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [documentState.shapes, inProgress, size])
+    schedulePaint()
+  }, [documentState.shapes, size, schedulePaint])
+  useEffect(() => () => {
+    cancelAnimationFrame(paintFrame.current)
+    currentGestureRef.current = null
+  }, [])
 
   useEffect(() => {
     if (!pendingText) return
@@ -214,25 +210,23 @@ export function ScreenshotEditor({
       ? { id, kind: tool, color, width, points: [at] }
       : { id, kind: tool, color, width, from: at, to: at }
     currentGestureRef.current = shape
-    setInProgress(shape)
+    schedulePaint()
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLCanvasElement>): void {
     const current = currentGestureRef.current
     if (!current || current.kind === 'text') return
     const to = point(event)
-    const next = current.kind === 'pen' || current.kind === 'highlight'
-      ? { ...current, points: [...current.points, to] }
-      : { ...current, to }
-    currentGestureRef.current = next
-    setInProgress(next)
+    if (current.kind === 'pen' || current.kind === 'highlight') current.points.push(to)
+    else current.to = to
+    schedulePaint()
   }
 
   function onPointerUp(): void {
     const finished = currentGestureRef.current
     currentGestureRef.current = null
     if (finished) setDocumentState((current) => commitShape(current, finished))
-    setInProgress(null)
+    schedulePaint()
   }
 
   function commitText(value: string): void {
@@ -263,11 +257,8 @@ export function ScreenshotEditor({
     })
   }
 
-  if (!bounds) return null
   return (
-    <WindowOverlayPortal layer="dialog">
-    <div className="browser-screenshot-editor" role="dialog" data-state="open" aria-label="Screenshot editor"
-      style={{ left: bounds.x, top: bounds.y, width: bounds.width, height: bounds.height }}>
+    <div className="browser-screenshot-editor" role="dialog" aria-label="Screenshot editor">
       <div ref={containerRef} className="browser-screenshot-editor__canvas-area">
       <div
         ref={viewportRef}
@@ -373,7 +364,7 @@ export function ScreenshotEditor({
             onClick={() => {
               currentGestureRef.current = null
               setPendingText(null)
-              setInProgress(null)
+              schedulePaint()
               setDocumentState((current) => clearShapes(current))
             }}
           >
@@ -381,13 +372,12 @@ export function ScreenshotEditor({
           </button>
         </div>
         <div className="browser-screenshot-toolbar__actions">
-          <button type="button" disabled={busy} onClick={onCancel}><ThemeActionCancelIcon size={13} /> Cancel</button>
+          <button type="button" onClick={onCancel}><ThemeActionCancelIcon size={13} /> Cancel</button>
           <button className="primary-button" type="button" disabled={busy || !loaded} onClick={complete}>
             <ThemeObjectClipboardIcon size={13} /> {busy ? 'Copying…' : 'Copy PNG'}
           </button>
         </div>
       </div>
     </div>
-    </WindowOverlayPortal>
   )
 }
