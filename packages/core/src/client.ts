@@ -3535,7 +3535,6 @@ export class AgentMuxClient {
     callerAgentSessionId: string
     limit: number
   }): Promise<AgentMuxDeliveryBatch> {
-    this.requireConnected()
     const reader = await this.currentStoredAgentSession(input.callerAgentSessionId)
     const consumerId = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, reader)
     return await this.messageQueue.check({ consumerId, readerRun: reader.run, limit: input.limit },
@@ -3549,7 +3548,6 @@ export class AgentMuxClient {
     readerRun: AgentMuxRunRef
     generation: number
   }): Promise<AgentMuxDeliveryAcknowledgement> {
-    this.requireConnected()
     const reader = await this.currentStoredAgentSession(input.callerAgentSessionId)
     const consumerId = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, reader)
     if (!sameRun(reader.run, input.readerRun)) {
