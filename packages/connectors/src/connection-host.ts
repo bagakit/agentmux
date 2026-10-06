@@ -28,6 +28,7 @@ function unavailable(reason: 'credential-missing' | 'adapter-unavailable' | 'che
 export class ConnectionHost implements ConnectionPort {
   bindings?: import('@agentmux/core/connections').RoomBindingsPort
   delivery?: import('@agentmux/core/connections').ConnectionDeliveryPort
+  ingress?: import('@agentmux/core/connections').ConnectionIngressReadPort
   readonly database: DatabaseSync
   private readonly adapters: Map<string, ConnectionAdapter>
   private readonly observations = new Map<string, { revision: number; value: ConnectionObservation }>()
