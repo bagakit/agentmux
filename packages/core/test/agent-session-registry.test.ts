@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
@@ -17,8 +18,8 @@ function session(run = 'run-1'): AgentMuxStoredAgentSession {
     hookBindingId: 'hook-binding-1',
     hookToken: 'hook-token-1',
 
-    createdAt: 100,
-    updatedAt: 100
+    createdAt: reshapeFixtureEpoch(0, 0, 100),
+    updatedAt: reshapeFixtureEpoch(0, 0, 100)
   }
 }
 
@@ -74,11 +75,11 @@ describe('semantic session registry concurrency', () => {
     const cachedUnrelated = reader.get('unrelated')
     await writer.load('local')
     await writer.update('semantic-1', { runId: 'run-1' }, current => ({ ...current,
-      updatedAt: 200, semanticStatus: { state: 'working', source: 'native-hook', observedAt: 200 } }))
+      updatedAt: reshapeFixtureEpoch(0, 0, 200), semanticStatus: { state: 'working', source: 'native-hook', observedAt: reshapeFixtureEpoch(0, 0, 200) } }))
     const writes = vi.spyOn(store, 'compareAndSwap')
     try {
       await expect(reader.refresh('semantic-1', { runId: 'run-1' })).resolves.toMatchObject({
-        semanticStatus: { state: 'working', observedAt: 200 }
+        semanticStatus: { state: 'working', observedAt: reshapeFixtureEpoch(0, 0, 200) }
       })
       expect(writes).not.toHaveBeenCalled()
       expect(reader.get('unrelated')).toBe(cachedUnrelated)
@@ -123,7 +124,7 @@ describe('semantic session registry concurrency', () => {
         agentSessionId: current.agentSessionId,
         run: { ...current.run },
         eventName: 'SessionStart',
-        observedAt: 200
+        observedAt: reshapeFixtureEpoch(0, 0, 200)
       }
     }))
 
@@ -170,7 +171,7 @@ describe('semantic session registry concurrency', () => {
         await memory.compareAndSwapMetadata(expected, next)
       },
       async reserveLifecycle(value) { await memory.reserveLifecycle(value) },
-      async claimStaleLifecycles(value) { return await memory.claimStaleLifecycles(value) },
+      async claimStaleLifecycles(value, target) { return await memory.claimStaleLifecycles(value, target) },
       async releaseLifecycle(value) { await memory.releaseLifecycle(value) },
       async retireRuns(value) { await memory.retireRuns(value) },
       async commitLifecycle(value, next) { await memory.commitLifecycle(value, next) },
@@ -179,12 +180,12 @@ describe('semantic session registry concurrency', () => {
     }
     const registry = new AgentMuxAgentSessionRegistry(store)
     const original = session()
-    const resumed = { ...original, run: session('run-2').run, updatedAt: 200 }
+    const resumed = { ...original, run: session('run-2').run, updatedAt: reshapeFixtureEpoch(0, 0, 200) }
     await registry.put(original)
 
     const transition = registry.put(resumed, original.run)
     await transitionEntered
-    const staleUpdate = registry.put({ ...original, updatedAt: 142 }, original.run)
+    const staleUpdate = registry.put({ ...original, updatedAt: reshapeFixtureEpoch(0, 0, 142) }, original.run)
     releaseTransition()
 
     await transition
@@ -237,7 +238,7 @@ describe('semantic session registry concurrency', () => {
         await memory.compareAndSwapMetadata(expected, next, signal)
       },
       async reserveLifecycle(value) { await memory.reserveLifecycle(value) },
-      async claimStaleLifecycles(value) { return await memory.claimStaleLifecycles(value) },
+      async claimStaleLifecycles(value, target) { return await memory.claimStaleLifecycles(value, target) },
       async releaseLifecycle(value) { await memory.releaseLifecycle(value) },
       async retireRuns(value) { await memory.retireRuns(value) },
       async commitLifecycle(value, next) { await memory.commitLifecycle(value, next) },
@@ -249,7 +250,7 @@ describe('semantic session registry concurrency', () => {
     block = true
     const active = registry.update('semantic-1', { runId: 'run-1' }, (current) => ({
       ...current,
-      updatedAt: 101
+      updatedAt: reshapeFixtureEpoch(0, 0, 101)
     }))
     let activeSettled = false
     void active.then(
@@ -260,11 +261,11 @@ describe('semantic session registry concurrency', () => {
     const controller = new AbortController()
     const queued = registry.update('semantic-1', { runId: 'run-1' }, (current) => ({
       ...current,
-      updatedAt: 102
+      updatedAt: reshapeFixtureEpoch(0, 0, 102)
     }), controller.signal)
     const following = registry.update('semantic-1', { runId: 'run-1' }, (current) => ({
       ...current,
-      updatedAt: 103
+      updatedAt: reshapeFixtureEpoch(0, 0, 103)
     }))
     controller.abort()
 
@@ -272,10 +273,10 @@ describe('semantic session registry concurrency', () => {
     expect(activeSettled).toBe(false)
     block = false
     releaseActive()
-    await expect(active).resolves.toMatchObject({ updatedAt: 101 })
-    await expect(following).resolves.toMatchObject({ updatedAt: 103 })
+    await expect(active).resolves.toMatchObject({ updatedAt: reshapeFixtureEpoch(0, 0, 101) })
+    await expect(following).resolves.toMatchObject({ updatedAt: reshapeFixtureEpoch(0, 0, 103) })
     expect(compareCalls).toBe(3)
-    expect(registry.get('semantic-1').updatedAt).toBe(103)
-    expect((await memory.load())[0]).toMatchObject({ updatedAt: 103 })
+    expect(registry.get('semantic-1').updatedAt).toBe(reshapeFixtureEpoch(0, 0, 103))
+    expect((await memory.load())[0]).toMatchObject({ updatedAt: reshapeFixtureEpoch(0, 0, 103) })
   })
 })

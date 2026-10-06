@@ -23,7 +23,7 @@ const store = {
       })}\n`)
     }
   },
-  claimStaleLifecycles: async (claim) => await delegate.claimStaleLifecycles(claim),
+  claimStaleLifecycles: async (claim, target) => await delegate.claimStaleLifecycles(claim, target),
   commitLifecycle: async (reservation, next) => await delegate.commitLifecycle(reservation, next),
   releaseLifecycle: async (reservation, runs) => await delegate.releaseLifecycle(reservation, runs),
   retireRuns: async (runs) => await delegate.retireRuns(runs),

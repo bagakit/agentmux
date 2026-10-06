@@ -63,7 +63,7 @@ const store = {
     }
   },
   async reserveLifecycle(value) { await base.reserveLifecycle(value) },
-  async claimStaleLifecycles(value) { return await base.claimStaleLifecycles(value) },
+  async claimStaleLifecycles(value, target) { return await base.claimStaleLifecycles(value, target) },
   async releaseLifecycle(value, retiredRuns) { await base.releaseLifecycle(value, retiredRuns) },
   async retireRuns(runs) { await base.retireRuns(runs) },
   async commitLifecycle(value, next) { await base.commitLifecycle(value, next) },
