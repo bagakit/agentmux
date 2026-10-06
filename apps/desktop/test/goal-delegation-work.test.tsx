@@ -242,6 +242,18 @@ describe('mounted original Goal delegation consumer', () => {
     expect(container.textContent).toContain('Review results')
     expect(container.textContent).not.toContain('Result accepted')
   })
+  it('keeps retained creation uncertainty and its recovery action visible outside optional relationships', async () => {
+    const record = goal()
+    const originalKey = JSON.stringify([record.id, 'assignees'])
+    useAppStore.setState({ goalAgentCreationDrafts: { [originalKey]: { goalId: record.id, role: 'assignees', operationId: 'original-creation', phase: 'may-have-dispatched',
+      request: { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'original-creation', operation: 'agent.open',
+        content: { kind: 'new-agent', executorId: 'fixture' }, destination: { spaceId: 'original-space', zoneId: 'original-zone', newTab: true }, focus: false } } } })
+    await mount(record, createElement(GoalExecution, { demand: { ...record, sessions: [], workspacePath: null }, onUpdate: vi.fn().mockResolvedValue(true) }))
+    expect(container.querySelector<HTMLDetailsElement>('.goal-collaboration__relationships')!.open).toBe(false)
+    const recovery = button('Check creation and relationship')
+    expect(recovery.closest('details')).toBeNull(); expect(recovery.parentElement!.getAttribute('role')).toBe('status')
+    expect(useAppStore.getState().goalAgentCreationDrafts[originalKey]!.operationId).toBe('original-creation')
+  })
   it('distinguishes two same-state workers and current follow-up responsibility beside the visible report', async () => {
     const original = delegation(), second = { ...original, operationId: 'second-operation', sourceMessageId: 'second-message', workerAgentSessionId: 'second-worker' }
     const record = { ...goal(), supervisorSessionId: 'current-supervisor', delegations: [original, second] }
