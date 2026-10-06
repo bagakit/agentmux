@@ -176,7 +176,7 @@ export function normalizeSessionHistoryPage(
     if (item.questionRequest !== undefined && item.kind !== 'assistant-message') return invalid()
     if (item.questionAnswers !== undefined && item.kind !== 'user-message') return invalid()
     const questionDiagnostic = item.questionDiagnostic === undefined ? undefined : object(item.questionDiagnostic)
-    if (questionDiagnostic && item.kind !== 'assistant-message') return invalid()
+    if (questionDiagnostic && item.kind !== 'assistant-message' && item.kind !== 'user-message') return invalid()
     return { id, kind: item.kind, contentParts,
       ...(item.messagePhase === undefined ? {} : { messagePhase: choice(item.messagePhase, ['progress', 'final']) }),
       ...(item.questionRequest === undefined ? {} : { questionRequest: questionRequest(item.questionRequest) }),

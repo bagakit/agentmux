@@ -968,6 +968,8 @@ export function ActivityView({
           located={locatedMessageKey === conversationMessageSourceKey(sessionId, entry.message.source)}
           {...(describeSpeaker ? { describeSpeaker } : {})}
           content={entry.message.contentParts.length > 0 ? entry.message.contentParts : entry.message.content}
+          {...(entry.message.questionAnswers ? { questionAnswers: entry.message.questionAnswers } : {})}
+          {...(entry.message.questionDiagnostic ? { questionDiagnostic: entry.message.questionDiagnostic } : {})}
           {...(entry.message.deliveryStatus ? { status: entry.message.deliveryStatus } : {})}
           {...(entry.message.recordedAt === undefined ? {} : { createdAt: entry.message.recordedAt })}
           origin={origin}

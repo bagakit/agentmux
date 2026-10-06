@@ -407,6 +407,8 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
               {selectedNativeRead?.page ? <>
                 {nativeMessages.map((item, index) => <article key={`${nativeSourceKey}:${item.id}`} ref={index === nativeMessages.length - 1 ? nativeLastMessageRef : undefined} className="launcher-resume__message">
                   <ConversationMessage compact content={item.contentParts} messageId={item.id} providerId={selectedNativeRead.page!.source.providerId}
+                    {...(item.questionAnswers ? { questionAnswers: item.questionAnswers } : {})}
+                    {...(item.questionDiagnostic ? { questionDiagnostic: item.questionDiagnostic } : {})}
                     name={item.kind === 'user-message' ? 'Input' : 'Assistant'} workspaceRoot={nativeCandidate.workspacePath}
                     nativeResourceRecord={{ source: selectedNativeRead.page!.source, recordId: item.id, ...(item.turnId === undefined ? {} : { turnId: item.turnId }) }}
                     readHistoryResource={readNativeResource} />

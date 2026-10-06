@@ -55,6 +55,8 @@ export function MobileMailbox({ session, connected, messages, platform, describe
           onCopy={message => originalAction(message, onHistoryCopy)} onRead={message => <ConversationMessage {...reading}
             messageId={message.id} conversationSessionId={message.agentSessionId}
             content={message.contentParts.length ? message.contentParts : message.content} inputSource={message.source}
+            {...(message.questionAnswers ? { questionAnswers: message.questionAnswers } : {})}
+            {...(message.questionDiagnostic ? { questionDiagnostic: message.questionDiagnostic } : {})}
             speaker={speakerOfUserMessage(message)} describeSpeaker={describeSpeaker}
             {...(message.source.kind === 'native' ? { nativeResourceRecord: { source: { providerId: message.source.providerId, nativeSessionId: message.source.nativeSessionId }, recordId: message.source.recordId,
               ...(message.turnId === undefined ? {} : { turnId: message.turnId }) } } : {})}

@@ -98,18 +98,19 @@ function MessageHistory({ mailboxOrigin, items, incoming, selectedKey, onOpen, o
       messageId={messageKey(selected)} speaker={speakerOf(selected) as ConversationSpeaker} name={authorLabel(selected)}
       content={isUserMessage(selected) && selected.contentParts.length > 0 ? selected.contentParts : selected.content ?? ''}
       {...(isUserMessage(selected) && selected.questionAnswers ? { questionAnswers: selected.questionAnswers } : {})}
+      {...(isUserMessage(selected) && selected.questionDiagnostic ? { questionDiagnostic: selected.questionDiagnostic } : {})}
       {...(isUserMessage(selected) && selected.source.kind === 'native' && selected.contentParts.length > 0
         ? {} : { copyText: selected.content ?? '' })}
       {...(time(selected) === undefined ? {} : { createdAt: time(selected)! })}
       {...(isUserMessage(selected) ? { inputSource: selected.source } : {})}
       {...(isUserMessage(selected) && selected.source.kind === 'native' ? { nativeResourceRecord: { source: { providerId: selected.source.providerId, nativeSessionId: selected.source.nativeSessionId }, recordId: selected.source.recordId, ...(selected.turnId ? { turnId: selected.turnId } : {}) }, ...(historyResourceReader ? { readHistoryResource: historyResourceReader } : {}) } : {})}
       {...(onCopy ? { onCopy } : {})}
-      messageActions={renderNavigation(selected)}
       messageDetails={<><dl className="composer-mailbox__record-facts">
         {!isUserMessage(selected) ? <><dt>Source</dt><dd>Captured input</dd><dt>Recorded author</dt><dd>{authorLabel(selected)}</dd></> : null}
         <dt>Time</dt><dd><MailboxTime value={time(selected)} complete /></dd>
         <dt>Delivery</dt><dd>{isUserMessage(selected) && selected.source.kind === 'native' ? 'Recorded · not a delivery receipt' : state(selected) === 'complete' ? 'Submission confirmed · CLI acceptance and reply are separate' : 'Delivery not confirmed'}</dd>
       </dl>{locationDetails}</>} />
+    <div className="composer-mailbox__record-actions">{renderNavigation(selected)}</div>
     {!selected.content && !(isUserMessage(selected) && selected.contentParts.length) ? <MailboxEmpty title="No text recorded" /> : null}
     {state(selected) !== 'complete' && !(isUserMessage(selected) && selected.source.kind === 'native')
       ? <p className="composer-mailbox__risk">Delivery not confirmed. Check the Agent’s response before sending again.</p> : null}

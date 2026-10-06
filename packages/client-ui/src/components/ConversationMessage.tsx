@@ -1,4 +1,4 @@
-import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryMessagePhase, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
+import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryMessagePhase, AgentSessionHistoryQuestionAnswer, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
 import { readSessionHistoryTextResource } from '@agentmux/core/session-history-content'
@@ -19,6 +19,7 @@ import type { ConversationAnnotationSelection } from '../lib/conversation-annota
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 import { conversationFiles } from '../lib/conversation-files.js'
 import { ConversationFiles } from './ConversationFiles.js'
+import { ConversationQuestionReply } from './ConversationQuestionReply.js'
 
 const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
@@ -50,6 +51,10 @@ export type ConversationMessageProps = {
   name?: string
   providerId?: AgentProviderId
   content: string | readonly AgentSessionHistoryContentPart[]
+  /** Recorded Provider reply semantics; clients never parse message text for these facts. */
+  questionAnswers?: readonly AgentSessionHistoryQuestionAnswer[]
+  /** Non-blocking notice from the Provider's recorded reading projection. */
+  questionDiagnostic?: { code: string; message: string }
   status?: AgentTimelineItemStatus | 'unverified'
   createdAt?: number
   /** Host-selected clock display; the recorded instant remains unchanged. */
@@ -117,7 +122,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
   compact = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
-  speaker: recordedSpeaker, conversationSessionId, inputSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
+  speaker: recordedSpeaker, conversationSessionId, inputSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
   const platform = useClientUiPlatform()
@@ -127,9 +132,11 @@ export function ConversationMessage({
   const parts: readonly AgentSessionHistoryContentPart[] = isStringContent
     ? [{ kind: 'text', text: content }]
     : content
-  const hasContent = parts.some(partHasRenderableContent)
+  const hasQuestionAnswers = Boolean(questionAnswers?.length)
+  const firstTextIndex = parts.findIndex(part => part.kind === 'text')
+  const hasContent = hasQuestionAnswers || parts.some(partHasRenderableContent)
   const hasCopyContent = copyText === undefined ? parts.some((part) => partText(part).length > 0) : copyText.length > 0
-  const isTraceOnly = parts.length > 0 && parts.every((part) =>
+  const isTraceOnly = !hasQuestionAnswers && parts.length > 0 && parts.every((part) =>
     part.kind === 'text' ? part.text.trim().length === 0 : !(part.kind === 'resource' && part.resourceType === 'text' && part.content?.kind === 'text'))
   const speaker = recordedSpeaker ? recordedIdentity ? recordedSpeaker : speakerForDisplay(recordedSpeaker) : undefined
   const isPeerAgent = speaker?.role === 'agent' && speaker.id.length > 0 &&
@@ -143,8 +150,8 @@ export function ConversationMessage({
     ? conversationFiles(parts, workspaceRoot, homeDir) : [],
   [speaker?.role, isPeerAgent, compact, messagePhase, status, openWorkspaceFile, content, workspaceRoot, homeDir])
   const firstText = parts[0]?.kind === 'text' ? sessionHistoryTextForReading(parts[0]) : undefined
-  const prefix = useMemo(() => inputMarkdown && firstText !== undefined ? parseAgentMuxMessagePrefix(firstText) : null,
-    [inputMarkdown, firstText])
+  const prefix = useMemo(() => !hasQuestionAnswers && inputMarkdown && firstText !== undefined ? parseAgentMuxMessagePrefix(firstText) : null,
+    [hasQuestionAnswers, inputMarkdown, firstText])
   const isDeclaredSender = prefix !== null && prefix.sourceLabel.length > 0 && recordedSpeaker?.role === 'unknown'
   const [systemContextOpen, setSystemContextOpen] = useState(false)
   const systemContentId = useId()
@@ -320,6 +327,7 @@ export function ConversationMessage({
           </span>}
           {isPeerAgent ? <span className="log-turn__sender-kind">Agent</span> : null}
           {recordTitle && !isSystemContext ? <span className="log-turn__sender-kind">{recordTitle}</span> : null}
+          {hasQuestionAnswers ? <span className="log-turn__sender-kind">问题答复</span> : null}
           {status === 'streaming' ? (
             <span className="log-row__chip" role="status">{platform.renderIcon('working', 12)}Streaming</span>
           ) : null}
@@ -358,9 +366,15 @@ export function ConversationMessage({
       {hasContent && (!isSystemContext || systemContextOpen) ? (
         <div ref={bodyRef} id={isSystemContext ? systemContentId : undefined} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
+          {hasQuestionAnswers && firstTextIndex < 0 ? <ConversationQuestionReply answers={questionAnswers!}
+            inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
+            {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /> : null}
           {parts.map((part, index) => {
             const key = partKey(part)
-            return part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}>
+            return part.kind === 'text' && hasQuestionAnswers && index === firstTextIndex ? <ConversationQuestionReply key={key}
+              answers={questionAnswers!} originalText={part.text} inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
+              {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
+            : part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}>
               {index === 0 ? prefix?.declaredContexts?.map((context, contextIndex) => <details key={contextIndex} className="log-turn__declared-context">
                 <summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />Declared context{prefix.declaredContexts!.length > 1 ? ` ${contextIndex + 1}` : ''}</summary>
                 <pre>{context.raw}</pre>
@@ -413,6 +427,7 @@ export function ConversationMessage({
           {files.length > 0 && openWorkspaceFile ? <ConversationFiles files={files} openFile={openWorkspaceFile} /> : null}
         </div>
       ) : null}
+      {questionDiagnostic ? <p className="agent-interaction__error" role="status" data-question-reply-diagnostic={questionDiagnostic.code}>{questionDiagnostic.message}</p> : null}
       {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
     </div>
   )

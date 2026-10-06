@@ -1,7 +1,9 @@
 import { stat } from 'node:fs/promises'
 import { AgentMuxError } from '../errors.js'
 import { NativeJsonlHistoryReader } from '../native-jsonl-history-reader.js'
+import { SESSION_HISTORY_MAX_PAGE_BYTES } from '../session-history.js'
 import { isNativeText, nativeJsonStringify, type NativeHistoryContentPart, type NativeHistoryItem } from '../native-history-value.js'
+import { codexQuestionAnswers } from './codex-question.js'
 import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPage,
   AgentProviderSessionHistoryRecordContext, AgentSessionHistoryItem } from '../types.js'
 
@@ -56,11 +58,54 @@ function item(record: Record<string, unknown>, start: number): NativeHistoryItem
   } else if (record.type === 'event_msg' && type === 'token_count') return null
   else if (record.type === 'compacted' && isNativeText(payload.message)) parts = [{ kind: 'text', text: payload.message }]
   else parts = [{ kind: 'text', text: nativeJsonStringify(payload) }]
+  // The saved rollout spells the native text part input_text. Reuse the same
+  // complete-reply protocol as indexed history without changing original parts.
+  const questionAnswers = kind === 'user-message' ? codexQuestionAnswers(Array.isArray(payload.content)
+    ? payload.content.map(part => object(part).type === 'input_text' ? { ...object(part), type: 'text' } : part)
+    : payload.content) : undefined
   const timestamp = Date.parse(String(record.timestamp)), id = typeof payload.id === 'string' && payload.id ? payload.id : `codex-record:${start}`
   return { id, kind, contentParts: parts,
+    ...(questionAnswers === undefined ? {} : { questionAnswers }),
     ...(typeof payload.turn_id === 'string' ? { turnId: payload.turn_id } : {}),
     ...(Number.isFinite(timestamp) ? { timestamp } : {}),
     ...(title ? { title } : kind === 'activity' ? { title: String(type ?? record.type) } : {}) }
+}
+
+/** Optional answer details cannot make the original saved history exceed its existing read budget. */
+function fitQuestionAnswerProjection(context: AgentProviderSessionHistoryContext, items: AgentSessionHistoryItem[], nextCursor: string | null): AgentSessionHistoryItem[] {
+  if (!items.some(item => item.questionAnswers !== undefined)) return items
+  const projected = [...items]
+  // Match the Provider page envelope checked by normalizeSessionHistoryPage.
+  let pageBytes = Buffer.byteLength(JSON.stringify({ source: context.source, items, nextCursor }))
+  if (pageBytes <= SESSION_HISTORY_MAX_PAGE_BYTES) return items
+  const diagnostic = { code: 'CODEX_QUESTION_ANSWER_DETAILS_UNAVAILABLE',
+    message: 'Answer details did not fit this history page’s existing byte budget. The original reply remains complete and readable/copyable.' }
+  const candidates = items.flatMap((item, index) => {
+    if (item.questionAnswers === undefined) return []
+    const { questionAnswers: _answers, ...original } = item
+    const originalBytes = Buffer.byteLength(JSON.stringify(original))
+    return [{ index, original, originalBytes, savedBytes: Buffer.byteLength(JSON.stringify(item)) - originalBytes }]
+  }).sort((a, b) => b.savedBytes - a.savedBytes)
+  const withdrawn: typeof candidates = []
+  // First preserve as many answers as fit; diagnostics cannot displace another answer.
+  for (const candidate of candidates) {
+    projected[candidate.index] = candidate.original
+    pageBytes -= candidate.savedBytes
+    withdrawn.push(candidate)
+    if (pageBytes <= SESSION_HISTORY_MAX_PAGE_BYTES) break
+  }
+  const unreported: string[] = []
+  for (const candidate of withdrawn) {
+    const value = { ...candidate.original, questionDiagnostic: diagnostic }
+    const addedBytes = Buffer.byteLength(JSON.stringify(value)) - candidate.originalBytes
+    if (pageBytes + addedBytes <= SESSION_HISTORY_MAX_PAGE_BYTES) {
+      projected[candidate.index] = value
+      pageBytes += addedBytes
+    } else unreported.push(candidate.original.id)
+  }
+  if (unreported.length) console.warn('Codex history answer details and their diagnostic did not fit the existing page budget. Original reply content is preserved.',
+    { source: context.source, recordIds: unreported })
+  return projected
 }
 
 async function open(context: AgentProviderSessionHistoryContext): Promise<NativeJsonlHistoryReader> {
@@ -98,7 +143,8 @@ export async function readCodexSavedSessionHistoryPage(context: AgentProviderSes
       if (converted) items.push(converted)
     }
     const nextCursor = await reader.nextCursor()
-    return { source: context.source, items: await Promise.all(items.reverse().map(value => reader.materializeItem(value))),
+    const materialized = await Promise.all(items.reverse().map(value => reader.materializeItem(value)))
+    return { source: context.source, items: fitQuestionAnswerProjection(context, materialized, nextCursor),
       nextCursor, sourceSizeBytes: reader.sourceSizeBytes }
   } finally { await reader.close() }
 }
@@ -110,7 +156,7 @@ export async function readCodexSavedSessionHistoryRecord(context: AgentProviderS
       const converted = item(entry.value, entry.start)
       if (converted?.id === context.recordId && (context.turnId === undefined || converted.turnId === context.turnId)) {
         await reader.verifyUnchanged()
-        return await reader.materializeItem(converted)
+        return fitQuestionAnswerProjection({ ...context, limit: 1 }, [await reader.materializeItem(converted)], null)[0]!
       }
     }
     throw new AgentMuxError('The original saved Codex record is unavailable.', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')

@@ -181,6 +181,8 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
       {...(message.original.kind === 'captured' ? { status: message.original.item.status } : completedNativeReply(message.original.item) ? { status: 'complete' } : {})}
       {...(message.executionHostId ? { executionHostId: message.executionHostId } : {})}
       name={described!.name} content={message.contentParts}
+      {...(message.original.kind === 'native' && message.original.item.questionAnswers ? { questionAnswers: message.original.item.questionAnswers } : {})}
+      {...(message.original.kind === 'native' && message.original.item.questionDiagnostic ? { questionDiagnostic: message.original.item.questionDiagnostic } : {})}
       timeFormatter={time.clock}
       {...(message.recordedAt === undefined || !Number.isFinite(message.recordedAt) ? {} : { createdAt: message.recordedAt })}
       workspaceRoot={recipient?.workspacePath ?? workspaceRoot ?? ''} readPastedImage={readPastedImage} /></div>

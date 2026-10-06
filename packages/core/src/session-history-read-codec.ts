@@ -152,7 +152,7 @@ export function parseUserMessageHistoryPage(value: unknown, input: AgentSessionH
   if (input.source === 'captured' && page.nativeSource !== undefined || nativeSource &&
     (typeof nativeSource.providerId !== 'string' || !nativeSource.providerId || typeof nativeSource.nativeSessionId !== 'string' || !nativeSource.nativeSessionId)) return bad()
   for (const value of page.userMessages) {
-    const message = rpcRecord(value, ['id', 'rawId', 'agentSessionId', 'turnId', 'source', 'author', 'content', 'contentParts', 'questionAnswers', 'recordedAt', 'deliveryStatus'], 'CONTROL_PROTOCOL_ERROR')
+    const message = rpcRecord(value, ['id', 'rawId', 'agentSessionId', 'turnId', 'source', 'author', 'content', 'contentParts', 'questionAnswers', 'questionDiagnostic', 'recordedAt', 'deliveryStatus'], 'CONTROL_PROTOCOL_ERROR')
     if (typeof message.id !== 'string' || !message.id || typeof message.rawId !== 'string' || !message.rawId || message.agentSessionId !== input.agentSessionId || typeof message.content !== 'string' ||
       !Array.isArray(message.contentParts) || message.recordedAt !== undefined && (!Number.isSafeInteger(message.recordedAt) || (message.recordedAt as number) < 0) ||
       message.deliveryStatus !== undefined && !['complete', 'failed', 'unverified'].includes(String(message.deliveryStatus))) return bad()
@@ -168,10 +168,12 @@ export function parseUserMessageHistoryPage(value: unknown, input: AgentSessionH
         if (source.device !== undefined) normalizeOperationDevice(source.device)
       } catch { return bad() }
     }
+    if (message.questionDiagnostic !== undefined) rpcRecord(message.questionDiagnostic, ['code', 'message'], 'CONTROL_PROTOCOL_ERROR')
     try { normalizeSessionHistoryPage({ providerId: 'query-validation', nativeSessionId: 'query-validation' }, {
       source: { providerId: 'query-validation', nativeSessionId: 'query-validation' }, nextCursor: null,
       items: [{ id: message.rawId, kind: 'user-message', contentParts: message.contentParts, ...(message.turnId === undefined ? {} : { turnId: message.turnId }),
-        ...(message.questionAnswers === undefined ? {} : { questionAnswers: message.questionAnswers }) }]
+        ...(message.questionAnswers === undefined ? {} : { questionAnswers: message.questionAnswers }),
+        ...(message.questionDiagnostic === undefined ? {} : { questionDiagnostic: message.questionDiagnostic }) }]
     }, 1) } catch { return bad() }
   }
   return page as AgentSessionHistoryReadPage

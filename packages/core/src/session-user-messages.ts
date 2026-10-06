@@ -84,6 +84,7 @@ export function projectSessionUserMessages(params: {
         content,
         contentParts: [...item.contentParts],
         ...(item.questionAnswers === undefined ? {} : { questionAnswers: item.questionAnswers }),
+        ...(item.questionDiagnostic === undefined ? {} : { questionDiagnostic: item.questionDiagnostic }),
         ...(item.startedAt !== undefined ? { recordedAt: item.startedAt } : {})
       })
     }
