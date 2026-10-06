@@ -1,7 +1,8 @@
+import { fixturePath as _liveTailFixturePath } from "../../../test/fixture-values.mjs"
 import { fixtureYear as _hygiene_fixtureYear } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { focusSettings } from '../src/main/settings/modules/focus'
 import { settingsCatalog } from '../src/renderer/src/components/settings/settings-modules'
 import { focusSettingsModule } from '../src/renderer/src/components/settings/modules/focus'
@@ -19,6 +20,7 @@ vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () =
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 
 const dom = composerDOM()
+afterEach(() => vi.useRealTimers())
 const Pane = focusSettingsModule.Pane
 const saveButton = () => dom.container.querySelector<HTMLButtonElement>('[data-settings-save-bar] button')!
 async function choose(hours: FocusRecentActivityHours) { await dom.click(`input[value="${hours}"]`) }
@@ -95,7 +97,7 @@ it('updates the actual GlobalFocusSurface for 12 and 72 hours while retaining pr
   const now = Date.UTC(_hygiene_fixtureYear, 9, 8, 9), hour = 3_600_000
   vi.spyOn(Date, 'now').mockReturnValue(now)
   const ids = ['old30', 'unknown', 'mid18', 'working', 'attention', 'recent2', 'exact12']
-  const workspaces = ids.map(id => ({ id, name: id, hostId: 'local', path: `/focus-window-${id}`, kind: 'folder' as const }))
+  const workspaces = ids.map(id => ({ id, name: id, hostId: 'local', path: _liveTailFixturePath(`focus-window-${id}`), kind: 'folder' as const }))
   const sessions = ids.map((id, index) => {
     const base = composerSession(id)
     const state = id === 'working' ? 'working' as const : id === 'attention' ? 'waiting' as const : 'done' as const
@@ -108,11 +110,14 @@ it('updates the actual GlobalFocusSurface for 12 and 72 hours while retaining pr
     agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
   await dom.render(<GlobalFocusSurface />)
   const order = () => [...dom.container.querySelectorAll<HTMLElement>('.focus-project-lanes__row')].map(row => row.dataset.projectId)
-  expect(order()).toEqual(['attention', 'working', 'old30', 'mid18', 'recent2', 'exact12', 'unknown'])
+  expect(order()).toEqual(['attention', 'working', 'recent2', 'exact12', 'mid18', 'old30', 'unknown'])
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   await act(async () => useAppStore.setState({ config: { ...config, focus: { recentActivityHours: 12 } } }))
+  await act(async () => vi.advanceTimersByTime(3000))
   expect(order()).toEqual(['attention', 'working', 'recent2', 'exact12', 'old30', 'mid18', 'unknown'])
   await act(async () => useAppStore.setState({ config: { ...config, focus: { recentActivityHours: 72 } } }))
-  expect(order()).toEqual(['attention', 'working', 'old30', 'mid18', 'recent2', 'exact12', 'unknown'])
+  await act(async () => vi.advanceTimersByTime(3000))
+  expect(order()).toEqual(['attention', 'working', 'recent2', 'exact12', 'mid18', 'old30', 'unknown'])
   expect(useAppStore.getState().sessions).toBe(sessions)
   expect(useAppStore.getState().sessions.map(session => session.control.run)).toEqual(sessions.map(session => session.control.run))
   expect(dom.container.querySelector('[data-session-id="unknown"]')).not.toBeNull()
