@@ -9,7 +9,7 @@ import type { GoalDelegationAuthority, GoalDelegationMethod, GoalDelegationParam
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRun, AgentMuxRpcCallContext } from '@agentmux/core'
 import { validateDemandDelegationReport, type DemandDelegation, type DemandDelegationReportInput } from '@agentmux/demand/delegations'
 import type { DurableAgentMuxMessage } from '@agentmux/core'
-import type { DemandStore } from '@agentmux/demand'
+import type { DemandStore, Demand, DemandDispatch, GoalStartObservation } from '@agentmux/demand'
 import type { RuntimeController } from './runtime-controller.js'
 
 export type GoalDelegationCoreMethod = Extract<AgentMuxRpcMethod,
@@ -25,7 +25,8 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     private readonly runtime: Pick<RuntimeController, 'agentCreation'>,
     private readonly readMaterials?: (input: FileReadParams) => Promise<FileReadResult>,
     private readonly core?: GoalDelegationCorePort,
-    private readonly readAttention?: (goalId: string, delegation: DemandDelegation) => Promise<GoalDelegationObservation['attention']>) {}
+    private readonly readAttention?: (goalId: string, delegation: DemandDelegation) => Promise<GoalDelegationObservation['attention']>,
+    private readonly readStart?: (goal: Demand, start: DemandDispatch) => Promise<GoalStartObservation>) {}
 
   async call<M extends GoalDelegationMethod>(method: M, input: GoalDelegationParamsMap[M],
     context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<GoalDelegationResult> {
@@ -160,7 +161,10 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     if (!goal) throw new AgentMuxError('The original Goal is unavailable. Original Sessions and input remain available.', 'CONTROL_UNAVAILABLE')
     const observations = method === 'goal.delegation.prepare' ? undefined
       : await Promise.all((goal.delegations ?? []).map(delegation => this.observeDelegation(input.goalId, delegation, context, authority, goal.supervisorSessionId)))
+    const startObservations = method === 'goal.delegation.prepare' || !this.readStart ? undefined
+      : await Promise.all((goal.dispatches ?? []).filter(start => start.execution === 'finite').map(start => this.readStart!(goal, start)))
     return { goalId: goal.id, goalUpdatedAt: goal.updatedAt, delegations: goal.delegations ?? [],
+      ...(startObservations ? { dispatches: goal.dispatches ?? [], startObservations } : {}),
       ...(observations ? { observations } : {}),
       ...(goal.grounding ? { grounding: goal.grounding } : {}), diskDurability: 'confirmed' }
   }
