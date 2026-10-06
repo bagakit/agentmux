@@ -7,6 +7,7 @@ import { ConversationImage, type ReadPastedImage } from './ConversationImage.js'
 import { splitPastedImageReferences } from '../lib/pasted-image-reference.js'
 import { composerKeywordMatches } from '../lib/composer-keywords.js'
 import { encodeSemanticReference, parseComposerDraft, type ComposerSemanticReference } from '../lib/composer-semantic-reference.js'
+import { createSemanticIconElement } from '../theme/icon-sprite.js'
 import { useClientUiPlatform } from '../platform.js'
 
 export function draftDocument(value: string): JSONContent {
@@ -86,7 +87,7 @@ export function composerExtensions(
         dom.contentEditable = 'false'
         dom.className = `composer-semantic-token composer-semantic-token--${reference.kind}`
         dom.dataset.toolReference = reference.kind
-        dom.textContent = `${reference.kind === 'component' ? '◇' : reference.kind === 'subcommand' ? '›' : reference.kind === 'file' ? '▤' : '$'} ${reference.label}`
+        dom.append(createSemanticIconElement(`conversation.reference-${reference.kind}`, dom.ownerDocument, { size: 12 }), dom.ownerDocument.createTextNode(reference.label))
         dom.title = `${reference.kind === 'subcommand' ? 'Expand prompt' : reference.kind === 'file' ? 'File reference' : 'Open reference'}: ${reference.reference}`
         dom.setAttribute('aria-label', dom.title)
         dom.addEventListener('click', () => {
