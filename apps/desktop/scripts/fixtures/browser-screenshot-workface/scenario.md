@@ -16,6 +16,8 @@ The mounted tests exercise the production Browser adapter and editor, including 
 
 The native fixture mounts the production BrowserPane, its image editor and shared Desktop styles in a private Electron profile. It uses the original Browser owner and two local page forms, trusted pointer/keyboard input, actual Canvas pixels and clipboard output. Store projection and IPC transport are fixture adapters; Browser capture and file operations remain with their real owners. Existing Core public SDK and CLI paths inspect the original page and consume the same editable file. No user profile, Agent, Session or Run is replaced by this fixture.
 
+Renderer probes and the annotation Vitest configuration also reuse the formal build's [Radix overlay aliases](../../radix-overlay-aliases.ts): Dialog and Menu share the original dismissal and focus owners. A failure caused only by resolving a different primitive stack is not evidence of a production defect. Private mutations must retain the same dependency resolution as the source candidate.
+
 Exercise these flows:
 
 1. Enter capture from the toolbar and More menu. Draw a long stroke, select/move it, resize a rectangle and arrow endpoint, edit existing text, change a note intent, locate its region, zoom and pan, then verify Undo and processed PNG/context.
