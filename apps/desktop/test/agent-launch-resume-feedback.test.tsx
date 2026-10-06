@@ -4,9 +4,10 @@ import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, mkdir, readFile, rm, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
+import '../src/preload/index'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient, AgentMuxError, AgentMuxMemoryAgentSessionStore, AgentProviderRegistry, defineAgentProvider,
@@ -17,7 +18,7 @@ import type { ConfigStore } from '../src/main/config-store'
 import type { WorkspaceFiles } from '../src/main/workspace-files'
 import { AgentHookServer } from '../../../packages/core/src/hook-server'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
-const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
+const bridge = vi.hoisted(() => ({ directory: '', api: null as AgentMuxPreloadApi | null,
   invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
 // Electron transport and unrelated startup services are isolated. The target's Renderer, Store,
 // preload, registered IPC, RuntimeController and public Core submission all execute below.
@@ -26,22 +27,28 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     bridge.api = api; Object.assign(window, { [name]: api })
   } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), removeListener: vi.fn(), send: vi.fn() },
-  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => _hygiene_fixturePath("private-explicit-steer") },
+  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.directory || _hygiene_fixturePath('isolated-launch'), getAppPath: () => resolve('apps/desktop') },
   ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
+  safeStorage: { isEncryptionAvailable: () => false }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} }
 }))
-vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
+vi.mock('../src/main/connector-host', () => ({ createDesktopConnections: async () => ({ connections: {}, secrets: {}, close() {} }) }))
+vi.mock('@agentmux/core/notebook-store', async importOriginal => {
+  const actual = await importOriginal<typeof import('@agentmux/core/notebook-store')>()
+  return { ...actual, AgentMuxNotesStorage: class extends actual.AgentMuxNotesStorage {
+    constructor() { super(join(dir, 'notes-location.json'), join(dir, 'notes')) }
+  } }
+})
+vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () => [], subscribe: () => () => {} }) }))
 vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
-import '../src/preload/index'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { registerIpc } from '../src/main/ipc'
@@ -72,6 +79,7 @@ const launcherId = 'projection-launcher', regionId = initialWorkbenchRegionId(la
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   dir = await mkdtemp(join(tmpdir(), 'amx-launch-projection-'))
+  bridge.directory = dir
   await mkdir(join(dir, 'home'), { mode: 0o700 })
   vi.stubEnv('CODEX_HOME', join(dir, 'home'))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(dir, 'runtime'))
@@ -79,8 +87,9 @@ beforeEach(async () => {
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(dir, 'messages.ndjson'))
   starts = []; runs = new Map(); writes = []; destroyed = false
   const template = new AgentProviderRegistry().get('codex')
+  const { providerFork: _nativeFork, ...capabilities } = template.catalog.capabilities
   const provider = defineAgentProvider({
-    catalog: { ...template.catalog, id: 'projection-fixture', label: 'Projection fixture',
+    catalog: { ...template.catalog, capabilities, id: 'projection-fixture', label: 'Projection fixture',
       executable: 'projection-fixture', expectedProcess: 'projection-fixture', hookStrategy: { kind: 'none' },
       readySignal: { kind: 'foreground-process', expectedProcess: 'projection-fixture' } },
     hook: { rules: [], eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' } },
@@ -128,10 +137,10 @@ beforeEach(async () => {
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const sender = Object.assign(new EventEmitter(), { id: 9981, isDestroyed: () => destroyed, send: vi.fn(),
     session: { flushStorageData: vi.fn() } })
-  disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
-    configStore: { get: async () => config } as unknown as ConfigStore,
+  disposeIpc = await registerIpc({ initialConfig: config, window: { isDestroyed: () => destroyed, setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
+    configStore: { validate: (next: AppConfig) => next, save: async (next: AppConfig) => (config = next), get: async () => config } as unknown as ConfigStore,
     progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never,
-    scratchTopics: topics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+    scratchTopics: topics, workspaceFiles: { dispose: async () => {}, read: vi.fn(), listFiles: vi.fn(), observe: async () => () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return handler!({ sender } as unknown as IpcMainInvokeEvent, ...values)
@@ -150,7 +159,7 @@ afterEach(async () => {
   const results = await Promise.allSettled([disposeIpc?.(), runtime.dispose()])
   disposeIpc = undefined
   useAppStore.setState(initial, true); bridge.invoke.mockReset(); vi.restoreAllMocks(); vi.unstubAllEnvs()
-  await rm(dir, { recursive: true, force: true })
+  await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
   for (const result of results) if (result.status === 'rejected') failures.push(result.reason)
   expect(failures).toEqual([])
 })
@@ -241,7 +250,7 @@ it.each([
   expect(writes).toEqual(['healthy input']); expect(stop).not.toHaveBeenCalled()
   await collapseFailure(container.querySelector('.agent-launch-notice')!)
   expect(container.querySelector('.launch-surface .service-disclosure__summary')).toBeNull()
-  expect(container.querySelector('.global-system-notices__item')?.textContent).toContain(message)
+  expect(container.querySelector('.notification-item[data-notice-id]')?.textContent).toContain(message)
   const receipts = useAppStore.getState().noticeReadReceipts
   await act(async () => useAppStore.getState().reportError(new Error(message), useAppStore.getState().errorNoticeContext!))
   expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts)
@@ -256,7 +265,7 @@ it.each([
   expect(useAppStore.getState().errorNoticeContext).toBeNull()
   expect(useAppStore.getState().lastError).toBeNull()
   expect(useAppStore.getState().tabs[launcherId]!.regions[regionId]).toMatchObject({ kind: 'agent', phase: 'attached' })
-  expect(container.querySelector('.global-system-notices__item')).toBeNull()
+  expect(container.querySelector('.notification-item[data-notice-id]')).toBeNull()
   expect(stop).not.toHaveBeenCalled()
 })
 
@@ -336,10 +345,10 @@ it('the actual App offers the same failure through System without a second windo
   useAppStore.setState({ loading: false, mainSurface: 'agents' })
   await act(async () => root.render(<App />))
   expect(container.querySelector('main.main-shell')).not.toBeNull()
-  expect(container.querySelectorAll('.global-system-notices__item')).toHaveLength(1)
-  expect(container.querySelector('.global-system-notices__item')?.textContent).toContain('one lifecycle cause')
-  expect(container.querySelector('.main-shell__notices .error-notice')).toBeNull()
+  expect(container.querySelectorAll('.notification-item[data-notice-id]')).toHaveLength(1)
+  expect(container.querySelector('.notification-item[data-notice-id]')?.textContent).toContain('one lifecycle cause')
+  expect(container.querySelector('.notification-item[data-event-id]')).toBeNull()
   await act(async () => useAppStore.getState().reportError(new Error('unrelated actual failure')))
-  expect(container.querySelectorAll('.main-shell__notices .error-notice')).toHaveLength(1)
-  expect(container.querySelector('.main-shell__notices .error-notice')?.textContent).toContain('unrelated actual failure')
+  expect(container.querySelectorAll('.notification-item[data-event-id]')).toHaveLength(1)
+  expect(container.querySelector('.notification-item[data-event-id]')?.textContent).toContain('unrelated actual failure')
 })
