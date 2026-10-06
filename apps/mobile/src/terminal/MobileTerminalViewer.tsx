@@ -148,23 +148,22 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
   }
   const originalPending = control.current === controls.current.get(agentSessionId ?? '') ? control.current?.facts().pending : null
   return <section className="mobile-terminal" data-control={inputState.mode} data-agent-session-id={agentSessionId ?? undefined} data-reading={client && agentSessionId ? reading.phase : 'unavailable'}>
-    <div className="mobile-terminal-toolbar"><span><SemanticIcon name="object.terminal" size={16} />{inputState.mode === 'control' ? '控制终端' : '观看终端'}</span><button aria-label="复制选中文字" onClick={() => { void copy() }}><SemanticIcon name="action.copy" size={17} /></button><button aria-label="重新核实终端输出" onClick={() => { void reader.current?.retry() }}><SemanticIcon name="action.refresh" size={17} /></button></div>
+    <div className="mobile-terminal-toolbar"><span><SemanticIcon name="object.terminal" size={16} />{inputState.mode === 'control' ? '控制终端' : '观看终端'}</span>
+      {agentSessionId && (inputState.mode === 'watch' ? <button className="mobile-terminal-mode" disabled={!client || connection.state !== 'connected' || inputState.phase === 'unknown'} onClick={enableControl}><SemanticIcon name="object.keyboard" size={16} />控制终端</button>
+        : <button className="mobile-terminal-mode" onClick={() => control.current?.watch()}><SemanticIcon name="action.reveal" size={16} />回到观看</button>)}
+      <button aria-label="复制选中文字" onClick={() => { void copy() }}><SemanticIcon name="action.copy" size={17} /></button><button aria-label="重新核实终端输出" onClick={() => { void reader.current?.retry() }}><SemanticIcon name="action.refresh" size={17} /></button></div>
     <div className="mobile-terminal-reading-tools" aria-label="本机终端阅读">
       <button aria-label="缩小终端文字" onClick={() => gestures.current?.zoom(fontSize - 1)}>A−</button>
       <button aria-label="恢复终端文字大小" onClick={() => gestures.current?.zoom(MOBILE_TERMINAL_FONT_DEFAULT)}>{fontSize}px</button>
       <button aria-label="放大终端文字" onClick={() => gestures.current?.zoom(fontSize + 1)}>A+</button>
       <button onClick={() => { terminal.current?.scrollToBottom(); if (container.current) container.current.scrollTop = container.current.scrollHeight }}>最新输出</button>
     </div>
-    {agentSessionId && <div className="mobile-terminal-actions">
-      {inputState.mode === 'watch' ? <button disabled={!client || connection.state !== 'connected' || inputState.phase === 'unknown'} onClick={enableControl}><SemanticIcon name="object.keyboard" size={16} />控制终端</button>
-        : <button onClick={() => control.current?.watch()}><SemanticIcon name="action.reveal" size={16} />回到观看</button>}
-      <button disabled={inputState.mode !== 'control'} aria-expanded={sizeOpen} onClick={() => { setCols(String(terminal.current?.cols ?? 80)); setRows(String(terminal.current?.rows ?? 24)); setSizeOpen(value => !value) }}>PTY 尺寸</button>
-    </div>}
     {inputState.mode === 'control' && <div className="mobile-terminal-keys" aria-label="终端常用按键">
+      <button aria-expanded={sizeOpen} onClick={() => { setCols(String(terminal.current?.cols ?? 80)); setRows(String(terminal.current?.rows ?? 24)); setSizeOpen(value => !value) }}>PTY 尺寸</button>
       {([['Esc', '\x1b', null], ['Tab', '\t', null], ['Ctrl-C', '\x03', null], ['↑', '\x1b[A', 'control.key-up'], ['↓', '\x1b[B', 'control.key-down'], ['←', '\x1b[D', 'control.key-left'], ['→', '\x1b[C', 'control.key-right'], ['Enter', '\r', null]] as const).map(([label, data, icon]) =>
         <button key={label} disabled={inputState.phase === 'unknown' || connection.state !== 'connected'} aria-label={`终端 ${label}`} onClick={() => terminal.current?.input(data, true)}>{icon ? <SemanticIcon name={icon} size={16} /> : label}</button>)}
     </div>}
-    {sizeOpen && <form className="mobile-terminal-size" onSubmit={event => {
+    {inputState.mode === 'control' && sizeOpen && <form className="mobile-terminal-size" onSubmit={event => {
       event.preventDefault(); if (control.current?.resize(Number(cols), Number(rows))) setSizeOpen(false)
     }}><label>列<TextInput aria-label="PTY 列数" inputMode="numeric" value={cols} onChange={event => setCols(event.target.value)} /></label><label>行<TextInput aria-label="PTY 行数" inputMode="numeric" value={rows} onChange={event => setRows(event.target.value)} /></label><button disabled={inputState.mode !== 'control' || inputState.phase === 'unknown'} type="submit">应用到原 Run</button><p>只按这次选择改变 Mac 的 PTY；手机旋转不会再改尺寸。</p></form>}
     {!agentSessionId && <div className="mobile-terminal-empty"><h2>查看原会话的终端</h2><p>先从会话列表选择一个已授权会话。这里只显示 Mac 持有的输出。</p></div>}
