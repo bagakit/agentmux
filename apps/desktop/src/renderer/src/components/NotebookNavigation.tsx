@@ -20,13 +20,15 @@ const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
 const ThemeObjectNoteIcon = semanticIconComponent('object.note')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
 
 
-export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteId, onSelect, onOpen, onTalk, onCreateChild, query, onQuery, onCreate, pending, actions, archived, onArchivedChange }: {
+export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteId, onSelect, onOpen, onTalk, onCreateChild, query, onQuery, onCreate, pending, actions, archived, onArchivedChange, onOpenGraph, graphActive = false }: {
   notebooks: Notebook[]; pages: NotebookPage[]; selectedId: string | null; selectedNoteId: string | null
   onSelect(notebookId: string): void; onOpen(page: NotebookPage): void; onCreateChild(page: NotebookPage): void; query: string; onQuery(query: string): void
   onCreate(): void; pending: boolean; actions: ReactNode; archived: boolean; onArchivedChange(archived: boolean): void
   onTalk?: NoteTalkHandler | undefined
+  onOpenGraph?: (() => void) | undefined; graphActive?: boolean
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const book = notebooks.find(candidate => candidate.notebookId === selectedId)
@@ -34,7 +36,8 @@ export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteI
   const members = pages.filter(page => page.notebookId === book.notebookId)
   const rows = notebookPageRows(pages, book.notebookId, query, collapsed, archived)
   return <div className="survey-notebook-navigation" aria-label="Notebook navigation" data-notebook-id={book.notebookId}>
-    <div className="recall-directory-tools"><button className="recall-directory-home" aria-label={`Notebook directory: ${book.name}`} aria-current={!selectedNoteId ? 'page' : undefined} onClick={() => onSelect(book.notebookId)}>Pages</button>{actions}</div>
+    <div className="recall-directory-tools"><div className="recall-directory-destinations"><button className="recall-directory-home" aria-label={`Notebook directory: ${book.name}`} aria-current={!selectedNoteId && !graphActive ? 'page' : undefined} onClick={() => onSelect(book.notebookId)}>Pages</button>
+      {onOpenGraph ? <button type="button" className="recall-directory-home recall-directory-graph" aria-label="Notebook graph" aria-pressed={graphActive} onClick={onOpenGraph}><ThemeObjectBranchIcon size={13} /><span>Graph</span></button> : null}</div>{actions}</div>
     <button className="survey-notebook-new-page" aria-label={`New page in ${book.name}`} disabled={pending} onClick={onCreate}><ThemeActionCreateNoteIcon size={14} /><span>New page</span></button>
     <NotebookDirectoryViews archived={archived} onChange={onArchivedChange} />
     {members.length ? <label className="notebook-find notebook-find--sidebar"><ThemeActionSearchIcon size={12} /><TextInput aria-label={`Find pages in ${book.name}`} placeholder="Find a page…" value={query} onChange={event => onQuery(event.target.value)} /></label> : null}
@@ -79,7 +82,7 @@ export function NotebookHome({ notebook, pages, pending, onCreate, onOpen, onTal
     {!navigationVisible && onArchivedChange ? <NotebookDirectoryViews archived={archived} onChange={onArchivedChange} /> : null}
     {!navigationVisible || !pages.length ? <button className="notebook-create-page" disabled={pending} onClick={onCreate}><ThemeActionCreateNoteIcon size={15} /><span>New page</span></button> : null}
     {pages.length ? <>{onQuery ? <label className="notebook-find notebook-find--directory"><ThemeActionSearchIcon size={14} /><TextInput aria-label="Search notebook pages" placeholder="Find a page…" value={query} onChange={event => onQuery(event.target.value)} /></label> : null}
-      {view === 'cards' ? <NotebookCards pages={visiblePages} onOpen={onOpen} onTalk={onTalk} /> : view === 'graph' ? <NotebookGraph notebookId={notebook.notebookId} pages={visiblePages} onOpen={onOpen} onTalk={onTalk} active={active} /> : <NotebookDirectoryContextMenu pages={visiblePages} onTalk={onTalk}><div className="notebook-page-directory" aria-label={archived ? "Archived pages" : "Saved pages"}>{rows.map(({ page, depth }) => <button key={page.noteId} data-note-id={page.noteId} style={{ paddingLeft: Math.min(depth, 8) * 16 + 3 }} onClick={() => onOpen(page)}>
+      {view === 'cards' ? <NotebookCards pages={visiblePages} onOpen={onOpen} onTalk={onTalk} /> : view === 'graph' ? <NotebookGraph notebookId={notebook.notebookId} pages={visiblePages} expandOnFirstView={!query.trim() && !archived} onOpen={onOpen} onTalk={onTalk} active={active} /> : <NotebookDirectoryContextMenu pages={visiblePages} onTalk={onTalk}><div className="notebook-page-directory" aria-label={archived ? "Archived pages" : "Saved pages"}>{rows.map(({ page, depth }) => <button key={page.noteId} data-note-id={page.noteId} style={{ paddingLeft: Math.min(depth, 8) * 16 + 3 }} onClick={() => onOpen(page)}>
         <ThemeFileTextIcon size={17} strokeWidth={1.5} /><span><strong>{page.title}</strong><small>{page.sources[0] ? new URL(page.sources[0].url).hostname : 'Note'} · {new Date(page.updatedAt).toLocaleDateString()}</small></span><ThemeActionOpenExternalIcon size={14} />
       </button>)}{!rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}</div></NotebookDirectoryContextMenu>} {view !== 'tree' && !rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}</> : <div className="notebook-empty"><span className="notebook-empty-line" /><p>{archived ? 'No archived pages.' : <>Start with a blank page.<br />Notes captured from webpages stay here, too.</>}</p></div>}
   </section>

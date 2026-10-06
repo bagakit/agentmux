@@ -29,6 +29,6 @@ export function NotebookCards({ pages, onOpen, onTalk }: { pages: NotebookPage[]
     <ThemeFileTextIcon size={18} strokeWidth={1.4} /><strong>{page.title}</strong><span>{sourceLabel(page)}</span><small>{new Date(page.updatedAt).toLocaleDateString()}</small>
   </button>)}</div></NotebookDirectoryContextMenu>
 }
-export function NotebookGraph({ notebookId, pages, onOpen, onTalk, active = true }: { notebookId: string; pages: NotebookPage[]; onOpen(page: NotebookPage, blockId?: string): void; onTalk?: NoteTalkHandler | undefined; active?: boolean }) {
-  return <NoteCanvas scope={{ kind: 'notebook', notebookId }} seedNoteIds={pages.map(page => page.noteId)} active={active} onOpen={onOpen} onTalk={onTalk} />
+export function NotebookGraph({ notebookId, pages, onOpen, onTalk, active = true, expandOnFirstView = true }: { notebookId: string; pages: NotebookPage[]; onOpen(page: NotebookPage, blockId?: string): void; onTalk?: NoteTalkHandler | undefined; active?: boolean; expandOnFirstView?: boolean }) {
+  return <NoteCanvas scope={{ kind: 'notebook', notebookId }} seedNoteIds={pages.map(page => page.noteId)} expandOnFirstView={expandOnFirstView} active={active} onOpen={onOpen} onTalk={onTalk} />
 }

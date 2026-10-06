@@ -128,3 +128,9 @@
 .note-link-option:hover, .note-link-option[aria-selected="true"] { background: var(--surface-2); }
 .note-link-lookup { padding: 12px 0; margin: 8px 0; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
 .note-link-lookup__heading strong { overflow-wrap: anywhere; }
+.note-view-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-6); border-bottom: 1px solid var(--line-soft); }
+.note-view-toolbar .surface-mode-switch { margin: 0; }
+.note-view-toolbar .surface-mode-switch button { min-width: 64px; height: 30px; padding-inline: var(--sp-5); font: var(--fs-body)/1.4 var(--font-sans); }
+.note-view-snapshot { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); }
+.note-view-snapshot > span { color: var(--text-2); }
+@container (max-width: 420px) { .note-view-toolbar { padding: var(--sp-3) var(--sp-4); gap: var(--sp-3); } }

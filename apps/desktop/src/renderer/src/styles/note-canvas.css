@@ -64,7 +64,7 @@
 .note-canvas .note-canvas-edge-link { stroke: var(--blue); stroke-width: 1.8; }
 .note-canvas .note-canvas-edge-embed { stroke: var(--green); stroke-width: 1.8; }
 .note-canvas .note-canvas-edge-hierarchy { stroke: var(--text-3); stroke-width: 1; opacity: .65; }
-.note-canvas-edge-label { position: absolute; pointer-events: all; padding: 3px 6px; border: 1px solid var(--line-soft); border-radius: 4px; background: var(--surface-1); color: var(--text-3); font-size: 9px !important; line-height: 1.4; }
+.note-canvas-edge-label { position: absolute; pointer-events: all; padding: 5px 8px; min-height: 26px; border: 1px solid var(--line-soft); border-radius: 4px; background: var(--surface-1); color: var(--text-3); font-size: 11px !important; line-height: 1.4; }
 .note-canvas-edge-label.is-reference { color: var(--blue); }
 .note-canvas-edge-label.is-link { color: var(--blue); }
 .note-canvas-edge-label.is-embed { color: var(--green); }
@@ -97,9 +97,6 @@
 .note-canvas-inspector-actions span { color: var(--text-3); font-size: 10px; }
 .note-canvas-reference-issue { color: var(--text-3); font-size: 10px; line-height: 1.6; margin: 8px 0 0; }
 .global-recall-surface .survey-notebook-home:has(.note-canvas) { max-width: none; padding: clamp(16px, 3vh, 30px) clamp(12px, 3vw, 32px); }
-.note-association-action { display: flex; justify-content: flex-end; padding-block: 4px 12px; }
-.note-association-action .note-text-button { padding: 4px 0; border: 0; background: transparent; color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); cursor: pointer; }
-.note-association-action .note-text-button:hover, .note-association-action .note-text-button[aria-expanded="true"] { color: var(--blue); }
 .note-association-canvas { width: 100%; min-width: 0; padding-bottom: 16px; }
 .note-original-editor[hidden] { display: none; }
 @container (max-width: 420px) {
@@ -112,3 +109,21 @@
   .note-canvas-caption { padding: 8px; }
   .note-canvas-stage { height: 520px; }
 }
+
+.note-canvas-degrees { display: flex; gap: 12px; padding: 0 15px 12px; color: var(--text-3); font-size: 10px; line-height: 1.5; }
+.note-canvas-card > .react-flow__handle { opacity: 0; }
+.note-canvas-card:hover > .react-flow__handle { opacity: 1; }
+.note-canvas-reference-query { display: flex; flex-direction: column; gap: 5px; line-height: 1.6; overflow-wrap: anywhere; }
+.note-canvas-reference-query > span { color: var(--text-3); font-size: 10px; }
+/* Graph keeps the Notebook identity close to its view controls so the relationships lead. */
+.global-recall-surface .survey-notebook-home:has(.note-canvas) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-content: start; align-items: center; gap: 12px; }
+.global-recall-surface .survey-notebook-home:has(.note-canvas) > .notebook-cover-mark { width: 30px; height: 30px; margin: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.global-recall-surface .survey-notebook-home:has(.note-canvas) > .notebook-cover-mark svg { width: 23px; height: 23px; }
+.global-recall-surface .survey-notebook-home:has(.note-canvas) > header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; min-width: 0; margin: 0; }
+.global-recall-surface .survey-notebook-home:has(.note-canvas) > header h1 { min-width: 0; margin: 0; font-size: 21px; line-height: 1.4; }
+.global-recall-surface .survey-notebook-home:has(.note-canvas) > header p { margin: 0; color: var(--text-3); font-size: var(--fs-meta); }
+.global-recall-surface .survey-notebook-home:has(.note-canvas) > .recall-view-picker { margin: 0; }
+.global-recall-surface .survey-notebook-home:has(.note-canvas) > :is(.note-canvas, .notebook-find, .notebook-directory-views, .notebook-create-page, .notebook-no-results) { grid-column: 1 / -1; }
+.global-recall-surface .survey-notebook-home:has(.note-canvas) .note-canvas-stage { height: clamp(360px, calc(100vh - 220px), 820px); }
+.global-recall-surface[data-navigation-stacked="true"] .survey-notebook-home:has(.note-canvas) { grid-template-columns: auto minmax(0, 1fr); }
+.global-recall-surface[data-navigation-stacked="true"] .survey-notebook-home:has(.note-canvas) > .recall-view-picker { grid-column: 1 / -1; justify-self: start; }

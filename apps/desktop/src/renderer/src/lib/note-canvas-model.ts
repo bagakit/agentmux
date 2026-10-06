@@ -5,7 +5,7 @@ import type { NoteCanvasScope } from './note-canvas-state'
 
 export type CanvasReference = NotebookGraph['references'][number]
 export type CanvasRelationship = { id: string; kind: 'hierarchy' | 'reference' | 'embed' | 'link'; source: string; target: string; references: CanvasReference[] }
-export type CanvasNote = { id: string; page?: NotebookPage; observation?: NoteContentMetadata; title: string; notebook: string; root: boolean; context: boolean; neighbors: number; unbound: CanvasReference[] }
+export type CanvasNote = { id: string; page?: NotebookPage; observation?: NoteContentMetadata; title: string; notebook: string; root: boolean; context: boolean; neighbors: number; incoming: number; outgoing: number; unbound: CanvasReference[] }
 export type CanvasProjection = { notes: CanvasNote[]; relationships: CanvasRelationship[]; unbound: CanvasReference[] }
 const key = (kind: string, from: string, to: string) => JSON.stringify([kind, from, to])
 
@@ -39,12 +39,17 @@ export function projectNoteCanvas(snapshot: NotebookGraphSnapshot, scope: NoteCa
     if (!expansion.has(id)) continue
     for (const next of adjacent.get(id) ?? []) if (!visible.has(next)) { visible.add(next); queue.push(next) }
   }
+  const incoming = new Map<string, number>(), outgoing = new Map<string, number>()
+  for (const reference of graph.references) {
+    outgoing.set(reference.source.noteId, (outgoing.get(reference.source.noteId) ?? 0) + 1)
+    if (reference.target.kind !== 'unbound') incoming.set(reference.target.noteId, (incoming.get(reference.target.noteId) ?? 0) + 1)
+  }
   const observations = new Map(graph.observations.map(value => [value.noteId, value]))
   const notes = [...visible].map(id => {
     const page = catalog.pages[id], observation = observations.get(id)
     return { id, ...(page ? { page } : {}), ...(observation ? { observation } : {}), title: page?.title ?? 'Uncatalogued note',
       notebook: page ? catalog.notebooks[page.notebookId]?.name ?? 'Original notebook' : 'Outside this directory',
-      root: scope.kind === 'note' && id === scope.noteId, context: !seeds.has(id), neighbors: adjacent.get(id)?.size ?? 0, unbound: unbound.get(id) ?? [] }
+      root: scope.kind === 'note' && id === scope.noteId, context: !seeds.has(id), neighbors: adjacent.get(id)?.size ?? 0, incoming: incoming.get(id) ?? 0, outgoing: outgoing.get(id) ?? 0, unbound: unbound.get(id) ?? [] }
   })
   return { notes, relationships: [...relationships.values()].filter(edge => visible.has(edge.source) && visible.has(edge.target)), unbound: [...unbound.values()].flat().filter(reference => visible.has(reference.source.noteId)) }
 }
