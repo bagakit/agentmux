@@ -34,7 +34,7 @@ const attachment = (): AgentMuxRunAttachment => ({ run: { ...session.run, native
     restoreBytes: raw.length ? new Uint8Array(raw) : encoder.encode('\x1b[0m'), resizes: [] } })
 const finite = {
   // Optional public read transport is absent in this bounded terminal SDK fixture.
-  subscribeRpc: undefined,
+  subscribeRpc: undefined as AgentMuxHostedClient['subscribeRpc'],
   // This bounded SDK fixture has no observed public RPC owner; diagnostics remain unknown.
   runtimeOwnerIdentity() { return null },
   runtimeIdentity() { return { hostId: 'local', instanceId: 'private-fixture-runtime', buildIdentity: 'fixture', protocolVersion: 1, processId: null } },
@@ -372,4 +372,22 @@ export async function runDirectionalIconProof() {
   }
   assert(terminal === canvas, 'Directional drawing never remounts the original native canvas')
   return { directions: directions.map(([label, icon, data]) => ({ label, icon, bytes: [...encoder.encode(data)] })), writes: calls.filter(call => call.method === 'writeAgent').slice(before), retainedNativeCanvas: terminal === canvas }
+}
+
+/** Private QA supplies the original Host read lease; product entry never imports this module. */
+export function installAppearanceReader(reader: NonNullable<AgentMuxHostedClient['subscribeRpc']>) { finite.subscribeRpc = reader }
+export async function seedPaletteReadingProof() {
+  const header = '\x1b[0mPrivate native ANSI palette · 原工作面\r\n';
+  const swatches = Array.from({length:16},(_,i)=>`\x1b[${i<8?30+i:90+i-8}m${String(i).padStart(2,'0')} 色 \x1b[0m${i%4===3?'\r\n':''}`).join('');
+  output(encoder.encode(header+swatches+'\r\n\x1b[31mDanger · 失败\x1b[0m  \x1b[33mWarning · 待确认\x1b[0m\r\n\x1b[32mSuccess · 已完成\x1b[0m  中文与 Unicode 保留\r\n'+Array.from({length:65},(_,i)=>`Original reading row ${i+1} · 内容不随颜色改变\r\n`).join('')));
+  await until(()=>text().includes('Original reading row 65'),'real private replay bytes');
+  terminal!.scrollToLine(10);terminal!.select(0,12,24);
+  return mobilePaletteFacts();
+}
+export function mobilePaletteFacts() { return {palette:terminal!.options.theme,viewport:terminal!.buffer.active.viewportY,base:terminal!.buffer.active.baseY,selection:terminal!.getSelection(),text:text(),fontSize:terminal!.options.fontSize,canvasPresent:!!document.querySelector('.xterm-screen'),attachCalls:calls.filter(c=>c.method==='reattachAgent').length,forbidden:[...forbidden]} }
+
+export async function proveCoveredNativeInputIsPassive() {
+ const before=calls.filter(call=>call.method==='writeAgent').length;terminal!.input('covered native input must remain local',true);
+ await new Promise(resolve=>setTimeout(resolve,25));assert(calls.filter(call=>call.method==='writeAgent').length===before,'A covering dialog cannot preserve the prior input control intent');
+ return {before,after:calls.filter(call=>call.method==='writeAgent').length,readonly:terminal!.textarea?.readOnly};
 }
