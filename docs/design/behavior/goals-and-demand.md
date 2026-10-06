@@ -127,6 +127,14 @@ Goals 的原 Settings owner 保存「让提需 Agent 默认担任 Supervisor」�
 
 路由队列可恢复地发现无 Project、无负责人、未确认或需要人处理的目标，队列不改变生命周期状态。搜索与状态、Project、负责人、优先级、标签、日期、Session／Agent 及归档筛选作用于同一集合；清除、复制或公共接口重放保持语义。清单、看板、表格不各存数据。卡片只保足够扫描和路由的 ID、目标、状态及次级关系摘要，完整正文和危险动作在准确详情内可达；字段的默认展开与视觉密度引用[呈现 owner](../presentation/goals-and-demand.md#goals-的目标正文与对齐密度)。
 
+## 委派回报与责任接续
+
+Goal 的委派沿 Core 原通信 dispatch 和实际独立 AgentSession，保存原 source message、operation、Host、owner／worker、Run、冻结任务正文及资料来源；Goal 持有业务关联和逐成功标准的报告，Core 持有通信、投递与回复事实。委派不更换 Supervisor，只有显式交接修改责任。Mote 的执行 cwd 与 Goal Project 分别成立，准确发现目标，不从名称、正文或显示位置推定执行身份。
+
+未交付的执行 Agent 退出时，原 Goal、委派、负责人和工作面保留，明确需要原身份接续或处理阻塞。已有真实报告时显示报告待回收，并让 Supervisor 沿原回复核对证据、差距与未知，提交同一 Goal 的结果；回收后显示待人核验或接受。进程退出、idle、投递、ack、worker_done 和报告自称完成均不代签业务完成或人类接受。仅观测未知时说明失败步骤与恢复动作，保健康 Agent 可用，不盲重投。
+
+委派意图、通信提交和报告回收分别沿原 owner 持久化与对账；回执丢失和重启后保持同一 operation／message、冻结正文和原责任。逐标准报告有准确作者、原 reply、证据位置与目标提案版本，重复或迟到回复不制造新工作、不覆盖已回收报告或人的接受。原 Mote 和 Goal 工作入口提供查看来源、回答提问／处理阻塞、回收报告及原 Session 接续的真实动作；不要求用户靠追问发现未收尾。
+
 ## Goal 详情中的 Session 观察投影
 
 执行拓扑按需表达准确 Project／资源 Workspace、Topic／Branch、已有 Tab、Region 与 AgentSession；多处合法绑定可辨，不以 Session 数量、当前焦点、最近顺序或终端标题猜位置。没有 Tab、Region 或当前 Agent 时诚实说明。共用原空间与 Session 投影组件，不为每张目标常驻完整终端或另建拓扑账本。

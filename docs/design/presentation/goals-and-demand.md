@@ -116,3 +116,7 @@ Goal 详情是连续的右侧 surface：标题和状态在短 header 中，属�
 
 多 Session 投影继续复用现有 Region arrangement。卡片只显示可扫描的 Agent topology 摘要，完整 Topic/Branch/Tab/Region 层级在详情内可展开；unknown 或尚未恢复的事实占用同样的稳定槽位，不用空白或跳动布局掩盖缺口。
 > 命名更新：历史 “Leader Topic” 与 “PMO Teams Topic” 现称 **Mote**；视觉与密度约束继续有效，当前产品身份由交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)定义。
+
+## 委派与回报的阅读
+
+委派、报告回收与责任沿[同主题行为](../behavior/goals-and-demand.md#委派回报与责任接续)。原 Goal 的协作区和 Mote 当前工作摘要先显示需要谁做什么：待回应、提问或阻塞、报告待回收、未交付待接续、观测未知、结果待人接受。准确作者和下一步紧邻正文，原 source／reply、Host／Session／Run、资料版本和逐标准证据按需展开。原 Session、报告回收和结果核验动作可操作，宽窄布局保主要正文与入口，不以大段技术标识、状态色或静态卡片代替实际回收。
