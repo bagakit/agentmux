@@ -4,6 +4,7 @@ import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnnotationToolbar, ANNOTATION_TOOLS, type AnnotationTool } from './AnnotationToolbar'
+import { AnnotationOriginalMenu } from './AnnotationOriginalMenu'
 import { AnnotationNotes } from './AnnotationNotes'
 import { renderCommittedLayer, renderScreenshotScene } from './canvas-render'
 import { canRedo, canUndo, clearShapes, commitShape, createScreenshotDocument, DEFAULT_SCREENSHOT_COLOR,
@@ -359,11 +360,11 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const fontOptions = [...new Set<number>([...SCREENSHOT_FONT_SIZES, displayedFont])].sort((a, b) => a - b)
   return <div ref={editorRef} className="image-annotation-editor" role="dialog" aria-label="Screenshot editor" style={active ? undefined : { display: 'none' }}>
     <header className="image-annotation-editor__header">
-      <span className="image-annotation-editor__title"><strong>Screenshot</strong><small>{image.width} × {image.height}</small></span>
-      <span className="image-annotation-editor__status" role="status">{copied ? <><CheckIcon size={13} />{copied}</> : documentStatus}</span>
+      <span className="image-annotation-editor__title"><strong>Screenshot</strong><small>{image.width} × {image.height}</small>
+        <span className={'image-annotation-editor__status' + (copied ? ' image-annotation-editor__status--success' : '')} role="status">{copied ? <><CheckIcon size={13} />{copied}</> : documentStatus}</span>
+      </span>
       <div className="image-annotation-toolbar__actions">
-        {onOpenOriginal ? <button type="button" disabled={busy} onClick={onOpenOriginal}>Open original</button> : null}
-        {onSaveOriginal ? <button type="button" disabled={busy || !loaded} onClick={() => complete('save')}>Save original</button> : null}
+        <AnnotationOriginalMenu active={active} busy={busy} loaded={loaded} onOpen={onOpenOriginal} onSave={onSaveOriginal ? () => complete('save') : undefined} />
         <button type="button" onClick={onCancel}><CancelIcon size={13} /> Cancel</button>
         {onCopyContext ? <button type="button" disabled={busy || !loaded} onClick={() => complete('context')}>Copy context</button> : null}
         <button className="primary-button" type="button" disabled={busy || !loaded} onClick={() => complete()}><ClipboardIcon size={13} />{busy ? 'Copying…' : 'Copy PNG'}</button>
