@@ -732,12 +732,12 @@ describe('BrowserViewManager', () => {
       viewPosition: { x: 0, y: 0 },
       deviceScaleFactor: 0,
       viewSize: { width: 390, height: 844 },
-      scale: 1
+      scale: 501 / 844
     })
     expect(manager.setViewport('browser-1', 'desktop')).toMatchObject({ viewport: 'desktop' })
     expect(view.webContents.enableDeviceEmulation).toHaveBeenLastCalledWith(expect.objectContaining({
       screenPosition: 'desktop',
-      viewSize: { width: 1280, height: 800 }
+      viewSize: { width: 1152, height: 720 }
     }))
     expect(manager.setViewport('browser-1', 'responsive')).toMatchObject({ viewport: 'responsive' })
     expect(view.webContents.deviceEmulation).toBeNull()
@@ -775,6 +775,62 @@ describe('BrowserViewManager', () => {
     expect(() => manager.setBounds('browser-1', null)).not.toThrow()
     expect(() => manager.setBounds('browser-1', { x: 0, y: 0, width: 100, height: 100 }))
       .not.toThrow()
+  })
+
+  it('keeps the confirmed viewport when native application fails and permits retry', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const initial = await manager.create('browser-viewport-failure', 'https://example.com/')
+    const view = fixture.children[0]!
+    manager.setBounds(initial.id, { x: 10, y: 20, width: 720, height: 600 })
+    const lastEvent = () => (fixture.sent.at(-1) as { browser: { viewport: string } }).browser.viewport
+
+    view.webContents.enableDeviceEmulation.mockImplementationOnce(() => { throw new Error('Native preset rejected') })
+    expect(() => manager.setViewport(initial.id, 'mobile')).toThrow('Native preset rejected')
+    expect(await manager.create(initial.id, initial.url)).toMatchObject({
+      viewport: 'responsive', navigationId: initial.navigationId, profileId: initial.profileId
+    })
+    expect(lastEvent()).toBe('responsive')
+    expect(fixture.children).toContain(view)
+    expect(view.visible).toBe(true)
+    expect(view.webContents.isDestroyed()).toBe(false)
+    expect(manager.setViewport(initial.id, 'mobile').viewport).toBe('mobile')
+
+    view.webContents.disableDeviceEmulation.mockImplementationOnce(() => { throw new Error('Native reset rejected') })
+    expect(() => manager.setViewport(initial.id, 'responsive')).toThrow('Native reset rejected')
+    expect((await manager.create(initial.id, initial.url)).viewport).toBe('mobile')
+    expect(lastEvent()).toBe('mobile')
+    expect(view.webContents.deviceEmulation).not.toBeNull()
+    expect(manager.setViewport(initial.id, 'responsive').viewport).toBe('responsive')
+    expect(view.webContents.deviceEmulation).toBeNull()
+    manager.close(initial.id)
+  })
+
+  it('fits fixed viewports again only when the original Pane size changes', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const initial = await manager.create('browser-fit', 'https://example.com/')
+    const view = fixture.children[0]!, contents = view.webContents
+    manager.setBounds(initial.id, { x: 20, y: 40, width: 720, height: 600 })
+    manager.setViewport(initial.id, 'mobile')
+    expect(contents.deviceEmulation).toMatchObject({ viewSize: { width: 390, height: 844 }, scale: 600 / 844 })
+    contents.enableDeviceEmulation.mockClear()
+    manager.setBounds(initial.id, { x: 30, y: 50, width: 720, height: 600 })
+    expect(contents.enableDeviceEmulation).not.toHaveBeenCalled()
+    manager.setBounds(initial.id, { x: 30, y: 50, width: 480, height: 420 })
+    expect(contents.deviceEmulation).toMatchObject({ scale: 420 / 844 })
+    expect(contents.getZoomFactor()).toBe(DEFAULT_BROWSER_ZOOM_FACTOR)
+    expect(await manager.create(initial.id, initial.url)).toMatchObject({ navigationId: initial.navigationId, profileId: initial.profileId })
+
+    manager.setViewport(initial.id, 'desktop')
+    expect(contents.deviceEmulation).toMatchObject({ viewSize: { width: 1152, height: 720 }, scale: 480 / 1152 })
+    manager.setBounds(initial.id, null)
+    manager.setBounds(initial.id, { x: 30, y: 50, width: 1600, height: 1000 })
+    expect(contents.deviceEmulation).toMatchObject({ scale: 1 })
+    await manager.reload(initial.id)
+    expect(contents.deviceEmulation).toMatchObject({ viewSize: { width: 1152, height: 720 }, scale: 1 })
+    manager.setViewport(initial.id, 'responsive')
+    manager.setBounds(initial.id, { x: 30, y: 50, width: 480, height: 420 })
+    expect(contents.deviceEmulation).toBeNull()
+    manager.close(initial.id)
   })
 
   it.each([true, false])('synchronizes a loaded visible page at load and show edges, preserving policy %s', async policy => {
