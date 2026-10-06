@@ -246,6 +246,12 @@
 
 /* Mailbox chrome stays outside the one reading scroll surface. */
 .composer-mailbox:popover-open { display: flex; flex-direction: column; }
+.composer-mailbox { flex-direction: column; transform-origin: right bottom; transition: display var(--dur-enter) allow-discrete, overlay var(--dur-enter) allow-discrete; }
+.composer-mailbox:not(:popover-open), .composer-mailbox[data-state='closed'] { pointer-events: none; }
+.composer-mailbox:not(:popover-open), .composer-mailbox:popover-open[data-state='closed'] { opacity: 0; }
+.composer-pending[data-mailbox-returning='true'] { animation: composer-mailbox-return var(--dur-enter) var(--ease-enter); }
+@keyframes composer-mailbox-return { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .composer-mailbox { transition: none; } .composer-pending[data-mailbox-returning='true'] { animation: none; } }
 .composer-mailbox__heading, .composer-mailbox__folders, .composer-mailbox__back { flex: 0 0 auto; }
 .composer-mailbox__content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .composer-mailbox__back { margin-bottom: var(--sp-2); }
