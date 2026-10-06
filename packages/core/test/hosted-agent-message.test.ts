@@ -82,7 +82,9 @@ describe('Hosted original message submission', () => {
     try {
       expect(f.client.submitAgentMessage).toEqual(expect.any(Function))
       await f.client.submitAgentMessage(f.message)
-      expect(f.submit).toHaveBeenCalledExactlyOnceWith(f.message)
+      expect(f.submit).toHaveBeenCalledTimes(1)
+      expect(f.submit.mock.calls[0]![0]).toEqual(f.message)
+      expect(f.submit.mock.calls[0]![1]?.externalAuthor).toBeUndefined()
       const retained = await loadAgentSessions(f.store)
       expect(retained).toHaveLength(1)
       const admission = retained[0]!.promptCompletionAdmission
@@ -110,7 +112,9 @@ describe('Hosted original message submission', () => {
         envelope: { ...f.message.envelope, sender: { kind: 'agent-session', agentSessionId: 'forged-sender' },
           senderSessionId: 'forged-sender', senderRunId: 'forged-run' } }
       await expect(f.client.submitAgentMessage(forged)).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
-      expect(f.submit).toHaveBeenCalledExactlyOnceWith(forged)
+      expect(f.submit).toHaveBeenCalledTimes(1)
+      expect(f.submit.mock.calls[0]![0]).toEqual(forged)
+      expect(f.submit.mock.calls[0]![1]?.externalAuthor).toBeUndefined()
       expect(await f.queue.listAfter()).toEqual([]); expect(f.input.mock.calls).toEqual([])
       expect(f.core.agentSession('recipient').run).toEqual({ runId: 'recipient-run' })
       expect(f.stop.mock.calls).toEqual([])
