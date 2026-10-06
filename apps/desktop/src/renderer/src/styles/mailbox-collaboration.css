@@ -8,3 +8,6 @@
 .mailbox-collaboration__message > summary span + span { margin-left: var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
 .mailbox-collaboration .composer-tool { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .mailbox-collaboration .composer-mailbox__row-head strong { white-space: normal; overflow-wrap: anywhere; }
+.mailbox-collaboration__filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
+.mailbox-collaboration__filters > input { flex: 1 1 220px; min-width: 0; width: 100%; }
+.mailbox-collaboration__filters .selection-field { flex: 1 1 160px; min-width: 0; }

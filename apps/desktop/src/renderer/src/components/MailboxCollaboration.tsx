@@ -2,9 +2,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent 
 import type { AgentMuxRpcResult, DurableAgentMuxMessage } from '@agentmux/core'
 import { formatSessionAddress } from '@agentmux/core/sharing'
 import { ConversationMessage, type ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
+import { TextInput } from '@agentmux/client-ui/input'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { MailboxEmpty, MailboxSourceNotice, MailboxTime } from './MailboxReading'
+import { SelectionField } from './SelectionField'
 import '../styles/mailbox-collaboration.css'
 
 type Page = AgentMuxRpcResult<'message.dispatch.ls'>
@@ -46,6 +48,8 @@ export function MailboxCollaboration({ control, active, reading, onCopy }: {
   const [detail, setDetail] = useState<{ source: string; loading: boolean; issue: string | null } | null>(null)
   const [navigationIssue, setNavigationIssue] = useState<{ source: string; message: string } | null>(null)
   const [loadingList, setLoadingList] = useState(false)
+  const [query, setQuery] = useState(''), [status, setStatus] = useState('all')
+  const search = useRef<HTMLInputElement>(null)
   const loadedPages = useRef(1), navigationRequest = useRef(0)
   const root = useRef<HTMLElement>(null), back = useRef<HTMLButtonElement>(null)
   const listPosition = useRef<{ scroll: number; source: string; focused: boolean } | null>(null)
@@ -124,6 +128,12 @@ export function MailboxCollaboration({ control, active, reading, onCopy }: {
   const original = selected && record?.dispatch.sourceMessageId === selected ? record : null
   const detailIssue = detail?.source === selected ? detail.issue : null
   const loadingDetail = detail?.source === selected && detail.loading
+  const names = useMemo(() => new Map([...new Set((page?.dispatches ?? []).flatMap(item => [item.ownerAgentSessionId, item.workerAgentSessionId]))]
+    .map(id => [id, reading?.describeSpeaker?.({ role: 'agent', id }).name ?? id])), [page, reading?.describeSpeaker])
+  const matches = (page?.dispatches ?? []).filter(item => {
+    const searchable = [item.sourceMessageId, item.ownerAgentSessionId, item.workerAgentSessionId, names.get(item.ownerAgentSessionId), names.get(item.workerAgentSessionId)].join(' ').toLocaleLowerCase()
+    return searchable.includes(query.trim().toLocaleLowerCase()) && (status === 'all' || (status === 'waiting' ? item.originAwaits : !item.originAwaits))
+  })
   return <section ref={root} className="mailbox-collaboration" aria-label="Supervised collaboration records">
     <div className="mailbox-collaboration__heading"><strong>Supervised collaboration</strong><button type="button" className="composer-tool" aria-busy={loadingList || loadingDetail}
       onClick={refresh}>Refresh records</button></div>
@@ -147,12 +157,22 @@ export function MailboxCollaboration({ control, active, reading, onCopy }: {
           {original.identityDiagnostics.map(item => <p key={JSON.stringify([item.agentSessionId, item.runId, item.code])}>{item.agentSessionId} · {item.runId} · {item.code}: {item.message}</p>)}
           <p>Original recorded identities remain above. Current Run health is not established by this observation.</p></details> : null}
       </article> : <MailboxEmpty title={loadingDetail ? 'Reading original record' : 'Original record is unconfirmed'} hint={selected} />}
-    </> : page ? <><ol className="composer-mailbox__messages" aria-label="Supervised collaboration sources">{page.dispatches.map(item => <li key={item.sourceMessageId}>
+    </> : page ? <><div className="mailbox-collaboration__filters" onKeyDown={event => { if (event.key === 'Enter') event.stopPropagation() }}>
+      <TextInput ref={search} aria-label="Find loaded collaboration records" placeholder="Find by Agent or message ID" value={query}
+        onChange={event => { if (isCurrentOwner()) setQuery(event.target.value) }} />
+      <SelectionField label="Filter collaboration communication" value={status} onValueChange={value => { if (isCurrentOwner()) setStatus(value) }} options={[
+        { value: 'all', label: 'All communication' }, { value: 'waiting', label: 'Awaiting report' }, { value: 'reported', label: 'Report recorded' }
+      ]} />
+      {query || status !== 'all' ? <button type="button" className="composer-tool" onClick={() => { if (!isCurrentOwner()) return; setQuery(''); setStatus('all'); search.current?.focus({ preventScroll: true }) }}>Clear filters</button> : null}
+    </div><p className="mailbox-collaboration__hint" role="status">{matches.length} of {page.dispatches.length} loaded records · Search covers this loaded list only.</p>
+    <ol className="composer-mailbox__messages" aria-label="Supervised collaboration sources">{matches.map(item => <li key={item.sourceMessageId}>
       <button type="button" className="composer-mailbox__row" data-source-message={item.sourceMessageId} onClick={event => select(item.sourceMessageId, event)}>
-        <span className="composer-mailbox__row-head"><strong>{item.ownerAgentSessionId} → {item.workerAgentSessionId}</strong></span>
+        <span className="composer-mailbox__row-head"><strong>{names.get(item.ownerAgentSessionId)} → {names.get(item.workerAgentSessionId)}</strong></span>
+        {names.get(item.ownerAgentSessionId) !== item.ownerAgentSessionId || names.get(item.workerAgentSessionId) !== item.workerAgentSessionId ? <span className="composer-mailbox__metadata">{item.ownerAgentSessionId} → {item.workerAgentSessionId}</span> : null}
         <span className="composer-mailbox__preview">{item.sourceMessageId}</span><span className="composer-mailbox__metadata">{item.originAwaits ? 'Awaiting report' : 'Report recorded · review separate'}</span>
       </button></li>)}</ol>
       {!page.dispatches.length ? <MailboxEmpty title="No supervised collaboration recorded" hint="This does not describe other Agent messages or execution status." /> : null}
+      {page.dispatches.length && !matches.length ? <MailboxEmpty title="No loaded records match" hint="Clear the filters or load more original records. Other history has not been searched." /> : null}
       {page.nextSourceMessageId ? <button type="button" className="composer-tool" onClick={() => void loadPage(page.nextSourceMessageId, 1, true)}>Load more collaboration records</button> : null}
     </> : <MailboxEmpty title={loadingList ? 'Reading supervised collaboration' : 'Supervised collaboration is unconfirmed'} />}
   </section>
