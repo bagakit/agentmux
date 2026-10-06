@@ -12,7 +12,7 @@ import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import type { AgentPromptExecutionEvidence, AgentMuxStoredAgentSession, AgentMuxClientEvent } from '../src/types.js'
 import type { AgentScreenEvidenceStore } from '../src/screen-evidence.js'
 
-async function fixture(interrupt = '\x1b', endEvent = 'Interrupt', refresh?: string, strategy: 'interrupt-before-input' | 'native-steer' = 'interrupt-before-input') {
+async function fixture(interrupt = '\x1b', endEvent = 'Interrupt', refresh?: string) {
   let stored: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'private-immediate', providerId: 'fixture', executorId: 'fixture',
     hostId: 'local', workspacePath: fixturePath("private/workspace"), run: { runId: 'private-run' }, retiredRuns: [], hookBindingId: 'b', hookToken: 't', createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1),
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: reshapeFixtureEpoch(0, 0, 1) } }
@@ -28,10 +28,10 @@ async function fixture(interrupt = '\x1b', endEvent = 'Interrupt', refresh?: str
   const template = new AgentProviderRegistry().get('codex')
   const capabilities = { ...template.catalog.capabilities }
   delete capabilities.providerFork // This execution fixture does not contribute a fork launcher.
-  const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'fixture', capabilities: { ...capabilities, promptExecution: { immediate: strategy } }, hookStrategy: { kind: 'native', installation: 'unmanaged' } },
+  const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'fixture', capabilities: { ...capabilities, promptExecution: { immediate: 'interrupt-before-input' } }, hookStrategy: { kind: 'native', installation: 'unmanaged' } },
     buildArgs: (_, args) => [...args], hook: { rules: [] }, terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: '>' },
     planPromptInput: (prompt, context) => ({ kind: 'render-then-submit', payload: prompt, renderedText: prompt, submit: '\r',
-      ...(context?.execution === 'immediate' && strategy === 'interrupt-before-input' ? { prepare: { interrupt, endEvent, ...(refresh ? { refresh } : {}) } } : {}) }),
+      ...(context?.execution === 'immediate' ? { prepare: { interrupt, endEvent, ...(refresh ? { refresh } : {}) } } : {}) }),
     verifyPromptExecutionTransport: async () => {
       if (sourceDrift) native = { ...native!, sourceId: 'replaced-native-source' }
       return transport
@@ -67,8 +67,7 @@ async function fixture(interrupt = '\x1b', endEvent = 'Interrupt', refresh?: str
         native = { sourceId: 'private-native', id: 'cancelled', nativeTurnId: wrongEnd ? 'turn-other' : 'turn-1', state: 'ended', endReason: 'interrupted' }
         await draw('', false)
         if (loseInterruptAck) { loseInterruptAck = false; throw new AgentMuxError('private lost interrupt ACK', 'CTXMUX_INPUT_UNCONFIRMED', 'unknown') }
-      } else if (operation.data !== '\r') await draw(operation.data, strategy === 'native-steer')
-      else if (strategy === 'native-steer') await draw('', true)
+      } else if (operation.data !== '\r') await draw(operation.data, false)
       return { run: run(), appliedByteRange: range }
     }) }
   let generation = 0, resizeDuringRead = false
@@ -248,19 +247,19 @@ it('a different ordinary intent recovers lost harmless refresh ACK and preserves
 })
 
 
-describe('declared native steering', () => {
- it('refuses a declaration of Native steer backed only by screen and PTY', () => {
+describe('retired Native writer declaration', () => {
+ it('rejects the retired Native steering strategy instead of advertising a dead Provider slot', () => {
   // The earlier screen/PTY acceptance and footer/draft predicates belonged to an
   // abandoned authorization scheme. Their original bytes are retained in process
   // evidence; actual Native consumption and original draft safety have real tests.
   const template = new AgentProviderRegistry().get('codex')
   const { providerFork: _fork, ...capabilities } = template.catalog.capabilities
-  expect(() => defineAgentProvider({ catalog: { ...template.catalog, id: 'no-native-port', capabilities: { ...capabilities, promptExecution: { immediate: 'native-steer' } }, hookStrategy: { kind: 'none' } },
+  expect(() => defineAgentProvider({ catalog: { ...template.catalog, id: 'no-native-port', capabilities: { ...capabilities, promptExecution: { immediate: 'native-steer' as never } }, hookStrategy: { kind: 'none' } },
     hook: { rules: [] }, buildArgs: (_prompt, args) => [...args],
     terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: '>' },
     planPromptInput: prompt => ({ kind: 'render-then-submit', payload: prompt, renderedText: prompt, submit: '\r' }),
     inspectPromptExecution: () => 'idle', readPromptExecutionEvidence: async () => ({ sourceId: 'screen', id: 'screen', state: 'idle' }),
-    verifyPromptExecutionTransport: async () => true })).toThrow(/machine input environment and Native admission contribution/)
+    verifyPromptExecutionTransport: async () => true })).toThrow(/Provider immediate strategy is invalid/)
  })
  it('rejoins an already frozen interrupt plan after capability changes, without replacing its bytes', async () => {
   const f = await fixture()

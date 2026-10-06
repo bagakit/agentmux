@@ -139,8 +139,8 @@ describe('native warnings-only final row', () => {
         (options.after ?? '') + `\x1b[${composerRow};3H\x1b[?2026l`
       const bytes = Buffer.from(output)
       await terminal.write({ startByte: 0, endByte: bytes.length, dataBytes: bytes })
-      expect(provider.catalog.capabilities.promptExecution?.immediate).toBe('native-steer')
-      return provider.inspectPromptExecution!(terminal.snapshot(), 'native-steer')
+      expect(provider.catalog.capabilities.promptExecution?.immediate).toBe('terminal-submit')
+      return provider.inspectPromptExecution!(terminal.snapshot(), 'interrupt-before-input')
     } finally { terminal.dispose() }
   }
 
@@ -167,74 +167,5 @@ describe('native warnings-only final row', () => {
     ['question between composer and footer', { before: '\x1b[73;1H1. Choose an answer' }]
   ])('keeps %s unavailable', async (_name, options) => {
     expect(await inspectOnly(options)).toBe('unavailable')
-  })
-})
-
-
-// Current native 191x62 history footer. Retain the observed positions and SGR
-// attributes; replace project/transcript content with neutral fixture text.
-describe('native history footer of the current main composer', () => {
-  async function inspectHistory(options: {
-    cols?: number, rows?: number, busy?: boolean, header?: string, keys?: string,
-    suffix?: string, warnings?: string | null, left?: number, warningShift?: number,
-    headerDim?: boolean, keysDim?: boolean, latestDim?: boolean, warningDim?: boolean,
-    after?: string, historyRow?: number
-  } = {}) {
-    const cols = options.cols ?? 191, rows = options.rows ?? 62
-    const composerRow = rows - 3, hintRow = options.historyRow ?? rows
-    const header = options.header ?? 'New activity · Earlier messages available.'
-    const keys = options.keys ?? 'enter/esc'
-    const suffix = options.suffix ?? ' · ? shortcuts'
-    const warning = options.warnings === undefined ? '⚠ 4 warnings · f2 to view' : options.warnings
-    const terminal = new AgentTerminalScreen(cols, rows)
-    try {
-      const output = `[?2026h[2J[${composerRow - 3};1H` +
-        (options.busy ? '• Working (9s • esc to interrupt)' : ("  Worked for 9s • " + (fixtureClock(1, 9)))) +
-        `[${composerRow};1H› [2mAsk Codex to do anything[22m` +
-        `[${rows - 1};3HGPT-6.1-Sol xhigh · ${fixtureDisplayPath("project")} · Main` +
-        `[${hintRow};${options.left ?? 3}H` + (options.headerDim === false ? '[22m' : '[2m') + header + '  ' +
-        (options.keysDim ? '[2m' : '[22m') + keys +
-        (options.latestDim === false ? '[22m' : '[2m') + ' latest' + '[22m' + suffix +
-        (warning === null ? '' : `[${hintRow};${cols - warning.length + (options.warningShift ?? 0)}H` +
-          (options.warningDim ? '[2m' : '[22m') + warning) +
-        '[22m' + (options.after ?? '') + `[${composerRow};3H[?2026l`
-      const bytes = Buffer.from(output)
-      await terminal.write({ startByte: 0, endByte: bytes.length, dataBytes: bytes })
-      return inspectCodexPromptExecution(terminal.snapshot(), 'native-steer')
-    } finally { terminal.dispose() }
-  }
-
-  it('accepts the complete observed idle history footer', async () => {
-    expect(await inspectHistory()).toBe('idle')
-  })
-  it('preserves the adjacent active turn under the complete history footer', async () => {
-    expect(await inspectHistory({ busy: true })).toBe('interruptible')
-  })
-  it('uses the actual edges for a complete smaller viewport and singular badge', async () => {
-    expect(await inspectHistory({ cols: 120, rows: 30, warnings: '⚠ 1 warning · f2 to view' })).toBe('idle')
-  })
-  it('accepts the same complete native history shortcut without a warning badge', async () => {
-    expect(await inspectHistory({ warnings: null })).toBe('idle')
-  })
-  it.each([
-    ['actual draft after cursor', { after: '[59;3HKEEP_NATIVE_DRAFT' }],
-    ['approval between composer and footer', { after: '[60;1H1. Allow request' }],
-    ['question at the composer', { after: '[59;1H1. Choose an answer' }],
-    ['unknown header', { header: 'New activity · Unknown messages available.' }],
-    ['unknown key', { keys: 'other/esc' }],
-    ['unknown tail label', { suffix: ' · ? approvals' }],
-    ['ordinary transcript attributes', { headerDim: false }],
-    ['dim keys', { keysDim: true }],
-    ['non-dim subordinate label', { latestDim: false }],
-    ['dim warning badge', { warningDim: true }],
-    ['wrong warning key', { warnings: '⚠ 4 warnings · f3 to view' }],
-    ['left edge shifted', { left: 4 }],
-    ['right edge shifted', { warningShift: -1 }],
-    ['right edge clipped', { warningShift: 1 }],
-    ['not the final native row', { historyRow: 61 }],
-    ['a clipped/wrapped narrow footer', { cols: 60 }],
-    ['historical footer with no current composer', { after: '[59;1H[2K[5;1H› [2mAsk Codex[22m' }]
-  ])('keeps %s unavailable', async (_name, options) => {
-    expect(await inspectHistory(options)).toBe('unavailable')
   })
 })

@@ -13,10 +13,9 @@ afterEach(()=>{vi.restoreAllMocks();vi.unstubAllEnvs()})
 it('actual CLI and RPC bind execution to one original durable message and Core Provider plan',async()=>{
  const h=await rpcOwnerFixture(),path=join(h.root,'control.sock')
  h.inner.kernel.identity=()=>({daemonInstanceId:'fixture-runtime',protocolVersion:1,buildIdentity:'fixture'})
- const phase=vi.fn(async(_prompt:string,_operationId:string)=>({outcome:'admitted' as const,turnId:'exact-turn'}))
+ const phase=h.inner.kernel.input as ReturnType<typeof vi.fn>
  const provider=(h.client as any).providers.get('codex')
- vi.spyOn(provider,'prepareNativePromptInput').mockResolvedValue({plan:{kind:'native-rpc',protocolId:'fixture-steer',sourceId:'source',actorId:'actor',threadId:'thread',operation:'start-or-steer'},
-  assertCurrent:async()=>{},dispatch:phase,close:async()=>{}})
+ vi.spyOn(provider,'planPromptInput').mockImplementation((text:string)=>({kind:'single-phase',data:text+'\r'}))
  const server=new AgentMuxControlServer({socketPath:path,coreClients:h.coreClients})
  await server.start();const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path},credentials:h.credentials})
  try{
@@ -24,8 +23,8 @@ it('actual CLI and RPC bind execution to one original durable message and Core P
   const cli=await runCompiledObjectCli(args,objectCliEnvironment(h.root,{AGENTMUX_AGENT_SESSION_ID:'caller',AGENTMUX_AGENT_CAPABILITY:h.capability}))
   expect(cli.code,cli.stderr).toBe(0);const result=JSON.parse(cli.stdout).result
   await vi.waitFor(()=>expect(phase).toHaveBeenCalledOnce())
-  expect((h.client.agentSession('recipient').promptCompletionAdmission?.intent)).toMatchObject({execution:'immediate',plan:{kind:'native-rpc'}})
-  expect(phase.mock.calls[0]![0]).toBe('[Message from Agent caller]\nexact immediate body')
+  expect((h.client.agentSession('recipient').promptCompletionAdmission?.intent)).toMatchObject({execution:'immediate',plan:{kind:'single-phase'}})
+  expect(phase.mock.calls[0]![1]).toMatchObject({data:'[Message from Agent caller]\nexact immediate body\r'})
   const params={sourceChannel:'cli' as const,target:{kind:'agent-session' as const,agentSessionId:'recipient'},text:'exact immediate body',execution:'immediate' as const,operationId:'public-immediate-op'}
   expect((await rpc.call('agent.send',params)).messageId).toBe(result.messageId);expect(phase).toHaveBeenCalledOnce()
   await expect(rpc.call('agent.send',{...params,execution:'default'})).rejects.toMatchObject({code:'MESSAGE_ID_CONFLICT'})
@@ -47,7 +46,7 @@ it('Hosted RPC preserves the declared strategy and rejects an unknown wire strat
  let reader:Awaited<ReturnType<typeof connectHostedAgentMux>>|undefined
  try {
   reader=await connectHostedAgentMux({rpc})
-  expect(reader.catalog().find(entry=>entry.id==='codex')!.capabilities.promptExecution).toEqual({immediate:'native-steer'})
+  expect(reader.catalog().find(entry=>entry.id==='codex')!.capabilities.promptExecution).toEqual({immediate:'terminal-submit'})
   const wire=structuredClone(await hosted.bootstrap())
   const native=wire.catalog.find(entry=>entry.id==='codex')!
   native.capabilities.promptExecution={immediate:'unknown' as never}

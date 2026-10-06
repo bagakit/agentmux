@@ -1,12 +1,11 @@
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { nativeProcessFiles } from '../src/agent-native-process.js'
-import { hasCodexNativeWriter } from '../src/providers/codex-native-prompt.js'
 import { locateAppServerNativeSession } from '../src/providers/app-server-native-session.js'
 import { codexMainNativeRecord } from '../src/providers/codex-native-record-role.js'
 
@@ -81,13 +80,9 @@ it('OS producer counts many writable descriptors as one exact actor/file, withou
     { detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
   try {
     await once(child.stdout!, 'data')
-    const signal = AbortSignal.timeout(4000), identity = await stat(path, { bigint: true })
+    const signal = AbortSignal.timeout(4000)
     const files = await nativeProcessFiles(child.pid!, signal, 'process')
     expect(files.filter(file => file.path === path && (file.access === 'w' || file.access === 'u'))).toHaveLength(17)
-    expect(hasCodexNativeWriter(files, child.pid!, path, identity)).toBe(true)
-    expect(hasCodexNativeWriter(files, child.pid! + 1, path, identity)).toBe(false)
-    expect(hasCodexNativeWriter(files.filter(file => file.access === 'r'), child.pid!, path, identity)).toBe(false)
-    expect(hasCodexNativeWriter(files, child.pid!, path, { ...identity, ino: identity.ino + 1n })).toBe(false)
     const found = await new AgentProviderRegistry().get('codex').discoverNativeSession!({ processId: child.pid!, command: process.execPath, args: [], workspacePath: root, signal })
     expect(found?.handle).toMatchObject({ sessionId: 'dual-main', transcriptPath: path }); await found!.assertCurrent()
     expect(child.exitCode).toBeNull()

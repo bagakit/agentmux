@@ -15,7 +15,7 @@ import { issueAgentCapability, hashAgentCapability } from '../../src/agent-capab
 import type { AgentMuxStoredAgentSession } from '../../src/types.js'
 import type { CtxmuxAdapterObservationEvent, CtxmuxAdapterRun } from '../../src/ctxmux-run-adapter.js'
 
-/** Real Core registry, authorization and queue; only the Native transport is a deterministic fixture. */
+/** Real Core registry, authorization and journal; Runtime byte I/O is a deterministic port. */
 export async function rpcOwnerFixture(ids = ['caller', 'recipient'], ownerModule?: {
   AgentMuxClient: typeof SourceClient; AgentMuxFileAgentSessionStore: typeof SourceStore
 }) {
@@ -35,9 +35,24 @@ export async function rpcOwnerFixture(ids = ['caller', 'recipient'], ownerModule
   const client = new Client({ store })
   const inner = client as unknown as { connected: boolean; registry: { load(hostId: string): Promise<void> }; kernel: Record<string, unknown> }
   await inner.registry.load('local'); inner.connected = true; inner.kernel.isConnected = () => true
+  const cursors = new Map<string, number>()
+  const writes = new Map<string, { data: string; startByte: number; endByte: number }>()
   const run = (runId: string): CtxmuxAdapterRun => ({ runId, lifecycleOperationId: null, program: 'codex', args: [], workspacePath: root,
-    pid: null, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 3, firstAvailableByte: 0, acceptedInputBytes: 0, nativeService: null })
+    pid: null, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 3, firstAvailableByte: 0, acceptedInputBytes: cursors.get(runId) ?? 0, nativeService: null })
   inner.kernel.status = vi.fn(async (id: string) => run(id))
+  inner.kernel.identity = () => ({ daemonInstanceId: 'fixture-runtime', protocolVersion: 1, buildIdentity: 'fixture' })
+  inner.kernel.input = vi.fn(async (id: string, input: { operationId: string; expectedByte: number; data: string }) => {
+    const key = JSON.stringify([id, input.operationId]), previous = writes.get(key)
+    if (previous) {
+      if (input.data !== previous.data || input.expectedByte !== previous.startByte) throw new Error('Fixture operation differs from its original byte claim')
+      return { run: run(id), appliedByteRange: { startByte: previous.startByte, endByte: previous.endByte } }
+    }
+    const startByte = cursors.get(id) ?? 0
+    if (input.expectedByte !== startByte) throw new Error('Fixture input cursor differs from its original ordered byte claim')
+    const endByte = startByte + Buffer.byteLength(input.data)
+    writes.set(key, { data: input.data, startByte, endByte }); cursors.set(id, endByte)
+    return { run: run(id), appliedByteRange: { startByte, endByte } }
+  })
   const observers = new Set<(event: CtxmuxAdapterObservationEvent) => void>(), closes = vi.fn()
   inner.kernel.observeOutput = vi.fn(async (id: string, _after: number, listener: (event: CtxmuxAdapterObservationEvent) => void) => {
     observers.add(listener)

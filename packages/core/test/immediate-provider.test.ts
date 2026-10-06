@@ -27,15 +27,15 @@ describe('Provider-owned immediate evidence',()=>{
   ['modal',ordinary+'\x1b[17;1H1. Approve request'],['multiline draft',ordinary+'\x1b[17;1Hhidden draft'],
   ['remapped interrupt',ordinary.replace('esc to interrupt','f12 to interrupt')],['clipped preview',ordinary.replace('\x1b[13;1H','\x1b[1;1H')]
  ])('does not guess from %s',async(_name,body)=>{const s=await frame(body);try{expect(inspectCodexPromptExecution(s.snapshot())).toBe('unavailable')}finally{s.dispose()}})
- it('contributes native steer and preserves authenticated canceled semantic end without changing default',()=>{
+ it('contributes current terminal input and preserves authenticated canceled semantic end',()=>{
   const p=new AgentProviderRegistry().get('codex');expect(p.planPromptInput('owned')).not.toHaveProperty('prepare')
-  expect(p.catalog.capabilities.promptExecution).toEqual({immediate:'native-steer'});expect(typeof p.prepareNativePromptInput).toBe('function')
-  expect(()=>p.planPromptInput('owned',{execution:'immediate'})).toThrow(/machine input environment/)
+  expect(p.catalog.capabilities.promptExecution).toEqual({immediate:'terminal-submit'});expect(p).not.toHaveProperty('prepareNativePromptInput')
+  expect(p.planPromptInput('owned',{execution:'immediate'})).not.toHaveProperty('prepare')
   const envelope={providerId:'codex',agentSessionId:'agent',runId:'run',receiptId:'receipt',eventName:'Interrupt',payload:{session_id:'native',turn_id:'native-turn'}}
   expect(p.normalizeHook(envelope,{processNativeHandle:{kind:'provider',providerId:'codex',sessionId:'native'}})).toMatchObject({semanticState:'unknown',lifecycleEvent:'turn-end',nativeTurnId:'native-turn',mainSubject:true})
   expect(p.normalizeHook(envelope,{})).toMatchObject({semanticState:'unknown',lifecycleEvent:null,mainSubject:false})
   expect(new AgentProviderRegistry().get('claude').planPromptInput('owned')).not.toHaveProperty('prepare')
-  expect(()=>new AgentProviderRegistry().get('claude').planPromptInput('owned',{execution:'immediate'})).toThrow(/ordinary terminal input remains available/)
+  expect(new AgentProviderRegistry().get('claude').planPromptInput('owned',{execution:'immediate'})).not.toHaveProperty('prepare')
  })
  it('binds bounded native evidence and transport to this native Session',async()=>{
   const verifyCodexPromptExecutionTransport=createCodexPromptExecutionTransportVerifier()
@@ -46,12 +46,12 @@ describe('Provider-owned immediate evidence',()=>{
    const start={ordinal:1,type:'event_msg',payload:{type:'task_started',turn_id:'native-turn'}},end={ordinal:2,type:'event_msg',payload:{type:'turn_aborted',turn_id:'native-turn',reason:'interrupted'}}
    const write=async(items:unknown[])=>writeFile(path,items.map(v=>JSON.stringify(v)).join('\n')+'\n')
    await write([head,start]);const before=await readCodexPromptExecutionEvidence(c);expect(before).toMatchObject({state:'working',nativeTurnId:'native-turn'})
-   expect(await verifyCodexPromptExecutionTransport(c)).toBe(false);await write([head,start,end]);const after=await readCodexPromptExecutionEvidence(c)
+   await expect(verifyCodexPromptExecutionTransport(c)).rejects.toMatchObject({code:'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED'});await write([head,start,end]);const after=await readCodexPromptExecutionEvidence(c)
    expect(after).toMatchObject({sourceId:before?.sourceId,state:'ended',endReason:'interrupted',nativeTurnId:'native-turn'});expect(after?.id).not.toBe(before?.id)
    expect(await readCodexPromptExecutionEvidence({...c,nativeHandle:{...c.nativeHandle,sessionId:'different'}})).toBe(null)
-   expect(await verifyCodexPromptExecutionTransport({...c,args:['--remote','ws://private.invalid']})).toBe(false)
+   await expect(verifyCodexPromptExecutionTransport({...c,args:['--remote','ws://private.invalid']})).rejects.toMatchObject({code:'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED'})
    await mkdir(join(root,'app-server-control'));await writeFile(join(root,'app-server-control','app-server-control.sock'),'existing')
-   expect(await verifyCodexPromptExecutionTransport(c)).toBe(false);expect(await verifyCodexPromptExecutionTransport({...c,args:['--no-daemon']})).toBe(false)
+   await expect(verifyCodexPromptExecutionTransport(c)).rejects.toMatchObject({code:'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED'});await expect(verifyCodexPromptExecutionTransport({...c,args:['--no-daemon']})).rejects.toMatchObject({code:'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED'})
    const large={type:'response_item',payload:{text:'z'.repeat(600*1024)}}
    await write([head,start,large]);expect(await readCodexPromptExecutionEvidence(c)).toBe(null)
    const context={ordinal:3,type:'turn_context',payload:{turn_id:'native-turn'}}
