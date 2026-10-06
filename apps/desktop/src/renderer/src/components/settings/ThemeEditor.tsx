@@ -25,7 +25,7 @@ export function ThemeEditor({ item, appearance, active, onSave, onClose }: {
   const [reset, setReset] = useState(0)
   const save = useSettingsSave()
   const parsed = themeDocumentSchema.safeParse(draft)
-  const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
+  const dirty = Boolean(iconError) || JSON.stringify(draft) !== JSON.stringify(saved)
   const latest = useRef(draft); latest.current = draft
   const mounted = useRef(true)
   const copyId = useRef<string | null>(null)
