@@ -1,3 +1,4 @@
+import { fixtureEpoch as _newTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMuxClientEvent, AgentMuxRunAttachment } from '@agentmux/core'
@@ -44,6 +45,45 @@ afterEach(() => vi.useRealTimers())
 const settle = () => vi.advanceTimersByTimeAsync(20)
 
 describe('original Run passive mobile reader', () => {
+  it('keeps initial and confirmed healthy reading notice-free, including the normal alternate-buffer history boundary', async () => {
+    const h = harness(snapshot(new Uint8Array(), { checkpoint: 0 }))
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'pending', notice: null })
+    h.canvas.buffer.active.type = 'alternate'
+    h.reader.setVisible(true); await settle()
+    await vi.waitFor(() => expect(h.reports.at(-1)).toMatchObject({ phase: 'reading', notice: null, historyBoundary: expect.any(String) }))
+    h.output(0, encode('healthy')); await settle()
+    expect(h.reports.at(-1)?.notice).toBeNull()
+    h.reader.setVisible(false); await settle()
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'paused', notice: null })
+    await h.reader.dispose()
+  })
+
+  it('publishes unknown geometry while reading and clears it only after a trusted terminal continuation', async () => {
+    const h = harness(snapshot(encode('raw'))); h.reader.setVisible(true); await settle()
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'reading', notice: expect.stringContaining('历史终端尺寸尚未核实') })
+    const notice = h.reports.at(-1)!.notice
+    h.output(3, encode('tail')); await settle()
+    expect(h.reports.at(-1)?.notice).toBe(notice)
+    h.replay.mockResolvedValueOnce(snapshot(new Uint8Array(), { checkpoint: 7 }))
+    await h.reader.retry()
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'reading', notice: null })
+    await h.reader.dispose()
+  })
+
+  it('keeps a handshake deadline notice through pending and transport restoration until that exact admission succeeds', async () => {
+    const h = harness(), admission = deferred<Awaited<ReturnType<AgentMuxHostedClient['reattachAgent']>>>()
+    h.attach.mockReturnValueOnce(admission.promise); h.reader.setVisible(true)
+    await vi.advanceTimersByTimeAsync(6_100)
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'pending', notice: expect.stringContaining('握手仍未返回') })
+    const notice = h.reports.at(-1)!.notice
+    h.emit({ type: 'connection-state', state: 'restored', evidence: { source: 'user', observedAt: _newTailFixtureEpoch(0, 0, 1) } })
+    expect(h.reports.at(-1)?.notice).toBe(notice)
+    admission.resolve({ session: session(), attachment: snapshot(new Uint8Array(), { checkpoint: 0 }) }); await settle()
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'reading', notice: null })
+    expect(h.attach.mock.calls).toEqual([['session-original', 0, 'terminal']])
+    await h.reader.dispose()
+  })
+
   it('uses raw split UTF-8 bytes and overlap suffixes, ignoring unrelated Run events and waiting for parser completion', async () => {
     const h = harness(); h.reader.setVisible(true); await settle()
     const word = encode('你好')
@@ -78,7 +118,14 @@ describe('original Run passive mobile reader', () => {
     h.emit({ type: 'terminal-snapshot', ...invalid, afterByte: 16 }); await settle()
     expect(h.bytes).toEqual(original); expect(vi.mocked(h.canvas.reset).mock.calls.length).toBe(resets)
     expect(h.reports.at(-1)?.message).toContain('未完成')
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'reading', notice: expect.stringContaining('未完成') })
     expect(h.reader.facts().cursor).toBe(16)
+    const notice = h.reports.at(-1)!.notice
+    h.output(16, encode('live')); await settle()
+    h.emit({ type: 'connection-state', state: 'restored', evidence: { source: 'user', observedAt: _newTailFixtureEpoch(0, 0, 1) } })
+    expect(h.reports.at(-1)?.notice).toBe(notice)
+    h.replay.mockResolvedValueOnce(snapshot(new Uint8Array(), { checkpoint: 20 })); await h.reader.retry()
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'reading', notice: null })
     await h.reader.dispose()
   })
 
@@ -157,6 +204,7 @@ describe('original Run passive mobile reader', () => {
   it('consumes the SDK authoritative reconnect snapshot and reads unknown missing output from parser cursor, not observed afterByte', async () => {
     const h = harness(snapshot(new Uint8Array(), { checkpoint: 0 })); h.reader.setVisible(true); await settle(); h.output(0, encode('original')); await settle()
     h.emit({ type: 'connection-state', state: 'lost', evidence: { source: 'user', observedAt: 1 } })
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'reading', notice: expect.stringContaining('Host 输出连接尚未恢复') })
     const recovered = snapshot(encode('missed output'), { start: 8 })
     recovered.terminal = { type: 'unknown', reason: 'origin_unknown' }
     h.replay.mockResolvedValueOnce(recovered)
@@ -166,6 +214,40 @@ describe('original Run passive mobile reader', () => {
     expect(h.reader.facts().cursor).toBe(21)
     expect(new TextDecoder().decode(new Uint8Array(h.bytes))).toBe('\x1b[0moriginalmissed output')
     expect(h.reports.at(-1)?.message).toContain('历史终端尺寸尚未核实')
+    expect(h.reports.at(-1)?.notice).toContain('历史终端尺寸尚未核实')
+    await h.reader.dispose()
+  })
+
+  it('keeps a missing-output notice on new live bytes until a trusted snapshot repairs the original projection', async () => {
+    const h = harness(snapshot(new Uint8Array(), { checkpoint: 0 })); h.reader.setVisible(true); await settle()
+    h.replay.mockRejectedValueOnce(new Error('Original replay temporarily unavailable'))
+    h.output(10, encode('new')); await settle()
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'reading', notice: expect.stringContaining('未恢复区间') })
+    const notice = h.reports.at(-1)!.notice
+    h.output(13, encode('tail')); await settle()
+    expect(h.reports.at(-1)?.notice).toBe(notice)
+    expect(h.reader.facts().cursor).toBe(17)
+    h.replay.mockResolvedValueOnce(snapshot(new Uint8Array(), { checkpoint: 17 })); await h.reader.retry()
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'reading', notice: null })
+    expect(h.replay.mock.calls).toEqual([[{ runId: 'run-original' }, 0, 'terminal'], [{ runId: 'run-original' }, 17, 'terminal']])
+    await h.reader.dispose()
+  })
+
+  it('does not clear a confirmed replacement-Run notice with an otherwise valid old-Run snapshot', async () => {
+    const h = harness(snapshot(encode('OLD'), { checkpoint: 0 })); h.reader.setVisible(true); await settle()
+    await vi.waitFor(() => expect(h.reports.at(-1)?.phase).toBe('reading'))
+    const nextSession = { ...session(), run: { runId: 'confirmed-new-run' } }; h.setSession(nextSession)
+    h.emit({ type: 'agent-session', session: nextSession })
+    const notice = h.reports.at(-1)!.notice
+    expect(notice).toContain('画面来自上一个 Run')
+    h.emit({ type: 'terminal-snapshot', ...snapshot(new Uint8Array(), { checkpoint: 3 }), afterByte: 3 }); await settle()
+    await vi.waitFor(() => expect(h.reports.at(-1)?.message).toContain('已核实原会话的终端输出'))
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'reading', notice })
+    const nextSnapshot = snapshot(encode('NEW'), { checkpoint: 0 }); nextSnapshot.run.runId = 'confirmed-new-run'
+    if (nextSnapshot.terminal.type === 'basic-vt') nextSnapshot.terminal.checkpoint.runId = 'confirmed-new-run'
+    h.attach.mockResolvedValueOnce({ session: nextSession, attachment: nextSnapshot }); await h.reader.retry()
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'reading', notice: null })
+    expect(h.reader.facts().acquired).toEqual({ runId: 'confirmed-new-run' })
     await h.reader.dispose()
   })
 

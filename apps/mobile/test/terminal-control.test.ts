@@ -26,6 +26,7 @@ const key = 'agentmux-mobile-terminal-intent-v1:session-original'
 describe('explicit original Run terminal control', () => {
   it('shares the actual Desktop input source, admits only explicit user control and drops DA/DSR parser replies in either mode', async () => {
     const h = harness()
+    expect(h.control.facts().notice).toBeNull()
     let user!: () => void, data!: (value: string) => void, binary!: (value: string) => void
     const disposed = [false, false, false]
     const binding = subscribeTerminalInput({ onUserInput: listener => { user = listener; return { dispose() { disposed[0] = true } } },
@@ -34,12 +35,14 @@ describe('explicit original Run terminal control', () => {
     user(); data('watch'); binary('\x80'); data('\x1b[1;1R'); await settle()
     expect(h.write.mock.calls).toEqual([]); expect(h.resize.mock.calls).toEqual([])
     expect(h.control.enable()).toBe(true)
+    expect(h.control.facts().notice).toBeNull()
     data('\x1b[1;1R'); data('\x1b[?1;2c'); user(); data('你好'); binary('\x1b[M\x20\x80\xff'); user(); data('')
     await settle()
     expect(h.write.mock.calls.map(([input]) => input)).toEqual([
       { agentSessionId: 'session-original', expectedRun: { runId: 'run-original' }, source: 'user', data: '你好' },
       { agentSessionId: 'session-original', expectedRun: { runId: 'run-original' }, source: 'user', data: Uint8Array.of(27, 91, 77, 32, 128, 255) }
     ])
+    expect(h.control.facts().notice).toBeNull()
     binding.dispose(); expect(disposed).toEqual([true, true, true]); h.control.dispose()
   })
 
@@ -62,8 +65,12 @@ describe('explicit original Run terminal control', () => {
     first.reject(new Error('Original connection lost after dispatch')); await settle()
     expect(h.control.facts()).toMatchObject({ phase: 'unknown', queuedBytes: 13, pending: { runId: 'run-original', kind: 'input' } })
     expect(h.control.queuedText()).toBe('unsent suffix'); expect(h.control.enable()).toBe(false)
+    expect(h.control.facts().notice).toContain('终端操作回执未确认')
+    const notice = h.control.facts().notice
     h.control.watch(); await settle(); expect(h.write.mock.calls.map(([input]) => input.data)).toEqual(['original unknown'])
+    expect(h.control.facts().notice).toBe(notice)
     expect(h.control.continueAfterReview()).toBe(true); await settle()
+    expect(h.control.facts().notice).toBeNull()
     expect(h.write.mock.calls.map(([input]) => input.data)).toEqual(['original unknown'])
     h.control.enable(); await settle()
     expect(h.write.mock.calls.map(([input]) => input.data)).toEqual(['original unknown', 'unsent suffix'])
@@ -83,8 +90,10 @@ describe('explicit original Run terminal control', () => {
     h.control.watch(); h.setRun('new-run')
     first.resolve({ runId: 'run-original', appliedByteRange: { startByte: 0, endByte: 1 }, acceptedThroughByte: 1 }); await settle()
     expect(h.control.enable()).toBe(false); expect(h.control.queuedText()).toBe('old Run only')
+    expect(h.control.facts().notice).toContain('未发送输入属于旧 Run')
     expect(h.write.mock.calls.map(([input]) => input.expectedRun)).toEqual([{ runId: 'run-original' }])
-    h.control.discardUnsent(); expect(h.control.enable()).toBe(true); h.control.send('new intent', 'user'); await settle()
+    h.control.discardUnsent(); expect(h.control.enable()).toBe(true); expect(h.control.facts().notice).toBeNull()
+    h.control.send('new intent', 'user'); await settle()
     expect(h.write.mock.calls.map(([input]) => input.expectedRun)).toEqual([{ runId: 'run-original' }, { runId: 'new-run' }]); h.control.dispose()
   })
 
@@ -93,7 +102,11 @@ describe('explicit original Run terminal control', () => {
     expect(h.control.resize(52, 18)).toBe(false); h.control.enable()
     expect(h.resize.mock.calls).toEqual([])
     expect(h.control.resize(1, 0)).toBe(false); expect(h.resize.mock.calls).toEqual([])
+    expect(h.control.facts().notice).toContain('尺寸尚未提交')
+    h.control.send('valid input is unrelated to invalid dimensions', 'user'); await settle()
+    expect(h.control.facts().notice).toContain('尺寸尚未提交')
     expect(h.control.resize(52, 18)).toBe(true); await settle()
+    expect(h.control.facts().notice).toBeNull()
     expect(h.resize.mock.calls).toEqual([['session-original', { runId: 'run-original' }, 52, 18]])
     h.control.watch(); expect(h.control.resize(80, 24)).toBe(false); h.control.dispose()
   })
@@ -106,6 +119,7 @@ describe('explicit original Run terminal control', () => {
     expect(saved).not.toContain('never persist'); h.control.dispose()
     const restored = harness(h.backing)
     expect(restored.control.facts()).toMatchObject({ mode: 'watch', phase: 'unknown' })
+    expect(restored.control.facts().notice).toContain('重启前的终端操作回执未确认')
     expect(restored.control.enable()).toBe(false); expect(restored.write.mock.calls).toEqual([]); restored.control.dispose()
     first.reject(new Error('Old request ended')); await settle()
   })
@@ -115,6 +129,7 @@ describe('explicit original Run terminal control', () => {
     expect(h.control.facts().storageIssue).toContain('原字节保留'); h.control.enable(); h.control.send('healthy user input', 'user'); await settle()
     expect(h.write.mock.calls.map(([input]) => input.data)).toEqual(['healthy user input'])
     expect(backing.get(key)).toBe('{original bad bytes'); expect(h.control.facts().storageIssue).toContain('原字节保留'); h.control.dispose()
+    expect(h.control.facts().notice).toBeNull()
   })
 
   it('does not let the unmounted previous instance late ACK clear a different current intent guard', async () => {
@@ -148,11 +163,15 @@ describe('explicit original Run terminal control', () => {
     const next = harness()
     h.control.rebind({ ...next.client, runtimeIdentity: () => ({ ...next.client.runtimeIdentity(), instanceId: 'other-runtime' }) })
     expect(h.control.enable()).toBe(false); expect(h.control.queuedText()).toBe('only original owner'); expect(next.write.mock.calls).toEqual([])
+    expect(h.control.facts().notice).toContain('属于另一 Host')
     h.control.rebind({ ...next.client, agentSession: () => ({ ...next.client.agentSession(), agentSessionId: 'another-session' }) })
     expect(h.control.enable()).toBe(false); expect(next.write.mock.calls).toEqual([])
+    expect(h.control.facts().notice).toContain('原会话身份尚未核实')
     next.setRun('another-run'); h.control.rebind(next.client)
     expect(h.control.enable()).toBe(false); expect(next.write.mock.calls).toEqual([])
+    expect(h.control.facts().notice).toContain('属于旧 Run')
     h.control.rebind(null); expect(h.control.enable()).toBe(false); expect(h.control.queuedText()).toBe('only original owner')
+    expect(h.control.facts().notice).toContain('连接尚未恢复')
     h.control.dispose(); next.control.dispose()
   })
 
@@ -165,5 +184,47 @@ describe('explicit original Run terminal control', () => {
     expect(next.write.mock.calls).toEqual([]); expect(h.control.queuedText()).toBe('suffix')
     expect(h.control.enable()).toBe(true); await settle(); expect(next.write.mock.calls.map(([input]) => input.data)).toEqual(['suffix'])
     h.control.dispose(); next.control.dispose()
+  })
+
+  it('keeps identity failures visible across watch and rebind until explicit control confirms the same original target', async () => {
+    const h = harness()
+    h.control.rebind(null)
+    expect(h.control.facts().notice).toBeNull()
+    expect(h.control.enable()).toBe(false)
+    const notice = h.control.facts().notice
+    expect(notice).toContain('原会话身份尚未核实')
+    h.control.watch(); h.control.rebind(h.client)
+    expect(h.control.facts().notice).toBe(notice)
+    expect(h.control.enable()).toBe(true)
+    expect(h.control.facts().notice).toBeNull()
+    h.control.send('still the original Run', 'user'); await settle()
+    expect(h.write.mock.calls.map(([input]) => input.expectedRun)).toEqual([{ runId: 'run-original' }])
+    h.control.dispose()
+  })
+
+  it('keeps a queued-resize notice through an unrelated input ACK and clears it on the exact resize receipt', async () => {
+    const h = harness(), input = deferred<Awaited<ReturnType<AgentMuxHostedClient['writeAgent']>>>(), size = deferred<Awaited<ReturnType<AgentMuxHostedClient['resizeAgent']>>>()
+    h.write.mockReturnValueOnce(input.promise); h.resize.mockReturnValueOnce(size.promise)
+    h.control.enable(); h.control.send('a', 'user')
+    expect(h.control.resize(52, 18)).toBe(true)
+    expect(h.control.resize(60, 20)).toBe(false)
+    expect(h.control.facts().notice).toContain('已有一次尺寸操作等待回执')
+    input.resolve({ runId: 'run-original', appliedByteRange: { startByte: 0, endByte: 1 }, acceptedThroughByte: 1 }); await settle()
+    expect(h.control.facts()).toMatchObject({ phase: 'sending', notice: expect.stringContaining('已有一次尺寸操作等待回执') })
+    expect(h.resize.mock.calls).toEqual([['session-original', { runId: 'run-original' }, 52, 18]])
+    size.resolve({ runId: 'run-original', cols: 52, rows: 18 }); await settle()
+    expect(h.control.facts()).toMatchObject({ phase: 'idle', notice: null })
+    h.control.dispose()
+  })
+
+  it('reports unsent capacity failures without affecting normal subsequent input or introducing another write', async () => {
+    const h = harness(); h.control.enable()
+    h.control.send('x'.repeat(300 * 1024), 'user')
+    expect(h.control.facts()).toMatchObject({ queuedBytes: 0, notice: expect.stringContaining('这次输入未提交') })
+    expect(h.write.mock.calls).toEqual([])
+    h.control.send('normal user input', 'user'); await settle()
+    expect(h.write.mock.calls.map(([input]) => input.data)).toEqual(['normal user input'])
+    expect(h.control.facts().notice).toBeNull()
+    h.control.dispose()
   })
 })
