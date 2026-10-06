@@ -19,7 +19,7 @@ function Fixture({ declarations = options, naming = false, saved = {} }: { decla
 }
 async function mount(declarations = options, naming = false) { await act(async () => root.render(<Fixture declarations={declarations} naming={naming} />)) }
 async function click(selector: string) { const element = document.querySelector<HTMLButtonElement>(selector); expect(element).not.toBeNull(); await act(async () => element!.click()) }
-async function change(selector: string, value: string) { const input = document.querySelector<HTMLSelectElement>(selector); expect(input).not.toBeNull(); await act(async () => { input!.value = value; input!.dispatchEvent(new Event('change', { bubbles: true })) }) }
+async function change(_selector: string, value: string) { const field = document.querySelector<HTMLElement>('.launch-refine__row .selection-field')!; expect(field).not.toBeNull(); await act(async () => field.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse', ctrlKey: false }))); const choice = document.querySelector<HTMLElement>(`[role=menuitemradio][data-value="${value}"]`)!; expect(choice).not.toBeNull(); await act(async () => choice.click()) }
 
 describe('compact actual launch options', () => {
   it('hides an empty Provider declaration and draws no empty panel', async () => { await mount([]); expect(container.textContent).toBe(''); expect(document.querySelector('[role="dialog"]')).toBeNull() })
@@ -28,20 +28,20 @@ describe('compact actual launch options', () => {
     await click('[aria-label="Launch options"]'); expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Sandbox')
     expect(document.querySelector<HTMLElement>('[role="dialog"]')!.style.visibility).toBe('visible')
     expect(document.querySelector('[data-overlay-host] [role="dialog"]')).not.toBeNull()
-    expect(document.querySelectorAll('select')).toHaveLength(1); expect(document.querySelector('select')!.value).toBe('')
+    expect(document.querySelectorAll('.launch-refine__row .selection-field')).toHaveLength(1); expect(document.querySelector<HTMLElement>('.launch-refine__row .selection-field')!.dataset.value).toBe('')
   })
   it('passes the exact choice, keeps dangerous posture in the compact summary, and clears to defaults', async () => {
     await mount(); await click('[aria-label="Launch options"]'); await change('select', 'full')
-    expect(selected).toHaveBeenLastCalledWith('sandbox', 'full'); expect(document.querySelector('select')?.dataset.tier).toBe('danger')
+    expect(selected).toHaveBeenLastCalledWith('sandbox', 'full'); expect(document.querySelector('.launch-refine__row')?.getAttribute('data-tier')).toBe('danger')
     await click('[aria-label="Close launch options"]'); expect(container.querySelector('.launch-refine__summary [data-tier="danger"]')?.textContent).toBe('Full access')
     expect(container.querySelector('.launch-refine__count')?.getAttribute('data-tier')).toBe('danger'); expect(container.querySelector('.launch-refine__count')?.textContent).toBe('1Risk'); expect(container.querySelector('.launch-refine__count')?.getAttribute('aria-label')).toBe('1 options set · danger')
     await click('[aria-label="Launch options"]'); await change('select', ''); expect(selected).toHaveBeenLastCalledWith('sandbox', null)
     await click('[aria-label="Close launch options"]'); expect(container.textContent).toBe('Options')
   })
-  it('renders every Provider choice in native compact selectors without exposing argv', async () => {
+  it('renders original Provider fields and all choices in the shared menu without exposing argv', async () => {
     await mount(describeLaunchOptions(CLAUDE_LAUNCH_OPTIONS)); await click('[aria-label="Launch options"]')
-    expect([...document.querySelectorAll('select')].map(element => element.getAttribute('aria-label'))).toEqual(['Model', 'Effort', 'Permission mode'])
-    expect([...document.querySelector('select[aria-label="Effort"]')!.querySelectorAll('option')].map(element => element.textContent)).toContain('Max')
+    expect([...document.querySelectorAll('.launch-refine__row .selection-field')].map(element => element.getAttribute('aria-label'))).toEqual(['Model', 'Effort', 'Permission mode'])
+    await act(async () => document.querySelector<HTMLElement>('[aria-label="Effort"].selection-field')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse', ctrlKey: false }))); expect(document.querySelector('.selection-field__menu')!.textContent).toContain('Max'); expect(document.querySelector('.selection-field__menu')!.textContent).toContain('Highest reasoning effort')
     expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('--model')
   })
   it('can configure optional names even when the Provider declares no choices', async () => {
@@ -49,7 +49,7 @@ describe('compact actual launch options', () => {
   })
   it('does not invent model/effort for a Provider whose declaration has neither', async () => {
     const declarations = describeLaunchOptions(CODEX_LAUNCH_OPTIONS); expect(declarations.map(option => option.id)).toEqual(['sandbox', 'approval'])
-    await mount(declarations); await click('[aria-label="Launch options"]'); expect([...document.querySelectorAll('select')].map(element => element.getAttribute('aria-label'))).toEqual(['Sandbox', 'Approval policy'])
+    await mount(declarations); await click('[aria-label="Launch options"]'); expect([...document.querySelectorAll('.launch-refine__row .selection-field')].map(element => element.getAttribute('aria-label'))).toEqual(['Sandbox', 'Approval policy'])
   })
   it('shows retained missing fields and choices without silently clearing or disabling them', async () => {
     await act(async () => root.render(<Fixture saved={{ sandbox: 'legacy-mode', retired: 'original-value' }} />))
@@ -59,17 +59,17 @@ describe('compact actual launch options', () => {
     await click('[aria-label="Launch options"]')
     expect(document.querySelector('[role="status"]')!.textContent).toContain('Sandbox: legacy-mode')
     expect(document.querySelector('[role="status"]')!.textContent).toContain('retired: original-value')
-    expect(document.querySelector<HTMLSelectElement>('select')!.value).toBe('legacy-mode')
-    const retained = [...document.querySelector<HTMLSelectElement>('select')!.options].find(option => option.value === 'legacy-mode')!
-    expect(retained.textContent).toBe('Saved choice: legacy-mode')
-    expect(retained.disabled).toBe(true)
+    expect(document.querySelector<HTMLElement>('.launch-refine__row .selection-field')!.dataset.value).toBe('legacy-mode')
+    await act(async () => document.querySelector<HTMLElement>('.launch-refine__row .selection-field')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse', ctrlKey: false })))
+    const retained = document.querySelector('[role=menuitemradio][data-disabled]')!; expect(retained.textContent).toContain('Saved selection'); expect(retained.getAttribute('aria-disabled')).toBe('true')
+    await act(async () => retained.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true,cancelable:true})))
     await change('select', 'read'); expect(document.querySelector('[role="status"]')!.textContent).not.toContain('legacy-mode')
     expect(document.querySelector('[role="status"]')!.textContent).toContain('original-value')
   })
   it('keeps the retained choices accessible when the Provider removes every declared field', async () => {
     await act(async () => root.render(<Fixture declarations={[]} saved={{ retired: 'original-value' }} />))
     await click('[aria-label="Launch options"]'); expect(document.querySelector('[role="status"]')!.textContent).toContain('retired: original-value')
-    expect(document.querySelectorAll('select')).toHaveLength(0)
+    expect(document.querySelectorAll('.launch-refine__row .selection-field')).toHaveLength(0)
     const reset = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Use Agent defaults')!
     await act(async () => reset.click()); expect(resetRequested).toHaveBeenCalledOnce(); expect(container.textContent).toBe('')
   })
@@ -80,7 +80,7 @@ describe('compact actual launch options', () => {
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, 'Keep this name'); name.dispatchEvent(new Event('input', { bubbles: true })) })
     const reset = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Use Agent defaults')!
     await act(async () => reset.click()); expect(resetRequested).toHaveBeenCalledOnce()
-    expect(document.querySelector<HTMLSelectElement>('select')!.value).toBe(''); expect(document.querySelector('[role="status"]')).toBeNull()
+    expect(document.querySelector<HTMLElement>('.launch-refine__row .selection-field')!.dataset.value).toBe(''); expect(document.querySelector('[role="status"]')).toBeNull()
     expect(document.querySelector<HTMLInputElement>('[aria-label="Agent name"]')!.value).toBe('Keep this name')
   })
 })
