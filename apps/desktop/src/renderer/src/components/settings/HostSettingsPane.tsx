@@ -57,6 +57,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   const [requestedHost, setRequestedHost] = useState<string | null>(null)
   const editor = useRef<HTMLDivElement>(null)
   const [removeRequest, setRemoveRequest] = useState<SshHostConfig | null>(null)
+  useEffect(() => { if (!active) setRemoveRequest(null) }, [active])
   const saveState = useSettingsSave()
   const { saving } = saveState
   const dirty = resource.dirty
@@ -256,7 +257,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
       </div>
       <SettingsSaveBar save={saveState} dirty={dirty} label="Save hosts" onSave={() => void save()} />
       <ConfirmationDialog
-        open={removeRequest !== null}
+        open={active && removeRequest !== null}
         title="Remove SSH host?"
         description={`This removes the host and ${config.workspaces.filter((workspace) => workspace.hostId === removeRequest?.id).length} linked workspace registrations. Remote files are not deleted.`}
         {...(removeRequest ? { subject: removeRequest.label } : {})}

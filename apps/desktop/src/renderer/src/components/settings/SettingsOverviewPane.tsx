@@ -8,20 +8,23 @@ const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosu
 
 
 /** Presentation only. The parent passes published configuration and the original section catalog. */
-export function SettingsOverviewPane<Module extends SettingsModule>({ config, groups, onOpen }: {
+export function SettingsOverviewPane<Module extends SettingsModule>({ config, groups, onOpen, active = true }: {
   config: AppConfig
   groups: SettingsNavGroup<Module>[]
   onOpen: (section: Module['id']) => void
+  active?: boolean
 }) {
   const [documentVisible, setDocumentVisible] = useState(() => document.visibilityState !== 'hidden')
   useEffect(() => {
+    if (!active) return
     const onVisibilityChange = () => setDocumentVisible(document.visibilityState !== 'hidden')
+    onVisibilityChange()
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () => document.removeEventListener('visibilitychange', onVisibilityChange)
-  }, [])
+  }, [active])
 
   return (
-    <div className="settings-content__scroll settings-overview" data-settings-overview data-document-visible={documentVisible}>
+    <div className="settings-content__scroll settings-overview" data-settings-overview data-document-visible={active && documentVisible}>
       <div className="settings-overview__hero">
         <img className="settings-overview__art" src={bannerUrl} alt="" aria-hidden="true" onError={(event) => { event.currentTarget.hidden = true }} />
         <span className="settings-overview__sweep" aria-hidden="true" />

@@ -1,7 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { lazy, Suspense, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import type { ToolkitAction, ToolkitToolDefinition, ToolkitToolFields, ToolkitInlineToolConfiguration } from '@agentmux/core/control'
 import { TOOLKIT_ICON_IDS } from '../../../../shared/toolkit-preferences'
 import { ToolkitIcon, toolkitIconLabels } from '../toolkit/ToolkitIcon'
@@ -33,6 +33,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   const uid = useId()
   const picker = useRef<HTMLDetailsElement>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  useEffect(() => { if (!active) setConfirmDelete(false) }, [active])
   const [removing, setRemoving] = useState(false)
   const [executing, setExecuting] = useState(false)
   const [runFeedback, setRunFeedback] = useState('')
@@ -146,6 +147,6 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
       <button type="button" className="small-button" disabled={entry.saving || removing} onClick={() => entry.expected ? setConfirmDelete(true) : void remove()}>{entry.expected ? <><ThemeActionRemoveIcon size={13} /> Delete tool</> : <><ThemeActionCancelIcon size={13} /> Cancel new tool</>}</button>
       <SettingsSaveBar save={save} dirty={dirty} disabled={invalid || entry.missing} label="Save tool" onSave={onSave} />
     </footer>
-    <ConfirmationDialog open={confirmDelete} title="Delete this tool?" subject={tool.name} description="Remove the saved tool and its status bar entry. A running or unconfirmed execution prevents deletion." confirmLabel="Delete tool" busy={removing} onCancel={() => setConfirmDelete(false)} onConfirm={() => void remove()} />
+    <ConfirmationDialog open={active && confirmDelete} title="Delete this tool?" subject={tool.name} description="Remove the saved tool and its status bar entry. A running or unconfirmed execution prevents deletion." confirmLabel="Delete tool" busy={removing} onCancel={() => setConfirmDelete(false)} onConfirm={() => void remove()} />
   </section>
 }
