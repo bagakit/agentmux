@@ -8,7 +8,7 @@ overrides:
   '@ctxmux/sdk@0.0.0': file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz
 
 patchedDependencies:
-  '@xterm/xterm@6.1.0-beta.303': 634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d
+  '@xterm/xterm@6.1.0-beta.303': 86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6
 
 importers:
 
@@ -91,25 +91,25 @@ importers:
         version: 3.31.0
       '@xterm/addon-fit':
         specifier: 0.12.0-beta.300
-        version: 0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d))
+        version: 0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))
       '@xterm/addon-search':
         specifier: 0.17.0-beta.300
-        version: 0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d))
+        version: 0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))
       '@xterm/addon-unicode11':
         specifier: 0.10.0-beta.300
-        version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d))
+        version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))
       '@xterm/addon-web-links':
         specifier: 0.13.0-beta.300
-        version: 0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d))
+        version: 0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.299
-        version: 0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d))
+        version: 0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))
       '@xterm/headless':
         specifier: ^5.5.0
         version: 5.5.0
       '@xterm/xterm':
         specifier: 6.1.0-beta.303
-        version: 6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d)
+        version: 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
       dompurify:
         specifier: 3.4.16
         version: 3.4.16
@@ -297,7 +297,7 @@ importers:
         version: 1.1.23(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@xterm/xterm':
         specifier: 6.1.0-beta.303
-        version: 6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d)
+        version: 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@19.2.8)
@@ -6322,29 +6322,29 @@ snapshots:
 
   '@xmldom/xmldom@0.9.12': {}
 
-  '@xterm/addon-fit@0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d))':
+  '@xterm/addon-fit@0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
 
-  '@xterm/addon-search@0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d))':
+  '@xterm/addon-search@0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
 
-  '@xterm/addon-unicode11@0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d))':
+  '@xterm/addon-unicode11@0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
 
-  '@xterm/addon-web-links@0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d))':
+  '@xterm/addon-web-links@0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
 
-  '@xterm/addon-webgl@0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d))':
+  '@xterm/addon-webgl@0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
 
   '@xterm/headless@5.5.0': {}
 
-  '@xterm/xterm@6.1.0-beta.303(patch_hash=634b8c1d5a64ed71e981da0f6df0ade605fdf95ff3226db19f77e7030fd7467d)': {}
+  '@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)': {}
 
   ansi-regex@5.0.1: {}
 
