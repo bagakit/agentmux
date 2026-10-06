@@ -3264,6 +3264,7 @@ export class AgentMuxClient {
 
   async statusAgent(agentSessionId: string): Promise<AgentMuxAgentRuntimeStatus> {
     this.requireConnected()
+    await this.resolveRawAgentSession(agentSessionId)
     const durable = await this.currentStoredAgentSession(agentSessionId)
     // The SessionStore enforces durable Run uniqueness; this exact refresh also
     // checks the original registry bindings before observing that one Run.
