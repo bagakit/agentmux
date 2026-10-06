@@ -130,6 +130,25 @@ function seed(document: FileDocument = {
 }
 
 describe('revision-aware file save Store', () => {
+  it.each([false, true])('absorbs canonical saved content only when no later draft exists (%s)', async later => {
+    const { tab, key } = seed()
+    useAppStore.getState().updateDocument(tab.id, 'Submitted text')
+    const saving = useAppStore.getState().saveDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+    if (later) useAppStore.getState().updateDocument(tab.id, 'Later draft')
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'canonical-revision', content: 'Canonical saved text', noteAttribution: { status: 'unconfirmed', reason: 'Actor unavailable' } })
+    await saving
+    expect(useAppStore.getState().documents[key]).toMatchObject({ content: later ? 'Later draft' : 'Canonical saved text', revision: 'canonical-revision', noteWriteAttribution: { status: 'unconfirmed' } })
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(later)
+    expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
+    useAppStore.getState().updateDocument(tab.id, 'Next edit')
+    const nextSave = useAppStore.getState().saveDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 2)
+    expect(fileApi.writes[1]!.input.expectedRevision).toBe('canonical-revision')
+    fileApi.writes[1]!.resolve({ status: 'written', revision: 'next-revision', noteAttribution: { status: 'recorded' } })
+    await nextSave
+    expect(useAppStore.getState().documents[key]?.noteWriteAttribution).toEqual({ status: 'recorded' })
+  })
   it('keeps the original dirty document when a published save has no confirmed receipt', async () => {
     const { tab, key } = seed()
     useAppStore.getState().updateDocument(tab.id, 'bravo')
