@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from '../helpers/fixture-epoch.mjs'
 import { tmpdir as fixtureTmpdir } from 'node:os'
 import { join as fixtureJoin, sep as fixtureSep } from 'node:path'
 const fixturePath = relative => { const temporary = relative.replace(/^(?:private\/)?tmp\//u, ''); return (temporary === relative ? fixtureJoin(fixtureTmpdir(), 'agentmux-fixtures') : fixtureTmpdir()) + fixtureSep + temporary.replaceAll('/', fixtureSep) }
@@ -100,7 +101,7 @@ assert.throws(
     type: 'update',
     agentSessionId: 'packed-agent',
     itemId: 'assistant-1',
-    updatedAt: 1,
+    updatedAt: reshapeFixtureEpoch(0, 0, 1),
     contentDelta: 'legacy delta'
   }),
   (error) => error?.code === 'INVALID_AGENT_TIMELINE'
@@ -898,7 +899,7 @@ const resumeRollbackStore = {
   loadRetiredAgentSessions: async () => await resumeRollbackDelegate.loadRetiredAgentSessions(),
   compareAndSwap: async (...args) => await resumeRollbackDelegate.compareAndSwap(...args),
   reserveLifecycle: async (reservation) => await resumeRollbackDelegate.reserveLifecycle(reservation),
-  claimStaleLifecycles: async (claim) => await resumeRollbackDelegate.claimStaleLifecycles(claim),
+  claimStaleLifecycles: async (claim, target) => await resumeRollbackDelegate.claimStaleLifecycles(claim, target),
   retireRuns: async (runs) => await resumeRollbackDelegate.retireRuns(runs),
   loadTimeline: async (agentSessionId) => await resumeRollbackDelegate.loadTimeline(agentSessionId),
   applyTimelineMutation: async (...args) => await resumeRollbackDelegate.applyTimelineMutation(...args),

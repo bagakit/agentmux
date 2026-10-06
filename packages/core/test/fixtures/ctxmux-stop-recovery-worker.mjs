@@ -12,8 +12,8 @@ const store = {
   loadRetiredAgentSessions: async () => await delegate.loadRetiredAgentSessions(),
   compareAndSwap: async (expected, next) => await delegate.compareAndSwap(expected, next),
   reserveLifecycle: async (reservation) => await delegate.reserveLifecycle(reservation),
-  async claimStaleLifecycles(claim) {
-    const reservations = await delegate.claimStaleLifecycles(claim)
+  async claimStaleLifecycles(claim, target) {
+    const reservations = await delegate.claimStaleLifecycles(claim, target)
     const stop = reservations.find((reservation) => reservation.kind === 'stop')
     if (stop) claimedStopOperation = stop.stopOperation
     return reservations
