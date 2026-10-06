@@ -1,4 +1,5 @@
-import { isGoalDelegationMethod, parseGoalDelegationParams, parseGoalDelegationResult } from './goal-delegation.js'
+import { isGoalDelegationMethod } from './goal-delegation-methods.js'
+import { parseGoalDelegationParams, parseGoalDelegationResult } from './goal-delegation.js'
 import { isMoteAvatarWriteMethod, parseMoteAvatarWriteParams, parseMoteAvatarWriteResult } from './mote-avatar-write.js'
 import { isMoteAvatarSeriesMethod, parseMoteAvatarSeriesParams, parseMoteAvatarSeriesResult } from './mote-avatar-series.js'
 import { parseDiagnosticEvidenceResult } from './diagnostic-evidence-codec.js'

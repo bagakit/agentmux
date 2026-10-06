@@ -1,3 +1,5 @@
+import { type GoalDelegationMethod } from './goal-delegation-methods.js'
+export { GOAL_DELEGATION_METHODS, isGoalDelegationMethod, type GoalDelegationMethod } from './goal-delegation-methods.js'
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { parseDemandDispatches, type DemandDispatch, type GoalStartObservation } from '@agentmux/demand'
 import { parseFileReadParams, type FileReadParams } from './public-rpc-files.js'
@@ -13,8 +15,6 @@ import { AgentMuxError } from './errors.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 
 /** Goal owns business intent and reports; this port never owns a message queue. */
-export const GOAL_DELEGATION_METHODS = { 'goal.delegation.prepare': 'long', 'goal.delegation.bind': 'long', 'goal.delegate': 'long', 'goal.report': 'long', 'goal.collect': 'long', 'goal.delegations': 'long' } as const
-export type GoalDelegationMethod = keyof typeof GOAL_DELEGATION_METHODS
 export type GoalDelegationParamsMap = {
   'goal.delegation.prepare': { goalId: string; intent: DemandDelegationIntent; materials?: FileReadParams[] }
   'goal.delegation.bind': { goalId: string; intent: DemandDelegationIntent }
@@ -32,7 +32,6 @@ export interface GoalDelegationsOwner {
   call<M extends GoalDelegationMethod>(method: M, input: GoalDelegationParamsMap[M], context: AgentMuxRpcCallContext,
     authority: GoalDelegationAuthority): Promise<GoalDelegationResultMap[M]>
 }
-export function isGoalDelegationMethod(value: string): value is GoalDelegationMethod { return Object.hasOwn(GOAL_DELEGATION_METHODS, value) }
 function record(value: unknown, keys: readonly string[]) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key)))
     throw new AgentMuxError('The original Goal delegation object is invalid.', 'INVALID_CONTROL_REQUEST')

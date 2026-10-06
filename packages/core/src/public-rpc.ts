@@ -1,4 +1,5 @@
-import { GOAL_DELEGATION_METHODS, type GoalDelegationParamsMap, type GoalDelegationResultMap } from './goal-delegation.js'
+import { GOAL_DELEGATION_METHODS } from './goal-delegation-methods.js'
+import type { GoalDelegationParamsMap, GoalDelegationResultMap } from './goal-delegation.js'
 import { AGENTMUX_RPC_MOTE_AVATAR_WRITE_METHODS, type MoteAvatarParameterMap, type MoteAvatarResultMap, type MoteAvatarMethod } from './mote-avatar-write.js'
 import { AGENTMUX_RPC_MOTE_AVATAR_METHODS } from './mote-avatar-series.js'
 import { AGENTMUX_RPC_TOPIC_METHODS } from './public-rpc-topics.js'
