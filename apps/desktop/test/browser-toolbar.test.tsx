@@ -1,3 +1,6 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
+import { GRAPHITE_THEME, mountThemeRuntime, previewTheme } from '@agentmux/client-ui/theme'
+import { semanticIconHref } from '@agentmux/client-ui/icons'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -133,9 +136,9 @@ function agentSession(
     hostId: 'local',
     workspacePath: _hygiene_fixturePath("repo"),
     label: id,
-    createdAt: 1,
-    updatedAt: 1,
-    agentSessionUpdatedAt: 1,
+    createdAt: _reshape_fixtureEpoch(0, 0, 1),
+    updatedAt: _reshape_fixtureEpoch(0, 0, 1),
+    agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 1),
     processState: 'running',
     status,
     latestOutputBytes: 0,
@@ -253,7 +256,7 @@ describe('Browser bar contract', () => {
           id: 'operation-1',
           browserId: tab.browserId,
           operator: { id: 'agent-1', name: 'Navigator', providerId: 'codex' },
-          startedAt: 1,
+          startedAt: _reshape_fixtureEpoch(0, 0, 1),
           phase: 'running' as const,
           summary: 'Inspect page',
           url: tab.url,
@@ -341,8 +344,8 @@ describe('Browser bar contract', () => {
         ]}
         currentNavigationByBrowserId={{ 'browser-1': 'navigation-1' }}
         agentSessions={[
-          agentSession('ready-agent', { state: 'working', source: 'native-hook', observedAt: 1 }),
-          agentSession('offline-agent', { state: 'disconnected', source: 'run-process', observedAt: 1 })
+          agentSession('ready-agent', { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }),
+          agentSession('offline-agent', { state: 'disconnected', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) })
         ]}
         onDelete={() => {}}
         onClear={() => {}}
@@ -417,4 +420,12 @@ describe('Browser bar contract', () => {
     await act(async () => root.unmount())
     container.remove()
   })
+})
+
+it('actual selected element Add annotation and saved bookmark have independent theme meanings while their original callbacks remain intact',async()=>{
+ const cleanup=mountThemeRuntime(window),container=document.createElement('div'),root=createRoot(container);document.body.append(container)
+ try{vi.spyOn(api.browser,'selectElement').mockResolvedValue(annotation.selection);await act(async()=>root.render(<BrowserPane tab={tab} visible/>));await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="Select element"]')!.click());const add=[...container.querySelectorAll<HTMLButtonElement>('button')].find(n=>n.textContent?.trim()==='Add annotation')!;expect(add,'actual selected-element annotation caller').not.toBeUndefined();expect(add.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('action.add-annotation'))
+ const custom=structuredClone(GRAPHITE_THEME);custom.id='custom.browser-meaning';custom.name='Browser control meanings';custom.icons={'action.add-annotation':{kind:'paths',paths:[{d:'M4 4H20V20H4Z'}]},'status.saved':{kind:'paths',paths:[{d:'M12 3L21 20H3Z'}]}};await act(async()=>{expect(previewTheme(custom).applied).toBe(true)});expect([...container.querySelectorAll<HTMLButtonElement>('button')].find(n=>n.textContent?.trim()==='Add annotation')).toBe(add);expect(document.getElementById(semanticIconHref('action.add-annotation').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z');await act(async()=>add.click());expect(fixture.state.addBrowserAnnotation).toHaveBeenCalledOnce()
+ await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="Save this page as a bookmark"]')!.click());const saved=container.querySelector('.browser-bookmark-result')!;expect(saved,'actual bookmark owner receipt').not.toBeNull();expect(saved.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('status.saved'));expect(saved.textContent).toContain('Example.webloc');expect(document.getElementById(semanticIconHref('status.saved').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M12 3L21 20H3Z');expect(fixture.state.saveBrowserBookmark).toHaveBeenCalledOnce()
+ }finally{await act(async()=>root.unmount());container.remove();cleanup();vi.restoreAllMocks()}
 })
