@@ -200,12 +200,13 @@ external author. Platform adapters own verification; this package does not claim
 that registering configuration has authenticated an event.
 
 ```ts
-import { DurableIngressHost } from '@agentmux/connectors'
+import { DurableIngressHost, ConnectionReceivers } from '@agentmux/connectors'
 
 const ingress = new DurableIngressHost({ connections, bindings, authenticators, core: originalCoreForHost })
 connections.ingress = ingress
-const received = await ingress.receive({ connectionId, raw }, acknowledgeTransport)
-await ingress.dispatch(received.ingress.ingressId)
+const receivers = new ConnectionReceivers(connections, ingress)
+// Close registered transports before closing their borrowed connection database.
+receivers.close()
 ```
 
 `receive` commits the complete raw event and normalized business facts before
@@ -254,3 +255,35 @@ retain business body, actor, safe refusal code and original input references;
 inspection reads the original Core receipt without dispatch. Raw payloads and
 transport proofs remain private to the Host. An unavailable optional intake owner
 limits these reads only; the original connection and Agents remain available.
+
+## Registered receiving transports
+
+A `ConnectionAdapter` can contribute an `ingress` authenticator and a `transport`.
+`ConnectionIngressTransport.start` receives the original configuration, resolved
+credential, an abort signal and `receive({ raw, transportProof? }, acknowledge)`.
+It returns a receiver with `close()` and typed `observation()`. The proof is an
+adapter-private in-process value. The callback freezes the connection identity;
+an event cannot supply a different connection, Session or execution Host.
+
+`ConnectionReceivers` starts only enabled configurations with registered ports.
+The callback first verifies and commits intake, then ACKs durable retention. It
+returns to the transport callback before a deferred turn enters original Core
+input. Neither Core observation nor platform reply checks consume the transport
+ACK budget. A revision change closes only that receiver and refuses its stale
+callbacks. Current configuration is checked for each callback, so restoring the
+same Host service does not require replacing an Agent or restarting the app.
+
+Recovery reads bounded pages of the original database's unclaimed `received`
+records, with a continuation per connection and a low frequency retry. A slow
+page cannot starve later retained records. Claimed or unknown input is never
+copied into a second queue or automatically submitted again. Transport service
+facts overlay the original Connection observation, independently of publication.
+
+`createDesktopConnections` can compose this intake owner on its original shared
+database when supplied the original executing Core port. Private authorization
+callbacks belong at that execution owner; ordinary Hosted RPC arguments cannot
+carry them or authenticate external authors. Cross-process composition must keep
+that authority check on the original semantic Host rather than treating a client
+projection as an in-process Core. The integration fixture exercises the actual
+connection composition with a signed HTTP protocol and replay ledger; those test
+leaves do not claim a production webhook listener or platform delivery.
