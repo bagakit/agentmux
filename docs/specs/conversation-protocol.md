@@ -32,8 +32,16 @@ The first checkpoint cuts after the last complete persisted record. Existing his
 
 A checkpoint is a read continuation, never sharing or input authority. It contains no transcript path. Source replacement, truncation, changed identity or changed saved boundary returns an explicit source error and retains the original continuation. A connector must inspect and authorize a new source cut before publishing from it. Multiple sources keep independent checkpoints; their readers do not manufacture a global event order.
 
+## Asynchronous question references
+
+`projectConversationQuestions` projects already accepted native pages and same-source answer context. Every question reference retains the managed Session, Provider source, record, recorded turn and opaque question ID; an execution Host is included only when supplied by the caller. Missing turn identity stays missing. Each recorded answer retains its original user record and source, independently of the question's own turn.
+
+`recordedQuestionAnswerFacts` queries only those accepted facts. A same-source answer outside the displayed window can confirm the card without rereading history, replacing the reading window or retaining a separate answer cache. Other Sessions or native sources cannot contribute answers. `questionReplyReceiptMatches` checks the original submission receipt; native answer evidence does not prove which operation delivered it, and a submitted receipt does not prove that a native answer was recorded.
+
+The original `agent.history` and `agent.context` expose typed question and answer records. `agent.question.reply` remains the original exact reply owner, including its stable operation, Run and predecessor. Historical asynchronous questions are readable facts rather than synchronous pending requests. Client draft, in-flight and unknown reply intent remain with the existing client owner under [the original question and reading contract](../design/behavior/conversation-input.md#共同对话与原生记录); refreshing or projecting a question does not submit it.
+
 ## State, change and delivery
 
 A successful read proves what was observed in its stated range. It does not prove that a message was delivered, an input was adopted or a task completed. UI snapshots and observation cursors are not durable publishing checkpoints. External delivery must retain its own operation identity and confirmed platform mapping, and reconcile unknown effects through the original operation.
 
-The source model and protected behavior are defined by [the conversation contract](../design/behavior/conversation-input.md#共同对话协议与外部交流入口). This page documents implemented reading, observation and catch-up; actions and connector capabilities are described as their owning implementations land.
+The source model and protected behavior are defined by [the conversation contract](../design/behavior/conversation-input.md#共同对话协议与外部交流入口). This page documents implemented reading, observation, catch-up and asynchronous question composition; connector capabilities are described as their owning implementations land.
