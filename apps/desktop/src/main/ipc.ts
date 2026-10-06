@@ -1,3 +1,4 @@
+import { createPublicationConversationPort } from '@agentmux/connectors'
 import { createDesktopConnections } from './connector-host.js'
 import { registerConnectorIpc } from './connector-ipc.js'
 import { GoalStartResponsibilityOwner } from './goal-start-responsibility.js'
@@ -1932,6 +1933,7 @@ export async function registerIpc(args: {
   const detach = args.runtime.attach(args.window.webContents)
   const rpcHttp = agentMuxRpcHttpOptions()
   const connectorServices = await createDesktopConnections({ directory: join(homedir(), '.agentmux', 'connectors'), encryption: safeStorage,
+    publication: createPublicationConversationPort(() => args.runtime.rpcClients()),
     bindings: { spatial: spatialState, checkpoint: async (reference: import("@agentmux/core/conversation").ConversationRef) => {
       const original = args.runtime.rpcClients().filter(entry => entry.hostId === reference.hostId)
       if (original.length !== 1) throw new AgentMuxError('The exact execution Host is unavailable. No binding was rerouted.', 'CONTROL_UNAVAILABLE')
