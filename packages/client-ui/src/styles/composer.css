@@ -89,9 +89,13 @@
 .composer-outbox p { margin: var(--sp-3) 0; color: var(--text-3); }
 /* The breakdown card. `popover` puts it in the top layer, so it escapes the composer's overflow:hidden
    instead of being clipped. Flat by contract: an elevated fill + top highlight, no resting border. */
-.composer__context-card { position: fixed; position-anchor: --composer-context; position-area: top span-left; margin: 0 0 var(--sp-2) 0; width: max-content; max-width: min(260px, 90vw); padding: var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
+.composer__context-card { position-try-fallbacks: flip-block, flip-inline; max-height: calc(100vh - 24px); overflow: auto; position: fixed; position-anchor: --composer-context; position-area: top span-left; margin: 0 0 var(--sp-2) 0; width: max-content; max-width: min(260px, 90vw); padding: var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
 .composer__context-card h3 { margin: 0 0 var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .composer__context-card strong { color: var(--text); font-size: var(--fs-body); font-weight: 620; }
+.composer__context-turn { margin-top: var(--sp-3); padding-top: var(--sp-3); box-shadow: inset 0 1px var(--line-soft); }
+.composer__context-turn dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); margin: 0; }
+.composer__context-turn dt { color: var(--text-3); font-size: var(--fs-micro); }
+.composer__context-turn dd { margin: var(--sp-1) 0 0; color: var(--text-2); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .composer__context-card p { margin: var(--sp-2) 0 0; color: var(--text-3); }
 
 /* The document is plain prose plus atomic tool references; ProseMirror owns native editing.
