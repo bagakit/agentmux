@@ -62,7 +62,6 @@ export function assertSemanticHostOwner(app, identity, row, mode) {
   fail(identity && Number.isSafeInteger(identity.hostProcessId) && identity.hostProcessId > 1 &&
     typeof identity.storePath === 'string' && isAbsolute(identity.storePath), 'The original Semantic Host namespace is unconfirmed; retry this installation when its public endpoint responds.')
   const expected = `${scope(app).executable} ${join(app, 'Contents/Resources/app/out/main/agentmux-host.js')} --store ${identity.storePath}`
-  const suffix = row?.command?.slice(expected.length)
   const argvMatches = row?.command === expected
   fail(row && row.pid === identity.hostProcessId && row.uid === process.getuid() && argvMatches,
     'The public Semantic Host does not match the original installed namespace; no process was signalled.')
@@ -100,7 +99,6 @@ export function semanticHostProcessIds(app, owner, processes) {
 
 export async function prepareSemanticHostReload(currentApp, candidateApp, ops = operations) {
   const originalSource = await ops.source(currentApp), candidateSource = await ops.source(candidateApp)
-  if (originalSource === candidateSource) return null
   const processes = await ops.processes(scope(currentApp))
   const entry = join(currentApp, 'Contents/Resources/app/out/main/agentmux-host.js')
   // No semantic worker from this bundle means ordinary new App startup owns the cold path.
