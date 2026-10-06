@@ -233,6 +233,10 @@
     "./search": {
       "types": "./dist/search.d.ts",
       "import": "./dist/search.js"
+    },
+    "./session-history-query-budget": {
+      "types": "./dist/session-history-query-budget.d.ts",
+      "import": "./dist/session-history-query-budget.js"
     }
   },
   "bin": {

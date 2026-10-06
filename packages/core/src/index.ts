@@ -113,3 +113,7 @@ export * from './note-links.js'
 export * from './conversation.js'
 
 export * from './search-metadata.js'
+
+export * from './search-contract.js'
+export * from './search-codec.js'
+export * from './search-reader.js'
