@@ -350,6 +350,9 @@ importers:
       '@agentmux/core':
         specifier: workspace:*
         version: link:../core
+      '@floating-ui/dom':
+        specifier: 1.8.0
+        version: 1.8.0
       '@radix-ui/react-dialog':
         specifier: ^1.1.23
         version: 1.1.23(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)

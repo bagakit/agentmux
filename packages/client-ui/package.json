@@ -72,6 +72,7 @@
   },
   "dependencies": {
     "@agentmux/core": "workspace:*",
+    "@floating-ui/dom": "1.8.0",
     "@radix-ui/react-dialog": "^1.1.23",
     "@tiptap/core": "^3.31.3",
     "@tiptap/pm": "3.31.3",
