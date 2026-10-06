@@ -150,6 +150,10 @@
       "types": "./dist/runtime-client.d.ts",
       "import": "./dist/runtime-client.js"
     },
+    "./notebook-observation": {
+      "types": "./dist/notebook-observation.d.ts",
+      "import": "./dist/notebook-observation.js"
+    },
     "./notebook-catalog": {
       "types": "./dist/notebook-catalog.d.ts",
       "import": "./dist/notebook-catalog.js"

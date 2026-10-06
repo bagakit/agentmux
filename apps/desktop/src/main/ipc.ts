@@ -25,7 +25,7 @@ import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from 
 import { homedir } from 'node:os'
 import { FileUploadOwner } from './file-upload-owner.js'
 import { GitPublicControl } from './git-public-control.js'
-import { NotebookObservationOwner } from './notebook-observation-owner.js'
+import { createNotebookObservationServices } from './notebook-observation-requests.js'
 import { FileReadOwner } from './file-read-owner.js'
 import { HtmlFilePreviews } from './html-file-previews.js'
 import { FilePreviewResources } from './file-preview-resources.js'
@@ -1061,12 +1061,25 @@ export async function registerIpc(args: {
   }))
 
   const notebookStore = new AgentMuxNotebookStore(undefined, notesStorageOwner.storage)
+  const notebookObservation = createNotebookObservationServices(notebookStore, { files, workspace: id => config.workspaces.find(item => item.id === id) }, () => notesStorageReady)
   handleWithEvent('notesStorage:inspect', async (event, operationId?: string) => { requireTrustedSender('notesStorage:inspect', event); await notesStorageReady; return notesStorageOwner.inspect(operationId) })
   handleWithEvent('notesStorage:change', async (event, input: import('@agentmux/core/notebook-store').NotesStorageChange) => { requireTrustedSender('notesStorage:change', event); return notesStorageOwner.change(input) })
   const disposeNotebook = notebookStore.subscribe(observation => {
     if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('notebook:changed', observation)
   })
   const notebookActor = { kind: 'user' as const, id: 'local-user:' + (process.getuid?.() ?? 'current') }
+  handleWithEvent('notebook:graph', async (event, input: import('../shared/notebook-observation').NotebookGraphRequest) => {
+    requireTrustedSender('notebook:graph', event)
+    return notebookObservation.requests.graph(event.sender, input)
+  })
+  handleWithEvent('notebook:content', async (event, input: import('../shared/notebook-observation').NotebookContentRequest) => {
+    requireTrustedSender('notebook:content', event)
+    return notebookObservation.requests.content(event.sender, input)
+  })
+  handleWithEvent('notebook:cancelObservation', (event, requestId: string) => {
+    requireTrustedSender('notebook:cancelObservation', event)
+    notebookObservation.requests.cancel(event.sender, requestId)
+  })
   handleWithEvent('notebook:actor', async event => { requireTrustedSender('notebook:actor', event); return notebookActor })
   handleWithEvent('notebook:read', async event => { requireTrustedSender('notebook:read', event); await notesStorageReady; return notebookStore.read() })
   handleWithEvent('notebook:apply', async (event, input: NotebookWrite) => {
@@ -1907,7 +1920,7 @@ export async function registerIpc(args: {
 
     schedules: args.progressLoops,
     notebookStore,
-    notebookObservation: new NotebookObservationOwner({ files, workspace: id => config.workspaces.find(item => item.id === id) }),
+    notebookObservation: notebookObservation.owner,
     goalDelegations,
     coreClients: () => args.runtime.rpcClients(),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
@@ -1962,7 +1975,7 @@ export async function registerIpc(args: {
       { owner: 'goal-attention', dispose: () => goalAttention?.dispose() },
       { owner: 'goal-start-responsibility', dispose: () => goalStartResponsibility?.dispose() },
       { owner: 'demand-changes', dispose: () => disposeDemandChanges() },
-      { owner: 'notebook', dispose: () => disposeNotebook() },
+      { owner: 'notebook', dispose: () => { notebookObservation.requests.dispose(); disposeNotebook() } },
       { owner: 'toolkit-ipc', dispose: () => disposeToolkitIpc() },
       { owner: 'toolkit', dispose: () => toolkit.dispose() },
       { owner: 'spatial-links', dispose: () => args.spatialLinks?.unavailable() },
