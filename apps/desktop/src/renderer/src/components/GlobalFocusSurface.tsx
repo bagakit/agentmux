@@ -129,7 +129,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const storedFocusExecutionSession = useAppStore((state) => state.focusExecutionSession)
   const focusExecutionSession = onSelectContext ?? storedFocusExecutionSession
   const [query, setQuery] = useState('')
-  const historySearch = useFocusHistorySearch(query, visible, catalogue.sources, catalogue.error ?? (!catalogue.available ? 'The retained source catalogue is still unconfirmed. Retry sources to confirm full coverage.' : null))
+  const historySearch = useFocusHistorySearch(query, visible)
   const [project, setProject] = useState('all')
   const [bucketFilter, setBucketFilter] = useState<FocusBucket | 'all'>('all')
   const [requestId, setRequestId] = useState<string | null>(null)

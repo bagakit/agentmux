@@ -54,6 +54,7 @@ const Hit = memo(function Hit({ hit, query, open, onExpand }: { hit: FocusHistor
   {open ? <>
    <dl className="focus-history-hit__provenance" aria-label="Original record source">
     <div><dt>Host</dt><dd>{hit.reference.hostId}</dd></div>
+    {hit.reference.sourceHostId !== hit.reference.hostId ? <div><dt>Source Host</dt><dd>{hit.reference.sourceHostId}</dd></div> : null}
     <div><dt>Session</dt><dd>{hit.reference.agentSessionId}</dd></div>
     <div><dt>Source</dt><dd>{hit.reference.source}</dd></div>
     {hit.nativeSource ? <div><dt>Provider</dt><dd>{hit.nativeSource.providerId}</dd></div> : null}
@@ -68,13 +69,13 @@ export function FocusHistorySearch({ search }: { search: ReturnType<typeof useFo
  const { result } = search
  if (!result) return null
  return <section className="focus-history-search" aria-label="History search results" aria-busy={result.loading}>
-  <header><strong>History · {result.label}</strong>{result.loading ? <button type="button" className="small-button" onClick={search.cancel}>Cancel search</button> : result.pending.length ? <button type="button" className="small-button" onClick={search.more}>Continue history search</button> : null}</header>
-  <details className="focus-history-coverage"><summary><small role="status">{result.hits.length} matches · {result.examined} records · {result.pending.length ? `${result.pending.length} source streams remaining` : `${result.completed} / ${result.total} source streams checked`}{result.issues.length ? ` · ${result.issues.length} unavailable` : ''}</small></summary>
+  <header><strong>History · {result.label}</strong>{result.loading ? <button type="button" className="small-button" onClick={search.cancel}>Cancel search</button> : result.nextCursor ? <button type="button" className="small-button" onClick={search.more}>Continue history search</button> : null}</header>
+  <details className="focus-history-coverage"><summary><small role="status">{result.hits.length} matches · {result.examined} records · {!result.confirmed ? 'source coverage unconfirmed' : result.remaining ? `${result.remaining} source streams remaining` : `${result.completed} / ${result.total} source streams checked`}{result.issues.length ? ` · ${result.issues.length} unavailable` : ''}</small></summary>
    {result.trimmed ? <p>{result.hits.length} of {result.matched} matching records read remain in this bounded window; {result.trimmed} earlier results are outside it. The expanded record is kept. Search again to read earlier results.</p> : null}
-   <p>{result.completed} / {result.total} source streams checked. Retained captured and native text; independent of execution project and state filters. Literal text is case-sensitive.</p>
+   <p>{result.confirmed ? `${result.completed} / ${result.total} source streams checked.` : 'Original source coverage is unconfirmed.'} Retained captured and native text; independent of execution project and state filters. Literal text is case-sensitive.</p>
    {result.issues.length ? <><strong>Unavailable search coverage</strong>{result.issues.map((issue, index) => <p key={index}>{issue}</p>)}<p>Search again to retry unavailable sources.</p></> : null}
   </details>
-  {!result.hits.length && !result.loading ? <p>{result.pending.length || result.issues.length ? 'No matches in the checked records. Search coverage is incomplete.' : 'No matches in the retained text of the checked sources.'}</p> : null}
+  {!result.hits.length && !result.loading ? <p>{!result.confirmed || result.remaining || result.issues.length ? 'No matches in the checked records. Search coverage is incomplete.' : 'No matches in the retained text of the checked sources.'}</p> : null}
   {result.hits.map(hit => <Hit key={focusHistoryHitKey(hit)} hit={hit} query={result.query} open={search.expandedKey === focusHistoryHitKey(hit)} onExpand={search.expand} />)}
  </section>
 }
