@@ -30,7 +30,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
   async call<M extends GoalDelegationMethod>(method: M, input: GoalDelegationParamsMap[M],
     context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<GoalDelegationResult> {
     context.signal?.throwIfAborted()
-    if (method === 'goal.delegation.prepare' || method === 'goal.delegate') {
+    if (method === 'goal.delegation.prepare' || method === 'goal.delegate' || method === 'goal.delegation.bind') {
       const request = input as GoalDelegationParamsMap['goal.delegation.prepare']
       let intent = request.intent
       if (authority.actor.kind !== 'agent' || authority.actor.id !== intent.ownerAgentSessionId ||
@@ -39,6 +39,17 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
       // A saved original intent remains readable after a Run/relationship changes. The
       // business owner compares the complete frozen intent before returning an idempotent read.
       const original = await this.demands.inspectDelegation(input.goalId, intent.operationId)
+      const existingSource = method === 'goal.delegation.bind'
+        ? (await this.requireCore().call(intent.hostId, 'message.read', { hostId: intent.hostId, operationId: intent.operationId }, context)).message
+        : null
+      if (method === 'goal.delegation.bind') {
+        if (!existingSource) throw new AgentMuxError('The original message is absent at this exact Host. Binding does not create or resend it.', 'CONTROL_UNAVAILABLE')
+        this.assertSource(intent, existingSource)
+        if (intent.requestText !== undefined && intent.requestText !== intent.text) throw new AgentMuxError('An existing opaque input cannot attest a different original request. Keep its frozen body.', 'CONTROL_REQUEST_CONFLICT')
+        if (intent.context?.some(source => source.availability !== 'unknown')) throw new AgentMuxError('An existing opaque input cannot attest retroactive material availability. Keep references as unknown and inspect the original input.', 'CONTROL_REQUEST_CONFLICT')
+        if (request.materials?.length) throw new AgentMuxError(
+          'The original message input is frozen. Material or coordination content cannot be added retroactively.', 'CONTROL_REQUEST_CONFLICT')
+      }
       if (request.materials?.length) {
         if (original) {
           const originalSources = original.context?.slice(-request.materials.length) ?? []
@@ -59,7 +70,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
       {
         if (original?.requestText !== undefined && !request.materials?.length && original.requestText === intent.text)
           intent = { ...intent, requestText: original.requestText, text: original.text }
-        else if (!original) {
+        else if (!original && !existingSource) {
           const coordination = JSON.stringify({ schema: 'agentmux.goal-delegation.v1', goalId: input.goalId,
             operationId: intent.operationId, sourceMessageId: intent.sourceMessageId, threadId: intent.threadId,
             ownerAgentSessionId: intent.ownerAgentSessionId, workerAgentSessionId: intent.workerAgentSessionId,
@@ -68,7 +79,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
           intent = { ...intent, requestText: request.intent.text, text: intent.text + '\n\n[AgentMux delegation]\n' + coordination }
         }
       }
-      if (!original) {
+      if (!original && !existingSource) {
         const [owner, worker] = await Promise.all([
           this.runtime.agentCreation(intent.hostId, intent.ownerAgentSessionId),
           this.runtime.agentCreation(intent.hostId, intent.workerAgentSessionId)
@@ -79,7 +90,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
           'The original delegation Session or Run changed before preparation. Inspect the same Goal and keep the original Agent and input.', 'CONTROL_REQUEST_CONFLICT')
       }
       await this.demands.prepareDelegation(input.goalId, intent, authority.actor.id)
-      if (method === 'goal.delegate') {
+      if (method === 'goal.delegate' || method === 'goal.delegation.bind') {
         const saved = (await this.demands.inspectDelegation(input.goalId, intent.operationId))!
         const core = this.requireCore()
         // A successful exact journal read is the only proof that an original logical message
@@ -87,6 +98,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         const existing = await core.call(saved.hostId, 'message.read', { hostId: saved.hostId, operationId: saved.operationId }, context)
         if (existing.message) this.assertSource(saved, existing.message)
         else {
+          if (method === 'goal.delegation.bind') throw new AgentMuxError('The original message became unavailable before binding. Keep its original source and body.', 'CONTROL_UNAVAILABLE')
           if (authority.runId !== saved.ownerRunId) throw new AgentMuxError('The saved task owner Run changed before its first submission. Read the original delegation and explicitly continue its responsibility.', 'CONTROL_REQUEST_CONFLICT')
           await core.call(saved.hostId, 'agent.send', { target: { kind: 'agent-session', agentSessionId: saved.workerAgentSessionId },
             operationId: saved.operationId, messageId: saved.sourceMessageId, threadId: saved.threadId,
