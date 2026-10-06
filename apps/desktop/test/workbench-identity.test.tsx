@@ -70,6 +70,7 @@ describe('original Topic row consumes shared workbench identity', () => {
 
   it('moves the highlight only when the exact semantic Agent occurrence changes', async () => {
     await row()
+    expect(highlighted()).toHaveLength(1)
     expect(highlighted()[0]!.dataset.regionId).toBe('subject-region')
     await act(async () => useAppStore.setState({ agentFocus: { execution: { sessionId: neighbor.id, history: [], reference: { ...reference, regionId: 'neighbor-region' } }, pmo: { sessionId: null } } }))
     expect(highlighted()).toHaveLength(1)
