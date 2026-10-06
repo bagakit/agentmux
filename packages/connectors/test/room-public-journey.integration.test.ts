@@ -1,21 +1,26 @@
 // @vitest-environment happy-dom
-import { appendFile, rename, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { appendFile, mkdir, rename, writeFile } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as core from '../../core/dist/index.js'
+import { AgentMuxHostedRuntimeService } from '../../core/dist/hosted-runtime-service.js'
+import { connectHostedAgentMux } from '../../core/dist/hosted.js'
+import { hostedTestOwner } from '../../core/test/helpers/hosted-runtime-port.js'
 import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
 import { externalIngressMailbox } from '../../../apps/desktop/test/helpers/external-ingress-mailbox.js'
 import { createPublicationConversationPort } from '../src/core-conversation-port.js'
+import { createHostedIngressCorePort } from '../src/core-ingress-port.js'
 import { signedRoomAdapter, type SignedRoomMessage } from './fixtures/signed-room-adapter.js'
 
 const mailbox = externalIngressMailbox(), cleanup: Array<() => void | Promise<void>> = []
+const evidencePath = process.env.AGENTMUX_CONNECTOR_JOURNEY_RECEIPT
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 const native = (id: string, text: string, type: 'user' | 'assistant' = 'assistant') => JSON.stringify({ sessionId: 'journey-native', uuid: id, type,
   message: { role: type, content: type === 'user' ? text : [{ type: 'text', text }] } }) + '\n'
-async function fixture(coreAvailable = true) {
+async function fixture(coreAvailable = true, execution: 'direct' | 'hosted' = 'direct') {
   const original = await rpcOwnerFixture(['original-agent'], core, root => ({ providerId: 'claude', executorId: 'claude', nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'journey-native', transcriptPath: join(root, 'native.jsonl') } }))
   cleanup.push(() => original.close())
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
@@ -33,11 +38,21 @@ async function fixture(coreAvailable = true) {
     bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { resource: createWorkspaceLayout('group', ['tab']) },
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'original-region' }, activeRegionId: 'original-region' } }, resources: {}
   } })
+  const hostedOwner = execution === 'hosted' ? new AgentMuxHostedRuntimeService(original.client, original.store.path, () => hostedTestOwner(original.client)) : undefined
+  if (hostedOwner) cleanup.push(() => hostedOwner.dispose())
+  const semantic = hostedOwner ? new core.AgentMuxControlServer({ socketPath: join(original.root, 'semantic.sock'), hostedRuntime: () => hostedOwner, coreClients: original.coreClients }) : undefined
+  if (semantic) { await semantic.start(); cleanup.push(() => semantic.stop()) }
+  const semanticRpc = semantic ? await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: semantic.path } }) : undefined
+  if (semanticRpc) cleanup.push(() => semanticRpc.dispose())
+  const hosted = semanticRpc ? await connectHostedAgentMux({ rpc: semanticRpc }) : undefined
+  if (hosted) cleanup.push(() => hosted.dispose())
+  const executionClients = () => [{ hostId: 'local', client: hosted ?? original.client }]
+  const inputCore = hosted ? createHostedIngressCorePort(executionClients) : () => original.client
   const wire = signedRoomAdapter()
   const services = await createDesktopConnections({ directory: join(original.root, 'connectors'), adapters: [wire.adapter],
     encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
     bindings: { spatial, checkpoint: async ref => ({ ...ref, checkpoint: await original.client.conversationCheckpoint(ref.agentSessionId) }) },
-    publication: createPublicationConversationPort(original.coreClients), ingress: { core: host => coreAvailable && host === 'local' ? original.client : undefined } })
+    publication: createPublicationConversationPort(executionClients), ingress: { core: host => coreAvailable && host === 'local' ? inputCore(host) : undefined } })
   cleanup.push(() => services.close())
   const server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'journey.sock'), connections: services.connections, spatialState: spatial, coreClients: original.coreClients })
   await server.start(); cleanup.push(() => server.stop())
@@ -60,7 +75,7 @@ async function fixture(coreAvailable = true) {
   await vi.waitFor(() => expect(wire.endpoint, 'Original Desktop composition must start the registered transport').toBeDefined(), { timeout: 3_000 })
   const message = (suffix = 'α'): SignedRoomMessage => ({ deliveryKey: 'delivery/' + suffix, recordKey: 'post/' + suffix, roomKey: 'room/project-α', person: actor.userId,
     text: 'External question\n保留完整原文', addressing: 'broadcast' })
-  return { ...original, services, wire, transcript, spatial, sdk, cli, config, binding: bound.binding, grant, actor, message, setCoreAvailable: (value: boolean) => { coreAvailable = value } }
+  return { ...original, services, wire, transcript, spatial, sdk, cli, config, binding: bound.binding, grant, actor, message, hosted, setCoreAvailable: (value: boolean) => { coreAvailable = value } }
 }
 
 it('signed transport follows public configuration, original Core input, mounted Desktop reading and automatic replay publication back to the same room', async () => {
@@ -113,6 +128,13 @@ it('signed transport follows public configuration, original Core input, mounted 
   const current = await f.store.readMetadata('original-agent')
   expect(current).toMatchObject({ agentSessionId: metadata!.agentSessionId, run: metadata!.run, nativeHandle: metadata!.nativeHandle, workspacePath: metadata!.workspacePath })
   expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.attach).not.toHaveBeenCalled()
+  if (evidencePath) {
+    await mkdir(dirname(evidencePath), { recursive: true })
+    await writeFile(evidencePath, JSON.stringify({ schema: 'agentmux.room-journey-receipt.v1', execution: 'original Core with deterministic Runtime I/O; signed HTTP and replay adapter test leaves',
+      trace: f.wire.trace, ingress: inspected, originalQueue: { operationId: queued!.envelope.operationId, messageId: queued!.envelope.messageId, body: queued!.envelope.body, sender: queued!.envelope.sender },
+      mountedReader: { speakerRole: read.detail.dataset.speakerRole, itemRef: read.detail.dataset.conversationItemRef, copiedOriginal: recorded.content },
+      delivery: delivered, followUp: after, replayEffects: f.wire.effects, originalSessionId: current!.agentSessionId, originalRun: current!.run, agentLifecycleCalls: { stop: 0, attach: 0 } }, null, 2) + '\n')
+  }
 }, 20_000)
 
 it('source gaps retain the original cut and published identities while later authorized external input remains available', async () => {
@@ -151,8 +173,8 @@ it('bounded recovery continues past one slow received page without copying the o
   expect(retained).toHaveLength(26); expect(retained.every((record: { state: string }) => record.state === 'received')).toBe(true)
   expect(f.inner.kernel.input).not.toHaveBeenCalled()
   let release!: () => void, reads = 0, completed = 0
-  const paused = new Promise<void>(resolve => { release = resolve }), read = f.client.metadata.read.bind(f.client.metadata)
-  vi.spyOn(f.client.metadata, 'read').mockImplementation(async (...args) => { if (++reads <= 25) await paused; await read(...args); completed++ })
+  const paused = new Promise<void>(resolve => { release = resolve }), read = f.client.readAgentSessions.bind(f.client)
+  vi.spyOn(f.client, 'readAgentSessions').mockImplementation(async () => { if (++reads <= 25) await paused; const sessions = await read(); completed++; return sessions })
   f.setCoreAvailable(true)
   // Existing administration wakes the same receiver owner; no synthetic recovery queue or direct dispatch call.
   await f.sdk.call('connection.grant', f.grant)
@@ -168,4 +190,24 @@ it('bounded recovery continues past one slow received page without copying the o
   release()
   await vi.waitFor(() => expect(completed).toBe(26))
   expect(f.inner.kernel.input).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 15_000)
+
+it('the actual Hosted wire cannot adopt private author authority from a client callback or replay an unconfirmed original claim', async () => {
+  const f = await fixture(true, 'hosted')
+  expect(await f.wire.post(f.message())).toBe(202)
+  let record: Awaited<ReturnType<NonNullable<typeof f.services.ingress>['list']>>['ingresses'][number] | undefined
+  await vi.waitFor(async () => { record = (await f.services.ingress!.list({ connectionId: f.config.connectionId })).ingresses[0]; expect(record?.state).toBe('claimed') })
+  const inspect = await f.cli(['connection', 'ingress', 'inspect', '--ingress', record!.ingressId])
+  expect(inspect.ingress.input).toEqual(record!.input)
+  expect(inspect.inputReceipt).toBeNull()
+  expect(await new core.DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath()).readByOperationId(record!.input!.operationId)).toBeNull()
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  expect(await f.wire.post(f.message())).toBe(202)
+  await new Promise(resolve => setImmediate(resolve))
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  await f.hosted!.submitAgentPrompt({ agentSessionId: 'original-agent', expectedRun: { runId: 'run-original-agent' }, operationId: 'hosted-local-input', prompt: 'Healthy local Hosted input',
+    admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', authorHuman: true })
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
+  expect((await f.services.ingress!.inspect({ ingressId: record!.ingressId })).ingress!.input).toEqual(record!.input)
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 15_000)
