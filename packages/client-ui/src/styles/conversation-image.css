@@ -22,34 +22,41 @@
   max-height: 180px;
   object-fit: contain;
 }
-/* Conversation image lightbox — a pasted image enlarged. A Radix Dialog Portal (focus trap and Escape
-   are free from the primitive, so we do not hand-roll them); it sits above the other overlays because it
-   is raised FROM inside the conversation, on top of whatever surface is showing. The scrim darkens the
-   window and clicking it closes (Radix routes an overlay click to onOpenChange); the content is only the
-   image, sized to fit the viewport with room to breathe, so the whole point — seeing it larger — is met
-   without chrome. The a11y title names the dialog for assistive tech without spending visible height. */
+/* Radix retains modal focus and dismissal; image transforms stay inside this local viewport. */
 .md-conversation-image__overlay { position: fixed; z-index: var(--layer-dialog); inset: 0; background: var(--scrim-2); backdrop-filter: blur(4px); pointer-events: auto; }
 .md-conversation-image__lightbox {
   position: fixed;
   z-index: var(--layer-dialog);
   pointer-events: auto;
-  top: 50%;
-  left: 50%;
-  max-width: calc(100vw - 48px);
-  max-height: calc(100vh - 48px);
+  inset: 50% auto auto 50%;
+  width: min(1120px, calc(100vw - 32px));
+  height: min(860px, calc(100dvh - 32px));
   transform: translate(-50%, -50%);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-0);
+  box-shadow: 0 12px 40px var(--scrim-3);
   outline: none;
 }
-.md-conversation-image__full {
-  display: block;
-  max-width: calc(100vw - 48px);
-  max-height: calc(100vh - 48px);
-  object-fit: contain;
-  border-radius: var(--radius-sm);
-  box-shadow: 0 30px 90px var(--scrim-3);
-}
-
-.md-conversation-image__a11y { position: absolute; width: 1px; height: 1px; padding:0; margin:-1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.md-conversation-image__viewer { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: 100%; height: 100%; min-height: 0; }
+.md-conversation-image__header { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); }
+.md-conversation-image__title { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: var(--fs-body); font-weight: 500; }
+.md-conversation-image__viewport { position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; overflow: hidden; touch-action: none; }
+.md-conversation-image__viewport[data-zoomed] { cursor: grab; }
+.md-conversation-image__viewport[data-dragging] { cursor: grabbing; }
+.md-conversation-image__viewport:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.md-conversation-image__full { display: block; flex: none; max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; }
+.md-conversation-image__toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); color: var(--text-2); }
+.md-conversation-image__hint { color: var(--text-3); font-size: var(--fs-meta); }
+.md-conversation-image__tools { display: flex; align-items: center; gap: var(--sp-1); margin-left: auto; }
+.md-conversation-image__control { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; cursor: pointer; }
+.md-conversation-image__control:hover { color: var(--text); background: var(--surface-2); }
+.md-conversation-image__control:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.md-conversation-image__control:disabled { opacity: .4; cursor: default; }
+.md-conversation-image__zoom { min-width: 48px; text-align: center; font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
+@media (max-width: 620px) { .md-conversation-image__hint { display: none; } }
+@media (pointer: coarse) { .md-conversation-image__control { width: 44px; height: 44px; } }
 
 .md-conversation-image__reference { overflow-wrap: anywhere; }
 .md-conversation-image__failure { display: block; margin-top: 4px; color: var(--ink-3); font-size: 11px; }

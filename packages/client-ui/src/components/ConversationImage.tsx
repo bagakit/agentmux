@@ -3,6 +3,7 @@ import { SemanticIcon } from '../theme/icons.js'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { PastedImage } from '../lib/pasted-images.js'
 import { useClientUiPlatform } from '../platform.js'
+import { ConversationImageViewport } from './ConversationImageViewport.js'
 
 /** App-pasted references retain their confined byte reader; native references use Core's exact-record reader. */
 export type ReadPastedImage = (path: string) => Promise<PastedImage | null>
@@ -72,11 +73,7 @@ export function ConversationImage({
       <Dialog.Portal container={platform.overlayContainer() as HTMLElement}>
         <Dialog.Overlay className="md-conversation-image__overlay" />
         <Dialog.Content className="md-conversation-image__lightbox" aria-describedby={undefined}>
-          {/* Radix requires a title for the dialog; it is visually hidden but read to assistive tech.
-              There is no description — the enlarged image is the whole content — so describedby is
-              explicitly cleared rather than left to warn about a missing Description. */}
-          <Dialog.Title className="md-conversation-image__a11y">{label ?? path}</Dialog.Title>
-          <img className="md-conversation-image__full" src={image.dataUrl} alt={label ?? path} onError={decodeFailed} />
+          <ConversationImageViewport src={image.dataUrl} alt={label ?? path} name={label ?? path.split(/[\\/]/u).at(-1) ?? 'Image'} onError={decodeFailed} />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
