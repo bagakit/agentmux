@@ -188,6 +188,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   }, [open, environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox, currentErrorInbox, eventInbox])
   const readEvents = events.length - eventInbox.unread.length
   const recentEvents = [...events].reverse()
+  const sessionsByIdentity = new Map(sessions.map(session => [JSON.stringify([session.hostId, session.id]), session]))
   const unreadEventIds = new Set(eventInbox.unread)
   const latestUnreadEvent = recentEvents.find(event => unreadEventIds.has(event.id))
   const liveVolume = serviceNoticeAriaLive(latestUnreadEvent?.context?.kind ?? 'indeterminate')
@@ -229,7 +230,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       </div> : null}
       {recentEvents.map(event => {
         const subject = event.context?.subject
-        const session = subject?.kind === 'agent' ? sessions.find(session => session.id === subject.agentSessionId && session.hostId === subject.hostId) : undefined
+        const session = subject?.kind === 'agent' ? sessionsByIdentity.get(JSON.stringify([subject.hostId, subject.agentSessionId])) : undefined
         return <NotificationItem key={event.id} eventId={event.id} kind={event.context?.kind ?? 'indeterminate'}
           title={event.context?.summary ?? (event.context?.kind === 'agent-broken' ? `${session?.label ?? 'Agent'} stopped unexpectedly` : event.message)}
           detail={event.message}
