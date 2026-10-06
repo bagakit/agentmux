@@ -78,10 +78,15 @@ export function App() {
 
 function DesktopApp() {
   const [settingsRoute, setSettingsRoute] = useState<SettingsNavigationRequest | null>(null)
-  const openSettings = useCallback((section: SettingsPageId, executorId?: string): void => setSettingsRoute({ section, executorId }), [])
-  const closeSettings = useCallback((): void => setSettingsRoute(null), [])
-  const openToolkit = useCallback((toolId: string): void => setSettingsRoute({ section: 'toolkit', toolId }), [])
-  const openHostSettings = useCallback((hostId: string): void => setSettingsRoute({ section: 'hosts', hostId }), [])
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const navigateSettings = useCallback((request: SettingsNavigationRequest): void => {
+    setSettingsRoute(request)
+    setSettingsOpen(true)
+  }, [])
+  const openSettings = useCallback((section: SettingsPageId, executorId?: string): void => navigateSettings({ section, executorId }), [navigateSettings])
+  const closeSettings = useCallback((): void => setSettingsOpen(false), [])
+  const openToolkit = useCallback((toolId: string): void => navigateSettings({ section: 'toolkit', toolId }), [navigateSettings])
+  const openHostSettings = useCallback((hostId: string): void => navigateSettings({ section: 'hosts', hostId }), [navigateSettings])
   const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit, openHost: openHostSettings }), [openSettings, openToolkit, openHostSettings])
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
@@ -114,7 +119,7 @@ function DesktopApp() {
   useLayoutEffect(() => {
     const floating = readPmoTeamsTopicFloatingState()
     presentationRef.current = { loading,
-      overlays: { settings: Boolean(settingsRoute), quickSwitcher: quickSwitchOpen },
+      overlays: { settings: settingsOpen, quickSwitcher: quickSwitchOpen },
       floating: floating ? { state: floating.open ? 'pinned' : floating.preview ? 'preview' : 'closed',
         topicId: pmoTeamsTopicFloatingTargetTopicId(floating, tabs),
         tabId: pmoTeamsTopicFloatingTargetTabId(floating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) ?? null,
@@ -142,9 +147,9 @@ function DesktopApp() {
     window.addEventListener('resize', resized)
     return () => window.removeEventListener('resize', resized)
   }, [])
-  const recallVisible = mainSurface === 'recall' && !settingsRoute
-  const surveyVisible = mainSurface === 'survey' && !settingsRoute
-  const focusVisible = mainSurface === 'agents' && !settingsRoute
+  const recallVisible = mainSurface === 'recall' && !settingsOpen
+  const surveyVisible = mainSurface === 'survey' && !settingsOpen
+  const focusVisible = mainSurface === 'agents' && !settingsOpen
   const surveyBindings = useAppStore(state => state.spaceZoneBindings)
   const surveyTopicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
   const surveySessionIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
@@ -305,8 +310,8 @@ function DesktopApp() {
     const held = reference?.displayWorkspaceId === activeWorkspaceId ? reference : retainedSpatialFocus?.displayWorkspaceId === activeWorkspaceId ? retainedSpatialFocus : null
     const displayed = layoutForLogicalRegionFocus(layout, tabs, held)
     const targets = ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId, undefined, held)
-    return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && !settingsRoute }))]))
-  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsRoute, retainedSpatialFocus, workbenchSpaceSelection])
+    return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && !settingsOpen }))]))
+  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsOpen, retainedSpatialFocus, workbenchSpaceSelection])
   const viewTargets = useMemo<WorkbenchViewTargets>(() => {
     const targets: Record<string, WorkbenchViewTarget[]> = {}
     const append = (tabId: string, target: WorkbenchViewTarget) => (targets[tabId] ??= []).push(target)
@@ -437,7 +442,7 @@ function DesktopApp() {
   // MERGE：workbench + workspace 时顶行下沉进 pane（root tabbar / chromeline），
   // 主区不再占用独立 topbar 行；Board 与欢迎页仍走顶栏。
   const mergedTopRow = mainSurface === 'agents' || mainSurface === 'survey' || mainSurface === 'recall' || (mainSurface === 'workbench' && Boolean(workspace))
-  const workbenchVisible = mainSurface === 'workbench' && !settingsRoute
+  const workbenchVisible = mainSurface === 'workbench' && !settingsOpen
   const terminalParkingMeasurement = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).has('agentmux-resource-probe')
   const { containerRef, isResizing, onResizeStart, onResizeReset } = useSidebarResize<HTMLDivElement>({
@@ -536,9 +541,9 @@ function DesktopApp() {
       <div
         className={`app-shell ${globalSurfaceOwnsProjectRail || !projectRailOpen ? 'app-shell--project-rail-collapsed' : ''}`}
       >
-      <div className="app-shell__workspace" aria-hidden={settingsRoute ? true : undefined} inert={Boolean(settingsRoute)}>
+      <div className="app-shell__workspace" aria-hidden={settingsOpen ? true : undefined} inert={settingsOpen}>
       {!globalSurfaceOwnsProjectRail && projectRailOpen ? (
-        <ProjectRail visible={!settingsRoute} />
+        <ProjectRail visible={!settingsOpen} />
       ) : globalSurfaceOwnsProjectRail ? null : (
         null
       )}
@@ -649,6 +654,7 @@ function DesktopApp() {
       <PmoTeamsTopicFloatingPanel floating={moteFloating} setFloating={setMoteFloating} projectionState={moteProjection} />
       {settingsRoute ? (
         <SettingsPanel
+          visible={settingsOpen}
           navigationRequest={settingsRoute}
           initialSection={settingsRoute.section}
           executorId={settingsRoute.executorId}
@@ -657,7 +663,7 @@ function DesktopApp() {
         />
       ) : null}
       <footer className="window-status-bar">
-        <div className="window-status-bar__surface-switch"><SurfaceSwitch settingsOpen={Boolean(settingsRoute)} onCloseSettings={closeSettings} /></div>
+        <div className="window-status-bar__surface-switch"><SurfaceSwitch settingsOpen={settingsOpen} onCloseSettings={closeSettings} /></div>
         <div className="window-status-bar__right">
           <GlobalSystemNotices nativeOverlayWarning={nativeOverlayWarning} />
           <WindowUtilityBar toolkit={<ToolkitStatusBar />} />

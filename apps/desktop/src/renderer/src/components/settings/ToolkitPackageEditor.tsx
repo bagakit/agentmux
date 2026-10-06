@@ -34,6 +34,7 @@ export function ToolkitPackageEditor({ id, entry, fact, active, pathInput, save,
   const [source, setSource] = useState<ToolkitScript | null>(null), [sourceOpen, setSourceOpen] = useState(false)
   const [sourceError, setSourceError] = useState(''), [operationError, setOperationError] = useState(''), [feedback, setFeedback] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false), [busy, setBusy] = useState(false)
+  useEffect(() => { if (!active) setConfirmDelete(false) }, [active])
   const tool = entry.value, dirty = toolkitDraftDirty(entry)
   const name = fact?.name ?? id, icon = fact?.icon ?? 'terminal'
   useEffect(() => { ++epoch.current; setSource(null); setSourceError(''); setSourceOpen(false) }, [id, entry.expected?.revision])
@@ -84,6 +85,6 @@ export function ToolkitPackageEditor({ id, entry, fact, active, pathInput, save,
     <p className="settings-hint">Saving, enabling and hovering do not execute the package. Scripts run as your local user with access to local files and the network.</p>
     {feedback ? <p className="settings-hint" role="status">{feedback}</p> : null}{operationError ? <p className="settings-inline-error" role="alert">{operationError}</p> : null}
     <footer className="toolkit-editor__footer"><button type="button" className="small-button" disabled={entry.saving || busy} onClick={() => entry.expected ? setConfirmDelete(true) : void onRemove()}>{entry.expected ? <><ThemeActionRemoveIcon size={13} /> Delete tool</> : <><ThemeActionCancelIcon size={13} /> Cancel installation</>}</button><SettingsSaveBar save={save} dirty={dirty} disabled={!tool.packagePath.trim() || !tool.workspacePath.trim() || entry.missing} label={entry.expected ? 'Save preferences' : 'Install package'} onSave={onSave} /></footer>
-    <ConfirmationDialog open={confirmDelete} title="Remove this tool?" subject={name} description="Remove its configuration and status bar entry. Your local package files are kept. An active or unconfirmed execution prevents removal." confirmLabel="Delete tool" busy={busy} onCancel={() => setConfirmDelete(false)} onConfirm={() => void operate(async () => { if (await onRemove()) setConfirmDelete(false) })} />
+    <ConfirmationDialog open={active && confirmDelete} title="Remove this tool?" subject={name} description="Remove its configuration and status bar entry. Your local package files are kept. An active or unconfirmed execution prevents removal." confirmLabel="Delete tool" busy={busy} onCancel={() => setConfirmDelete(false)} onConfirm={() => void operate(async () => { if (await onRemove()) setConfirmDelete(false) })} />
   </section>
 }
