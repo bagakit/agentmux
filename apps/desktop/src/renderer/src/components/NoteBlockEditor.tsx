@@ -1,3 +1,4 @@
+import { RovingToolbar, RovingToolbarButton } from './RovingToolbar'
 import { TextInput } from '@agentmux/client-ui/input'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type Ref } from 'react'
 import { Decoration, Extension, type Editor, type JSONContent } from '@tiptap/core'
@@ -244,23 +245,23 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     setPicker(false); setQuery('')
   }
   return <ReferenceContext.Provider value={{ knowledge, trail: [], onOpen, onOpenLink }}><div className="note-editor" data-note-empty={note.content.content?.length === 1 && note.content.content[0]?.type === 'paragraph' && !note.content.content[0].content?.length}>
-    <div className="note-editor__tools" role="toolbar" aria-label="Note block tools">
+    <RovingToolbar className="note-editor__tools" aria-label="Note block tools">
       <div className="note-editor__tool-group" role="group" aria-label="Block style">
-        <button type="button" className="note-tool" title="Heading" aria-label="Heading" aria-pressed={formatting?.heading ?? false} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}><ThemeObjectHeadingIcon size={15} /></button>
-        <button type="button" className="note-tool" title="Bullet list" aria-label="Bullet list" aria-pressed={formatting?.list ?? false} onClick={() => editor?.chain().focus().toggleBulletList().run()}><ThemeObjectListIcon size={15} /></button>
-        <button type="button" className="note-tool" title="Quote" aria-label="Quote" aria-pressed={formatting?.quote ?? false} onClick={() => editor?.chain().focus().toggleBlockquote().run()}><ThemeActionQuoteIcon size={15} /></button>
+        <RovingToolbarButton type="button" className="note-tool" title="Heading" aria-label="Heading" aria-pressed={formatting?.heading ?? false} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}><ThemeObjectHeadingIcon size={15} /></RovingToolbarButton>
+        <RovingToolbarButton type="button" className="note-tool" title="Bullet list" aria-label="Bullet list" aria-pressed={formatting?.list ?? false} onClick={() => editor?.chain().focus().toggleBulletList().run()}><ThemeObjectListIcon size={15} /></RovingToolbarButton>
+        <RovingToolbarButton type="button" className="note-tool" title="Quote" aria-label="Quote" aria-pressed={formatting?.quote ?? false} onClick={() => editor?.chain().focus().toggleBlockquote().run()}><ThemeActionQuoteIcon size={15} /></RovingToolbarButton>
       </div>
       <div className="note-editor__tool-group" role="group" aria-label="Block structure">
-        <button type="button" className="note-tool" title="Indent block" aria-label="Indent block" disabled={!formatting?.indent} onClick={() => editor?.chain().focus().sinkListItem('listItem').run()}><ThemeActionIndentIcon size={15} /></button>
-        <button type="button" className="note-tool" title="Outdent block" aria-label="Outdent block" disabled={!formatting?.outdent} onClick={() => editor?.chain().focus().liftListItem('listItem').run()}><ThemeActionOutdentIcon size={15} /></button>
-        <button type="button" className="note-tool" title="Fold or unfold nested blocks" aria-label="Fold or unfold nested blocks" disabled={!foldId} aria-pressed={foldId ? folded.current.has(foldId) : false} onClick={() => {
+        <RovingToolbarButton type="button" className="note-tool" title="Indent block" aria-label="Indent block" disabled={!formatting?.indent} onClick={() => editor?.chain().focus().sinkListItem('listItem').run()}><ThemeActionIndentIcon size={15} /></RovingToolbarButton>
+        <RovingToolbarButton type="button" className="note-tool" title="Outdent block" aria-label="Outdent block" disabled={!formatting?.outdent} onClick={() => editor?.chain().focus().liftListItem('listItem').run()}><ThemeActionOutdentIcon size={15} /></RovingToolbarButton>
+        <RovingToolbarButton type="button" className="note-tool" title="Fold or unfold nested blocks" aria-label="Fold or unfold nested blocks" disabled={!foldId} aria-pressed={foldId ? folded.current.has(foldId) : false} onClick={() => {
           if (!editor || !foldId) return
           if (folded.current.has(foldId)) folded.current.delete(foldId); else folded.current.add(foldId)
           editor.view.dispatch(editor.state.tr.setMeta('noteFold', true)); setFoldRevision(value => value + 1)
-        }}><ThemeNavigationDownIcon size={15} /></button>
+        }}><ThemeNavigationDownIcon size={15} /></RovingToolbarButton>
       </div>
-      <div className="note-editor__tool-group" role="group" aria-label="Block references"><button type="button" className="note-tool note-tool--label" title="Reference block" aria-label="Reference block" aria-expanded={picker} onClick={() => setPicker(value => !value)}><ThemeObjectLinkIcon size={14} /><span>Reference block</span></button></div>
-    </div>
+      <div className="note-editor__tool-group" role="group" aria-label="Block references"><RovingToolbarButton type="button" className="note-tool note-tool--label" title="Reference block" aria-label="Reference block" aria-expanded={picker} onClick={() => setPicker(value => !value)}><ThemeObjectLinkIcon size={14} /><span>Reference block</span></RovingToolbarButton></div>
+    </RovingToolbar>
     {picker ? <section className="note-reference-picker" aria-label="Choose an original block">
       <TextInput aria-label="Find a Note block" placeholder="Find in loaded Notes…" value={query} onChange={event => setQuery(event.target.value)} />
       <p className="note-scope">{knowledge.scope === 'complete' ? 'Confirmed Note scope' : 'Loaded Notes only · more sources may exist'}</p>
