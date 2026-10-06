@@ -23,7 +23,7 @@ import { MoteCurrentWork } from '../src/renderer/src/components/MoteCurrentWork'
 import { moteGoalContext } from '../src/renderer/src/lib/mote-goals'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { moteTopics, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
+import { moteAgent, moteTopics, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
 import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 
 function delegation(): DemandDelegation {
@@ -206,6 +206,23 @@ function button(label: string) {
 async function click(label: string) { await act(async () => button(label).click()); await settle() }
 
 describe('mounted original Goal delegation consumer', () => {
+  it('keeps actual report responsibility before repeated relationship configuration with visible summary and a primary collection action', async () => {
+    const record = goal({ ...delegation(), report: report(), attention: { operationId: 'notice', intentId: 'notice-intent', hostId: 'original-host',
+      supervisorAgentSessionId: 'original-owner', supervisorRunId: 'owner-run', occurrenceAt: _reshape_fixtureEpoch(0, 0, 20), agentMuxNote: 'Original reminder', preparedAt: _reshape_fixtureEpoch(0, 0, 21) } })
+    record.delegationObservations = [{ ...observation(), attention: { state: 'confirmed', reason: 'The original reminder was received.' } }]
+    vi.spyOn(api.demands, 'delegation').mockResolvedValue(result(record))
+    await mount(record, createElement(GoalExecution, { demand: { ...record, sessions: [], workspacePath: null }, onUpdate: vi.fn().mockResolvedValue(true) }))
+    const work = container.querySelector('.goal-delegation')!, relationships = container.querySelector<HTMLDetailsElement>('.goal-collaboration__relationships')!
+    expect(work.nextElementSibling).toBe(relationships)
+    expect(relationships.open).toBe(false)
+    expect(relationships.querySelector('summary')!.textContent).toContain('Supervisor · original-owner')
+    const summary = work.querySelector('.goal-delegation__summary')!
+    expect(summary.textContent).toBe('Original worker result'); expect(summary.closest('details')).toBeNull()
+    expect(button('Collect report').classList.contains('goals-button--primary')).toBe(true)
+    const notice = work.querySelector<HTMLDetailsElement>('.goal-delegation__notice')!
+    expect(notice.open).toBe(false); expect(notice.querySelector('summary')!.textContent).toBe('Supervisor reminder received')
+    expect(work.querySelector('.goals-service')).toBeNull()
+  })
   it('finite-only GoalExecution reads original Start responsibility and preserves its native navigation and unknown report association', async () => {
     const observed = { ...startObservation(), originalRun: { runId: 'original-run', state: 'exited' as const }, responsibility: 'original-worker-continuation' as const }
     const record = { ...goal(), delegations: [], dispatches: [finiteStart()], startObservations: [observed] }
@@ -230,9 +247,22 @@ describe('mounted original Goal delegation consumer', () => {
     const record = { ...goal(), supervisorSessionId: 'current-supervisor', delegations: [original, second] }
     await mount(record)
     const captions = [...container.querySelectorAll('.goal-delegation__identity')].map(element => element.textContent)
-    expect(captions).toEqual(['Agent original-worker · Follow-up current-supervisor', 'Agent second-worker · Follow-up current-supervisor'])
+    expect(captions).toEqual(['Agent Session original-worker · Host original-host · Follow-up Session current-supervisor', 'Agent Session second-worker · Host original-host · Follow-up Session current-supervisor'])
     await act(async () => { useAppStore.setState({ demands: { [record.id]: { ...record, supervisorSessionId: null } } }) })
     expect(container.querySelector('.goal-delegation__identity')!.textContent).toContain('needs an assigned Supervisor')
+  })
+  it('uses confirmed names only for the original presentation target and keeps canonical navigation after a rename', async () => {
+    const worker = { ...moteAgent('worker-view', null), hostId: 'original-host',
+      control: { kind: 'agent' as const, hostId: 'original-host', agentSessionId: 'original-worker', run: { runId: 'original-run' } } }
+    useAppStore.setState({ sessions: [worker], agentNames: { 'worker-view': 'Reviewer' } })
+    await mount(goal())
+    const name = container.querySelector('.goal-delegation__identity strong')!
+    expect(name.textContent).toBe('Reviewer'); expect(name.getAttribute('title')).toContain('original-worker')
+    await act(async () => useAppStore.setState({ agentNames: { 'worker-view': 'Renamed reviewer' } }))
+    expect(name.textContent).toBe('Renamed reviewer')
+    await click('Open original Agent'); expect(api.ui.openObjectLink).toHaveBeenCalledWith('amux://agent/original-worker')
+    await act(async () => useAppStore.setState({ sessions: [{ ...worker, hostId: 'wrong-host', control: { ...worker.control, hostId: 'wrong-host' } }] }))
+    expect(name.textContent).toContain('original-worker'); expect(name.textContent).not.toContain('Renamed reviewer')
   })
   it('the actual full Goal list adapter preserves a newer original owner cut against a delayed older filesystem snapshot', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'amux-goal-read-cut-'))
