@@ -216,7 +216,8 @@ metadata; the original complete event remains retained. A new event for the same
 message reuses the original intake only for the same body, actor, conversation
 and addressing facts. The same body in two distinct messages remains two inputs.
 Authentication or storage failure does not ACK; a lost ACK is reconciled by the
-same original event identity.
+same original event identity. Machine identity fields follow Core's existing per-field
+protocol bound; that bound does not truncate the raw event or authored body.
 
 `dispatch` authorizes the current exact binding and actor grant. Before any
 possible Core input call, it saves a claim with the original Host, Session, Core
@@ -247,7 +248,8 @@ amux connection ingress inspect --ingress original-ingress
 ```
 
 These readonly methods use the actual connection owner. Listing is bounded to one
-exact connection, with optional binding and original-intake continuation. Details
+exact connection, with optional binding and original-intake continuation. A
+binding-filtered continuation must come from that same binding and connection. Details
 retain business body, actor, safe refusal code and original input references;
 inspection reads the original Core receipt without dispatch. Raw payloads and
 transport proofs remain private to the Host. An unavailable optional intake owner
