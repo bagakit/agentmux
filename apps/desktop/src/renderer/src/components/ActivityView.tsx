@@ -1059,7 +1059,7 @@ export function ActivityView({
         <CapturedConversationMessage
           item={entry.item}
           {...(renderMessageActions && entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
-            !entry.item.authorAgentSessionId && entry.item.source !== 'user' && entry.item.content?.trim() && entry.item.status === 'complete'
+            !entry.item.authorAgentSessionId && entry.item.authorHuman !== true && entry.item.authorExternal === undefined && entry.item.source !== 'user'
             ? { messageActions: renderMessageActions({ kind: 'captured', agentSessionId: sessionId, recordId: entry.item.id }) } : {})}
           conversationSessionId={sessionId}
           {...(executionHostId ? { executionHostId } : {})}
