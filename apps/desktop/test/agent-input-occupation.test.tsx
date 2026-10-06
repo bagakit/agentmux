@@ -18,6 +18,9 @@ import * as presentations from '../src/renderer/src/lib/session-presentation'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopClientUiProvider'
 import { moteAgent, moteConfig } from './fixtures/mote-workface'
+import { observeAgent, type ContinuousProgressLoop } from '@agentmux/core'
+import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager'
+import type { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store'
 
 const initial = useAppStore.getState()
 const original = { ...moteAgent('rendered-worker', null), hostId: 'original-host',
@@ -132,4 +135,51 @@ it('registers one subscription and catches synchronous transport failure without
   const state = useAppStore.getState()
   listener({ ...state, agentComposerDrafts: { [original.id]: 'Draft' } }, state)
   expect(failure).toHaveBeenCalledTimes(1)
+})
+
+const historicalRef = { key: { kind: 'prompt' as const, agentSessionId: original.control.agentSessionId,
+  expectedRun: original.control.run, submissionId: 'original-history' }, waitGeneration: 1 }
+const settledHistory = { operationId: 'original-history', archived: true as const,
+  inputReceipt: { status: 'admitted' as const, control: { ref: historicalRef, state: 'dispatch-authorized' as const, at: 1, gateId: 'original-gate' } } }
+
+it('does not occupy input for confirmed archived history, including its late observer reply, while preserving unknown originals', () => {
+  const state = useAppStore.getState()
+  const withEntry = (entry: Parameters<typeof agentInputOccupied>[0]['agentSteerQueues'][string][number]) =>
+    ({ ...state, agentSteerQueues: { [original.id]: [entry] }, agentSteerInFlight: { [original.id]: entry.operationId } })
+  expect(agentInputOccupied(withEntry(settledHistory), original.id)).toBe(false)
+  expect(agentInputOccupied(withEntry({ operationId: 'archived-unknown', archived: true }), original.id)).toBe(true)
+  const earlierUnknown = { operationId: 'original-unknown-with-later-preparation-refusal', archived: true as const,
+    preparationInputNotApplied: true as const, promptCondition: { expectedRun: original.control.run, afterSubmissionId: null } }
+  expect(agentInputOccupied(withEntry(earlierUnknown), original.id)).toBe(true)
+  expect(agentInputOccupied(withEntry({ ...settledHistory, inputReceipt: { ...settledHistory.inputReceipt, status: 'unknown' } }), original.id)).toBe(true)
+  expect(agentInputOccupied(withEntry({ ...settledHistory, inputReceipt: { status: 'stopped', control: {
+    ...settledHistory.inputReceipt.control, state: 'stopped-before-dispatch' } } }), original.id)).toBe(false)
+  expect(agentInputOccupied(withEntry({ operationId: 'archived-local', archived: true, promptCondition: null }), original.id)).toBe(false)
+  expect(agentInputOccupied({ ...withEntry(settledHistory), agentComposerDrafts: { [original.id]: 'current draft' } }, original.id)).toBe(true)
+  expect(agentInputOccupied({ ...withEntry(settledHistory), agentSteerInFlight: { [original.id]: 'another-in-flight' } }, original.id)).toBe(true)
+  expect(agentInputOccupied(withEntry({ operationId: 'active-local', promptCondition: null }), original.id)).toBe(true)
+})
+
+it('feeds archived history through the actual input projection and Loop scheduler without treating admission as completion', async () => {
+  const target = { hostId: original.hostId, agentSessionId: original.control.agentSessionId,
+    providerId: original.providerId, workspacePath: original.workspacePath }
+  const state = { ...useAppStore.getState(), agentSteerQueues: { [original.id]: [settledHistory] } }
+  const input = readContinuousProgressInput(state, { requestId: 'history-read', operation: 'continuous-progress.observeInput',
+    control: original.control }, new AbortController().signal)
+  expect(input.occupied).toBe(false)
+  const run = async (semantic: 'done' | 'working', inputByte: number | null) => {
+    let rows: ContinuousProgressLoop[] = [{ loopId: 'original-due-loop', ...target, intervalMs: 10000,
+      prompt: 'next original step', nextCheckAt: 0, status: 'active' }]
+    const store = { load: async () => structuredClone(rows), save: async (next: ContinuousProgressLoop[]) => { rows = structuredClone(next) } } satisfies Pick<ContinuousProgressLoopStore, 'load' | 'save'>
+    const send = vi.fn(async () => 'sent' as const)
+    const status = { state: semantic, source: 'native-hook' as const, observedAt: 1 }
+    const manager = new ContinuousProgressLoopManager(store as ContinuousProgressLoopStore, send, () => 1, async (_loop, tickId, now) => ({
+      session: { ...target, run: original.control.run, semanticStatus: status }, inputByte, inputOccupied: input.occupied,
+      observation: observeAgent({ process: 'running', status, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, now), tickId, now }))
+    try { await manager.start(); await manager.check(1); return send.mock.calls.length }
+    finally { await manager.stop() }
+  }
+  expect(await run('done', 0)).toBe(1)
+  expect(await run('working', 0)).toBe(0)
+  expect(await run('done', null)).toBe(0)
 })
