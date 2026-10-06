@@ -36,8 +36,9 @@ const AGENT_VIABILITY_BY_PROCESS_STATE: Record<AgentMuxRunState, AgentViability>
   interrupted: 'unknown'
 }
 
-export function agentViabilityFromProcessState(processState: AgentMuxRunState): AgentViability {
-  return AGENT_VIABILITY_BY_PROCESS_STATE[processState]
+export function agentViabilityFromProcessState(processState: AgentMuxRunState, observationAvailable = true): AgentViability {
+  const last = AGENT_VIABILITY_BY_PROCESS_STATE[processState]
+  return !observationAvailable && last === 'alive' ? 'unknown' : last
 }
 
 /**
@@ -95,11 +96,12 @@ export type RenderableServiceNotice = Extract<ServiceNoticeClass, { notice: Serv
  * `agentViability` 的 switch **没有 default**：这是原则「不许把未知当成好的」的类型级兑现——
  * 少写一个分支会编译不过，而不是安静地漏成 healthy。
  */
-export function classifyServiceNotice(outcome: StepOutcome): ServiceNoticeClass {
+export function classifyServiceNotice(outcome: StepOutcome, observationAvailable = true): ServiceNoticeClass {
   // 步骤走通了：我们没有制造任何失败，不打扰。
   if (outcome.completed) return { kind: 'healthy' }
 
-  const { step, agentViability } = outcome
+  const { step } = outcome
+  const agentViability = !observationAvailable && outcome.agentViability === 'alive' ? 'unknown' : outcome.agentViability
   switch (agentViability) {
     case 'dead':
       // 完全坏了。服务窗不接手：一个死掉的 Agent，阻断本身就是诚实的，由既有恢复横幅承载。
@@ -120,7 +122,7 @@ export function classifyServiceNotice(outcome: StepOutcome): ServiceNoticeClass 
         kind: 'indeterminate',
         notice: {
           step: `${step.label} didn’t complete`,
-          mode: 'We can’t confirm whether the Agent itself is affected — you are not blocked',
+          mode: `${outcome.agentViability === 'unknown' ? `${step.degradedMode} ` : ''}Current Agent availability is unconfirmed; the original Session and available controls are kept.`,
           restore: step.restore
         }
       }
@@ -186,7 +188,7 @@ export function nativeSessionServiceCause(session: SessionSnapshot, service = se
   return JSON.stringify([service?.owner, service?.output, service?.input.phase, service?.terminalFault?.stage])
 }
 
-export function nativeSessionServiceOutcome(session: SessionSnapshot, service = session.nativeService): StepOutcome {
+export function nativeSessionServiceOutcome(session: SessionSnapshot, service = session.nativeService, observationAvailable = true): StepOutcome {
   if (!service) return { completed: true }
   const unavailable = [
     service.owner.type === 'stopped' && service.owner.reason !== 'historical' ? 'owner stopped' : null,
@@ -195,14 +197,14 @@ export function nativeSessionServiceOutcome(session: SessionSnapshot, service = 
     service.terminalFault ? `terminal view ${service.terminalFault.stage} at byte ${service.terminalFault.throughByte}` : null
   ].filter((value): value is string => value !== null)
   if (!unavailable.length && service.output.type === 'backpressured') return {
-    completed: false, agentViability: agentViabilityFromProcessState(session.processState), step: {
+    completed: false, agentViability: agentViabilityFromProcessState(session.processState, observationAvailable && session.status.state !== 'disconnected'), step: {
       label: 'Serving output under resource pressure',
-      degradedMode: `Output progress is paused by resource pressure. The Run was last observed ${session.processState}; input is ${service.input.phase.type}. This does not confirm saved output or input delivery.`,
+      degradedMode: `${observationAvailable && session.status.state !== 'disconnected' ? 'Output progress is paused by resource pressure.' : 'Last Native output observation reported backpressure.'} The Run was last observed ${session.processState}; input was last observed ${service.input.phase.type}. This does not confirm saved output or input delivery.`,
       restore: 'Check Runtime storage and resource status and release constrained resources. This notice clears when output serves again. Keep this Session and do not resend unconfirmed input.'
     }
   }
   if (!unavailable.length) return { completed: true }
-  return { completed: false, agentViability: agentViabilityFromProcessState(session.processState), step: {
+  return { completed: false, agentViability: agentViabilityFromProcessState(session.processState, observationAvailable && session.status.state !== 'disconnected'), step: {
     label: service.output.type === 'backpressured' ? 'Native terminal service under output resource pressure' : 'Native terminal service',
     degradedMode: `${unavailable.join('; ')}${service.output.type === 'backpressured' ? '; original output under resource pressure' : ''}. The child was last observed ${session.processState}. Original output, input delivery and terminal rendering remain separate facts.`,
     restore: 'Keep this Session and refresh its original service observation. Restore the unavailable lane before using it; do not resend unconfirmed input.'
@@ -212,7 +214,7 @@ export function nativeSessionServiceOutcome(session: SessionSnapshot, service = 
 export function hookIngressServiceOutcome(session: SessionSnapshot): StepOutcome {
   const failure = session.kind === 'agent' ? session.hookIngressObservation : undefined
   if (!failure || failure.run.runId !== session.control.run.runId) return { completed: true }
-  return { completed: false, agentViability: agentViabilityFromProcessState(session.processState), step: {
+  return { completed: false, agentViability: agentViabilityFromProcessState(session.processState, session.status.state !== 'disconnected'), step: {
     label: `Native Hook observation (${failure.phase === 'listen' ? 'listener' : 'Run binding'}, ${failure.code})`,
     degradedMode: `${failure.message} The original Run was last observed ${session.processState}; its terminal input and output remain separate capabilities.`,
     restore: 'Refresh this Session observation to retry the original Hook binding. Keep the existing Session and do not resend unconfirmed input.'
@@ -242,10 +244,12 @@ export function agentSessionServiceOutcome(session: SessionSnapshot | undefined)
   if (session.terminalCapability?.reason === 'handshake-timeout') {
     const step: ProcessStep = {
       label: 'Checking terminal capabilities',
-      degradedMode: 'The Agent is still usable; terminal capability is unknown and prompts remain available',
+      degradedMode: session.status.state === 'disconnected'
+        ? `The Run was last observed ${session.processState}; current availability is unconfirmed and original prompt controls are kept`
+        : 'The Agent is still usable; terminal capability is unknown and prompts remain available',
       restore: 'Nothing to do here — this Run keeps running, and the next one probes again'
     }
-    return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState) }
+    return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState, session.status.state !== 'disconnected') }
   }
 
   // A failed output observation confirms that step only. It is not an Input receipt or owner-health proof.
@@ -255,7 +259,7 @@ export function agentSessionServiceOutcome(session: SessionSnapshot | undefined)
       degradedMode: 'The output connection could not be reopened. The last Run observation is kept; current availability and input delivery are unconfirmed',
       restore: 'Use Refresh observation in this Region to re-read its Session and reopen output. Unknown Input is not replayed'
     }
-    return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState) }
+    return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState, session.status.state !== 'disconnected') }
   }
 
   if (session.status.state !== 'disconnected') return { completed: true }
@@ -274,12 +278,12 @@ export function agentSessionServiceOutcome(session: SessionSnapshot | undefined)
           restore: 'Resume the session to retry immediately on its original identity' }
       : {
         label: 'Reconnecting to this Agent',
-        degradedMode: 'The Agent process is still running; only this window’s link to it dropped',
-        restore: 'Resume the session to reattach'
+        degradedMode: `The Run was last observed ${session.processState}; its current availability and input delivery are unconfirmed`,
+        restore: 'Refresh the original Session observation to reconnect; keep unknown input on its original operation'
       }
-  // 看进程，不看我们的连接：进程在跑是第 2 类（连接断了、Agent 没坏），退了是第 1 类，
-  // interrupted（既非明确在跑也非明确退出）是分不清——如实说，不猜。
-  return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState) }
+  // A saved running observation cannot confirm present viability across a connection gap.
+  // A confirmed terminal exit remains final; retain capabilities while everything else is unknown.
+  return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState, false) }
 }
 
 /** Core owns delivery evidence; this notice survives view switches and snapshot refreshes. */
@@ -308,6 +312,6 @@ export function agentPromptDeliveryServiceOutcome(session: SessionSnapshot | und
         : 'Prompt input continued without full screen confirmation.',
       restore: 'Check the Agent’s response. You can review this notice in System; a verified prompt clears it.'
     },
-    agentViability: agentViabilityFromProcessState(session.processState)
+    agentViability: agentViabilityFromProcessState(session.processState, session.status.state !== 'disconnected')
   }
 }

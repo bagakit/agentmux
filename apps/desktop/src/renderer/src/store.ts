@@ -158,7 +158,7 @@ import {
   scratchTopicIdFromWorkspacePath,
   workspaceOwnsSessionPath
 } from '../../shared/scratch-topics'
-import { isScratchWorkspaceId } from '../../shared/contracts'
+import { CONNECTION_OBSERVATION_SOURCE_STEP, isScratchWorkspaceId } from '../../shared/contracts'
 import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc } from '../../shared/bookmark-file'
 import { reconcileNotesStorageResources, reconcileNotesLauncherDrafts, reobserveNotesStorageResources } from './lib/notes-storage-reconciliation'
 import type { NotesStorageSnapshot } from '@agentmux/core/notebook-store'
@@ -1929,9 +1929,15 @@ function enqueueSessionMembershipEvent(
     event.endpointWarning?.scope === 'observation' ? event.endpointWarning.step : null]), {
     hostId: event.hostId, warning: event.endpointWarning, restored: event.event.type === 'connection-state' && event.event.state === 'restored'
   })
-  if (event.endpointObservation) entry.endpointWarnings.set(JSON.stringify([event.hostId, event.endpointObservation.step]), {
-    hostId: event.hostId, warning: event.endpointObservation.warning, observationStep: event.endpointObservation.step, restored: false
-  })
+  if (event.endpointObservation) {
+    const observation = event.endpointObservation
+    entry.endpointWarnings.set(JSON.stringify([event.hostId, observation.step]), {
+      hostId: event.hostId, warning: observation.warning, observationStep: observation.step, restored: false
+    })
+    if (observation.resolvedSteps?.[0] === CONNECTION_OBSERVATION_SOURCE_STEP) entry.endpointWarnings.set(JSON.stringify([event.hostId, CONNECTION_OBSERVATION_SOURCE_STEP]), {
+      hostId: event.hostId, warning: null, observationStep: CONNECTION_OBSERVATION_SOURCE_STEP, restored: false
+    })
+  }
   const diagnostic = event.event.type === 'agent-error' ? runtimeDiagnosticNotice(useAppStore.getState(), event) : null
   entry.events.push({ event, pendingLaunchAgentSessionId, sequence: ++entry.sequence,
     ...(diagnostic?.cause ? { nativeIdentityNotice: { kind: 'indeterminate' as const,
@@ -1980,12 +1986,13 @@ function delaySessionMembershipRead(entry: SessionMembershipResync, milliseconds
 
 function runtimeEndpointWarningsAfterObservation(
   warnings: RuntimeEndpointWarning[] | undefined, hostId: string, warning: RuntimeEndpointWarning | null | undefined,
-  observationStep?: string
+  observationStep?: string, resolvedSteps?: NonNullable<RuntimeEvent['endpointObservation']>['resolvedSteps']
 ): RuntimeEndpointWarning[] | undefined {
   if (warning === undefined) return warnings
   const step = observationStep ?? (warning?.scope === 'observation' ? warning.step : undefined)
+  const resolvedSource = resolvedSteps?.[0] === CONNECTION_OBSERVATION_SOURCE_STEP ? CONNECTION_OBSERVATION_SOURCE_STEP : undefined
   const retained = (warnings ?? []).filter(previous => previous.hostId !== hostId || (step !== undefined
-    ? previous.scope !== 'observation' || previous.step !== step : previous.scope === 'observation'))
+    ? previous.scope !== 'observation' || previous.step !== step && previous.step !== resolvedSource : previous.scope === 'observation'))
   return warning === null ? retained : [...retained, warning]
 }
 
@@ -2278,7 +2285,7 @@ function startSessionMembershipResync(
             const next = pending.event.event.type === 'connection-state' && pending.event.event.state === 'restored' && pending.event.endpointWarning === null
               ? warnings : runtimeEndpointWarningsAfterObservation(warnings, pending.event.hostId, pending.event.endpointWarning)
             return pending.event.endpointObservation ? runtimeEndpointWarningsAfterObservation(next, pending.event.hostId,
-              pending.event.endpointObservation.warning, pending.event.endpointObservation.step) : next
+              pending.event.endpointObservation.warning, pending.event.endpointObservation.step, pending.event.endpointObservation.resolvedSteps) : next
           }, snapshot.runtimeEndpointWarnings ?? [])
           for (const { hostId, warning, restored, observationStep } of entry.endpointWarnings.values()) {
             if (restored && warning === null) continue
@@ -10193,7 +10200,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const core = event.event
     const endpointObservation = event.endpointObservation
     if (endpointObservation) set(state => ({ runtimeEndpointWarnings: runtimeEndpointWarningsAfterObservation(
-      state.runtimeEndpointWarnings, event.hostId, endpointObservation.warning, endpointObservation.step) }))
+      state.runtimeEndpointWarnings, event.hostId, endpointObservation.warning, endpointObservation.step, endpointObservation.resolvedSteps) }))
     if (core.type === 'control-endpoint-state') {
       if (sessionMembershipResync) enqueueSessionMembershipEvent(sessionMembershipResync, event)
       return

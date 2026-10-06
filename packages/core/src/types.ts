@@ -1556,7 +1556,10 @@ export type AgentMuxAcpEvent =
     }
 
 /** The exact observation operation that produced a projection; never new Input intent. */
-export type AgentMuxObservationOrigin = { kind: 'attachment-refresh'; operationId: string; run: AgentMuxRunRef }
+export type AgentMuxObservationOrigin =
+  | { kind: 'attachment-refresh'; operationId: string; run: AgentMuxRunRef }
+  /** The observer's exact connection boundary, not a Run lifecycle or business receipt. */
+  | { kind: 'runtime-connection'; boundary: 'core-ctxmux' | 'consumer-core' }
 
 export type AgentMuxClientEvent = (
   | (import('./control-endpoint-state.js').AgentMuxControlEndpointState & {
@@ -1662,9 +1665,9 @@ export type AgentMuxClientEvent = (
     }
   | {
       /**
-       * 我们与本 Host 的 daemon 之间那条**唯一实时连接**的状态变化。不针对某个 run/session：单 daemon
-       * 语义下连接是共享的，断了就是这台 Host 上所有 Agent 一起失联。渲染端据此把该 Host 的每个 Agent
-       * Session 置为 `disconnected`（`lost`）；`restored` 只说明实时连接可用，Session 状态由各 Run 的权威事实恢复。
+       * 原 observationOrigin 指名 Core↔ctxmux 或 consumer↔semantic Core 的连接观察。
+       * 不针对某个 Run，也不确认进程终局。两个边界独立恢复；`restored` 只说明这个边界
+       * 可用，Session 状态仍由准确 Run 的权威事实恢复。
        *
        * - `lost`：实时通道断了（socket 错误，或 daemon 关流却没交代 run 下场）。开始有界重连。
        * - `restored`：实时连接已重新订阅。携带 diagnostic 时恢复观察尚未确认或失败，保留原能力及服务窗；不携带 diagnostic 时本轮观察已完成。
@@ -1673,6 +1676,7 @@ export type AgentMuxClientEvent = (
        */
       type: 'connection-state'
       state: 'lost' | 'restored' | 'retrying' | 'unrecoverable'
+      observationOrigin: Extract<AgentMuxObservationOrigin, { kind: 'runtime-connection' }>
       /** Endpoint observation failure, not an Agent/Run error. Settles with this connection. */
       diagnostic?: { code: string; message: string }
       evidence: AgentMuxEvidence

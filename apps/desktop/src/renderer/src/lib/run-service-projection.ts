@@ -1,9 +1,9 @@
 import { useCallback, useSyncExternalStore } from 'react'
-import type { AgentMuxNativeService } from '@agentmux/core'
+import type { AgentMuxEvidence, AgentMuxNativeService } from '@agentmux/core'
 import type { RuntimeEvent, SessionSnapshot } from '../../../shared/contracts'
 
 type Listener = () => void
-type Entry = { service: AgentMuxNativeService | null; health: string; version: number }
+type Entry = { service: AgentMuxNativeService | null; evidence: AgentMuxEvidence | null; health: string; version: number }
 function targetKey(session: SessionSnapshot): string {
   return JSON.stringify([session.hostId, session.control.hostId, session.kind === 'agent' ? session.control.agentSessionId : null, session.control.run.runId])
 }
@@ -23,12 +23,12 @@ export function createRunServiceProjection() {
     for (const listener of listeners.get(key) ?? []) listener()
     for (const listener of globalListeners) listener()
   }
-  const update = (key: string, service: AgentMuxNativeService | null): void => {
+  const update = (key: string, service: AgentMuxNativeService | null, evidence: AgentMuxEvidence | null = null): void => {
     const previous = entries.get(key)
     if (previous && (!service || (previous.service && service.revision <= previous.service.revision))) return
     const health = serviceHealth(service)
     const changed = !previous || previous.health !== health
-    entries.set(key, { service, health, version: changed ? version + 1 : previous.version })
+    entries.set(key, { service, evidence, health, version: changed ? version + 1 : previous.version })
     if (changed) notify(key)
   }
   return {
@@ -50,11 +50,14 @@ export function createRunServiceProjection() {
       if (core.type !== 'run-service') return false
       const key = JSON.stringify([event.hostId, event.hostId, core.agentSessionId ?? null, core.run.runId])
       if (!entries.has(key)) return false
-      update(key, core.nativeService)
+      update(key, core.nativeService, core.evidence)
       return true
     },
     read(session: SessionSnapshot): AgentMuxNativeService | null {
       return entries.get(targetKey(session))?.service ?? null
+    },
+    evidence(session: SessionSnapshot): AgentMuxEvidence | null {
+      return entries.get(targetKey(session))?.evidence ?? null
     },
     healthVersion(session?: SessionSnapshot): number {
       return session ? entries.get(targetKey(session))?.version ?? 0 : 0

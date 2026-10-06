@@ -10,7 +10,7 @@ import { ServiceWindowNotice } from './ServiceWindowNotice'
 export function TerminalServiceNotices({ scope, visible = true, available = true,
   reveal, replayGeometry, viewportSync, continuation,
   attachment, sessionObservation, hookIngress, causes = {}, historyNotice, historyContent,
-  refreshingObservation = false, onRefreshObservation, storageControl, continuationReason }: {
+  refreshingObservation = false, onRefreshObservation, storageControl, continuationReason, connectionObservations = [] }: {
   scope: string
   visible?: boolean
   available?: boolean
@@ -27,12 +27,14 @@ export function TerminalServiceNotices({ scope, visible = true, available = true
   refreshingObservation?: boolean
   storageControl?: SessionControl
   continuationReason?: string | undefined
+  connectionObservations?: readonly ServiceNoticeItem[]
   onRefreshObservation?(): void
 }) {
   const notices: ServiceNoticeItem[] = (Object.entries({ attachment, sessionObservation, hookIngress, reveal, replayGeometry, viewportSync, continuation }) as
     [keyof typeof causes, RenderableServiceNotice | null | undefined][]).flatMap(([id, notice]) => notice
       ? [{ id, notice, ...(causes[id] ? { cause: causes[id] } : {}) }] : [])
   if (historyNotice) notices.push(historyNotice)
+  notices.push(...connectionObservations)
   // Keep the public receipt owner mounted even with no current notices: confirmed recovery clears
   // acknowledgements, while an unavailable observation retains them. No empty track is rendered.
   return <ServiceNoticeDisclosure scope={scope} visible={visible} available={available} notices={notices}
@@ -47,6 +49,7 @@ export function TerminalServiceNotices({ scope, visible = true, available = true
     <ServiceWindowNotice notice={replayGeometry} />
     <ServiceWindowNotice notice={viewportSync} />
     <ServiceWindowNotice notice={continuation} />
+    {connectionObservations.map(item => <ServiceWindowNotice key={item.id} notice={item.notice} />)}
     {historyContent}
     {storageControl ? <TerminalStorageDetails control={storageControl} scope={scope} visible={visible} continuationReason={continuationReason} /> : null}
   </ServiceNoticeDisclosure>

@@ -1067,6 +1067,8 @@ export type SessionSnapshot = SessionSnapshotBase & (
 
 export const CONTROL_ENDPOINT_PUBLICATION_STEP = 'Publishing control endpoint'
 
+export const CONNECTION_OBSERVATION_SOURCE_STEP = 'Connection observation source unconfirmed' as const
+
 export type RuntimeEvent = {
   type: 'core'
   hostId: string
@@ -1074,7 +1076,9 @@ export type RuntimeEvent = {
   /** Present only when this endpoint's observation availability changes. */
   endpointWarning?: RuntimeEndpointWarning | null
   /** An observation owner clears only its own Host and step, including during startup. */
-  endpointObservation?: { step: string; warning: RuntimeEndpointWarning | null }
+  endpointObservation?: { step: string; warning: RuntimeEndpointWarning | null;
+    /** Only an exact complete Core observation settles this earlier protocol-source gap. */
+    resolvedSteps?: readonly [typeof CONNECTION_OBSERVATION_SOURCE_STEP] }
 }
 
 export type RuntimeEndpointWarning = {
@@ -1087,6 +1091,9 @@ export type RuntimeEndpointWarning = {
   code: string
   message: string
   recovery: string
+  /** Original connection observation; its timestamp is not last confirmed Run health. */
+  observationOrigin?: Extract<import('@agentmux/core').AgentMuxObservationOrigin, { kind: 'runtime-connection' }> | null
+  evidence?: import('@agentmux/core').AgentMuxEvidence
 }
 
 /** Only successful Host reads are in sources; warnings retain this cut's unresolved Hosts. */

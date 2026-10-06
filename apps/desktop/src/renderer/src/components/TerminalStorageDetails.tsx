@@ -80,11 +80,12 @@ export function TerminalStorageDetails({ control, scope, visible = true, continu
           <div><dt>Offered to storage</dt><dd title={offset(persistence.offeredByte)}>{offset(persistence.offeredByte)}</dd></div>
           <div><dt>Last confirmed commit</dt><dd title={offset(persistence.confirmedByte)}>{offset(persistence.confirmedByte)}</dd></div>
           <div><dt>Unconfirmed byte span</dt><dd>{bytes(lag!)} · not a lost-byte count</dd></div>
-          <div><dt>Storage writer</dt><dd>{persistence.actorStopped ? 'Stopped' : 'Not stopped'}</dd></div>
+          <div><dt>Storage writer</dt><dd>{persistence.actorStopped ? 'Stopped' : 'No stop reported · progress unconfirmed'}</dd></div>
           <div><dt>Queued append commands</dt><dd>{persistence.queuedAppendCommands.toLocaleString()} · excludes in-flight work</dd></div>
         </> : <div><dt>Persistence facts</dt><dd>Unavailable for this Runtime</dd></div>}
       </dl>
       <p>Offered and confirmed positions are separate watermarks. Disk may be ahead after an unconfirmed commit; this sample does not prove a durable byte range.</p>
+      <p>No reported storage failure or writer stop does not confirm progress. A responding Runtime does not settle an outstanding operation; keep its original operation identity and inspect its own receipt.</p>
       {continuationReason === 'source_gap' ? <p className="terminal-storage-details__reason"><strong>Source gap reported.</strong> The Runtime cannot confirm continuous terminal state. Storage lag and capacity limits are separate facts.</p> : continuationReason === 'tail_evicted' ? <p className="terminal-storage-details__reason"><strong>Retained tail evicted.</strong> The Runtime reported missing bytes after the checkpoint. Refreshing storage cannot reconstruct those bytes.</p> : null}
       <h4>Effective capacity policy</h4>
       <dl className="terminal-storage-details__metrics">

@@ -1099,6 +1099,7 @@ export class AgentMuxClient {
       this.assertConnectionEpoch(epoch)
       if (recovering) await this.finishReconnect(epoch, generation)
       else if (observationNeeded) this.publisher.publish({ type: 'connection-state', state: 'restored',
+        observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' },
         evidence: { source: 'run-process', observedAt: Date.now() } })
     } catch (error) {
       if (recovering && epoch === this.connectionEpoch && generation === this.reconnectGeneration) this.scheduleSlowReconnect(epoch)
@@ -1159,6 +1160,7 @@ export class AgentMuxClient {
       this.connectionNeedsObservation = true
       // Availability comes from the transport. Completion of recovery is still observed separately.
       this.publisher.publish({ type: 'connection-state', state: 'restored',
+      observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' },
         diagnostic: { code: 'CTXMUX_CONNECTION_OBSERVATION_PENDING',
           message: 'The original Runtime connection is available. Session recovery observation remains unconfirmed; original terminal input and output remain available. Retry Session observation on this endpoint.' },
         evidence: { source: 'run-process', observedAt: Date.now() } })
@@ -1266,6 +1268,7 @@ export class AgentMuxClient {
           message: `${phase} failed: ${error instanceof Error ? error.message : String(error)}. The confirmed Runtime connection and original capabilities were retained; observation will retry.`,
           evidence: { source: 'agentmux', observedAt: Date.now() } })
         this.publisher.publish({ type: 'connection-state', state: 'restored',
+          observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' },
           diagnostic: { code: 'CTXMUX_CONNECTION_OBSERVATION_FAILED',
             message: `${phase} failed: ${error instanceof Error ? error.message : String(error)}. Original terminal capabilities remain available; retry Session observation on this endpoint.` },
           evidence: { source: 'agentmux', observedAt: Date.now() } })
@@ -1340,6 +1343,7 @@ export class AgentMuxClient {
     this.publisher.publish({
       type: 'connection-state',
       state: 'lost',
+      observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' },
       evidence: { source: 'run-process', observedAt: now }
     })
     void this.reconnectLoop(epoch)
@@ -1390,6 +1394,7 @@ export class AgentMuxClient {
     if (!current() || !this.connected || !this.kernel.isConnected()) return
     this.cancelReconnect()
     this.publisher.publish({ type: 'connection-state', state: 'restored',
+      observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' },
       evidence: { source: 'run-process', observedAt: restoredAt } })
   }
 
@@ -1401,6 +1406,7 @@ export class AgentMuxClient {
     this.reconnectController = controller
     this.reconnecting = true
     if (notify) this.publisher.publish({ type: 'connection-state', state: 'retrying',
+      observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' },
       evidence: { source: 'run-process', observedAt: Date.now() } })
     const generation = this.reconnectGeneration
     const schedule = (): void => {
