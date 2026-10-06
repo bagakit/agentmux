@@ -14,6 +14,7 @@ import '@agentmux/client-ui/styles.css'
 // This separate HTML entry is test-only. Product startup never receives this fixture client.
 const listeners = new Set<(event: AgentMuxClientEvent) => void>()
 const calls: Array<{ method: string; args: unknown[] }> = [], forbidden: string[] = [], copies: string[] = [], notifications: string[] = []
+const inputReceipts: Array<{ input: AgentMuxAgentWriteInput; receipt: { runId: string; appliedByteRange: { startByte: number; endByte: number }; acceptedThroughByte: number } }> = []
 const raw: number[] = [], written: Uint8Array[] = [], held: Array<() => void> = []
 const encoder = new TextEncoder()
 let delayCallbacks = false, resizeRevision = 0, cols = 80, rows = 24, parsedWrites = 0
@@ -58,7 +59,9 @@ const finite = {
     const startByte = inputCursor
     inputCursor += typeof input.data === 'string' ? encoder.encode(input.data).length : input.data.length
     if (loseInputReceipt) throw new Error('Original input may have applied; fixture reply was lost')
-    return { runId: session.run.runId, appliedByteRange: { startByte, endByte: inputCursor }, acceptedThroughByte: inputCursor }
+    const receipt = { runId: session.run.runId, appliedByteRange: { startByte, endByte: inputCursor }, acceptedThroughByte: inputCursor }
+    inputReceipts.push({ input, receipt })
+    return receipt
   },
   async resizeAgent(id: string, run: AgentMuxRunRef, nextCols: number, nextRows: number) {
     if (document.querySelector('.mobile-terminal')?.getAttribute('data-control') !== 'control') {
@@ -98,6 +101,20 @@ async function until(test: () => boolean, label: string) {
 function assert(value: unknown, message: string): asserts value { if (!value) throw new Error(`AssertionError: ${message}`) }
 function text() { const buffer = terminal!.buffer.active; return Array.from({ length: buffer.length }, (_, i) => buffer.getLine(i)!.translateToString(true)).join('\n') }
 
+/** Exercise the same visible reading Dialog that now owns secondary user actions. */
+async function clickReadingDetail(label: string) {
+  document.querySelector<HTMLButtonElement>('[aria-label="终端阅读与状态"]')!.click()
+  await until(() => document.querySelector('[role="dialog"]') !== null, 'visible terminal reading Dialog')
+  const action = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(element => element.textContent?.trim() === label)
+  assert(action, `Actual reading Dialog action ${label}`)
+  action.click()
+  await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭终端阅读"]')!.click()
+  await until(() => document.querySelector('[role="dialog"]') === null, 'reading Dialog explicitly closed')
+}
+const originalInputAcknowledged = () => localStorage.getItem(`agentmux-mobile-terminal-intent-v1:${session.agentSessionId}`) === null
+
+
 export async function runBrowserProof() {
   const cases: Array<{ name: string; facts: unknown }> = []
   render(); await until(() => terminal !== null && document.querySelector('[data-reading="reading"]') !== null, 'actual terminal mounted')
@@ -133,7 +150,7 @@ export async function runBrowserProof() {
   cases.push({ name: 'owner-geometry-view-only', facts: { cols: terminal!.cols, rows: terminal!.rows, forbidden: [...forbidden] } })
   terminal!.select(0, 0, 2)
   const selected = terminal!.getSelection(); assert(selected.length > 0, 'Real xterm selection is nonempty')
-  document.querySelector<HTMLButtonElement>('[aria-label="复制选中文字"]')!.click()
+  await clickReadingDetail('复制选中文字')
   await until(() => copies.length === 1, 'explicit OS adapter copy')
   assert(copies[0] === selected, 'Explicit copy uses exact selection')
   cases.push({ name: 'explicit-selection-copy', facts: { selected, copies: [...copies] } })
@@ -178,6 +195,27 @@ export function renderVisualFixture() {
   root.render(<MobileApp client={client} connection={connection} platform={platform} />)
 }
 
+/** Bounded visual QA uses the real MobileApp/Viewer; only its semantic SDK is controlled. */
+export async function prepareTerminalSurfaceVisual(mode: 'normal' | 'alternate' | 'unknown', nextCols = 80, nextRows = 24) {
+  renderVisualFixture()
+  await until(() => terminal !== null && document.querySelector('[data-reading="reading"]') !== null, 'mounted production MobileApp terminal')
+  cols = nextCols; rows = nextRows; resizeRevision += 1
+  emit({ type: 'terminal-resized', agentSessionId: session.agentSessionId, run: session.run, cols, rows, throughByte: raw.length, resizeRevision })
+  await until(() => terminal!.cols === cols && terminal!.rows === rows, 'authoritative SDK geometry for visual QA')
+  if (mode === 'alternate') {
+    output(encoder.encode('\x1b[?1049h\x1b[2J\x1b[H' + Array.from({length:rows}, (_, i) => `\x1b[${i + 1};1H\x1b[${i % 2 ? 36 : 32}m原始网格 ${i + 1} · ANSI / 中文 / 🚀\x1b[0m` + '·'.repeat(Math.max(0, cols - 35))).join('') + `\x1b[${rows};${Math.max(1, cols - 6)}H\x1b[33m最右端Z\x1b[0m`))
+  }
+  if (mode === 'unknown') {
+    document.querySelector<HTMLButtonElement>('.mobile-terminal-mode')!.click()
+    await until(() => terminal!.options.disableStdin === false, 'explicit visual control')
+    loseInputReceipt = true
+    terminal!.input('original uncertain fixture', true)
+    terminal!.input('retained unsent fixture', true)
+    await until(() => document.querySelector('.mobile-terminal-reading-trigger')?.getAttribute('data-notice') === 'true', 'unknown original operation remains discoverable')
+  }
+  return { fixture: true, mode, agentSessionId: session.agentSessionId, runId: session.run.runId, cols, rows, calls, forbidden }
+}
+
 export async function runControlBrowserProof() {
   const cases: Array<{ name: string; facts: unknown }> = []
   const writes = () => calls.filter(value => value.method === 'writeAgent')
@@ -195,7 +233,7 @@ export async function runControlBrowserProof() {
   assert(document.activeElement === terminal!.textarea, 'Only the explicit control gesture focuses the native terminal textarea')
   terminal!.input('你好', true)
   terminal!.input('\x1b[1;1R', false); terminal!.input('\x1b[?1;2c', false)
-  await until(() => writes().length === 1 && document.querySelector('.mobile-terminal-notice')!.textContent!.includes('Core 已确认'), 'native UTF-8 receipt')
+  await until(() => writes().length === 1 && inputReceipts.some(value => value.input.data === '你好' && value.receipt.runId === session.run.runId) && originalInputAcknowledged(), 'native UTF-8 receipt')
   const input = writes()[0]!.args[0] as AgentMuxAgentWriteInput
   assert(input.data === '你好' && input.source === 'user' && input.expectedRun.runId === session.run.runId && input.agentSessionId === session.agentSessionId,
     'Exact original SDK Input tuple carries true Unicode, with no fabricated operation ID')
@@ -233,7 +271,7 @@ export async function runControlBrowserProof() {
   root.unmount(); root = createRoot(document.getElementById('root')!); terminal = null
   render(); await until(() => terminal !== null && document.querySelector('[data-reading="reading"]') !== null, 'new actual component instance')
   assert(button('控制终端').disabled === true && terminal!.options.disableStdin === true && writes().length === count, 'Cold component admission is unknown and never writes')
-  button('已在原会话核对，继续新输入').click()
+  await clickReadingDetail('已在原会话核对，继续新输入')
   await until(() => button('控制终端').disabled === false, 'explicit review releases old local guard')
   loseInputReceipt = false; button('控制终端').click()
   await until(() => document.querySelector('.mobile-terminal')!.getAttribute('data-control') === 'control', 'explicit new control mode committed')
@@ -278,7 +316,7 @@ export async function runRebindBrowserProof() {
   // A preceding failed controlled run can leave its real metadata guard. Admit the
   // new test intent through the product's explicit review gesture, never storage deletion.
   if (button('控制终端').disabled) {
-    button('已在原会话核对，继续新输入').click()
+    await clickReadingDetail('已在原会话核对，继续新输入')
     await until(() => !button('控制终端').disabled, 'prior controlled fixture explicitly reviewed')
   }
   await clickControl()
@@ -289,14 +327,14 @@ export async function runRebindBrowserProof() {
   const replacement = port()
   await rebind(replacement)
   assert(terminal === originalCanvas && terminal!.options.disableStdin && button('控制终端').disabled, 'SDK replacement keeps the canvas and returns to watch with unknown intent')
-  button('复制未发送输入').click(); await until(() => copies.at(-1) === 'same-page suffix', 'original never-called suffix remains copyable')
+  await clickReadingDetail('复制未发送输入'); await until(() => copies.at(-1) === 'same-page suffix', 'original never-called suffix remains copyable')
   assert(writes().length === 1, 'Replacement cannot replay an uncertain operation or its suffix')
   const stored = localStorage.getItem(`agentmux-mobile-terminal-intent-v1:${session.agentSessionId}`)!
   assert(stored && !stored.includes('original unknown') && !stored.includes('suffix'), 'Rebinding never persists terminal payload')
-  button('已在原会话核对，继续新输入').click()
+  await clickReadingDetail('已在原会话核对，继续新输入')
   await until(() => !button('控制终端').disabled, 'original unknown intent explicitly reviewed')
   loseInputReceipt = false; await clickControl()
-  await until(() => writes().length === 2 && document.querySelector('.mobile-terminal-notice')!.textContent!.includes('Core 已确认'), 'only retained suffix receives its original ACK')
+  await until(() => writes().length === 2 && inputReceipts.some(value => value.input.data === 'same-page suffix' && value.receipt.runId === session.run.runId) && originalInputAcknowledged(), 'only retained suffix receives its original ACK')
   assert(JSON.stringify(writes().map(value => (value.args[0] as AgentMuxAgentWriteInput).data)) === JSON.stringify(['original unknown', 'same-page suffix']), 'Original unknown bytes never re-enter the queue')
   cases.push({ name: 'same-page-sdk-replacement-keeps-original-unknown-and-suffix', facts: { writes: writes().map(value => value.args[0]), retainedCanvas: terminal === originalCanvas, saved: JSON.parse(stored) } })
 
@@ -304,15 +342,15 @@ export async function runRebindBrowserProof() {
   await until(() => terminal!.options.disableStdin === true, 'second unknown dispatch')
   const count = writes().length
   await rebind(port({ runtimeIdentity: () => ({ ...finite.runtimeIdentity(), instanceId: 'different-Mac-runtime' }) }))
-  button('已在原会话核对，继续新输入').click(); await until(() => !button('控制终端').disabled, 'explicit review on changed owner')
-  button('复制未发送输入').focus(); button('控制终端').click()
+  await clickReadingDetail('已在原会话核对，继续新输入'); await until(() => !button('控制终端').disabled, 'explicit review on changed owner')
+  document.querySelector<HTMLButtonElement>('[aria-label="终端阅读与状态"]')!.focus(); button('控制终端').click()
   await new Promise(resolve => setTimeout(resolve, 20))
   assert(terminal!.options.disableStdin && document.activeElement !== terminal!.textarea && writes().length === count, 'Same Session/Run IDs on another Mac cannot receive input or focus')
   const originalRun = session.run
   session.run = { runId: 'Core-confirmed-new-run' }; await rebind(port()); button('控制终端').click()
   await new Promise(resolve => setTimeout(resolve, 20))
   assert(terminal!.options.disableStdin && writes().length === count, 'Original queued bytes cannot cross a confirmed Run replacement')
-  button('复制未发送输入').click(); await until(() => copies.at(-1) === 'original owner only', 'wrong owner retained suffix')
+  await clickReadingDetail('复制未发送输入'); await until(() => copies.at(-1) === 'original owner only', 'wrong owner retained suffix')
   session.run = originalRun; await rebind(port()); loseInputReceipt = false; await clickControl()
   await until(() => writes().length === count + 1, 'only original owner can receive its uninvoked suffix after explicit control')
   assert((writes().at(-1)!.args[0] as AgentMuxAgentWriteInput).data === 'original owner only', 'Retained suffix was not discarded or misdirected')
@@ -333,10 +371,10 @@ export async function runRebindBrowserProof() {
     'Session A late unknown result cannot mutate Session B controls or dispatch its suffix')
   await rebind(port(), session.agentSessionId)
   assert(button('控制终端').disabled, 'Original selected Session A still owns its unknown intent')
-  button('复制未发送输入').click(); await until(() => copies.at(-1) === 'Session A suffix', 'selected Session A retained its own suffix')
+  await clickReadingDetail('复制未发送输入'); await until(() => copies.at(-1) === 'Session A suffix', 'selected Session A retained its own suffix')
   assert(writes().length === beforeLate && terminal!.options.disableStdin, 'Returning to Session A never repeats its unknown input')
   cases.push({ name: 'late-previous-selected-session-ACK-has-no-current-session-effects', facts: { previousSession: session.agentSessionId, selectedSession: otherSession.agentSessionId, beforeLate, writes: writes().length, copied: copies.at(-1) } })
-  button('已在原会话核对，继续新输入').click(); button('放弃未发送输入').click()
+  await clickReadingDetail('已在原会话核对，继续新输入'); await clickReadingDetail('放弃未发送输入')
   root.unmount(); await until(() => listeners.size === 0, 'same-page own observers cleanup')
   assert(forbidden.length === 0, 'Rebind uses only the original finite SDK facts and methods')
   return { passed: true, cases, limitations: ['Actual mounted Chromium/xterm lifecycle with controlled semantic SDK ports; no actual phone, native trust, Host handoff or network performance claim.'] }
@@ -355,7 +393,7 @@ export async function renderControlVisualFixture(mode: 'watch' | 'control' | 'un
   return { mode, runId: session.run.runId, cols: terminal!.cols, rows: terminal!.rows, fixture: true }
 }
 
-export function probeFacts() { return { calls, forbidden, copies, notifications, parsedWrites, listeners: listeners.size } }
+export function probeFacts() { return { calls, inputReceipts, forbidden, copies, notifications, parsedWrites, listeners: listeners.size } }
 
 
 /** Actual maintained xterm, retained Viewer and original controller input bytes. */
@@ -368,7 +406,7 @@ export async function runDirectionalIconProof() {
     const key = document.querySelector<HTMLButtonElement>(`[aria-label="终端 ${label}"]`)!
     assert(key && key.querySelector(`[data-semantic-icon="${icon}"]`), 'Original directional key must have its product semantic drawing')
     key.click()
-    await until(() => calls.filter(call => call.method === 'writeAgent').length === before + index + 1 && document.querySelector('.mobile-terminal-notice')!.textContent!.includes('Core 已确认'), 'original directional byte receipt')
+    await until(() => calls.filter(call => call.method === 'writeAgent').length === before + index + 1 && inputReceipts.some(value => value.input.data === data && value.receipt.runId === session.run.runId) && originalInputAcknowledged(), 'original directional byte receipt')
     const sent = calls.filter(call => call.method === 'writeAgent').at(-1)!.args[0] as AgentMuxAgentWriteInput
     assert(sent.data === data && sent.agentSessionId === session.agentSessionId && sent.expectedRun.runId === session.run.runId && sent.source === 'user', 'Drawing change preserves the original key bytes and Run target')
   }
