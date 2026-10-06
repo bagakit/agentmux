@@ -254,6 +254,12 @@ Toolkit 的设备列表只列原 Host 已确认连接中的设备，不铺离线
 ### 手机对象身份与工作面
 手机 Mote 的日常入口围绕同一个原对象组织：进入原主对话、阅读进展、继续输入、回应事项与查看结果。主对话及合作资料消费原保存配置与业务 owner；主对话未确认时保留原对话候选和手动继续能力。同一 Session 在多处呈现时，入口保留此次 Space／Zone／Tab／Region 与 occurrence，不从 SID 的首个位置推导 Mote 身份。头像揭示该对象的 Profile、当前工作和就近动作。
 
+Mote 目录根行点击就地展开该对象的原二级 Tabs，不自动跳入主会话；Tab 行包含原 Agent 呈现 owner 的 recap。选择单 Agent 的 Tab 可进入其准确 Region 的已有 Session；包含多个 Region 的 Tab 保留各原工作面供明确选择，不任取一个 Session。展开目录与阅读 recap 不启动 Agent、不发送输入，也不增加操作授权。
+
+手机 Topics 在同一目录中展开或收起 Category 下的原 Topic 子项，分类和成员由准确身份及原绑定确定；选择 Topic 仍进入原 Topic／Zone／Tab 工作面，讨论、知识及管理保持可达。对象和来源沿[《Topics 知识库的层级与沉淀》](spaces-and-layout.md#topics-知识库的层级与沉淀)，同屏展开只改变手机呈现，不另造分类或改写 Desktop 的导航范围。
+
+手机 Space 与 Desktop 共用原项目分组和目录树的呈现规则，沿[《Project 与 Workspace》](spaces-and-layout.md#project-与-workspace)消费原 Project、手动分组与 Host 事实；目录派生分组只表达呈现。Zone／worktree、Tab 和 Region 的归属仍由原资源和绑定确认，不按路径猜 Session 的业务归属或执行资源。目录发现或呈现读取未确认时保留已知目录与原可用工作面，说明失败步骤和观察范围并提供原目标的读取／恢复；折叠说明和改变密度不判定健康、身份或操作资格。
+
 手机返回一次只离开当前最上层呈现：面板、来源或详情、终端／结果、对话、目录逐层返回。网页和原生包装遵守同一语义；切换主入口、打开资料与返回保留挂载的 Composer、原草稿、阅读位置和未确认操作。本设备保存呈现引用，原 Host 或目录迟到不得替换用户后来选择的工作面。
 
 手机版整体设计可分版本交付；每版须形成实际可用的完整流程，其他已有工作面与能力仍可达。各版的 Source、真实 Renderer、公共调用链与物理手机体验分别验收，浏览器窄屏、编译或原生同步不代签真机。
