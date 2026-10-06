@@ -232,6 +232,7 @@ type NativeParams = GoalDelegationParamsMap & MoteAvatarParameterMap & TopicPara
   'message.dispatch.read': { sourceMessageId: string; hostId?: string }
   'message.dispatch.ls': { hostId?: string; participantSessionId?: string; afterSourceMessageId?: string; limit?: number }
   'message.dispatch.report': { sourceMessageId: string; replyMessageId: string; kind: import('./agent-handoff.js').DispatchEventKind }
+  'app.search': import('./search-contract.js').AgentMuxSearchInput
   'app.snapshot': AgentMuxRpcSnapshotParams
   'goal.activity': AgentMuxRpcGoalFilters
   'system.storage': { hostId: string; runId: string }
@@ -292,6 +293,7 @@ type NativeResult = GoalDelegationResultMap & MoteAvatarResultMap & TopicResultM
   'message.dispatch.read': Awaited<ReturnType<AgentMuxClient['readDispatch']>> & { hostId: string }
   'message.dispatch.ls': Awaited<ReturnType<AgentMuxClient['listDispatches']>> & { hostId: string }
   'message.dispatch.report': Awaited<ReturnType<AgentMuxClient['recordDispatchEvent']>>
+  'app.search': import('./search-contract.js').AgentMuxSearchPage
   'app.snapshot': AgentMuxRpcSnapshot
   'goal.activity': { activity: Array<import('./control.js').AgentMuxDemandActivity & { goalId: string }>; diskDurability: 'confirmed' }
   'system.storage': import('./run-storage-observation.js').AgentMuxRunStorageObservation
@@ -337,7 +339,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
   'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
   'message.read': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
-  'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
+  'app.search': 'long', 'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
   'system.endpoint': 'short', 'system.subscription.cancel': 'short'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
 

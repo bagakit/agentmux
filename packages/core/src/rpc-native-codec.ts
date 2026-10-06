@@ -1,4 +1,5 @@
 import { parseConversationCheckpointPage, parseConversationChangesPage, parseConversationWatchOpening } from './conversation-changes.js'
+import { parseAgentMuxSearchInput, parseAgentMuxSearchPage } from './search-codec.js'
 import { parseConversationReadPage } from './conversation.js'
 import { parsePromptSubmissionRecord } from './prompt-submission-record.js'
 import { parseAgentInputSubmissionReceipt as inputReceipt } from './agent-input-receipt-codec.js'
@@ -246,6 +247,7 @@ function activity(value: unknown): void {
 export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, params: unknown,
   credentials?: AgentMuxRpcCredentials): Record<string, unknown> {
   try {
+    if (method === 'app.search') return parseAgentMuxSearchPage(value, parseAgentMuxSearchInput(params)) as unknown as Record<string, unknown>
     if (isGoalDelegationMethod(method)) return parseGoalDelegationResult(value, parseGoalDelegationParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteAvatarWriteMethod(method)) return parseMoteAvatarWriteResult(method, value, parseMoteAvatarWriteParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteAvatarSeriesMethod(method)) return parseMoteAvatarSeriesResult(method, value, parseMoteAvatarSeriesParams(method, params)) as unknown as Record<string, unknown>

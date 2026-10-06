@@ -1,4 +1,7 @@
 import { parseConversationRef, parseConversationCheckpointPage, parseConversationChangesInput, parseConversationChangesPage } from './conversation-changes.js'
+import { createAgentMuxSearchReader, type AgentMuxSearchReadContext } from './search-reader.js'
+import { createAgentMuxSearchObservationOwner } from './search-observation.js'
+import { parseAgentMuxSearchInput } from './search-codec.js'
 import { isGoalDelegationMethod, parseGoalDelegationParams, parseGoalDelegationResult, type GoalDelegationsOwner } from './goal-delegation.js'
 import { isMoteAvatarWriteMethod, parseMoteAvatarWriteParams, parseMoteAvatarWriteResult, type AgentMuxRpcMoteAvatarsOwner, type MoteAvatarWriteMethod } from './mote-avatar-write.js'
 import { parseAppearanceObservation, type AgentMuxAppearanceObservationPort } from './public-rpc-settings-observation.js'
@@ -133,6 +136,7 @@ export type AgentMuxRpcCallContext = { caller?: AgentMuxRpcCredentials; signal?:
 export type AgentMuxRpcServiceSubscription<M extends AgentMuxRpcStreamMethod = AgentMuxRpcStreamMethod> = {
   initial: AgentMuxRpcStreamInitial<M>; start?(): void | Promise<void>; dispose(): void | Promise<void>
 }
+type SearchCallContext = AgentMuxSearchReadContext & { rpc: AgentMuxRpcCallContext }
 const NATIVE_FIELDS = {
   'goal.delegation.prepare': ['goalId', 'intent', 'materials'], 'goal.delegation.bind': ['goalId', 'intent'], 'goal.delegate': ['goalId', 'intent', 'materials'],
   'goal.report': ['goalId', 'operationId', 'report'], 'goal.collect': ['goalId', 'operationId', 'collection'], 'goal.delegations': ['goalId'],
@@ -171,6 +175,7 @@ const NATIVE_FIELDS = {
   'message.dispatch.read': ['sourceMessageId', 'hostId'],
   'message.dispatch.ls': ['hostId', 'participantSessionId', 'afterSourceMessageId', 'limit'],
   'message.dispatch.report': ['sourceMessageId', 'replyMessageId', 'kind'],
+  'app.search': ['mode', 'query', 'hostId', 'agentSessionId', 'source', 'limit', 'scanLimit', 'maxBytes', 'cursor'],
   'app.snapshot': ['projectId', 'workspaceId', 'topicId', 'agentSessionId', 'goalId', 'executorId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit', 'include'],
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
@@ -204,6 +209,7 @@ export class AgentMuxRpcService {
   private readonly diagnosticQuery = new DiagnosticEvidenceQuery()
   private readonly notebooks: AgentMuxNotebookStore
   private readonly spatial: AgentMuxSpatialStateStore
+  private search: ReturnType<typeof createAgentMuxSearchReader<SearchCallContext>> | undefined
   private local: Promise<AgentMuxClient> | undefined
   constructor(private readonly ports: AgentMuxRpcServiceOptions = {}) { this.spatial = ports.spatialState ?? new AgentMuxSpatialStateStore(); this.notebooks = ports.notebookStore ?? new AgentMuxNotebookStore() }
 
@@ -238,6 +244,7 @@ export class AgentMuxRpcService {
   async dispose(): Promise<void> {
     // A borrowed SDK client belongs to RuntimeController. Only close this service's
     // own SDK connection; closing a reader/connection does not stop an Agent Run.
+    this.search?.dispose(); this.search = undefined
     const local = this.local; this.local = undefined
     if (local) { try { await (await local).dispose() } catch { /* The owner reports Runtime availability separately. */ } }
   }
@@ -637,6 +644,30 @@ export class AgentMuxRpcService {
     if (method === 'agent.conversation.inspect') {
       // Reuse the exact original route, authorization, budget and fragment contract.
       return await this.call('agent.history', params as AgentMuxRpcParams<'agent.history'>, context) as AgentMuxRpcResult<M>
+    }
+    if (method === 'app.search') {
+      const input = parseAgentMuxSearchInput(params)
+      this.search ??= createAgentMuxSearchReader<SearchCallContext>(createAgentMuxSearchObservationOwner<SearchCallContext>({
+        clients: () => this.clients(),
+        catalog: async () => {
+          const result = await this.execute(this.request('space.ls', { target: {} }))
+          if (result.operation !== 'space.ls') throw new AgentMuxError('The original spatial catalog returned another operation.', 'CONTROL_PROTOCOL_ERROR')
+          return result.catalog
+        },
+        projects: async () => {
+          const result = await this.execute(this.request('list.projects'))
+          if (result.operation !== 'list.projects') throw new AgentMuxError('The original Project owner returned another operation.', 'CONTROL_PROTOCOL_ERROR')
+          return result.projects
+        },
+        snapshot: async () => this.ports.snapshot ? await this.ports.snapshot({ include: ['workspaces', 'topics', 'motes'] }) : {
+          unavailable: ['workspaces', 'topics', 'motes'].map(source => ({ source, code: 'FILESYSTEM_SCOPE_UNAVAILABLE', message: 'The original client metadata owner is unavailable.', recovery: 'Connect the original config/filesystem observation port; known Sessions remain searchable.' }))
+        },
+        history: (input, readContext) => this.call('agent.history', input, readContext.rpc)
+      }))
+      const authority = createHash('sha256').update(JSON.stringify(context.caller
+        ? ['agent', context.caller.agentSessionId, context.caller.capability]
+        : ['principal', context.principal?.kind ?? 'public', context.principal?.id ?? '', context.transport ?? 'sdk'])).digest('hex')
+      return await this.search.read(input, { authority, rpc: context, ...(context.signal ? { signal: context.signal } : {}) }) as AgentMuxRpcResult<M>
     }
     if (method === 'agent.history') {
       const input = rpcRecord(params, NATIVE_FIELDS['agent.history']) as AgentMuxRpcParams<'agent.history'>
