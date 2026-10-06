@@ -4,6 +4,8 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { api } from '../lib/api'
 import type { DemandRecord } from '../lib/global-demand-board'
 import { goalDelegationRows } from '../lib/goal-delegation-presentation'
+import { goalStartRows } from '../lib/goal-start-presentation'
+import { GoalStartWork } from './GoalStartWork'
 import { applyGoalDelegationResult, beginGoalDelegationRead, refreshGoalDelegations, useGoalDelegationObservation } from '../lib/goal-delegation-work'
 import { useAppStore } from '../store'
 import '../styles/goal-delegation.css'
@@ -17,7 +19,8 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set()), [issue, setIssue] = useState<string | null>(null)
   const collecting = useRef(new Set<string>())
   const rows = goalDelegationRows(current)
-  if (compact || !rows.length) return null
+  const starts = goalStartRows(current)
+  if (compact || !rows.length && !starts.length) return null
   async function refresh() {
     await refreshGoalDelegations(demand.id)
     if (!useAppStore.getState().demands[demand.id]?.delegationObservationIssue) setIssue(null)
@@ -60,8 +63,11 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
   return <section className="goal-delegation" aria-label="Delegated work">
     <div className="goal-delegation__heading"><strong>Delegated work</strong><button type="button" className="goals-button" onClick={() => void refresh()}>Refresh reports</button></div>
     {current.delegationObservationIssue || issue ? <p className="goals-service" role="status">{issue ?? current.delegationObservationIssue} Original Agents, tasks and last confirmed reports are kept.</p> : null}
+    <GoalStartWork rows={starts} supervisorSessionId={current.supervisorSessionId} openAgent={openAgent} review={review} />
     {rows.map(row => <article className="goal-delegation__item" key={row.delegation.operationId}>
       <strong>{row.next}</strong>
+      <p className="goal-delegation__identity">Agent <span>{row.delegation.workerAgentSessionId}</span> · Follow-up {current.supervisorSessionId
+        ? <span>{current.supervisorSessionId}</span> : 'needs an assigned Supervisor'}</p>
       {row.issue && row.issue !== current.delegationObservationIssue ? <p className="goals-service" role="status">{row.issue}</p> : null}
       {row.attention ? <p className="goals-service" role="status">Supervisor reminder {row.attention.state === 'confirmed' ? 'received' : row.attention.state === 'prepared' ? 'prepared' : 'unknown'}. {row.attention.reason} Reminder receipt does not accept this Goal.
         {row.attention.state !== 'confirmed' && row.delegation.attention ? <button type="button" className="goals-button" onClick={() => void openAgent(row.delegation.attention!.supervisorAgentSessionId)}>Open original Supervisor</button> : null}
