@@ -1,3 +1,4 @@
+import { ThemeLibrary } from './ThemeLibrary'
 import { ThemeEditor } from './ThemeEditor'
 import { DEFAULT_THEME_ID, getThemeCatalog, type ThemeCatalogItem } from '@agentmux/client-ui/theme'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -103,11 +104,11 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
         </div>
         {catalog.issues.map(issue => <p className="settings-error" key={issue.id}><strong>{issue.id}</strong> — {issue.message}</p>)}
         {!catalog.items.some(item => item.id === theme.value) ? <p className="settings-error">Selected theme “{theme.value}” is unavailable. Its data is retained; choose a theme to restore the selection.</p> : null}
-        <div className="theme-editor__secondary"><button type="button" className="small-button" disabled={!catalog.items.some(item => item.id === theme.value)} onClick={() => {
+        <ThemeLibrary selected={catalog.items.find(item => item.id === theme.value)} appearance={appearance} active={active} editing={editingTheme !== null} onSave={onSave} onCustomize={() => {
           if (editingTheme) { document.querySelector<HTMLElement>('.theme-editor')?.scrollIntoView({ block: 'start' }); return }
           const selected = catalog.items.find(item => item.id === theme.value)
           if (selected) setEditingTheme(selected)
-        }}>Customize selected theme</button></div>
+        }} />
         <p className="settings-hint">Each theme includes dark and light surfaces. Application appearance below chooses the brightness; your terminal palette stays independent.</p>
       </section>
       {editingTheme ? <ThemeEditor key={editingTheme.id} item={editingTheme} appearance={appearance} active={active} onSave={onSave} onClose={() => setEditingTheme(null)} /> : null}
