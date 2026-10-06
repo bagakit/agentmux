@@ -31,7 +31,8 @@ export function conversationRulerRecords(sessionId: string | undefined, page: Ag
     const user = users.get(record.id)
     records.push({ id: JSON.stringify(['native', sessionId, source, record.id]), kind: 'ruler-record', record,
       ...(record.startedAt === undefined ? {} : { recordedAt: record.startedAt }),
-      speaker: user ? speakerOfUserMessage(user) : record.kind === 'assistant-message' ? { role: 'agent', id: sessionId! } : null,
+      speaker: user ? speakerOfUserMessage(user) : record.kind === 'assistant-message' ? { role: 'agent', id: sessionId! }
+        : record.kind === 'system-message' ? { role: 'system', id: native.source.providerId } : null,
       target: { kind: 'native', source, recordId: record.id } })
   }
   observed.forEach((record, index) => {

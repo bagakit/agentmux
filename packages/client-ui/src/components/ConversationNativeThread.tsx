@@ -8,7 +8,7 @@ import { ConversationRecordSequence, type ConversationProcessRenderer, type Conv
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 
 type ReadingProps = Pick<ConversationMessageProps,
-  'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation'>
+  'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation'>
 
 type Props = ReadingProps & {
   page: AgentSessionHistoryPage
@@ -38,13 +38,15 @@ export const ConversationNativeThread = memo(function ConversationNativeThread({
       const recordId = JSON.stringify(['native', page.source.providerId, page.source.nativeSessionId, item.id])
       const user = item.kind === 'user-message' ? users.get(item.id) : undefined
       const speaker = user ? speakerOfUserMessage(user)
-        : item.kind === 'assistant-message' ? { role: 'agent' as const, id: sessionId } : undefined
-      const described = speaker ? describeSpeaker?.(speaker) : undefined
+        : item.kind === 'assistant-message' ? { role: 'agent' as const, id: sessionId }
+        : item.kind === 'system-message' ? { role: 'system' as const, id: page.source.providerId } : undefined
+      const described = speaker && item.kind !== 'system-message' ? describeSpeaker?.(speaker) : undefined
       const body = <ConversationMessage messageId={user?.id ?? recordId} conversationSessionId={sessionId}
           located={Boolean(user && locatedMessageKey === conversationMessageSourceKey(sessionId, user.source))}
-          content={item.contentParts} {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})} {...(user ? { inputSource: user.source } : {})}
+          nativeResourceRecord={{ source: page.source, recordId: item.id, ...(item.turnId === undefined ? {} : { turnId: item.turnId }) }}
+          content={item.contentParts} {...(item.kind === 'system-message' ? { recordTitle: `${page.source.providerId} · ${item.title ?? 'System record'}` } : {})} {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})} {...(user ? { inputSource: user.source } : {})}
           {...(speaker ? { speaker } : {})}
-          name={described?.name ?? (user ? 'Input' : speaker ? 'Assistant' : recordTitle(item))}
+          name={item.kind === 'system-message' ? page.source.providerId : described?.name ?? (user ? 'Input' : speaker ? 'Assistant' : recordTitle(item))}
           providerId={described?.providerId ?? page.source.providerId}
           {...(describeSpeaker ? { describeSpeaker } : {})}
           {...(item.startedAt === undefined ? {} : { createdAt: item.startedAt })}

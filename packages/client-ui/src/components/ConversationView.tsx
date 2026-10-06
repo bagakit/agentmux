@@ -53,15 +53,16 @@ export const ConversationView = memo(function ConversationView({
       const recordId = record.id
       const user = record.input
       const speaker = record.speaker
-      const described = speaker ? describeSpeaker?.(speaker) : undefined
+      const described = speaker && item.kind !== 'system-message' ? describeSpeaker?.(speaker) : undefined
       const body = <ConversationMessage messageId={messageIdForRecord?.(item) ?? user?.id ?? recordId} conversationSessionId={sessionId}
           {...(completedNativeReply(item) ? { status: 'complete' } : {})}
           located={Boolean(user && locatedMessageKey === conversationMessageSourceKey(sessionId, user.source))}
-          {...(user && item.title ? { recordTitle: item.title } : {})}
+          {...(item.kind === 'system-message' ? { recordTitle: `${page.source.providerId} · ${item.title ?? 'System record'}` }
+            : user && item.title ? { recordTitle: item.title } : {})}
           nativeResourceRecord={{ source: page.source, recordId: item.id, ...(item.turnId === undefined ? {} : { turnId: item.turnId }) }}
           content={record.contentParts} {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})} {...(user ? { inputSource: user.source } : {})}
           {...(speaker ? { speaker } : {})}
-          name={described?.name ?? (user ? 'Input' : speaker ? 'Assistant' : recordTitle(item))}
+          name={item.kind === 'system-message' ? page.source.providerId : described?.name ?? (user ? 'Input' : speaker ? 'Assistant' : recordTitle(item))}
           providerId={described?.providerId ?? page.source.providerId}
           {...(describeSpeaker ? { describeSpeaker } : {})}
           {...(item.startedAt === undefined ? {} : { createdAt: item.startedAt })}

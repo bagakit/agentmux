@@ -11,7 +11,7 @@ export function buildNativeContinuationPrompt(page: AgentSessionHistoryPage, cut
     return true
   })
   const transcript = prefix.map((item) => {
-    const label = item.kind === 'user-message' ? 'Input' : item.kind === 'assistant-message' ? 'Agent' : 'Activity'
+    const label = item.kind === 'user-message' ? 'Input' : item.kind === 'assistant-message' ? 'Agent' : item.kind === 'system-message' ? 'Recorded system context' : 'Activity'
     const text = item.contentParts.map((part) => {
       if (part.kind === 'text') return part.text
       if (part.kind === 'reasoning') return part.redacted ? '[Reasoning redacted]' : part.text

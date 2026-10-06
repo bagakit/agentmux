@@ -80,12 +80,15 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
   const blocks = Array.isArray(content) ? content : []
 
   // Generated records remain neutral even when they carry a prompt-shaped attachment.
+  const isGenerated = record.isCompactSummary === true || record.isSynthetic === true || record.isMeta === true
   const isNeutralActivity = (!message && !queuedInput) || content === undefined ||
-    record.isCompactSummary === true || record.isSynthetic === true || record.isMeta === true ||
+    isGenerated ||
     (!queuedInput && record.type !== 'user' && record.type !== 'assistant')
 
-  let kind: 'user-message' | 'assistant-message' | 'activity'
-  if (isNeutralActivity) {
+  let kind: AgentSessionHistoryItem['kind']
+  if (record.type === 'system' && message && content !== undefined && !isGenerated) {
+    kind = 'system-message'
+  } else if (isNeutralActivity) {
     kind = 'activity'
   } else if (record.type === 'user' || queuedInput) {
     // Tool result turns in Claude are sent under role 'user', often with tool_use_result on the record
@@ -113,7 +116,7 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
     id: typeof record.uuid === 'string' && record.uuid ? record.uuid : `claude-record:${start}`,
     kind,
     contentParts: message || queuedInput && kind === 'user-message' ? parts(content) : [{ kind: 'text', text: nativeJsonStringify(record) }],
-    ...(queuedInput && kind === 'user-message' ? { title: '运行中追加' } :
+    ...(kind === 'system-message' ? { title: 'System instructions' } : queuedInput && kind === 'user-message' ? { title: '运行中追加' } :
       kind === 'activity' ? { title: typeof record.type === 'string' ? `Claude ${record.type}` : 'Claude activity' } : {}),
     ...(turnId !== undefined ? { turnId } : {}),
     ...(Number.isSafeInteger(time) && time >= 0 ? { startedAt: time } : {})

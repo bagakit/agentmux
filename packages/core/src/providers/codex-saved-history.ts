@@ -9,6 +9,17 @@ const object = (value: unknown): Record<string, unknown> => value && typeof valu
   ? value as Record<string, unknown> : {}
 const text = (value: unknown) => isNativeText(value) ? value : value === undefined ? '' : nativeJsonStringify(value)
 
+function systemMessage(payload: Record<string, unknown>): { kind: 'system-message'; title: string } | undefined {
+  if (payload.role === 'system' || payload.role === 'developer') return { kind: 'system-message', title: 'System instructions' }
+  if (payload.role !== 'user') return undefined
+  // Only the native structured content kinds identify injected context. Textual
+  // wrappers and unknown/mixed metadata remain original user speech.
+  const kinds = object(payload.internal_chat_message_metadata_passthrough).content_item_kinds
+  if (!Array.isArray(kinds) || kinds.length === 0 || !kinds.every(kind =>
+    kind === 'environments.environment_context' || kind === 'agents_md.instructions')) return undefined
+  return { kind: 'system-message', title: kinds.includes('agents_md.instructions') ? 'System instructions' : 'Runtime context' }
+}
+
 function contentParts(content: unknown): NativeHistoryContentPart[] {
   if (isNativeText(content)) return [{ kind: 'text', text: content }]
   if (!Array.isArray(content)) return content === undefined ? [] : [{ kind: 'text', text: nativeJsonStringify(content) }]
@@ -25,9 +36,11 @@ function contentParts(content: unknown): NativeHistoryContentPart[] {
 function item(record: Record<string, unknown>, start: number): NativeHistoryItem | null {
   const payload = object(record.payload), type = payload.type
   if (record.type === 'session_meta' || record.type === 'turn_context') return null
-  let kind: NativeHistoryItem['kind'] = 'activity', parts: NativeHistoryContentPart[]
+  let kind: NativeHistoryItem['kind'] = 'activity', parts: NativeHistoryContentPart[], title: string | undefined
   if (record.type === 'response_item' && type === 'message') {
-    kind = payload.role === 'user' ? 'user-message' : payload.role === 'assistant' ? 'assistant-message' : 'activity'
+    const system = systemMessage(payload)
+    title = system?.title
+    kind = system?.kind ?? (payload.role === 'user' ? 'user-message' : payload.role === 'assistant' ? 'assistant-message' : 'activity')
     parts = contentParts(payload.content)
   } else if (record.type === 'response_item' && type === 'reasoning') {
     parts = contentParts(payload.summary).map(part => part.kind === 'text' ? { kind: 'reasoning', text: part.text } : part)
@@ -47,7 +60,7 @@ function item(record: Record<string, unknown>, start: number): NativeHistoryItem
   return { id, kind, contentParts: parts,
     ...(typeof payload.turn_id === 'string' ? { turnId: payload.turn_id } : {}),
     ...(Number.isFinite(timestamp) ? { timestamp } : {}),
-    ...(kind === 'activity' ? { title: String(type ?? record.type) } : {}) }
+    ...(title ? { title } : kind === 'activity' ? { title: String(type ?? record.type) } : {}) }
 }
 
 async function open(context: AgentProviderSessionHistoryContext): Promise<NativeJsonlHistoryReader> {
