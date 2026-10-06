@@ -19,6 +19,8 @@ Core 使用 Node 24+，包不设 OS 安装门，portable API 可独立使用；�
 
 ## 原生对话读取
 
+共同记录投影与公开有界读取见[对话协议](../../docs/specs/conversation-protocol.md)。`@agentmux/core/conversation` 不依赖 UI；既有 Desktop/Mobile 消息面与外部接入复用原来源与内容，不另建历史缓存。
+
 `sessionHistoryPage(agentSessionId, { limit, cursor?, signal? })` 读取原 Session 的 Provider 原生记录；`observeSessionHistory(agentSessionId, onChange)` 观察该原生来源的变化，消费者据此重读最新页。两者独立于 Hook timeline，读取不向 Agent 输入内容或改变 Run。历史 cursor 是 Provider 生成的 opaque 值，不能用数组下标、正文或时间重新生成。
 
 | Provider | 原生来源与身份 | 更新观察 | Native Resume |
