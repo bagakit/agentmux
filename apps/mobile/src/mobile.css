@@ -138,10 +138,10 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-terminal-panel { height: 100%; min-height: 0; overflow: hidden; }
 .mobile-terminal { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior-y: contain; }
 .mobile-terminal > :not(.mobile-terminal-canvas) { flex-shrink: 0; }
-.mobile-terminal-toolbar { display: flex; align-items: center; min-height: 48px; padding: 0 12px; border-bottom: 1px solid var(--mobile-border); }
+.mobile-terminal-toolbar { display: flex; align-items: center; min-height: 44px; padding: 0 8px; border-bottom: 1px solid var(--mobile-border); }
 .mobile-terminal-toolbar > span { display: flex; gap: 7px; align-items: center; color: var(--text-2); font-size: 12px; margin-right: auto; }
 .mobile-terminal-toolbar button { min-width: 44px; min-height: 44px; display: grid; place-items: center; background: transparent; color: var(--text-2); }
-.mobile-terminal-canvas { min-height: 120px; flex: 1 0 120px; overflow: auto; padding: 10px 12px 0; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scrollbar-width: thin; scrollbar-color: var(--neutral-2) var(--surface-0); }
+.mobile-terminal-canvas { min-height: 120px; flex: 1 0 120px; overflow: auto; padding: 8px 8px 0; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scrollbar-width: thin; scrollbar-color: var(--neutral-2) var(--surface-0); }
 .mobile-terminal-canvas .xterm { min-height: 100%; }
 .mobile-terminal-canvas .xterm .xterm-viewport { touch-action: pan-y; overscroll-behavior-y: contain; background: var(--surface-0); }
 .mobile-terminal-canvas .xterm-helper-textarea { pointer-events: none; }
@@ -156,8 +156,6 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-terminal-size label { display: flex; gap: 5px; align-items: center; font-size: 12px; color: var(--text-2); }
 .mobile-terminal-size input { width: 54px; min-height: 44px; padding: 5px; border: 1px solid var(--mobile-border); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); font-size: 16px; }
 .mobile-terminal-size p { width: 100%; margin: 0; font-size: 10px; color: var(--text-3); }
-.mobile-terminal-notice { padding: 8px 14px; border-top: 1px solid var(--mobile-border); color: var(--text-3); font-size: 10px; line-height: 1.65; }
-.mobile-terminal-notice p { margin: 0; overflow-wrap: anywhere; }
 .mobile-terminal-empty { padding: 22px; color: var(--text-3); }
 .mobile-terminal-empty h2 { font-size: 18px; font-weight: 500; color: var(--text-2); margin: 0 0 12px; }
 .mobile-terminal-empty p { font-size: 13px; line-height: 1.8; margin: 0; }

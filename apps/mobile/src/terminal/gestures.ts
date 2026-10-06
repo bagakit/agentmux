@@ -4,6 +4,7 @@ export const MOBILE_TERMINAL_FONT_DEFAULT = 12
 const FONT_MIN = 8, FONT_MAX = 32
 type Canvas = Pick<Terminal, 'options' | 'rows' | 'buffer' | 'scrollToLine' | 'element'>
 type Point = { x: number; y: number }
+type Anchor = { column: number; line: number; row: number }
 type Pan = Point & { id: number; row: number; axis: 'x' | 'y' | null }
 const center = (a: Touch, b: Touch): Point => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 })
 const distance = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
@@ -13,28 +14,36 @@ export function bindMobileTerminalGestures({ element, canvas, isControl, isVisib
   element: HTMLElement; canvas: Canvas; isControl(): boolean; isVisible(): boolean; reportFont(size: number): void
 }) {
   let pan: Pan | null = null
-  let pinch: { distance: number; size: number } | null = null
+  let pinch: { distance: number; size: number; anchor: Anchor | null } | null = null
   let frame: number | null = null
-  let requested: { size: number; at: Point } | null = null
+  let requested: { size: number; at: Point; anchor: Anchor | null } | null = null
   const screen = () => element.querySelector<HTMLElement>('.xterm-screen')
   const cellHeight = () => (screen()?.getBoundingClientRect().height ?? 0) / canvas.rows
   const fontSize = () => canvas.options.fontSize ?? MOBILE_TERMINAL_FONT_DEFAULT
+  const anchorAt = (at: Point): Anchor | null => {
+    const bounds = screen()?.getBoundingClientRect()
+    return bounds?.width && bounds.height ? { column: (at.x - bounds.left) / bounds.width,
+      line: (at.y - bounds.top) / bounds.height, row: canvas.buffer.active.viewportY } : null
+  }
   const reset = () => { pan = null; pinch = null }
-  const zoom = (size: number, at?: Point) => {
+  const zoom = (size: number, at?: Point, anchor: Anchor | null = null) => {
     const bounds = element.getBoundingClientRect()
     requested = { size: Math.min(FONT_MAX, Math.max(FONT_MIN, Math.round(size))),
-      at: at ?? { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 } }
+      at: at ?? { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }, anchor }
     if (frame !== null) return
     frame = requestAnimationFrame(() => {
       frame = null
       const next = requested; requested = null
       if (!next || !isVisible()) return
-      const ratio = next.size / fontSize(), row = canvas.buffer.active.viewportY
-      const left = (element.scrollLeft + next.at.x - bounds.left) * ratio - (next.at.x - bounds.left)
-      const top = (element.scrollTop + next.at.y - bounds.top) * ratio - (next.at.y - bounds.top)
+      // Retain the gesture's original cell, so rounded scroll pixels cannot accumulate per frame.
+      const reference = next.anchor ?? anchorAt(next.at)
       canvas.options.fontSize = next.size
-      canvas.scrollToLine(row)
-      element.scrollLeft = left; element.scrollTop = top
+      if (reference) canvas.scrollToLine(reference.row)
+      const after = screen()?.getBoundingClientRect()
+      if (reference && after) {
+        element.scrollLeft += after.left + reference.column * after.width - next.at.x
+        element.scrollTop += after.top + reference.line * after.height - next.at.y
+      }
       reportFont(next.size)
     })
   }
@@ -46,7 +55,7 @@ export function bindMobileTerminalGestures({ element, canvas, isControl, isVisib
     const a = event.touches[0], b = event.touches[1]
     if (a && b) {
       event.preventDefault(); pan = null
-      pinch = { distance: distance(a, b), size: fontSize() }
+      pinch = { distance: distance(a, b), size: fontSize(), anchor: anchorAt(center(a, b)) }
     } else if (a && !pinch) pan = { id: a.identifier, x: a.clientX, y: a.clientY, row: canvas.buffer.active.viewportY, axis: null }
   }
   const move = (event: TouchEvent) => {
@@ -55,8 +64,8 @@ export function bindMobileTerminalGestures({ element, canvas, isControl, isVisib
     const a = event.touches[0], b = event.touches[1]
     if (a && b) {
       event.preventDefault()
-      if (!pinch) pinch = { distance: distance(a, b), size: fontSize() }
-      if (pinch.distance > 0) zoom(pinch.size * distance(a, b) / pinch.distance, center(a, b))
+      if (!pinch) pinch = { distance: distance(a, b), size: fontSize(), anchor: anchorAt(center(a, b)) }
+      if (pinch.distance > 0) zoom(pinch.size * distance(a, b) / pinch.distance, center(a, b), pinch.anchor)
       pan = null; return
     }
     if (pinch || !pan || !a || a.identifier !== pan.id) return
