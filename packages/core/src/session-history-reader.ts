@@ -2,10 +2,10 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxClient } from './client.js'
 import type { AgentSessionHistoryItem, AgentTimelineItem, AgentSessionHistorySource, AgentSessionHistoryDescriptor } from './types.js'
-import { readAgentUserMessageHistory } from './session-history-query.js'
+import { readAgentSessionHistoryQuery } from './session-history-query.js'
 
 export * from './session-history-read-codec.js'
-import { validateSessionHistoryReadInput, isUserMessageHistoryRead, type AgentSessionContextReference, type AgentSessionHistoryReadInput, type AgentSessionHistoryReadPage, type AgentSessionHistoryReadEntry } from './session-history-read-codec.js'
+import { validateSessionHistoryReadInput, isSessionHistoryQuery, type AgentSessionContextReference, type AgentSessionHistoryReadInput, type AgentSessionHistoryReadPage, type AgentSessionHistoryReadEntry } from './session-history-read-codec.js'
 
 export type AgentSessionHistoryReader = Pick<AgentMuxClient, 'sessionHistorySources' | 'sessionTimeline' | 'sessionHistoryPage' | 'sessionHistoryResource'>
 type Reader = Pick<AgentSessionHistoryReader, 'sessionHistorySources' | 'sessionTimeline' | 'sessionHistoryPage'> & Partial<Pick<AgentSessionHistoryReader, 'sessionHistoryResource'>>
@@ -42,7 +42,7 @@ function decode(input: AgentSessionHistoryReadInput): Cursor {
 export async function readAgentSessionHistory(client: Reader, input: AgentSessionHistoryReadInput, options: AgentSessionHistoryReadContext = {}): Promise<AgentSessionHistoryReadPage> {
   validateSessionHistoryReadInput(input)
   options.signal?.throwIfAborted()
-  if (isUserMessageHistoryRead(input)) return await readAgentUserMessageHistory(client, input, options)
+  if (isSessionHistoryQuery(input)) return await readAgentSessionHistoryQuery(client, input, options)
   const cursor = decode(input)
   const descriptor = options.resolveSource ? await options.resolveSource(input.agentSessionId)
     : (await client.sessionHistorySources()).find(entry => entry.hostId === input.hostId && entry.agentSessionId === input.agentSessionId)

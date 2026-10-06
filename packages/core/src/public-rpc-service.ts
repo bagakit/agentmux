@@ -31,7 +31,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxMessageTargetCandidates, agent
   type AgentMuxControlCaller, type AgentMuxDemand } from './control.js'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from './control-codec.js'
 import { AgentMuxError } from './errors.js'
-import { readAgentSessionHistory, validateSessionHistoryReadInput, isUserMessageHistoryRead } from './session-history-reader.js'
+import { readAgentSessionHistory, validateSessionHistoryReadInput, isSessionHistoryQuery } from './session-history-reader.js'
 import { parseSessionHistoryResourceParams, parseSessionHistoryResourceResult } from './session-history-resource.js'
 import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
 import { classifySelfViewFailure, SELF_CONTEXT_TOPIC_HINT } from './agent-self-context.js'
@@ -626,7 +626,7 @@ export class AgentMuxRpcService {
         const page = await client.forwardRpc('agent.history', { ...input, hostId: 'local' }, readContext)
         return { ...page, hostId: input.hostId } as AgentMuxRpcResult<M>
       }
-      if (isUserMessageHistoryRead(input)) {
+      if (isSessionHistoryQuery(input)) {
         const page = await client.readAgentSessionHistory({ ...input, hostId: 'local' }, context.signal ? { signal: context.signal } : {})
         return { ...page, hostId: input.hostId } as AgentMuxRpcResult<M>
       }

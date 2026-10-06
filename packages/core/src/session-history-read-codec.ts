@@ -4,6 +4,7 @@ import { decodeBase64, encodeBase64 } from './hosted-value.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { normalizeSessionHistoryPage } from './session-history.js'
+import { normalizeAgentTimelineMutation } from './session-timeline.js'
 import type { AgentSessionHistoryItem, AgentTimelineItem, AgentSessionHistorySource, AgentSessionUserMessage } from './types.js'
 
 // Pure wire/data contract. Host readers own crypto, source IO and read leases;
@@ -16,9 +17,9 @@ const fail = (message: string, code = 'INVALID_AGENT_SESSION_HISTORY_OPTIONS'): 
 export type AgentSessionContextReference = { hostId: string; agentSessionId: string }
 export type AgentSessionHistoryReadInput = AgentSessionContextReference & {
   source: 'captured' | 'native'; limit?: number; cursor?: string; maxBytes?: number
-  /** A semantic user-input view of the same original source; never a delivery receipt. */
-  kind?: 'user-message'
-  /** Case-sensitive literal text, not a regular expression. Implies kind=user-message. */
+  /** Explicit query view of the original source; text keeps original records, user-message projects inputs. */
+  kind?: 'user-message' | 'text'
+  /** Case-sensitive literal text, not a regular expression. Defaults to kind=user-message. */
   query?: string
   /** Maximum original records examined, independently of the matching-result limit. */
   scanLimit?: number
@@ -31,13 +32,14 @@ export type AgentSessionHistoryReadPage = AgentSessionContextReference & {
   source: 'captured' | 'native'; revision: string; availability: 'available' | 'empty'; order: 'newest-first' | 'chronological-page';
   items: AgentSessionHistoryReadEntry[]; nextCursor: string | null; budgetBytes: number
   nativeSource?: AgentSessionHistorySource
-  /** Present only for kind=user-message/query. Original raw reads retain their existing entries. */
-  kind?: 'user-message'
+  /** Text queries retain original items; user-message queries project only original inputs. */
+  kind?: 'user-message' | 'text'
   userMessages?: AgentSessionUserMessage[]
   scan?: { examined: number; complete: boolean }
 }
-export function isUserMessageHistoryRead(input: AgentSessionHistoryReadInput): boolean { return input.kind === 'user-message' || input.query !== undefined }
-export function historyReadBudget(input: AgentSessionHistoryReadInput): number { return input.maxBytes ?? (isUserMessageHistoryRead(input) ? 1024 * 1024 : 64 * 1024) }
+export function isUserMessageHistoryRead(input: AgentSessionHistoryReadInput): boolean { return input.kind === 'user-message' || input.kind === undefined && input.query !== undefined }
+export function isSessionHistoryQuery(input: AgentSessionHistoryReadInput): boolean { return input.kind === 'text' || isUserMessageHistoryRead(input) }
+export function historyReadBudget(input: AgentSessionHistoryReadInput): number { return input.maxBytes ?? (isSessionHistoryQuery(input) ? 1024 * 1024 : 64 * 1024) }
 function text(value: unknown): value is string {
   return typeof value === 'string' && Boolean(value) && !/[\0\r\n]/u.test(value) && byteLength(value) <= 4096
 }
@@ -45,16 +47,17 @@ export function validateSessionHistoryReadInput(input: AgentSessionHistoryReadIn
   if (!text(input.hostId) || !text(input.agentSessionId) || input.agentSessionId === 'self' ||
     !['captured', 'native'].includes(input.source) ||
     !Number.isSafeInteger(input.limit ?? 30) || (input.limit ?? 30) < 1 || (input.limit ?? 30) > 100 ||
-    !Number.isSafeInteger(historyReadBudget(input)) || historyReadBudget(input) < 4096 || historyReadBudget(input) > (isUserMessageHistoryRead(input) ? 16 * 1024 * 1024 : 128 * 1024) ||
-    (input.kind !== undefined && input.kind !== 'user-message') ||
+    !Number.isSafeInteger(historyReadBudget(input)) || historyReadBudget(input) < 4096 || historyReadBudget(input) > (isSessionHistoryQuery(input) ? 16 * 1024 * 1024 : 128 * 1024) ||
+    (input.kind !== undefined && !['user-message', 'text'].includes(input.kind)) ||
     (input.query !== undefined && (typeof input.query !== 'string' || input.query.includes('\0') || byteLength(input.query) > 4096)) ||
-    (input.scanLimit !== undefined && (!isUserMessageHistoryRead(input) || !Number.isSafeInteger(input.scanLimit) || input.scanLimit < 1 || input.scanLimit > 1000)) ||
+    (input.scanLimit !== undefined && (!isSessionHistoryQuery(input) || !Number.isSafeInteger(input.scanLimit) || input.scanLimit < 1 || input.scanLimit > 1000)) ||
     (input.cursor !== undefined && (typeof input.cursor !== 'string' || !input.cursor || /[\0\r\n]/u.test(input.cursor) || input.cursor.length > 32768))) {
-    fail('History requires exact Host/Session, explicit source, limit 1–100 and a bounded byte budget; user-message queries accept a literal string and scanLimit 1–1000.')
+    fail('History requires exact Host/Session, explicit source, limit 1–100 and a bounded byte budget; user-message/text queries accept a literal string and scanLimit 1–1000.')
   }
 }
 /** The public consumer verifies exact reference, source and serialized budget before accepting data. */
 export function parseAgentSessionHistoryReadPage(value: unknown, input: AgentSessionHistoryReadInput): AgentSessionHistoryReadPage {
+  if (input.kind === 'text') return parseTextHistoryPage(value, input)
   if (isUserMessageHistoryRead(input)) return parseUserMessageHistoryPage(value, input)
   const bad = (): never => fail('History result is malformed, over budget or belongs to another source.', 'CONTROL_PROTOCOL_ERROR')
   const page = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'revision', 'availability', 'order', 'items', 'nextCursor', 'budgetBytes', 'nativeSource'], 'CONTROL_PROTOCOL_ERROR')
@@ -87,6 +90,49 @@ export function parseAgentSessionHistoryReadPage(value: unknown, input: AgentSes
     } else return bad()
   }
   if (page.availability === 'empty' && page.items.length) return bad()
+  return page as AgentSessionHistoryReadPage
+}
+
+/** Normalizers own record semantics; wire validation must also reject discarded or rewritten fields. */
+function sameOriginal(left: unknown, right: unknown): boolean {
+  if (left === right) return true
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object' || Array.isArray(left) !== Array.isArray(right)) return false
+  const a = left as Record<string, unknown>, b = right as Record<string, unknown>, keys = Object.keys(a)
+  return keys.length === Object.keys(b).length && keys.every(key => Object.hasOwn(b, key) && sameOriginal(a[key], b[key]))
+}
+
+function parseTextHistoryPage(value: unknown, input: AgentSessionHistoryReadInput): AgentSessionHistoryReadPage {
+  const bad = (): never => fail('Text history result is malformed or belongs to another query source.', 'CONTROL_PROTOCOL_ERROR')
+  const page = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'kind', 'revision', 'availability', 'order', 'items', 'scan', 'nextCursor', 'budgetBytes', 'nativeSource'], 'CONTROL_PROTOCOL_ERROR')
+  const scan = rpcRecord(page.scan, ['examined', 'complete'], 'CONTROL_PROTOCOL_ERROR')
+  if (page.hostId !== input.hostId || page.agentSessionId !== input.agentSessionId || page.source !== input.source || page.kind !== 'text' ||
+    typeof page.revision !== 'string' || !/^[a-f0-9]{64}$/u.test(page.revision) || page.order !== 'newest-first' ||
+    !Array.isArray(page.items) || page.items.length > (input.limit ?? 30) || !Number.isSafeInteger(scan.examined) ||
+    (scan.examined as number) < page.items.length || (scan.examined as number) > (input.scanLimit ?? 200) || typeof scan.complete !== 'boolean' ||
+    !(page.nextCursor === null || typeof page.nextCursor === 'string' && page.nextCursor.length > 0 && page.nextCursor.length <= 32768) ||
+    scan.complete !== (page.nextCursor === null) || page.budgetBytes !== historyReadBudget(input) ||
+    byteLength(JSON.stringify(page)) > historyReadBudget(input) - 1024 ||
+    page.availability !== (page.items.length ? 'available' : 'empty')) return bad()
+  const nativeSource = input.source === 'native' ? rpcRecord(page.nativeSource, ['providerId', 'nativeSessionId'], 'CONTROL_PROTOCOL_ERROR') : undefined
+  if (input.source === 'captured' && page.nativeSource !== undefined || nativeSource && (!text(nativeSource.providerId) || !text(nativeSource.nativeSessionId))) return bad()
+  const ids = new Set<string>()
+  for (const value of page.items) {
+    const entry = rpcRecord(value, ['kind', 'item'], 'CONTROL_PROTOCOL_ERROR')
+    if (entry.kind !== 'item') return bad()
+    const item = rpcRecord(entry.item, undefined, 'CONTROL_PROTOCOL_ERROR')
+    if (!text(item.id) || ids.has(item.id)) return bad()
+    ids.add(item.id)
+    try {
+      if (input.source === 'captured') {
+        if (item.agentSessionId !== input.agentSessionId) return bad()
+        const normalized = normalizeAgentTimelineMutation({ type: 'append', agentSessionId: input.agentSessionId, item })
+        if (normalized.type !== 'append' || !sameOriginal(normalized.item, item)) return bad()
+      } else {
+        const normalized = normalizeSessionHistoryPage(nativeSource as AgentSessionHistorySource, { source: nativeSource, items: [item], nextCursor: null }, 1)
+        if (!sameOriginal(normalized.items[0], item)) return bad()
+      }
+    } catch { return bad() }
+  }
   return page as AgentSessionHistoryReadPage
 }
 
