@@ -242,7 +242,7 @@ it('does not revive a cancelled Arrange when a later original graph adds another
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
   const node = dom.container.querySelector<HTMLElement>('.react-flow__node[data-id="target"]')!
   await act(async () => { node.focus(); node.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
-  await dom.click('.note-canvas-tool-text')
+  await dom.click('[aria-label="Arrange notes"]')
   expect(workers).toHaveLength(1)
   await act(async () => node.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })))
   const manual = useAppStore.getState().noteCanvasLayouts[key]!.positions.target
@@ -255,4 +255,73 @@ it('does not revive a cancelled Arrange when a later original graph adds another
   expect(useAppStore.getState().noteCanvasLayouts[key]!.positions.target).toEqual(manual)
   expect(useAppStore.getState().noteCanvasLayouts[key]!.positions['closed-source']).toEqual({ x: 500, y: 80 })
   expect(useAppStore.getState().noteCanvasLayouts[key]!.positions['new-child']).toBeDefined()
+})
+
+
+it('draws both directions and every relation kind on distinct lanes from original files, with incoming/outgoing counts', async () => {
+  await writeFile(join(directory, 'target.note.json'), body('target', 'See [[Original closed-source]]'))
+  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-edge-label')).toHaveLength(4))
+  const labels = [...dom.container.querySelectorAll<HTMLElement>('.note-canvas-edge-label')]
+  expect(new Set(labels.map(label => label.dataset.lane)).size).toBe(4)
+  expect(new Set(labels.map(label => label.style.transform)).size).toBe(4)
+  expect(labels.map(label => `${label.dataset.sourceNote}→${label.dataset.targetNote}`)).toContain('target→closed-source')
+  const target = dom.container.querySelector('[data-note-id="target"]')!.closest('article')!
+  expect(target.querySelector('.note-canvas-degrees')?.textContent).toContain('5 incoming')
+  expect(target.querySelector('.note-canvas-degrees')?.textContent).toContain('1 outgoing')
+  await act(async () => labels.find(label => label.dataset.sourceNote === 'target')!.click())
+  expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('[[Original closed-source]]')
+  expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('confirm a permanent target')
+  expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
+  expect(api.notebooks.content).not.toHaveBeenCalled()
+})
+
+it('shows cross-Notebook incoming neighbors on first entry, while preserving a saved collapse until Show related', async () => {
+  const actor = { kind: 'user', id: 'ui-test' } as const
+  const apply = async (change: any) => store.apply({ expectedRevision: (await store.read()).revision, operationId: crypto.randomUUID(), change }, actor)
+  await apply({ kind: 'create', notebookId: 'external', name: 'Outside Notebook' })
+  await apply({ kind: 'move', noteId: 'closed-source', notebookId: 'external', parentNoteId: null })
+  const notebookScope = { kind: 'notebook', notebookId: (await store.read()).pages.target!.notebookId } as const
+  await dom.render(<NoteCanvas scope={notebookScope} seedNoteIds={['target']} onOpen={() => {}} />); await ready()
+  expect(dom.container.querySelector('[data-note-id="closed-source"]')!.closest('article')?.dataset.context).toBe('true')
+  const rootNode = dom.container.querySelector<HTMLElement>('.react-flow__node[data-id="target"]')!
+  await act(async () => { rootNode.click(); rootNode.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
+  await vi.waitFor(() => expect(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(notebookScope)]?.positions.target).toBeDefined())
+  expect(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(notebookScope)]!.expandedNoteIds).toEqual(['target'])
+  await ready()
+  await act(async () => useAppStore.setState({ noteCanvasLayouts: { [noteCanvasScopeKey(notebookScope)]: { positions: { target: { x: 77, y: 99 } }, expandedNoteIds: [], previewNoteIds: [], viewport: { x: 14, y: 25, zoom: .8 } } } }))
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-title[data-note-id]')).toHaveLength(1))
+  expect(dom.container.querySelector('.note-canvas-degrees')?.textContent).toContain('5 incoming')
+  const reads = vi.mocked(api.notebooks.graph).mock.calls.length
+  await dom.click('[aria-label="Show related notes"]'); await ready()
+  expect(api.notebooks.graph).toHaveBeenCalledTimes(reads)
+  expect(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(notebookScope)]!.positions.target).toEqual({ x: 77, y: 99 })
+  expect(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(notebookScope)]!.viewport).toEqual({ x: 14, y: 25, zoom: .8 })
+})
+
+
+it('keeps an explicit filter even when it matches every Notebook page, until Show related is chosen', async () => {
+  const actor = { kind: 'user', id: 'ui-test' } as const
+  await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'book-filter', change: { kind: 'create', notebookId: 'external', name: 'Outside Notebook' } }, actor)
+  await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'move-filter', change: { kind: 'move', noteId: 'closed-source', notebookId: 'external', parentNoteId: null } }, actor)
+  await dom.render(<NoteCanvas scope={{ kind: 'notebook', notebookId: (await store.read()).pages.target!.notebookId }} seedNoteIds={['target']} expandOnFirstView={false} onOpen={() => {}} />)
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-title[data-note-id]')).toHaveLength(1))
+  expect(dom.container.querySelector('[data-note-id="target"]')).not.toBeNull()
+  await dom.click('[aria-label="Show related notes"]'); await ready()
+})
+
+
+it('keeps different self-reference and embed loops separately visible and selectable', async () => {
+  const note = JSON.parse(body('target', 'A Note can cite itself'))
+  for (const mode of ['reference', 'embed']) note.content.content.push({ type: 'blockReference', attrs: { blockId: 'self-' + mode, referenceId: 'occurrence-' + mode, mode, target: { noteId: 'target', blockId: 'target-block' } } })
+  await writeFile(join(directory, 'target.note.json'), JSON.stringify(note))
+  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-edge-label[data-source-note="target"][data-target-note="target"]')).toHaveLength(2))
+  const loops = [...dom.container.querySelectorAll<HTMLElement>('.note-canvas-edge-label[data-source-note="target"][data-target-note="target"]')]
+  expect(new Set(loops.map(label => label.style.transform)).size).toBe(2)
+  for (const loop of loops) {
+    await act(async () => loop.click())
+    expect(dom.container.querySelectorAll('.note-canvas-inspector li')).toHaveLength(1)
+    expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('self-' + loop.dataset.relationshipKind)
+  }
 })
