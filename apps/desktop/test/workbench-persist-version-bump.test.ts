@@ -116,6 +116,7 @@ const PERSISTED_PREFERENCES = {
   focusTimelineHeight: 173, // 非默认 96，且在现 owner 的 [72,480] 范围内。
   focusTimelineNameWidth: 191,
   focusTimelineRuler: { mode: 'uniform', timeZone: 'UTC', intervalMinutes: 60, phaseMinutes: 15 },
+  noteCanvasLayouts: { '[\"note\",\"note-kept\"]': { positions: { 'note-kept': { x: 420, y: -72 } }, viewport: { x: -91, y: 36, zoom: 0.8 }, expandedNoteIds: ['note-kept'], previewNoteIds: ['note-kept'] } },
   noteBlockSelections: { '["local","workspace-alpha","group-alpha","tab-alpha","note-region"]': { noteId: 'note-kept', blockId: 'block-kept' } },
   surveyCollectedZones: { 'zone-kept': true },
   surveySidebarCollapsed: true,

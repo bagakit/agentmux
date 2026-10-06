@@ -227,6 +227,7 @@ describe('Renderer persistence boundary', () => {
       surveyCollectedZones: {},
       surveyExplorationNames: {},
       noteBlockSelections: {},
+      noteCanvasLayouts: {},
       surveySidebarCollapsed: false,
       surveySidebarWidth: 220,
       projectRailOpen: true,

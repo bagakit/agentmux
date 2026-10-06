@@ -12,12 +12,14 @@ import { join, resolve } from 'node:path'
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state'
 import { AgentMuxNotebookStore } from '../../../packages/core/src/notebook-store'
 import { WorkspaceFiles } from '../src/main/workspace-files'
+import { createNotebookObservationServices } from '../src/main/notebook-observation-requests'
+import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 import { desktopSpatialGraph, desktopBindingsFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { act } from 'react'
 import { flushSync } from 'react-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, LocalExecutionHost } from '@agentmux/core'
 import type { KnowledgeTopic, TopicKnowledgeWrite, TopicMethod, TopicParams, TopicResult } from '@agentmux/core/control'
 import type { BrowserSnapshot } from '../src/shared/contracts'
 import type { SurfaceMemoryCollectionInput } from '../src/renderer/src/lib/surface-memory-budget-candidates'
@@ -109,6 +111,7 @@ let css: HTMLStyleElement
 let nameOwnerCleanup: (() => Promise<void>) | undefined
 
 beforeEach(() => {
+  installNoteCanvasGeometry()
   let catalog = emptyNotebookState()
   vi.spyOn(api.notebooks, 'read').mockImplementation(async () => structuredClone(catalog))
   vi.spyOn(api.notebooks, 'apply').mockImplementation(async input => { catalog = applyNotebookChange(catalog, input, { kind: 'user', id: 'actual-ui-user' }, Date.now()); return structuredClone(catalog) })
@@ -242,7 +245,10 @@ async function withActualNotes(run: (owner: AgentMuxNotebookStore, files: Worksp
     const notesWorkspace = { ...scratchWorkspace, path }
     useAppStore.setState({ config: { ...useAppStore.getState().config!, workspaces: useAppStore.getState().config!.workspaces.map(item => item.id === NOTES_WORKSPACE_ID ? notesWorkspace : item) } })
     const notebooks = new AgentMuxNotebookStore(join(path, 'notebooks.json'))
-    const files = new WorkspaceFiles(() => ({ id: 'local', kind: 'local' }))
+    const files = new WorkspaceFiles(() => new LocalExecutionHost())
+    const observation = createNotebookObservationServices(notebooks, { files, workspace: () => notesWorkspace })
+    vi.spyOn(api.notebooks, 'graph').mockImplementation(async (params, options) => { const catalog = await notebooks.read(); return { catalog, graph: await observation.owner.graph(catalog, params, options) } })
+    vi.spyOn(api.notebooks, 'content').mockImplementation(async (noteId, options) => observation.owner.content(await notebooks.read(), noteId, options))
     vi.spyOn(api.notebooks, 'read').mockImplementation(() => notebooks.read())
     vi.spyOn(api.notebooks, 'apply').mockImplementation(input => notebooks.apply(input, { kind: 'user', id: 'views-user' }))
     vi.spyOn(api.notebooks, 'onChange').mockImplementation(listener => notebooks.subscribe(listener))
@@ -323,10 +329,10 @@ it('shows only current Notebook search and archive scope in cards and graph usin
   await dom.click('[aria-label="Cards view"]')
   expect([...dom.container.querySelectorAll('.recall-note-card')].map(item => item.getAttribute('data-note-id'))).toEqual([firstId])
   await dom.click('[aria-label="Graph view"]')
-  expect([...dom.container.querySelectorAll('.recall-graph-node')].map(item => item.getAttribute('data-note-id'))).toEqual([firstId])
+  await vi.waitFor(() => expect([...dom.container.querySelectorAll('.note-canvas-title[data-note-id]')].map(item => item.getAttribute('data-note-id'))).toEqual([firstId]))
   expect(dom.container.querySelector(`[data-note-id="${foreignId}"]`)).toBeNull()
   await dom.click('.global-recall-surface [aria-label="Archived pages"]')
-  expect([...dom.container.querySelectorAll('.recall-graph-node')].map(item => item.getAttribute('data-note-id'))).toEqual([childId])
+  await vi.waitFor(() => expect([...dom.container.querySelectorAll('.note-canvas-title[data-note-id]')].map(item => item.getAttribute('data-note-id'))).toEqual([childId]))
   await dom.click('[aria-label="Cards view"]')
   expect([...dom.container.querySelectorAll('.recall-note-card')].map(item => item.getAttribute('data-note-id'))).toEqual([childId])
   await fill(dom.container.querySelector<HTMLInputElement>('[aria-label="Find pages in Research notebook"]')!, 'does not exist')
@@ -335,7 +341,7 @@ it('shows only current Notebook search and archive scope in cards and graph usin
   expect(Object.keys((await owner.read()).pages)).toHaveLength(3); intactOriginalWork()
 }))
 
-it('distinguishes durable hierarchy from exact confirmed references and keeps unread or ambiguous edges unknown', async () => withActualNotes(async owner => {
+it('distinguishes original saved hierarchy and exact block references while keeping editor drafts intact', async () => withActualNotes(async (owner, files, notesWorkspace) => {
   await renderApp(); await enterSurvey(); await startNotebookWithPage(); await readyNoteRegion()
   const parentId = useAppStore.getState().recallNoteId!, parentRef = useAppStore.getState().recallZoneSelection!.active!
   await act(async () => { await changeNotebook({ kind: 'rename-page', noteId: parentId, title: 'Parent source' }) })
@@ -346,27 +352,27 @@ it('distinguishes durable hierarchy from exact confirmed references and keeps un
     { type: 'blockReference', attrs: { blockId: 'source-block', referenceId: 'confirmed-reference', target: { noteId: childId, blockId: 'confirmed-target' }, mode: 'reference' } },
     { type: 'blockReference', attrs: { blockId: 'unknown-block', referenceId: 'unknown-reference', target: { noteId: 'unread-note', blockId: 'unknown-target' }, mode: 'embed' } }
   ] } }
-  await act(async () => { useAppStore.getState().updateDocument(childRef.tabId, JSON.stringify(child), childRef.regionId); useAppStore.getState().updateDocument(parentRef.tabId, JSON.stringify(source), parentRef.regionId) })
-  const reads = vi.mocked(api.files.read).mock.calls.length, writes = vi.mocked(api.files.write).mock.calls.length
+  const pages = (await owner.read()).pages
+  for (const [id, content] of [[parentId, source], [childId, child]] as const) {
+    const original = await files.read(notesWorkspace, pages[id]!.resource.path)
+    if (original.status !== 'read') throw new Error('Original Note file not read')
+    await files.write(notesWorkspace, { path: pages[id]!.resource.path, expectedRevision: original.document.revision, content: JSON.stringify(content) })
+  }
+  await act(async () => useAppStore.getState().updateDocument(parentRef.tabId, 'Keep original dirty draft', parentRef.regionId))
+  const draft = useAppStore.getState().documents[documentKey(NOTES_WORKSPACE_ID, pages[parentId]!.resource.path)]!
   await directory(); await dom.click('[aria-label="Graph view"]')
-  expect(dom.container.querySelectorAll('[data-edge-kind="hierarchy"]')).toHaveLength(1)
-  expect(dom.container.querySelectorAll('[data-edge-kind="reference"]')).toHaveLength(1)
-  expect(dom.container.querySelector('[data-edge-kind="reference"]')?.getAttribute('data-edge-from')).toBe(parentId)
-  expect(dom.container.querySelector('[data-edge-kind="reference"]')?.getAttribute('data-edge-to')).toBe(childId)
-  expect(dom.container.querySelector('.recall-graph-legend')?.textContent).toContain('Confirmed block reference / embed')
-  expect(dom.container.querySelector('.recall-graph-coverage')?.textContent).toContain('Partial reference coverage · 2 of 2')
-  expect(dom.container.querySelector('.recall-graph-coverage')?.textContent).toContain('1 references have an unread')
-  const snapshot = useAppStore.getState(), duplicatePath = 'duplicate.note.json'
-  await act(async () => useAppStore.setState({ documents: { ...snapshot.documents, [documentKey(NOTES_WORKSPACE_ID, duplicatePath)]: { path: duplicatePath, content: JSON.stringify(child), revision: 'foreign' } } }))
-  expect(dom.container.querySelectorAll('[data-edge-kind="reference"]')).toHaveLength(0)
-  expect(dom.container.querySelectorAll('[data-edge-kind="hierarchy"]')).toHaveLength(1)
-  expect(dom.container.querySelector('.recall-graph-coverage')?.textContent).toContain('2 references have an unread')
-  await act(async () => useAppStore.setState({ documents: snapshot.documents, config: { ...snapshot.config!, workspaces: snapshot.config!.workspaces.map(workspace => workspace.id === NOTES_WORKSPACE_ID ? { ...workspace, hostId: 'foreign-host' } : workspace) } }))
-  expect(dom.container.querySelectorAll('[data-edge-kind="reference"]')).toHaveLength(0)
-  expect(dom.container.querySelector('.recall-graph-coverage')?.textContent).toContain('Partial reference coverage · 0 of 2')
-  await act(async () => useAppStore.setState({ config: snapshot.config }))
-  expect(api.files.read).toHaveBeenCalledTimes(reads); expect(api.files.write).toHaveBeenCalledTimes(writes)
-  await dom.click(`.recall-graph-node[data-note-id="${childId}"]`)
+  await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Inspect 1 block reference"]')).not.toBeNull())
+  expect(dom.container.querySelector('[aria-label="Inspect parent and subpage relationship"]')).not.toBeNull()
+  expect(dom.container.querySelector('.note-canvas-caption')?.textContent).toContain('Partial coverage · 2/2 originals read')
+  await dom.click('[aria-label="Inspect 1 block reference"]')
+  expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('source-block')
+  expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('confirmed-target')
+  const graphCalls = vi.mocked(api.notebooks.graph).mock.calls.length
+  await act(async () => useAppStore.setState({ documents: { ...useAppStore.getState().documents, foreign: { path: 'duplicate.note.json', content: JSON.stringify(child), revision: 'foreign-draft' } } }))
+  expect(api.notebooks.graph).toHaveBeenCalledTimes(graphCalls)
+  expect(useAppStore.getState().documents[documentKey(NOTES_WORKSPACE_ID, pages[parentId]!.resource.path)]).toBe(draft)
+  await dom.click('[aria-label="Close relationship details"]')
+  await dom.click(`.note-canvas-title[data-note-id="${childId}"]`)
   await vi.waitFor(() => expect(useAppStore.getState().recallZoneSelection?.active).toEqual(childRef))
   expect(useAppStore.getState().recallNoteId).toBe(childId)
   expect((await owner.read()).pages[childId]!.parentNoteId).toBe(parentId); intactOriginalWork()
