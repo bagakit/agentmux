@@ -441,3 +441,9 @@
 .focus-retained-projects__row:hover, .focus-retained-projects__toggle:hover { background: var(--surface-2); color: var(--text); }
 .focus-retained-projects__row:focus-visible, .focus-retained-projects__toggle:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
 .focus-retained-projects__row:disabled { cursor: default; }
+
+.focus-search-locations { flex: 0 0 auto; max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 3px; padding: 6px; min-width: 0; }
+.focus-search-locations > small { color: var(--text-muted); }
+.focus-search-locations .focus-location-choice { min-width: 0; text-align: left; }
+.focus-search-locations .focus-location-choice strong,
+.focus-search-locations .focus-location-choice small { overflow-wrap: anywhere; white-space: normal; }

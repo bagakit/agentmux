@@ -20,6 +20,8 @@ import { focusLaneOrigins } from '../lib/focus-lane-origin'
 import { readSurveyPresentation } from '../lib/mobile-presentation'
 import type { FocusLaneCounts, FocusLaneMetrics } from '../lib/focus-lane-layout'
 import { FocusToolbar } from './FocusToolbar'
+import { FocusSearchLocations } from './FocusSearchLocations'
+import { focusSearchContextKey, searchFocus } from '../lib/focus-search'
 import { FocusSourceStatus } from './FocusSourceStatus'
 import * as FilterMenu from './HoverDropdownMenu'
 import { RecentFocusTimeline } from './RecentFocusTimeline'
@@ -163,7 +165,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     timelines, sources: catalogue.sources, sourcesAvailable: catalogue.available
   }), [executionHistory, allLanes, timelines, catalogue.sources, catalogue.available])
   const trimmedQuery = query.trim()
-  const search = trimmedQuery.toLocaleLowerCase()
+  const searchResult = useMemo(() => searchFocus(query, { rows: executionRows, lanes: allLanes, catalog: navigationCatalog, sources: catalogue.sources, history: executionHistory, retained: retainedProjects }), [query, executionRows, allLanes, navigationCatalog, catalogue.sources, executionHistory, retainedProjects])
   const laneByContext = new Map(allLanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
   // The common Region choice is independent of both the project filter and Agent MRU.
   const resourceLaneIds = new Set(currentSurface && currentSurface.kind !== 'agent' && currentSurface.kind !== 'terminal'
@@ -174,7 +176,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const currentLaneId = currentContext ? laneByContext.get(currentContext.id)?.id ?? null
     : resourceLaneIds.size === 1 ? resourceLaneIds.values().next().value ?? null : null
   const matching = executionRows.filter(row => (project === 'all' || (() => { const lane = laneByContext.get(row.id); return lane && focusProjectKey(lane.hostId, lane.projectId) === project })()) &&
-    ((row.kind === 'agent' && row.id.includes(trimmedQuery)) || `${row.name} ${row.detail} ${row.recap?.text ?? ''} ${row.stateLabel} ${row.workspacePath} ${laneByContext.get(row.id)?.name ?? row.workspaceName} ${row.providerId ?? ''}`.toLocaleLowerCase().includes(search)))
+    searchResult.contextKeys.has(focusSearchContextKey(row.hostId, row.id)))
   const filtered = matching.filter(row => bucketFilter === 'all' || row.bucket === bucketFilter)
   const selected = executionRows.find(row => row.id === shownSessionId)
   const filteredIds = new Set(filtered.map(row => row.id))
@@ -189,7 +191,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   }
   const boardLanes = focusProjectLanes
   const filteredRetainedProjects = retainedProjects.filter(item => (project === 'all' || item.key === project) && bucketFilter === 'all'
-    && `${item.name} ${item.identity.workspacePath} ${item.identity.branch ?? ''} ${item.identity.topicId ?? ''}`.toLocaleLowerCase().includes(search))
+    && searchResult.projectKeys.has(item.key))
   const recentProjects = filteredRetainedProjects.filter(item => item.recent)
   const pastProjects = filteredRetainedProjects.filter(item => !item.recent)
   const readProjectHistory = (item: typeof retainedProjects[number]) => {
@@ -265,7 +267,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     <FocusToolbar selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
       <div className={`focus-filters${isMacPlatform() ? ' focus-filters--mac' : ''}`}>
         <div className="global-board-toolbar__controls">
-          <label className="global-board-search"><ThemeActionSearchIcon size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search contexts or amux ID" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+          <label className="global-board-search"><ThemeActionSearchIcon size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search text, IDs or amux links" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <FilterMenu.Root>
             <FilterMenu.Trigger asChild><button type="button" className="focus-filter-trigger" aria-label="Focus filters" aria-description={filterSummary} title={filterSummary} data-active={filterCount > 0 ? 'true' : undefined}>
               <ThemeActionFilterIcon size={14} aria-hidden="true" /><span className="focus-filter-trigger__summary">{filterSummary}</span>{filterCount ? <span className="focus-filter-trigger__count" aria-hidden="true">{filterCount}</span> : null}
@@ -298,6 +300,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     </FocusToolbar>
     <div ref={focusLayoutRef} className="global-focus-layout">
       <div className="global-board-main global-focus-main">
+      <FocusSearchLocations result={searchResult} describeLocation={location => {
+        const ref = location.reference, layout = layouts[ref.displayWorkspaceId], index = layout ? groupIds(layout.root).indexOf(ref.groupId) : -1
+        return `${config?.workspaces.find(workspace => workspace.id === ref.displayWorkspaceId)?.name ?? ref.displayWorkspaceId} · ${index >= 0 ? `Group ${index + 1}` : ref.groupId}`
+      }} onSelect={location => onSelectLocation ? onSelectLocation(location.reference) : location.sessionId ? focusExecutionSession(location.sessionId, location.reference) : useAppStore.getState().reportError(new Error('The original location is kept. Its navigation is not confirmed in this view.'))} />
       {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => {
         const id = pmoAttention[0]!
         const current = useAppStore.getState()
