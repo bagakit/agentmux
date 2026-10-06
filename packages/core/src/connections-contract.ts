@@ -38,14 +38,15 @@ export type ConnectionResultMap = {
 }
 /** Borrow the Host's original connection owner. Core never constructs adapters or stores credentials. */
 export interface ConnectionPort {
+  bindings?: import('./room-binding-contract.js').RoomBindingsPort
   list(): Promise<ConnectionResultMap['connection.ls']>
   inspect(input: ConnectionInspectInput): Promise<ConnectionInspectResult>
   configure(input: ConnectionConfigureInput): Promise<ConnectionOperation>
   test(input: ConnectionParamsMap['connection.test']): Promise<ConnectionRecord>
 }
-export type ConnectionActor = { application: ConnectionApplication; userId: string }
+export type ConnectionActor = { application: ConnectionApplication; idType: string; userId: string }
 /** Attribution is not authorization. Grants remain scoped to the original external conversation. */
 export type ConnectionGrant = {
   grantId: string; revision: number; connectionId: string; actor: ConnectionActor
-  externalConversationId: string; capabilities: Array<'input' | 'answer' | 'permission' | 'publish'>
+  externalConversationId: string; state: 'active' | 'revoked'; capabilities: Array<'input' | 'answer' | 'permission'>
 }
