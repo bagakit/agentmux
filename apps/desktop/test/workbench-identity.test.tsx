@@ -134,8 +134,10 @@ describe('original Topic row consumes shared workbench identity', () => {
     expect(chips[0]!.querySelector('[data-subject-region]')).toBeNull()
     await act(async () => chips[1]!.focus())
     expect(document.querySelectorAll('.workbench-topology__inspector--portal [data-subject-region]')).toHaveLength(1)
+    expect(document.querySelector('.workbench-topology__inspector-head > small')?.textContent).toBe(`${workspace.name} · Group 2`)
     await act(async () => chips[0]!.focus())
     expect(document.querySelectorAll('.workbench-topology__inspector--portal [data-subject-region]')).toHaveLength(0)
+    expect(document.querySelector('.workbench-topology__inspector-head > small')?.textContent).toBe(`${workspace.name} · Group 1`)
   })
 
   it('retains the original configured Executor appearance', async () => {
