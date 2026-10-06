@@ -17,7 +17,7 @@ import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { AgentMuxRpcDispatcher, AgentMuxRpcError, type AgentMuxRpcConnection, type AgentMuxRpcFrame } from '../src/public-rpc-wire.js'
 import { connectHostedAgentMux } from '../src/hosted-client.js'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
-import type { AgentInputSubmissionReceipt, AgentNativePromptInputPlan } from '../src/index.js'
+import type { AgentInputSubmissionReceipt } from '../src/index.js'
 import { DeviceAuthority } from '../../../apps/host/src/device-authority.js'
 
 const AgentMuxControlServer: typeof SourceServer = process.env.AGENTMUX_TEST_RPC_SERVER_ENTRY
@@ -485,29 +485,26 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
     expect(operation).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
   })
 
-  it.each(['native-assert', 'claimed-runtime-read'] as const)('rechecks the actual device authority after %s before Native dispatch', async stage => {
+  it.each(['runtime-read', 'claimed-store-write'] as const)('rechecks the actual device authority after %s before terminal input', async stage => {
     const f = await hostedFixture(), authority = await DeviceAuthority.open(join(f.root, 'input-devices.json'))
     cleanups.push(() => authority.flush())
     const publicKey = Buffer.alloc(32, 21).toString('base64'), device = await authority.authorizeKey(publicKey)
     const author = { deviceId: device.deviceId, createdAt: device.createdAt }
     const key = { kind: 'prompt' as const, agentSessionId: 'recipient-agent', expectedRun: { runId: 'run-recipient-agent' }, submissionId: 'device-revoke-' + stage }
-    const plan: AgentNativePromptInputPlan = { kind: 'native-rpc', operation: 'start-or-steer', protocolId: 'controlled-contract',
-      sourceId: 'original-source', actorId: 'original-actor', threadId: 'original-thread' }
     let entered!: () => void, proceed!: () => void, reached = false
     const paused = new Promise<void>(yes => { entered = yes }), continuation = new Promise<void>(yes => { proceed = yes })
-    const dispatch = vi.fn(async () => ({ outcome: 'admitted' as const, turnId: 'must-not-be-created' }))
-    const provider = Reflect.get(f.client, 'providers').get('codex') as import('../src/agent-provider.js').AgentProvider
-    const prepare = vi.spyOn(provider as typeof provider & Required<Pick<typeof provider, 'prepareNativePromptInput'>>, 'prepareNativePromptInput')
-      .mockImplementation(async () => ({ plan, close: async () => {}, assertCurrent: async () => {
-        if (stage === 'native-assert' && !reached) { reached = true; entered(); await continuation }
-      }, dispatch }))
     const originalStatus = f.inner.kernel.status as (runId: string) => Promise<ReturnType<typeof f.run>>
     f.inner.kernel.status = vi.fn(async (runId: string) => {
-      const claim = stage === 'claimed-runtime-read' ? await f.client.inspectAgentPromptSubmission(key) : null
-      if (claim?.admission?.transport === 'native' && claim.admission.native.outcome === 'claimed' && !reached) {
+      if (stage === 'runtime-read' && !reached) { reached = true; entered(); await continuation }
+      return await originalStatus(runId)
+    })
+    const originalWrite = f.store.compareAndSwapMetadata.bind(f.store)
+    const write = vi.spyOn(f.store, 'compareAndSwapMetadata').mockImplementation(async (...args) => {
+      const result = await originalWrite(...args)
+      if (stage === 'claimed-store-write' && args[1]?.promptCompletionAdmission?.submissionId === key.submissionId && !reached) {
         reached = true; entered(); await continuation
       }
-      return await originalStatus(runId)
+      return result
     })
     const h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted,
       http: { host: '127.0.0.1', port: 0, authorize: async () => ({ principal: { kind: 'device', id: authority.hostId + ':' + device.deviceId },
@@ -524,13 +521,13 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
       await authority.revoke(device.deviceId)
       proceed(); await pending
       const current = (await f.client.inspectAgentInput({ key }))!
-      expect(current.ref).toEqual(receipt.ref); expect(dispatch).not.toHaveBeenCalled()
-      if (stage === 'native-assert') expect(current).toMatchObject({ status: 'waiting', admission: null,
+      expect(current.ref).toEqual(receipt.ref); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+      if (stage === 'runtime-read') expect(current).toMatchObject({ status: 'waiting', admission: null,
         control: { state: 'enabled', waiting: { phase: 'authorization', reason: 'author-authorization-needed' } } })
       else expect(current).toMatchObject({ status: 'not-applied', control: { state: 'dispatch-authorized' },
-        admission: { admission: { native: { outcome: 'not-applied' }, notApplied: true } } })
+        admission: { admission: { notApplied: true } } })
       expect(f.inner.kernel.stop).not.toHaveBeenCalled()
-    } finally { proceed(); prepare.mockRestore() }
+    } finally { proceed(); write.mockRestore(); f.inner.kernel.status = originalStatus }
   })
 
   it('preserves a saved device input when its original current-author source is unavailable', async () => {
@@ -566,12 +563,12 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
     }
     let entered!: () => void, proceed!: () => void
     const paused = new Promise<void>(yes => { entered = yes }), continuation = new Promise<void>(yes => { proceed = yes })
-    const plan: AgentNativePromptInputPlan = { kind: 'native-rpc', operation: 'start-or-steer', protocolId: 'controlled-contract',
-      sourceId: 'original-source', actorId: 'original-actor', threadId: 'original-thread' }
-    const dispatch = vi.fn(async () => ({ outcome: 'admitted' as const, turnId: 'must-not-be-created' }))
-    const provider = Reflect.get(f.client, 'providers').get('codex') as import('../src/agent-provider.js').AgentProvider
-    const prepare = vi.spyOn(provider as typeof provider & Required<Pick<typeof provider, 'prepareNativePromptInput'>>, 'prepareNativePromptInput')
-      .mockImplementation(async () => ({ plan, close: async () => {}, assertCurrent: async () => { entered(); await continuation }, dispatch }))
+    const originalStatus = f.inner.kernel.status as (runId: string) => Promise<ReturnType<typeof f.run>>
+    let reached = false
+    f.inner.kernel.status = vi.fn(async (runId: string) => {
+      if (!reached) { reached = true; entered(); await continuation }
+      return await originalStatus(runId)
+    })
     const h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted,
       http: { host: '127.0.0.1', port: 0, authorize: async () => ({ principal: { kind: 'device', id: authority.hostId + ':' + device.deviceId },
         assertCurrent: () => authority.assertCurrentKey(author, publicKey) }) } })
@@ -589,8 +586,8 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
       await authority.revoke(device.deviceId); proceed(); await pending
       expect(await f.client.inspectAgentInput({ key: receipt.key })).toMatchObject({ ref: receipt.ref, status: 'waiting', admission: null,
         control: { state: 'enabled', waiting: { phase: 'authorization', reason: 'author-authorization-needed' } } })
-      expect(dispatch).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
-    } finally { proceed(); prepare.mockRestore() }
+      expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+    } finally { proceed(); f.inner.kernel.status = originalStatus }
   })
 
   it.each(['agent.send', 'agent.input.rejoin'] as const)('checks the source author and removes its nonJSON callback before virtual %s forwarding', async method => {

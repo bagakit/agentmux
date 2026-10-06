@@ -217,6 +217,29 @@ it('later author revocation cannot erase an already confirmed Runtime byte recei
   } finally { await h.close() }
 })
 
+it('a real pending interaction appearing after payload keeps that byte receipt and blocks submit', async () => {
+  const h = await fixture()
+  try {
+    h.onInput(async data => {
+      if (data !== plan.payload) return
+      await h.write(current => ({ ...current, pendingInteraction: { request: {
+        kind: 'permission', id: 'late-original-request', agentSessionId: current.agentSessionId,
+        title: 'Display text does not grant permission', options: [{ id: 'deny', label: 'Deny', kind: 'reject-once' }],
+        evidence: { source: 'native-hook', observedAt: _liveTailFixtureEpoch(0, 0, 2), run: current.run, hookReceiptId: 'late-original-hook' }
+      } } }))
+    })
+    await expect(h.submit('late-pending')).rejects.toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
+    expect([...h.accepted.values()].map(value => value.data)).toEqual([plan.payload])
+    const current = await h.stored()
+    expect(current.terminalPromptSubmission?.payload.inputByteRange).toEqual({ startByte: 0, endByte: Buffer.byteLength(plan.payload) })
+    expect(Reflect.get(h.coordinator, 'deps').agentInputCursors.get(h.initial.agentSessionId)).toBe(Buffer.byteLength(plan.payload))
+    expect(current.promptCompletionAdmission?.acknowledged).not.toBe(true)
+    expect(current.promptCompletionAdmission?.notApplied).not.toBe(true)
+    expect(current.terminalPromptSubmission?.submit.acknowledged).not.toBe(true)
+    expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+  } finally { await h.close() }
+})
+
 it('an actual pending interaction and a preparation plan remain refused without entering the dispatch gate', async () => {
   const h = await fixture()
   try {

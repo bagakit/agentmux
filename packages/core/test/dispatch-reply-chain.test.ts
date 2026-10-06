@@ -30,21 +30,18 @@ async function fixture() {
 }
 
 describe('original Dispatch reply lineage', () => {
-  it('reads the actual CLI reply after native send ACK loss before any worker_done and preserves its original author', async () => {
+  it('reads the actual CLI reply after terminal receipt loss before any worker_done and preserves its original author', async () => {
     const h = await fixture()
     try {
       await h.open()
       const provider = (h.client as any).providers.get('codex')
-      const native = vi.fn(async () => { throw new core.AgentMuxError('Native report ACK was lost.', 'AGENT_PROMPT_INPUT_UNCONFIRMED') })
-      vi.spyOn(provider, 'prepareNativePromptInput').mockResolvedValue({
-        plan: { kind: 'native-rpc', protocolId: 'private-steer', sourceId: 'source', actorId: 'actor', threadId: 'thread', operation: 'start-or-steer' },
-        assertCurrent: async () => {}, dispatch: native, close: async () => {}
-      })
+      const native = h.inner.kernel.input as ReturnType<typeof vi.fn>
+      vi.spyOn(provider, 'planPromptInput').mockImplementation((text: string) => ({ kind: 'single-phase', data: text + '\r' }))
       const submit = h.client.submitAgentMessage.bind(h.client)
       vi.spyOn(h.client, 'submitAgentMessage').mockImplementation(async input => {
         await submit(input)
         await vi.waitFor(() => expect(native).toHaveBeenCalledOnce())
-        throw new core.AgentMuxError('Reply was journaled; native send receipt is unconfirmed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+        throw new core.AgentMuxError('Reply was journaled; terminal receipt is unconfirmed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
       })
       const body = JSON.stringify({ schema: 'isolated.report.v1', goalId: 'original-goal', evidence: ['actual-reply'] })
       const failed = await h.cli(['agent', 'send', '--to-session', 'caller', '--text', body,

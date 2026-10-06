@@ -23,12 +23,9 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
 async function owner() {
   const h = await rpcOwnerFixture(['caller', 'recipient', 'stranger'], core)
   h.inner.kernel.identity = () => ({ daemonInstanceId: 'run-fence-native', protocolVersion: 1, buildIdentity: 'private' })
-  const phase = vi.fn(async () => ({ outcome: 'admitted' as const, turnId: 'original-turn' }))
+  const phase = h.inner.kernel.input as ReturnType<typeof vi.fn>
   const provider = (h.client as any).providers.get('codex')
-  vi.spyOn(provider, 'prepareNativePromptInput').mockResolvedValue({
-    plan: { kind: 'native-rpc', protocolId: 'private-steer', sourceId: 'source', actorId: 'actor', threadId: 'thread', operation: 'start-or-steer' },
-    assertCurrent: async () => {}, dispatch: phase, close: async () => {}
-  })
+  vi.spyOn(provider, 'planPromptInput').mockImplementation((text: string) => ({ kind: 'single-phase', data: text + '\r' }))
   const path = join(h.root, 'owner.sock')
   const server = new AgentMuxControlServer({ socketPath: path, coreClients: h.coreClients })
   await server.start()
@@ -74,7 +71,7 @@ describe('original message Run fence and intake reading', () => {
         messageId: send.messageId, recipientRunId: 'run-recipient', body: send.text })
       await vi.waitFor(() => expect(h.phase).toHaveBeenCalledOnce())
       const originalInput = await h.rpc.call('agent.input.inspect', { kind: 'message-control', originalControlOperationId: send.operationId })
-      expect(originalInput.input).toMatchObject({ status: 'admitted' })
+      expect(originalInput.input).toMatchObject({ status: 'terminal-confirmed' })
       // The optional fence never becomes a global readiness or other-input gate.
       await h.rpc.call('agent.send', { ...send, expectedRun: undefined, operationId: 'unfenced-healthy-input', messageId: 'unfenced-healthy-message' })
       await vi.waitFor(() => expect(h.phase).toHaveBeenCalledTimes(2))

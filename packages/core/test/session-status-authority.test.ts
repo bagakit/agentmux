@@ -23,7 +23,7 @@ vi.mock('electron', () => ({ app: { isPackaged: false } }))
 
 const fixtureReceipts: Array<{ processId: number; mainNativeSessionId: string; childNativeSessionId: string; exited: boolean; recordsRemoved: boolean }> = []
 const cleanup: Array<() => Promise<void>> = []
-afterEach(async () => { for (const fn of cleanup.splice(0).reverse()) await fn(); vi.restoreAllMocks();
+afterEach(async () => { for (const fn of cleanup.splice(0).reverse()) await fn(); vi.restoreAllMocks(); vi.unstubAllEnvs();
   if (process.env.AGENTMUX_STATUS_PROOF_FILE) await writeFile(process.env.AGENTMUX_STATUS_PROOF_FILE, JSON.stringify({ userRuntimeTouched: false, privateFixtures: fixtureReceipts, cleanup: { remaining: fixtureReceipts.filter(item => !item.exited || !item.recordsRemoved) } }, null, 2))
 })
 
@@ -32,7 +32,7 @@ async function processWitness() {
   const main = join(root, 'rollout-main.jsonl'), child = join(root, 'rollout-child.jsonl')
   await writeFile(main, JSON.stringify({ type: 'session_meta', payload: { id: 'main-native', source: 'cli' } }) + '\n')
   await writeFile(child, JSON.stringify({ type: 'session_meta', payload: { id: 'child-native', source: { subagent: { thread_spawn: { parent_thread_id: 'main-native' } } } } }) + '\n')
-  const process: ChildProcess = spawn(processExec(), ['-e', "const fs=require('fs'); for(const p of process.argv.slice(1)) fs.openSync(p,'r'); console.log('open');setInterval(()=>{},1000)", main, child], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+  const process: ChildProcess = spawn(processExec(), ['-e', "const fs=require('fs'); for(const p of process.argv.slice(1)) fs.openSync(p,'r+'); console.log('open');setInterval(()=>{},1000)", main, child], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
   const receipt = { processId: process.pid!, mainNativeSessionId: 'main-native', childNativeSessionId: 'child-native', exited: false, recordsRemoved: false }; fixtureReceipts.push(receipt)
   cleanup.push(async () => {
     if (process.exitCode === null && process.signalCode === null) { process.kill('SIGTERM'); await new Promise<void>(resolve => process.once('exit', () => resolve())) }
@@ -52,7 +52,11 @@ type Internals = {
   acceptHookEvent(event: NativeHookEnvelope, signal: AbortSignal): Promise<void>
 }
 async function harness(options: { provider?: string; legacy?: boolean; hookBound?: boolean; protectedTarget?: boolean; nativePath?: boolean; unavailable?: boolean } = {}) {
+  for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
   const fixture = await processWitness(), providerId = options.provider ?? 'codex'
+  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', fixture.root)
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(fixture.root, 'state'))
+  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(fixture.root, 'messages.ndjson'))
   const store = new AgentMuxMemoryAgentSessionStore()
   const initial: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'status-subject', providerId, executorId: providerId,
@@ -95,12 +99,7 @@ async function harness(options: { provider?: string; legacy?: boolean; hookBound
   }
   let submission = 0
   const consume = async () => {
-    // Native transport is the fixture seam; the real Core semantic claim owns
-    // completion consumption. Raw ACKs are deliberately outside that boundary.
-    client.providers.get(providerId).prepareNativePromptInput = async () => ({
-      plan: { kind: 'native-rpc', protocolId: 'private-protocol', sourceId: 'main-native', actorId: initial.run.runId, threadId: 'main-native', operation: 'start-or-steer' },
-      assertCurrent: async () => {}, dispatch: async () => ({ outcome: 'admitted', turnId: 'private-next-turn' }), close: async () => {}
-    })
+    // The existing ordered Runtime byte port is the fixture seam; Core owns the semantic claim.
     await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(initial.agentSessionId)),
       agentSessionId: initial.agentSessionId, operationId: `private-semantic-${++submission}`, prompt: 'new task', execution: 'immediate' })
   }
