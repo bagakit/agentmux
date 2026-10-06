@@ -263,8 +263,9 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     { '--host': 'data', '--session': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true) })),
   command('agent.conversation.changes', '--input FILE|-', 'Resume bounded original changes from a saved source checkpoint.',
     { '--input': 'data' }, async f => ({ ...parseConversationChangesInput(await readControlJsonInput(value(f, '--input', true)!, 'Conversation changes')) }), 'JSON requires hostId, agentSessionId, checkpoint and optional limit. Keep the returned checkpoint with the effects derived from its records. A source Gap retains the original boundary and requires explicit sharing review.'),
-  command('agent.conversation.watch', '--host ID --session ID', 'Follow relevant source invalidations; resume durable changes to recover notification gaps.',
-    { '--host': 'data', '--session': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true) })),
+  { ...command('agent.conversation.watch', '--host ID --session ID', 'Follow relevant source invalidations; resume durable changes to recover notification gaps.',
+    { '--host': 'data', '--session': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true) }),
+    'Notifications only wake an authoritative changes read. Ctrl-C releases this reader, never the original Session or Run. Source replacement ends this observation; inspect and authorize the new source cut before publishing.'), stream: true },
   command('agent.conversation.inspect', '--host ID --session ID --source captured|native [--limit N] [--cursor CURSOR] [--max-bytes N]',
     'Read the original bounded conversation with source-qualified records and retained byte fragments.',
     { '--host': 'data', '--session': 'data', '--source': 'value', '--limit': 'value', '--cursor': 'data', '--max-bytes': 'value' }, f => {
