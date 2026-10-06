@@ -1,5 +1,6 @@
 import { parseAmuxObjectLink, type AmuxObjectLinkTarget } from './sharing.js'
 import type { AgentMuxSpaceCatalog, AgentMuxSpaceLocation } from './space-control.js'
+import type { AgentMuxSearchTarget } from './search-contract.js'
 import type { AgentSessionHistoryDescriptor } from './types.js'
 
 type Identity = { agent: Set<string>; region: Set<string>; tab: Set<string>; space: Set<string>; zone: Set<string>; ids: Set<string>; text: string[] }
@@ -12,12 +13,14 @@ export type AgentMuxSearchLocation = { reference: Pick<AgentMuxSpaceLocation, 'd
 /** Disposable filtering of original facts. Links keep their type and exact identity. */
 export type AgentMuxSearchSession = {
   agentSessionId: string; hostId: string; kind: 'agent' | 'terminal'
-  workspaceId?: string; topicId?: string | null
+  workspaceId?: string; workspacePath?: string; topicId?: string | null
   /** Original observed IDs and searchable presentation; never control authority. */
   identities: readonly string[]; text: readonly string[]
 }
 export type AgentMuxSearchProject = { hostId: string; projectId: string; name: string; sessionIds: readonly string[] }
+export type AgentMuxSearchObject = { target: AgentMuxSearchTarget; name: string; identities: readonly string[]; text: readonly string[]; locations: readonly AgentMuxSearchLocation[] }
 export type AgentMuxSearchMetadata = {
+  objects?: readonly AgentMuxSearchObject[]
   sessions: readonly AgentMuxSearchSession[]; catalog: AgentMuxSpaceCatalog
   sources: readonly AgentSessionHistoryDescriptor[]; projects: readonly AgentMuxSearchProject[]
 }
@@ -30,7 +33,7 @@ export function searchAgentMuxMetadata(query: string, input: AgentMuxSearchMetad
     const sessions = new Map<string, AgentMuxSearchSessionReference>()
     for (const row of input.sessions) sessions.set(JSON.stringify([row.hostId, row.kind, row.agentSessionId]), { hostId: row.hostId, kind: row.kind, agentSessionId: row.agentSessionId })
     for (const source of input.sources) sessions.set(JSON.stringify([source.hostId, 'agent', source.agentSessionId]), { hostId: source.hostId, kind: 'agent', agentSessionId: source.agentSessionId })
-    return { sessions: [...sessions.values()], projects: input.projects.map(({hostId, projectId}) => ({hostId, projectId})), locations: [] as AgentMuxSearchLocation[], unplaced: [] as { kind: 'space' | 'zone' | 'tab' | 'region'; id: string; name: string }[], issue: null as string | null }
+    return { sessions: [...sessions.values()], projects: input.projects.map(({hostId, projectId}) => ({hostId, projectId})), locations: [] as AgentMuxSearchLocation[], objects: [...input.objects ?? []], unplaced: [] as { kind: 'space' | 'zone' | 'tab' | 'region'; id: string; name: string }[], issue: null as string | null }
   }
   let target: AmuxObjectLinkTarget | undefined, issue: string | null = null
   if (/^amux:/iu.test(raw)) {
@@ -140,5 +143,12 @@ export function searchAgentMuxMetadata(query: string, input: AgentMuxSearchMetad
     const fact = identity(); add(fact.ids, project.hostId, project.projectId); fact.text.push(project.name)
     return matches(fact) || project.sessionIds.some(id => (['agent', 'terminal'] as const).some(kind => { const member = agents.get(JSON.stringify([project.hostId, kind, id])); return member ? matches(member) : false }))
   }).map(({hostId, projectId}) => ({hostId, projectId}))
-  return { sessions, projects, locations, unplaced: unplaced.map(({fact: _fact, ...object}) => object), issue }
+  const objects = (input.objects ?? []).filter(object => {
+    const fact = identity(), original = object.target
+    if (original.kind === 'agent' || original.kind === 'region' || original.kind === 'tab' || original.kind === 'space' || original.kind === 'zone') add(fact[original.kind], targetId(original))
+    else add(fact.ids, original.kind === 'terminal' ? original.terminalId : original.kind === 'project' ? original.projectId : original.kind === 'workspace' ? original.workspaceId : original.topicId)
+    add(fact.ids, original.hostId, ...object.identities); fact.text.push(object.name, ...object.text)
+    return matches(fact)
+  })
+  return { sessions, projects, locations, objects, unplaced: unplaced.map(({fact: _fact, ...object}) => object), issue }
 }
