@@ -68,7 +68,7 @@ import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMu
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
 import { directoryIdentity, homeZoneId, topicSpatialAddress } from '../../shared/space-addresses'
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
-import { readContinuousProgressInput } from './lib/continuous-progress-input'
+import { observeAgentInputOccupation, readContinuousProgressInput } from './lib/continuous-progress-input'
 import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
 import type { MoteContextOperations } from '../../shared/mote-context-observation'
 import { observeMoteContextOperation } from './lib/mote-context-observation'
@@ -1400,6 +1400,7 @@ function sessionOwnsControl(session: SessionSnapshot, control: SessionControl): 
 }
 
 function demandRecordFromFilesystem(demand: FilesystemDemand, retained?: DemandRecord): DemandRecord {
+  if (retained?.delegationReadCut && demand.updatedAt < retained.delegationReadCut.goalUpdatedAt) return retained
   return {
     id: demand.id,
     title: demand.title,
@@ -1419,6 +1420,9 @@ function demandRecordFromFilesystem(demand: FilesystemDemand, retained?: DemandR
     phaseIndex: demand.phaseIndex,
     activityLog: demand.activities.map((activity) => `${activity.kind}: ${activity.message}`),
     delegations: [...(demand.delegations ?? [])],
+    ...(retained?.delegationObservations ? { delegationObservations: retained.delegationObservations } : {}),
+    ...(retained?.delegationObservationIssue ? { delegationObservationIssue: retained.delegationObservationIssue } : {}),
+    ...(retained?.delegationReadCut ? { delegationReadCut: retained.delegationReadCut } : {}),
     dispatches: [...(demand.dispatches ?? [])],
     activities: demand.activities,
     decisions: demand.decisions,
@@ -3815,6 +3819,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const disposeMoteStartupRecovery = beginMoteStartupRecovery()
     const disposeRunServiceProjection = initializeRunServiceProjection()
+    const disposeInputOccupation = initializeAgentInputOccupation()
     const pendingSessionEvents = sessionMembershipEventBuffer()
     const pendingBrowserEvents: BrowserEvent[] = []
     let booting = true
@@ -3861,6 +3866,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       cancelSessionMembershipResync()
       disposeMoteStartupRecovery()
       disposeRunServiceProjection()
+      disposeInputOccupation()
       disposeSessions()
       disposeBrowsers()
       disposeControl()
@@ -10478,6 +10484,14 @@ export function initializeRunServiceProjection(): () => void {
     }
   })
   return () => { dispose(); runServiceProjection.clear() }
+}
+
+/** Changes invalidate only the original unclaimed input observation, through Main's owner. */
+export function initializeAgentInputOccupation(): () => void {
+  return observeAgentInputOccupation(useAppStore, control => api.sessions.notifyInputOccupation(control), error => {
+    useAppStore.getState().reportError(error, { kind: 'indeterminate',
+      summary: 'User input observation could not reconnect. Your original Agent and draft remain available; retry the original operation.' })
+  })
 }
 
 /** Flush admitted draft/layout changes, then await their existing Chromium owner's request. */

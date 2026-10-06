@@ -9,6 +9,7 @@ import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { AgentTopologySummary } from './AgentTopologySummary'
 import { GoalAgentFace, GoalAgentPicker, type GoalRelationSave } from './GoalAgentPicker'
+import { GoalDelegationWork } from './GoalDelegationWork'
 
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeObjectTeamIcon = semanticIconComponent('object.team')
@@ -49,6 +50,7 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
     {!supervisor && demand.creationOrigin?.supervisorDefaultPending ? <p className="goals-condition">The original requester is not yet confirmed. You can choose a Supervisor explicitly.</p> : null}
     {creationDrafts.map(draft => <p key={draft.operationId} className="goals-service" role="status">Original Agent creation retained.<button type="button" className="goals-button" onClick={() => setRole(draft.role)}>Check creation and relationship</button></p>)}
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
+    <GoalDelegationWork demand={demand} />
     <GoalContinuationControl demand={demand} onChooseSupervisor={() => setRole('supervisor')} />
     {demand.sessionIds.length ? <details className="goals-topology" onToggle={event => { if (event.target === event.currentTarget) setArrangementOpen(event.currentTarget.open) }}><summary>Arrangement</summary>{arrangementOpen ? <GoalArrangement sessionIds={related.map(row => row.session?.id ?? row.id)} /> : null}</details> : null}
     {role ? <GoalAgentPicker key={`${demand.id}:${role}`} demand={demand} role={role} onSave={onUpdate} onClose={() => setRole(null)} /> : null}

@@ -36,6 +36,10 @@ export type DemandRecord = {
   source: 'default-topic' | 'session'
   decisionLog?: AgentMuxDemandDecision[]
   delegations?: import('@agentmux/demand').DemandDelegation[]
+  /** Last original-owner observation; transient reading facts, never persisted Goal state. */
+  delegationObservations?: NonNullable<import('@agentmux/core/goal-delegation').GoalDelegationResult['observations']>
+  delegationObservationIssue?: string
+  delegationReadCut?: { goalUpdatedAt: number; request: number }
   dispatches?: import('@agentmux/demand').DemandDispatch[]
   activities?: DemandActivity[]
   decisions?: DemandDecision[]
