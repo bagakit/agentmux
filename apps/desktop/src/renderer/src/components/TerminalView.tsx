@@ -1,3 +1,4 @@
+import { observeResolvedTheme } from '@agentmux/client-ui/theme'
 import { TextInput } from '@agentmux/client-ui/input'
 import { rendererPerformance } from '../lib/renderer-performance'
 import { createTerminalInteractionObservation } from '../lib/terminal-interaction-observation'
@@ -232,7 +233,7 @@ export function TerminalView({
   const terminalGenerationRef = useRef(0)
   const nextLinkRequestIdRef = useRef(0)
   const linkRequestRef = useRef<TerminalLinkRequest | null>(null)
-  /** linkOrigin is a prop; the attach effect only re-runs on runId/session/theme, so read it fresh
+  /** linkOrigin is a prop; the attach effect only re-runs on runId/session, so read it fresh
    * through a ref when the modifier fast-path opens a link from inside the effect closure. */
   const linkOriginRef = useRef(linkOrigin)
   linkOriginRef.current = linkOrigin
@@ -445,6 +446,13 @@ export function TerminalView({
   useLayoutEffect(() => {
     viewportRef.current?.setInteractiveResize(interactiveResize)
   }, [interactiveResize])
+
+  // Palette updates preserve the original terminal, buffer, viewport, selection and Attachment.
+  useEffect(() => {
+    const apply = () => { if (terminalRef.current) terminalRef.current.options.theme = terminalTheme(themeId) }
+    apply()
+    return themeId === 'workspace' ? observeResolvedTheme(apply) : undefined
+  }, [themeId])
 
   // Live font-size application. The attach effect already built xterm at the current size, so this must
   // not fire on mount — only when the user changes the size on an already-open terminal. Setting
@@ -1598,7 +1606,7 @@ export function TerminalView({
       releasePerformance()
       resourceOwners.release()
     }
-  }, [session.control.run.runId, session.id, themeId])
+  }, [session.control.run.runId, session.id])
 
   // Address changes replace only the observation callback, never the terminal/attachment.
   useEffect(() => {
@@ -1817,7 +1825,7 @@ export function TerminalView({
       >
         <div
           className="terminal-view"
-          style={{ backgroundColor: terminalTheme(themeId).background }}
+          style={{ backgroundColor: themeId === 'workspace' ? 'var(--surface-0)' : terminalTheme(themeId).background }}
         >
           <div
             className={`terminal-view__xterm ${hydrating ? 'terminal-view__xterm--hydrating' : ''}`}

@@ -14,7 +14,8 @@ function projection(config: AppConfig) {
   const selected = catalog.items.find(item => item.id === requested) ?? catalog.items[0]!
   return {
     values: { themeId: selected.id, appAppearance: config.appearance.appAppearance ?? 'dark', theme: selected.value,
-      terminalPalette: terminalPalette(config.appearance.terminalTheme) } as AgentMuxControlSettingsResourceFields,
+      terminalTheme: config.appearance.terminalTheme,
+      ...(config.appearance.terminalTheme === 'workspace' ? {} : { terminalPalette: terminalPalette(config.appearance.terminalTheme) }) } as AgentMuxControlSettingsResourceFields,
     issues: [...catalog.issues.filter(issue => issue.id === requested), ...(selected.id === requested ? [] : [
       { id: requested, message: 'Selected theme is unavailable. Graphite remains usable; choose or import a valid theme in Appearance.' }
     ])]
