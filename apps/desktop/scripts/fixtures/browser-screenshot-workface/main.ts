@@ -375,6 +375,9 @@ async function advancedAnnotationEdits() {
   const savedCorner = document.shapes.find((shape: any) => shape.kind === 'rect').to
   assert.ok(Math.abs(savedCorner.x - to.x - 100) < .001 && Math.abs(savedCorner.y - to.y - 60) < .001,
     'Actual saved resize retains its trusted pointer endpoint in original pixels')
+  const savedHeaderStatus = await evaluate('document.querySelector(".image-annotation-editor__header [role=status]")?.textContent')
+  assert.equal(savedHeaderStatus, 'Original saved', 'Actual save completion must replace the earlier PNG copy feedback')
+  receipt.savedHeaderStatus = savedHeaderStatus
   await shot('advanced-edits-saved-original')
   await click('Cancel', true); await closed('saved-original-cancel')
   const captureCount = receipt.captures.length

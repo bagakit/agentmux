@@ -129,6 +129,31 @@ describe('Browser annotation host save and reopen consumers', () => {
     expect(write).toHaveBeenCalledTimes(2); expect(captured).toHaveBeenCalledTimes(1)
   })
 
+  it.each(['written', 'unknown'] as const)('shows the current save status after Copy PNG without changing the document or retrying (%s)', async status => {
+    const pending = deferred<Awaited<ReturnType<typeof api.files.write>>>()
+    write.mockReturnValueOnce(pending.promise)
+    await mount(); const opened = await beginCapture()
+    await click(opened, 'Copy PNG')
+    expect(opened.querySelector('[role="status"]')!.textContent).toBe('PNG copied')
+    expect(api.ui.writeClipboardImage).toHaveBeenCalledExactlyOnceWith(image)
+    await click(opened, 'Save original'); await submit()
+    expect(write).toHaveBeenCalledOnce()
+    expect(opened.querySelector('[role="status"]')!.textContent, 'pending save must replace the earlier copy feedback').toBe('Saving original…')
+    await act(async () => pending.resolve(status === 'written' ? { status, revision: 'confirmed-save-revision' }
+      : { status, code: 'REPLY_LOST', message: 'Write acknowledgement unknown' })); await frame()
+    expect(opened.querySelector('[role="status"]')!.textContent).toBe(status === 'written' ? 'Original saved' : 'Save unconfirmed · Edits kept')
+    expect(button(opened, 'Undo').disabled).toBe(true); expect(button(opened, 'Redo').disabled).toBe(true)
+    expect(JSON.parse(write.mock.calls[0]![1].content)).toEqual(createEditableAnnotationDocument({ image: annotationImage,
+      shapes: [], crop: null, source: capture.source }, ANNOTATION_DOCUMENT_LIMITS))
+    if (status === 'unknown') await click(dialog(), 'Cancel')
+    expect(editor()).toBe(opened)
+    expect(await copyContext()).toMatchObject({ source: capture.source, annotations: [] })
+    expect(opened.querySelector('[role="status"]')!.textContent).toBe('Context copied')
+    expect(fixture.compose).toHaveBeenCalledTimes(2); expect(clipboard).toHaveBeenCalledOnce()
+    expect(write).toHaveBeenCalledOnce(); expect(read).not.toHaveBeenCalled()
+    expect(captured).toHaveBeenCalledOnce()
+  })
+
   it('keeps a cancelled late file read and late image decode from replacing a later editor', async () => {
     await mount(); const originalEditor = await beginCapture()
     const pending = deferred<Awaited<ReturnType<typeof api.files.read>>>()
