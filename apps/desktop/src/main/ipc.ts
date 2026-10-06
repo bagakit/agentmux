@@ -25,6 +25,7 @@ import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from 
 import { homedir } from 'node:os'
 import { FileUploadOwner } from './file-upload-owner.js'
 import { GitPublicControl } from './git-public-control.js'
+import { NotebookObservationOwner } from './notebook-observation-owner.js'
 import { FileReadOwner } from './file-read-owner.js'
 import { HtmlFilePreviews } from './html-file-previews.js'
 import { FilePreviewResources } from './file-preview-resources.js'
@@ -1906,6 +1907,7 @@ export async function registerIpc(args: {
 
     schedules: args.progressLoops,
     notebookStore,
+    notebookObservation: new NotebookObservationOwner({ files, workspace: id => config.workspaces.find(item => item.id === id) }),
     goalDelegations,
     coreClients: () => args.runtime.rpcClients(),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),

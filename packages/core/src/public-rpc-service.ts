@@ -9,6 +9,7 @@ import { DeliveryAttemptStore } from './delivery-attempt-store.js'
 import { parseDeliveryAttempt, validateDeliveryLogId, type DeliveryAttemptLookup } from './delivery-attempt.js'
 import { parseAgentContextParams, readAgentContext, forwardAgentContextParams, forwardAgentContextPage } from './agent-context.js'
 
+import { parseNotebookObservationParams, type NotebookObservationPort } from './notebook-observation.js'
 import { inspectNotebook } from './notebook-catalog.js'
 import { AgentMuxNotebookStore } from './notebook-store.js'
 import { normalizeMessageChannel } from './message-origin.js'
@@ -81,6 +82,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   /** Original semantic owner identity; never ctxmux identity or a route alias. */
   diagnosticCoreAuthority?(scope: AgentMuxRpcCoreClient): import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation | Promise<import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation>
   notebookStore?: AgentMuxNotebookStore
+  notebookObservation?: NotebookObservationPort
   files?: AgentMuxRpcFilesOwner
   git?: AgentMuxRpcGitOwner
   fileUploads?: AgentMuxRpcFileUploadsOwner
@@ -133,7 +135,7 @@ const NATIVE_FIELDS = {
   'goal.delegation.prepare': ['goalId', 'intent', 'materials'], 'goal.delegation.bind': ['goalId', 'intent'], 'goal.delegate': ['goalId', 'intent', 'materials'],
   'goal.report': ['goalId', 'operationId', 'report'], 'goal.collect': ['goalId', 'operationId', 'collection'], 'goal.delegations': ['goalId'],
   'settings.appearance.watch': [],
-  'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId'], 'notebook.apply': ['expectedRevision','operationId','change'],
+  'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId','content','maxBytes'], 'notebook.graph': ['notebookId','noteId','maxBytes'], 'notebook.apply': ['expectedRevision','operationId','change'],
   'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval','removedProjectGroupIds'],
   'space.resolve': ['tabId','regionId','direction'],
   'name.history': ['target','afterId','limit'],
@@ -764,7 +766,18 @@ export class AgentMuxRpcService {
     rpcRecord(p, fields)
     switch (method) {
       case 'notebook.ls': result = {state:await this.notebooks.read()}; break
-      case 'notebook.inspect': result = { ...inspectNotebook(await this.notebooks.read(), p), ...(this.notebooks.storage ? { storageOperation: (await this.notebooks.storage.inspect(p.operationId ? String(p.operationId) : undefined)).operation } : {}) }; break
+      case 'notebook.inspect': {
+        const input = parseNotebookObservationParams(p, true), state = await this.notebooks.read()
+        result = { ...inspectNotebook(state, input), ...(this.notebooks.storage ? { storageOperation: (await this.notebooks.storage.inspect(input.operationId)).operation } : {}),
+          ...(input.content ? { content: this.ports.notebookObservation
+            ? await this.ports.notebookObservation.content(state, input.noteId!, { ...(input.maxBytes === undefined ? {} : { maxBytes: input.maxBytes }), ...(context.signal ? { signal: context.signal } : {}) })
+            : (() => { throw new AgentMuxError('The original Host Note reader is unavailable. Directory and Agent capabilities remain available; retry this observation when the Host reconnects.', 'CONTROL_UNAVAILABLE') })() } : {}) }; break
+      }
+      case 'notebook.graph': {
+        const input = parseNotebookObservationParams(p)
+        if (!this.ports.notebookObservation) throw new AgentMuxError('The original Host Note graph reader is unavailable. Directory and Agent capabilities remain available; retry this observation when the Host reconnects.', 'CONTROL_UNAVAILABLE')
+        result = await this.ports.notebookObservation.graph(await this.notebooks.read(), input, context.signal ? { signal: context.signal } : undefined); break
+      }
       case 'notebook.apply': {
         const actor:import('./notebook-catalog.js').NotebookActor|undefined=caller?{kind:'agent',id:caller.agentSessionId}:context.principal?{kind:context.principal.kind,id:context.principal.id}:undefined
         if(!actor)throw new AgentMuxError('Notebook writing requires the authenticated original user, device or Agent. Knowledge and Runs are retained.', 'CONTROL_PERMISSION_DENIED')

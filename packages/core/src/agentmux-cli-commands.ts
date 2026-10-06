@@ -1,3 +1,4 @@
+import { parseNotebookObservationParams } from './notebook-observation.js'
 import { parseMoteAvatarWriteParams } from './mote-avatar-write.js'
 import { parseMoteAvatarSeriesParams } from './mote-avatar-series.js'
 import { parseDiagnosticEvidenceParams } from './diagnostic-evidence-codec.js'
@@ -170,8 +171,10 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   ...Object.values(AGENTMUX_SCHEDULE_CLI_COMMANDS),
   empty('notebook.ls', 'Read the durable Notebook and Note directory without opening an App or a page.'),
-  command('notebook.inspect', '(--notebook ID|--note ID|--operation-id ID)', 'Read an exact Notebook, Note source/history or original knowledge operation.',
-    { '--notebook':'data','--note':'data',...OP }, f => { const selected=one(f,['--notebook','--note','--operation-id'],'Inspect');return {[selected==='--notebook'?'notebookId':selected==='--note'?'noteId':'operationId']:id(f,selected)} }),
+  command('notebook.inspect', '(--notebook ID|--note ID|--operation-id ID) [--content] [--max-bytes N]', 'Read the original directory/history; --note ID --content also reads the exact saved Note body and revision.',
+    { '--notebook':'data','--note':'data','--content':'boolean','--max-bytes':'value',...OP }, f => { const selected=one(f,['--notebook','--note','--operation-id'],'Inspect'); return parseNotebookObservationParams({[selected==='--notebook'?'notebookId':selected==='--note'?'noteId':'operationId']:id(f,selected), ...(f.booleans.has('--content') ? {content:true} : {}), ...(value(f,'--max-bytes') !== undefined ? {maxBytes:Number(value(f,'--max-bytes',true))} : {})}, true) }),
+  command('notebook.graph', '(--all|--notebook ID|--note ID) [--max-bytes N]', 'Derive hierarchy, block references, embeds and incoming sources from the durable catalog and original files; report every unread or ambiguous source.',
+    { '--all':'boolean','--notebook':'data','--note':'data','--max-bytes':'value' }, f => { const selections=['--all','--notebook','--note'].filter(name=>f.values.has(name)||f.booleans.has(name));if(selections.length!==1)invalid('Graph requires exactly one of --all, --notebook or --note.');const selected=selections[0]!;return parseNotebookObservationParams({ ...(selected==='--all'?{}:selected==='--notebook'?{notebookId:id(f,selected)}:{noteId:id(f,selected)}), ...(value(f,'--max-bytes') !== undefined ? {maxBytes:Number(value(f,'--max-bytes',true))} : {})}) }),
   command('notebook.apply', '--revision N --operation-id ID --change-json JSON', 'Apply one typed knowledge change, including self follow/unfollow with only kind and noteId, archive/restore and Notebook deletion; preserve original Note bodies and reconcile the same operation after a lost response.',
     { '--revision':'value','--change-json':'data',...OP }, f => {
       const expectedRevision=Number(value(f,'--revision',true));if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0)invalid('Revision must be a nonnegative integer.')

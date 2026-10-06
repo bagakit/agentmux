@@ -1,3 +1,4 @@
+import { AGENTMUX_NOTE_GUIDE } from './agentmux-cli-note-guide.js'
 import { AGENTMUX_CLI_COMMANDS, type AgentMuxCliCommand } from './agentmux-cli-commands.js'
 import { AGENTMUX_BROWSER_PROGRAM_GUIDE, AGENTMUX_BROWSER_TASK_GUIDE, AGENTMUX_BROWSER_TARGET_GUIDE } from './agentmux-cli-browser-guide.js'
 import { browserPageCapabilityNames } from './browser-page-capability.js'
@@ -230,7 +231,8 @@ export function agentMuxCommandHelp(path: string): string | null {
   const selected = entries(path)
   if (!selected.length) return null
   const exact = selected.find(entry => entry.method === path)
-  const guide = path === 'device' || path.startsWith('device.') ? DEVICE_GUIDE
+  const guide = path === 'notebook' || path.startsWith('notebook.') ? AGENTMUX_NOTE_GUIDE
+    : path === 'device' || path.startsWith('device.') ? DEVICE_GUIDE
     : path === 'git' || path.startsWith('git.') ? GIT_GUIDE
     : path === 'agent.native' || path.startsWith('agent.native.') ? NATIVE_RESUME_GUIDE
     : path === 'agent.open' ? `${SPATIAL_GUIDE}\n\n${NATIVE_RESUME_GUIDE}`
@@ -264,6 +266,8 @@ ${list(AGENTMUX_CLI_COMMANDS)}
 ${COMMON}
 
 ${SPATIAL_GUIDE}
+
+${AGENTMUX_NOTE_GUIDE}
 
 ${NATIVE_RESUME_GUIDE}
 

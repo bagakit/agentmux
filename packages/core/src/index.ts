@@ -106,3 +106,5 @@ export type { AgentMuxAppearanceObservation, AgentMuxAppearanceObservationPort }
 export * from './mote-avatar-series.js'
 
 export * from './mote-avatar-write.js'
+
+export * from './notebook-observation.js'
