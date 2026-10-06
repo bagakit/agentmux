@@ -141,3 +141,40 @@ it('keeps source coverage unconfirmed when the first original read is cancelled'
  expect(container.textContent).toContain('Search coverage is incomplete'); expect(container.textContent).not.toContain('0 / 0 source streams checked')
  expect(useAppStore.getState().agentComposerDrafts.OriginalSession).toBe('Original unsent draft')
 })
+
+it('clears only local filters while retaining the original expanded history and its coverage without another read', async () => {
+ await query('hidden needle'); await enter(); await settle()
+ const before = useAppStore.getState(), search = container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
+ const result = container.querySelector('[aria-label="History search results"]')!, hit = result.querySelector<HTMLDetailsElement>('.focus-history-hit')!
+ await act(async () => { hit.open = true; hit.dispatchEvent(new Event('toggle')) })
+ const body = hit.querySelector('[data-message-id]')!, coverage = result.querySelector('.focus-history-coverage')!.textContent
+ expect(body).not.toBeNull(); expect(coverage).toContain('2 / 2 source streams checked')
+ const reads = vi.mocked(api.search.query).mock.calls.length
+ const clear = container.querySelector<HTMLButtonElement>('.focus-project-lanes__clear')!
+ expect(clear).not.toBeNull()
+ await act(async () => { clear.focus(); clear.click() })
+ expect(search.value).toBe(''); expect(document.activeElement).toBe(search)
+ expect(container.querySelector('[aria-label="History search results"]')).toBe(result)
+ expect(hit.open).toBe(true); expect(hit.querySelector('[data-message-id]')).toBe(body)
+ expect(result.querySelector('.focus-history-coverage')!.textContent).toBe(coverage)
+ expect(result.textContent).toContain('hidden needle')
+ expect(vi.mocked(api.search.query)).toHaveBeenCalledTimes(reads)
+ expect(useAppStore.getState().sessions).toBe(before.sessions)
+ expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+ expect(container.querySelector('.focus-project-lanes__clear')).toBeNull()
+ await query('another local query')
+ expect(container.querySelector('[aria-label="History search results"]')).toBeNull()
+})
+
+it('keeps the original pending history request and its failure when local filters are reset', async () => {
+ let reject!: (error: Error) => void
+ const request = vi.spyOn(api.search, 'query').mockImplementation(() => new Promise((_, no) => { reject = no }))
+ await query('hidden needle'); await enter()
+ const clear = container.querySelector<HTMLButtonElement>('.focus-project-lanes__clear')!
+ await act(async () => clear.click())
+ expect(request).toHaveBeenCalledOnce()
+ await act(async () => { reject(new Error('Original history observation unavailable')) })
+ expect(container.querySelector('[aria-label="History search results"]')?.textContent).toContain('Original history observation unavailable')
+ expect(container.textContent).toContain('source coverage unconfirmed')
+ expect(container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!.value).toBe('')
+})
