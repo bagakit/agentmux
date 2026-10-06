@@ -30,6 +30,17 @@ export type AgentCapabilityBinding = {
   readonly capabilityHash: string
 }
 
+/** Scope CAS for an already authenticated invocation; a hash alone authenticates nobody. */
+export function assertCurrentAgentCapabilityBinding(expected: Readonly<AgentCapabilityBinding>, current: AgentCapabilityBinding | null): void {
+  if (!current || expected.runId === null || current.runId !== expected.runId ||
+      current.agentSessionId !== expected.agentSessionId || current.workspacePath !== expected.workspacePath) {
+    throw new AgentMuxError('The original message author Session/Run changed before input.', 'AGENT_CAPABILITY_STALE_RUN')
+  }
+  if (!sameHash(current.capabilityHash, expected.capabilityHash)) {
+    throw new AgentMuxError('The original message author capability changed before input.', 'AGENT_CAPABILITY_INVALID')
+  }
+}
+
 function sameHash(left: string, right: string): boolean {
   const a = Buffer.from(left)
   const b = Buffer.from(right)

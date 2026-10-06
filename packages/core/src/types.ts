@@ -1079,8 +1079,12 @@ export type AgentNativePromptInputPlan = Readonly<{
   sourceId: string
   actorId: string
   threadId: string
-  expectedTurnId: string
-}>
+} & (
+  /** Manual input authorizes the actor's atomic idle start or busy append. */
+  { operation: 'start-or-steer'; expectedTurnId?: never } |
+  /** Original exact-turn plans remain readable and joinable; never converted. */
+  { operation?: 'steer'; expectedTurnId: string }
+)>
 
 export type AgentMuxAgentSession = {
   kind: 'agent'

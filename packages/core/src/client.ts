@@ -48,7 +48,7 @@ import { judgeReconnectFlap, shouldClearFlapLedger } from './ctxmux-reconnect-bu
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { composeAgentLaunchPrompt, composeAgentPrompt } from './agent-outbound-message.js'
-import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor } from './agent-capability.js'
+import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor, type AgentCapabilityBinding } from './agent-capability.js'
 import { planDiscussion } from './agent-discussion.js'
 import {
   DurableAgentMuxMessageQueue,
@@ -1059,8 +1059,8 @@ export class AgentMuxClient {
       screenEvidence: this.screenEvidence,
       requireAgentSession: (agentSessionId) => this.requireAgentSession(agentSessionId),
       assertAgentRun: (session, run) => { this.assertAgentRun(session, run) },
-      updateExactAgentSession: (agentSessionId, expectedRun, update, futureIntentId) =>
-        this.updateExactAgentSession(agentSessionId, expectedRun, update, futureIntentId)
+      updateExactAgentSession: (agentSessionId, expectedRun, update, futureIntentId, author) =>
+        this.updateExactAgentSession(agentSessionId, expectedRun, update, futureIntentId, author)
     })
   }
 
@@ -3380,6 +3380,10 @@ export class AgentMuxClient {
     recipientSessionId: string | null
     recipientRunId: string | null
   }): Promise<void> {
+    await this.messageAuthorBinding(input)
+  }
+
+  private async messageAuthorBinding(input: Parameters<AgentMuxClient['authorizeAgentMessage']>[0]): Promise<Readonly<AgentCapabilityBinding>> {
     const sender = await this.currentStoredAgentSession(input.callerAgentSessionId)
     this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, sender)
     if (input.senderAgentSessionId !== sender.agentSessionId || input.senderSessionId === null || input.senderRunId === null || input.senderSessionId !== sender.agentSessionId || input.senderRunId !== sender.run.runId) {
@@ -3392,6 +3396,8 @@ export class AgentMuxClient {
     if (input.recipientRunId !== recipient.run.runId) {
       throw new AgentMuxError('A2A recipient facts do not match the resolved Agent Session/Run.', 'MESSAGE_RECIPIENT_MISMATCH')
     }
+    return Object.freeze({ agentSessionId: sender.agentSessionId, workspacePath: sender.workspacePath,
+      runId: sender.run.runId, capabilityHash: sender.capabilityHash ?? '' })
   }
 
   /** Explicit consumption is durable and recipient-scoped, independent of input or human reading. */
@@ -5011,7 +5017,8 @@ export class AgentMuxClient {
   }
 
   private async submitPromptInternal(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string,
-    assertSession?: (session: AgentMuxAgentSession) => void, questionReply = false, assertInput?: () => void): Promise<void> {
+    assertSession?: (session: AgentMuxAgentSession) => void, questionReply = false, assertInput?: () => void,
+    authority?: import('./prompt-submission.js').AgentPromptInputAuthority): Promise<void> {
     const startedAt = Date.now()
     const id = (value: unknown): string | null => typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\0\r\n]/u.test(value) ? value : null
     let sourceDevice: import('./types.js').AgentOperationDevice | undefined
@@ -5027,7 +5034,7 @@ export class AgentMuxClient {
     let stage = 'validation'
     try {
       assertInput?.()
-      await this.performPromptSubmission(input, authorAgentSessionId, assertSession, questionReply, value => { stage = value })
+      await this.performPromptSubmission(input, authorAgentSessionId, assertSession, questionReply, value => { stage = value }, authority)
     } catch (error) {
       // All observations below come from this invocation's failure boundary. Missing
       // projections stay missing; they do not authorize replay of the logical message.
@@ -5062,7 +5069,8 @@ export class AgentMuxClient {
   }
 
   private async performPromptSubmission(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string,
-    assertSession?: (session: AgentMuxAgentSession) => void, questionReply = false, stage: (value: string) => void = () => {}): Promise<void> {
+    assertSession?: (session: AgentMuxAgentSession) => void, questionReply = false, stage: (value: string) => void = () => {},
+    authority?: import('./prompt-submission.js').AgentPromptInputAuthority): Promise<void> {
     stage('connection')
     this.requireConnected()
     stage('validation')
@@ -5070,7 +5078,7 @@ export class AgentMuxClient {
       throw new AgentMuxError('Prompt execution intent is invalid.', 'INVALID_AGENT_PROMPT')
     }
     if (input.execution === 'immediate' && (input.expectedCompletionId !== undefined || input.expectedFutureIntent !== undefined)) {
-      throw new AgentMuxError('Automatic admission cannot authorize native interruption.', 'INVALID_AGENT_PROMPT')
+      throw new AgentMuxError('Automatic admission cannot authorize immediate manual input.', 'INVALID_AGENT_PROMPT')
     }
     if (input.preparationRetry && (typeof input.preparationRetry !== 'object' || Array.isArray(input.preparationRetry) ||
         Object.keys(input.preparationRetry).some(key => key !== 'inputByte' && key !== 'nativeSourceId') ||
@@ -5140,12 +5148,12 @@ export class AgentMuxClient {
           }
         }
         stage('input-coordination')
-        // Native uses its atomic expected-turn guard and the same durable prompt
-        // claim. It neither writes PTY bytes nor holds the Raw input lane while a
+        // Native atomically starts or appends on the original thread using the
+        // same durable prompt claim. It does not hold the Raw input lane while a
         // Native reply is pending; Raw remains available after a lost Native ACK.
         const currentRun = await this.requireCurrentAgentRun(session)
         const delivered = await this.promptSubmission.submitNativeInputPlan(session, currentRun,
-          operationId, outbound, condition, message, input.execution ?? 'default', prepared, input.signal, assertSession)
+          operationId, outbound, condition, message, input.execution ?? 'default', prepared, input.signal, assertSession, authority)
         stage('receipt')
         await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered)
       } finally {
@@ -5280,11 +5288,19 @@ export class AgentMuxClient {
       throw new AgentMuxError('Message recipient does not match its exact prompt intent.', 'MESSAGE_RECIPIENT_MISMATCH')
     }
     let authorAgentSessionId: string | undefined
+    let authority: import('./prompt-submission.js').AgentPromptInputAuthority | undefined
     if (envelope.sender.kind === 'agent-session') {
       if (!input.caller?.capability) throw new AgentMuxError('Managed message capability is required.', 'AGENT_CAPABILITY_INVALID')
-      await this.authorizeAgentMessage({ capability: input.caller.capability, callerAgentSessionId: input.caller.agentSessionId,
+      const authorInput = { capability: input.caller.capability, callerAgentSessionId: input.caller.agentSessionId,
         senderAgentSessionId: envelope.sender.agentSessionId, senderSessionId: envelope.senderSessionId,
-        senderRunId: envelope.senderRunId, recipientSessionId: envelope.recipientSessionId, recipientRunId: envelope.recipientRunId })
+        senderRunId: envelope.senderRunId, recipientSessionId: envelope.recipientSessionId, recipientRunId: envelope.recipientRunId }
+      const binding = await this.messageAuthorBinding(authorInput)
+      authority = { binding, assertCurrent: async () => {
+        await this.messageAuthorBinding(authorInput)
+        const sender = await this.currentStoredAgentSession(binding.agentSessionId)
+        const run = await this.requireCurrentAgentRun(sender)
+        if (run.state.type !== 'running') throw new AgentMuxError('The original message author Run is not running.', 'AGENT_CAPABILITY_STALE_RUN')
+      } }
       authorAgentSessionId = envelope.senderSessionId!
     } else if (input.caller || envelope.senderSessionId !== null || envelope.senderRunId !== null) {
       throw new AgentMuxError('Local ingress cannot claim an Agent author.', 'MESSAGE_SENDER_MISMATCH')
@@ -5298,7 +5314,8 @@ export class AgentMuxClient {
     await this.submitPromptInternal({ ...originalCondition, agentSessionId: input.agentSessionId,
       operationId: envelope.messageId, prompt: renderAgentMuxMessageEnvelope(envelope), allowUncertainTurn: true,
       ...(envelope.sender.kind === 'human' ? { authorHuman: true } : {}),
-      ...(queued.sourceChannel ? { sourceChannel: queued.sourceChannel } : {}), ...(queued.sourceDevice ? { sourceDevice: queued.sourceDevice } : {}), ...(input.execution === undefined ? {} : { execution: input.execution }) }, authorAgentSessionId)
+      ...(queued.sourceChannel ? { sourceChannel: queued.sourceChannel } : {}), ...(queued.sourceDevice ? { sourceDevice: queued.sourceDevice } : {}), ...(input.execution === undefined ? {} : { execution: input.execution }) }, authorAgentSessionId,
+      undefined, false, undefined, authority)
     await this.messageQueue.recordDelivery(envelope.messageId, 'delivered')
   }
 
@@ -6591,17 +6608,18 @@ export class AgentMuxClient {
     agentSessionId: string,
     expectedRun: AgentMuxRunRef,
     update: (current: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession,
-    futureIntentId?: string
+    futureIntentId?: string,
+    author?: Readonly<AgentCapabilityBinding>
   ): Promise<AgentMuxStoredAgentSession> {
     try {
-      return await this.registry.update(agentSessionId, expectedRun, update, undefined, futureIntentId)
+      return await this.registry.update(agentSessionId, expectedRun, update, undefined, futureIntentId, author)
     } catch (error) {
       if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
       const canonical = await this.registry.refresh(agentSessionId, expectedRun)
       if (!sameRun(canonical.run, expectedRun)) {
         throw new AgentMuxError('Agent Session changed while semantic state was persisted.', 'STALE_AGENT_SESSION')
       }
-      return await this.registry.update(agentSessionId, expectedRun, update, undefined, futureIntentId)
+      return await this.registry.update(agentSessionId, expectedRun, update, undefined, futureIntentId, author)
     }
   }
 
