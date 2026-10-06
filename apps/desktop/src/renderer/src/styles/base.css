@@ -112,16 +112,8 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .boot small { color: var(--neutral-2); font-size: var(--fs-micro); }
 .boot--error > svg { color: var(--red); }
 .boot--error > span { width: min(620px, calc(100vw - 48px)); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; text-align: center; }
-.main-shell__notices { min-width: 0; display: flex; flex-direction: column; gap: var(--sp-2); padding: 0 var(--sp-4) var(--sp-3); }
-.main-shell__notices:empty { display: none; }
-.remote-core-upgrade-notices { display: grid; gap: var(--sp-2); max-height: min(34vh, 18rem); overflow-y: auto; }
-.remote-core-upgrade-notices .service-window { margin: 0; grid-template-columns: auto minmax(0, 1fr) auto; }
-.remote-core-upgrade-notices .small-button { align-self: start; }
-@media (max-width: 760px) {
-  .remote-core-upgrade-notices .service-window { grid-template-columns: auto minmax(0, 1fr); }
-  .remote-core-upgrade-notices .small-button { grid-column: 2; justify-self: start; }
-}
 .global-system-notices { flex: none; margin-left: auto; }
+.global-system-notices__announcement { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .global-system-notices__trigger { display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; anchor-name: --global-system-notices; }
 .global-system-notices__trigger:hover { color: var(--text); background: var(--surface-2); }
 .global-system-notices__trigger[data-unread="true"] > svg { color: var(--amber); }
@@ -130,20 +122,22 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .global-system-notices__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); font-size: var(--fs-meta); }
 .global-system-notices__details .service-window { margin: 0; padding: var(--sp-2) 0; border: 0; background: transparent; box-shadow: none; }
 .global-system-notices__details .service-window__body { overflow-wrap: anywhere; }
-.global-system-notices__item + .global-system-notices__item { border-top: 1px solid var(--line-soft); }
-.global-system-notices__action { display: block; margin-left: auto; }
-.error-notice { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-soft), var(--hl); font-size: var(--fs-micro); line-height: 1.45; }
-.error-notice[data-volume="assertive"] { color: var(--red-text); background: var(--red-bg); box-shadow: inset 0 0 0 1px var(--red-line), var(--hl); }
-.error-notice > span { min-width: 0; overflow-wrap: anywhere; }
-.error-notice__body { min-width: 0; overflow-wrap: anywhere; }
-.error-notice__details { max-height: min(30vh, 240px); overflow-y: auto; }
-.error-notice__original { white-space: pre-wrap; }
-.error-notice__close { width: 24px; height: 24px; margin: calc(var(--sp-1) * -1) calc(var(--sp-2) * -1) 0 0; color: inherit; }
-.error-notice__close:hover { color: var(--text); background: var(--surface-3); }
-.error-notice[data-volume="assertive"] .error-notice__close:hover { color: var(--red-text); background: color-mix(in srgb, var(--red) 16%, transparent); }
-.error-notice__reopen { align-self: flex-end; display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; }
-.error-notice__reopen:hover { color: var(--text); background: var(--surface-2); }
-.error-notice__reopen[data-volume="assertive"]:hover { color: var(--red-text); background: var(--red-bg); }
+.global-system-notices__section { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin: var(--sp-3) 0 var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; }
+.global-system-notices__section h3 { margin: 0; font: inherit; }
+.global-system-notices__section span { margin-left: var(--sp-1); font-variant-numeric: tabular-nums; }
+.notification-item { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3) 0; border-bottom: 1px solid var(--line-soft); font-size: var(--fs-micro); line-height: 1.5; }
+.notification-item__icon { flex: none; margin-top: 2px; color: var(--amber); }
+.notification-item[data-kind="agent-broken"] .notification-item__icon { color: var(--red-text); }
+.notification-item__body { flex: 1; min-width: 0; }
+.notification-item__title { display: block; color: var(--text); font-size: var(--fs-micro); font-weight: 500; overflow-wrap: anywhere; }
+.notification-item__controls { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; column-gap: var(--sp-2); margin-top: var(--sp-1); }
+.notification-item__details { flex: 1; min-width: 0; }
+.notification-item__details > summary { width: fit-content; color: var(--text-3); cursor: pointer; }
+.notification-item__details > summary:hover { color: var(--text); }
+.notification-item__original { padding-top: var(--sp-2); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.notification-item__original p { margin: 0 0 var(--sp-2); }
+.notification-item__original > span { display: block; margin-top: var(--sp-1); }
+.notification-item__action { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .danger-button { display: inline-flex; align-items: center; justify-content: center; gap:var(--sp-2); padding:var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--bg); background: linear-gradient(180deg, var(--red-text), var(--red)); font-size: var(--fs-meta); font-weight: 620; box-shadow: var(--elev-1), var(--hl-strong); cursor: pointer; transition: background var(--dur-fast) ease; }
 .danger-button:hover:not(:disabled) { background: linear-gradient(180deg, var(--red-text), var(--red-text)); }
 .danger-button:active:not(:disabled) { background: var(--red); box-shadow: inset 0 1px 3px var(--scrim-1); }

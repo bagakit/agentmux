@@ -1699,7 +1699,7 @@ export function TerminalView({
   //
   // 提示走 reportError 那一个瞬时槽，而不是新起一个服务窗：服务窗承载「这个 Session 现在处于某个
   // 降级状态」这类持续事实，会一直挂着；而「刚才那次点击没取到内容」是一次**事件**，说完就该让位。
-  // 两个面已经共用 serviceNoticeAriaLive 这一条严重度轴（见 TransientErrorNotice 文件头），
+  // 两个面已经共用 serviceNoticeAriaLive 这一条严重度轴（见 NotificationItem），
   // 不带 kind 时落在 polite/status 档——看得见，不喊。
   // 两条路各自 dispatch 一次，**不抽一个共用的 deliverCopy**：那样 copyTextToClipboard 就从两个
   // handler 里搬走了，而 wiring 那道门正是按「这一处落在哪个绑定上」判投递的，抽走即失守。

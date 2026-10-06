@@ -1,10 +1,11 @@
 import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { autoUpdate, computePosition, offset, shift, size, type VirtualElement } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useAppStore } from '../store'
-import { useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
+import { notificationEventIdentity, useAppStore } from '../store'
+import { useReadReceipts, useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
 import { selectDisplacedAgentNotices, displacedAgentStepOutcome } from '../lib/control-spatial-commit'
-import { classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
+import { classifyServiceNotice, serviceNoticeToRender, serviceNoticeAriaLive } from '../lib/service-window-notice'
+import { NotificationItem } from './NotificationItem'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { runServiceProjection, useRunServiceHealthChanges } from '../lib/run-service-projection'
@@ -44,6 +45,18 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const nameEditFailure = useAppStore(state => state.nameEditFailure)
   const reviewNameEdit = useAppStore(state => state.reviewNameEdit)
   const desktopNavigationNotice = useAppStore(state => state.desktopNavigationNotice)
+  const events = useAppStore(state => state.notificationEvents)
+  const currentError = useAppStore(state => state.error)
+  const errorDismissed = useAppStore(state => state.errorDismissed)
+  const errorContext = useAppStore(state => state.errorNoticeContext)
+  const clearReadEvents = useAppStore(state => state.clearReadNotificationEvents)
+  // This append-only event producer has no complete startup snapshot. Keep read identities across restarts.
+  const eventInbox = useReadReceipts('global:events', Object.fromEntries(events.map(event => [event.id, event.id])), !loading, false)
+  const currentErrorInbox = useServiceNotices('global:workflow', currentError && (!errorDismissed || errorContext?.cause || errorContext?.startupSessionSnapshot || errorContext?.startupProviderCatalog) && !errorContext?.lifecycle &&
+    !events.some(event => event.id === notificationEventIdentity(currentError, errorContext)) ? [{ id: 'current', cause: notificationEventIdentity(currentError, errorContext), notice: {
+      kind: 'indeterminate', notice: { step: errorContext?.summary ?? 'Operation needs attention',
+        mode: currentError, restore: 'Review the original operation before retrying.' }
+    } }] : [], !loading)
   const id = useId()
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -154,9 +167,10 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       restore: 'Close and reopen the floating panel. Existing Browser pages and Agents remain available.'
     } }
   }] : [], true)
-  const inboxes = [environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox]
+  const inboxes = [environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox, currentErrorInbox]
   const notices = inboxes.flatMap((inbox) => inbox.notices)
-  const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, 0)
+  const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, eventInbox.unread.length)
+  const count = notices.length + events.length
   const available = inboxes.every((inbox) => inbox.available)
   const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
   const releaseNativeSurfaceOverlay = useAppStore((state) => state.releaseNativeSurfaceOverlay)
@@ -168,37 +182,60 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     }
   }, [open, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
   useEffect(() => {
-    if (open) for (const inbox of inboxes) if (inbox.unread.length) inbox.acknowledge(inbox.unread)
-  }, [open, environmentInbox, ownershipInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox])
+    if (!open) return
+    for (const inbox of inboxes) if (inbox.unread.length) inbox.acknowledge(inbox.unread)
+    if (eventInbox.unread.length) eventInbox.acknowledge(eventInbox.unread)
+  }, [open, environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox, currentErrorInbox, eventInbox])
+  const readEvents = events.length - eventInbox.unread.length
+  const recentEvents = [...events].reverse()
+  const unreadEventIds = new Set(eventInbox.unread)
+  const latestUnreadEvent = recentEvents.find(event => unreadEventIds.has(event.id))
+  const liveVolume = serviceNoticeAriaLive(latestUnreadEvent?.context?.kind ?? 'indeterminate')
+  function navigationAction(action: NonNullable<ServiceNoticeItem['action']>) {
+    return { label: action.label, run() { action.run(); detailsRef.current?.hidePopover?.() } }
+  }
   return <div className="global-system-notices">
+    <span className="global-system-notices__announcement" role={liveVolume === 'assertive' ? 'alert' : 'status'} aria-live={liveVolume}>
+      {latestUnreadEvent ? `${latestUnreadEvent.context?.summary ?? Array.from(latestUnreadEvent.message.replace(/\s+/g, ' ')).slice(0, 100).join('')}. Review system notifications for details.` : ''}
+    </span>
     <button ref={triggerRef} type="button" className="global-system-notices__trigger" data-unread={unread > 0}
-      aria-label={`System notifications: ${unread} unread, ${notices.length} current`}
+      aria-label={`System notifications: ${unread} unread, ${notices.length} current, ${events.length} recent events`}
       aria-expanded={open} aria-controls={id} title="System notifications"
       popoverTarget={id} popoverTargetAction="toggle">
       <ThemeObjectNotificationsIcon size={14} aria-hidden="true" />
-      {notices.length ? <span aria-hidden="true">{notices.length}</span> : null}
+      {unread ? <span aria-hidden="true">{unread}</span> : null}
       {unread ? <ThemeStatusUnreadIcon size={5} className="global-system-notices__dot" aria-hidden="true" /> : null}
     </button>
     <div ref={detailsRef} id={id} popover="auto" className="global-system-notices__details" aria-label="System notifications"
       data-state={open ? 'open' : 'closed'}
-      onToggle={(event) => setOpen(event.newState === 'open')}>
+      onToggle={(event) => { if (event.target === event.currentTarget) setOpen(event.newState === 'open') }}>
       <div className="global-system-notices__heading">
         <strong>System notifications</strong>
         <button type="button" className="icon-button" aria-label="Collapse system notifications" title="Collapse system notifications"
           popoverTarget={id} popoverTargetAction="hide"><ThemeLayoutCollapseIcon size={14} /></button>
       </div>
+      {notices.length ? <h3 className="global-system-notices__section">Current issues <span>{notices.length}</span></h3> : null}
       {inboxes.map((inbox, index) => <div key={index}>
-        {inbox.notices.map((item) => <div key={item.id} className="global-system-notices__item">
-          <ServiceWindowNotice notice={item.notice} {...(item.summary ? { summary: item.summary } : {})} {...(inbox === storageInbox && item.id === 'workbench-save' ? { summary: {
-            step: 'Saving the workbench is unconfirmed',
-            mode: 'Your window was kept. Agent input was not disabled by this save request.',
-            restore: 'Restore storage access, then retry saving before quitting or updating.'
-          } } : {})} />
-          {item.action ? <button type="button" className="small-button global-system-notices__action" onClick={item.action.run}
-            popoverTarget={id} popoverTargetAction="hide">{item.action.label}</button> : null}
-        </div>)}
+        {inbox.notices.map((item) => <NotificationItem key={item.id} noticeId={item.id} kind={item.notice.kind}
+          title={item.summary?.step ?? item.notice.notice.step}
+          detail={[item.notice.notice.step, item.notice.notice.mode, item.notice.notice.restore].join('\n')}
+          {...(item.action ? { action: navigationAction(item.action) } : {})}>
+          <ServiceWindowNotice notice={item.notice} />
+        </NotificationItem>)}
       </div>)}
-      {!available ? <p>Waiting for Runtime status.</p> : notices.length === 0 ? <p>No current system notices.</p> : null}
+      {events.length ? <div className="global-system-notices__section">
+        <h3>Recent events <span>{events.length}</span></h3>
+        {readEvents ? <button type="button" className="small-button" onClick={clearReadEvents}>Clear read events</button> : null}
+      </div> : null}
+      {recentEvents.map(event => {
+        const subject = event.context?.subject
+        const session = subject?.kind === 'agent' ? sessions.find(session => session.id === subject.agentSessionId && session.hostId === subject.hostId) : undefined
+        return <NotificationItem key={event.id} eventId={event.id} kind={event.context?.kind ?? 'indeterminate'}
+          title={event.context?.summary ?? (event.context?.kind === 'agent-broken' ? `${session?.label ?? 'Agent'} stopped unexpectedly` : event.message)}
+          detail={event.message}
+          {...(session ? { action: navigationAction({ label: `Open ${session.label}`, run: () => { void selectSession(session.id) } }) } : {})} />
+      })}
+      {!available ? <p>Waiting for Runtime status.</p> : count === 0 ? <p>No system notifications.</p> : null}
     </div>
   </div>
 }
