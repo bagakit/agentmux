@@ -47,7 +47,7 @@ export function mountThemeRuntime(host: Window = window, initial: ThemeSelection
           })
         })
       }
-      updateIconSprite(host.document, resolved.value)
+      updateIconSprite(host.document, resolved.value, resolved.variant.colors.text)
       root.dataset.theme = resolved.id
       root.dataset.appearance = resolved.mode
       root.style.colorScheme = resolved.mode

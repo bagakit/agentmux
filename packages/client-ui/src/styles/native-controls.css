@@ -11,3 +11,10 @@ summary { list-style: none; }
 summary::-webkit-details-marker { display: none; }
 summary:not(:has([data-semantic-icon]))::before { content: ''; display: inline-block; width: 12px; height: 12px; flex: none; margin-right: 4px; background: currentColor; mask: var(--native-disclosure-mask) center / contain no-repeat; vertical-align: -1px; }
 details[open] > summary:not(:has([data-semantic-icon]))::before { transform: rotate(90deg); }
+
+/* Native single-selection menus retain their option/keyboard owner. The root supplies a literal
+   colored bitmap from the same control.select-open geometry and this resolved variant's text.
+   Background longhands resist per-surface background shorthand resets without changing fills. */
+select:not([multiple]):is(:not([size]), [size="1"]) { appearance: none; padding-inline-end: 28px !important; background-image: var(--native-select-open-image) !important; background-position: right 8px center !important; background-repeat: no-repeat !important; background-size: 14px 14px !important; }
+select:not([multiple]):is(:not([size]), [size="1"]):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+select:not([multiple]):is(:not([size]), [size="1"]):disabled { opacity: .55; }
