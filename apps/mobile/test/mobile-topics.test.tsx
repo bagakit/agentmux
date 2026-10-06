@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import './mobile-lan-crypto.setup'
 import { act, type ReactNode } from 'react'
@@ -44,7 +45,7 @@ async function input(value: HTMLInputElement | HTMLTextAreaElement, text: string
 }
 const category = { categoryId: 'category-original', title: '原分类', hostId: 'host', spaceId: 'category-space', directoryPath: fixturePath("category"), revision: 'category-revision' }
 const topic = { topicId: 'view:original', title: '同名 Topic', summary: '原一句说明', hostId: 'host', zoneId: 'zone-exact', directoryPath: fixturePath("topic"), categorySpaceIds: ['category-space'], chatIds: ['tab-second', 'tab-first'], spatialRevision: 17 }
-const knowledge: TopicKnowledge = { topicId: topic.topicId, entryId: '11111111-1111-4111-8111-111111111111', title: '原知识', content: '# 原正文\n\n完整内容', form: 'reference', certainty: 'fact', revision: 'sha256:' + '1'.repeat(64), updatedAt: 123,
+const knowledge: TopicKnowledge = { topicId: topic.topicId, entryId: '11111111-1111-4111-8111-111111111111', title: '原知识', content: '# 原正文\n\n完整内容', form: 'reference', certainty: 'fact', revision: 'sha256:' + '1'.repeat(64), updatedAt: _reshape_fixtureEpoch(0, 0, 123),
   sources: [{ kind: 'survey', zoneId: 'other-zone', tabId: 'other-tab', regionId: 'other-region' }, { kind: 'note', noteId: 'note-original', blockId: 'block-original' }] }
 function rpcMock(implementation: (method: string, params: any) => Promise<unknown>) { return vi.fn(implementation) as unknown as TopicsRpc }
 
@@ -138,13 +139,15 @@ describe('original Topic mobile consumers', () => {
     const { element } = await mount(<MobileTopicsSurface initialContext={{ categoryId: category.categoryId, topicId: 'view:pending', mode: 'discussion' }} onContextChange={report} rpc={rpc} onBackChange={back} onOpenTopic={vi.fn()} renderWorkface={() => null} openSource={vi.fn()} />)
     await act(async () => back.mock.calls.at(-1)![0]())
     await act(async () => resolve({ topic: { ...topic, topicId: 'view:pending', title: '迟到 Topic' }, unavailable: [] }))
-    expect(element.querySelector('header h1')?.textContent).toBe(category.title)
+    expect(element.querySelector('header h1')?.textContent).toBe('Topics')
+    expect(element.querySelector('header small')?.textContent).toBe(category.title)
     expect(report).toHaveBeenLastCalledWith({ categoryId: category.categoryId, topicId: null, mode: 'discussion' })
     await click(button(element, '新建 Topic'))
     const title = element.querySelector<HTMLInputElement>('[aria-label="分类或 Topic 名称"]')!
     await input(title, '准确分类上的未保存管理草稿')
     await act(async () => back.mock.calls.at(-1)![0]())
-    expect(element.querySelector('header h1')?.textContent).toBe(category.title)
+    expect(element.querySelector('header h1')?.textContent).toBe('Topics')
+    expect(element.querySelector('header small')?.textContent).toBe(category.title)
     await click(button(element, '继续管理草稿'))
     expect(element.querySelector<HTMLInputElement>('[aria-label="分类或 Topic 名称"]')?.value).toBe('准确分类上的未保存管理草稿')
     expect(vi.mocked(rpc).mock.calls.some(([method]) => method === 'topic.create')).toBe(false)
@@ -175,7 +178,8 @@ describe('original Topic mobile consumers', () => {
     await goBack()
     expect(workface).toHaveBeenLastCalledWith(topic, true)
     await goBack()
-    expect(view.element.querySelector('header h1')?.textContent).toBe('原分类')
+    expect(view.element.querySelector('header h1')?.textContent).toBe('Topics')
+    expect(view.element.querySelector('header small')?.textContent).toBe(category.title)
     await goBack()
     expect(back).toHaveBeenLastCalledWith(null)
     expect(view.element.querySelector('header h1')?.textContent).toBe('Topics')
