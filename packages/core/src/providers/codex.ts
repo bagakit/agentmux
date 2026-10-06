@@ -9,7 +9,6 @@ import { inspectCodexHookActivation } from './codex-hook-activation.js'
 import { isAbsolute } from 'node:path'
 import { join, resolve } from 'node:path'
 import { AgentMuxError } from '../errors.js'
-import { prepareCodexNativePromptInput } from './codex-native-prompt.js'
 import { codexMainNativeRecord } from './codex-native-record-role.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { CODEX_LAUNCH_OPTIONS } from '../agent-launch-option.js'
@@ -195,7 +194,6 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     verifyPromptExecutionTransport,
     preparePromptExecutionTransport: createCodexPromptTransportPreparation(verifyPromptExecutionTransport),
     readPromptExecutionEvidence: readCodexPromptExecutionEvidence,
-    prepareNativePromptInput: prepareCodexNativePromptInput,
     observeSessionStatus: observeCodexSessionStatus,
     planPromptInput: (prompt, context) => ({
       kind: 'render-then-submit',

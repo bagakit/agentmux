@@ -247,8 +247,7 @@
     "@agentmux/relay": "workspace:*",
     "stream-json": "3.7.0",
     "@agentmux/identity": "workspace:*",
-    "@agentmux/diagnostic-evidence": "workspace:*",
-    "ws": "^8.18.0"
+    "@agentmux/diagnostic-evidence": "workspace:*"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
