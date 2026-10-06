@@ -1,6 +1,6 @@
 const { fixturePath: _reshape_fixturePath } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 // @vitest-environment happy-dom
-import { createRef } from 'react'
+import { act, createRef } from 'react'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { mountThemeRuntime } from '@agentmux/client-ui/theme'
 import { semanticIconHref } from '@agentmux/client-ui/icons'
@@ -55,4 +55,8 @@ it('the package editor distinguishes adding and removing arguments and retains t
   await dom.click('button[aria-label="Remove argument 1"]')
   expect(edit).toHaveBeenCalledWith({ args: ['retained'] })
   expect(remove).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled()
+  const cancel = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === 'Cancel installation')!
+  expect(cancel.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('action.cancel'))
+  await act(async () => cancel.click())
+  expect(remove).toHaveBeenCalledOnce()
 })
