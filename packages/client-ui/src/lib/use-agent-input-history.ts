@@ -1,3 +1,4 @@
+import { readHistoryQuery } from './history-query-read.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentSessionHistoryReadInput, AgentSessionHistoryReadPage, AgentSessionUserMessage } from '@agentmux/core'
 
@@ -31,20 +32,7 @@ export function useAgentInputHistory({ scope, enabled, read, initialMessages = [
     try {
       const input: Omit<AgentSessionHistoryReadInput, 'hostId' | 'agentSessionId'> = { source, kind: 'user-message', query,
         limit: 30, scanLimit: 200, maxBytes: 128 * 1024, ...(cursor ? { cursor } : {}) }
-      let page: AgentSessionHistoryReadPage
-      try { page = await read(input, controller.signal) }
-      catch (error) {
-        // A read-only retry follows only the owner's exact required budget and original position.
-        const failure = error as { code?: unknown; detail?: unknown }
-        let budget: { requiredBytes?: number; maxBytes?: number; cursor?: string } = {}
-        if (failure?.code === 'AGENT_SESSION_HISTORY_BUDGET' && typeof failure.detail === 'string') {
-          try { budget = JSON.parse(failure.detail) } catch { /* Original error remains visible. */ }
-        }
-        if (!matches() || !Number.isSafeInteger(budget.requiredBytes) || !Number.isSafeInteger(budget.maxBytes) ||
-          budget.requiredBytes! <= input.maxBytes! || budget.requiredBytes! > budget.maxBytes! ||
-          typeof budget.cursor !== 'string' || !budget.cursor) throw error
-        page = await read({ ...input, cursor: budget.cursor, maxBytes: budget.requiredBytes! }, controller.signal)
-      }
+      const page = await readHistoryQuery(input, read, controller.signal, matches)
       if (!matches()) return
       if (!page.userMessages || !page.scan || page.source !== source) throw new Error('Input history returned no matching typed query result.')
       setState(value => {
