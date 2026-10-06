@@ -12,7 +12,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const require = createRequire(resolve(root, 'apps/desktop/package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const slice = process.argv[2]
-assert.ok(['goal-decision-details', 'component-gallery-inspection'].includes(slice))
+const owningCss = { 'goal-decision-details': 'goals', 'component-gallery-inspection': 'workflow', 'a2a-message-lineage': 'mailbox-collaboration' }
+assert.ok(Object.hasOwn(owningCss, slice))
 const evidence = resolve(root, '.tmp/reference-surfaces', slice)
 const privateRoot = await mkdtemp(resolve(tmpdir(), 'agentmux-reference-surface-'))
 const compiled = resolve(privateRoot, 'compiled')
@@ -32,7 +33,10 @@ try {
       // PostCSS follows local @imports without passing every leaf through transform.
       for (const path of this.getWatchFiles()) if (path.startsWith(root + sep) && !path.includes('/node_modules/') && path.endsWith('.css')) source[relative(root, path)] = hash(await readFile(path))
     } }] })
-  assert.ok(source[slice === 'goal-decision-details' ? 'apps/desktop/src/renderer/src/styles/goals.css' : 'apps/desktop/src/renderer/src/styles/workflow.css'], 'The actual owning CSS must be captured')
+  assert.ok(source[`apps/desktop/src/renderer/src/styles/${owningCss[slice]}.css`], 'The actual owning CSS must be captured')
+  if (slice === 'a2a-message-lineage') for (const name of ['scenario.cjs', 'index.html']) {
+    const path = `apps/desktop/scripts/fixtures/${slice}/${name}`; source[path] = hash(await readFile(resolve(root, path)))
+  }
   for (const name of ['capture-reference-surfaces.mjs', 'reference-surfaces-electron.cjs']) {
     const path = resolve(root, 'apps/desktop/scripts', name); source[relative(root, path)] = hash(await readFile(path))
   }
