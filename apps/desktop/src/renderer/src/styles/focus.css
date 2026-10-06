@@ -141,7 +141,7 @@
 .global-focus-surface .global-session-workspace { flex: 0 0 var(--focus-workspace-width, calc(61.8% - 6px)); width: var(--focus-workspace-width, calc(61.8% - 6px)); min-width: 0; min-height: 0; overflow: hidden; animation: none; }
 @container focus-workface (max-width: 560px) {
   .global-focus-layout { flex-direction: column; }
-  .global-focus-surface .global-focus-main { flex: 0 0 min(32%, 180px); }
+  .global-focus-surface.global-board-surface--session-open .global-focus-main { flex: 0 0 min(32%, 180px); }
   .focus-workspace-resize-handle { display: none; }
   .global-focus-surface .global-session-workspace { flex: 1 1 auto; width: 100%; border-left: 0; border-top: 1px solid var(--line); }
 }
