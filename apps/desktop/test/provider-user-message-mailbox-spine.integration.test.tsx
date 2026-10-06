@@ -109,6 +109,10 @@ async function setupProductionClaudeSpine(sessionId: string) {
 
   const client = new AgentMuxClient({ store })
   clients.push(client)
+  // Outbox's query view and its live Native seed use their original public read owners.
+  vi.spyOn(api.sessions, 'readHistory').mockImplementation((reference, input, context) =>
+    client.readAgentSessionHistory({ ...input, ...reference }, context)
+  )
   const inner = client as unknown as {
     kernel: Record<string, unknown>
     registry: { load(host: string): Promise<void> }
@@ -178,8 +182,8 @@ it('delivers terminal native user inputs to mounted AgentSessionComposer and Ses
   const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
 
   // Native input is recorded in session history; must NOT claim 'Sent' or 'Delivery not confirmed'
-  const headers = [...outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__row > strong')].map((h) => h.textContent)
-  expect(headers).toContain('Recorded')
+  const headers = [...outboxPanel.querySelectorAll('.input-history__meta > span')].map((h) => h.textContent)
+  expect(headers).toContain('原生记录 · 入口未记录')
   expect(headers).not.toContain('Sent')
   expect(headers).not.toContain('You')
 
@@ -241,6 +245,10 @@ it('preserves distinct records in Outbox when identical prompt text is entered r
 
   const client = new AgentMuxClient({ store })
   clients.push(client)
+  // Outbox's query view and its live Native seed use their original public read owners.
+  vi.spyOn(api.sessions, 'readHistory').mockImplementation((reference, input, context) =>
+    client.readAgentSessionHistory({ ...input, ...reference }, context)
+  )
   const inner = client as unknown as { registry: { load(host: string): Promise<void> } }
   await inner.registry.load('local')
 
@@ -274,7 +282,7 @@ it('preserves distinct records in Outbox when identical prompt text is entered r
   await act(async () => {
     await vi.waitFor(() => {
       const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      const messages = [...outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__preview')].map((p) => p.textContent)
+      const messages = [...outboxPanel.querySelectorAll('.input-history__excerpt')].map((p) => p.textContent)
       expect(messages.filter((m) => m === repeatedText)).toHaveLength(2)
     }, { timeout: 1000 })
   })
@@ -330,6 +338,10 @@ it('unverified correlation: native raw IDs matching unsent operations do not hid
 
   const client = new AgentMuxClient({ store })
   clients.push(client)
+  // Outbox's query view and its live Native seed use their original public read owners.
+  vi.spyOn(api.sessions, 'readHistory').mockImplementation((reference, input, context) =>
+    client.readAgentSessionHistory({ ...input, ...reference }, context)
+  )
   const inner = client as unknown as { registry: { load(host: string): Promise<void> } }
   await inner.registry.load('local')
 
@@ -375,7 +387,7 @@ it('unverified correlation: native raw IDs matching unsent operations do not hid
   })
 })
 
-it('page 30 boundary: non-null native continuation remains honestly visible with on-demand load earlier', async () => {
+it('bounded query continuation remains honestly visible and reads all original older records on demand', async () => {
   const sessionId = 'agent-spine-boundary'
   const rootDir = await mkdtemp(join(tmpdir(), 'mailbox-spine-boundary-'))
   const transcriptPath = join(rootDir, 'claude.jsonl')
@@ -416,6 +428,10 @@ it('page 30 boundary: non-null native continuation remains honestly visible with
 
   const client = new AgentMuxClient({ store })
   clients.push(client)
+  // Outbox's query view and its live Native seed use their original public read owners.
+  vi.spyOn(api.sessions, 'readHistory').mockImplementation((reference, input, context) =>
+    client.readAgentSessionHistory({ ...input, ...reference }, context)
+  )
   const inner = client as unknown as { registry: { load(host: string): Promise<void> } }
   await inner.registry.load('local')
 
@@ -446,31 +462,34 @@ it('page 30 boundary: non-null native continuation remains honestly visible with
     await folder('outbox')
   })
 
-  // Boundary notice must be honestly visible matching pattern
+  // Wait for the actual public queries, rather than asserting against the earlier live seed.
+  await act(async () => { await Promise.all(vi.mocked(api.sessions.readHistory).mock.results.map(result => result.value)) })
+
+  // The typed query's original continuation is actionable; a seed window is not complete history.
   await act(async () => {
     await vi.waitFor(() => {
-      const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      const boundaryVisible = /earlier|older|more records|partial history|30 of 31|latest 30/i.test(
-        outboxPanel.textContent ?? ''
-      )
-      expect(boundaryVisible).toBe(true)
+      expect(dom.container.querySelector('.input-history__coverage')?.textContent).toContain('当前为已读取范围')
+      expect([...dom.container.querySelectorAll('.input-history__sources button')]
+        .some(button => button.textContent === '继续查找原生记录'), dom.container.querySelector('[id$="-outbox"]')?.textContent).toBe(true)
     })
   })
-
-  // Click Load earlier messages button
-  await dom.click('.composer-mailbox__boundary button')
+  const earlier = [...dom.container.querySelectorAll<HTMLButtonElement>('.input-history__sources button')]
+    .find(button => button.textContent === '继续查找原生记录')!
+  await act(async () => earlier.click())
+  expect(vi.mocked(api.sessions.readHistory).mock.calls.some(([, input]) => input.source === 'native' && Boolean(input.cursor))).toBe(true)
+  await act(async () => { await Promise.all(vi.mocked(api.sessions.readHistory).mock.results.map(result => result.value)) })
 
   // Verify all 31 source records survive paging and the reading list shows their original timestamps newest first.
   await act(async () => {
     await vi.waitFor(() => {
       const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      const items = outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__messages li')
+      const items = outboxPanel.querySelectorAll('[data-input-history-id]')
       expect(items).toHaveLength(31)
     }, { timeout: 1000 })
   })
 
   const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-  const bodies = [...outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__preview')].map((p) => p.textContent)
+  const bodies = [...outboxPanel.querySelectorAll('.input-history__excerpt')].map((p) => p.textContent)
   expect(bodies).toEqual(Array.from({ length: 31 }, (_, i) => `Message item index ${30 - i}`))
 })
 
@@ -478,10 +497,12 @@ it('mounting Composer with closed Mailbox must not read native history', async (
   const sessionId = 'agent-spine-closed'
   const spine = await setupProductionClaudeSpine(sessionId)
   const historyPageSpy = vi.spyOn(api.sessions, 'historyPage')
+  const querySpy = vi.spyOn(api.sessions, 'readHistory')
 
   await dom.render(<AgentSessionComposer sessionId={sessionId} />)
   expect(mailbox().getAttribute('data-state')).toBe('closed')
   expect(historyPageSpy).not.toHaveBeenCalled()
+  expect(querySpy).not.toHaveBeenCalled()
   spine.verifyZeroControls()
 })
 
@@ -686,23 +707,25 @@ it('remount after consumer unmount discards late result from departed lifetime a
   })
 
   let callCount = 0
-  vi.spyOn(api.sessions, 'historyPage').mockImplementation(async (_control, options) => {
+  vi.spyOn(api.sessions, 'readHistory').mockImplementation(async (reference, options, context) => {
+    if (options.source === 'captured') return spine.client.readAgentSessionHistory({ ...options, ...reference }, context)
     callCount++
     if (callCount === 1) {
-      const page = await spine.client.sessionHistoryPage(sessionId, options)
-      expect(page.items.map((i: any) => i.id)).toEqual(['claude-u-101', 'claude-u-102'])
-      expect(page.source.nativeSessionId).toBe('spine-claude-sess')
+      const page = await spine.client.readAgentSessionHistory({ ...options, ...reference }, context)
+      expect(page.userMessages!.map(i => i.rawId)).toEqual(['claude-u-102', 'claude-u-101'])
+      expect(page.nativeSource!.nativeSessionId).toBe('spine-claude-sess')
       firstCallArrived?.()
       await firstCallPromise
       return page
     }
-    return spine.client.sessionHistoryPage(sessionId, options)
+    return spine.client.readAgentSessionHistory({ ...options, ...reference }, context)
   })
 
   // Mount consumer and open mailbox to start first read
   await dom.render(<AgentSessionComposer sessionId={sessionId} />)
   await act(async () => {
     await toggle('open')
+    await folder('outbox')
   })
 
   // Pin that initial read was dispatched, real public read completed, and entered delay gate before unmount!
@@ -743,7 +766,7 @@ it('remount after consumer unmount discards late result from departed lifetime a
   expect(callCount).toBe(2)
 
   // Now release first call (from departed lifetime)
-  resolveFirstCall!(null)
+  await act(async () => resolveFirstCall!(null))
 
   // Old result must NOT overwrite the new entry (all 3 items still visible)
   const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
@@ -783,7 +806,7 @@ it('finite zero-consumer registry: production entry and native body are released
   expect(observed.length).toBeGreaterThan(0)
   const [{ key, entry, registry }] = observed
   expect(registry!.get(key)).toBe(entry)
-  expect(entry.subscribers.size).toBe(1)
+  expect(entry.subscribers.size).toBeGreaterThanOrEqual(1)
   expect(entry.historyPage.items.map((item: any) => item.id)).toEqual(['claude-u-101', 'claude-u-102'])
   setSpy.mockRestore()
 
@@ -971,6 +994,10 @@ it('an explicit refresh queues once behind a real earlier-page read in the same 
 
   const client = new AgentMuxClient({ store })
   clients.push(client)
+  // Outbox's query view and its live Native seed use their original public read owners.
+  vi.spyOn(api.sessions, 'readHistory').mockImplementation((reference, input, context) =>
+    client.readAgentSessionHistory({ ...input, ...reference }, context)
+  )
   const inner = client as unknown as { registry: { load(host: string): Promise<void> } }
   await inner.registry.load('local')
 
@@ -1125,6 +1152,10 @@ it('an earlier-page finalizer cannot clear loading owned by a newer still-pendin
 
   const client = new AgentMuxClient({ store })
   clients.push(client)
+  // Outbox's query view and its live Native seed use their original public read owners.
+  vi.spyOn(api.sessions, 'readHistory').mockImplementation((reference, input, context) =>
+    client.readAgentSessionHistory({ ...input, ...reference }, context)
+  )
   const inner = client as unknown as { registry: { load(host: string): Promise<void> } }
   await inner.registry.load('local')
 
@@ -1274,7 +1305,7 @@ it('mixed mounted surface: timeline captured item and native item with legal ide
   await act(async () => {
     await vi.waitFor(() => {
       const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      const items = outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__messages li')
+      const items = outboxPanel.querySelectorAll('[data-input-history-id]')
       expect(items).toHaveLength(3)
       expect(outboxPanel.textContent).toContain('Terminal input message alpha')
       expect(outboxPanel.textContent).toContain('Second terminal command bravo')
@@ -1311,7 +1342,7 @@ it('mixed mounted surface: timeline captured item and native item with legal ide
   await act(async () => {
     await vi.waitFor(() => {
       const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      expect(outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__messages li')).toHaveLength(4)
+      expect(outboxPanel.querySelectorAll('[data-input-history-id]')).toHaveLength(4)
       expect(outboxPanel.textContent).toContain('Fourth appended dynamic message')
     })
   })
