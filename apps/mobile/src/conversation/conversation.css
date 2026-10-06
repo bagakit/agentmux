@@ -49,7 +49,7 @@
 @media (prefers-reduced-motion: reduce) {
 .native-process-observation--compact :is(.wf-chev, .log-row__chevron) { transition: none; } }
 .mobile-active-state { display: flex; align-items: center; gap: 7px; margin: 0 0 8px; color: var(--text-3); font-size: 11px; }
-.mobile-active-state > span { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--green); }
+.mobile-active-state > svg { width: 5px; height: 5px; flex: none; color: var(--green); }
 .mobile-conversation .conversation-native-thread { border: 0; background: transparent; padding: 0; }
 .mobile-conversation :is(.conversation-message,.log-turn) { border: 0; }
 .mobile-conversation__composer { flex-shrink: 0; padding: 0 12px 10px; border-top: 0; }
