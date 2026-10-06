@@ -1,4 +1,5 @@
 import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'
+import { readScreenshotViewport, screenshotSource, SCREENSHOT_VIEWPORT_SCRIPT } from './browser-screenshot-source.js'
 import { evaluateBrowserOutcomeCriteria } from './browser-outcome-criteria.js'
 import { parseBrowserStructuredOutputRequest } from './browser-structured-output.js'
 import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
@@ -1095,7 +1096,11 @@ export class BrowserViewManager {
     const entry = this.require(id)
     const view = entry.view
     const navigationId = entry.navigationId
+    const url = view.webContents.getURL(), title = view.webContents.getTitle()
+    const readViewport = () => readScreenshotViewport(() => view.webContents.executeJavaScriptInIsolatedWorld(BROWSER_SELECTION_WORLD_ID, [{ code: SCREENSHOT_VIEWPORT_SCRIPT }]))
+    const before = await readViewport()
     const image = await view.webContents.capturePage()
+    const after = await readViewport()
     if (
       this.entries.get(id) !== entry ||
       entry.view !== view ||
@@ -1107,6 +1112,7 @@ export class BrowserViewManager {
     return {
       browserId: id,
       navigationId,
+      source: screenshotSource(url, title, before, after),
       image: browserPngFromNativeImage(image)
     }
   }

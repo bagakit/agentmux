@@ -1318,6 +1318,7 @@ const mockApi: AgentMuxDesktopApi = {
     captureScreenshot: async (id) => ({
       browserId: id,
       navigationId: requireMockBrowser(id).navigationId,
+      source: { url: requireMockBrowser(id).url, title: requireMockBrowser(id).title, viewport: null, viewportWarning: 'This is a preview image; a live CSS viewport is unavailable.' },
       image: {
         mimeType: 'image/png',
         dataUrl: `data:image/png;base64,${MOCK_SCREENSHOT_BASE64}`,
