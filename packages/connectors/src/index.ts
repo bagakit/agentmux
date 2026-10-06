@@ -5,3 +5,5 @@ export * from './publication-host.js'
 export * from './publication-adapter.js'
 export * from './publication-wire.js'
 export * from './core-conversation-port.js'
+
+export * from './durable-ingress.js'
