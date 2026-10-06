@@ -36,9 +36,17 @@ beforeAll(async()=>{
   await writeFile(join(output,'compiled-inputs.json'),JSON.stringify(hashes,null,2)+'\n')
 })
 function run(file:string,args:string[],env:NodeJS.ProcessEnv={}) { return new Promise<{code:number;result:any;stderr:string}>((ok,fail)=>{
-  const child=spawn(process.execPath,[file,...args],{env:{...process.env,AGENTMUX_AGENT_SESSION_ID:undefined,AGENTMUX_AGENT_CAPABILITY:undefined,AGENTMUX_RPC_ENDPOINT:undefined,...env},stdio:['ignore','pipe','pipe']});let stdout='',stderr='';child.stdout.on('data',s=>stdout+=s);child.stderr.on('data',s=>stderr+=s);child.on('error',fail);child.on('close',code=>{try{ok({code:code??-1,result:JSON.parse(stdout.trim() || stderr.trim()),stderr})}catch(e){fail(new Error(stdout+'\n'+stderr,{cause:e}))}})
+  const child=spawn(process.execPath,[file,...args],{env:{...process.env,AGENTMUX_AGENT_SESSION_ID:undefined,AGENTMUX_AGENT_CAPABILITY:undefined,AGENTMUX_RPC_ENDPOINT:undefined,...env},stdio:['ignore','pipe','pipe']});let stdout='',stderr='';child.stdout.on('data',s=>stdout+=s);child.stderr.on('data',s=>stderr+=s);child.on('error',fail);child.on('close',code=>{try{ok({code:code??-1,result:JSON.parse(stdout.trim() || stderr.trim().split('\n').filter(line => line.startsWith('{')).at(-1) || ''),stderr})}catch(e){fail(new Error(stdout+'\n'+stderr,{cause:e}))}})
 }) }
 describe('durable Notebook directory with no App or open Note',()=>{
+  it('keeps unrelated shipping CLI help free of SQLite loading and its runtime warnings', async () => {
+    const output = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn(process.execPath, [cli, '--help'], { stdio: ['ignore', 'pipe', 'pipe'] }); let stdout = '', stderr = ''
+      child.stdout.on('data', data => { stdout += data }); child.stderr.on('data', data => { stderr += data }); child.on('error', reject)
+      child.on('close', code => resolve({ code: code ?? -1, stdout, stderr }))
+    })
+    expect(output.code, output.stderr).toBe(0); expect(output.stdout).toContain('notebook'); expect(output.stderr).not.toContain('SQLite'); expect(output.stderr).not.toContain('ExperimentalWarning')
+  })
   it('keeps 随手记 stable and never creates storage merely to list an empty library',async()=>{
     const {store}=await fixture();expect((await store.read()).notebooks[DEFAULT_NOTEBOOK_ID]?.name).toBe('随手记');expect((await store.read()).revision).toBe(0);await expect(readFile(store.path)).rejects.toMatchObject({code:'ENOENT'})
   })
