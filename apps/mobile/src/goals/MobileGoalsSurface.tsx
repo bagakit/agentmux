@@ -20,6 +20,7 @@ import { mobileGoalDraftSource, useGoalDraft } from './useGoalDraft'
 import { MobileGoalDraftEditor } from './MobileGoalDraftEditor'
 
 export type MobileGoalsSurfaceProps = {
+  leadingAction?: ReactNode
   client: AgentMuxHostedClient | null
   connected: boolean
   visible: boolean
@@ -36,7 +37,7 @@ const message = (error: unknown) => error instanceof Error ? error.message : Str
 type Decisions = AgentMuxRpcResult<'goal.decisions'>['decisions']
 
 /** The original Goal owner supplies all facts and validates all mutations. */
-export function MobileGoalsSurface({ client, connected, visible, openSession, onBackChange, initialContext, context: presentedContext, onContextChange, copyText }: MobileGoalsSurfaceProps) {
+export function MobileGoalsSurface({ client, connected, visible, openSession, onBackChange, initialContext, context: presentedContext, onContextChange, copyText, leadingAction }: MobileGoalsSurfaceProps) {
   const [goals, setGoals] = useState<AgentMuxRpcGoal[] | null>(null)
   const [localContext, setLocalContext] = useState<MobileGoalsContext>(initialContext ?? { goalId: null, mode: 'detail', discussion: null })
   const context = presentedContext ?? localContext, contextRef = useRef(context); contextRef.current = context
@@ -142,7 +143,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
   }
   const visibleGoals = useMemo(() => goals?.filter(goal => (!status || goal.status === status) && `${goal.title} ${goal.description} ${goal.projectName ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [goals, status, query])
   return <section className="mobile-goals" aria-label="Goals" hidden={!visible}>
-    <header><h1>Goals</h1><button className="mobile-icon-button mobile-goals-refresh" aria-label="刷新目标" title="刷新目标" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} /><span className="mobile-visually-hidden">刷新目标</span></button></header>
+    <header className="mobile-page-header">{leadingAction}<h1>Goals</h1><button className="mobile-icon-button mobile-goals-refresh" aria-label="刷新目标" title="刷新目标" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} /><span className="mobile-visually-hidden">刷新目标</span></button></header>
     {!connected && <p role="status">连接暂不可用，已读目标与草稿保留；可刷新核对。</p>}
     {!client?.forwardRpc && <p role="status">目标公共端口暂不可用，已读目标与会话保留。</p>}
     {issue && <p role="status">{issue}</p>}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -18,6 +18,7 @@ import './navigation.css'
 type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
 export type MobileSpatialContext = { spaceId: string | null; tabId: string | null; regionId: string | null }
 export type MobileSpatialNavigationProps = { home: MobileHome; client: AgentMuxHostedClient | null; connected: boolean;
+  leadingAction?: ReactNode;
   visible?: boolean; sessions: AgentMuxAgentSession[]; openSession(id: string, identity: MobileObjectIdentity): void; openProfile?(identity: MobileObjectIdentity): void;
   openHttpLink?: OpenHttpLink; initialContext?: MobileSpatialContext; onContextChange?(context: MobileSpatialContext): void;
   onBackChange?(back: (() => void) | null): void }
@@ -25,7 +26,7 @@ type Region = Catalog['regions'][number]
 type ContentTarget = { key: string; spaceId: string; spaceName: string; tabName: string; tabId: string; zoneId: string | null; region: Region; zone?: Catalog['zones'][number] }
 const EMPTY_CONTEXT: MobileSpatialContext = { spaceId: null, tabId: null, regionId: null }
 const contentKey = (spaceId: string, zoneId: string | null, region: Region) => JSON.stringify([spaceId, zoneId, region.tabId, region.regionId, region.kind, region.browserId ?? null, region.file ?? null])
-export function MobileSpatialNavigation({ home, client, connected, sessions, openSession, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, visible = true }: MobileSpatialNavigationProps) {
+export function MobileSpatialNavigation({ home, client, connected, sessions, openSession, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, leadingAction, visible = true }: MobileSpatialNavigationProps) {
   const avatarFilterId = useId().replace(/:/g, '')
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [issue, setIssue] = useState('')
@@ -170,7 +171,7 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
   }
   const filteredSessions = (values: AgentMuxAgentSession[]) => values.filter(session => matching(name(session) + ' ' + identity(session).project + ' ' + session.providerId))
   return <section className="mobile-spatial-panel">
-    <div className="mobile-section-heading"><div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
+    <div className="mobile-section-heading mobile-page-header">{leadingAction}<div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
       <p>{home === 'mote' ? '与你的协调 Agent 继续讨论' : home === 'focus' ? '需要你处理的事项与最近执行' : '按 Mac 上的工作空间继续'}</p></div>
       <button className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} className={pending ? 'is-refreshing' : ''} /></button></div>
     {!connected && <p className="mobile-spatial-notice" role="status">连接暂不可用，原工作面与最近目录保留。</p>}
