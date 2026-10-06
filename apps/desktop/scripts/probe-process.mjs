@@ -95,54 +95,79 @@ export async function stopProbeProcesses(groupId, temporaryRoot, graceMs = 1_000
   throw new Error(`Probe cleanup left owned processes: ${remaining.join(', ')}`)
 }
 
-// The caller cannot start another probe until this promise has both observed
-// exit and reaped owned descendants. An assertion timeout is not an exit receipt.
+// This receipt belongs only to the ChildProcess spawned here. It says nothing
+// about independently owned Runtime resources or descendants. A signal is not exit.
 export async function runProbeProcess(executable, args, {
-  temporaryRoot, cwd, env, timeoutMs, onLine = () => {}, graceMs = 1_000
+  cwd, env, timeoutMs, onLine = () => {}, graceMs = 1_000
 }) {
   const child = spawn(executable, args, { cwd, env, detached: true, stdio: ['ignore', 'inherit', 'pipe'] })
-  let cleanupPromise
-  const cleanup = () => cleanupPromise ??= (child.pid
-    ? stopProbeProcesses(child.pid, temporaryRoot, graceMs)
-    : Promise.resolve()).catch(cause => {
-      const error = new Error(`Private probe cleanup failed; remaining owners are unknown. ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
-      error.code = cause?.code
-      error.probe = { leaderPid: child.pid ?? null, temporaryRoot, cleanup: 'unknown' }
-      throw error
-    })
-  let timedOut = false
-  let interruption = null
-  let rejectCleanupFailure
-  const cleanupFailure = new Promise((_resolve, reject) => { rejectCleanupFailure = reject })
-  const abort = () => { void cleanup().catch(rejectCleanupFailure) }
-  const onInterrupt = (name) => { interruption = name; abort() }
-  const onSigint = () => onInterrupt('SIGINT')
-  const onSigterm = () => onInterrupt('SIGTERM')
-  process.on('SIGINT', onSigint)
-  process.on('SIGTERM', onSigterm)
-  const timer = setTimeout(() => { timedOut = true; abort() }, timeoutMs)
-  const lines = createInterface({ input: child.stderr })
-  lines.on('line', (line) => {
-    onLine(line)
-    // The failure report is published before this marker. Teardown starts now,
-    // instead of retaining Electron until the full watchdog budget expires.
-    if (line.startsWith('file_editing_probe_failed=')) abort()
-  })
-  try {
-    const childExit = new Promise((resolve, reject) => {
-      child.once('error', reject)
-      child.once('exit', (code, signal) => resolve(signal ? 1 : code ?? 1))
-    })
-    const exitCode = await Promise.race([childExit, cleanupFailure])
-    await cleanup()
-    return { exitCode, timedOut, interruption }
-  } finally {
-    clearTimeout(timer)
-    process.off('SIGINT', onSigint)
-    process.off('SIGTERM', onSigterm)
-    try { await cleanup() } finally {
-      lines.close()
-      child.stderr.destroy()
+  const outcome = { originalPid: child.pid ?? null, exitCode: null, originalExitCode: null,
+    exitSignal: null, exitConfirmed: false, timedOut: false, interruption: null,
+    cleanup: 'unknown', signals: [], cleanupErrors: [] }
+  return await new Promise((resolve, reject) => {
+    let settled = false, stopping = false, primary, timer, hardStop, unknownStop, lines
+    const cleanupErrors = []
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer); clearTimeout(hardStop); clearTimeout(unknownStop)
+      process.off('SIGINT', onSigint); process.off('SIGTERM', onSigterm)
+      lines?.close()
+      if (!outcome.exitConfirmed) {
+        // Release only this observer's handles; keep the unconfirmed owner in the receipt.
+        child.unref(); child.stderr?.destroy()
+      }
+      const failures = [...(primary === undefined ? [] : [primary]), ...cleanupErrors]
+      if (!outcome.exitConfirmed) failures.push(new Error('The original private child exit is unconfirmed; retain its namespace.'))
+      if (failures.length) {
+        const failure = new AggregateError(failures, 'Private probe failed; original and cleanup errors are retained.')
+        failure.probe = outcome
+        reject(failure)
+      } else resolve(outcome)
     }
-  }
+    const signalOriginal = signal => {
+      if (settled || outcome.exitConfirmed || child.exitCode !== null || child.signalCode !== null) return
+      try { outcome.signals.push({ signal, accepted: child.kill(signal) }) }
+      catch (error) {
+        cleanupErrors.push(error)
+        outcome.cleanupErrors.push({ name: error.name, message: error.message, stack: error.stack, ...(error.code ? { code: error.code } : {}) })
+      }
+    }
+    const stopOriginal = () => {
+      if (settled || stopping || outcome.exitConfirmed) return
+      stopping = true
+      signalOriginal('SIGTERM')
+      if (settled) return
+      hardStop = setTimeout(() => signalOriginal('SIGKILL'), graceMs)
+      unknownStop = setTimeout(finish, graceMs + 2_000)
+    }
+    const onSigint = () => { outcome.interruption = 'SIGINT'; stopOriginal() }
+    const onSigterm = () => { outcome.interruption = 'SIGTERM'; stopOriginal() }
+    child.once('error', error => {
+      if (settled) return
+      primary ??= error
+      if (child.pid === undefined) finish()
+      else stopOriginal()
+    })
+    child.once('exit', (code, signal) => {
+      if (settled) return
+      outcome.exitConfirmed = true
+      outcome.originalExitCode = code
+      outcome.exitCode = signal ? 1 : code ?? 1
+      outcome.exitSignal = signal
+      outcome.cleanup = 'original-child-exited'
+      finish()
+    })
+    // The original child observers exist before any cancellation entry point.
+    process.on('SIGINT', onSigint); process.on('SIGTERM', onSigterm)
+    timer = setTimeout(() => { outcome.timedOut = true; stopOriginal() }, timeoutMs)
+    lines = createInterface({ input: child.stderr })
+    lines.on('line', line => {
+      if (settled) return
+      try { onLine(line) } catch (error) { primary ??= error; stopOriginal() }
+      // Explicit private-fixture notification from this child's own stderr;
+      // its human-readable payload neither selects nor authorizes another process.
+      if (line.startsWith('file_editing_probe_failed=')) stopOriginal()
+    })
+  })
 }

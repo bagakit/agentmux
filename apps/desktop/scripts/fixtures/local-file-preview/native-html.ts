@@ -9,12 +9,14 @@ import type { BrowserWindow } from 'electron'
 
 export async function verifyNativeHtml(window: BrowserWindow, root: string, evidence: string) {
   const profiles = new BrowserProfileManager(new BrowserProfileStore(join(root, 'profiles.json')))
-  await profiles.initialize()
-  const manager = new BrowserViewManager(window, profiles, new BrowserRefLedgerStore(join(root, 'ledger.json')), {
-    rememberedSchemes: async () => ({}), rememberScheme: async () => { throw new Error('No system-app choices in this private proof') },
-    openExternal: async () => { throw new Error('No system-app handoff in this private proof') }
-  })
+  let manager: BrowserViewManager | undefined, result: Record<string, unknown> | undefined, primary: unknown
+  const cleanup: { owner: string; released: boolean; error?: unknown }[] = []
   try {
+    await profiles.initialize()
+    manager = new BrowserViewManager(window, profiles, new BrowserRefLedgerStore(join(root, 'ledger.json')), {
+      rememberedSchemes: async () => ({}), rememberScheme: async () => { throw new Error('No system-app choices in this private proof') },
+      openExternal: async () => { throw new Error('No system-app handoff in this private proof') }
+    })
     const file = join(root, 'local.html')
     await writeFile(join(root, 'relative.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="140"><rect width="240" height="140" fill="#58c99a"/></svg>')
     await writeFile(join(root, 'relative.css'), 'body { background: #15221d; color: #e6f3ed; font: 18px system-ui; padding: 32px }')
@@ -42,6 +44,17 @@ export async function verifyNativeHtml(window: BrowserWindow, root: string, evid
     assert.deepEqual(await readFile(file), before)
     const png = (await page.capturePage()).toPNG()
     await writeFile(join(evidence, 'html-native-browser.png'), png)
-    return { passed: true, pid: process.pid, facts, preferences: { contextIsolation: preferences.contextIsolation, sandbox: preferences.sandbox, nodeIntegration: preferences.nodeIntegration, preload: preferences.preload ?? null } }
-  } finally { manager.dispose(); await profiles.dispose() }
+    result = { passed: true, pid: process.pid, facts, preferences: { contextIsolation: preferences.contextIsolation, sandbox: preferences.sandbox, nodeIntegration: preferences.nodeIntegration, preload: preferences.preload ?? null } }
+  } catch (error) { primary = error }
+  const failures: unknown[] = primary === undefined ? [] : [primary]
+  for (const [owner, release] of [['browser-manager', () => manager?.dispose()], ['browser-profiles', () => profiles.dispose()]] as const) {
+    try { await release(); cleanup.push({ owner, released: true }) }
+    catch (error) { failures.push(error); cleanup.push({ owner, released: false, error }) }
+  }
+  if (failures.length) {
+    const error = new AggregateError(failures, 'Native HTML verification and owner cleanup failed.')
+    Object.assign(error, { cleanup })
+    throw error
+  }
+  return { ...result, cleanup }
 }
