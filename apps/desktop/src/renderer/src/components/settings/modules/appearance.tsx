@@ -28,7 +28,7 @@ export const appearanceSettingsModule = {
     const theme = getThemeCatalog(config.appearance.customThemes).items.find(item => item.id === (config.appearance.themeId ?? DEFAULT_THEME_ID))
     return `${theme?.value.name ?? 'Unavailable theme'} · ${mode[0]!.toUpperCase()}${mode.slice(1)} · Editor ${config.appearance.editorFontSize === undefined ? 'App size' : `${config.appearance.editorFontSize}px`} · Terminal ${config.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT}px`
   },
-  Pane({ config }) {
-    return <AppearanceSettingsPane appearance={config.appearance} onSave={saveAppearance} />
+  Pane({ config, active }) {
+    return <AppearanceSettingsPane appearance={config.appearance} onSave={saveAppearance} active={active} />
   }
 } as const satisfies SettingsModule
