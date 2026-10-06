@@ -12,7 +12,7 @@ import { defineAgentProvider, type AgentProviderRegistry } from '../src/agent-pr
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { agentTurnCompletionIdentity } from '../src/agent-session-identity.js'
 
-const nativePlan = { kind: 'native-rpc' as const, protocolId: 'fixture-native-contract', actorId: 'exact-actor', sourceId: 'exact-source', threadId: 'exact-thread', expectedTurnId: 'exact-turn' }
+const nativePlan = { kind: 'native-rpc' as const, protocolId: 'fixture-native-contract', actorId: 'exact-actor', sourceId: 'exact-source', threadId: 'exact-thread', operation: 'start-or-steer' as const }
 
 function rawTransport(h: Awaited<ReturnType<typeof rpcOwnerFixture>>) {
   let cursor = 0
@@ -39,17 +39,18 @@ it.each(['admitted', 'not-applied', 'lost-reply'] as const)('actual CLI/RPC cons
   const tty = vi.fn(() => { throw new Error('Native messages must not write PTY bytes') })
   h.inner.kernel.input = tty
   const terminalPlan = vi.spyOn(provider, 'planPromptInput').mockImplementation(() => { throw new Error('Native message cannot create a terminal plan') })
+  let lost = false
   const dispatch = vi.fn(async (_prompt: string, operationId: string) => {
     const current = (await loadAgentSessions(h.store)).find(s => s.agentSessionId === 'recipient')!
     expect(current.promptCompletionAdmission).toMatchObject({ transport: 'native', submissionId: operationId,
-      operationId, native: { outcome: 'claimed', plan: { expectedTurnId: 'exact-turn' } }, intent: { message: { authorAgentSessionId: 'caller' } } })
+      operationId, native: { outcome: 'claimed', plan: { operation: 'start-or-steer' } }, intent: { message: { authorAgentSessionId: 'caller' } } })
     expect(current.promptCompletionAdmission).not.toHaveProperty('startByte')
     expect(current.promptCompletionAdmission).not.toHaveProperty('endByte')
-    if (outcome === 'lost-reply') throw new AgentMuxError('Fixture lost the original reply after dispatch.', 'AGENT_NATIVE_INPUT_UNCONFIRMED', '{"phase":"native-rpc","reason":"connection-closed"}')
+    if (outcome === 'lost-reply' && !lost) { lost = true; throw new AgentMuxError('Fixture lost the original reply after dispatch.', 'AGENT_NATIVE_INPUT_UNCONFIRMED', '{"phase":"native-rpc","reason":"connection-closed"}') }
     return outcome === 'not-applied' ? { outcome: 'not-applied' as const, errorCode: -32600 } : { outcome: 'admitted' as const, turnId: 'exact-turn' }
   })
   const prepare = vi.spyOn(provider, 'prepareNativePromptInput').mockResolvedValue({
-    plan: { kind: 'native-rpc', protocolId: 'fixture-native-contract', actorId: 'exact-actor', sourceId: 'exact-source', threadId: 'exact-thread', expectedTurnId: 'exact-turn' },
+    plan: nativePlan,
     assertCurrent: async () => {}, dispatch, close: async () => {}
   })
   const server = new AgentMuxControlServer({ socketPath: endpoint, coreClients: h.coreClients })
@@ -79,9 +80,11 @@ it.each(['admitted', 'not-applied', 'lost-reply'] as const)('actual CLI/RPC cons
     // Reopening the real durable Session Store retains the original Native outcome.
     expect((await loadAgentSessions(h.store)).find(s => s.agentSessionId === 'recipient')?.promptCompletionAdmission).toEqual(stored.promptCompletionAdmission)
     if (outcome === 'lost-reply') {
-      await expect(rpc.call('agent.send', { ...params, operationId: 'later-after-unknown' })).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
-      expect(dispatch).toHaveBeenCalledOnce()
-      expect((await loadAgentSessions(h.store)).find(s => s.agentSessionId === 'recipient')?.promptCompletionAdmission).toEqual(stored.promptCompletionAdmission)
+      await expect(rpc.call('agent.send', { ...params, operationId: 'later-after-unknown' })).resolves.toMatchObject({ delivery: { state: 'delivered' } })
+      expect(dispatch).toHaveBeenCalledTimes(2)
+      expect((await h.store.readPromptAdmission('recipient', stored.run, journal[0]!.envelope.messageId))?.admission).toEqual(stored.promptCompletionAdmission)
+      await expect(rpc.call('agent.send', params)).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+      expect(dispatch).toHaveBeenCalledTimes(2)
     }
   } finally { await rpc.dispose(); await server.stop(); await h.close() }
 }, 20_000)

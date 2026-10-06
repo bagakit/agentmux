@@ -423,6 +423,27 @@ setInterval(()=>{},1000);process.on('SIGTERM',()=>process.exit());\n`)
     expect((await records()).filter(value => value.payload?.item?.client_id === loseReceiptFor)).toHaveLength(1)
     const unknownAdmission = client.agentSession(session.agentSessionId).promptCompletionAdmission
     expect((await externalStore.readMetadata(session.agentSessionId))?.promptCompletionAdmission).toEqual(unknownAdmission)
+    const oldKey = { kind: 'message' as const, agentSessionId: session.agentSessionId, expectedRun: original, messageId: loseReceiptFor }
+    const originalUnknown = await client.inspectAgentPromptSubmission(oldKey)
+    expect(originalUnknown?.admission).toEqual(unknownAdmission)
+    const independentId = 'native-independent-after-unknown'
+    await expect(client.submitAgentPrompt({ agentSessionId: session.agentSessionId, expectedRun: original,
+      admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', operationId: independentId,
+      prompt: 'PRIVATE-REAL-INDEPENDENT-AFTER-UNKNOWN', authorHuman: true, sourceChannel: 'api' })).resolves.toBeUndefined()
+    expect(client.agentSession(session.agentSessionId).promptCompletionAdmission).toMatchObject({ submissionId: independentId, native: { outcome: 'admitted' } })
+    await waitFor(records, values => values.some(value => value.payload?.item?.client_id === independentId))
+    expect((await records()).filter(value => value.payload?.item?.client_id === independentId)).toHaveLength(1)
+    expect(await client.inspectAgentPromptSubmission(oldKey)).toEqual(originalUnknown)
+    expect((await rpc.call('agent.input.inspect', { key: oldKey })).record).toEqual(originalUnknown)
+    const historyCli = await runCompiledObjectCli(['--endpoint', 'unix://' + join(root, 'control.sock'), 'agent', 'input', 'inspect', '--input', '-'],
+      objectCliEnvironment(root, {}), JSON.stringify({ key: oldKey }), 15_000)
+    expect(historyCli.code).toBe(0)
+    expect(JSON.parse(historyCli.stdout).result.record).toEqual(originalUnknown)
+    const beforeOldJoin = { dispatch: nativeDispatchIds.length, preparation: preparations.length }
+    await expect(rpc.call('agent.send', lostParams)).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+    expect(nativeDispatchIds).toHaveLength(beforeOldJoin.dispatch); expect(preparations).toHaveLength(beforeOldJoin.preparation)
+    expect((await records()).filter(value => value.payload?.item?.client_id === loseReceiptFor)).toHaveLength(1)
+    expect(await externalStore.readPromptAdmission(session.agentSessionId, original, loseReceiptFor)).toEqual(originalUnknown)
     const lostRaw = (await client.statusAgent(session.agentSessionId)).run.acceptedInputBytes!
     await client.writeAgent({ agentSessionId: session.agentSessionId, expectedRun: original, source: 'terminal-protocol', data: '\x1b[I' })
     expect((await client.statusAgent(session.agentSessionId)).run.acceptedInputBytes).toBe(lostRaw + 3)
@@ -430,7 +451,9 @@ setInterval(()=>{},1000);process.on('SIGTERM',()=>process.exit());\n`)
       nativeOutcome: admission.native!.outcome, clientId: delivered.messageId, consumedOnce: true, draftKept: true, ttyBytesUnchanged: true,
     invalidThreadErrorCode: stale.error?.code, invalidParamsErrorCode: invalid.error?.code, internalErrorCode: internal.error?.code,
     idleAdmissions: [{ inputId: 'native-sdk-idle', turnId: sdkAdmission.native?.turnId }, { inputId: idleMessage.messageId, turnId: idleAdmission.native?.turnId }], ambiguityProof, authorProof,
-    lostReceiptProof: { boundary: 'Provider-to-Core after real Native admitted receipt', inputId: loseReceiptFor, outcome: 'unknown', consumedOnce: true, replayDispatches: nativeDispatchIds.length - dispatchesAfterLoss } }))
+    lostReceiptProof: { boundary: 'Provider-to-Core after real Native admitted receipt', inputId: loseReceiptFor, outcome: 'unknown', consumedOnce: true,
+      independentAdmittedInputId: independentId, sameActor: true, originalHistoryPreserved: true, sdkPublicCompiledCliRead: true,
+      replayDispatches: nativeDispatchIds.filter(id => id === loseReceiptFor).length - 1, oldJoinAfterNewInputPreparations: preparations.length - beforeOldJoin.preparation } }))
     console.log(JSON.stringify({ schema: 'agentmux.native-steer-cost.v1', preparations, secondSendMs, rawAckMs,
       independentMessagesConsumedOnce: [delivered.messageId, secondMessage.messageId], sameActor: true }))
   } catch (error) { primaryFailure = { error }; throw error }
