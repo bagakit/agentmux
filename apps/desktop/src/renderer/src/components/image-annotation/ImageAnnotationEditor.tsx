@@ -406,7 +406,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
             style={{ left: Math.max(0, Math.min(size.width - textEditorWidth, view.x + pendingText.shape.at.x * scale)),
               top: Math.max(0, Math.min(size.height - textEditorHeight, view.y + pendingText.shape.at.y * scale)),
               width: textEditorWidth, height: textEditorHeight, maxHeight: Math.max(1, size.height), minWidth: 0, minHeight: 0, maxWidth: 'none',
-              color: pendingText.shape.color, fontSize: textEditorFont, lineHeight: 1.4, fontFamily: SCREENSHOT_TEXT_FONT }}
+              color: 'var(--text)', fontSize: textEditorFont, lineHeight: 1.4, fontFamily: SCREENSHOT_TEXT_FONT }}
             onPointerDown={event => event.stopPropagation()} onChange={() => onEdited?.()} onBlur={event => finishText(event.currentTarget.value)} onKeyDown={event => {
               event.stopPropagation(); if (isImeOwnedKeyboardEvent(event)) return
               if (event.key === 'Enter') { event.preventDefault(); finishText(event.currentTarget.value) }
