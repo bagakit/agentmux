@@ -170,21 +170,6 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-header-actions { display: flex; align-items: center; gap: 10px; }
 .mobile-session-toolbar > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 12px; }
 .mobile-navigation > button > span { font-size: 10px; }
-.mobile-spatial-search { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 9px; color: var(--text-3); background: var(--surface-1); min-height: 44px; padding: 4px 10px; }
-.mobile-spatial-search input { width: 100%; min-width: 0; border: 0; padding: 0; outline: none; color: var(--text); background: transparent; font: inherit; font-size: 16px; }
-.mobile-spatial-search input.ui-input:focus-visible { outline: none; }
-.mobile-spatial-search:focus-within { outline: 1px solid var(--focus-line); }
-.mobile-spatial-subheading > span { color: var(--text-3); font-size: 12px; font-weight: 400; }
-.mobile-spatial-panel .mobile-session-icon { width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px; }
-.mobile-spatial-panel .mobile-session-list strong { font-size: 15px; line-height: 1.4; }
-.mobile-spatial-panel .mobile-session-list small { margin-top: 3px; font-size: 12px; }
-.mobile-spatial-empty, .mobile-spatial-notice { color: var(--text-3); font-size: 12px; line-height: 1.6; margin: 12px 0; }
-.mobile-spatial-notice { color: var(--text-2); }
-.mobile-spatial-recent { margin-top: 20px; font-size: 13px; color: var(--text-2); }
-.mobile-spatial-recent > summary { cursor: pointer; padding-block: 10px; }
-.mobile-spatial-tab h3 { font-size: 13px; margin: 16px 0 3px; color: var(--text-2); }
-.mobile-spatial-resource { display: flex; align-items: center; gap: 10px; padding: 12px 0; color: var(--text-3); font-size: 13px; }
-.mobile-spatial-resource small { display: block; margin-top: 3px; font-size: 11px; }
 .mobile-connect-mark { display: inline-flex; padding: 14px; border: 1px solid var(--mobile-border); border-radius: 16px; color: var(--green); background: var(--surface-1); }
 .mobile-home-settings { margin: 18px 0; padding: 0; border: 0; }
 .mobile-home-settings legend { margin-bottom: 6px; color: var(--text-3); font-size: 12px; }
@@ -243,9 +228,9 @@ to { transform: rotate(360deg); } }
 .mobile-drawer .mobile-sheet-handle { display: none; }
 .mobile-drawer > p { color: var(--text-3); font-size: 11px; margin: 2px 0 12px; }
 .mobile-drawer .mobile-menu-row { border: 0; }
-.mobile-session-copy { flex: 1; min-width: 0; gap: 2px!important; }
-.mobile-session-copy strong { font-size: 14px!important; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mobile-session-state small { font-size: 10px!important; margin: 0!important; color: var(--text-3); }
+.mobile-session-copy { flex: 1; min-width: 0; gap: 2px; }
+.mobile-session-copy strong { font-size: 13px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-session-state small { font-size: 10px; margin: 0; color: var(--text-3); }
 .mobile-session-state[data-state='waiting'], .mobile-session-state[data-state='blocked'] { color: var(--amber); }
 .mobile-session-state[data-state='working'] { color: var(--green); }
 .mobile-object-avatar { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: 12px; overflow: visible; }
@@ -258,22 +243,13 @@ to { transform: rotate(360deg); } }
 .mobile-connect-dragon { object-fit: contain; margin-bottom: 12px; width: min(40vw, 150px); height: min(40vw, 150px); }
 .mobile-connect-page h1 { margin: 8px 0; font-size: 20px; }
 .mobile-connect-page > p { color: var(--text-2); line-height: 1.7; font-size: 13px; max-width: 300px; }
-.mobile-spatial-panel .mobile-section-heading p { margin: 5px 0 0; font-size: 12px; color: var(--text-3); display: none; }
-.mobile-spatial-subheading { display: flex; align-items: baseline; gap: 8px; font-weight: 600; color: var(--text-3); margin: 12px 0 3px; font-size: 11px; }
-.mobile-spatial-panel .mobile-session-list button { min-height: 56px; padding: 7px 0; gap: 10px; border: 0; }
 .mobile-navigation button { background: transparent; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; min-height: 44px; border-radius: 8px; font-size: 10px; gap: 2px; padding: 2px 0; color: var(--text-3); }
 .mobile-navigation svg { stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .mobile-navigation button[aria-current='page'] { background: var(--surface-2); color: var(--green); font-weight: 600; }
 @media (prefers-reduced-motion:reduce) {
 .mobile-app { transition: none; } }
 .mobile-app { position: fixed; top: var(--mobile-viewport-top, 0px); left: 50%; transform: translateX(-50%); width: 100%; max-width: 720px; height: var(--mobile-viewport-height, 100dvh); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto auto; background: var(--surface-0); transition: transform 220ms ease, border-radius 220ms ease; font-size: 13px; }
-.mobile-spatial-panel { padding: 4px 12px 10px; }
-.mobile-spatial-panel h1 { margin: 0; font-size: 17px; }
-.mobile-spatial-panel .mobile-section-heading { align-items: center; padding-bottom: 8px; }
-.mobile-spatial-panel .mobile-session-list > li > button { min-height: 52px; padding: 5px 0; gap: 8px; }
-.mobile-spatial-panel .mobile-session-list strong, .mobile-session-copy strong { font-size: 13px!important; line-height: 1.3; }
 .mobile-session-project { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
-.mobile-spatial-panel .mobile-session-recap { display: block; margin: 0!important; font-size: 11px!important; line-height: 1.35; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mobile-session-state { flex: none; display: grid; gap: 3px; text-align: right; color: var(--text-2); font-size: 10px; }
 .mobile-executor-avatar { position: relative; width: 28px; height: 28px; flex: none; display: grid; place-items: center; }
 .mobile-executor-avatar small { position: absolute; right: -1px; bottom: -1px; display: grid; place-items: center; background: var(--surface-0); border-radius: 50%; width: 10px; height: 10px; }
