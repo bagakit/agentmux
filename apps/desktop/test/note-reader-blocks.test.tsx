@@ -62,3 +62,22 @@ it('bounds a long original excerpt independently and offers explicit continuatio
   await act(async () => dom.container.querySelector<HTMLButtonElement>('.note-reader-excerpt-continue')!.click())
   expect(clip.style.maxHeight).toBe('112px')
 })
+
+it('locates an exact selected descendant inside its long original excerpt while keeping unrelated excerpts clipped', async () => {
+  installNoteCanvasGeometry()
+  const rectangle = HTMLElement.prototype.getBoundingClientRect
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: HTMLElement) {
+    if (this.classList.contains('note-reader-excerpt-clip')) return new DOMRect(0, 100, 450, 56)
+    if (this.dataset.blockId === 'late-child') return new DOMRect(0, 700, 900, 30)
+    return rectangle.call(this)
+  })
+  const content = file([{ type: 'blockquote', attrs: { blockId: 'long-parent' }, content: [paragraph('before-child', 'A long context before the child'), paragraph('late-child', 'Selected exact descendant')] }, paragraph('unselected', 'Another unrelated excerpt')])
+  await dom.render(<NoteReader path="original.note.json" workspaceId="notes" content={content} revision="r1" blockIds={['long-parent','unselected']} highlightBlockIds={['long-parent','late-child']} />)
+  const selected = () => dom.container.querySelector('[data-note-selected-block="late-child"]')
+  await vi.waitFor(() => expect(selected()).not.toBeNull())
+  const clip = selected()!.closest<HTMLElement>('.note-reader-excerpt-clip')!
+  await vi.waitFor(() => expect(clip.scrollTop).toBe(1200))
+  expect(clip.style.maxHeight).toBe('112px'); expect(clip.style.overflow).toBe('auto')
+  const other = dom.container.querySelector('[data-block-id="unselected"]')!.closest<HTMLElement>('.note-reader-excerpt-clip')!
+  expect(other.style.overflow).toBe('hidden')
+})

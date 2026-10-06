@@ -206,7 +206,7 @@ it('frames a fresh large graph at a readable zoom around the original focus and 
   const viewport = () => JSON.parse(dom.container.querySelector('.actual-flow-viewport')!.textContent!)
   await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-title')).toHaveLength(9))
   await vi.waitFor(() => expect(viewport()).toEqual({ x: 24, y: 24, zoom: 1 }))
-  expect(dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-reader')).not.toBeNull()
+  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-reader')).not.toBeNull())
   await dom.click('[aria-label="Fit visible notes"]')
   await vi.waitFor(() => expect(viewport().zoom).toBeLessThan(.8))
   const saved = { x: 123, y: 84, zoom: .9 }
@@ -228,4 +228,22 @@ it('reads the exact saved source of an unbound query without inventing a destina
   expect(dom.container.querySelectorAll('.note-canvas-title')).toHaveLength(1)
   expect(dom.container.querySelector('.note-canvas-caption')?.textContent).toContain('1 visible unbound links')
   expect(api.notebooks.content).toHaveBeenCalledTimes(1)
+})
+
+it('keeps the direct incoming source beside its root readable on first entry without fitting or changing the original positions', async () => {
+  class IncomingLayoutWorker {
+    onmessage: ((event: MessageEvent) => void) | null = null
+    onerror = null
+    postMessage(request: { id: string }) { queueMicrotask(() => this.onmessage?.({ data: { id: request.id, positions: { target: { x: 400, y: 0 }, 'closed-source': { x: 0, y: 0 } } } } as MessageEvent)) }
+    terminate() {}
+  }
+  vi.stubGlobal('Worker', IncomingLayoutWorker)
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(900)
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
+  await dom.render(<ReactFlowProvider><ViewportProbe /><NoteCanvas scope={scope} onOpen={() => {}} /></ReactFlowProvider>); await ready()
+  await vi.waitFor(() => expect(JSON.parse(dom.container.querySelector('.actual-flow-viewport')!.textContent!)).toEqual({ x: 24, y: 24, zoom: 1 }))
+  await vi.waitFor(() => expect(sourceCardContent()).toContain('Saved target'))
+  expect(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(scope)]!.positions.target).toEqual({ x: 400, y: 0 })
+  expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
+  function sourceCardContent() { return dom.container.querySelector('.react-flow__node[data-id="closed-source"] .note-canvas-reader')?.textContent ?? '' }
 })
