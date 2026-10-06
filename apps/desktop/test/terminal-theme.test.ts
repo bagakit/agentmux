@@ -63,6 +63,7 @@ describe('terminal appearance', () => {
 
   it('offers only complete curated palettes', () => {
     expect(TERMINAL_THEME_CATALOG.map((item) => item.id)).toEqual([
+      'workspace',
       'graphite',
       'catppuccin-mocha'
     ])

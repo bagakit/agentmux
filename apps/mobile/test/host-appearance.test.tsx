@@ -106,3 +106,28 @@ it('does not turn malformed terminal options into executable rendering config', 
   expect(() => observedTerminalPalette({ fontSize: 90 })).toThrow()
   expect(() => observedTerminalPalette({ extendedAnsi: [] })).toThrow()
 })
+
+it('projects Workspace ANSI from the phone Root system mode through the real Main public watch', async () => {
+  const { f, client } = await actualHost()
+  await f.owner.update(config => ({ ...config, appearance: { ...config.appearance, appAppearance: 'system', terminalTheme: 'workspace' } }))
+  const value = themeValue(structuredClone(GRAPHITE_THEME))
+  value.variants.dark.colors.surface0 = '#132837'; value.variants.light.colors.surface0 = '#fff6e8'
+  await f.owner.update(config => ({ ...config, appearance: { ...config.appearance, themeId: 'custom.phone', customThemes: { 'custom.phone': value } } }))
+  const reader = await themeObservation(f.owner).subscribe(async () => {}, async () => {}, new AbortController().signal)
+  expect(reader.initial.values.terminalTheme).toBe('workspace')
+  expect(reader.initial.values).not.toHaveProperty('terminalPalette')
+  reader.dispose()
+  await act(async () => root.render(<Harness client={client} />))
+  await until(() => container.querySelector('output')!.textContent === '#132837')
+  const composer = container.querySelector('textarea')!
+  composer.value = 'Original phone draft'; composer.focus(); composer.setSelectionRange(1, 7)
+  await act(async () => { media.matches = false; media.dispatchEvent(new Event('change')) })
+  expect(container.querySelector('output')!.textContent).toBe('#fff6e8')
+  expect(document.documentElement.dataset.appearance).toBe('light')
+  expect(container.querySelector('textarea')).toBe(composer)
+  expect(composer.value).toBe('Original phone draft'); expect(composer.selectionStart).toBe(1)
+  await act(async () => { await f.owner.update(config => ({ ...config, appearance: { ...config.appearance, terminalTheme: 'graphite' } })) })
+  await until(() => container.querySelector('output')!.textContent === '#000000')
+  await act(async () => { media.matches = true; media.dispatchEvent(new Event('change')) })
+  expect(container.querySelector('output')!.textContent).toBe('#000000')
+})
