@@ -21,11 +21,13 @@
 .note-canvas .react-flow__attribution { background: var(--surface-1); padding: 2px 6px; font-size: 9px; opacity: .7; }
 .note-canvas .react-flow__attribution a { color: var(--text-3); }
 .note-canvas .react-flow__handle { height: 5px; width: 5px; min-height: 5px; min-width: 5px; border: 1px solid var(--surface-2); background: var(--text-3); }
-.note-canvas-card { width: 288px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); box-shadow: 0 3px 12px #0000000b; box-sizing: border-box; }
+.note-canvas-card { position: relative; width: 288px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); box-shadow: 0 3px 12px #0000000b; box-sizing: border-box; }
 .note-canvas-card[data-root="true"] { border-color: var(--blue); box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 15%, transparent), 0 3px 12px #0000000b; }
 .note-canvas-card[data-selected="true"] { outline: 2px solid var(--focus-line); outline-offset: 3px; }
 .note-canvas-drag { padding: 14px 15px 16px; cursor: grab; }
 .note-canvas-endpoint { position: relative; }
+.note-canvas-row-endpoint { position: absolute; left: 0; right: 0; height: 0; pointer-events: none; }
+.note-canvas-row-endpoint > .react-flow__handle { background: var(--blue); opacity: 1; }
 .note-canvas-block-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; padding: 6px 15px; border-top: 1px solid var(--line-soft); color: var(--text-2); font-size: 10px; line-height: 1.5; }
 .note-canvas-block-summary > span:last-child { color: var(--text-3); font-size: var(--fs-micro); }
 .react-flow__node.dragging .note-canvas-drag { cursor: grabbing; }

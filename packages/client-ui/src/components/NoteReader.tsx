@@ -25,7 +25,7 @@ function Reference({ node }: NodeViewProps) {
   if (!scope) return <NodeViewWrapper>引用内容尚未确认。</NodeViewWrapper>
   const result = resolveNoteBlock(scope.knowledge, reference.target)
   const key = JSON.stringify(reference.target)
-  return <NodeViewWrapper className="mobile-note-reference" {...noteProvenanceAttributes(node.attrs.provenance)}>
+  return <NodeViewWrapper className="mobile-note-reference" data-block-id={node.attrs.blockId} {...noteProvenanceAttributes(node.attrs.provenance)}>
     <strong>{reference.mode === 'embed' ? '引用原块' : '块引用'}</strong>
     {scope.trail.includes(key) ? <p role="status">循环引用，原引用保留。</p>
       : result.status === 'resolved' ? reference.mode === 'embed'
