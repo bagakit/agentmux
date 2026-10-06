@@ -16,7 +16,6 @@ vi.mock('../src/renderer/src/features/git/diff/GitBranchDiffPane', () => ({ GitB
 vi.mock('../src/renderer/src/components/NewTabSurface', () => ({ NewTabSurface: () => null }))
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
-import { TransientErrorNotice } from '../src/renderer/src/components/TransientErrorNotice'
 import { AttentionRequestPanel } from '../src/renderer/src/components/AttentionRequestPanel'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
@@ -59,12 +58,8 @@ afterEach(async () => {
 })
 const panel = () => container.querySelector<HTMLElement>('.attention-request-panel')
 const closeButton = () => [...container.querySelectorAll<HTMLButtonElement>('.attention-request-panel button')].find(button => /^(Close failed Session|Retry closing failed Session|Closing…)$/.test(button.textContent ?? ''))
-function ExistingErrorSurface() {
-  const error = useAppStore(state => state.error)
-  return createElement(TransientErrorNotice, { error, dismissed: false, lastError: null, onDismiss: () => {}, onReopen: () => {} })
-}
 async function mountReview() {
-  await act(async () => root.render(createElement('div', {}, createElement(GlobalFocusSurface), createElement(GlobalSystemNotices), createElement(ExistingErrorSurface))))
+  await act(async () => root.render(createElement('div', {}, createElement(GlobalFocusSurface), createElement(GlobalSystemNotices))))
   const card = container.querySelector<HTMLButtonElement>(`.global-focus-main [data-session-id="${failed.id}"]`)!
   expect(card, 'Actual failed Focus card').not.toBeNull(); await act(async () => card.click())
   const review = container.querySelector<HTMLButtonElement>('.focus-toolbar__review')!
