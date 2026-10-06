@@ -1,5 +1,4 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { AgentMuxError } from '../src/errors.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import type { AgentInputSubmissionReceipt, AgentMuxAgentPromptInput } from '../src/index.js'
@@ -27,16 +26,16 @@ async function fixture() {
   const h = await rpcOwnerFixture()
   h.inner.kernel.identity = () => ({ daemonInstanceId: 'original-runtime', protocolVersion: 1, buildIdentity: 'controlled' })
   const original = (await h.store.readMetadata('recipient'))!
-  await h.store.compareAndSwapMetadata(original, { ...original,
-    nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'original-thread' },
-    nativeBinding: { source: 'process-witness', run: original.run, observedAt: 1 } })
-  await h.inner.registry.load('local')
-  const provider = (Reflect.get(h.client, 'providers') as AgentProviderRegistry).get('codex')
-  const dispatch = vi.fn(async (_body: string, operationId: string) => ({ outcome: 'admitted' as const, turnId: operationId }))
-  vi.spyOn(provider, 'prepareNativePromptInput').mockResolvedValue({
-    plan: { kind: 'native-rpc', operation: 'start-or-steer', protocolId: 'controlled-contract',
-      sourceId: 'original-source', actorId: 'original-actor', threadId: 'original-thread' },
-    assertCurrent: async signal => signal.throwIfAborted(), dispatch, close: async () => {} })
+  let cursor = 0
+  h.inner.kernel.status = async (id: string) => ({ ...h.run(id), acceptedInputBytes: cursor })
+  const dispatch = vi.fn((_body: string, _operationId: string) => {})
+  h.inner.kernel.input = async (id: string, operation: { expectedByte: number; data: string }) => {
+    expect(operation.expectedByte).toBe(cursor)
+    const startByte = cursor; cursor += Buffer.byteLength(operation.data)
+    if (operation.data === '\r') dispatch('', (await h.store.readMetadata('recipient'))!.promptCompletionAdmission!.submissionId!)
+    return { run: { ...h.run(id), acceptedInputBytes: cursor }, appliedByteRange: { startByte, endByte: cursor } }
+  }
+  vi.spyOn(Reflect.get(h.client, 'screenEvidence'), 'wait').mockImplementation(async () => { throw new Error('Current terminal input cannot wait on display.') })
   const input = (id: string): AgentMuxAgentPromptInput => ({ agentSessionId: 'recipient', expectedRun: original.run,
     operationId: id, prompt: 'Original body ' + id, admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', authorHuman: true })
   const read = async (id: string) => (await h.client.inspectAgentInput({ key: {
@@ -53,7 +52,7 @@ it.each(['resolve', 'reject'] as const)('Stop releases a held author read and it
       .toMatchObject({ outcome: 'stopped-before-dispatch' })
     const freshAuthor = vi.fn(async () => {})
     await h.client.submitAgentPrompt(h.input('B'), { assertCurrent: freshAuthor })
-    await eventually(async () => (await h.read('B')).status, 'admitted')
+    await eventually(async () => (await h.read('B')).status, 'terminal-confirmed')
     expect(freshAuthor).toHaveBeenCalled()
     expect(h.dispatch.mock.calls.map(call => call[1])).toEqual(['B'])
     if (late === 'resolve') held.resolve()
@@ -72,7 +71,7 @@ it('SDK observation cancellation releases a held read without cancelling the nex
       assertCurrent: async () => { entered.resolve(); await held.pending } })
     await entered.pending; controller.abort(new Error('Original SDK reader stopped.'))
     await h.client.submitAgentPrompt(h.input('B'), { assertCurrent: async () => {} })
-    await eventually(async () => (await h.read('B')).status, 'admitted')
+    await eventually(async () => (await h.read('B')).status, 'terminal-confirmed')
     expect(await h.read('A')).toMatchObject({ status: 'waiting', control: { waiting: { phase: 'observer' } } })
     expect(h.dispatch.mock.calls.map(call => call[1])).toEqual(['B'])
   } finally { held.resolve(); await h.close() }
@@ -119,7 +118,7 @@ it('Stop after the dispatch gate does not cancel the operation through its held 
       .toMatchObject({ outcome: 'observation-stopped' })
     expect(h.dispatch).not.toHaveBeenCalled()
     held.resolve()
-    await eventually(async () => (await h.read('A')).status, 'admitted')
+    await eventually(async () => (await h.read('A')).status, 'terminal-confirmed')
     expect(h.dispatch).toHaveBeenCalledTimes(1)
   } finally { held.resolve(); await h.close() }
 })
@@ -135,7 +134,7 @@ it('the actual public input owner releases a stopped transport authority before 
     await service.call('agent.input.stop', { ref: first.inputReceipt!.ref, cancelOperationId: 'stop-public-A' },
       { principal: { kind: 'user', id: 'private-local-user' } })
     const second = await service.call('agent.send', input('B'), { assertCurrent: async () => {} })
-    await eventually(async () => (await service.call('agent.input.inspect', { key: second.inputReceipt!.key })).input?.status, 'admitted')
+    await eventually(async () => (await service.call('agent.input.inspect', { key: second.inputReceipt!.key })).input?.status, 'terminal-confirmed')
     expect(h.dispatch.mock.calls.map(call => call[1])).toEqual(['message-B'])
     expect(h.inner.kernel.stop).not.toHaveBeenCalled()
   } finally { held.resolve(); await h.close() }
