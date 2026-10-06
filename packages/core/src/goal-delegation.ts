@@ -11,10 +11,11 @@ import { AgentMuxError } from './errors.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 
 /** Goal owns business intent and reports; this port never owns a message queue. */
-export const GOAL_DELEGATION_METHODS = { 'goal.delegation.prepare': 'long', 'goal.delegate': 'long', 'goal.report': 'long', 'goal.collect': 'long', 'goal.delegations': 'long' } as const
+export const GOAL_DELEGATION_METHODS = { 'goal.delegation.prepare': 'long', 'goal.delegation.bind': 'long', 'goal.delegate': 'long', 'goal.report': 'long', 'goal.collect': 'long', 'goal.delegations': 'long' } as const
 export type GoalDelegationMethod = keyof typeof GOAL_DELEGATION_METHODS
 export type GoalDelegationParamsMap = {
   'goal.delegation.prepare': { goalId: string; intent: DemandDelegationIntent; materials?: FileReadParams[] }
+  'goal.delegation.bind': { goalId: string; intent: DemandDelegationIntent }
   'goal.delegate': { goalId: string; intent: DemandDelegationIntent; materials?: FileReadParams[] }
   'goal.report': { goalId: string; operationId: string; report: DemandDelegationReportInput }
   'goal.collect': { goalId: string; operationId: string; collection: DemandDelegationCollectionInput }
@@ -40,8 +41,8 @@ function id(value: unknown): string {
   return value
 }
 export function parseGoalDelegationParams<M extends GoalDelegationMethod>(method: M, value: unknown): GoalDelegationParamsMap[M] {
-  const prepares = method === 'goal.delegation.prepare' || method === 'goal.delegate'
-  const p = record(value, prepares ? ['goalId', 'intent', 'materials'] : method === 'goal.report' ? ['goalId', 'operationId', 'report'] : method === 'goal.collect' ? ['goalId', 'operationId', 'collection'] : ['goalId'])
+  const prepares = method === 'goal.delegation.prepare' || method === 'goal.delegate' || method === 'goal.delegation.bind'
+  const p = record(value, prepares ? method === 'goal.delegation.bind' ? ['goalId', 'intent'] : ['goalId', 'intent', 'materials'] : method === 'goal.report' ? ['goalId', 'operationId', 'report'] : method === 'goal.collect' ? ['goalId', 'operationId', 'collection'] : ['goalId'])
   return { goalId: id(p.goalId), ...(prepares ? { intent: parseDemandDelegationIntent(p.intent),
     ...(p.materials === undefined ? {} : { materials: Array.isArray(p.materials) ? p.materials.map(parseFileReadParams) : (() => { throw new AgentMuxError('Original materials must be exact File requests.', 'INVALID_CONTROL_REQUEST') })() }) }
     : method === 'goal.report' ? { operationId: id(p.operationId), report: parseDemandDelegationReportInput(p.report) }
@@ -94,7 +95,7 @@ export function goalDelegationReportBody(goalId: string, operationId: string, re
   return JSON.stringify({ schema: 'agentmux.goal-report.v1', goalId, delegationOperationId: operationId,
     report: { operationId: report.operationId, replyMessageId: report.replyMessageId, authorAgentSessionId: report.authorAgentSessionId, grounding: report.grounding } })
 }
-export function assertGoalDelegationSource(saved: DemandDelegation, message: DurableAgentMuxMessage): void {
+export function assertGoalDelegationSource(saved: DemandDelegationIntent, message: DurableAgentMuxMessage): void {
   const envelope = message.envelope
   if (envelope.operationId !== saved.operationId || envelope.messageId !== saved.sourceMessageId ||
     envelope.sender.kind !== 'agent-session' || envelope.sender.agentSessionId !== saved.ownerAgentSessionId || envelope.senderSessionId !== saved.ownerAgentSessionId || envelope.senderRunId !== saved.ownerRunId ||

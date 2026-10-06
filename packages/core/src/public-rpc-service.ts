@@ -130,7 +130,7 @@ export type AgentMuxRpcServiceSubscription<M extends AgentMuxRpcStreamMethod = A
   initial: AgentMuxRpcStreamInitial<M>; start?(): void | Promise<void>; dispose(): void | Promise<void>
 }
 const NATIVE_FIELDS = {
-  'goal.delegation.prepare': ['goalId', 'intent', 'materials'], 'goal.delegate': ['goalId', 'intent', 'materials'],
+  'goal.delegation.prepare': ['goalId', 'intent', 'materials'], 'goal.delegation.bind': ['goalId', 'intent'], 'goal.delegate': ['goalId', 'intent', 'materials'],
   'goal.report': ['goalId', 'operationId', 'report'], 'goal.collect': ['goalId', 'operationId', 'collection'], 'goal.delegations': ['goalId'],
   'settings.appearance.watch': [],
   'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId'], 'notebook.apply': ['expectedRevision','operationId','change'],
