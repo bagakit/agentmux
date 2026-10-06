@@ -95,7 +95,7 @@ it('discards a delayed Arrange reply after a later real React Flow keyboard gest
   await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />)
   await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node')).not.toBeNull())
   await dom.click('.react-flow__node')
-  await dom.click('.note-canvas-tool-text')
+  await dom.click('[aria-label="Arrange notes"]')
   expect(workers).toHaveLength(1)
   const worker = workers[0]!
   await act(async () => dom.container.querySelector<HTMLElement>('.react-flow__node')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })))
