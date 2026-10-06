@@ -868,7 +868,7 @@ function interactionRequest(value: unknown): AgentMuxInteractionRequest {
     const toolInput = source.toolInput === undefined
       ? undefined
       : text(source.toolInput, 'pendingInteraction.request.toolInput')
-    return {
+    const request: Extract<AgentMuxInteractionRequest, { kind: 'permission' }> = {
       kind: 'permission',
       ...base,
       title: text(source.title, 'pendingInteraction.request.title'),
@@ -879,6 +879,37 @@ function interactionRequest(value: unknown): AgentMuxInteractionRequest {
         nativeToolCallId: string(source.nativeToolCallId, 'pendingInteraction.request.nativeToolCallId')
       })
     }
+    if (source.responseUnavailableReason !== undefined) request.responseUnavailableReason = text(source.responseUnavailableReason, 'pendingInteraction.request.responseUnavailableReason')
+    if (source.permissionHook !== undefined) {
+      const hook = record(source.permissionHook, 'pendingInteraction.request.permissionHook')
+      const receiptId = string(hook.receiptId, 'pendingInteraction.request.permissionHook.receiptId')
+      if (receiptId !== request.id || request.evidence.hookReceiptId !== receiptId || request.evidence.source !== 'native-hook' ||
+          !request.evidence.run?.runId || hook.closed !== undefined && hook.closed !== 'abstained' && hook.closed !== 'decision-returned') {
+        throw new AgentMuxError('Permission callback does not match its original Hook.', 'INVALID_AGENT_SESSION_STORE')
+      }
+      request.permissionHook = { receiptId, ...(hook.closed ? { closed: hook.closed } : {}),
+        ...(hook.nativeSessionId === undefined ? {} : { nativeSessionId: string(hook.nativeSessionId, 'pendingInteraction.request.permissionHook.nativeSessionId') }),
+        ...(hook.nativeTurnId === undefined ? {} : { nativeTurnId: string(hook.nativeTurnId, 'pendingInteraction.request.permissionHook.nativeTurnId') }) }
+      if (hook.nativeTurnEnded !== undefined) {
+        const end = record(hook.nativeTurnEnded, 'pendingInteraction.request.permissionHook.nativeTurnEnded')
+        if (!request.permissionHook.nativeSessionId || !request.permissionHook.nativeTurnId) throw new AgentMuxError('Permission Hook turn end lacks its native target.', 'INVALID_AGENT_SESSION_STORE')
+        request.permissionHook.nativeTurnEnded = { recordId: string(end.recordId, 'pendingInteraction.request.permissionHook.nativeTurnEnded.recordId'),
+          observedAt: timestamp(end.observedAt, 'pendingInteraction.request.permissionHook.nativeTurnEnded.observedAt') }
+      }
+      if (hook.response !== undefined) {
+        const response = record(hook.response, 'pendingInteraction.request.permissionHook.response')
+        const value = interactionResponse(response.value, request)
+        const responseDigest = string(response.responseDigest, 'pendingInteraction.request.permissionHook.response.responseDigest')
+        if (value.kind !== 'permission' || responseDigest !== createHash('sha256').update(JSON.stringify(value)).digest('base64url') ||
+            !['saved', 'unknown', 'connection-written'].includes(response.delivery as string)) {
+          throw new AgentMuxError('Permission Hook response receipt is invalid.', 'INVALID_AGENT_SESSION_STORE')
+        }
+        request.permissionHook.response = { value, responseDigest,
+          operationId: string(response.operationId, 'pendingInteraction.request.permissionHook.response.operationId'),
+          delivery: response.delivery as 'saved' | 'unknown' | 'connection-written' }
+      }
+    }
+    return request
   }
   if (source.kind !== 'question' || !Array.isArray(source.questions) ||
     (source.responseUnavailableReason === undefined ? source.questions.length !== 1 : source.questions.length !== 0)) {

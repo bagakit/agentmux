@@ -7,6 +7,7 @@ import { questionReplyKey } from '@agentmux/client-ui/conversation-question-repl
 import { ClientDeliveryDiagnostics, startDeliveryAttempt, type DeliveryAttemptSeed } from '@agentmux/client-ui/delivery-diagnostics'
 import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDetails'
 import { initFollowState, onContentChange, onScroll, shouldShowJumpToLatest } from '@agentmux/client-ui/activity-autoscroll'
+import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -435,13 +436,14 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
 
   const session = reading.session
   const pending = session?.pendingInteraction
-  const request = pending?.request
+  const request = agentInteractionActiveRequest(pending)
+  const responseUnavailableReason = pending && agentInteractionResponseUnavailableReason(pending)
   const requestRun = request?.evidence?.run ?? session?.run
   const requestKey = session && request && requestRun
     ? JSON.stringify([session.agentSessionId, requestRun.runId, request.id]) : null
   const responseAttempt = requestKey ? responses.current.get(requestKey) : undefined
   const responseDisabled = !available || request?.agentSessionId !== session?.agentSessionId
-    || requestRun?.runId !== session?.run.runId || Boolean(pending?.response || pending?.nativeInput || pending?.nativeCompleted)
+    || requestRun?.runId !== session?.run.runId || Boolean(responseUnavailableReason)
     || responseAttempt?.phase === 'unknown' || responseAttempt?.phase === 'sending' || responseAttempt?.phase === 'confirmed'
   async function respond(response: AgentMuxInteractionResponse): Promise<void> {
     if (!client || !session || !request || !requestRun || !requestKey || responseDisabled) return
@@ -596,7 +598,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         speaker={{ role: 'system', id: 'agentmux' }} createdAt={item.createdAt} {...readingProps} /></details>)}
       {request && requestKey ? <div className="mobile-conversation__interaction">
         <AgentInteractionCard key={requestKey} request={request} disabled={responseDisabled}
-          {...(responseAttempt?.phase === 'unknown' ? { responseUnavailableReason: responseAttempt.message } : {})}
+          {...(responseAttempt?.phase === 'unknown' ? { responseUnavailableReason: responseAttempt.message } : responseUnavailableReason ? { responseUnavailableReason } : {})}
           onRespond={respond} />
         {responseAttempt ? <p role="status">{responseAttempt.message}</p> : null}
       </div> : null}

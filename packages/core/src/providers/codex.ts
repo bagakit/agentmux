@@ -92,6 +92,13 @@ export const CODEX_HOOK_EVENTS = [
 ] as const
 
 export const CODEX_HOOKS: AgentNativeHookSpecification = {
+  permissionDecision: {
+    eventName: 'PermissionRequest',
+    outputs: {
+      'allow-once': { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } },
+      'reject-once': { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny' } } }
+    }
+  },
   processNativeIdentity: true,
   resolveSubject(payload, context) {
     const main = context.processNativeHandle
@@ -146,7 +153,7 @@ export function createCodexManagedHookPlan(workspacePath: string): AgentManagedH
   const command = managedHookCommand('codex')
   const hooks = Object.fromEntries(CODEX_HOOK_EVENTS.map((eventName) => [eventName, [{
     ...(eventName === 'SessionStart' ? { matcher: 'startup|resume|clear|compact' } : {}),
-    hooks: [{ type: 'command', command, ...hookCommandTimeout('codex') }]
+    hooks: [{ type: 'command', command, ...(eventName === 'PermissionRequest' ? {} : hookCommandTimeout('codex')) }]
   }]]))
   return {
     providerId: 'codex',

@@ -1033,7 +1033,15 @@ export class AgentMuxClient {
     })
     this.kernel = new CtxmuxRunAdapter()
     this.hookServer = new AgentHookServer(
-      async (event, signal) => await this.acceptHookEvent(event, signal),
+      async (event, signal) => {
+        await this.acceptHookEvent(event, signal)
+        if (event.permissionCallback) {
+          const session = this.registry.findByRun(runRef(event.runId)), pending = session?.pendingInteraction
+          return { permissionCallbackAccepted: session?.agentSessionId === event.agentSessionId &&
+            [pending?.request, ...(pending?.additionalRequests ?? [])].some(request =>
+              request?.kind === 'permission' && request.permissionHook?.receiptId === event.receiptId) }
+        }
+      },
       undefined,
       failure => {
         const session = this.registry.findByRun(runRef(failure.runId ?? ''))
@@ -1042,6 +1050,13 @@ export class AgentMuxClient {
           code: failure.code,
           message: `Native Hook ${failure.receiptId} failed during ${failure.stage}; ${failure.accepted === false ? 'owner work did not start' : 'durable delivery is unconfirmed'}. The original Session, Run and terminal capability are kept. ${failure.code === 'HOOK_BODY_TOO_LARGE' || failure.code === 'INVALID_HOOK_ENVELOPE' ? 'Refresh native Session observation to read its original source.' : 'Retry the same observation receipt after backoff; refresh native Session observation if its sender has exited.'}${failure.message === undefined ? '' : ` Cause: ${failure.message}`}`,
           evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
+      },
+      (providerId, eventName) => this.providers.get(providerId).hook.permissionDecision?.eventName === eventName && eventName !== undefined,
+      (agentSessionId, runId, receiptId, decided) => {
+        void this.closePermissionHook(agentSessionId, runId, receiptId, decided).catch(() => {
+          const session = this.registry.findByRun(runRef(runId))
+          if (session) this.publishSession(session)
+        })
       }
     )
     this.hookInstaller = options.hookInstaller
@@ -5839,9 +5854,8 @@ export class AgentMuxClient {
     await this.messageQueue.recordDelivery(envelope.messageId, 'delivered')
   }
 
-  async respondAgentInteraction(input: AgentMuxAgentInteractionInput): Promise<void> {
-    this.requireConnected()
-    const requestedSession = this.requireAgentSession(input.agentSessionId)
+  async respondAgentInteraction(input: AgentMuxAgentInteractionInput, context?: AgentInputCallContext): Promise<void> {
+    const requestedSession = await this.registry.resolveMetadata(input.agentSessionId, 'local', () => context?.requestSignal?.throwIfAborted())
     if (!sameRun(requestedSession.run, input.expectedRun)) {
       throw new AgentMuxError(
         'Agent Session changed before its interaction was answered.',
@@ -5850,6 +5864,21 @@ export class AgentMuxClient {
     }
     const canonical = await this.registry.refresh(requestedSession.agentSessionId, requestedSession.run)
     const pending = canonical.pendingInteraction
+    const hookRequest = [pending?.request, ...(pending?.additionalRequests ?? [])].find(request =>
+      request?.id === input.response.requestId && request.kind === 'permission' && request.permissionHook)
+    if (hookRequest?.kind === 'permission' && hookRequest.permissionHook) {
+      await this.respondPermissionHook(canonical, hookRequest, input.response, context)
+      return
+    }
+    await this.connect()
+    const assertOriginalResponseTarget = () => {
+      const current = this.requireAgentSession(requestedSession.agentSessionId)
+      if (!sameRun(current.run, requestedSession.run) || !sameNativeHandle(current.nativeHandle, canonical.nativeHandle) ||
+          !isDeepStrictEqual(current.pendingInteraction?.request, pending?.request)) {
+        throw new AgentMuxError('The original interaction target changed before dispatch.', 'STALE_AGENT_SESSION')
+      }
+    }
+    assertOriginalResponseTarget()
     if (!pending || pending.request.id !== input.response.requestId) {
       throw new AgentMuxError('Agent interaction is not pending.', 'UNKNOWN_AGENT_INTERACTION')
     }
@@ -5858,6 +5887,8 @@ export class AgentMuxClient {
       if (response.kind !== 'permission') {
         throw new AgentMuxError('ACP question responses are unsupported.', 'AGENT_INTERACTION_UNSUPPORTED')
       }
+      await context?.assertCurrent?.()
+      assertOriginalResponseTarget()
       await this.acp.respondPermission(input.agentSessionId, pending.request.id, response.decision)
       return
     }
@@ -5913,6 +5944,7 @@ export class AgentMuxClient {
         nativeHandleIdentity: JSON.stringify(canonical.nativeHandle ?? null), deadline }
     })
     await this.serializeAgentInput(requestedSession, async (session, run) => {
+      await context?.assertCurrent?.()
       await this.submitNativeInteractionResponse(
         session,
         run,
@@ -5922,9 +5954,114 @@ export class AgentMuxClient {
         operationId,
         plan.data,
         prepared,
-        renderObservation.signal
+        renderObservation.signal,
+        context?.assertCurrent
       )
     }, { kind: 'semantic', bytes: null }, renderObservation)
+  }
+
+  private async closePermissionHook(agentSessionId: string, runId: string, receiptId: string, decided: boolean): Promise<void> {
+    const session = this.registry.findByRun(runRef(runId))
+    if (!session || session.agentSessionId !== agentSessionId || !session.pendingInteraction) return
+    await this.updatePermissionHookRequest(session, receiptId, request => ({ ...request,
+      permissionHook: { ...request.permissionHook!, closed: decided ? 'decision-returned' : 'abstained' } }))
+  }
+
+  private async updatePermissionHookRequest(session: AgentMuxAgentSession, receiptId: string,
+    change: (request: Extract<AgentMuxInteractionRequest, { kind: 'permission' }>) => AgentMuxInteractionRequest): Promise<AgentMuxStoredAgentSession> {
+    const next = await this.updateExactAgentSession(session.agentSessionId, session.run, current => {
+      const pending = current.pendingInteraction
+      if (!pending) throw new AgentMuxError('The original permission request is no longer retained.', 'UNKNOWN_AGENT_INTERACTION')
+      let found = false
+      const update = (request: AgentMuxInteractionRequest) => {
+        if (request.kind !== 'permission' || request.permissionHook?.receiptId !== receiptId) return request
+        found = true
+        return change(request)
+      }
+      const request = update(pending.request)
+      const additionalRequests = pending.additionalRequests?.map(update)
+      if (!found) throw new AgentMuxError('The original permission callback does not match this request.', 'UNKNOWN_AGENT_INTERACTION')
+      return { ...current, pendingInteraction: { ...pending, request, ...(additionalRequests ? { additionalRequests } : {}) }, updatedAt: Date.now() }
+    })
+    this.publishSession(next)
+    return next
+  }
+
+  private async respondPermissionHook(session: AgentMuxStoredAgentSession,
+    request: Extract<AgentMuxInteractionRequest, { kind: 'permission' }>,
+    input: AgentMuxInteractionResponse, context?: AgentInputCallContext): Promise<void> {
+    context?.requestSignal?.throwIfAborted()
+    const value = normalizeAgentInteractionResponse(request, input)
+    if (value.kind !== 'permission' || !request.permissionHook) throw new AgentMuxError('Permission Hook response kind changed.', 'INVALID_AGENT_INTERACTION_RESPONSE')
+    const receiptId = request.permissionHook.receiptId
+    const responseDigest = digestInteractionResponse(value)
+    const operationId = agentInteractionOperationIdentity(session, request.id, responseDigest, 'permission-hook')
+    const contribution = this.providers.get(session.providerId).hook.permissionDecision
+    const output = value.decision.outcome === 'cancelled' ? null : contribution?.outputs[value.decision.optionId]
+    if (output === undefined) throw new AgentMuxError('The Provider does not declare this Hook decision.', 'AGENT_INTERACTION_UNSUPPORTED')
+    const original = request.permissionHook.response
+    if (original && (original.operationId !== operationId || original.responseDigest !== responseDigest)) {
+      throw new AgentMuxError('This original permission callback already has a different response.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
+    }
+    if (original?.delivery === 'connection-written') return
+    if (original?.delivery === 'unknown') throw new AgentMuxError('The original Hook response is unknown; it will not be replayed.', 'AGENT_INTERACTION_UNCONFIRMED')
+    // A frozen/attempted terminal response remains on its original transport.
+    if (session.pendingInteraction?.request.id === request.id && (session.pendingInteraction.response || session.pendingInteraction.nativeInput)) {
+      throw new AgentMuxError('This request already has terminal input to reconcile; it cannot be answered through a Hook.', 'AGENT_INTERACTION_UNCONFIRMED')
+    }
+    let claimed = false, dispatchStarted = false
+    try {
+      await this.registry.refresh(session.agentSessionId, session.run)
+      await context?.assertCurrent?.()
+      await this.updatePermissionHookRequest(session, receiptId, current => {
+        if (current.permissionHook?.closed || current.permissionHook?.nativeTurnEnded || !this.hookServer.hasPermissionCallback(session.agentSessionId, session.run.runId, receiptId)) {
+          throw new AgentMuxError('The original permission Hook callback is closed. Use the original terminal.', 'AGENT_INTERACTION_UNCONFIRMED')
+        }
+        const previous = current.permissionHook?.response
+        if (previous && (previous.operationId !== operationId || previous.responseDigest !== responseDigest || previous.delivery !== 'saved')) {
+          throw new AgentMuxError('The original permission decision has already been dispatched.', 'AGENT_INTERACTION_UNCONFIRMED')
+        }
+        return { ...current, permissionHook: { ...current.permissionHook!, response: { value, operationId, responseDigest, delivery: 'saved' } } }
+      })
+      // Only this existing saved-to-unknown CAS claims the original decision dispatch.
+      // A concurrent save or claim loser never owns the original callback's None exit.
+      await this.updatePermissionHookRequest(session, receiptId, current => {
+        if (current.permissionHook?.closed || current.permissionHook?.nativeTurnEnded || current.permissionHook?.response?.operationId !== operationId ||
+            current.permissionHook.response.delivery !== 'saved' ||
+            !this.hookServer.hasPermissionCallback(session.agentSessionId, session.run.runId, receiptId)) {
+          throw new AgentMuxError('The original permission callback changed before dispatch.', 'AGENT_INTERACTION_UNCONFIRMED')
+        }
+        return { ...current, permissionHook: { ...current.permissionHook, response: { ...current.permissionHook.response, delivery: 'unknown' } } }
+      })
+      claimed = true
+      await context?.assertCurrent?.()
+      context?.requestSignal?.throwIfAborted()
+      const current = this.requireAgentSession(session.agentSessionId), pending = current.pendingInteraction
+      const target = [pending?.request, ...(pending?.additionalRequests ?? [])].find(candidate => candidate?.id === request.id)
+      if (!sameRun(current.run, session.run) || target?.kind !== 'permission' || !target.permissionHook || target.permissionHook.nativeTurnEnded ||
+          current.nativeHandle?.kind === 'provider' && target.permissionHook.nativeSessionId !== undefined && target.permissionHook.nativeSessionId !== current.nativeHandle.sessionId) {
+        throw new AgentMuxError('The original permission target changed before dispatch.', 'AGENT_INTERACTION_UNCONFIRMED')
+      }
+      dispatchStarted = true
+      await this.hookServer.respondPermission(session.agentSessionId, session.run.runId, receiptId, output === null ? null : structuredClone(output))
+      await this.updatePermissionHookRequest(session, receiptId, current => ({ ...current,
+        permissionHook: { ...current.permissionHook!, response: { ...current.permissionHook!.response!, delivery: 'connection-written' } } }))
+    } catch (error) {
+      if (claimed && !dispatchStarted) {
+        // This caller won the dispatch claim and no original response call occurred. Release the exact callback without a decision;
+        // revocation must not leave Native waiting behind a response we know was never sent.
+        this.hookServer.abstainPermission(session.agentSessionId, session.run.runId, receiptId)
+        try {
+          await this.updatePermissionHookRequest(session, receiptId, current => {
+              const response = current.permissionHook?.response
+              return response?.operationId === operationId && response.delivery === 'unknown'
+                ? { ...current, permissionHook: { ...current.permissionHook!, closed: 'abstained', response: { ...response, delivery: 'saved' } } }
+                : current
+          })
+        } catch { /* The original rejection and durable choice remain; never retry this callback. */ }
+      }
+      throw error
+    }
   }
 
   /**
@@ -6299,6 +6436,14 @@ export class AgentMuxClient {
     const projected = cloneSession(session)
     if (session.nativeHandle) projected.nativeHandlePersistence = this.registry.isDurabilityUnconfirmed(session.agentSessionId)
       ? 'unconfirmed' : 'confirmed'
+    const pending = projected.pendingInteraction
+    if (pending) {
+      const requests = [pending.request, ...(pending.additionalRequests ?? [])]
+      for (const request of requests) if (request.kind === 'permission' && request.permissionHook &&
+          !request.permissionHook.closed && !this.hookServer.hasPermissionCallback(session.agentSessionId, session.run.runId, request.permissionHook.receiptId)) {
+        request.responseUnavailableReason = 'The original permission Hook callback is no longer open. Use the original terminal; the decision will not be replayed.'
+      }
+    }
     const observation = this.hookIngressObservations.get(session.agentSessionId)
     if (observation && sameRun(observation.run, session.run)) projected.hookIngressObservation = structuredClone(observation)
     return projected
@@ -7233,7 +7378,16 @@ export class AgentMuxClient {
                 ...(observation.failure ? { failure: structuredClone(observation.failure),
                   detail: `[${observation.failure.code}] ${observation.failure.message}` } : {})
               })
+              const pending = saved.pendingInteraction
+              const finishPermission = (request: AgentMuxInteractionRequest): AgentMuxInteractionRequest =>
+                ended && request.kind === 'permission' && request.permissionHook &&
+                saved.nativeHandle?.kind === 'provider' && request.permissionHook.nativeSessionId === saved.nativeHandle.sessionId &&
+                request.permissionHook.nativeTurnId === observation.nativeTurnId
+                  ? { ...request, permissionHook: { ...request.permissionHook,
+                    nativeTurnEnded: { recordId: observation.recordId, observedAt: status.observedAt } } } : request
               return { ...saved, semanticStatus: status, updatedAt: Math.max(saved.updatedAt, status.observedAt),
+                ...(pending ? { pendingInteraction: { ...pending, request: finishPermission(pending.request),
+                  ...(pending.additionalRequests ? { additionalRequests: pending.additionalRequests.map(finishPermission) } : {}) } } : {}),
                 ...(acceptsAgentActivityState(saved.activityCommit, saved.run, status) ? {
                   activityCommit: advanceAgentActivityCommit(saved.activityCommit, {
                     id: JSON.stringify(['activity-state', 'native-transcript', saved.run.runId, observation.recordId]),
@@ -7387,7 +7541,8 @@ export class AgentMuxClient {
     operationId: string,
     data: string,
     qualification?: AgentInteractionInputQualification,
-    renderSignal?: AbortSignal
+    renderSignal?: AbortSignal,
+    assertCurrent?: () => void | Promise<void>
   ): Promise<void> {
     await this.assertNativeInteractionSource(session)
     if (
@@ -7508,6 +7663,8 @@ export class AgentMuxClient {
         run = await observeFinalTarget(current, true)
         assertTargetFrame(run, current)
       }
+      await assertCurrent?.()
+      if (canApply) assertTargetFrame(run, this.requireAgentSession(session.agentSessionId))
       const accepted = await this.kernel.input(session.run.runId, {
         ownerInstanceId: this.kernel.identity().daemonInstanceId,
         operationId: state.operationId,
@@ -8248,9 +8405,16 @@ export class AgentMuxClient {
       }
       if (normalized.interaction) {
         const { nativeToolCallId: _unconfirmedCall, ...unboundInteraction } = normalized.interaction
-        const interaction = precedingInteractionReceiptId && (current.hookReceipt?.id !== precedingInteractionReceiptId ||
+        let interaction: AgentMuxInteractionRequest = precedingInteractionReceiptId && (current.hookReceipt?.id !== precedingInteractionReceiptId ||
           JSON.stringify(current.nativeHandle ?? null) !== JSON.stringify(context.nativeHandle ?? null))
           ? unboundInteraction : normalized.interaction
+        if (interaction.kind === 'permission' && envelope.permissionCallback && provider.hook.permissionDecision?.eventName === normalized.eventName) {
+          const { nativeToolCallId: _notReportedByCallback, ...originalCallback } = interaction
+          interaction = { ...originalCallback, permissionHook: { receiptId: receipt.id,
+            ...(current.nativeHandle?.kind === 'provider' ? { nativeSessionId: current.nativeHandle.sessionId } : {}),
+            ...(normalized.nativeTurnId ? { nativeTurnId: normalized.nativeTurnId } : {}),
+            ...(!this.hookServer.hasPermissionCallback(current.agentSessionId, current.run.runId, receipt.id) ? { closed: 'abstained' as const } : {}) } }
+        }
         if (
           interaction.agentSessionId !== current.agentSessionId ||
           interaction.evidence.source !== 'native-hook' ||

@@ -13,7 +13,7 @@ import { decodeHostedValue, encodeHostedValue, hostedTransfer, AGENTMUX_HOSTED_T
 
 const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory', 'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource',
-  'clientPerformanceDiagnostics',
+  'clientPerformanceDiagnostics', 'respondAgentInteraction',
   'listHostExecutors', 'configureHostExecutor',
   'readDeliveryAttempt', 'inspectAgentPromptSubmission', 'inspectAgentInput', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId',
   'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
@@ -232,7 +232,7 @@ export class AgentMuxHostedRuntimeService {
         { kind: 'user', id: rpcString(context.principal.id, 'Transport principal') })) }
     }
     const invocation = input as unknown as AgentMuxHostedInvocation
-    const controlledInput = invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'rejoinAgentInputWaiting'
+    const controlledInput = invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'rejoinAgentInputWaiting' || invocation.method === 'respondAgentInteraction'
     if (controlledInput && invocation.args.length !== 1) throw new AgentMuxError('Input call context is supplied only by the original Host, never by wire arguments.', 'INVALID_CONTROL_REQUEST')
     const attachment = invocation.method === 'reattachAgent' || invocation.method === 'attachTerminal' || invocation.method === 'refreshRunAttachment'
     // Direct attachment invocations borrow an existing exact event destination;

@@ -51,6 +51,11 @@ export type AgentNativeSubagentTracking = {
 }
 
 export type AgentNativeHookSpecification = {
+  /** Exact synchronous native Hook decision outputs; absent hooks remain observers. */
+  permissionDecision?: {
+    eventName: string
+    outputs: Readonly<Record<string, Readonly<Record<string, unknown>>>>
+  }
   rules: readonly AgentNativeHookStateRule[]
   nativeTurnIdKeys?: readonly string[]
   /** Provider protocol correlation with the immediately preceding durable Hook. */

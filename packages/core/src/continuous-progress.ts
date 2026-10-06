@@ -1,3 +1,4 @@
+import { agentInteractionActiveRequest } from './agent-interaction-state.js'
 import { agentTurnCompletionIdentity } from './agent-session-identity.js'
 import type { AgentObservation } from './agent-status-freshness.js'
 import type { AgentMuxAgentSession } from './types.js'
@@ -34,7 +35,7 @@ export function decideContinuousProgress(observation: ContinuousProgressObservat
   }
   if (observation.inputByte === null) return { kind: 'skip', reason: 'unknown-status' }
   if (current.process !== 'running') return { kind: 'skip', reason: 'unknown-status' }
-  if (session.pendingInteraction || current.semantic === 'awaiting-input') return { kind: 'skip', reason: 'interaction-pending' }
+  if (agentInteractionActiveRequest(session.pendingInteraction) || current.semantic === 'awaiting-input') return { kind: 'skip', reason: 'interaction-pending' }
   if (current.readiness !== 'ready') return { kind: 'skip', reason: 'readiness-unconfirmed' }
   if (current.semantic === 'active') return { kind: 'skip', reason: 'working' }
   // Decayed working is an observation limit, not a completed turn. Freshness belongs

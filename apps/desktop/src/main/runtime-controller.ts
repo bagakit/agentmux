@@ -1928,7 +1928,7 @@ export class RuntimeController {
     response: AgentMuxInteractionResponse
   ): Promise<void> {
     await this.trackHostLifecycleOperation(control.hostId, async () => {
-      await (await this.connectedClient(control.hostId)).respondAgentInteraction({
+      await this.configuredClient(control.hostId).respondAgentInteraction({
         agentSessionId: control.agentSessionId,
         expectedRun: control.run,
         response
