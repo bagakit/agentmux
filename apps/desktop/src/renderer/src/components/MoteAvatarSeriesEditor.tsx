@@ -7,6 +7,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
 import { createSeriesGlbRenderer, type SeriesGlbRenderer } from '../lib/mote-avatar-series-renderer'
 import { MoteFace } from './MoteFace'
+import { MoteAvatarSeriesCreateDialog } from './MoteAvatarSeriesCreateDialog'
 import '../styles/mote-avatar-series.css'
 
 const ThemeObjectModel3dIcon = semanticIconComponent('object.model-3d')
@@ -86,6 +87,7 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
   const canvas = useRef<HTMLCanvasElement>(null), face = useRef<HTMLDivElement>(null), preview = useRef<HTMLDivElement>(null)
   const controller = useRef<SeriesGlbRenderer | null>(null), bitmap = useRef<HTMLImageElement | null>(null)
   const catalogRequest = useRef(0), sourceRequest = useRef(0), frameRequest = useRef(0)
+  const selectionIntent = useRef(0)
   const originalTarget = useRef(targetKey); originalTarget.current = targetKey
   const alive = useRef(true), intersecting = useRef(true), raf = useRef<number | null>(null)
   const draftCallback = useRef(onDraft); draftCallback.current = onDraft
@@ -100,17 +102,20 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
   }, [targetKey])
   useEffect(() => { onPreparing?.(preparing || rendering); return () => onPreparing?.(false) }, [preparing, rendering, onPreparing])
 
-  async function loadCatalog() {
-    const request = ++catalogRequest.current, target = targetKey
+  async function loadCatalog(prefer?: Pick<MoteAvatarSeriesLocator, 'origin' | 'seriesId'>) {
+    const request = ++catalogRequest.current, target = targetKey, intent = selectionIntent.current
     setCatalogLoading(true)
     try {
       const value = await api.moteAvatars.list()
-      if (!alive.current || request !== catalogRequest.current || originalTarget.current !== target) return
+      if (!alive.current || request !== catalogRequest.current || originalTarget.current !== target) return false
       setCatalog(value)
-      setSelectedSeries(previous => previous || (value.series[0] ? seriesKey(value.series[0]) : ''))
+      const chosen = prefer && value.series.find(series => seriesKey(series) === seriesKey(prefer))
+      setSelectedSeries(previous => chosen && intent === selectionIntent.current ? seriesKey(chosen) : previous || (value.series[0] ? seriesKey(value.series[0]) : ''))
       setIssue(previous => previous?.scope === 'catalog' ? null : previous)
+      return !prefer || Boolean(chosen)
     } catch (error) {
       if (alive.current && request === catalogRequest.current && originalTarget.current === target) setIssue({ scope: 'catalog', detail: presentError(error) })
+      return false
     } finally { if (alive.current && request === catalogRequest.current && originalTarget.current === target) setCatalogLoading(false) }
   }
   async function prepareSource(source: MoteAvatarSeriesLocator, expectedRevision?: string) {
@@ -267,15 +272,21 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
   const entries = selected?.entries.filter(entry => selected.origin !== 'builtin' || entry.definition.kind !== 'face2d' ||
     [initialChoice?.source, prepared?.source].some(source => source && locatorKey(source) === locatorKey({ ...selected, entryId: entry.entryId }))) ?? []
   const controlsDisabled = disabled
-  const partial = Boolean(catalog?.issues.length || prepared?.issues.length || catalog?.roots.some(root => root.state === 'unavailable'))
+  const partial = Boolean(catalog?.issues.length || prepared?.issues.length || catalog?.roots.some(root => root.state === 'unavailable' || root.origin === 'builtin' && root.state === 'missing'))
   return <section className="mote-series" hidden={!visible} aria-label="Avatar series" data-series-target={targetKey}>
     <div className="mote-series__catalog">
-      <label className="mote-series__select">Series<select aria-label="Avatar series" disabled={disabled || catalogLoading} value={selectedSeries}
-        onChange={event => setSelectedSeries(event.currentTarget.value)}>
+      <div className="mote-series__selector-row"><label className="mote-series__select">Series<select aria-label="Avatar series" disabled={disabled || catalogLoading} value={selectedSeries}
+        onChange={event => { selectionIntent.current++; setSelectedSeries(event.currentTarget.value) }}>
         {!selected ? <option value={selectedSeries}>{initialChoice ? initialChoice.source.seriesId : 'Choose a series'}</option> : null}
         {catalog?.series.map(value => <option key={seriesKey(value)} value={seriesKey(value)}>{value.title}{value.origin === 'user' ? ' · Your collection' : ''}</option>)}
       </select></label>
+      <MoteAvatarSeriesCreateDialog disabled={disabled} rootPath={catalog?.roots.find(root => root.origin === 'user')?.path}
+        onUse={async created => {
+          selectionIntent.current++
+          if (!await loadCatalog({ origin: 'user', seriesId: created.seriesId })) throw new Error('The created folder is kept. Refresh its original source to browse it; your current avatar and draft remain available.')
+        }} />
       <button type="button" className="small-button mote-series__refresh" aria-label="Refresh avatar series" disabled={disabled || catalogLoading} onClick={() => void loadCatalog()}><ThemeActionRefreshIcon size={12} />Refresh</button>
+      </div>
       {catalogLoading ? <p className="mote-series__status" role="status">Loading series…</p> : null}
       {selected ? <div className="mote-series__entries" role="group" aria-label="Series appearances">{entries.map(entry => {
         const source = { origin: selected.origin, seriesId: selected.seriesId, entryId: entry.entryId }
@@ -349,8 +360,8 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
         </>}
       </div> : null}
     </div>
-    {issue || partial || catalog?.roots.some(root => root.state === 'missing') ? <div className="mote-series__notice">
-      <div><span role="status">{issue ? issue.scope === 'catalog' ? 'Series unavailable. Other avatar styles are ready.' : issue.scope === 'source' && savedImageConfirmed && !prepared ? 'Editing source unavailable. Saved avatar kept.' : 'Preview unavailable. Your current draft is kept.' : partial ? 'Some sources are unavailable.' : 'Your avatar folder has not been created yet.'}</span>
+    {issue || partial ? <div className="mote-series__notice">
+      <div><span role="status">{issue ? issue.scope === 'catalog' ? 'Series unavailable. Other avatar styles are ready.' : issue.scope === 'source' && savedImageConfirmed && !prepared ? 'Editing source unavailable. Saved avatar kept.' : 'Preview unavailable. Your current draft is kept.' : 'Some sources are unavailable.'}</span>
         {issue ? <button type="button" className="small-button" disabled={disabled || preparing || catalogLoading} onClick={retry}>Retry</button> : null}</div>
       <details><summary>Details</summary>{issue ? <p>{issue.detail}</p> : null}
         {[...(catalog?.issues ?? []), ...(prepared?.issues ?? [])].map((value, index) => <p key={index}>{value.message} {value.recovery}</p>)}
