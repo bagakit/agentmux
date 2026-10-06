@@ -18,8 +18,15 @@ it('uses one optional whole-file byte cap while preserving ordinary reads and na
   expect(()=>parseFileReadResult(value,{...params,maxBytes:29})).toThrowError(expect.objectContaining({code:'CONTROL_PROTOCOL_ERROR'}))
   expect(()=>parseFileReadResult(value,params)).not.toThrow()
 })
-import { parseFileWriteParams, parseFileWriteResult } from '../src/public-rpc-files'
+import { fileUploadRevision, parseFileWriteParams, parseFileWriteResult } from '../src/public-rpc-files'
 const writeParams = { ...params, expectedResource: receipt().resource!, content: '原正文\n😀', expectedRevision: 'sha256:' + 'a'.repeat(64) }
+it('checks canonical saved bytes against the returned revision and retains honest attribution status', () => {
+  const content = 'Canonical saved Note with server metadata', revision = fileUploadRevision(new TextEncoder().encode(content))
+  const value = { resource: receipt().resource, result: { status: 'written', revision, content, noteAttribution: { status: 'unconfirmed', reason: 'Actor unavailable' } } }
+  expect(parseFileWriteResult(value, writeParams)).toEqual(value)
+  expect(() => parseFileWriteResult({ ...value, result: { ...value.result, content: 'Different bytes' } }, writeParams)).toThrow('does not match its revision')
+  expect(() => parseFileWriteResult({ ...value, result: { ...value.result, noteAttribution: { status: 'unconfirmed' } } }, writeParams)).toThrow('attribution')
+})
 it('keeps original write outcomes and resource mapping, never promotes unknown to written', () => {
   expect(parseFileWriteParams(writeParams)).toEqual(writeParams)
   const resource = receipt().resource

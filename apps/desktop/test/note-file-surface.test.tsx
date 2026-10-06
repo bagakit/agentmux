@@ -1,3 +1,4 @@
+import { fixtureEpoch as _liveTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -20,6 +21,7 @@ import * as noteKnowledgeModule from '../src/renderer/src/lib/note-knowledge'
 import * as noteDocumentModule from '@agentmux/client-ui/note/note-document'
 import * as noteDirectoryModule from '../src/renderer/src/lib/note-directory-sources'
 import { noteBlockSelectionKey } from '../src/renderer/src/lib/note-block-selection'
+import { attributeNoteBlocks } from '@agentmux/client-ui/note/note-provenance'
 const dom = composerDOM(), birth = directoryIdentity('local', _hygiene_fixturePath("repo")), zoneId = homeZoneId(birth)
 const original = { ...createWorkbenchTab('mixed-original', { kind: 'launcher', workspaceId: 'workspace', regionId: 'mixed-launcher' }), space: { spaceId: birth, zoneId } }
 const sourceRegion: FileWorkbenchSurface = { kind: 'file', regionId: 'mixed-file', workspaceId: 'workspace', path: 'source.note.json' }
@@ -87,6 +89,28 @@ it('uses the original conflict actions and preserves the rich draft rather than 
   await act(async () => editor().view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true })))
   expect(api.files.write).not.toHaveBeenCalled(); expect(useAppStore.getState().documents[sourceKey]!.content).toBe(raw)
 })
+it('renders per-block Agent authors and a non-blocking unconfirmed save notice while retaining canonical content', async () => {
+  const authored = attributeNoteBlocks(null, source, { kind: 'agent', id: 'verified-author' }, _liveTailFixtureEpoch(0, 0, 100))
+  useAppStore.setState({ documents: { ...useAppStore.getState().documents, [sourceKey]: { path: sourceRegion.path, content: JSON.stringify(authored), revision: 'authored-revision' } } })
+  await mount()
+  const originalEditor = editor()
+  expect(dom.container.querySelector('[data-note-agent-author]')?.getAttribute('data-note-agent-author')).toContain('verified-author')
+  expect(dom.container.querySelector('[data-note-agent-author]')?.getAttribute('title')).toContain('Created: Agent verified-author')
+  await act(async () => originalEditor.commands.insertContentAt(1, 'Edited '))
+  const current = readNoteDocument(useAppStore.getState().documents[sourceKey]!.content)
+  if (current.status !== 'valid') throw Error('Draft must remain valid')
+  const canonical = JSON.stringify(attributeNoteBlocks(authored, current.note, undefined, _liveTailFixtureEpoch(0, 0, 200)))
+  vi.mocked(api.files.write).mockResolvedValueOnce({ status: 'written', revision: 'canonical-revision', content: canonical, noteAttribution: { status: 'unconfirmed', reason: 'Original actor is unknown' } })
+  await click('Save')
+  expect(useAppStore.getState().documents[sourceKey]?.content).toBe(canonical)
+  expect(dom.container.textContent).toContain('Block authorship is unconfirmed')
+  expect(editor()).toBe(originalEditor)
+  await act(async () => originalEditor.commands.insertContentAt(1, 'Another '))
+  vi.mocked(api.files.write).mockResolvedValueOnce({ status: 'written', revision: 'next-revision', noteAttribution: { status: 'recorded' } })
+  await click('Save')
+  expect(api.files.write).toHaveBeenCalledTimes(2)
+  expect(dom.container.textContent).not.toContain('Block authorship is unconfirmed')
+}, 45_000)
 it('returns to an existing mixed Tab second File Region without creating a canonical replacement or changing Space focus', async () => {
   await mount(referring, referringTab.id)
   const before = useAppStore.getState(), tabs = before.tabs, layout = before.layouts.workspace!, active = layout.groups[0]!.activeTabId, region = mixed.layout.activeRegionId
@@ -130,7 +154,7 @@ it('does not rederive this directory for another project revision or an unrelate
 it('reads a valid reference-only Note without inserting content, assigning new IDs, or making it dirty', async () => {
   const before = useAppStore.getState().documents[referenceKey]!, generation = useAppStore.getState().documentGenerations[referenceKey]
   await mount(referring, referringTab.id)
-  expect(editor().getJSON()).toEqual(reference.content)
+  expect(editor().getJSON()).toEqual({ ...reference.content, content: reference.content.content.map(block => ({ ...block, attrs: { ...block.attrs, provenance: null } })) })
   expect(useAppStore.getState().documents[referenceKey]).toBe(before)
   expect(useAppStore.getState().dirtyDocuments[referenceKey]).toBeUndefined()
   expect(useAppStore.getState().documentGenerations[referenceKey]).toBe(generation)
