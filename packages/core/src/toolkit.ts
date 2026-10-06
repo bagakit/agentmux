@@ -67,6 +67,8 @@ export type ToolkitExecution = {
   executionId: string; invocationId: string; definition: ToolkitToolDefinition
   expectedLatestExecutionId: string | null; target: { workspacePath: string }
   run: { hostId: string; runId: string } | null; startedAt: number; text: string
+  /** Absent for text-only results; null means the original machine document is unavailable. */
+  document?: ToolkitResultDocument | null
   action?: { id: string; sourceExecutionId: string; expectedAdmissionExecutionId: string | null } | null
 }
 export type ToolkitAdmission = ToolkitExecution & {
@@ -142,8 +144,8 @@ function record(value: unknown, fields: readonly string[], optional: readonly st
   return r
 }
 // Typed children have their own schema; wrapper nesting is not arbitrary Settings JSON.
-function envelope(value: unknown, fields: readonly string[]): Record<string, unknown> {
-  const r = settingsResourceEnvelope(value, fields, 'CONTROL_PROTOCOL_ERROR')
+function envelope(value: unknown, fields: readonly string[], optional: readonly string[] = []): Record<string, unknown> {
+  const r = settingsResourceEnvelope(value, [...fields, ...optional], 'CONTROL_PROTOCOL_ERROR')
   if (fields.some(key => !Object.hasOwn(r, key))) invalid()
   return r
 }
@@ -309,7 +311,7 @@ export function parseToolkitActionInput(value: unknown, code = 'INVALID_CONTROL_
 }
 const EXECUTION_FIELDS = ['executionId', 'invocationId', 'definition', 'expectedLatestExecutionId', 'target', 'run', 'startedAt', 'text'] as const
 function execution(value: unknown, confirmed: boolean): ToolkitAdmission | ToolkitConfirmedResult {
-  const r = record(value, [...EXECUTION_FIELDS, 'state', 'reason', ...(confirmed ? ['endedAt', 'exitCode'] : [])], ['action'])
+  const r = envelope(value, [...EXECUTION_FIELDS, 'state', 'reason', ...(confirmed ? ['endedAt', 'exitCode'] : [])], ['action', 'document'])
   identity(r.executionId); identity(r.invocationId); nullable(r.expectedLatestExecutionId, identity)
   const definition = parseToolkitToolDefinition(r.definition)
   if (r.action !== undefined && r.action !== null) {
@@ -320,6 +322,8 @@ function execution(value: unknown, confirmed: boolean): ToolkitAdmission | Toolk
   const target = record(r.target, ['workspacePath']); text(target.workspacePath); encodedText(target.workspacePath, 4096)
   if (target.workspacePath !== definition.workspacePath) invalid()
   runRef(r.run); time(r.startedAt); nullable(r.reason, text); nullable(r.reason, value => encodedText(value, 4096)); text(r.text, TOOLKIT_TEXT_MAX_BYTES); encodedText(r.text, TOOLKIT_TEXT_MAX_JSON_BYTES)
+  if (Object.hasOwn(r, 'document') && r.document !== null) parseToolkitResultDocument(r.document)
+  if (r.document !== undefined && r.run === null) invalid()
   if (confirmed) {
     if (!['succeeded', 'failed', 'stopped'].includes(r.state as string)) invalid()
     time(r.endedAt)
@@ -345,7 +349,7 @@ export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
     return { ...r, configuration, retained } as ToolkitPackageUnavailableSnapshot
   }
   if (source.kind === 'script') {
-    const r = record(source, ['schema', 'kind', 'toolId', 'definition', 'state', 'reason', 'admission', 'latestConfirmed', 'consumerCount', 'sequence'], ['display'])
+    const r = envelope(source, ['schema', 'kind', 'toolId', 'definition', 'state', 'reason', 'admission', 'latestConfirmed', 'consumerCount', 'sequence'], ['display'])
     identity(r.toolId); const definition = parseToolkitToolDefinition(r.definition)
     if (r.toolId !== definition.id || !['idle', 'disabled', 'pending', 'running', 'stopping', 'unknown', 'succeeded', 'failed', 'stopped'].includes(r.state as string)) invalid()
     const admission = r.admission === null ? null : execution(r.admission, false) as ToolkitAdmission
@@ -356,7 +360,7 @@ export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
     if (!admission && ['succeeded', 'failed', 'stopped'].includes(r.state as string) && r.state !== latestConfirmed?.state) invalid()
     count(r.consumerCount); count(r.sequence); nullable(r.reason, text); nullable(r.reason, value => encodedText(value, 4096))
     if (Object.hasOwn(r, 'display')) {
-      const display = record(r.display, ['state', 'reason', 'admission', 'latestConfirmed', 'sequence'], ['lastSucceeded'])
+      const display = envelope(r.display, ['state', 'reason', 'admission', 'latestConfirmed', 'sequence'], ['lastSucceeded'])
       const displayAdmission = display.admission === null ? null : execution(display.admission, false) as ToolkitAdmission
       const displayConfirmed = display.latestConfirmed === null ? null : execution(display.latestConfirmed, true) as ToolkitConfirmedResult
       const lastSucceeded = display.lastSucceeded === undefined || display.lastSucceeded === null ? display.lastSucceeded
