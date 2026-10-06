@@ -1,0 +1,8 @@
+body { margin: 0; font-family: var(--font-sans); color: var(--text); background: var(--bg); }
+main { padding: var(--sp-6); max-width: 1100px; margin: auto; }
+nav { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-6); font-size: var(--fs-meta); }
+nav span { color: var(--text-3); flex: 1; }
+nav button { color: var(--text-2); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-4); }
+section { margin-bottom: var(--sp-6); padding: var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+h2 { font-size: var(--fs-body); font-weight: 500; color: var(--text-2); }
+#draft { max-width: 780px; }
