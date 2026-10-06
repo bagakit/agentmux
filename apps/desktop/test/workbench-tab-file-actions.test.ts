@@ -1,5 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { describe, expect, it, vi } from 'vitest'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import {
   callbackErasureGates,
   contentSourceText,
@@ -67,6 +69,12 @@ function labelsOf(entries: ReturnType<typeof fileEntries>): string[] {
 }
 
 describe('文件 Tab 菜单：路径复制与在文件管理器中显示', () => {
+  it('uses copy meanings for address and relative-path actions without turning either into focus or reply', () => {
+    const model = createWorkbenchTabCopyModel({ tabId: 'view:x', agentSessionId: null, file: FILE, writeClipboardText: vi.fn(async () => {}) })
+    expect(renderToStaticMarkup(createElement(model.tabAddress.icon))).toContain('data-semantic-icon="action.copy-address"')
+    expect(renderToStaticMarkup(createElement(model.copyRelativePath!.icon))).toContain('data-semantic-icon="action.copy-relative-path"')
+    expect(renderToStaticMarkup(createElement(model.copyPath!.icon))).toContain('data-semantic-icon="action.copy"')
+  })
   it('文件 Tab 有三项文件动作，且顺序在地址之后', () => {
     const labels = labelsOf(fileEntries())
     expect(labels).toEqual([
