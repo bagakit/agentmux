@@ -73,7 +73,7 @@ export const ConversationView = memo(function ConversationView({
           {...(describeSpeaker ? { describeSpeaker } : {})}
           {...(item.startedAt === undefined ? {} : { createdAt: item.startedAt })}
           {...(user && onContinue ? { onContinue: () => onContinue(buildNativeContinuationPrompt(page, item)) } : {})}
-          {...(renderMessageActions && item.kind === 'assistant-message' && item.messagePhase !== 'progress' && item.contentParts.some(part => part.kind === 'text' && part.text.trim())
+          {...(renderMessageActions && item.kind === 'assistant-message'
             ? { messageActions: renderMessageActions({ kind: 'native', agentSessionId: sessionId,
               providerId: page.source.providerId, nativeSessionId: page.source.nativeSessionId, recordId: item.id }) } : {})}
           {...reading} />

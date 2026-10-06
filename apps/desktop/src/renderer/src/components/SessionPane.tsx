@@ -727,7 +727,7 @@ export function SessionPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.id, session?.kind, missing, interruptionReason])
 
-  const renderMessageActions = useConversationReactions(sessionId, visible && !readOnly && surfaceKind === 'agent')
+  const renderMessageActions = useConversationReactions(sessionId, observationVisible && !readOnly && surfaceKind === 'agent')
 
   const mailboxReading = {
     workspaceRoot: fileContext.workspaceRoot, homeDir: fileContext.homeDir,
