@@ -142,28 +142,30 @@ const historicalRef = { key: { kind: 'prompt' as const, agentSessionId: original
 const settledHistory = { operationId: 'original-history', archived: true as const,
   inputReceipt: { status: 'admitted' as const, control: { ref: historicalRef, state: 'dispatch-authorized' as const, at: 1, gateId: 'original-gate' } } }
 
-it('does not occupy input for confirmed archived history, including its late observer reply, while preserving unknown originals', () => {
+it.each(['admitted', 'terminal-confirmed'] as const)('does not occupy input for confirmed archived history, including its late observer reply, while preserving unknown originals (%s)', status => {
+  const historical = { ...settledHistory, inputReceipt: { ...settledHistory.inputReceipt, status } }
   const state = useAppStore.getState()
   const withEntry = (entry: Parameters<typeof agentInputOccupied>[0]['agentSteerQueues'][string][number]) =>
     ({ ...state, agentSteerQueues: { [original.id]: [entry] }, agentSteerInFlight: { [original.id]: entry.operationId } })
-  expect(agentInputOccupied(withEntry(settledHistory), original.id)).toBe(false)
+  expect(agentInputOccupied(withEntry(historical), original.id)).toBe(false)
   expect(agentInputOccupied(withEntry({ operationId: 'archived-unknown', archived: true }), original.id)).toBe(true)
   const earlierUnknown = { operationId: 'original-unknown-with-later-preparation-refusal', archived: true as const,
     preparationInputNotApplied: true as const, promptCondition: { expectedRun: original.control.run, afterSubmissionId: null } }
   expect(agentInputOccupied(withEntry(earlierUnknown), original.id)).toBe(true)
-  expect(agentInputOccupied(withEntry({ ...settledHistory, inputReceipt: { ...settledHistory.inputReceipt, status: 'unknown' } }), original.id)).toBe(true)
-  expect(agentInputOccupied(withEntry({ ...settledHistory, inputReceipt: { status: 'stopped', control: {
-    ...settledHistory.inputReceipt.control, state: 'stopped-before-dispatch' } } }), original.id)).toBe(false)
+  expect(agentInputOccupied(withEntry({ ...historical, inputReceipt: { ...historical.inputReceipt, status: 'unknown' } }), original.id)).toBe(true)
+  expect(agentInputOccupied(withEntry({ ...historical, inputReceipt: { status: 'stopped', control: {
+    ...historical.inputReceipt.control, state: 'stopped-before-dispatch' } } }), original.id)).toBe(false)
   expect(agentInputOccupied(withEntry({ operationId: 'archived-local', archived: true, promptCondition: null }), original.id)).toBe(false)
-  expect(agentInputOccupied({ ...withEntry(settledHistory), agentComposerDrafts: { [original.id]: 'current draft' } }, original.id)).toBe(true)
-  expect(agentInputOccupied({ ...withEntry(settledHistory), agentSteerInFlight: { [original.id]: 'another-in-flight' } }, original.id)).toBe(true)
+  expect(agentInputOccupied({ ...withEntry(historical), agentComposerDrafts: { [original.id]: 'current draft' } }, original.id)).toBe(true)
+  expect(agentInputOccupied({ ...withEntry(historical), agentSteerInFlight: { [original.id]: 'another-in-flight' } }, original.id)).toBe(true)
   expect(agentInputOccupied(withEntry({ operationId: 'active-local', promptCondition: null }), original.id)).toBe(true)
 })
 
-it('feeds archived history through the actual input projection and Loop scheduler without treating admission as completion', async () => {
+it.each(['admitted', 'terminal-confirmed'] as const)('feeds archived history through the actual input projection and Loop scheduler without treating admission as completion (%s)', async status => {
+  const historical = { ...settledHistory, inputReceipt: { ...settledHistory.inputReceipt, status } }
   const target = { hostId: original.hostId, agentSessionId: original.control.agentSessionId,
     providerId: original.providerId, workspacePath: original.workspacePath }
-  const state = { ...useAppStore.getState(), agentSteerQueues: { [original.id]: [settledHistory] } }
+  const state = { ...useAppStore.getState(), agentSteerQueues: { [original.id]: [historical] } }
   const input = readContinuousProgressInput(state, { requestId: 'history-read', operation: 'continuous-progress.observeInput',
     control: original.control }, new AbortController().signal)
   expect(input.occupied).toBe(false)

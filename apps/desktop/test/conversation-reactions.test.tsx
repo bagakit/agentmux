@@ -71,14 +71,26 @@ describe('Saved Prompt → explicit lookup → exact reply card → original use
  })
  it('uses the original queue and public Core admission to persist the selected body and note as one human message',async()=>{
   const publicFlow=await reactionPublicClientFixture('agent-1','run-agent-1')
+  const unlisten=publicFlow.client.onEvent(event=>useAppStore.getState().applyEvent({hostId:'local',event}))
   try {
-   useAppStore.setState({sessions:[composerSession('agent-1','traex')]})
-   vi.spyOn(api.sessions,'refresh').mockImplementation(async()=>({...composerSession('agent-1','traex'),promptSubmissionPredecessor:agentPromptCondition(publicFlow.client.agentSession('agent-1')).afterSubmissionId}))
+   const target=composerSession('agent-1','traex')
+   useAppStore.setState({sessions:[{...target,pendingInteraction:{kind:'permission',requestId:'original-permission',agentSessionId:'agent-1',run:{runId:'run-agent-1'},source:'hook',title:'Explicit approval',options:[]}}]})
+   vi.spyOn(api.sessions,'refresh').mockImplementation(async()=>({...target,promptSubmissionPredecessor:agentPromptCondition(publicFlow.client.agentSession('agent-1')).afterSubmissionId}))
+   vi.spyOn(api.sessions,'inspectInput').mockImplementation(async (_control, key) => publicFlow.client.inspectAgentInput({key}))
    const submitted=vi.spyOn(api.sessions,'submitPrompt').mockImplementation(async(control,prompt,operationId,condition,_choice,human,agentMuxNote,sourceChannel)=>{
-    await publicFlow.client.submitAgentPrompt({agentSessionId:control.agentSessionId,prompt,operationId,...condition,authorHuman:human!,...(agentMuxNote===undefined?{}:{agentMuxNote}),...(sourceChannel===undefined?{}:{sourceChannel})})
+    return await publicFlow.client.submitAgentPrompt({agentSessionId:control.agentSessionId,prompt,operationId,...condition,..._choice,authorHuman:human!,...(agentMuxNote===undefined?{}:{agentMuxNote}),...(sourceChannel===undefined?{}:{sourceChannel})})
    })
    await mount();await press();await useAppStore.getState().flushAgentSteerQueue('agent-1')
+   const original=structuredClone(queued()[0]!)
+   expect(original).toMatchObject({directInputBinding:{expectedRun:target.control.run,admissionIntent:{kind:'manual-actor'}},directInputControl:target.control})
+   expect(submitted).not.toHaveBeenCalled()
+   useAppStore.setState({sessions:[target]})
+   await useAppStore.getState().flushAgentSteerQueue('agent-1')
    expect(submitted).toHaveBeenCalledTimes(1)
+   expect(submitted.mock.calls[0]!.slice(0,4)).toEqual([target.control,original.text,original.operationId,original.directInputBinding])
+   await publicFlow.settle()
+   const receipt=await publicFlow.client.inspectAgentInput({key:{kind:'prompt',agentSessionId:'agent-1',expectedRun:{runId:'run-agent-1'},submissionId:submitted.mock.calls[0]![2]}})
+   expect(receipt,JSON.stringify(receipt)).toMatchObject({status:'terminal-confirmed'})
    const all=(await publicFlow.store.loadTimeline('agent-1')).items;expect(all).toHaveLength(2)
    const items=all.filter(item=>item.kind==='user_message')
    expect(items).toHaveLength(1)
@@ -89,39 +101,46 @@ describe('Saved Prompt → explicit lookup → exact reply card → original use
    expect((await reloaded.loadTimeline('agent-1')).items).toEqual(all)
    expect(publicFlow.writes.join('')).toContain(definition.body)
    expect(publicFlow.writes.join('')).toContain('reply-original')
-   expect(useAppStore.getState().agentSteerQueues['agent-1']).toBeUndefined()
+   expect(useAppStore.getState().agentSteerQueues['agent-1']).toMatchObject([{archived:true,inputReceipt:{status:'terminal-confirmed'}}])
    expect(dom.draft()).toBe('Keep my draft')
-  } finally {await publicFlow.close()}
+  } finally {unlisten();await publicFlow.close()}
  })
  it('keeps an unconfirmed submission in the original Outbox and retries only its original explicit operation',async()=>{
   const flow=await reactionPublicClientFixture('agent-1','run-agent-1')
+  vi.spyOn(api.sessions,'inspectInput').mockImplementation(async (_control,key)=>flow.client.inspectAgentInput({key}))
+  vi.spyOn(api.sessions,'rejoinInputWaiting').mockImplementation(async (_control,ref)=>flow.client.rejoinAgentInputWaiting({ref}))
   try {
    useAppStore.setState({sessions:[composerSession('agent-1','traex')]})
    vi.spyOn(api.sessions,'refresh').mockImplementation(async()=>({...composerSession('agent-1','traex'),promptSubmissionPredecessor:agentPromptCondition(flow.client.agentSession('agent-1')).afterSubmissionId}))
    let first=true
    const submit=vi.spyOn(api.sessions,'submitPrompt').mockImplementation(async(control,prompt,operationId,condition,_choice,human,agentMuxNote,sourceChannel)=>{
-    await flow.client.submitAgentPrompt({agentSessionId:control.agentSessionId,prompt,operationId,...condition,authorHuman:human!,...(agentMuxNote===undefined?{}:{agentMuxNote}),...(sourceChannel===undefined?{}:{sourceChannel})})
+    const receipt = await flow.client.submitAgentPrompt({agentSessionId:control.agentSessionId,prompt,operationId,...condition,..._choice,authorHuman:human!,...(agentMuxNote===undefined?{}:{agentMuxNote}),...(sourceChannel===undefined?{}:{sourceChannel})})
     if(first){first=false;throw new Error('Response lost after acceptance')}
+    return receipt
    })
    await mount();await press();await useAppStore.getState().flushAgentSteerQueue('agent-1')
    expect(submit).toHaveBeenCalledTimes(1)
    const pending=structuredClone(queued()[0]!)
+   await flow.settle()
+   const receipt=await flow.client.inspectAgentInput({key:{kind:'prompt',agentSessionId:'agent-1',expectedRun:{runId:'run-agent-1'},submissionId:submit.mock.calls[0]![2]}})
+   expect(receipt,JSON.stringify(receipt)).toMatchObject({status:'terminal-confirmed'})
    const writesAfter=flow.writes.length;expect(writesAfter).toBeGreaterThan(0)
    await useAppStore.getState().flushAgentSteerQueue('agent-1')
    expect(submit).toHaveBeenCalledTimes(1);expect(queued()[0]!.operationId).toBe(pending.operationId)
    await useAppStore.getState().sendQueuedAgentSteer('agent-1',pending.operationId)
-   expect(submit).toHaveBeenCalledTimes(2)
-   expect(submit.mock.calls.map(call=>call[2])).toEqual([pending.operationId,pending.operationId])
+   expect(submit).toHaveBeenCalledTimes(1)
+   expect(submit.mock.calls.map(call=>call[2])).toEqual([pending.operationId])
+   expect(queued()[0]).toMatchObject({operationId:pending.operationId,archived:true,inputReceipt:{status:'terminal-confirmed'}})
    expect(flow.writes).toHaveLength(writesAfter)
    expect((await flow.store.loadTimeline('agent-1')).items.filter(item=>item.kind==='user_message')).toHaveLength(1)
   } finally {await flow.close()}
  })
- it('allows an explicit reaction after confirmed archived history while preserving that original record and the current draft',async()=>{
+ it.each(['admitted','terminal-confirmed'] as const)('allows an explicit reaction after confirmed archived %s history while preserving that original record and the current draft',async status=>{
   waitPermission();await mount();await press()
   const original=structuredClone(queued()[0]!)
   const key={kind:'prompt' as const,agentSessionId:'agent-1',expectedRun:{runId:'run-agent-1'},submissionId:original.operationId},ref={key,waitGeneration:1}
   const historical={...original,archived:true as const,inputIntakeStarted:true as const,inputReceipt:{key,ref,persistence:'confirmed' as const,
-   status:'admitted' as const,observation:'closed' as const,admission:{agentSessionId:'agent-1',run:{runId:'run-agent-1'}},
+   status,observation:'closed' as const,admission:{agentSessionId:'agent-1',run:{runId:'run-agent-1'}},
    control:{ref,state:'dispatch-authorized' as const,at:1,gateId:'original-gate'}}}
   await act(async()=>useAppStore.setState({agentSteerQueues:{'agent-1':[historical]}}))
   expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="回复：认可"]')!.disabled).toBe(false)
@@ -161,6 +180,16 @@ describe('Saved Prompt → explicit lookup → exact reply card → original use
   expect(submit).not.toHaveBeenCalled()
   expect(dom.container.querySelector('[role="status"] .conversation-reactions__sr')).not.toBeNull()
   expect(dom.container.querySelector('[role="status"] .conversation-reactions__sr')!.textContent).toBe('已加入发件箱')
+ })
+ it('freezes a pending reaction at the click Run and never retargets it when the interaction clears after Run replacement',async()=>{
+  waitPermission();await mount();await press()
+  const original=structuredClone(queued()[0]!),target=composerSession()
+  expect(original).toMatchObject({directInputBinding:{expectedRun:target.control.run,admissionIntent:{kind:'manual-actor'}},directInputControl:target.control,reaction:{code:'ok',replySource:reply}})
+  const submit=vi.spyOn(api.sessions,'submitPrompt'),inspect=vi.spyOn(api.sessions,'inspectInput')
+  await act(async()=>useAppStore.setState({sessions:[{...target,control:{...target.control,run:{runId:'replacement-after-click'}}}]}))
+  await useAppStore.getState().flushAgentSteerQueue('agent-1')
+  expect(submit).not.toHaveBeenCalled();expect(inspect).not.toHaveBeenCalled()
+  expect(queued()).toEqual([original]);expect(dom.draft()).toBe('Keep my draft')
  })
  it('freezes queued meaning across Settings edits and remounts instead of silently accepting the same outstanding reply again',async()=>{
   waitPermission();await mount();await press();const original=structuredClone(queued()[0]);await external({body:'new meaning'})

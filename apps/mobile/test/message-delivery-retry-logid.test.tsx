@@ -5,7 +5,7 @@ import { ClientDeliveryDiagnostics } from '@agentmux/client-ui/delivery-diagnost
 import { MobileConversationSurface, type MobileConversationSurfaceProps } from '../src/conversation/MobileConversationSurface'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { DeviceWorkfaceStore, emptyDeviceWorkface, getDeviceWorkface, parseDraftRecord } from '../src/recovery/device-workface'
-import { button, click, deferred, editor, evidence, fixture, mount, mounted, paste, session } from './conversation-fixture'
+import { acceptedPrompt, button, click, deferred, editor, evidence, fixture, mount, mounted, paste, plainEnter, session } from './conversation-fixture'
 
 const connected = { state: 'connected' as const, message: '已连接原 Host' }
 const draftKey = JSON.stringify(['draft', 'session-original'])
@@ -86,7 +86,7 @@ it.each(['digest', 'quota', 'listener'] as const)('releases the fresh Mobile sen
   }
   try {
     const view = await mount(<MobileConversationSurface {...f.options} />)
-    await paste(view.element, body); await click(button(view.element, 'Send'))
+    await paste(view.element, body); await plainEnter(view.element)
     await settled(() => {
       expect(storedAttempt().logId).toBeDefined()
       expect(storedAttempt().phase).toBe('rejected')
@@ -114,7 +114,7 @@ it.each(['preparation', 'lost-ack'] as const)('continues the same %s request thr
   f.submit.mockRejectedValueOnce(firstError).mockRejectedValueOnce(refusal('second actual call refused')).mockResolvedValue(undefined)
   const view = await mount(<MobileConversationSurface {...f.options} />)
   await paste(view.element, body)
-  await click(button(view.element, 'Send'))
+  await plainEnter(view.element)
   await settled(() => expect(storedAttempt().logId).toBeDefined())
   const firstAttempt = structuredClone(storedAttempt()), firstId = firstAttempt.logId!, firstRecord = log(firstId).record
   expect(firstAttempt.phase).toBe(kind === 'preparation' ? 'rejected' : 'unknown')
@@ -149,12 +149,12 @@ it.each(['preparation', 'lost-ack'] as const)('continues the same %s request thr
   await settled(() => expect(inspect(firstId).availability).toBe('found'))
   expect(inspect(firstId).record).toEqual(firstRecord)
   expect(inspect(secondId).record).toEqual(secondRecord)
-  await click(button(view.element, 'Send'))
+  await plainEnter(view.element)
   await settled(() => expect(storedAttempt().phase).toBe('confirmed'))
   expect(f.submit).toHaveBeenCalledTimes(3)
   const request = f.submit.mock.calls[0]![0]
   expect(request).toMatchObject({ agentSessionId: 'session-original', operationId: firstAttempt.operationId,
-    expectedRun: { runId: 'run-original' }, afterSubmissionId: null, prompt: body, authorHuman: true, allowUncertainTurn: true })
+    expectedRun: { runId: 'run-original' }, afterSubmissionId: null, prompt: body, authorHuman: true })
   expect(f.submit.mock.calls.map(call => call[0])).toEqual([request, request, request])
   expect(storedAttempt().operationId).toBe(firstAttempt.operationId)
   expect(editor(view.element).textContent).toBe('')
@@ -168,7 +168,7 @@ it('copies the exact logid only after the actual clipboard callback confirms suc
   const f = consumer(); f.submit.mockRejectedValueOnce(refusal('copyable original failure'))
   f.clipboard.mockRejectedValueOnce(new Error('real clipboard permission refused')).mockResolvedValue(undefined)
   const view = await mount(<MobileConversationSurface {...f.options} />)
-  await paste(view.element, body); await click(button(view.element, 'Send'))
+  await paste(view.element, body); await plainEnter(view.element)
   await settled(() => expect(storedAttempt().logId).toBeDefined())
   const logId = storedAttempt().logId!
   await click(button(view.element, '复制 logid'))
@@ -184,7 +184,7 @@ it('copies the exact logid only after the actual clipboard callback confirms suc
 it.each(['run', 'runtime'] as const)('keeps every retry visible but refuses a changed %s without reassigning the original request', async target => {
   const f = consumer(); f.submit.mockRejectedValueOnce(refusal('retain original target'))
   const view = await mount(<MobileConversationSurface {...f.options} />)
-  await paste(view.element, body); await click(button(view.element, 'Send'))
+  await paste(view.element, body); await plainEnter(view.element)
   await settled(() => expect(storedAttempt().logId).toBeDefined())
   const original = structuredClone(storedAttempt())
   if (target === 'run') { const changed = session(); changed.run = { runId: 'other-current-run' }; f.sessions.set('session-original', changed) }
@@ -205,7 +205,7 @@ it('has one actual in-flight request, keeps a distinct edited draft, and never a
   const f = consumer(), pending = deferred<void>()
   f.submit.mockRejectedValueOnce(refusal('original first failure')).mockImplementationOnce(() => pending.promise)
   const view = await mount(<MobileConversationSurface {...f.options} />)
-  await paste(view.element, body); await click(button(view.element, 'Send'))
+  await paste(view.element, body); await plainEnter(view.element)
   await settled(() => expect(storedAttempt().logId).toBeDefined())
   const original = structuredClone(storedAttempt()), retry = button(view.element, '重试原请求')
   await act(async () => { retry.click(); retry.click() })
@@ -257,11 +257,11 @@ it.each(['known', 'unknown'] as const)('retains offline failure with %s diagnost
 it('reopens the actual device record with the original request/runtime/inputRequested facts and no automatic retry', async () => {
   const f = consumer(); f.submit.mockRejectedValueOnce(refusal('durable original failed request'))
   const view = await mount(<MobileConversationSurface {...f.options} />)
-  await paste(view.element, body); await click(button(view.element, 'Send'))
+  await paste(view.element, body); await plainEnter(view.element)
   await settled(() => expect(storedAttempt().logId).toBeDefined())
   const saved = structuredClone(storedAttempt()), originalBytes = localStorage.getItem('agentmux-mobile-workface-v1')
-  expect(saved).toMatchObject({ explicit: true, inputRequested: true, originalRuntimeId: 'original-runtime',
-    request: { runtimeId: 'original-runtime', condition: { expectedRun: { runId: 'run-original' }, afterSubmissionId: null }, explicit: true } })
+  expect(saved).toMatchObject({ explicit: false, inputRequested: true, originalRuntimeId: 'original-runtime',
+    request: { runtimeId: 'original-runtime', condition: { expectedRun: { runId: 'run-original' }, afterSubmissionId: null }, explicit: false } })
   const first = mounted.pop()!
   await act(async () => first.root.unmount()); first.element.remove()
   const reopened = new DeviceWorkfaceStore(() => localStorage).snapshot()
@@ -300,9 +300,9 @@ it('keeps a legacy unknown retry reachable but never fabricates its missing orig
 it('sends a distinct explicit draft while retaining the original unknown input for exact retry and cold reading', async () => {
   const f = consumer()
   f.submit.mockRejectedValueOnce(Object.assign(new Error('original ACK unavailable'), { code: 'TRANSPORT_LOST',
-    controlFailure: { disposition: 'unknown', confirmedInputBytes: 9 } })).mockResolvedValue(undefined)
+    controlFailure: { disposition: 'unknown', confirmedInputBytes: 9 } })).mockImplementation(acceptedPrompt)
   const view = await mount(<MobileConversationSurface {...f.options} />)
-  await paste(view.element, body); await click(button(view.element, 'Send'))
+  await paste(view.element, body); await plainEnter(view.element)
   await settled(() => expect(storedAttempt().phase).toBe('unknown'))
   const original = structuredClone(storedAttempt()), firstRecord = log(original.logId!).record
   await replaceDraft(view.element, 'Distinct current Session draft')
@@ -353,9 +353,9 @@ it('retains a legacy unknown with no original condition without blocking a disti
 it('never gives an unresolved identical input a new identity after a neighboring message became active', async () => {
   const f = consumer()
   f.submit.mockRejectedValueOnce(Object.assign(new Error('original partial ACK unknown'), { code: 'TRANSPORT_LOST',
-    controlFailure: { disposition: 'unknown', confirmedInputBytes: 9 } })).mockResolvedValue(undefined)
+    controlFailure: { disposition: 'unknown', confirmedInputBytes: 9 } })).mockImplementation(acceptedPrompt)
   const view = await mount(<MobileConversationSurface {...f.options} />)
-  await paste(view.element, body); await click(button(view.element, 'Send'))
+  await paste(view.element, body); await plainEnter(view.element)
   await settled(() => expect(storedAttempt().phase).toBe('unknown'))
   const originalInput = structuredClone(f.submit.mock.calls[0]![0])
   await replaceDraft(view.element, 'Independent neighbor'); await click(button(view.element, 'Send'))
@@ -428,9 +428,12 @@ it.each(['default', 'immediate'] as const)('binds a proven never-requested %s in
   await click(button(view.element, 'Send'))
   await settled(() => expect(storedAttempt().phase).toBe('confirmed'))
   expect(f.submit).toHaveBeenCalledExactlyOnceWith({ agentSessionId: current.agentSessionId, operationId: original.operationId,
-    prompt: body, authorHuman: true, expectedRun: current.run, afterSubmissionId: null, execution,
-    ...(execution === 'immediate' ? { allowUncertainTurn: true } : {}) })
-  expect(storedAttempt().request).toMatchObject({ condition: { expectedRun: current.run }, execution, explicit: execution === 'immediate' })
+    prompt: body, authorHuman: true, expectedRun: current.run, execution,
+    ...(execution === 'immediate' ? { admissionIntent: { kind: 'manual-actor' } } : { afterSubmissionId: null }) })
+  if (execution === 'immediate') {
+    expect(storedAttempt().manualInput).toMatchObject({ expectedRun: current.run })
+    expect(storedAttempt().request).toBeUndefined()
+  } else expect(storedAttempt().request).toMatchObject({ condition: { expectedRun: current.run }, execution, explicit: false })
 })
 
 it.each(['host', 'missing-host', 'runtime'] as const)('refuses never-requested Run rebinding when original %s cannot be confirmed', async reason => {
@@ -468,12 +471,13 @@ it('refuses a never-dispatched legacy intent whose original explicit choice is u
 })
 
 
-it('consumes declared native steer for explicit Mobile send', async () => {
+it('keeps explicit Mobile manual intent independent of a declared Native capability', async () => {
  const f = consumer()
- expect(f.client.catalog().find(p => p.id === 'codex')!.capabilities.promptExecution).toEqual({immediate: 'native-steer'})
+ const catalog=f.client.catalog();f.client.catalog=()=>catalog.map(provider=>({...provider,capabilities:{...provider.capabilities,promptExecution:{immediate:'interrupt-before-input' as const}}}))
+ expect(f.client.catalog().find(p => p.id === 'codex')!.capabilities.promptExecution).toEqual({immediate: 'interrupt-before-input'})
  const view = await mount(<MobileConversationSurface {...f.options} />)
  await paste(view.element, body)
  await click(button(view.element, 'Send'))
  await settled(() => expect(f.submit).toHaveBeenCalledOnce())
- expect(f.submit.mock.calls[0]![0]).toMatchObject({prompt: body,execution: 'immediate',allowUncertainTurn: true})
+ expect(f.submit.mock.calls[0]![0]).toMatchObject({prompt: body,execution: 'immediate',admissionIntent: {kind: 'manual-actor'}})
 })

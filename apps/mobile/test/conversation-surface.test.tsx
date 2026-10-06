@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MobileConversationSurface, type MobileConversationSurfaceProps } from '../src/conversation/MobileConversationSurface'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { DeviceWorkfaceStore, emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, deferred, editor, evidence, fixture, history, mount, mounted, paste, session } from './conversation-fixture'
+import { acceptedPrompt, button, click, deferred, editor, evidence, fixture, history, mount, mounted, paste, plainEnter, session } from './conversation-fixture'
 
 const connected = { state: 'connected' as const, message: '已连接原 Host' }
 async function refreshOriginal(element: HTMLElement) {
@@ -42,7 +42,8 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     // The optional attachment port remains a local chooser operation owned by the shell.
     await click(button(view.element, 'Reference files for the Agent to read'))
     expect(attach).toHaveBeenCalledOnce()
-    expect(f.unsubscribe).toHaveBeenCalledOnce()
+    // Reading and live input receipt observation each release their own subscription.
+    expect(f.unsubscribe).toHaveBeenCalledTimes(2)
     expect(f.disposeHistory).toHaveBeenCalledOnce()
   })
 
@@ -87,12 +88,11 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await paste(view.element, `[工具](agentmux-skill:${encodeURIComponent(skillPath)}) 保留引用`)
     await act(async () => { editor(view.element).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', isComposing: true, keyCode: 229 })) })
     expect(f.submit).not.toHaveBeenCalled()
-    await click(button(view.element, 'Send'))
+    await plainEnter(view.element)
     expect(f.submit).toHaveBeenCalledOnce()
     const input = f.submit.mock.calls[0]![0]
     expect(input).toEqual({ agentSessionId: 'session-original', operationId: expect.any(String), prompt: expect.any(String),
-      authorHuman: true, expectedRun: { runId: 'run-original' }, afterSubmissionId: 'prior-submission',
-      allowUncertainTurn: true, execution: 'immediate' })
+      authorHuman: true, expectedRun: { runId: 'run-original' }, afterSubmissionId: 'prior-submission', execution: 'default' })
     expect(input.prompt.trim()).toBe(`${skillPath} 保留引用`)
     expect(input.operationId).not.toBe('')
     expect(editor(view.element).textContent).toContain('保留引用')
@@ -125,6 +125,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
       const admitted = { ...original, promptCompletionAdmission: { submissionId: input.operationId, operationId: 'native-phase', startByte: 0, endByte: 8, acknowledged: true } }
       f.sessions.set(original.agentSessionId, admitted)
       f.emit({ type: 'agent-session', session: admitted })
+      return acceptedPrompt(input)
     })
     const view = await mount(<MobileConversationSurface {...props(f)} />)
     await paste(view.element, '第一条消息')
@@ -134,8 +135,9 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await click(button(view.element, 'Send'))
     expect(f.submit).toHaveBeenCalledTimes(2)
     const [first, second] = f.submit.mock.calls.map(call => call[0])
-    expect(first).toMatchObject({ expectedRun: original.run, afterSubmissionId: null, allowUncertainTurn: true, execution: 'immediate' })
-    expect(second).toMatchObject({ expectedRun: original.run, afterSubmissionId: first!.operationId, allowUncertainTurn: true, execution: 'immediate' })
+    expect(first).toMatchObject({ expectedRun: original.run, admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' })
+    expect(second).toMatchObject({ expectedRun: original.run, admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' })
+    expect(second).not.toHaveProperty('afterSubmissionId')
     expect(second!.operationId).not.toBe(first!.operationId)
     expect(editor(view.element).textContent).toBe('')
   })
@@ -146,11 +148,11 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await act(async () => editor(view.element).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' })))
     expect(f.submit).toHaveBeenCalledOnce()
     expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('allowUncertainTurn')
-    expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('execution')
+    expect(f.submit.mock.calls[0]![0].execution).toBe('default')
     await paste(view.element, '明确steer')
     await act(async () => editor(view.element).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', metaKey: true })))
     expect(f.submit).toHaveBeenCalledTimes(2)
-    expect(f.submit.mock.calls[1]![0]).toMatchObject({ allowUncertainTurn: true, execution: 'immediate' })
+    expect(f.submit.mock.calls[1]![0]).toMatchObject({ admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' })
   })
 
   it('keeps a pre-input turn-boundary refusal editable with full-width recovery, without treating it as unknown delivery', async () => {
@@ -177,7 +179,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await paste(view.element, '明确拒绝后保留')
     await click(button(view.element, 'Send'))
     expect(editor(view.element).textContent).toBe('明确拒绝后保留')
-    expect(view.element.textContent).toContain('尚未发送')
+    expect(view.element.querySelector('.mobile-send-status')?.getAttribute('data-phase')).toBe('rejected')
     expect(button(view.element, 'Send').disabled).toBe(false)
     expect(f.submit).toHaveBeenCalledOnce()
     await click(button(view.element, 'Send'))
@@ -207,7 +209,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
   })
 
   it.each(['success', 'failure'] as const)('binds a late %s receipt to its original operation and preserves edits in both mounted Sessions', async outcome => {
-    const f = fixture(), ack = deferred<void>()
+    const f = fixture(), ack = deferred<Awaited<ReturnType<typeof acceptedPrompt>>>()
     f.submit.mockImplementationOnce(() => ack.promise)
     const options = props(f), view = await mount(<MobileConversationSurface {...options} />)
     await paste(view.element, '原会话提交')
@@ -215,7 +217,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await paste(view.element, '提交后的原会话补充')
     await view.render(<MobileConversationSurface {...options} agentSessionId="other" />)
     await paste(view.element, '另一个会话新草稿')
-    await act(async () => outcome === 'success' ? ack.resolve() : ack.reject(new Error('original mounted late failure')))
+    await act(async () => outcome === 'success' ? ack.resolve(await acceptedPrompt(f.submit.mock.calls[0]![0])) : ack.reject(new Error('original mounted late failure')))
     expect(editor(view.element).textContent).toBe('另一个会话新草稿')
     await view.render(<MobileConversationSurface {...options} />)
     expect(editor(view.element).textContent).toContain('原会话提交')
@@ -235,7 +237,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
       { code: 'AGENT_PROMPT_INPUT_NOT_APPLIED', detail: 'not_applied' }))
     const view = await mount(<MobileConversationSurface {...props(f)} />)
     await paste(view.element, '已接受的 payload 不能重投')
-    await click(button(view.element, 'Send'))
+    await plainEnter(view.element)
     const input = f.submit.mock.calls[0]![0], value = session()
     value.terminalPromptSubmission = { run: value.run, submissionId: input.operationId, promptDigest: 'actual-core-digest', outputCursorBytes: 0,
       payload: { operationId: 'payload-original', inputByteRange: { startByte: 0, endByte: 20 }, acknowledged: true },
@@ -253,7 +255,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     f.submit.mockImplementationOnce(() => ack.promise)
     const view = await mount(<MobileConversationSurface {...props(f)} />)
     await paste(view.element, '交互之前已接受的 payload')
-    await click(button(view.element, 'Send'))
+    await plainEnter(view.element)
     const input = f.submit.mock.calls[0]![0], value = session()
     value.terminalPromptSubmission = { run: value.run, submissionId: input.operationId, promptDigest: 'actual-core-digest', outputCursorBytes: 0,
       payload: { operationId: 'payload-original', inputByteRange: { startByte: 0, endByte: 20 }, acknowledged: true },
@@ -285,7 +287,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
       { code: 'AGENT_PROMPT_INPUT_NOT_APPLIED', detail: 'not_applied' }))
     const view = await mount(<MobileConversationSurface {...props(f)} />)
     await paste(view.element, '原意图的未应用事实')
-    await click(button(view.element, 'Send'))
+    await plainEnter(view.element)
     const input = f.submit.mock.calls[0]![0], value = session()
     const payloadEnd = new TextEncoder().encode(input.prompt).byteLength, submitEnd = payloadEnd + new TextEncoder().encode('\r').byteLength
     value.promptCompletionAdmission = { submissionId: input.operationId, operationId: 'native-phase-original', startByte: 0, endByte: submitEnd,
@@ -325,7 +327,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(editor(view.element).textContent).toBe('原意图的未应用事实')
     expect(button(view.element, 'Send').disabled).toBe(false)
     expect(f.submit).toHaveBeenCalledOnce()
-    await click(button(view.element, 'Send'))
+    await plainEnter(view.element)
     expect(f.submit).toHaveBeenCalledTimes(2)
     const next = f.submit.mock.calls[1]![0]
     expect(next).toEqual({ ...input, operationId: expect.any(String), afterSubmissionId: input.operationId })
@@ -379,13 +381,13 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     f.submit.mockImplementationOnce(() => receipt.promise)
     const original = await mount(<MobileConversationSurface {...options} />)
     await paste(original.element, '冷启草稿 [工具](agentmux-skill:%2Foriginal%2Ftool.md)')
-    await click(button(original.element, 'Send'))
+    await plainEnter(original.element)
     const input = f.submit.mock.calls[0]![0]
     const saved = JSON.parse(localStorage.getItem(STORAGE)!).conversation
     expect(saved.attempts[0][0]).toBe(JSON.stringify(['draft', 'session-original']))
     expect(saved.attempts[0][1]).toMatchObject({
       operationId: input.operationId, runId: 'run-original', draft: '冷启草稿 [工具](agentmux-skill:%2Foriginal%2Ftool.md)', phase: 'sending',
-      inputRequested: true, explicit: true, request: { condition: { expectedRun: { runId: 'run-original' }, afterSubmissionId: null }, execution: 'immediate' }
+      inputRequested: true, explicit: false, request: { condition: { expectedRun: { runId: 'run-original' }, afterSubmissionId: null }, execution: 'default' }
     })
     const previous = mounted.pop()!
     await act(async () => previous.root.unmount()); previous.element.remove()
