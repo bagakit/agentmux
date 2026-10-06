@@ -176,3 +176,15 @@ prior revisions, and a later Binding revision does not inherit old actor grants.
 This package's binding owner authorizes boundaries only. Intake, external
 publication and original Core question or permission execution remain separate
 owners; creating or inspecting a binding performs none of those effects.
+
+## Durable publication
+
+`PublicationHost` borrows the original `ConnectionHost.database`, `RoomBindingReadPort` and exact Core conversation reads. `createPublicationConversationPort` adapts existing execution clients; it creates no Runtime, transcript reader or message queue. Desktop's original connection composition starts this owner and exposes its `ConnectionPort.delivery`. Configuration and Binding changes reconcile the same owner; source notifications wake durable catch-up rather than serving as the message log.
+
+Each accepted page commits its necessary Outbox effects, explicit skips and source frontier together. Selection includes original assistant speech and typed questions, preserving separate records with equal text. Complete resource-backed text uses the original Core resource reader and verified content digest before exact Unicode fragmentation. Reasoning, tool data and internal metadata are excluded. Confirmed surplus platform fragments receive explicit withdrawal operations when a source revision shortens the speech.
+
+A low-level `PublicationAdapter` prepares a bounded request synchronously inside the claim transaction, after the original predecessor mapping is known. That transaction freezes the original request, render version, audience and platform key before dispatch. Credentials are resolved by the Host outside prepared data. Compatible retries consume that same frozen request; an unavailable render version retains the operation for inspection.
+
+Every dispatch attempt has a private durable receipt correlation under the same operation and platform key. A late outcome updates its original attempt rather than certifying a later retry. An authoritative non-application permits an explicit same-ID retry; an unknown effect is inspected without replay, a new key or group-level fallback. Each Binding has an independent read/effect lane, so a slow or unknown effect does not occupy another Binding or the original Core input lane.
+
+Public `connection.delivery.inspect` and bounded `connection.delivery.ls` expose the original safe receipt and exact source reference, excluding body, prepared wire and credentials. The scoped list can report a source gap before any effect exists. Source replacement retains its old frontier for explicit relinking; storage or authority uncertainty retains the original work and reports the failed service step. Closing this publication owner releases only its readers and external-effect observation, preserving original Agents and durable operations.
