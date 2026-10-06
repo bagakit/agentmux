@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
@@ -10,6 +11,7 @@ import {
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import {
   projectPersistedWorkbench,
+  persistedSessionSurfaceIds,
   restorePersistedWorkbench,
   type PersistedWorkbench
 } from '../src/renderer/src/lib/workbench-persistence.js'
@@ -33,10 +35,10 @@ function session(id: string): SessionSnapshot {
     hostId: 'local',
     workspacePath: _hygiene_fixturePath("repo"),
     label: id,
-    createdAt: 1,
-    updatedAt: 1,
+    createdAt: _reshape_fixtureEpoch(0, 0, 1),
+    updatedAt: _reshape_fixtureEpoch(0, 0, 1),
     processState: 'running',
-    status: { state: 'running', source: 'run-process', observedAt: 1 },
+    status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) },
     latestOutputBytes: 0,
     control: {
       kind: 'agent',
@@ -460,8 +462,7 @@ describe('durable Workbench file/browser projection', () => {
     expect(restoredTab.layout).toEqual(tab.layout)
   })
 
-  it('G5: on restore, removes only the non-surviving Region and keeps the tab (collapses to leaf)', () => {
-    // A not-yet-attached Terminal has no confirmed Run to restore; only that Region is removed.
+  it('G5: retains an unknown launching Terminal and its exact split through save and restore', () => {
     const viewId = 'view:agent-pending-terminal'
     const left = initialWorkbenchRegionId(viewId)
     let tab = createWorkbenchTab(viewId, agentSurface(left, 'al-agent'))
@@ -472,21 +473,40 @@ describe('durable Workbench file/browser projection', () => {
       sessionId: 'not-attached',
       workspaceId: 'workspace'
     })
+    const persisted = projectPersistedWorkbench({ tabs: { [tab.id]: tab }, layouts: { workspace: createWorkspaceLayout('group', [tab.id]) } })
     const restored = restorePersistedWorkbench({
       config,
       sessions: [session('al-agent')],
-      persisted: {
-        tabs: { [tab.id]: tab },
-        layouts: { workspace: createWorkspaceLayout('group', [tab.id]) }
-      },
+      persisted,
       createTabGroupId: () => 'new-group'
     })
     const restoredTab = restored.tabs[viewId]!
     expect(restoredTab).toBeDefined()
-    expect(workbenchSurfaces(restoredTab)).toHaveLength(1)
-    expect(restoredTab.regions['al-pending-terminal']).toBeUndefined()
+    expect(workbenchSurfaces(restoredTab)).toHaveLength(2)
+    expect(restoredTab.regions['al-pending-terminal']).toEqual(tab.regions['al-pending-terminal'])
     expect(restoredTab.regions[left]!.kind).toBe('agent')
-    expect(restoredTab.layout.root.type).toBe('leaf')
+    expect(restoredTab.layout).toEqual(tab.layout)
+    expect(restored.layouts).toEqual(persisted.layouts)
+  })
+
+  it('keeps local, remote and selected scratch pending Terminal definitions through two round trips without inventing placement or Run', () => {
+    const pending = ['local-pending', 'remote-pending', 'scratch-pending'].map((id, index) => createWorkbenchTab(id, {
+      kind: 'terminal', phase: 'launching', regionId: `region-${id}`, sessionId: `unconfirmed-${id}`,
+      workspaceId: index === 2 ? SCRATCH_WORKSPACE_ID : index === 1 ? 'remote-workspace' : 'workspace'
+    }))
+    const tabs = Object.fromEntries(pending.map(tab => [tab.id, tab]))
+    const layouts = { workspace: createWorkspaceLayout('local-unbound'),
+      'remote-workspace': createWorkspaceLayout('remote-unbound'),
+      [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-selected', ['scratch-pending']) }
+    let state = { tabs, layouts }
+    for (let index = 0; index < 2; index++) {
+      const persisted = projectPersistedWorkbench(state)
+      expect(persistedSessionSurfaceIds(persisted)).toEqual(new Set())
+      state = restorePersistedWorkbench({ config, sessions: [], persisted,
+        preserveEntityIds: new Set(pending.map(tab => tab.id)), createTabGroupId: () => 'unused' })
+      expect(state.tabs).toEqual(tabs)
+      expect(state.layouts).toEqual(layouts)
+    }
   })
 
   it('G6: a file-only tab whose workspace is not configured disappears entirely', () => {

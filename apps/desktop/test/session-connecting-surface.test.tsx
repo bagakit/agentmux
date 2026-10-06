@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixtureIso: _hygiene_fixtureIso, fixturePath: _hygiene_fixturePath, fixtureTime: _hygiene_fixtureTime } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 // @vitest-environment happy-dom
@@ -20,6 +21,21 @@ import { composerConfig, composerDOM, composerSession } from './helpers/composer
 
 const dom = composerDOM()
 const prompt = '  Review the complete request.\n\nKeep spacing, 中文 and <symbols> intact.\n'
+it('retains the mounted original pending Terminal as unknown without starting, recovering or attaching a Run', async () => {
+  const tab = createWorkbenchTab('pending-terminal-tab', { regionId: 'pending-terminal-region', kind: 'terminal', phase: 'launching',
+    workspaceId: 'workspace', sessionId: 'unconfirmed-creation-slot' })
+  useAppStore.setState({ config: composerConfig, sessions: [composerSession('healthy-neighbor')], tabs: { [tab.id]: tab },
+    layouts: { workspace: createWorkspaceLayout('original-group', [tab.id]) }, pendingAgentLaunches: {} })
+  const start = vi.spyOn(api.sessions, 'launchTerminal'), recover = vi.spyOn(api.sessions, 'recover'), attach = vi.spyOn(api.sessions, 'attach')
+  await dom.render(<SessionPane sessionId="unconfirmed-creation-slot" surfaceKind="terminal" visible interactiveResize={false}
+    linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'original-group', tabId: tab.id, regionId: 'pending-terminal-region' }} />)
+  expect(document.body.textContent).toContain('Terminal creation is unconfirmed')
+  expect(document.body.textContent).toContain('original creation request identity')
+  expect(document.body.textContent).not.toContain('Waiting for this session to reconnect.')
+  expect(document.querySelector('.service-window[data-kind="indeterminate"]')).not.toBeNull()
+  expect(useAppStore.getState().tabs[tab.id]).toBe(tab)
+  expect(start).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled(); expect(attach).not.toHaveBeenCalled()
+})
 function pendingFixture(id = 'pending') {
   const tab = createWorkbenchTab('view', { regionId: 'region', kind: 'agent', phase: 'launching', workspaceId: 'workspace', sessionId: id })
   useAppStore.setState({
@@ -41,6 +57,66 @@ function deferred<T>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
   return { promise, resolve, reject }
 }
+
+it('a fresh Terminal request keeps its actual in-flight key while the mounted Region only reports unconfirmed observation', async () => {
+  const original = pendingFixture()
+  const launcher = createWorkbenchTab(original.id, { kind: 'launcher', regionId: 'region', workspaceId: 'workspace' })
+  useAppStore.setState({ tabs: { [launcher.id]: launcher }, activeWorkspaceId: 'workspace', pendingAgentLaunches: {} })
+  const pending = deferred<Awaited<ReturnType<typeof api.sessions.launchTerminal>>>()
+  const start = vi.spyOn(api.sessions, 'launchTerminal').mockReturnValue(pending.promise)
+  const opening = useAppStore.getState().launchTerminal('pane', { tabId: launcher.id, regionId: 'region' })
+  const surface = useAppStore.getState().tabs[launcher.id]!.regions.region!
+  if (surface.kind !== 'terminal') throw new Error('Expected the original Terminal opening')
+  expect(start).toHaveBeenCalledOnce()
+  expect(start.mock.calls[0]![0].createOperationId).toEqual(expect.any(String))
+  await dom.render(<SessionPane sessionId={surface.sessionId} surfaceKind="terminal" visible interactiveResize={false}
+    linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'pane', tabId: launcher.id, regionId: 'region' }} />)
+  expect(document.body.textContent).toContain('creation request identity is unconfirmed here')
+  expect(document.body.textContent).not.toContain('has no original creation request identity')
+  const returned = { ...composerSession('private-terminal-run'), kind: 'terminal' as const, providerId: null,
+    control: { kind: 'terminal' as const, hostId: 'local', runId: 'private-terminal-run', run: { runId: 'private-terminal-run' } } }
+  await act(async () => { pending.resolve(returned); await opening })
+  expect(start).toHaveBeenCalledOnce()
+  expect(useAppStore.getState().tabs[launcher.id]!.regions.region).toMatchObject({ kind: 'terminal', phase: 'attached', sessionId: returned.id })
+})
+
+it.each(['unknown', 'missing'] as const)('keeps the exact fresh Terminal Region and key after a %s creation receipt without replaying', async (receipt) => {
+  const original = pendingFixture()
+  const launcher = createWorkbenchTab(original.id, { kind: 'launcher', regionId: 'region', workspaceId: 'workspace' })
+  useAppStore.setState({ tabs: { [launcher.id]: launcher }, activeWorkspaceId: 'workspace', pendingAgentLaunches: {} })
+  const failure = Object.assign(new Error('Private transport reader ended'), receipt === 'unknown'
+    ? { controlFailure: { disposition: 'unknown', confirmedInputBytes: null } } : {})
+  const start = vi.spyOn(api.sessions, 'launchTerminal').mockRejectedValue(failure)
+  const recover = vi.spyOn(api.sessions, 'recover'), attach = vi.spyOn(api.sessions, 'attach')
+  const opening = useAppStore.getState().launchTerminal('pane', { tabId: launcher.id, regionId: 'region' })
+  const pendingTab = useAppStore.getState().tabs[launcher.id]!
+  const pendingSurface = pendingTab.regions.region!
+  if (pendingSurface.kind !== 'terminal') throw new Error('Expected original pending Terminal')
+  const result = await opening.catch(error => error)
+  const key = start.mock.calls[0]![0].createOperationId
+  expect(result).toMatchObject({ createOperationId: key, controlFailure: { disposition: 'unknown' } })
+  expect(useAppStore.getState().tabs[launcher.id]).toBe(pendingTab)
+  expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(['neighbor'])
+  expect(useAppStore.getState().errorNoticeContext).toMatchObject({ kind: 'indeterminate', lifecycle: { step: 'launch', regionId: 'region', tabId: launcher.id } })
+  expect(useAppStore.getState().error).toContain(key)
+  await dom.render(<SessionPane sessionId={pendingSurface.sessionId} surfaceKind="terminal" visible interactiveResize={false}
+    linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'pane', tabId: launcher.id, regionId: 'region' }} />)
+  expect(document.body.textContent).toContain('Terminal creation is unconfirmed')
+  expect(document.querySelector('.service-window[data-kind="indeterminate"]')).not.toBeNull()
+  expect(start).toHaveBeenCalledOnce(); expect(recover).not.toHaveBeenCalled(); expect(attach).not.toHaveBeenCalled()
+})
+
+it('only an exact not_applied Terminal creation receipt returns the original Launcher for configuration repair', async () => {
+  const original = pendingFixture()
+  const launcher = createWorkbenchTab(original.id, { kind: 'launcher', regionId: 'region', workspaceId: 'workspace' })
+  useAppStore.setState({ tabs: { [launcher.id]: launcher }, activeWorkspaceId: 'workspace', pendingAgentLaunches: {} })
+  const failure = Object.assign(new Error('Private launch admission refused'), { controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+  const start = vi.spyOn(api.sessions, 'launchTerminal').mockRejectedValue(failure)
+  await expect(useAppStore.getState().launchTerminal('pane', { tabId: launcher.id, regionId: 'region' })).rejects.toBe(failure)
+  expect(useAppStore.getState().tabs[launcher.id]!.regions.region).toEqual(launcher.regions.region)
+  expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(['neighbor'])
+  expect(start).toHaveBeenCalledOnce()
+})
 
 it.each(['launcher', 'control'] as const)('captures the exact %s request before native launch settles, independent of new drafts', async (entry) => {
   pendingFixture()
@@ -146,7 +222,7 @@ it('uses only the matching recovery candidate identity, never a neighbor or edit
   const session = composerSession('pending')
   await act(async () => useAppStore.setState({ pendingAgentLaunches: {}, recoveryCandidates: [{
     agentSessionId: 'pending', executorId: 'reviewer', providerId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"),
-    label: 'Saved agent', createdAt: 1, updatedAt: 2, capabilities: session.capabilities, run: session.control.run
+    label: 'Saved agent', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), capabilities: session.capabilities, run: session.control.run
   }], agentComposerDrafts: { pending: 'not the original request' } }))
   await dom.render(pane())
   expect(dom.container.textContent).toContain('Restoring your session')
@@ -163,7 +239,7 @@ it('passes the actual recovery Host and SID through the production Pane into one
   const saved = composerSession('pending')
   useAppStore.setState({ pendingAgentLaunches: {}, recoveryCandidates: [{
     agentSessionId: 'pending', executorId: 'reviewer', providerId: 'codex', hostId: 'remote-original',
-    workspacePath: _hygiene_fixturePath("original"), label: 'Saved agent', createdAt: 1, updatedAt: Date.now(),
+    workspacePath: _hygiene_fixturePath("original"), label: 'Saved agent', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: Date.now(),
     capabilities: saved.capabilities, run: saved.control.run
   }], agentComposerDrafts: { pending: 'Preserve my unsent draft' }, timelines: {} })
   const read = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({ agentSessionId: 'pending',
