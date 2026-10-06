@@ -30,6 +30,34 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## Shotback screenshot crop and pixelation reference
+
+The crop composition and pixelation algorithms in `apps/desktop/src/renderer/src/components/browser-screenshot/compose.ts` and `drawing-renderer.ts` are independently implemented with reference to Shotback commit `df21fa87ced894847c0d5e0d8abc70c391a6ae40`, particularly `src/lib/crop.ts` and `src/lib/annotate.ts`. AgentMux keeps its existing screenshot document, rendering pipeline, and clipboard lifecycle; no Shotback package or complete editor is included.
+
+Reference: https://github.com/DCCA/shotback/tree/df21fa87ced894847c0d5e0d8abc70c391a6ae40
+
+MIT License
+
+Copyright (c) 2026 Shotback contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ## fs-native-extensions
 
 fs-native-extensions 1.5.1, Copyright 2023 Holepunch Inc., is a runtime dependency licensed under Apache-2.0. The license text is reproduced in [Core notices](packages/core/THIRD_PARTY_NOTICES.md) and included in the dependency package. Its require-addon loader and transitive loader dependencies retain their own licenses in the distributed packages.
