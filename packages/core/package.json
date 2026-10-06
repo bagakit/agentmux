@@ -229,6 +229,10 @@
     "./conversation": {
       "types": "./dist/conversation.d.ts",
       "import": "./dist/conversation.js"
+    },
+    "./search": {
+      "types": "./dist/search.d.ts",
+      "import": "./dist/search.js"
     }
   },
   "bin": {

@@ -111,3 +111,5 @@ export * from './notebook-observation.js'
 export * from './note-links.js'
 
 export * from './conversation.js'
+
+export * from './search-metadata.js'
