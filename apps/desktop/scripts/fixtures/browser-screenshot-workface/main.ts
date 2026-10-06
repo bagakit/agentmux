@@ -2,13 +2,18 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
+import { createWorkspaceLayout } from '@agentmux/core/spatial-layout'
+import { parseAgentMuxSpatialGraph, spatialCatalog } from '@agentmux/core/spatial-state'
 import { createServer, type Server } from 'node:http'
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, nativeImage, type WebContentsView } from 'electron'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
 import { BrowserRefLedgerStore } from '../../../src/main/browser-ref-ledger-store'
 import { NativeOverlaySurfaces } from '../../../src/main/native-overlay-surfaces'
+import { WorkspaceFiles } from '../../../src/main/workspace-files'
+import { FileReadOwner } from '../../../src/main/file-read-owner'
+import type { WorkspaceRecord } from '../../../src/shared/contracts'
 
 const root = process.env.AGENTMUX_SCREENSHOT_PROBE_ROOT!, out = process.env.AGENTMUX_SCREENSHOT_PROBE_OUT!
 const label = process.env.AGENTMUX_SCREENSHOT_PROBE_LABEL!
@@ -27,6 +32,8 @@ let original: WebContentsView, sibling: WebContentsView, originalSnapshot: any, 
 let baseUrl: string
 let publicServer: AgentMuxControlServer
 let scriptCapture: any
+let files: WorkspaceFiles
+let workspace: WorkspaceRecord
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const evaluate = (code: string) => window.webContents.executeJavaScript(code)
 async function stage(value: string) {
@@ -41,18 +48,36 @@ async function until(label: string, read: () => Promise<any>, budget = 4000) {
   throw new Error('Native screenshot observation failed: ' + label)
 }
 async function facts() { return await evaluate('window.screenshotProbe.read()') }
+function imagePointOnScreen(facts: any, x: number, y: number) {
+  assert.ok(facts.imageView?.scale > 0 && facts.canvas, 'The actual Canvas exposes its painted image transform')
+  return { x: facts.canvas.x + facts.imageView.x + x * facts.imageView.scale,
+    y: facts.canvas.y + facts.imageView.y + y * facts.imageView.scale }
+}
 async function mouse(type: string, x: number, y: number, button?: string) {
   await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x, y,
     ...(button ? { button, clickCount: 1 } : {}), ...(type === 'mouseMoved' && button ? { buttons: 1 } : {}) })
 }
-async function click(name: string, insideEditor = false) {
-  const point = await evaluate(`(()=>{const root=${insideEditor ? "document.querySelector('.image-annotation-editor')" : 'document'},button=[...root.querySelectorAll('button,[role="menuitem"]')].find(b=>(b.getAttribute('aria-label')===${JSON.stringify(name)}||b.textContent.trim()===${JSON.stringify(name)})&&b.getBoundingClientRect().width>0);if(!button)return null;const r=button.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,disabled:button.disabled}})()`)
+async function click(name: string, insideEditor: boolean | 'file' = false) {
+  if (insideEditor === true && (name === 'Open original' || name === 'Save original')) {
+    await click('Original file actions', true)
+    const point = await until('actual Original menu action ' + name, async () => await evaluate(`(()=>{const item=[...document.querySelectorAll('[role="menuitem"]')].find(e=>e.textContent.trim()===${JSON.stringify(name + '…')});if(!item)return null;const r=item.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return r.width>0?{x,y,hit:item.contains(document.elementFromPoint(x,y))}:null})()`))
+    assert.equal(point.hit, true, 'The actual Original menu action owns its trusted pointer hit: ' + name)
+    if (process.env.AGENTMUX_SCREENSHOT_VISUAL === '1') { await settle(); await shot('original-file-actions') }
+    await mouse('mouseMoved', point.x, point.y); await mouse('mousePressed', point.x, point.y, 'left'); await mouse('mouseReleased', point.x, point.y, 'left')
+    return
+  }
+  const point = await evaluate(`(()=>{const root=${insideEditor === 'file' ? "document.querySelector('.confirmation-dialog')" : insideEditor ? "document.querySelector('.image-annotation-editor')" : 'document'},button=[...root.querySelectorAll('button,[role="menuitem"]')].find(b=>(b.getAttribute('aria-label')===${JSON.stringify(name)}||b.textContent.trim()===${JSON.stringify(name)})&&b.getBoundingClientRect().width>0);if(!button)return null;const r=button.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);return{x,y,disabled:button.disabled,hit:!!hit&&button.contains(hit),hitTag:hit?.tagName,bodyPointerEvents:document.body.style.pointerEvents}})()`)
   assert.ok(point, 'The actual mounted button exists: ' + name)
+  receipt.clicks ??= []; receipt.clicks.push({ name, insideEditor, ...point })
+  assert.equal(point.hit, true, 'The actual control owns its trusted pointer hit: ' + name + ' ' + JSON.stringify(point))
   await mouse('mouseMoved', point.x, point.y)
   await mouse('mousePressed', point.x, point.y, 'left'); await mouse('mouseReleased', point.x, point.y, 'left')
 }
 async function escape() {
   for (const type of ['keyDown', 'keyUp']) await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+}
+async function key(key: string, code: string, windowsVirtualKeyCode: number, modifiers = 0) {
+  for (const type of ['keyDown', 'keyUp']) await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode, modifiers })
 }
 async function settle() { await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))') }
 async function keepOwners(caseLabel: string) {
@@ -100,11 +125,13 @@ async function closed(label: string) {
 }
 async function shot(kind: string) {
   // Explicit evidence capture is outside the measured drawing interval.
-  const image = await window.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true }), bytes = image.toPNG()
+  // Capture the exact Renderer surface through the same debugger that owns trusted input.
+  const captured = await window.webContents.debugger.sendCommand('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false })
+  const bytes = Buffer.from(captured.data, 'base64'), image = nativeImage.createFromBuffer(bytes)
   assert.ok(!image.isEmpty() && bytes.length > 8)
   const path = label + '-' + kind + '.png'; await writeFile(join(out, path), bytes)
   receipt.images.push({ path, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), size: image.getSize(),
-    kind: 'actual-original-renderer', pid: process.pid, webContentsId: window.webContents.id, windowId: window.id })
+    kind: 'actual-original-renderer', capture: 'CDP-Page.captureScreenshot', pid: process.pid, webContentsId: window.webContents.id, windowId: window.id })
 }
 async function drag(from: { x: number; y: number }, to: { x: number; y: number }, samples = 12) {
   await mouse('mouseMoved', from.x, from.y); await mouse('mousePressed', from.x, from.y, 'left')
@@ -112,7 +139,7 @@ async function drag(from: { x: number; y: number }, to: { x: number; y: number }
   await mouse('mouseReleased', to.x, to.y, 'left'); await settle()
 }
 async function fillField(name: string, text: string) {
-  const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(`[aria-label="${name}"]`)});if(!e)return null;const r=e.getBoundingClientRect();let left=Math.max(0,r.left),right=Math.min(innerWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);for(let p=e.parentElement;p;p=p.parentElement){const s=getComputedStyle(p),b=p.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(s.overflowX)){left=Math.max(left,b.left);right=Math.min(right,b.right)}if(/auto|scroll|hidden|clip/.test(s.overflowY)){top=Math.max(top,b.top);bottom=Math.min(bottom,b.bottom)}}const x=(left+right)/2,y=(top+bottom)/2;return right>left&&bottom>top?{x,y,hit:document.elementFromPoint(x,y)===e}:null})()`)
+  const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(`[aria-label="${name}"]`)})??[...document.querySelectorAll('label')].find(l=>l.textContent.trim()===${JSON.stringify(name)})?.control;if(!e)return null;const r=e.getBoundingClientRect();let left=Math.max(0,r.left),right=Math.min(innerWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);for(let p=e.parentElement;p;p=p.parentElement){const s=getComputedStyle(p),b=p.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(s.overflowX)){left=Math.max(left,b.left);right=Math.min(right,b.right)}if(/auto|scroll|hidden|clip/.test(s.overflowY)){top=Math.max(top,b.top);bottom=Math.min(bottom,b.bottom)}}const x=(left+right)/2,y=(top+bottom)/2;return right>left&&bottom>top?{x,y,hit:document.elementFromPoint(x,y)===e}:null})()`)
   assert.equal(point?.hit, true, 'The visible input point names this exact real field: ' + name)
   assert.ok(point, 'The actual editable field exists: ' + name)
   await mouse('mousePressed', point.x, point.y, 'left'); await mouse('mouseReleased', point.x, point.y, 'left')
@@ -122,15 +149,19 @@ async function fillField(name: string, text: string) {
   await settle()
 }
 async function capabilityEdits(opened: any) {
-  const box = opened.canvas
-  const from = { x: box.x + 40, y: box.y + 45 }, to = { x: box.x + 120, y: box.y + 70 }
+  const box = opened.canvas, capturedImage = receipt.captures.at(-1).image
+  const from = imagePointOnScreen(opened, capturedImage.width * .08, capturedImage.height * .12)
+  const to = imagePointOnScreen(opened, capturedImage.width * .22, capturedImage.height * .18)
   await drag(from, to)
   const beforeMove = await evaluate('window.screenshotProbe.inkPixels()')
   assert.ok(beforeMove.count > 100 && beforeMove.redBounds, 'The actual object exists before selecting it')
   await click('Select', true)
-  await drag(from, { x: from.x + 50, y: from.y + 55 })
+  await settle()
+  const selectedFrom = imagePointOnScreen(await facts(), capturedImage.width * .08, capturedImage.height * .12)
+  await drag(selectedFrom, { x: selectedFrom.x + 50, y: selectedFrom.y + 55 })
   const afterMove = await evaluate('window.screenshotProbe.inkPixels()')
-  const sx = afterMove.width / box.width, sy = afterMove.height / box.height
+  const afterMoveFacts = await facts(), sx = afterMove.width / afterMoveFacts.canvas.width, sy = afterMove.height / afterMoveFacts.canvas.height
+  receipt.selectMove = { beforeMove, afterMove, from, selectedFrom, painted: afterMoveFacts.imageView }
   assert.ok(Math.abs(afterMove.redBounds.x - beforeMove.redBounds.x - 50 * sx) < 5 && Math.abs(afterMove.redBounds.y - beforeMove.redBounds.y - 55 * sy) < 5,
     'actual-Select-move-must-move-the-original-ink')
   await click('Delete selected', true); await settle()
@@ -138,26 +169,27 @@ async function capabilityEdits(opened: any) {
   await click('Undo', true); await settle()
   assert.ok((await evaluate('window.screenshotProbe.inkPixels()')).count > 100, 'Undo restores the original moved object')
   await click('Erase', true)
-  const movedStart = { x: from.x + 50, y: from.y + 55 }; await drag(movedStart, movedStart, 1)
+  const movedStart = { x: selectedFrom.x + 50, y: selectedFrom.y + 55 }; await drag(movedStart, movedStart, 1)
   assert.ok((await evaluate('window.screenshotProbe.inkPixels()')).count < 20, 'The actual Erase tool removes the original hit object')
   await click('Undo', true); await settle()
   const pattern = await original.webContents.executeJavaScript('(()=>{const r=document.querySelector("#pattern").getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()')
   const nativeBounds = original.getBounds(), zoom = original.webContents.getZoomFactor()
-  const patch = { x: pattern.x * zoom / nativeBounds.width * box.width,
-    y: pattern.y * zoom / nativeBounds.height * box.height,
-    width: pattern.width * zoom / nativeBounds.width * box.width, height: pattern.height * zoom / nativeBounds.height * box.height }
+  const current = await facts(), patternTop = imagePointOnScreen(current, pattern.x * zoom / nativeBounds.width * capturedImage.width, pattern.y * zoom / nativeBounds.height * capturedImage.height)
+  const patch = { x: patternTop.x - current.canvas.x, y: patternTop.y - current.canvas.y,
+    width: pattern.width * zoom / nativeBounds.width * capturedImage.width * current.imageView.scale,
+    height: pattern.height * zoom / nativeBounds.height * capturedImage.height * current.imageView.scale }
   // Inspect the interior of the real captured striped patch, excluding edit handles/borders.
   const interior = { x: patch.x + 8, y: patch.y + 8, width: patch.width - 16, height: patch.height - 16 }
   await click('Pixelate', true); await settle()
   const beforeMask = await evaluate(`window.screenshotProbe.patchStats(${JSON.stringify(interior)})`)
   assert.ok(beforeMask.transitions > beforeMask.adjacent * 0.15, 'The actual source patch contains visible fine structure')
-  await drag({ x: box.x + patch.x - 2, y: box.y + patch.y - 2 }, { x: box.x + patch.x + patch.width + 2, y: box.y + patch.y + patch.height + 2 })
+  await drag({ x: current.canvas.x + patch.x - 2, y: current.canvas.y + patch.y - 2 }, { x: current.canvas.x + patch.x + patch.width + 2, y: current.canvas.y + patch.y + patch.height + 2 })
   const afterMask = await evaluate(`window.screenshotProbe.patchStats(${JSON.stringify(interior)})`)
   assert.ok(afterMask.opaque > afterMask.width * afterMask.height * 0.99 && afterMask.transitions < beforeMask.transitions * 0.7,
     'actual-Pixelate-must-replace-fine-source-pixels-with-blocks')
   await click('Numbered note', true)
-  const notePoint = { x: box.x + box.width * 0.72, y: box.y + box.height * 0.58 }
-  await drag(notePoint, { x: box.x + box.width * 0.88, y: box.y + box.height * 0.78 })
+  const notePoint = imagePointOnScreen(await facts(), capturedImage.width * .72, capturedImage.height * .58)
+  await drag(notePoint, imagePointOnScreen(await facts(), capturedImage.width * .88, capturedImage.height * .78))
   await fillField('Note text', 'Check original control')
   await click('Copy context', true)
   await until('the actual context handler writes its private text receipt', async () => receipt.clipboardText.length === 1)
@@ -177,8 +209,8 @@ async function capabilityEdits(opened: any) {
   const uncropped = receipt.clipboard[0]
   assert.deepEqual(firstContext.outputPng, { width: uncropped.width, height: uncropped.height })
   await click('Crop', true); await settle()
-  const cropBox = (await facts()).canvas
-  await drag({ x: cropBox.x + 20, y: cropBox.y + 20 }, { x: cropBox.x + cropBox.width - 20, y: cropBox.y + cropBox.height - 20 })
+  const cropFacts = await facts()
+  await drag(imagePointOnScreen(cropFacts, 20, 20), imagePointOnScreen(cropFacts, capturedImage.width - 20, capturedImage.height - 20))
   await click('Copy PNG', true)
   await until('the actual crop reaches the private PNG consumer', async () => receipt.clipboard.length === 2 && !(await facts()).copying)
   const cropped = receipt.clipboard[1]
@@ -199,17 +231,16 @@ async function capabilityEdits(opened: any) {
   // Trusted tools change the same processed output; hidden/masked note text must
   // disappear from the actual context consumer, then Undo restores that original note.
   await click('Crop', true)
-  const hiddenBox = (await facts()).canvas
-  await drag({ x: hiddenBox.x + 3, y: hiddenBox.y + 3 }, { x: hiddenBox.x + hiddenBox.width * 0.35, y: hiddenBox.y + hiddenBox.height * 0.3 })
+  const hiddenFacts = await facts()
+  await drag(imagePointOnScreen(hiddenFacts, 3, 3), imagePointOnScreen(hiddenFacts, capturedImage.width * .35, capturedImage.height * .3))
   await click('Copy context', true)
   await until('the actual cropped-away note is absent from context', async () => receipt.clipboardText.length === 3)
   const hiddenContext = parseContext(receipt.clipboardText[2])
   assert.ok(!hiddenContext.annotations.some((annotation: any) => annotation.id === firstNote.id))
   assert.ok(!receipt.clipboardText[2].includes('Check original control'))
   await click('Undo', true); await settle(); await click('Pixelate', true)
-  const maskedBox = (await facts()).canvas, natural = firstNote.originalImagePixels
-  const map = (x: number, y: number) => ({ x: maskedBox.x + x / captured.image.width * maskedBox.width,
-    y: maskedBox.y + y / captured.image.height * maskedBox.height })
+  const maskedFacts = await facts(), natural = firstNote.originalImagePixels
+  const map = (x: number, y: number) => imagePointOnScreen(maskedFacts, x, y)
   await drag(map(natural.x - 12, natural.y - 12), map(natural.x + natural.width + 12, natural.y + natural.height + 12))
   await click('Copy context', true)
   await until('the actual pixelate-covered note is absent from context', async () => receipt.clipboardText.length === 4)
@@ -224,12 +255,167 @@ async function capabilityEdits(opened: any) {
   assert.deepEqual(restoredContext.outputPng, croppedContext.outputPng)
   receipt.cases.push({ label: 'actual-crop-hidden-pixelate-masked-note-context-and-Undo', hiddenContext, maskedContext, restoredContext })
 }
+async function advancedAnnotationEdits() {
+  let opened = await openEditor()
+  const captured = receipt.captures.at(-1), width = captured.image.width, height = captured.image.height
+  const point = async (x: number, y: number) => imagePointOnScreen(await facts(), x, y)
+  const snapshots: any[] = []
+  const context = async () => {
+    const before = receipt.clipboardText.length
+    await click('Copy context', true)
+    await until('advanced document reaches its actual context consumer', async () => receipt.clipboardText.length === before + 1 && !(await facts()).copying)
+    const text = receipt.clipboardText.at(-1), value = JSON.parse(text.slice(text.indexOf('{')))
+    snapshots.push(value); return value
+  }
+  const from = { x: width * .25, y: height * .3 }, to = { x: width * .55, y: height * .6 }
+  await click('Rectangle', true); await drag(await point(from.x, from.y), await point(to.x, to.y))
+  const first = await context(), rectangle = first.annotations.find((shape: any) => shape.kind === 'rect')
+  assert.ok(rectangle, 'The real Rectangle tool creates a context object before resizing')
+  await click('Select', true); await drag(await point(from.x, from.y), await point(from.x, from.y), 1)
+  await drag(await point(to.x, to.y), await point(to.x + 100, to.y + 60))
+  if (process.env.AGENTMUX_SCREENSHOT_VISUAL === '1') await shot('selected-object-handles')
+  const resized = (await context()).annotations.find((shape: any) => shape.id === rectangle.id)
+  assert.ok(resized.originalImagePixels.width > rectangle.originalImagePixels.width + 90 && resized.originalImagePixels.height > rectangle.originalImagePixels.height + 50,
+    'actual-selected-handle-must-resize-the-original-object')
+  await click('Undo', true); assert.deepEqual((await context()).annotations, first.annotations, 'Actual Undo restores the same original geometry and ID')
+  await click('Redo', true)
+  const beforeZoom = await facts(); await click('Zoom in', true); await settle()
+  const afterZoom = await facts(); assert.ok(afterZoom.imageView.scale > beforeZoom.imageView.scale, 'The actual zoom action changes painted magnification')
+  await click('Pan', true)
+  const panStart = { x: afterZoom.canvas.x + afterZoom.canvas.width / 2, y: afterZoom.canvas.y + afterZoom.canvas.height / 2 }
+  await drag(panStart, { x: panStart.x + 20, y: panStart.y + 15 })
+  const panned = await facts()
+  assert.ok(Math.abs(panned.imageView.x - afterZoom.imageView.x - 20) < .1 && Math.abs(panned.imageView.y - afterZoom.imageView.y - 15) < .1,
+    'actual-pan-must-translate-the-painted-image')
+  assert.deepEqual(panned.canvasPixels, beforeZoom.canvasPixels, 'View changes keep the real Canvas viewport allocation bounded')
+  await click('Fit image', true)
+  const textAt = { x: width * .2, y: height * .12 }
+  await click('Text', true); await drag(await point(textAt.x, textAt.y), await point(textAt.x, textAt.y), 1)
+  await fillField('Screenshot text', 'Original editable text'); await key('Enter', 'Enter', 13); await settle()
+  await click('Select', true); await drag(await point(textAt.x + 4, textAt.y + 4), await point(textAt.x + 4, textAt.y + 4), 1)
+  const originalText = (await context()).annotations.find((shape: any) => shape.kind === 'text')
+  assert.ok(originalText, 'Existing text has an original annotation identity before editing')
+  await click('Edit text', true); await fillField('Screenshot text', 'Edited existing text')
+  if (process.env.AGENTMUX_SCREENSHOT_VISUAL === '1') await shot('pending-existing-text')
+  await key('Enter', 'Enter', 13); await settle()
+  await click('Color #ffffff', true)
+  await drag(await point(textAt.x + 4, textAt.y + 4), await point(width - 8, height - 8))
+  const edgeText = (await context()).annotations.find((shape: any) => shape.id === originalText.id)
+  assert.ok(edgeText, 'The actual selected text moves to the original image edge')
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify('button[aria-label="Color #ffffff"]')})?.getAttribute('aria-pressed')`), 'true',
+    'The actual selected edge annotation uses the white palette color')
+  const previousAppearance = (await facts()).appearance
+  assert.equal((await evaluate('window.screenshotProbe.appearance("light")')).applied, true)
+  await click('Actual image size', true)
+  for (let index = 0; index < 6; index++) await click('Zoom in', true)
+  await settle(); const edgeView = (await facts()).imageView
+  await click('Edit text', true); await settle()
+  const edgeUi = await evaluate(`(()=>{const input=document.querySelector('[aria-label="Screenshot text"]'),viewport=document.querySelector('.image-annotation-editor__viewport');if(!input||!viewport)return null;const rect=e=>{const r=e.getBoundingClientRect();return{left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height}},style=getComputedStyle(input);return{input:rect(input),viewport:rect(viewport),fontSize:parseFloat(style.fontSize),color:style.color,background:style.backgroundColor,focused:document.activeElement===input,scroll:[viewport,viewport.parentElement].map(e=>({left:e.scrollLeft,top:e.scrollTop}))}})()`)
+  assert.ok(edgeUi?.focused, 'The actual edge text field owns keyboard input')
+  assert.ok(edgeUi.input.left >= edgeUi.viewport.left - .5 && edgeUi.input.top >= edgeUi.viewport.top - .5 &&
+    edgeUi.input.right <= edgeUi.viewport.right + .5 && edgeUi.input.bottom <= edgeUi.viewport.bottom + .5,
+    'actual-existing-edge-text-input-must-fit-the-viewport')
+  assert.ok(edgeUi.fontSize >= 12 && edgeUi.fontSize <= 32)
+  const luminance = (color: string) => {
+    const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number)
+    assert.equal(channels?.length, 3, 'The real text control resolves an RGB color')
+    return channels!.map(value => value / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
+      .reduce((total, value, index) => total + value * [.2126, .7152, .0722][index]!, 0)
+  }
+  const foreground = luminance(edgeUi.color), background = luminance(edgeUi.background)
+  assert.ok((Math.max(foreground, background) + .05) / (Math.min(foreground, background) + .05) >= 4.5,
+    'The actual light-theme input remains readable while editing a white annotation')
+  assert.deepEqual(edgeUi.scroll, [{ left: 0, top: 0 }, { left: 0, top: 0 }], 'Actual field focus never scrolls the hidden viewport')
+  assert.deepEqual((await facts()).imageView, edgeView, 'Pending text focus preserves the painted view transform')
+  if (process.env.AGENTMUX_SCREENSHOT_VISUAL === '1') await shot('pending-edge-existing-text-light')
+  await key('Enter', 'Enter', 13); await settle()
+  assert.deepEqual((await context()).annotations.find((shape: any) => shape.id === originalText.id), edgeText,
+    'UI input clamping retains the original object identity and processed image coordinates')
+  receipt.edgeText = { ui: edgeUi, originalAnnotation: edgeText, paintedView: edgeView }
+  await click('Undo', true); await click('Color #ef4444', true); await click('Fit image', true)
+  assert.equal((await evaluate(`window.screenshotProbe.appearance(${JSON.stringify(previousAppearance)})`)).applied, true)
+  const noteFrom = { x: width * .7, y: height * .15 }, noteTo = { x: width * .85, y: height * .3 }
+  await click('Numbered note', true); await drag(await point(noteFrom.x, noteFrom.y), await point(noteTo.x, noteTo.y))
+  await fillField('Note text', 'MASKED_EDITABLE_NOTE_MUST_NOT_REACH_CONTEXT')
+  // Trusted reverse Tab reaches the real native select; ordinary keys select its Expected option.
+  await key('Tab', 'Tab', 9, 8); await key('Tab', 'Tab', 9, 8)
+  assert.equal((await facts()).activeElement, 'Note template', 'Trusted Tab reaches the actual note intent selector')
+  await key('Home', 'Home', 36); await key('ArrowDown', 'ArrowDown', 40); await key('ArrowDown', 'ArrowDown', 40)
+  await key('Enter', 'Enter', 13)
+  if (await evaluate('window.screenshotProbe.field("Note template")') !== 'expected') {
+    await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'e', code: 'KeyE', windowsVirtualKeyCode: 69, text: 'e', unmodifiedText: 'e' })
+    await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: 'e', code: 'KeyE', windowsVirtualKeyCode: 69 })
+    await key('Enter', 'Enter', 13)
+  }
+  assert.equal(await evaluate('window.screenshotProbe.field("Note template")'), 'expected', 'Native keyboard changes the actual note template')
+  await click('Locate', true); await click('Fit image', true)
+  await click('Cover', true)
+  await drag(await point(noteFrom.x - 50, noteFrom.y - 50), await point(noteTo.x + 50, noteTo.y + 50))
+  const processed = await context()
+  assert.ok(processed.annotations.some((shape: any) => shape.kind === 'cover'), 'The real cover reaches the processed output')
+  assert.ok(!JSON.stringify(processed).includes('MASKED_EDITABLE_NOTE_MUST_NOT_REACH_CONTEXT') && !processed.annotations.some((shape: any) => shape.kind === 'note'),
+    'actual-cover-must-omit-the-masked-note-from-Agent-context')
+  const pngCount = receipt.clipboard.length
+  await click('Copy PNG', true); await until('actual covered PNG reaches the private sink', async () => receipt.clipboard.length === pngCount + 1 && !(await facts()).copying)
+  const png = receipt.clipboard.at(-1), decoded = nativeImage.createFromPath(join(out, png.png.path)), bitmap = decoded.toBitmap()
+  const px = Math.floor(noteFrom.x + 10), py = Math.floor(noteFrom.y + 10), offset = (py * png.width + px) * 4
+  assert.deepEqual([...bitmap.subarray(offset, offset + 4)], [39, 24, 17, 255], 'actual-Copy-PNG-must-contain-opaque-cover-pixels')
+  const filePath = 'annotation original.json', writesBefore = receipt.fileCalls?.filter((row: any) => row.method === 'filesWrite').length ?? 0
+  await click('Save original', true); await fillField('Workspace file', filePath)
+  if (process.env.AGENTMUX_SCREENSHOT_VISUAL === '1') await shot('save-original-file-dialog')
+  await click('Save original', 'file')
+  await until('the actual file owner writes and closes the request dialog', async () => !(await evaluate('!!document.querySelector(".confirmation-dialog")')))
+  const bytes = await readFile(join(workspace.path, filePath)), document = JSON.parse(bytes.toString('utf8'))
+  assert.equal(receipt.fileCalls.filter((row: any) => row.method === 'filesWrite').length, writesBefore + 1)
+  assert.deepEqual(Object.keys(document), ['schema', 'image', 'shapes', 'crop', 'source'])
+  const savedText = document.shapes.find((shape: any) => shape.kind === 'text'), savedNote = document.shapes.find((shape: any) => shape.kind === 'note')
+  assert.equal(savedText.id, originalText.id); assert.equal(savedText.text, 'Edited existing text', 'Actual Edit text replaces the same saved object')
+  assert.equal(savedNote.note, 'MASKED_EDITABLE_NOTE_MUST_NOT_REACH_CONTEXT'); assert.equal(savedNote.template, 'expected')
+  assert.deepEqual(document.source, captured.source); assert.equal(document.shapes.find((shape: any) => shape.kind === 'rect').id, rectangle.id)
+  const savedCorner = document.shapes.find((shape: any) => shape.kind === 'rect').to
+  assert.ok(Math.abs(savedCorner.x - to.x - 100) < .001 && Math.abs(savedCorner.y - to.y - 60) < .001,
+    'Actual saved resize retains its trusted pointer endpoint in original pixels')
+  await shot('advanced-edits-saved-original')
+  await click('Cancel', true); await closed('saved-original-cancel')
+  const captureCount = receipt.captures.length
+  await click('More browser tools')
+  await until('the actual More Open item mounts', async () => await evaluate(`document.querySelector(${JSON.stringify('[role="menuitem"][aria-label="Open annotation original"]')})?.getBoundingClientRect().width > 0`))
+  await click('Open annotation original')
+  await until('the actual More entry opens the file dialog', async () => await evaluate('!!document.querySelector(".confirmation-dialog")'))
+  await fillField('Workspace file', filePath); await click('Open original', 'file')
+  opened = await until('saved document fully decodes into a fresh editor', async () => { const value = await facts(); return value.editor && value.imageLoaded && !await evaluate('!!document.querySelector(".confirmation-dialog")') ? value : null })
+  await settle(); assert.equal(receipt.captures.length, captureCount, 'Opening a saved original never captures the current Browser page')
+  const reopened = await context()
+  assert.equal(reopened.browserId, null); assert.equal(reopened.navigationId, null); assert.equal(reopened.sourceKind, 'saved-document')
+  assert.deepEqual(reopened.source, document.source); assert.deepEqual(reopened.annotations, processed.annotations)
+  await shot('reopened-editable-original')
+  await click('Cancel', true); await closed('first-reopened-original-cancel')
+  const changed = await publicEditOriginal(filePath, document)
+  await click('More browser tools')
+  await until('the actual More Open item mounts for the public edit', async () => await evaluate(`document.querySelector(${JSON.stringify('[role="menuitem"][aria-label="Open annotation original"]')})?.getBoundingClientRect().width > 0`))
+  await click('Open annotation original')
+  await until('publicly edited original opens through the actual request dialog', async () => await evaluate('!!document.querySelector(".confirmation-dialog")'))
+  await fillField('Workspace file', filePath); await click('Open original', 'file')
+  await until('the public file fully decodes into the original GUI consumer', async () => (await facts()).editor && !await evaluate('!!document.querySelector(".confirmation-dialog")'))
+  await settle()
+  const publicContext = await context(), publicNote = publicContext.annotations.find((shape: any) => shape.id === changed.shapes.find((shape: any) => shape.kind === 'note').id)
+  assert.ok(publicNote, 'The explicitly reopened public edit reaches the actual GUI processed context')
+  assert.equal(publicNote.note, 'PUBLIC_FILE_EDIT_REOPENED_IN_GUI'); assert.equal(publicNote.template, 'expected')
+  assert.deepEqual(publicContext.source, document.source); assert.equal(publicContext.browserId, null); assert.equal(publicContext.navigationId, null)
+  assert.equal(receipt.captures.length, captureCount, 'Public file reopen retains the Browser capture owner without another screenshot')
+  await shot('public-file-edit-reopened-in-GUI')
+  receipt.cases.push({ label: 'actual-handles-view-existing-text-note-template-cover-save-and-More-reopen',
+    source: captured.source, snapshots, zoom: { before: beforeZoom.imageView, after: afterZoom.imageView, panned: panned.imageView },
+    originalFile: { path: filePath, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), shapeIds: document.shapes.map((shape: any) => shape.id),
+      originalImage: { width: document.image.width, height: document.image.height }, retainedHiddenNote: true }, reopened, publicContext, captureCount })
+  await click('Cancel', true); await closed('reopened-original-cancel')
+}
 async function visualScene(kind: string, width: number, height: number, appearance: 'dark' | 'light') {
   window.setContentSize(width, height)
   assert.equal((await evaluate(`window.screenshotProbe.appearance(${JSON.stringify(appearance)})`)).applied, true)
-  await settle(); const opened = await openEditor(), box = opened.canvas
+  await settle(); const opened = await openEditor(), box = opened.canvas, source = receipt.captures.at(-1).image
   await click('Numbered note', true)
-  await drag({ x: box.x + box.width * 0.55, y: box.y + box.height * 0.4 }, { x: box.x + box.width * 0.82, y: box.y + box.height * 0.65 })
+  await drag(imagePointOnScreen(opened, source.width * .55, source.height * .4), imagePointOnScreen(opened, source.width * .82, source.height * .65))
   await fillField('Note text', 'Review this captured control')
   await shot(kind + '-notes')
   await click('Pixelate', true)
@@ -248,10 +434,23 @@ async function visualScene(kind: string, width: number, height: number, appearan
   receipt.cases.push({ label: 'visual-' + kind, appearance, width, height, facts: final })
   await click('Cancel', true); await closed('visual-' + kind + '-cancel'); await stage('visual-' + kind + '-complete')
 }
+async function visualScenes() {
+  for (const [kind, width, height, appearance] of [
+    ['normal-dark', 1040, 740, 'dark'], ['narrow-dark', 450, 640, 'dark'], ['short-dark', 880, 390, 'dark'],
+    ['normal-light', 1040, 740, 'light'], ['narrow-light', 450, 640, 'light'], ['short-light', 880, 390, 'light']
+  ] as const) await visualScene(kind, width, height, appearance)
+}
 async function publicScreenshot(program: string) {
+  const graph = parseAgentMuxSpatialGraph({ spaces: [], zones: [{ zoneId: 'annotation-zone', workspaceId, kind: 'directory', hostId: 'local', directoryPath: workspace.path, branch: null }],
+    tabs: [{ tabId: 'annotation-tab', zoneId: 'annotation-zone', workspaceId, name: null, regionIds: ['private-original-region'] }],
+    regions: [{ regionId: 'private-original-region', tabId: 'annotation-tab', kind: 'browser', agentSessionId: null, runId: null, execution: null }], bindings: [],
+    layouts: { [workspaceId]: createWorkspaceLayout('annotation-group', ['annotation-tab']) },
+    tabLayouts: { 'annotation-tab': { root: { type: 'leaf', regionId: 'private-original-region' }, activeRegionId: 'private-original-region' } }, resources: { 'annotation-tab': { browserId: originalId } } })
   publicServer = new AgentMuxControlServer({
     coreClients: () => [],
+    files: new FileReadOwner({ files, workspace: id => id === workspaceId ? workspace : undefined, catalog: async () => spatialCatalog(graph) }),
     execute: async request => {
+      if (request.operation === 'space.inspect') return { operation: 'space.inspect', catalog: spatialCatalog(graph, request.target as any) }
       assert.equal(request.operation, 'browser.run', 'The real public service delegates only this requested operation')
       if (request.operation !== 'browser.run') throw new Error('Unexpected private public request')
       assert.equal(request.browserId, originalId)
@@ -297,10 +496,47 @@ async function publicScreenshot(program: string) {
     endpoint: publicServer.path, runtimeDirectory: env.AGENTMUX_RUNTIME_DIRECTORY, stateDirectory: env.AGENTMUX_STATE_DIRECTORY })
   await keepOwners('public-SDK-and-CLI-retain-original-native-owner')
 }
+async function publicEditOriginal(path: string, originalDocument: any) {
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: publicServer.path } })
+  let read: any
+  try { read = await rpc.call('file.read', { zoneId: 'annotation-zone', path,
+    expectedResource: { hostId: 'local', workspaceId, workspacePath: workspace.path } }) }
+  finally { await rpc.dispose() }
+  assert.equal(read.result.status, 'read', 'The actual public SDK reads the file created by the original GUI owner')
+  assert.deepEqual(JSON.parse(read.result.document.content), originalDocument)
+  assert.deepEqual(read.resource, { hostId: 'local', workspaceId, workspacePath: workspace.path, zoneId: 'annotation-zone', zonePath: workspace.path, path })
+  const changed = structuredClone(originalDocument), note = changed.shapes.find((shape: any) => shape.kind === 'note')
+  note.note = 'PUBLIC_FILE_EDIT_REOPENED_IN_GUI'; note.from = { x: 60, y: 110 }; note.to = { x: 300, y: 230 }
+  const content = JSON.stringify(changed), env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:AGENTMUX_|CTXMUX_)/.test(key)))
+  Object.assign(env, { ELECTRON_RUN_AS_NODE: '1', AGENTMUX_RPC_ENDPOINT: 'unix:' + publicServer.path,
+    AGENTMUX_RUNTIME_DIRECTORY: join(root, 'file-cli-runtime'), AGENTMUX_STATE_DIRECTORY: join(root, 'file-cli-state') })
+  const cli = await new Promise<{ code: number | null; stdout: string; stderr: string; pid: number }>((resolve, reject) => {
+    const child = spawn(process.execPath, [process.env.AGENTMUX_SCREENSHOT_CLI!, 'file', 'write', '--zone', 'annotation-zone', '--path', path,
+      '--resource', JSON.stringify(read.resource), '--expected-revision', read.result.document.revision], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+    let stdout = '', stderr = '', expired = false, escalation: ReturnType<typeof setTimeout> | undefined
+    child.stdout.on('data', bytes => { stdout += bytes }); child.stderr.on('data', bytes => { stderr += bytes })
+    const timeout = setTimeout(() => { expired = true; child.kill('SIGTERM'); escalation = setTimeout(() => child.kill('SIGKILL'), 500) }, 7000)
+    child.once('error', error => { clearTimeout(timeout); clearTimeout(escalation); reject(error) })
+    child.once('exit', code => { clearTimeout(timeout); clearTimeout(escalation); expired ? reject(new Error('The exact private file CLI child timed out and exited')) : resolve({ code, stdout, stderr, pid: child.pid! }) })
+    child.stdin.end(content)
+  })
+  assert.equal(cli.code, 0, cli.stderr + cli.stdout)
+  const result = JSON.parse(cli.stdout)
+  assert.equal(result.ok, true); assert.equal(result.operation, 'file.write'); assert.equal(result.result.result.status, 'written')
+  assert.deepEqual(result.result.resource, read.resource)
+  assert.equal(await readFile(join(workspace.path, path), 'utf8'), content, 'Actual CLI writes bytes to the same original GUI file owner')
+  receipt.publicFiles = { sdk: { resource: read.resource, revision: read.result.document.revision,
+    bytes: Buffer.byteLength(read.result.document.content), sha256: createHash('sha256').update(read.result.document.content).digest('hex') },
+    cli: { ...cli, result }, changedShapeId: note.id, contentSha256: createHash('sha256').update(content).digest('hex') }
+  return changed
+}
 async function run() {
   await stage('private-process-start')
   await app.whenReady(); await stage('electron-ready')
-  receipt.loadedCompiled = Object.fromEntries(await Promise.all(['main.mjs', 'renderer.js', 'renderer.css', 'preload.cjs'].map(async path => [path, createHash('sha256').update(await readFile(join(root, path))).digest('hex')])))
+  receipt.loadedCompiled = Object.fromEntries(await Promise.all(['app/out/main/main.mjs', 'app/resources/bin/agentmux-workspace-move', 'renderer.js', 'renderer.css', 'preload.cjs'].map(async path => [path, createHash('sha256').update(await readFile(join(root, path))).digest('hex')])))
+  const workspacePath = join(root, 'workspace'); await mkdir(workspacePath)
+  workspace = { id: workspaceId, name: 'Private annotation files', hostId: 'local', path: workspacePath, kind: 'folder' }
+  files = new WorkspaceFiles(() => ({ id: 'local', kind: 'local', label: 'Private local files', run: async () => { throw new Error('Remote execution is outside this file proof') }, dispose: async () => {} }))
   server = createServer((request, response) => {
     const sibling = request.url === '/sibling'
     response.setHeader('Content-Type', 'text/html; charset=utf-8'); response.end(`<!doctype html><title>${sibling ? 'Sibling source' : 'Original screenshot source'}</title><style>body{margin:0;background:${sibling ? '#1f3f38' : '#f5f6fa'};color:${sibling ? 'white' : '#233248'};font:16px system-ui;padding:25px}input{font:14px system-ui;padding:10px;border:1px solid #bbc6d2;border-radius:6px;width:75%}h1{font-size:24px}p{line-height:1.8}#pattern{position:absolute;left:25px;top:245px;width:320px;height:100px;background:repeating-linear-gradient(90deg,#24425f 0 2px,#ffffff 2px 4px)}</style><h1>${sibling ? 'Sibling page' : 'Browser screenshot canvas'}</h1><p>Original page identity and draft remain available.</p><input value="retained ${sibling ? 'sibling' : 'original'} draft"><p>Draw an arrow or highlight this content.</p><div id="pattern"></div>`)
@@ -355,6 +591,12 @@ async function run() {
         png: { path, bytes: png.length, sha256: createHash('sha256').update(png).digest('hex') } }); return
     }
     if (method === 'privateClipboardText') { assert.equal(typeof args[0], 'string'); receipt.clipboardText.push(args[0]); return }
+    if (method === 'filesRead' || method === 'filesWrite') {
+      assert.equal(args[0], workspaceId, 'The annotation file operation retains its exact private Workspace')
+      receipt.fileCalls ??= []
+      receipt.fileCalls.push({ method, workspaceId: args[0], input: args[1] })
+      return method === 'filesRead' ? await files.read(workspace, args[1]) : await files.write(workspace, args[1])
+    }
     assert.equal(args[0], originalId, 'The original Pane keeps its exact Browser target')
     receipt.calls.push({ method, args })
     if (method === 'captureScreenshot') {
@@ -389,11 +631,17 @@ async function run() {
   receipt.cases.push({ label: 'actual-runner-captureScreenshot-consumes-original-source', result: scriptCapture, outcome: runner.outcome, operation: runner.runOperation })
   await keepOwners('runner-retains-original-native-owner')
   await publicScreenshot(program); await stage('real-SDK-and-CLI-consumed-original-source')
+  if (process.env.AGENTMUX_SCREENSHOT_VISUAL_PILOT === '1') {
+    receipt.scope = 'actual-Renderer-visual-pilot-only-not-feature-acceptance'
+    await openEditor(); await click('Cancel', true); await closed('visual-pilot-initial-cancel')
+    await visualScenes(); assert.deepEqual((await facts()).errors, []); receipt.passed = true; return
+  }
   const opened = await openEditor()
   assert.equal(receipt.calls.filter((row: any) => row.method === 'captureScreenshot').length, 1)
   await evaluate('window.screenshotProbe.rememberPixels()')
   const before = { counters: { ...receipt.counters }, publications: receipt.publications.length, facts: await facts(), ink: await evaluate('window.screenshotProbe.inkPixels()') }
-  const box = opened.canvas, x = box.x + 30, y = box.y + 40, count = 300, start = Date.now()
+  const box = opened.canvas, startPoint = imagePointOnScreen(opened, receipt.captures.at(-1).image.width * .08, receipt.captures.at(-1).image.height * .16)
+  const x = startPoint.x, y = startPoint.y, count = 300, start = Date.now()
   await mouse('mouseMoved', x, y); await mouse('mousePressed', x, y, 'left')
   for (let i = 1; i <= count; i++) await mouse('mouseMoved', x + (i / count) * Math.min(300, box.width - 65), y + 40 * Math.sin(i / 25), 'left')
   await mouse('mouseReleased', x + Math.min(300, box.width - 65), y + 40 * Math.sin(count / 25), 'left')
@@ -435,11 +683,9 @@ async function run() {
   await click('Cancel', true); await closed('copy-followed-by-explicit-cancel')
   await stage('actual-edits-and-pending-copy-Cancel-complete')
   assert.equal(receipt.counters.originalCapture, 8, 'Five Desktop entries plus direct runner, real SDK and CLI capture exactly once each')
+  await advancedAnnotationEdits(); await stage('actual-annotation-file-and-geometry-consumers-complete')
   if (process.env.AGENTMUX_SCREENSHOT_VISUAL === '1') {
-    for (const [kind, width, height, appearance] of [
-      ['normal-dark', 1040, 740, 'dark'], ['narrow-dark', 450, 640, 'dark'], ['short-dark', 880, 390, 'dark'],
-      ['normal-light', 1040, 740, 'light'], ['narrow-light', 450, 640, 'light'], ['short-light', 880, 390, 'light']
-    ] as const) await visualScene(kind, width, height, appearance)
+    await visualScenes()
   }
   assert.deepEqual((await facts()).errors, [])
   receipt.passed = true
@@ -449,7 +695,18 @@ void run().catch(async error => {
   try { receipt.failure.facts = await facts(); receipt.failure.fields = await evaluate('[...document.querySelectorAll("textarea,select")].map(e=>({label:e.getAttribute("aria-label"),value:e.value,rect:e.getBoundingClientRect().toJSON()}))'); await shot('failure') } catch {}
 }).finally(async () => {
   await writeFile(join(out, label + '.json'), JSON.stringify(receipt, null, 2))
+  process.stdout.write('cleanup-renderer-start\n')
   try { if (window && !window.isDestroyed()) await evaluate('window.screenshotProbe?.dispose()') } catch {}
+  process.stdout.write('cleanup-public-start\n')
   await publicServer?.stop()
-  overlays?.dispose(); manager?.dispose(); server?.close(); window?.destroy(); app.exit(receipt.passed ? 0 : 1)
+  process.stdout.write('cleanup-files-start\n')
+  await files?.dispose()
+  process.stdout.write('cleanup-native-start\n')
+  overlays?.dispose(); process.stdout.write('cleanup-overlays-complete\n')
+  manager?.dispose(); process.stdout.write('cleanup-manager-complete\n')
+  server?.close(); process.stdout.write('cleanup-server-complete\n')
+  if (window && !window.isDestroyed() && window.webContents.debugger.isAttached()) window.webContents.debugger.detach()
+  process.stdout.write('cleanup-debugger-complete\n')
+  window?.destroy(); process.stdout.write('cleanup-window-complete\n')
+  app.exit(receipt.passed ? 0 : 1)
 })

@@ -2,6 +2,10 @@
 const bridge = (window as any).screenshotNative
 const noop = () => () => {}
 export const api = {
+  files: {
+    read: (workspaceId: string, path: string) => bridge.call('filesRead', workspaceId, path),
+    write: (workspaceId: string, input: unknown) => bridge.call('filesWrite', workspaceId, input)
+  },
   browser: {
     captureScreenshot: (id: string) => bridge.call('captureScreenshot', id),
     setBounds: (id: string, bounds: unknown) => bridge.call('setBounds', id, bounds),

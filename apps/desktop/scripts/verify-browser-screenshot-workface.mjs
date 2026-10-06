@@ -5,9 +5,11 @@ import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { readFile, readdir, writeFile, mkdir, mkdtemp, rm, copyFile, symlink } from 'node:fs/promises'
 import { join, resolve, dirname } from 'node:path'
+import { radixOverlayAliases } from './radix-overlay-aliases.ts'
 
 const args = process.argv.slice(2)
-assert.ok(args.every(arg => ['--mutations', '--visual', '--editor', '--model'].includes(arg)), 'Unsupported screenshot proof option')
+assert.ok(args.every(arg => ['--mutations', '--visual', '--visual-pilot', '--editor', '--model'].includes(arg)), 'Unsupported screenshot proof option')
+assert.ok(!args.includes('--visual-pilot') || !args.includes('--mutations'), 'Visual pilot collects candidate images without claiming mutation acceptance')
 if (args.includes('--model')) {
   const code = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [resolvePath('apps/desktop/scripts/verify-browser-screenshot-model.mjs'), ...args.filter(arg => arg !== '--model')], { stdio: 'inherit' })
@@ -19,7 +21,7 @@ function resolvePath(path) { return resolve(path) }
 const fixture = resolve('apps/desktop/scripts/fixtures/browser-screenshot-workface')
 const require = createRequire(resolve('apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
-const out = resolve('.local/browser-screenshot-workface/editor-proof'), work = await mkdtemp(_reshape_fixturePath("tmp/agentmux-screenshot-workface-"))
+const out = resolve(process.env.AGENTMUX_SCREENSHOT_PROOF_OUT ?? '.local/browser-screenshot-workface/editor-proof'), work = await mkdtemp(_reshape_fixturePath("tmp/agentmux-screenshot-workface-"))
 await mkdir(out, { recursive: true })
 await rm(join(out, 'receipt.json'), { force: true })
 const pane = resolve('apps/desktop/src/renderer/src/components/BrowserPane.tsx')
@@ -35,29 +37,48 @@ const sourceInputs = [
   'apps/desktop/src/main/native-overlay-surfaces.ts', 'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/renderer/src/styles/browser.css',
   'apps/desktop/src/main/browser-screenshot-source.ts',
   'apps/desktop/src/main/browser-external-owner.ts', 'apps/desktop/src/renderer/src/styles/base.css',
+  'apps/desktop/src/renderer/src/styles/chrome.css', 'apps/desktop/src/renderer/src/styles/overlays.css',
   'packages/client-ui/src/theme/icon-catalog.ts', 'packages/client-ui/src/theme/icon-glyphs.ts',
   'packages/client-ui/src/theme/icon-sprite.ts',
   'apps/desktop/src/shared/contracts.ts',
+  'apps/desktop/src/main/workspace-files.ts', 'apps/desktop/native/workspace-move.c', 'apps/desktop/resources/bin/agentmux-workspace-move',
+  'apps/desktop/src/main/file-read-owner.ts', 'apps/desktop/src/shared/zone-file-resource.ts',
   ...['public-rpc-server.ts', 'public-rpc-client.ts', 'public-rpc-service.ts', 'rpc-business-codec.ts', 'control-codec.ts', 'agentmux.ts'].map(name => 'packages/core/src/' + name),
   ...['index.js', 'control-host.js', 'public-rpc.js', 'public-rpc-frame.js', 'public-rpc-client.js', 'public-rpc-service.js', 'public-rpc-server.js', 'public-rpc-wire.js', 'rpc-business-codec.js', 'control-codec.js', 'runtime-paths.js', 'agentmux-cli-commands.js', 'agentmux.js'].map(name => 'packages/core/dist/' + name),
   'apps/desktop/scripts/verify-browser-screenshot-workface.mjs',
+  'apps/desktop/scripts/radix-overlay-aliases.ts', 'apps/desktop/electron.vite.config.ts',
   ...['main.ts', 'renderer.tsx', 'bridge.ts', 'preload.cjs', 'fixture.css'].map(name => 'apps/desktop/scripts/fixtures/browser-screenshot-workface/' + name)
 ]
 for (const directory of screenshotDirectories) for (const name of await readdir(directory)) {
   const path = directory + '/' + name
   if (/\.(?:tsx?|css)$/.test(name) && !sourceInputs.includes(path)) sourceInputs.push(path)
 }
-const evidence = { schema: 'agentmux.browser-screenshot-workface-native.v1', sourceInputs: Object.fromEntries(await Promise.all(sourceInputs.map(async path => [path, sha(await readFile(path))]))), cases: [], passed: false }
+const evidence = { schema: 'agentmux.browser-screenshot-workface-native.v1', mode: args.includes('--visual-pilot') ? 'visual-pilot-only' : 'consumer-and-mutation-acceptance', sourceInputs: Object.fromEntries(await Promise.all(sourceInputs.map(async path => [path, sha(await readFile(path))]))),
+  rendererPrimitives: Object.fromEntries(await Promise.all(Object.entries(radixOverlayAliases).map(async ([name, path]) => [name, { owner: '@radix-ui/react-dialog', sha256: sha(await readFile(path)) }]))), cases: [], passed: false }
 const base = { bundle: true, logLevel: 'silent', absWorkingDir: process.cwd(), jsx: 'automatic',
   alias: { react: dirname(require.resolve('react/package.json')), 'react-dom': dirname(require.resolve('react-dom/package.json')) },
   nodePaths: [resolve('apps/desktop/node_modules')] }
 async function run(label, mutant) {
   const compiled = join(work, label); await mkdir(compiled)
+  await mkdir(join(compiled, 'app/resources/bin'), { recursive: true })
+  await copyFile(resolve('apps/desktop/resources/bin/agentmux-workspace-move'), join(compiled, 'app/resources/bin/agentmux-workspace-move'))
   await symlink(resolve('apps/desktop/node_modules'), join(compiled, 'node_modules'))
   await copyFile(join(fixture, 'preload.cjs'), join(compiled, 'preload.cjs'))
   const adapter = await readFile(join(fixture, 'bridge.ts'), 'utf8')
   const plugins = [{ name: 'private-product-IO-and-reversible-source-mutation', setup(build) {
     build.onLoad({ filter: /\/renderer\/src\/(lib\/api|store)\.ts$/ }, () => ({ contents: adapter, loader: 'ts', resolveDir: fixture }))
+    build.onLoad({ filter: /\/image-annotation\/canvas-render\.ts$/ }, async value => {
+      let contents = await readFile(value.path, 'utf8')
+      for (const [name, key] of [['renderCommittedLayer', 'committed'], ['renderScreenshotScene', 'scene']]) {
+        const anchor = 'export function ' + name + '('
+        assert.equal(contents.split(anchor).length - 1, 1, 'Observe the exact actual Canvas consumer once: ' + name)
+        contents = contents.replace(anchor, 'function observed_' + name + '(')
+        contents += `\nexport function ${name}(...args: Parameters<typeof observed_${name}>): void {
+const cost=((window as any).__annotationCanvasCost??={committed:{calls:0,totalMs:0,maxObservedMs:0},scene:{calls:0,totalMs:0,maxObservedMs:0}}).${key};
+const start=performance.now();try{return observed_${name}(...args)}finally{const ms=performance.now()-start;cost.calls++;cost.totalMs+=ms;cost.maxObservedMs=Math.max(cost.maxObservedMs,ms)}}\n`
+      }
+      return { contents, loader: 'ts', resolveDir: dirname(value.path) }
+    })
     if (mutant === 'omit-screenshot-hide') build.onLoad({ filter: /BrowserPane\.tsx$/ }, value => {
       assert.equal(value.path, pane)
       const target = '          screenshot !== null ||\n'
@@ -74,9 +95,9 @@ async function run(label, mutant) {
     })
     if (mutant === 'omit-selected-move') build.onLoad({ filter: /ImageAnnotationEditor\.tsx$/ }, value => {
       assert.equal(value.path, editor)
-      const target = 'currentGestureRef.current = moveShape(original, at.x - start.x, at.y - start.y)'
+      const target = ': moveShape(transform.original, at.x - transform.start.x, at.y - transform.start.y)'
       assert.equal(editorSource.split(target).length - 1, 1, 'The actual selected-object move consumer exists exactly once')
-      return { contents: editorSource.replace(target, 'currentGestureRef.current = original'), loader: 'tsx', resolveDir: dirname(editor) }
+      return { contents: editorSource.replace(target, ': transform.original'), loader: 'tsx', resolveDir: dirname(editor) }
     })
     if (mutant === 'omit-processed-crop') build.onLoad({ filter: /ImageAnnotationEditor\.tsx$/ }, value => {
       assert.equal(value.path, editor)
@@ -87,8 +108,8 @@ async function run(label, mutant) {
   } }]
   await build({ ...base, platform: 'node', format: 'esm', packages: 'external',
     banner: { js: `import {createRequire as __createRequire} from 'node:module'; const require=__createRequire(import.meta.url);` },
-    entryPoints: [join(fixture, 'main.ts')], outfile: join(compiled, 'main.mjs') })
-  await build({ ...base, plugins, platform: 'browser', format: 'esm', define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' },
+    entryPoints: [join(fixture, 'main.ts')], outfile: join(compiled, 'app/out/main/main.mjs') })
+  await build({ ...base, alias: { ...base.alias, ...radixOverlayAliases }, plugins, platform: 'browser', format: 'esm', define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' },
     loader: { '.png': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' },
     entryPoints: [join(fixture, 'renderer.tsx')], outfile: join(compiled, 'renderer.js') })
   await writeFile(join(compiled, 'index.html'), '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="renderer.css"><div id="root"></div><script type="module" src="renderer.js"></script>')
@@ -96,11 +117,12 @@ async function run(label, mutant) {
   const env = { ...cleanEnv, AGENTMUX_SCREENSHOT_PROBE_ROOT: compiled, AGENTMUX_SCREENSHOT_PROBE_OUT: out,
     AGENTMUX_SCREENSHOT_CLI: resolve('packages/core/dist/agentmux.js'),
     AGENTMUX_RUNTIME_DIRECTORY: join(compiled, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(compiled, 'state'),
-    AGENTMUX_SCREENSHOT_PROBE_LABEL: label, AGENTMUX_SCREENSHOT_VISUAL: !mutant && args.includes('--visual') ? '1' : '0' }
+    AGENTMUX_SCREENSHOT_PROBE_LABEL: label, AGENTMUX_SCREENSHOT_VISUAL: !mutant && (args.includes('--visual') || args.includes('--visual-pilot')) ? '1' : '0',
+    AGENTMUX_SCREENSHOT_VISUAL_PILOT: args.includes('--visual-pilot') ? '1' : '0' }
   delete env.ELECTRON_RUN_AS_NODE
   await Promise.all([label + '.json', label + '.progress.json'].map(name => rm(join(out, name), { force: true })))
   const result = await new Promise((done, reject) => {
-    const child = spawn(require('electron'), [join(compiled, 'main.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(require('electron'), [join(compiled, 'app/out/main/main.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] })
     let output = '', expired = false, escalation
     for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => { output += bytes })
     const timeout = setTimeout(() => { expired = true; child.kill('SIGTERM'); escalation = setTimeout(() => child.kill('SIGKILL'), 1500) }, 30000)
@@ -121,7 +143,8 @@ async function run(label, mutant) {
   } else {
     assert.equal(result.code, 0, result.output + '\n' + receipt.failure?.message + '\nEvidence: ' + join(out, label + '.json'))
     assert.equal(receipt.passed, true)
-    assert.ok(receipt.cases.some(row => row.label === 'continuous-pointer-ink-with-zero-native-chrome-work'))
+    if (args.includes('--visual-pilot')) assert.equal(receipt.cases.filter(row => row.label.startsWith('visual-') && !row.label.endsWith('cancel')).length, 6)
+    else assert.ok(receipt.cases.some(row => row.label === 'continuous-pointer-ink-with-zero-native-chrome-work'))
     assert.ok(receipt.images.length > 0)
   }
   evidence.cases.push({ label, result: mutant ? 'RED' : 'GREEN', receipt: label + '.json' })
@@ -137,6 +160,7 @@ try {
     await run('restored-source')
   }
   for (const path of sourceInputs) assert.equal(sha(await readFile(path)), evidence.sourceInputs[path], 'Shared source changed during proof: ' + path)
+  for (const [name, path] of Object.entries(radixOverlayAliases)) assert.equal(sha(await readFile(path)), evidence.rendererPrimitives[name].sha256, 'The actual shared Renderer primitive changed during proof: ' + name)
   evidence.passed = true
   await writeFile(join(out, 'receipt.json'), JSON.stringify(evidence, null, 2))
 } finally { await rm(work, { recursive: true, force: true }) }
