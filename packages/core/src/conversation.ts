@@ -69,6 +69,16 @@ export function projectConversationRecords({ agentSessionId, executionHostId, hi
 /** A reference to the original Session, never a new conversation lifecycle. */
 export type ConversationRef = import('./session-history-read-codec.js').AgentSessionContextReference
 
+/** Exact original record within its Session and source; never a body or display position. */
+export type ConversationItemRef = ConversationRef & { source: AgentConversationRecordSource }
+
+/** Unknown Host does not acquire a navigation identity or hide the recorded content. */
+export function conversationItemRef(record: Pick<AgentConversationRecord, 'agentSessionId' | 'executionHostId' | 'source'>): ConversationItemRef | null {
+  return record.executionHostId
+    ? { hostId: record.executionHostId, agentSessionId: record.agentSessionId, source: { ...record.source } }
+    : null
+}
+
 /** Retain the original bounded envelope rather than duplicating scope or body bytes. */
 export type AgentConversationReadPage = import('./session-history-read-codec.js').AgentSessionHistoryReadPage
 export { parseAgentSessionHistoryReadPage as parseConversationReadPage } from './session-history-read-codec.js'
