@@ -8,6 +8,8 @@ export const SEMANTIC_ICON_CATALOG = {
   'control.checkbox-checked': { label: 'Checked checkbox', glyph: 'check' },
   'control.radio-checked': { label: 'Selected radio', glyph: 'status-dot' },
   'control.select-open': { label: 'Open selection options', glyph: 'chevron-down' },
+  'control.date-open': { label: 'Open date picker', glyph: 'calendar' },
+  'control.time-open': { label: 'Open time picker', glyph: 'clock-3' },
   'control.key-up': { label: 'Up arrow key', glyph: 'arrow-up' },
   'control.key-enter': { label: 'Enter key', glyph: 'corner-down-left' },
   'navigation.footnote-reference': { label: 'Return to footnote reference', glyph: 'corner-down-left' },
