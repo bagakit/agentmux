@@ -3761,6 +3761,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // subscriptions above intentionally start first so events arriving during this storage read
       // stay in the existing boot buffer instead of being missed.
       const persistWarning = await ensurePersistHydrated()
+      // Capture the original handoff before Core layout/name observations can
+      // replace these caches. A name document may already own other targets;
+      // absence there must not erase an alias before retainLabels receives it.
+      const hydrated = get()
+      const retainedDisplayNames = [
+        ...Object.entries(hydrated.agentNames).map(([id, value]) => ({ target: { kind: 'agent-session', id }, value })),
+        ...Object.entries(hydrated.surveyExplorationNames).map(([id, value]) => ({ target: { kind: 'zone', id }, value })),
+        ...Object.values(hydrated.restoredWorkbench?.tabs ?? hydrated.tabs).flatMap(tab => tab.name ? [{ target: { kind: 'tab', id: tab.id }, value: tab.name }] : [])
+      ]
       disposeCoreSpatial?.();disposeCoreSpatial=null
       if(api.spatial) {
         coreSpatialPersistence=new DesktopSpatialPersistence(api.spatial,error=>get().reportWorkbenchSaveFailure(error))
@@ -4134,13 +4143,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         disposeCoreSpatial=()=>{offLocal();offRemote()}
         try {
           await spatial.bootstrap(capture())
-          const legacy = get()
-          const retained = [
-            ...Object.entries(legacy.agentNames).map(([id,value]) => ({ target: { kind: 'agent-session', id }, value })),
-            ...Object.entries(legacy.surveyExplorationNames).map(([id,value]) => ({ target: { kind: 'zone', id }, value })),
-            ...Object.values(legacy.tabs).flatMap(tab => tab.name ? [{ target: { kind: 'tab', id: tab.id }, value: tab.name }] : [])
-          ]
-          const acknowledged = await api.spatial.retainLabels(retained)
+          const acknowledged = await api.spatial.retainLabels(retainedDisplayNames)
           spatial.acceptNames(acknowledged)
           applyNameAcknowledgement(acknowledged)
           set({}) // Rewrite UI preferences after the Core ACK, removing the old entity snapshot.

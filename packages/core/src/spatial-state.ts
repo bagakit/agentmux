@@ -275,7 +275,12 @@ export class AgentMuxSpatialStateStore {
           context: { actor: { kind: 'unknown', id: null, verified: false }, source: 'retained', entryPoint: 'initial-name-ownership', transport: null, location: {} } });
         const key = nameTargetKey(value.target);
         if (Object.hasOwn(document.labels, key)) continue;
-        document.labels[key] = { ...structuredClone(value), source: 'retained', nameRevision: 1, operationId: 'retained:' + key };
+        const tab = value.target.kind === 'tab' ? graph.tabs.find(tab => tab.tabId === value.target.id) : undefined;
+        // An existing durable Tab name outranks the client's old handoff.
+        // Keep the label and public Tab fact in the same owner commit.
+        const retainedValue = tab?.name ?? value.value;
+        document.labels[key] = { target: structuredClone(value.target), value: retainedValue, source: 'retained', nameRevision: 1, operationId: 'retained:' + key };
+        if (tab) tab.name = retainedValue;
         changed = true;
       }
       if (!changed) return projectSpatialState(current);
