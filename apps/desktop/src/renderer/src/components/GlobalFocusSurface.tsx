@@ -20,6 +20,8 @@ import { focusLaneOrigins } from '../lib/focus-lane-origin'
 import { readSurveyPresentation } from '../lib/mobile-presentation'
 import type { FocusLaneCounts, FocusLaneMetrics } from '../lib/focus-lane-layout'
 import { FocusToolbar } from './FocusToolbar'
+import { FocusHistorySearch } from './FocusHistorySearch'
+import { useFocusHistorySearch } from '../lib/use-focus-history-search'
 import { FocusSearchLocations } from './FocusSearchLocations'
 import { focusSearchContextKey, searchFocus } from '../lib/focus-search'
 import { FocusSourceStatus } from './FocusSourceStatus'
@@ -127,6 +129,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const storedFocusExecutionSession = useAppStore((state) => state.focusExecutionSession)
   const focusExecutionSession = onSelectContext ?? storedFocusExecutionSession
   const [query, setQuery] = useState('')
+  const historySearch = useFocusHistorySearch(query, visible, catalogue.sources, catalogue.error ?? (!catalogue.available ? 'The retained source catalogue is still unconfirmed. Retry sources to confirm full coverage.' : null))
   const [project, setProject] = useState('all')
   const [bucketFilter, setBucketFilter] = useState<FocusBucket | 'all'>('all')
   const [requestId, setRequestId] = useState<string | null>(null)
@@ -267,7 +270,8 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     <FocusToolbar selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
       <div className={`focus-filters${isMacPlatform() ? ' focus-filters--mac' : ''}`}>
         <div className="global-board-toolbar__controls">
-          <label className="global-board-search"><ThemeActionSearchIcon size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search text, IDs or amux links" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+          <label className="global-board-search"><ThemeActionSearchIcon size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search text, IDs or amux links" title="Filter names, activity, paths and original object IDs or links. Enter searches case-sensitive text in retained conversations." onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); historySearch.start() } }} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+          <button type="button" className="small-button focus-search-history-trigger" aria-label="Search retained conversation text" title="Search retained conversation text · Enter" disabled={!query.trim()} onClick={() => historySearch.start()}><ThemeActionSearchIcon size={13} /><span>History</span></button>
           <FilterMenu.Root>
             <FilterMenu.Trigger asChild><button type="button" className="focus-filter-trigger" aria-label="Focus filters" aria-description={filterSummary} title={filterSummary} data-active={filterCount > 0 ? 'true' : undefined}>
               <ThemeActionFilterIcon size={14} aria-hidden="true" /><span className="focus-filter-trigger__summary">{filterSummary}</span>{filterCount ? <span className="focus-filter-trigger__count" aria-hidden="true">{filterCount}</span> : null}
@@ -300,10 +304,11 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     </FocusToolbar>
     <div ref={focusLayoutRef} className="global-focus-layout">
       <div className="global-board-main global-focus-main">
-      <FocusSearchLocations result={searchResult} describeLocation={location => {
+      <FocusSearchLocations result={searchResult} onRead={historySearch.start} describeLocation={location => {
         const ref = location.reference, layout = layouts[ref.displayWorkspaceId], index = layout ? groupIds(layout.root).indexOf(ref.groupId) : -1
         return `${config?.workspaces.find(workspace => workspace.id === ref.displayWorkspaceId)?.name ?? ref.displayWorkspaceId} · ${index >= 0 ? `Group ${index + 1}` : ref.groupId}`
       }} onSelect={location => onSelectLocation ? onSelectLocation(location.reference) : location.sessionId ? focusExecutionSession(location.sessionId, location.reference) : useAppStore.getState().reportError(new Error('The original location is kept. Its navigation is not confirmed in this view.'))} />
+      {visible ? <FocusHistorySearch search={historySearch} /> : null}
       {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => {
         const id = pmoAttention[0]!
         const current = useAppStore.getState()

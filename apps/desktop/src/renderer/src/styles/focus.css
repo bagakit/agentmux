@@ -447,3 +447,16 @@
 .focus-search-locations .focus-location-choice { min-width: 0; text-align: left; }
 .focus-search-locations .focus-location-choice strong,
 .focus-search-locations .focus-location-choice small { overflow-wrap: anywhere; white-space: normal; }
+
+.focus-search-history-trigger { flex: 0 0 auto; gap: 4px; }
+.focus-history-search { display: flex; flex: 0 0 auto; flex-direction: column; gap: 6px; min-width: 0; max-height: 60%; overflow: auto; padding: 8px; border-bottom: 1px solid var(--border); }
+.focus-history-search > header { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.focus-history-search > header > strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.focus-history-search > small, .focus-history-hit small { color: var(--text-muted); }
+.focus-history-hit { min-width: 0; padding: 6px; border: 1px solid var(--border); border-radius: 5px; }
+.focus-history-hit > summary { display: flex; flex-direction: column; gap: 4px; cursor: pointer; overflow-wrap: anywhere; }
+.focus-history-hit small, .focus-search-locations > div > small { display: block; overflow-wrap: anywhere; }
+.focus-history-hit__excerpt { white-space: pre-wrap; }
+@container (max-width: 400px) { .focus-search-history-trigger > span { display: none; } }
+.focus-history-coverage { font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.focus-history-coverage > summary { color: var(--text-muted); cursor: pointer; }
