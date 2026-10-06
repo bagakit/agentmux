@@ -622,8 +622,11 @@ describe('semantic Host observation consumers', () => {
     expect(bridge.connections.map(value => value.method)).toEqual(['runtime.events'])
     await client.submitAgentPrompt({ agentSessionId: original.agentSessionId, expectedRun: original.run, prompt: 'exact original request',
       operationId: 'submission-original', afterSubmissionId: null })
-    expect(f.core.submitAgentPrompt.mock.calls).toEqual([[expect.objectContaining({ agentSessionId: original.agentSessionId,
-      expectedRun: original.run, prompt: 'exact original request' })]])
+    const requestSignal = bridge.calls.at(-1)!.signal
+    expect(requestSignal).toBeInstanceOf(AbortSignal)
+    expect(f.core.submitAgentPrompt.mock.calls).toEqual([[{ agentSessionId: original.agentSessionId,
+      expectedRun: original.run, prompt: 'exact original request', operationId: 'submission-original', afterSubmissionId: null,
+      signal: requestSignal }, { requestSignal }]])
     const events: AgentMuxClientEvent[] = []
     client.onEvent(value => events.push(value))
     await bridge.connections[0]!.close()
@@ -711,7 +714,9 @@ describe('semantic Host observation consumers', () => {
       agentSessionId: 'a123456789012345', expectedRun: { runId: 'original-run' }, prompt: 'original prompt',
       operationId: 'submission-original', afterSubmissionId: null
     }] } }, { signal: controller.signal })
-    expect(f.core.submitAgentPrompt.mock.calls).toEqual([[expect.objectContaining({ signal: controller.signal, prompt: 'original prompt' })]])
+    expect(f.core.submitAgentPrompt.mock.calls).toEqual([[{ agentSessionId: 'a123456789012345', expectedRun: { runId: 'original-run' },
+      prompt: 'original prompt', operationId: 'submission-original', afterSubmissionId: null, signal: controller.signal },
+    { requestSignal: controller.signal }]])
     await events.dispose(); await f.service.dispose()
   })
 
@@ -750,7 +755,9 @@ describe('semantic Host observation consumers', () => {
       { method: 'runtime.invoke', params: { fence, consumerId: expect.any(String), invocation: { method: 'submitAgentPrompt', args: [{ agentSessionId: prompt.agentSessionId,
         operationId: prompt.operationId, expectedRun: prompt.expectedRun, afterSubmissionId: prompt.afterSubmissionId, prompt: prompt.prompt }] } }, signal: expect.any(AbortSignal) }
     ])
-    expect(f.core.submitAgentPrompt.mock.calls).toEqual([[{ ...prompt, signal: expect.any(AbortSignal) }]])
+    const requestSignal = bridge.calls.at(-1)!.signal
+    expect(requestSignal).toBeInstanceOf(AbortSignal)
+    expect(f.core.submitAgentPrompt.mock.calls).toEqual([[{ ...prompt, signal: requestSignal }, { requestSignal }]])
     const watches: Array<{ options: unknown; signal: AbortSignal | undefined }> = []
     const subscribe = bridge.port.subscribe
     bridge.port.subscribe = ((method: Parameters<AgentMuxHostedRpcPort['subscribe']>[0], params: Parameters<AgentMuxHostedRpcPort['subscribe']>[1], handlers: Parameters<AgentMuxHostedRpcPort['subscribe']>[2]) => {
@@ -851,7 +858,7 @@ describe('transport-authenticated device origin', () => {
     const args = [{ agentSessionId: 'a123456789012345', expectedRun: { runId: 'original-run' }, operationId: 'phone-prompt', prompt: 'hello', authorHuman: true }]
     try {
       await f.service.call('runtime.invoke', { fence, consumerId: 'consumer-device', invocation: { method: 'submitAgentPrompt', args } }, { sourceDevice, recordDeviceOperation })
-      expect(f.core.submitAgentPrompt).toHaveBeenCalledWith({ ...args[0], sourceDevice })
+      expect(f.core.submitAgentPrompt).toHaveBeenCalledWith({ ...args[0], sourceDevice }, {})
       expect(recordDeviceOperation.mock.calls.map(call => call[3])).toEqual(['unknown', 'confirmed'])
       expect(recordDeviceOperation.mock.calls[0]![4]).toBe('phone-prompt')
       await expect(f.service.call('runtime.invoke', { fence, consumerId: 'consumer-device', invocation: {

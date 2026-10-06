@@ -17,6 +17,8 @@ import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { AgentMuxRpcDispatcher, AgentMuxRpcError, type AgentMuxRpcConnection, type AgentMuxRpcFrame } from '../src/public-rpc-wire.js'
 import { connectHostedAgentMux } from '../src/hosted-client.js'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
+import type { AgentInputSubmissionReceipt, AgentNativePromptInputPlan } from '../src/index.js'
+import { DeviceAuthority } from '../../../apps/host/src/device-authority.js'
 
 const AgentMuxControlServer: typeof SourceServer = process.env.AGENTMUX_TEST_RPC_SERVER_ENTRY
   ? (await import(/* @vite-ignore */ pathToFileURL(process.env.AGENTMUX_TEST_RPC_SERVER_ENTRY).href)).AgentMuxControlServer : SourceServer
@@ -471,5 +473,143 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
     controller.abort(); await sub.dispose()
     await vi.waitFor(() => expect(disposed).toHaveBeenCalledTimes(1))
     expect(f.inputs).toEqual([]); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  })
+
+  it.each(['submitAgentPrompt', 'submitAgentMessage', 'rejoinAgentInputWaiting'] as const)('rejects a wire-supplied trusted context for %s before calling Core', async method => {
+    const f = await hostedFixture(), operation = vi.spyOn(f.client, method)
+    const h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted })
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: h.path } }); cleanups.push(() => client.dispose())
+    const forged = { fence: f.fence, consumerId: 'forged-input-context', invocation: { method,
+      args: [{}, { assertCurrent: {}, requestSignal: {} }] } } as unknown as import('../src/public-rpc.js').AgentMuxRpcParams<'runtime.invoke'>
+    await expect(client.call('runtime.invoke', forged)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    expect(operation).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  })
+
+  it.each(['native-assert', 'claimed-runtime-read'] as const)('rechecks the actual device authority after %s before Native dispatch', async stage => {
+    const f = await hostedFixture(), authority = await DeviceAuthority.open(join(f.root, 'input-devices.json'))
+    cleanups.push(() => authority.flush())
+    const publicKey = Buffer.alloc(32, 21).toString('base64'), device = await authority.authorizeKey(publicKey)
+    const author = { deviceId: device.deviceId, createdAt: device.createdAt }
+    const key = { kind: 'prompt' as const, agentSessionId: 'recipient-agent', expectedRun: { runId: 'run-recipient-agent' }, submissionId: 'device-revoke-' + stage }
+    const plan: AgentNativePromptInputPlan = { kind: 'native-rpc', operation: 'start-or-steer', protocolId: 'controlled-contract',
+      sourceId: 'original-source', actorId: 'original-actor', threadId: 'original-thread' }
+    let entered!: () => void, proceed!: () => void, reached = false
+    const paused = new Promise<void>(yes => { entered = yes }), continuation = new Promise<void>(yes => { proceed = yes })
+    const dispatch = vi.fn(async () => ({ outcome: 'admitted' as const, turnId: 'must-not-be-created' }))
+    const provider = Reflect.get(f.client, 'providers').get('codex') as import('../src/agent-provider.js').AgentProvider
+    const prepare = vi.spyOn(provider as typeof provider & Required<Pick<typeof provider, 'prepareNativePromptInput'>>, 'prepareNativePromptInput')
+      .mockImplementation(async () => ({ plan, close: async () => {}, assertCurrent: async () => {
+        if (stage === 'native-assert' && !reached) { reached = true; entered(); await continuation }
+      }, dispatch }))
+    const originalStatus = f.inner.kernel.status as (runId: string) => Promise<ReturnType<typeof f.run>>
+    f.inner.kernel.status = vi.fn(async (runId: string) => {
+      const claim = stage === 'claimed-runtime-read' ? await f.client.inspectAgentPromptSubmission(key) : null
+      if (claim?.admission?.transport === 'native' && claim.admission.native.outcome === 'claimed' && !reached) {
+        reached = true; entered(); await continuation
+      }
+      return await originalStatus(runId)
+    })
+    const h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted,
+      http: { host: '127.0.0.1', port: 0, authorize: async () => ({ principal: { kind: 'device', id: authority.hostId + ':' + device.deviceId },
+        assertCurrent: () => authority.assertCurrentKey(author, publicKey) }) } })
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'http', url: h.url(), token: 'controlled-device-request' } }); cleanups.push(() => client.dispose())
+    try {
+      const firstsave = await client.call('runtime.invoke', { fence: f.fence, consumerId: 'original-device-consumer', invocation: invocation({ method: 'submitAgentPrompt', args: [{
+        agentSessionId: key.agentSessionId, expectedRun: key.expectedRun, operationId: key.submissionId, prompt: 'Original device input',
+        admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', authorHuman: true }] }) })
+      const receipt = decodeHostedValue(firstsave.value) as AgentInputSubmissionReceipt
+      expect(receipt).toMatchObject({ key, status: 'waiting', persistence: 'confirmed' })
+      await paused
+      const pending = Reflect.get(f.client, 'inputWaitingRecipients').get(key.agentSessionId).pending as Promise<void>
+      await authority.revoke(device.deviceId)
+      proceed(); await pending
+      const current = (await f.client.inspectAgentInput({ key }))!
+      expect(current.ref).toEqual(receipt.ref); expect(dispatch).not.toHaveBeenCalled()
+      if (stage === 'native-assert') expect(current).toMatchObject({ status: 'waiting', admission: null,
+        control: { state: 'enabled', waiting: { phase: 'authorization', reason: 'author-authorization-needed' } } })
+      else expect(current).toMatchObject({ status: 'not-applied', control: { state: 'dispatch-authorized' },
+        admission: { admission: { native: { outcome: 'not-applied' }, notApplied: true } } })
+      expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+    } finally { proceed(); prepare.mockRestore() }
+  })
+
+  it('preserves a saved device input when its original current-author source is unavailable', async () => {
+    const f = await hostedFixture(), h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted,
+      http: { host: '127.0.0.1', port: 0, authorize: async () => ({ principal: { kind: 'device', id: 'original-host:original-device' } }) } })
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'http', url: h.url(), token: 'controlled-device-request' } }); cleanups.push(() => client.dispose())
+    const key = { kind: 'prompt' as const, agentSessionId: 'recipient-agent', expectedRun: { runId: 'run-recipient-agent' }, submissionId: 'missing-device-authority' }
+    const firstsave = await client.call('runtime.invoke', { fence: f.fence, consumerId: 'unconfirmed-device-consumer', invocation: invocation({ method: 'submitAgentPrompt', args: [{
+      agentSessionId: key.agentSessionId, expectedRun: key.expectedRun, operationId: key.submissionId, prompt: 'Retained original input',
+      admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', authorHuman: true }] }) })
+    expect(decodeHostedValue(firstsave.value)).toMatchObject({ key, persistence: 'confirmed', status: 'waiting' })
+    await vi.waitFor(async () => expect(await f.client.inspectAgentInput({ key })).toMatchObject({ admission: null,
+      control: { state: 'enabled', waiting: { phase: 'authorization', reason: 'author-authorization-needed',
+        failure: { code: 'CONTROL_UNAVAILABLE' } } } }))
+    expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  })
+
+  it.each(['agent.send', 'agent.input.rejoin', 'runtime.invoke'] as const)('rebuilds the original device restriction for %s instead of retaining a request grant', async method => {
+    const f = await hostedFixture(), authority = await DeviceAuthority.open(join(f.root, 'rejoin-devices.json'))
+    cleanups.push(() => authority.flush())
+    const publicKey = Buffer.alloc(32, 23).toString('base64'), device = await authority.authorizeKey(publicKey)
+    const author = { deviceId: device.deviceId, createdAt: device.createdAt }
+    let prior: AgentInputSubmissionReceipt | undefined
+    if (method !== 'agent.send') {
+      prior = await f.client.submitAgentPrompt({ agentSessionId: 'recipient-agent', expectedRun: { runId: 'run-recipient-agent' },
+        operationId: 'original-rejoin-input', prompt: 'Original retained body', admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', authorHuman: true },
+      { assertCurrent: () => { throw new AgentMuxError('Original request authority unavailable.', 'CONTROL_UNAVAILABLE') } }) as AgentInputSubmissionReceipt
+      await Reflect.get(f.client, 'inputWaitingRecipients').get('recipient-agent').pending
+      expect(await f.client.inspectAgentInput({ key: prior.key })).toMatchObject({ admission: null,
+        control: { waiting: { phase: 'authorization', reason: 'author-authorization-needed' } } })
+      expect(await f.client.stopAgentInputWaiting({ ref: prior.ref, cancelOperationId: 'original-device-stop' }))
+        .toMatchObject({ outcome: 'stopped-before-dispatch' })
+    }
+    let entered!: () => void, proceed!: () => void
+    const paused = new Promise<void>(yes => { entered = yes }), continuation = new Promise<void>(yes => { proceed = yes })
+    const plan: AgentNativePromptInputPlan = { kind: 'native-rpc', operation: 'start-or-steer', protocolId: 'controlled-contract',
+      sourceId: 'original-source', actorId: 'original-actor', threadId: 'original-thread' }
+    const dispatch = vi.fn(async () => ({ outcome: 'admitted' as const, turnId: 'must-not-be-created' }))
+    const provider = Reflect.get(f.client, 'providers').get('codex') as import('../src/agent-provider.js').AgentProvider
+    const prepare = vi.spyOn(provider as typeof provider & Required<Pick<typeof provider, 'prepareNativePromptInput'>>, 'prepareNativePromptInput')
+      .mockImplementation(async () => ({ plan, close: async () => {}, assertCurrent: async () => { entered(); await continuation }, dispatch }))
+    const h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted,
+      http: { host: '127.0.0.1', port: 0, authorize: async () => ({ principal: { kind: 'device', id: authority.hostId + ':' + device.deviceId },
+        assertCurrent: () => authority.assertCurrentKey(author, publicKey) }) } })
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'http', url: h.url(), token: 'original-device' } }); cleanups.push(() => client.dispose())
+    try {
+      const receipt = method === 'agent.send' ? (await client.call(method, { target: { kind: 'agent-session', agentSessionId: 'recipient-agent' },
+        text: 'Original retained body', execution: 'immediate', operationId: 'original-device-send', messageId: 'original-device-message' })).inputReceipt!
+        : method === 'agent.input.rejoin' ? await client.call(method, { ref: prior!.ref })
+        : decodeHostedValue((await client.call('runtime.invoke', { fence: f.fence, consumerId: 'original-rejoin-consumer',
+          invocation: invocation({ method: 'rejoinAgentInputWaiting', args: [{ ref: prior!.ref }] }) })).value) as AgentInputSubmissionReceipt
+      expect(receipt).toMatchObject({ persistence: 'confirmed', status: 'waiting', ref: { waitGeneration: prior ? 2 : 1 } })
+      if (prior) expect(receipt.key).toEqual(prior.key)
+      await paused
+      const pending = Reflect.get(f.client, 'inputWaitingRecipients').get('recipient-agent').pending as Promise<void>
+      await authority.revoke(device.deviceId); proceed(); await pending
+      expect(await f.client.inspectAgentInput({ key: receipt.key })).toMatchObject({ ref: receipt.ref, status: 'waiting', admission: null,
+        control: { state: 'enabled', waiting: { phase: 'authorization', reason: 'author-authorization-needed' } } })
+      expect(dispatch).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+    } finally { proceed(); prepare.mockRestore() }
+  })
+
+  it.each(['agent.send', 'agent.input.rejoin'] as const)('checks the source author and removes its nonJSON callback before virtual %s forwarding', async method => {
+    const f = await hostedFixture(), received = new AgentMuxError('Original receiving Host reached.', 'CONTROL_UNAVAILABLE')
+    const forwardRpc = vi.fn(async () => { throw received }), assertCurrent = vi.fn(async () => {})
+    const client = Object.assign(f.client, { forwardRpc })
+    const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client }] }); cleanups.push(() => service.dispose())
+    const ref = { key: { kind: 'prompt' as const, agentSessionId: 'recipient-agent', expectedRun: { runId: 'run-recipient-agent' }, submissionId: 'original-input' }, waitGeneration: 1 }
+    const context = { principal: { kind: 'device' as const, id: 'source-host:original-device' }, assertCurrent }
+    const call = () => method === 'agent.send' ? service.call(method, { target: { kind: 'agent-session', agentSessionId: 'recipient-agent' },
+      text: 'Original forwarded body', operationId: 'original-control', messageId: 'original-message', execution: 'immediate' }, context)
+      : service.call(method, { ref }, context)
+    await expect(call()).rejects.toBe(received)
+    expect(assertCurrent).toHaveBeenCalledOnce(); expect(forwardRpc).toHaveBeenCalledOnce()
+    const forwarded = forwardRpc.mock.calls[0] as unknown as [string, unknown, Record<string, unknown>]
+    expect(forwarded[0]).toBe(method); expect(forwarded[2]).not.toHaveProperty('assertCurrent')
+    expect(JSON.stringify(forwarded[1])).not.toContain('assertCurrent')
+    assertCurrent.mockRejectedValueOnce(new AgentMuxError('The original source device was revoked.', 'CONTROL_PERMISSION_DENIED'))
+    await expect(call()).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+    expect(forwardRpc).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
   })
 })

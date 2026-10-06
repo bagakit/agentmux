@@ -29,7 +29,8 @@ async function unixHost() {
   const retained = new Map<string, typeof attachment.run>()
   const core = {
     connect: vi.fn(async () => {}), connectRuntime: vi.fn(async () => {}),
-    onEvent: vi.fn(() => () => {}), catalog: () => [], agentSessions: () => [],
+    onEvent: vi.fn(() => () => {}), catalog: () => [], agentSessions: () => [], readAgentSessions: async () => [],
+    metadata: { pendingIds: () => [] },
     runtimeIdentity: () => ({ hostId: 'local', instanceId: 'original-daemon', buildIdentity: 'private-fixture', protocolVersion: 1, processId: 123, ownership: 'owned' as const }),
     agentMessageQueuePath: () => join(directory, 'messages.ndjson'),
     runtimeProjection: vi.fn(async () => ({ hostId: 'local', subjects: [] })),
