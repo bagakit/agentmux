@@ -107,7 +107,10 @@ async function capture() {
   await click(tree('Binary.webloc'));await wait(`bookmarkProbe.facts().surfaces.some(r=>r.kind==='browser'&&r.bookmarkOrigin?.path==='Binary.webloc')`);const binary=await bookmarkTab('Binary.webloc');assert.ok(binary);await page(localUrl,'binary-bookmark-file-browser')
   await evaluate(`bookmarkProbe.split(${JSON.stringify(binary.id)},.34);bookmarkProbe.theme('light')`);await menuSource(true,'binary-source-disabled-menu-narrow-light')
   const before=await evaluate('bookmarkProbe.durable()'), readCount=reads.filter(r=>r.method==='read').length
-  await click(tree('Large.webloc'));await wait(`document.querySelector('.error-notice')?.textContent.includes('4 MiB preview limit')`)
+  await click(tree('Large.webloc'));await click(`document.querySelector('.global-system-notices__trigger')`)
+  await wait(`Boolean(document.querySelector('.notification-item[data-event-id] .notification-item__details > summary'))`)
+  await click(`document.querySelector('.notification-item[data-event-id] .notification-item__details > summary')`)
+  await wait(`document.querySelector('.notification-item[data-event-id] .notification-item__original')?.innerText.includes('4 MiB preview limit')`)
   assert.deepEqual(await evaluate('bookmarkProbe.durable()'),before,'Budget failure retains the original Tabs, split, focus and documents')
   assert.equal(reads.filter(r=>r.method==='read').length,readCount,'Native IPC budget rejection cannot reread the bookmark as text')
   await frame('bookmark-budget-visible-error')

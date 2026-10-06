@@ -109,15 +109,15 @@ window.remoteNoticeObservation = () => {
   const inputs = [...document.querySelectorAll('.agent-input-stack')].filter(inVisibleViewport).map(bounds)
   const expanded = panel?.matches(':popover-open') && inVisibleViewport(panel)
   const popup = expanded ? bounds(panel) : null
-  const notice = [...document.querySelectorAll('.error-notice')].find(inVisibleViewport)
+  const notice = [...document.querySelectorAll('.notification-item[data-event-id], .notification-item[data-notice-id="current"]')].find(inVisibleViewport)
   const noticeStyle = notice ? getComputedStyle(notice) : null
   const panelStyle = panel ? getComputedStyle(panel) : null
   return { expanded, popup, inputs,
     inputClear: Boolean(popup) && inputs.length > 0 && inputs.every(input => popup.bottom <= input.top),
-    notice: notice ? { kind: useAppStore.getState().errorNoticeContext?.kind ?? 'indeterminate',
+    notice: notice ? { kind: notice.getAttribute('data-kind'),
       ariaLive: notice.getAttribute('aria-live'), color: noticeStyle.color, background: noticeStyle.backgroundColor,
       quiet: notice.getAttribute('aria-live') === 'polite' && noticeStyle.color === panelStyle.color &&
-        noticeStyle.backgroundColor === panelStyle.backgroundColor } : null }
+        noticeStyle.backgroundColor === 'rgba(0, 0, 0, 0)' } : null }
 }
 window.remoteState = () => {
   const state = useAppStore.getState(), workbench = projectPersistedWorkbench(state)

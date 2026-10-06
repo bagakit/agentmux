@@ -14,7 +14,8 @@ const green = await readFile(store, 'utf8')
 const digest = value => createHash('sha256').update(value).digest('hex')
 const bindings = Object.fromEntries(await Promise.all([store, test,
   fileURLToPath(import.meta.url),
-  resolve(repository, 'apps/desktop/src/renderer/src/components/TransientErrorNotice.tsx'),
+  resolve(repository, 'apps/desktop/src/renderer/src/components/GlobalSystemNotices.tsx'),
+  resolve(repository, 'apps/desktop/src/renderer/src/components/NotificationItem.tsx'),
   resolve(repository, 'apps/desktop/src/renderer/src/App.tsx'),
   resolve(repository, 'vitest.config.ts')].map(async path => [relative(repository, path), digest(await readFile(path))])))
 await writeFile(resolve(output, 'store.green.ts.txt'), green)
@@ -96,12 +97,14 @@ for (const [path, before] of Object.entries(bindings)) {
 }
 const callers = (await readFile(resolve(repository, 'apps/desktop/src/renderer/src/App.tsx'), 'utf8'))
 assert.ok(/beginRendererStartup\(\s*initialize\s*,/.test(callers), 'Actual App must initialize this Store')
-assert.ok(callers.includes('<TransientErrorNotice'), 'Actual App must mount the original notice consumer')
+assert.ok(callers.includes('<GlobalSystemNotices'), 'Actual App must mount the unified notification inbox')
+const inbox = await readFile(resolve(repository, 'apps/desktop/src/renderer/src/components/GlobalSystemNotices.tsx'), 'utf8')
+assert.ok(inbox.includes('<NotificationItem') && inbox.includes('errorContext?.startupSessionSnapshot'), 'The inbox must consume original startup issues through real notification items')
 assert.ok(green.includes('if (!snapshotVerified || emptySessionSnapshotWarning) startSessionMembershipResync('), 'Actual initialize must call the owning resync')
 assert.equal(green.split('startupSnapshotConfirmsSessions(snapshot, ').length - 1, 2, 'Both adopted initialize and resync facts must use the same notice predicate')
 assert.ok(green.includes('sessionMembershipGap) startSessionMembershipResync(event)'), 'Membership events must call the same resync')
 await writeFile(resolve(output, 'receipt.json'), JSON.stringify({ schema: 'agentmux.startup-snapshot-notice-mutation-proof.v1',
-  passed: true, output, bindings, actualProductCallers: ['App initialize effect', 'App TransientErrorNotice mount',
+  passed: true, output, bindings, actualProductCallers: ['App initialize effect', 'App GlobalSystemNotices mount -> NotificationItem startup issues',
     'Store initialize -> startSessionMembershipResync', 'Store applyEvent -> startSessionMembershipResync'],
   sharedSourceUnchanged: true, results }, null, 2) + '\n')
 console.log(`receipt: ${resolve(output, 'receipt.json')}`)

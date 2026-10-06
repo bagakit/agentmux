@@ -45,7 +45,10 @@ app.whenReady().then(async () => { try {
   result.escape={exactTrigger:true}
   await key('F10',8);await menuSettled();await mouse('[aria-label="Later explicit input"]');await until('later input wins',()=>read(`!document.querySelector('.focus-context-menu')&&document.activeElement===document.querySelector('[aria-label="Later explicit input"]')`));result.laterFocus={preserved:true}
   await read('window.recapProof.denyClipboard(true)');await mouse(row('recap-b'),'right');await menuSettled();await mouse('.focus-context-menu [role=menuitem]:last-child')
-  await until('original clipboard failure outlet',()=>read('document.querySelector(".error-notice")?.textContent.includes("Clipboard denied: private presentation probe")'))
+  await mouse('.global-system-notices__trigger')
+  await until('original clipboard failure item',()=>read('Boolean(document.querySelector(".notification-item[data-event-id] .notification-item__details > summary"))'))
+  await mouse('.notification-item[data-event-id] .notification-item__details > summary')
+  await until('original clipboard failure outlet',()=>read('document.querySelector(".notification-item[data-event-id] .notification-item__original")?.innerText.includes("Clipboard denied: private presentation probe")'))
   result.clipboardFailure=await read('window.recapProof.facts()');await shot('clipboard-failure-360.png','actual original error outlet + draft retention')
   const before=await read('window.recapProof.facts()');await read('window.recapProof.churn()');await settle();const after=await read('window.recapProof.facts()');assert.deepEqual(after.reads,before.reads);assert.deepEqual(after.controls,before.controls);result.cost={updates:200,before,after}
   result.after=after;for(const key of ['sameNodes','originalFocus','originalDrafts','originalControls'])assert.equal(after[key],true,key)

@@ -465,9 +465,11 @@ try {
   assert.equal(channels.length,1,'Use the actual existing production event channel')
   const event={type:'core',hostId:'local',event:counterexample.gap}
   await active.main.evaluate(`process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron').BrowserWindow.getAllWindows()[0].webContents.send(${JSON.stringify(channels[0][1])},${JSON.stringify(event)})`)
-  await waitFor('captured Gap through actual preload/Store diagnostic',()=>active.cdp.evaluate('document.querySelector(".error-notice")?.textContent.includes("OUTPUT_GAP")'))
-  await click('.error-notice__details summary')
-  receipt.gapProjection=await active.cdp.evaluate('({text:document.querySelector(".error-notice")?.innerText,detailsOpen:document.querySelector(".error-notice__details")?.open})')
+  await click('.global-system-notices__trigger')
+  await waitFor('captured Gap notification item',()=>active.cdp.evaluate('Boolean(document.querySelector(".notification-item[data-event-id] .notification-item__details > summary"))'))
+  await click('.notification-item[data-event-id] .notification-item__details > summary')
+  await waitFor('captured Gap through actual preload/Store diagnostic',()=>active.cdp.evaluate('document.querySelector(".notification-item[data-event-id] .notification-item__original")?.innerText.includes("OUTPUT_GAP")'))
+  receipt.gapProjection=await active.cdp.evaluate('({text:document.querySelector(".notification-item[data-event-id] .notification-item__original")?.innerText,detailsOpen:document.querySelector(".notification-item[data-event-id] .notification-item__details")?.open})')
   assert.equal(receipt.gapProjection.detailsOpen,true);assert.ok(receipt.gapProjection.text.includes('Origin: daemon'))
   assert.ok(receipt.gapProjection.text.includes('decoded output missed by this observation: unknown'))
   receipt.gapProjection.record={path:gapPath,sha256:hash(gapBytes),kind:'previously-captured-private-Core-Native-event',liveGapInThisGUI:false}

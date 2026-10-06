@@ -165,15 +165,15 @@ export async function clickGoalsEntryInActualUI({ cdp, fixture, activateButton, 
       const shown = await cdp.evaluate(`document.querySelector('[data-workbench-region-id="${topic.region.regionId}"]')?.innerText.toLowerCase()`)
       if (!shown?.includes('preparation') || !shown.includes('not been sent')) return null
       const directory = join(await realpath(fixture.topicsPath), scratchTopicDirectoryName(topic.tabResource.topicId))
-      const cause = await cdp.evaluate(`Array.from(document.querySelectorAll('.error-notice__original')).map(node => node.textContent).find(text => text.includes('EACCES') && text.includes('mkdir') && text.includes(${JSON.stringify(directory)}))`)
-      if (!cause) return null
       fixture.preparationFailure = { code: 'EACCES', operation: 'mkdir', workspacePath: directory }
       return topic
     })
     // Expand the actual error details while the filesystem is still unwritable; the initial
     // preparation marker alone says unknown and cannot establish this failed Main mkdir.
-    await activateButton(cdp, `Array.from(document.querySelectorAll('.error-notice__original')).find(node => node.textContent.includes(${JSON.stringify(fixture.preparationFailure.workspacePath)})).closest('details').querySelector('summary')`)
-    await waitFor('actual preparation cause is visible', () => cdp.evaluate(`Array.from(document.querySelectorAll('.error-notice__original')).some(node => node.textContent.includes(${JSON.stringify(fixture.preparationFailure.workspacePath)}) && node.getClientRects().length > 0)`))
+    await activateButton(cdp, `document.querySelector('.global-system-notices__trigger')`)
+    await waitFor('actual preparation notification item', () => cdp.evaluate(`Boolean(document.querySelector('.notification-item[data-event-id] .notification-item__details > summary'))`))
+    await activateButton(cdp, `document.querySelector('.notification-item[data-event-id] .notification-item__details > summary')`)
+    await waitFor('actual preparation cause is visible', () => cdp.evaluate(`Array.from(document.querySelectorAll('.notification-item[data-event-id] .notification-item__original')).some(node => node.innerText.includes('EACCES') && node.innerText.includes('mkdir') && node.innerText.includes(${JSON.stringify(fixture.preparationFailure.workspacePath)}) && node.getClientRects().length > 0)`))
   } finally { await chmod(fixture.topicsPath, fixture.topicsMode) }
   assert.notEqual(fixture.failed.tab.tabId, fixture.normal.tabId)
   assert.notEqual(fixture.failed.tabResource.topicId, fixture.normal.topicId)
