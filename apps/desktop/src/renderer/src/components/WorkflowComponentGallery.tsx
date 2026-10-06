@@ -55,6 +55,8 @@ function InlineRenameExample() {
 
 export function WorkflowComponentGallery() {
   const [theme, setTheme] = useState<AppAppearanceId>('dark')
+  const [previewWidth, setPreviewWidth] = useState('fit')
+  const [boundaries, setBoundaries] = useState(false)
   useEffect(() => mountThemeRuntime(), [])
   useEffect(() => { updateThemeSelection({ appAppearance: theme }) }, [theme])
   return (
@@ -69,6 +71,14 @@ export function WorkflowComponentGallery() {
           ))}
         </div>
       </header>
+      <div className="wf-gallery__inspect" role="group" aria-label="Inspect components">
+        <label><input type="checkbox" checked={boundaries} onChange={event => setBoundaries(event.target.checked)} />Show boundaries</label>
+        <label>Preview width<select aria-label="Preview width" value={previewWidth} onChange={event => setPreviewWidth(event.target.value)}>
+          <option value="fit">Auto</option><option value="640">640 px</option><option value="390">390 px</option><option value="320">320 px</option>
+        </select></label>
+        <button type="button" onClick={() => { setPreviewWidth('fit'); setBoundaries(false) }}>Reset preview</button>
+      </div>
+      <div className="wf-gallery__examples" data-inspect-bounds={boundaries} style={{ width: previewWidth === 'fit' ? undefined : `${previewWidth}px` }}>
       <section className="wf-gallery__intro">
         <div className="wf-gallery__intro-mark"><SemanticIcon name="object.workflow" size={18} /></div>
         <h1>Reusable Workflow surfaces</h1>
@@ -118,6 +128,7 @@ export function WorkflowComponentGallery() {
         <p className="wf-gallery__caption"><ThemeActionEditIcon size={13} /><b>原位改名</b><span>名称、选区、等待和错误共用一套交互。</span></p>
         <InlineRenameExample />
       </section>
+      </div>
     </main>
   )
 }
