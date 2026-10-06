@@ -18,3 +18,8 @@ details[open] > summary:not(:has([data-semantic-icon]))::before { transform: rot
 select:not([multiple]):is(:not([size]), [size="1"]) { appearance: none; padding-inline-end: 28px !important; background-image: var(--native-select-open-image) !important; background-position: right 8px center !important; background-repeat: no-repeat !important; background-size: 14px 14px !important; }
 select:not([multiple]):is(:not([size]), [size="1"]):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 select:not([multiple]):is(:not([size]), [size="1"]):disabled { opacity: .55; }
+
+/* Keep the original host picker, value, disabled/readonly state and hit slot.
+   Chromium exposes only its entrance glyph to author CSS; popup internals stay host-owned. */
+input:is([type="date"], [type="datetime-local"])::-webkit-calendar-picker-indicator { background-image: var(--native-date-open-image); background-position: center; background-repeat: no-repeat; background-size: contain; }
+input[type="time"]::-webkit-calendar-picker-indicator { background-image: var(--native-time-open-image); background-position: center; background-repeat: no-repeat; background-size: contain; }

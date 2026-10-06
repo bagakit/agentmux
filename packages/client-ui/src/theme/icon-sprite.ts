@@ -27,8 +27,14 @@ const NATIVE_ICON_PROJECTIONS = {
   '--native-permission-unknown-mask': 'status.permission-unknown'
 } as const satisfies Record<string, SemanticIconId>
 
+const NATIVE_ICON_IMAGES = {
+  '--native-select-open-image': 'control.select-open',
+  '--native-date-open-image': 'control.date-open',
+  '--native-time-open-image': 'control.time-open'
+} as const satisfies Record<string, SemanticIconId>
+
 const SVG_NS = 'http://www.w3.org/2000/svg'
-const sprites = new WeakMap<Document, { element: SVGSVGElement; signature: string; nativeSignature: string; selectSignature: string }>()
+const sprites = new WeakMap<Document, { element: SVGSVGElement; signature: string; nativeSignature: string; imageSignature: string }>()
 export function semanticIconHref(name: SemanticIconId): string { return `#agentmux-icon-${name}` }
 
 /** The document root owns one sprite. Existing React and editor DOM keep stable references. */
@@ -44,7 +50,7 @@ export function updateIconSprite(document: Document, theme: Pick<ThemeValue, 'ic
     element.style.cssText = 'position:absolute;overflow:hidden;pointer-events:none'
     // No display:none: several browsers omit its referenced symbols from rendering.
     document.body.prepend(element)
-    sprite = { element, signature: '', nativeSignature: '', selectSignature: '' }
+    sprite = { element, signature: '', nativeSignature: '', imageSignature: '' }
     sprites.set(document, sprite)
   }
   const root = document.documentElement.style
@@ -56,10 +62,10 @@ export function updateIconSprite(document: Document, theme: Pick<ThemeValue, 'ic
     for (const [property, name] of Object.entries(NATIVE_ICON_PROJECTIONS)) root.setProperty(property, iconMaskDataUrl(iconShapes(name, theme.icons), theme.iconStyle))
     sprite.nativeSignature = nativeSignature
   }
-  const selectSignature = JSON.stringify([theme.icons['control.select-open'], theme.iconStyle, nativeTextColor])
-  if (sprite.selectSignature !== selectSignature) {
-    root.setProperty('--native-select-open-image', iconSvgDataUrl(iconShapes('control.select-open', theme.icons), theme.iconStyle, nativeTextColor))
-    sprite.selectSignature = selectSignature
+  const imageSignature = JSON.stringify([Object.values(NATIVE_ICON_IMAGES).map(name => theme.icons[name]), theme.iconStyle, nativeTextColor])
+  if (sprite.imageSignature !== imageSignature) {
+    for (const [property, name] of Object.entries(NATIVE_ICON_IMAGES)) root.setProperty(property, iconSvgDataUrl(iconShapes(name, theme.icons), theme.iconStyle, nativeTextColor))
+    sprite.imageSignature = imageSignature
   }
   if (sprite.signature === signature) return
   const symbols = document.createDocumentFragment()
