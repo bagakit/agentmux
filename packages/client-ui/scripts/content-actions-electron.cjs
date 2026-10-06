@@ -53,7 +53,7 @@ app.whenReady().then(async () => {
     await read(() => document.querySelector('#failed .composer-image__remove').focus({ preventScroll: true })); await press('Enter')
     assert.equal(await read(() => document.querySelector('#failed output').textContent), 'Keep the surrounding text  and continue.')
     result.operations.push({ failedReferenceRemovable: true })
-    } else {
+    } else if (slice === 'trace-copy') {
       await until(() => document.querySelector('#conversation details'))
       const openDetails = async () => {
         await read(() => { const details = document.querySelector('#conversation details'); details.open = true; details.dispatchEvent(new Event('toggle')); document.querySelectorAll('#conversation .conversation-tool-trace__row[aria-expanded="false"]').forEach(button => button.click()) })
@@ -109,6 +109,57 @@ app.whenReady().then(async () => {
       await until(() => document.querySelector('#draft .composer-image__remove'))
       assert.equal(await read(() => document.querySelector('#draft output').textContent === `Keep @${window.contentActionsFixture.path} and continue.`), true)
       result.operations.push({ retryAfterEarlyError: true, obsoleteAttemptIgnored: true, replacedSourceIsolated: true, protectedContentHasNoCopy: true, integratedImageRemovalAndUndo: true })
+    } else {
+      const panelOpen = () => document.querySelector('#known .composer__context-card').matches(':popover-open')
+      const move = async selector => {
+        const point = await win.webContents.executeJavaScript(`(() => { const r = document.querySelector('${selector}').getBoundingClientRect(); return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)} })()`)
+        win.webContents.sendInputEvent({type:'mouseMove',...point}); await settle(); return point
+      }
+      const mouseClick = async selector => { const point = await move(selector); win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...point}); win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...point}); await settle() }
+      await until(() => document.querySelectorAll('.composer__context').length === 2)
+      for (const width of [1024,390]) {
+        win.setContentSize(width,900); await settle()
+        for (const mode of ['dark','light']) {
+          if (await read(() => document.documentElement.dataset.appearance) !== mode) await mouseClick('nav button')
+          await read(() => { window.contextHoverFixture.reset(); document.querySelector('#known .tiptap').focus() }); await settle()
+          await move('#known .composer__context'); await until(panelOpen)
+          assert.equal(await read(() => document.activeElement === document.querySelector('#known .tiptap')),true)
+          assert.equal(await read(() => document.querySelector('#known output').textContent),'Keep my current draft and input focus.')
+          assert.equal(await read(() => document.querySelector('#known .composer__context-card').textContent.includes('750 remaining')),true)
+          assert.equal(await read(() => document.querySelector('#known .composer__context-card').textContent.includes('9000000')),false)
+          assert.equal(await read(() => document.querySelector('#known .composer__context-card').textContent.includes('Invalid Date')),false)
+          assert.equal(await read(() => { const r=document.querySelector('#known .composer__context-card').getBoundingClientRect(); return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight }),true)
+          assert.equal(await read(() => document.documentElement.scrollWidth === innerWidth),true)
+          await frame(`${slice}-${mode}-${width}.png`)
+          await move('#known .composer__context-card'); await new Promise(done=>setTimeout(done,220)); assert.equal(await read(panelOpen),true)
+          await move('nav strong'); await until(() => !document.querySelector('#known .composer__context-card').matches(':popover-open'))
+          await move('#known .composer__context'); await until(panelOpen); await mouseClick('#known .composer__context'); await move('nav strong')
+          await new Promise(done=>setTimeout(done,220)); assert.equal(await read(panelOpen),true)
+          await press('Escape'); await until(() => !document.querySelector('#known .composer__context-card').matches(':popover-open'))
+          result.operations.push({width,mode,nativeHover:true,originalInputFocus:true,gapReading:true,clickPinned:true,originalNativeSample:true,noPageOverflow:true,withinViewport:true})
+        }
+      }
+      await read(() => document.querySelector('#known .composer__context').focus()); await press('Enter'); await until(panelOpen)
+      assert.equal(await read(() => document.activeElement === document.querySelector('#known .composer__context')),true)
+      await frame(`${slice}-keyboard-390.png`)
+      await read(() => { const h=document.querySelector('#known .composer__context-card h3'),r=document.createRange();r.selectNodeContents(h);getSelection().removeAllRanges();getSelection().addRange(r);window.contextHoverFixture.selectedText=getSelection().toString();window.contextHoverFixture.originalCard=document.querySelector('#known .composer__context-card');window.contextHoverFixture.compact() }); await settle()
+      assert.equal(await read(() => document.querySelector('#known .composer__context-card') === window.contextHoverFixture.originalCard),true)
+      assert.equal(await read(() => getSelection().toString().length > 0 && getSelection().toString() === window.contextHoverFixture.selectedText),true)
+      assert.equal(await read(() => document.querySelector('#known .composer__context-card').textContent.includes('10% used')),true)
+      await read(() => window.contextHoverFixture.switchSource()); await settle(); assert.equal(await read(panelOpen),false)
+      await move('#unreported .composer__context'); await until(() => document.querySelector('#unreported .composer__context-card').matches(':popover-open'))
+      assert.equal(await read(() => document.querySelector('#unreported .composer__context-card').textContent.includes('Unavailable')),true)
+      assert.equal(await read(() => document.querySelector('#unreported .composer__context-card').textContent.includes('% remaining')),false)
+      await frame(`${slice}-unknown-390.png`); await move('nav strong'); await press('Escape')
+      const point = await win.webContents.executeJavaScript(`(() => {const r=document.querySelector('#known .composer__context').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+      win.webContents.debugger.attach('1.3')
+      await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[point]})
+      await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]})
+      await until(panelOpen); assert.equal(await read(() => window.contextHoverFixture.pointers.includes('touch')),true)
+      await frame(`${slice}-touch-390.png`); win.webContents.debugger.detach()
+      await read(() => window.contextHoverFixture.setVisible(false)); await settle(); assert.equal(await read(panelOpen),false)
+      await read(() => window.contextHoverFixture.setVisible(true)); await settle(); assert.equal(await read(panelOpen),false)
+      result.operations.push({nativeKeyboard:true,nativeTouch:true,unknownCapacity:true,sameSourceCompactionPreservesReading:true,replacedSourceClosed:true,hiddenOccurrenceClosed:true})
     }
     assert.deepEqual(result.errors, []); result.passed = true
   } catch (error) {

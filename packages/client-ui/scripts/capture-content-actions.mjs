@@ -12,7 +12,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const require = createRequire(resolve(root, 'apps/desktop/package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const slice = process.argv[2]
-assert.ok(['image-remove', 'trace-copy'].includes(slice))
+assert.ok(['image-remove', 'trace-copy', 'context-details'].includes(slice))
 const evidence = resolve(root, '.tmp/conversation-content-actions', slice)
 const privateRoot = await mkdtemp(resolve(tmpdir(), 'agentmux-content-actions-'))
 const compiled = resolve(privateRoot, 'compiled')
@@ -20,10 +20,12 @@ const hash = data => createHash('sha256').update(data).digest('hex')
 const source = {}
 const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', source, frames: [],
   scope: 'Actual shared Tiptap draft and conversation detail consumers with explicit image readers and controlled clipboard receipts; isolated Electron, no user files, system clipboard or installed Host claim.' }
+if (slice === 'context-details') receipt.scope = 'Actual Desktop context disclosure and shared AgentComposer; controlled Host observations and the preview overlay lease only. Native Chromium pointer, keyboard and touch; no live Provider, user data, Runtime or installed Host claim.'
 let server
 await mkdir(evidence, { recursive: true })
 try {
-  await build({ configFile: false, logLevel: 'error', worker: { format: 'es' }, root: resolve(root, 'packages/client-ui/test/fixtures', slice),
+  await build({ configFile: false, logLevel: 'error', worker: { format: 'es' }, root: resolve(root, slice === 'context-details' ? 'apps/desktop/scripts/fixtures' : 'packages/client-ui/test/fixtures', slice),
+    define: slice === 'context-details' ? { __AGENTMUX_WEB_PREVIEW__: 'true' } : {},
     esbuild: { jsx: 'automatic' }, build: { outDir: compiled, emptyOutDir: true, target: 'esnext' },
     plugins: [{ name: 'content-actions-input-identity', enforce: 'pre', transform(code, id) {
       if (id.startsWith(root + sep) && !id.includes('/node_modules/') && !id.includes('?') && /\.(tsx?|css)$/.test(id)) source[relative(root, id)] = hash(code)
