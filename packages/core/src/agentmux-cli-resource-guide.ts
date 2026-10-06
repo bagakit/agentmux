@@ -71,7 +71,12 @@ Forgetting a remembered choice never expands browser access. There is no choice 
 or bypass of a person's application-link choice. It does not establish human approval.
 
 Theme resources use settings themes ls / inspect / create / update / delete. The catalog includes
-readonly built-ins and issues for unsupported saved records; those records are retained. Choose an
+readonly built-ins and issues for unsupported saved records; those records are retained. ls also returns
+iconCatalog: groups with labels/descriptions, semantic icons with exact id, label, description, groupId
+and defaultGlyph, and the available glyph IDs. This read-only metadata comes from the same client catalog
+as Appearance settings. Use an exact semantic ID as a theme icons key and a discovered glyph ID for
+{kind: "glyph", glyph: ID}, or embed validated path data. Theme drawings never change control meaning,
+permissions or accessible labels. Choose an
 available ID using settings set appearance.themeId ID. A theme value is the complete versioned data
 without its envelope ID. Create/update also accept the complete exported document when its ID matches the exact target; no ID rename is inferred. Editing a built-in requires a custom. copy. Custom update requires
 {changes, expected: completeOriginalValue}; custom delete requires {expected: originalValue},

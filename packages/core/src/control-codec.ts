@@ -38,6 +38,7 @@ import {
   type AgentMuxControlSettingsResourceRequest,
   type AgentMuxControlSettingsResourceKind,
   type AgentMuxControlSettingsResourceItem,
+  type AgentMuxControlThemeIconCatalog,
   AGENTMUX_CONTROL_MAX_MESSAGE_BYTES,
   type AgentMuxControlDemandUpdateRequest,
   AGENTMUX_DEMAND_PRIORITIES,
@@ -1026,6 +1027,40 @@ function resourceIssues(value: unknown): { id: string; message: string }[] {
   })
 }
 
+function resourceIconCatalog(value: unknown): AgentMuxControlThemeIconCatalog {
+  const code = 'CONTROL_PROTOCOL_ERROR'
+  // Normalize through the existing JSON boundary before inspecting arrays or fields.
+  const source = settingsResourceEnvelope(settingsResourceRecord(value, code), ['groups', 'icons', 'glyphs'], code)
+  const list = (raw: unknown, name: string): unknown[] => {
+    if (!Array.isArray(raw) || !raw.length) throw new AgentMuxError(`Theme icon catalog ${name} must be a nonempty array.`, code)
+    return raw
+  }
+  const description = (raw: unknown, name: string): string => {
+    const value = text(raw, `Theme icon catalog ${name}`, code)
+    if (!value.trim()) throw new AgentMuxError(`Theme icon catalog ${name} must not be blank.`, code)
+    return value
+  }
+  const key = (raw: unknown) => id(raw, 'Theme icon catalog identity is invalid.', code)
+  const groups = list(source.groups, 'groups').map(raw => {
+    const group = settingsResourceEnvelope(raw, ['id', 'label', 'description'], code)
+    return { id: key(group.id), label: description(group.label, 'group label'), description: description(group.description, 'group description') }
+  })
+  const icons = list(source.icons, 'icons').map(raw => {
+    const icon = settingsResourceEnvelope(raw, ['id', 'label', 'description', 'groupId', 'defaultGlyph'], code)
+    return { id: key(icon.id), label: description(icon.label, 'icon label'), description: description(icon.description, 'icon description'),
+      groupId: key(icon.groupId), defaultGlyph: key(icon.defaultGlyph) }
+  })
+  const glyphs = list(source.glyphs, 'glyphs').map(key)
+  const groupIds = new Set(groups.map(group => group.id)), iconIds = new Set(icons.map(icon => icon.id)), glyphIds = new Set(glyphs)
+  if (groupIds.size !== groups.length || iconIds.size !== icons.length || glyphIds.size !== glyphs.length) {
+    throw new AgentMuxError('Theme icon catalog identities must be unique within each directory.', code)
+  }
+  if (icons.some(icon => !groupIds.has(icon.groupId) || !glyphIds.has(icon.defaultGlyph))) {
+    throw new AgentMuxError('Theme icon catalog references an undiscovered group or default drawing.', code)
+  }
+  return { groups, icons, glyphs }
+}
+
 function resourceReceipt(receipt: AgentMuxControlSuccessReceipt): AgentMuxControlSuccessReceipt {
   settingsResourceBudget(receipt, 'CONTROL_PROTOCOL_ERROR')
   return receipt
@@ -1226,7 +1261,7 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], 'CONTROL_PROTOCOL_ERROR')
     const code = 'CONTROL_PROTOCOL_ERROR', resource = resourceKind(result.resource, code)
     if (operation === 'settings.resource.list') {
-      settingsResourceEnvelope(result, ['resource', 'items', 'partial', 'issues'], code)
+      settingsResourceEnvelope(result, resource === 'themes' ? ['resource', 'items', 'partial', 'issues', 'iconCatalog'] : ['resource', 'items', 'partial', 'issues'], code)
       if (result.partial !== true || !Array.isArray(result.items) || Object.getPrototypeOf(result.items) !== Array.prototype ||
         Reflect.ownKeys(result.items).length !== result.items.length + 1) throw new AgentMuxError('Resource list is invalid.', code)
       const items = Array.from({ length: result.items.length }, (_, index) => {
@@ -1236,6 +1271,8 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
       })
       if (new Set(items.map(item => item.id)).size !== items.length) throw new AgentMuxError('Resource item IDs are not unique.', code)
       const issues = result.issues === undefined ? undefined : resourceIssues(result.issues)
+      if (resource === 'themes') return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+        result: { resource, items, partial: true, ...(issues === undefined ? {} : { issues }), iconCatalog: resourceIconCatalog(result.iconCatalog) } })
       return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
         result: { resource, items, partial: true, ...(issues === undefined ? {} : { issues }) } })
     }
