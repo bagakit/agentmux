@@ -1,8 +1,8 @@
 {
   "schema": "ctxmux.local-artifacts.v1",
   "source": {
-    "commit": "f1345ff428fadb581f8271e2a3456fec390d5d87",
-    "tree": "8cc2c4ccd5a4c3d1bfe3d9167edfd1512ffe3bd0",
+    "commit": "ad69f4715dec3b6f41d22118deb7c0962bed8bc5",
+    "tree": "2f6a317db2dbe01e2c7783929df8db4fb3685b3b",
     "worktree_clean": true
   },
   "product": {
@@ -19,7 +19,7 @@
     "profile": "release",
     "locked": true,
     "rustc": "1.96.0",
-    "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
+    "cargo": "cargo 1.96.0 (30a34c682)",
     "node": "v24.14.1",
     "npm": "11.12.1"
   },
@@ -28,11 +28,11 @@
     "version": "0.0.0",
     "protocol": 22,
     "entry_count": 338,
-    "unpacked_bytes": 542548,
+    "unpacked_bytes": 544319,
     "archive": {
       "path": "ctxmux-sdk-0.0.0.tgz",
-      "sha256": "2a666665ce08497a78b1e9f1654326474b726654d0d7ea7de6f613363c7b02f7",
-      "bytes": 120696,
+      "sha256": "002be5b6cad3e12a14525a884aeec7fb0bf4ef4386956d116503cf9bb56e8463",
+      "bytes": 121314,
       "mode": "0644"
     }
   },
@@ -42,8 +42,8 @@
       "version": "0.1.0",
       "protocol": 22,
       "path": "bin/ctxmux",
-      "sha256": "dab71f049e4924785f11a53c52a3a37bccee4729e79946abbcffa964dd188b6d",
-      "bytes": 3514096,
+      "sha256": "e6d0e2651793aec389dc6a78834b2a64f74a85bf7b23b498a096cd43284d151a",
+      "bytes": 3514160,
       "mode": "0755"
     },
     {
@@ -51,13 +51,13 @@
       "version": "0.1.0",
       "protocol": 22,
       "path": "bin/ctxmuxd",
-      "sha256": "ea29f39d2b4803d61552bfbe544be6c6107bc9ed31509e21d4e22af22bb9d445",
-      "bytes": 6788320,
+      "sha256": "60fe8160a2101b7b53a5e00762c6b9118ef9636e02fb7ccba2949c473240c8bc",
+      "bytes": 6833696,
       "mode": "0755"
     }
   ],
   "determinism": {
-    "sdk_archive": "Archive member timestamps normalized; documentation examples use caller-owned configuration; executable member payloads are unchanged and the archive identity is the recorded digest.",
-    "binaries": "Diagnostic compiler source roots normalized without instruction changes; ad-hoc signatures regenerated where required; content identity is the recorded binary digest."
+    "sdk_archive": "Executable SDK members match the bound source; documentation paths are host-derived; archive member order and canonical metadata are retained.",
+    "binaries": "Executable sections match the bound source; diagnostic roots are relative; ad-hoc signatures and recorded content digests are verified."
   }
 }
