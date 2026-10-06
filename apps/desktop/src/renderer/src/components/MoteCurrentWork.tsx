@@ -11,6 +11,7 @@ import { fileNavigationSelection, useAppStore } from '../store'
 import { MoteBehaviorAction } from './MoteBehaviorDialog'
 import { SelectionField } from './SelectionField'
 import { GoalContinuationControl } from './GoalContinuationControl'
+import { GoalDelegationWork } from './GoalDelegationWork'
 
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeActionCreateGoalIcon = semanticIconComponent('action.create-goal')
@@ -141,6 +142,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
         </div>
         {open && summary.detail ? <p className="mote-current-work__detail">{summary.detail}</p> : null}
         {unloaded.length ? <p className="mote-details__hint">{unloaded.length} linked discussion{unloaded.length > 1 ? 's' : ''} not loaded. Original references retained.</p> : null}
+        <GoalDelegationWork demand={goal} active={active} compact={!open} />
         {open ? <GoalContinuationControl demand={goal} active={active} onRefresh={() => void refresh()} /> : null}
       </div>
     })}

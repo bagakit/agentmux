@@ -1,8 +1,11 @@
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, isDemandEvidenceReference } from '@agentmux/demand/goals'
 import type { DemandRecord } from './global-demand-board'
+import { goalDelegationNextStep } from './goal-delegation-presentation'
 
 /** Display the owner facts. Business status is not an acknowledgement. */
-export function goalNextStep(demand: Pick<DemandRecord, 'alignment' | 'grounding' | 'status'>): string {
+export function goalNextStep(demand: Pick<DemandRecord, 'alignment' | 'grounding' | 'status' | 'delegations' | 'delegationObservations' | 'delegationObservationIssue'>): string {
+  const delegated = goalDelegationNextStep(demand)
+  if (delegated) return delegated
   const { alignment, grounding } = demand
   if (demand.status === 'done' && !grounding) return 'Results not verified'
   if (!alignment) return 'Goal needs an outline'
