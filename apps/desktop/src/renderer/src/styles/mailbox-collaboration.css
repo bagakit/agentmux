@@ -13,3 +13,9 @@
 .mailbox-collaboration__filters .selection-field { flex: 1 1 160px; min-width: 0; }
 .mailbox-collaboration__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); }
 .mailbox-collaboration__evidence { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); }
+
+.mailbox-collaboration__help > summary { display: inline-flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1) 0; border-radius: var(--radius-sm); color: var(--text-2); cursor: pointer; list-style: none; }
+.mailbox-collaboration__help > summary::-webkit-details-marker { display: none; }
+.mailbox-collaboration__help > summary:hover { color: var(--text); background: var(--surface-3); }
+.mailbox-collaboration__help > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.mailbox-collaboration__help[open] > summary > svg { transform: rotate(90deg); }

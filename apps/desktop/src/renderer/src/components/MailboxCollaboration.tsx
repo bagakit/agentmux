@@ -4,6 +4,7 @@ import { formatSessionAddress } from '@agentmux/core/sharing'
 import { ConversationMessage, type ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
 import { TextInput } from '@agentmux/client-ui/input'
 import { ContentCopyButton } from '@agentmux/client-ui/components/ContentCopyButton'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { MailboxEmpty, MailboxSourceNotice, MailboxTime } from './MailboxReading'
@@ -144,7 +145,9 @@ export function MailboxCollaboration({ control, active, reading, onCopy }: {
   return <section ref={root} className="mailbox-collaboration" aria-label="Supervised collaboration records">
     <div className="mailbox-collaboration__heading"><strong>Supervised collaboration</strong><button type="button" className="composer-tool" aria-busy={loadingList || loadingDetail}
       onClick={refresh}>Refresh records</button></div>
-    <p className="mailbox-collaboration__hint">Original supervised messages only. Other Agent messages remain in Inbox and Outbox.</p>
+    <details className="mailbox-collaboration__help"><summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />About these records</summary>
+      <p className="mailbox-collaboration__hint">Original supervised messages only. Other Agent messages remain in Inbox and Outbox. Search covers the loaded list; load more records to extend it.</p>
+    </details>
     {listIssue ? <MailboxSourceNotice title="Collaboration list is unconfirmed" message={listIssue.message} action="Retry collaboration list" onAction={() => void loadPage(listIssue.cursor, listIssue.pages, listIssue.extend)} /> : null}
     {selected ? <><div className="mailbox-collaboration__actions"><button ref={back} type="button" className="composer-tool" onClick={leave}>Back to collaboration</button>
       {original ? <span className="mailbox-collaboration__evidence"><span>Original evidence</span><ContentCopyButton label="Copy collaboration evidence" text={evidenceText} identity={evidenceIdentity} /></span> : null}</div>
@@ -172,7 +175,7 @@ export function MailboxCollaboration({ control, active, reading, onCopy }: {
         { value: 'all', label: 'All communication' }, { value: 'waiting', label: 'Awaiting report' }, { value: 'reported', label: 'Report recorded' }
       ]} />
       {query || status !== 'all' ? <button type="button" className="composer-tool" onClick={() => { if (!isCurrentOwner()) return; setQuery(''); setStatus('all'); search.current?.focus({ preventScroll: true }) }}>Clear filters</button> : null}
-    </div><p className="mailbox-collaboration__hint" role="status">{matches.length} of {page.dispatches.length} loaded records · Search covers this loaded list only.</p>
+    </div><p className="mailbox-collaboration__hint" role="status">{matches.length} of {page.dispatches.length} loaded records · This list only.</p>
     <ol className="composer-mailbox__messages" aria-label="Supervised collaboration sources">{matches.map(item => <li key={item.sourceMessageId}>
       <button type="button" className="composer-mailbox__row" data-source-message={item.sourceMessageId} onClick={event => select(item.sourceMessageId, event)}>
         <span className="composer-mailbox__row-head"><strong>{names.get(item.ownerAgentSessionId)} → {names.get(item.workerAgentSessionId)}</strong></span>
