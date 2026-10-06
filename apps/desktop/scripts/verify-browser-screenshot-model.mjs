@@ -10,6 +10,9 @@ const { build } = createRequire(require.resolve('vite'))('esbuild')
 const sourcePaths = {
   'drawing-model.ts': 'apps/desktop/src/renderer/src/components/image-annotation/drawing-model.ts',
   'geometry.ts': 'apps/desktop/src/renderer/src/components/image-annotation/geometry.ts',
+  'view.ts': 'apps/desktop/src/renderer/src/components/image-annotation/view.ts',
+  'selection-geometry.ts': 'apps/desktop/src/renderer/src/components/image-annotation/selection-geometry.ts',
+  'canvas-render.ts': 'apps/desktop/src/renderer/src/components/image-annotation/canvas-render.ts',
   'drawing-renderer.ts': 'apps/desktop/src/renderer/src/components/image-annotation/drawing-renderer.ts',
   'compose.ts': 'apps/desktop/src/renderer/src/components/browser-screenshot/compose.ts'
 }
@@ -24,7 +27,7 @@ async function run(label, mutation) {
   const compiled = join(work, label); await mkdir(compiled, { recursive: true })
   await mkdir(join(compiled, 'user-data'))
   await symlink(resolve('apps/desktop/node_modules'), join(compiled, 'node_modules'))
-  const plugins = mutation ? [{ name: label, setup(build) { build.onLoad({ filter: /(?:drawing-model|drawing-renderer|compose)\.ts$/ }, args => {
+  const plugins = mutation ? [{ name: label, setup(build) { build.onLoad({ filter: /(?:drawing-model|drawing-renderer|canvas-render|selection-geometry|compose)\.ts$/ }, args => {
     const name = args.path.split('/').at(-1), source = sources[name]
     if (name !== mutation.file) return
     assert.equal(args.path, resolve(sourcePaths[name]), 'The mutation belongs to the original source owner')
@@ -53,7 +56,7 @@ await writeFile(${JSON.stringify(join(compiled, 'receipt.json'))}, JSON.stringif
   })
   const receipt = JSON.parse(await readFile(join(compiled, 'receipt.json'), 'utf8').catch(error => { throw new Error('Model child produced no receipt: ' + JSON.stringify(result), { cause: error }) }))
   if (mutation) { assert.equal(result.code, 1, JSON.stringify(receipt)); assert.equal(receipt.passed, false); assert.match(receipt.failure, mutation.failure) }
-  else { assert.equal(result.code, 0, result.output + JSON.stringify(receipt)); assert.equal(receipt.passed, true); assert.equal(receipt.cases.length, 7) }
+  else { assert.equal(result.code, 0, result.output + JSON.stringify(receipt)); assert.equal(receipt.passed, true); assert.equal(receipt.cases.length, 14) }
   if (receipt.png) { await writeFile(join(output, label + '.png'), Buffer.from(receipt.png.dataUrl.split(',')[1], 'base64')); delete receipt.png }
   await writeFile(join(output, label + '.json'), JSON.stringify({ ...receipt, process: result }, null, 2))
   evidence.cases.push({ label, result: mutation ? 'RED' : 'GREEN' }); console.log(label + ': ' + (mutation ? 'expected RED' : 'GREEN'))
@@ -64,6 +67,10 @@ try {
     await run('crop-omitted', { file: 'compose.ts', find: 'if (!input.crop) return output', replace: 'return output', failure: /crop must change/ })
     await run('pixelation-omitted', { file: 'drawing-renderer.ts', find: "case 'pixelate': drawPixelate(context, shape); break", replace: "case 'pixelate': break", failure: /pixelate must change/ })
     await run('move-omitted', { file: 'drawing-model.ts', find: 'const move = (at: ScreenshotPoint) => ({ x: at.x + dx, y: at.y + dy })', replace: 'const move = (at: ScreenshotPoint) => at', failure: /move must preserve/ })
+    await run('cover-omitted', { file: 'drawing-renderer.ts', find: "case 'cover': drawCover(context, shape); break", replace: "case 'cover': break", failure: /fractional cover must be opaque/ })
+    await run('masked-note-filter-omitted', { file: 'drawing-model.ts', find: 'return !masks.some(mask => intersectRect(shapeBounds(shape), normalizeRect(mask.from, mask.to)))', replace: 'return true', failure: /cover output must omit masked note data/ })
+    await run('mask-protection-omitted', { file: 'canvas-render.ts', find: "if (inProgress && inProgress.kind !== 'pixelate' && inProgress.kind !== 'cover' && masks.length)", replace: 'if (false)', failure: /live ink must not replace processed cover/ })
+    await run('viewport-allocation-magnified', { file: 'canvas-render.ts', find: 'Math.round(viewport.width * dpr)', replace: 'Math.round(viewport.width * dpr * viewport.view.scale)', failure: /viewport allocation must use visible area/ })
     await run('restored-source')
   }
   for (const [file, source] of Object.entries(sources)) assert.equal(await readFile(sourcePaths[file], 'utf8'), source, 'Model source changed during native verification: ' + file)
