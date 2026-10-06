@@ -15,10 +15,11 @@ const receipt = { passed: false, aestheticReview: 'not-performed', source: {}, i
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 try {
   const option = process.argv.length > 2 ? process.argv[2] : null
-  const mutationIds = ['stale-source', 'stale-frame', 'reused-target', 'skip-dispose', 'new-retry-id', 'lost-png-projection', 'lost-mobile-projection', 'forget-kept-request']
-  assert.ok(option === null || option === 'visual-delta' || option === 'durable' || option === 'consumer-build' || option === 'request-label-delta' || mutationIds.includes(option), 'Unknown editor scope or mutation')
+  const faceEntryMutations = ['restoreduplicate', 'lose-saved-entry', 'missing-face-layout']
+  const mutationIds = ['stale-source', 'stale-frame', 'reused-target', 'skip-dispose', 'new-retry-id', 'lost-png-projection', 'lost-mobile-projection', 'forget-kept-request', ...faceEntryMutations]
+  assert.ok(option === null || option === 'visual-delta' || option === 'durable' || option === 'consumer-build' || option === 'request-label-delta' || option === 'face-entry-delta' || mutationIds.includes(option), 'Unknown editor scope or mutation')
   const mutation = mutationIds.includes(option) ? option : null
-  receipt.scope = option === 'visual-delta' || option === 'durable' || option === 'consumer-build' || option === 'request-label-delta' ? option : ['new-retry-id', 'lost-png-projection', 'lost-mobile-projection', 'forget-kept-request'].includes(option) ? 'durable' : 'full'
+  receipt.scope = faceEntryMutations.includes(option) ? 'face-entry-delta' : option === 'visual-delta' || option === 'durable' || option === 'consumer-build' || option === 'request-label-delta' || option === 'face-entry-delta' ? option : ['new-retry-id', 'lost-png-projection', 'lost-mobile-projection', 'forget-kept-request'].includes(option) ? 'durable' : 'full'
   const edits = {
     'stale-source': ['apps/desktop/src/renderer/src/components/MoteAvatarSeriesEditor.tsx', 'if (!alive.current || request !== sourceRequest.current || originalTarget.current !== target) return', 'if (!alive.current || originalTarget.current !== target) return'],
     'stale-frame': ['apps/desktop/src/renderer/src/components/MoteAvatarSeriesEditor.tsx', 'const valid = () => alive.current && request === frameRequest.current && originalTarget.current === target', 'const valid = () => alive.current && originalTarget.current === target'],
@@ -28,6 +29,9 @@ try {
     'lost-png-projection': ['apps/desktop/src/renderer/src/components/SpaceObjectIcon.tsx', "manualIcon.kind === 'series' ? manualIcon.image : manualIcon", "manualIcon.kind === 'series' ? manualIcon : manualIcon"],
     'lost-mobile-projection': ['apps/desktop/src/renderer/src/lib/mobile-presentation.ts', "choice?.kind === 'series' ? choice.image :", "choice?.kind === 'series' ? null :"],
     'forget-kept-request': ['apps/desktop/src/renderer/src/lib/mote-avatar-save-draft.ts', 'if (!existing) localStorage.setItem(moteAvatarSaveDraftKey(request.target), JSON.stringify(request))', 'if (!existing) void request'],
+    'restoreduplicate': ['apps/desktop/src/renderer/src/components/MoteAvatarSeriesEditor.tsx', "selected.origin !== 'builtin' || entry.definition.kind !== 'face2d' ||", "true || selected.origin !== 'builtin' || entry.definition.kind !== 'face2d' ||"],
+    'lose-saved-entry': ['apps/desktop/src/renderer/src/components/MoteAvatarSeriesEditor.tsx', '[initialChoice?.source, prepared?.source].some(source => source && locatorKey(source) === locatorKey({ ...selected, entryId: entry.entryId }))', 'false'],
+    'missing-face-layout': ['apps/desktop/src/renderer/src/components/MoteAvatarSeriesEditor.tsx', 'original.querySelectorAll<HTMLElement | SVGElement>(layoutParts).forEach', ';[].forEach'],
   }
   const mutated = { name: 'bounded-production-mutation', setup(plugin) {
     if (!mutation) return
@@ -105,7 +109,7 @@ try {
       return { path: file, external: true }
     })
   } }
-  const nativeEntry = ['durable', 'consumer-build', 'request-label-delta'].includes(receipt.scope)
+  const nativeEntry = ['durable', 'consumer-build', 'request-label-delta', 'face-entry-delta'].includes(receipt.scope)
     ? 'export { MoteAvatarSeriesOwner, MoteAvatarControl, createMoteAvatarWriter, ConfigStore, DEFAULT_CONFIG, ConfigOwner, ScratchTopics, directoryIdentity } from "./apps/desktop/scripts/fixtures/mote-avatar-series/writer-entry.ts";'
     : 'export { MoteAvatarSeriesOwner, MoteAvatarControl } from "./apps/desktop/scripts/fixtures/mote-avatar-series/source-entry.ts"; export { ConfigStore, DEFAULT_CONFIG } from "./apps/desktop/src/main/config-store.ts"; export { ConfigOwner } from "./apps/desktop/src/main/config-owner.ts"; export { ScratchTopics } from "./apps/desktop/src/main/scratch-topics.ts"; export { directoryIdentity } from "./apps/desktop/src/shared/space-addresses.ts";'
   const native = await build({ absWorkingDir: root, stdin: { contents: nativeEntry + ' export { CONFIG_CHANGED_CHANNEL } from "./apps/desktop/src/shared/contracts.ts"; export { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from "./apps/desktop/src/main/workbench-storage-authority.ts";', resolveDir: root, sourcefile: 'original-source-entry.ts' },
@@ -126,7 +130,7 @@ try {
   await recordResources(path.join(root, 'packages/core/dist'))
   receipt.nativeCoreExports = Object.fromEntries(await Promise.all([...nativeCoreFiles].map(async file => [path.relative(root, file), sha(await fs.readFile(file))])))
   Object.assign(receipt.source, receipt.nativeCoreExports)
-  receipt.boundary = ['durable', 'request-label-delta'].includes(receipt.scope)
+  receipt.boundary = ['durable', 'request-label-delta', 'face-entry-delta'].includes(receipt.scope)
     ? 'Production Picker/Editor/SpaceObjectIcon and default API/production preload consume the production Main source control + createMoteAvatarWriter factory, actual ScratchTopics/nativeImage bounded PNG owner, durable ConfigStore/ConfigOwner and original CONFIG_CHANGED channel. Writes and target replacements are confined to private fixture Motes; no fixed saved replies, live App/Session/layout preservation, installed-package or final aesthetic claim.'
     : receipt.boundary
   for (const name of ['SpaceIconPicker.tsx', 'MoteAvatarSeriesEditor.tsx']) assert.ok(receipt.source['apps/desktop/src/renderer/src/components/' + name], 'Original production consumer must be compiled')
