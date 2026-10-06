@@ -1,0 +1,9 @@
+import {defineConfig,mergeConfig} from 'vite'
+import base from '../../../vite.web.config'
+import {createHash} from 'node:crypto'
+import {resolve} from 'node:path'
+const inputs:Record<string,{source:string,transformed:string}>={};const mutant=process.env.SHARED_DETAIL_MUTANT??''
+export default mergeConfig(base,defineConfig({root:import.meta.dirname,worker:{format:'es'},plugins:[{name:'shared-detail-source-binding',enforce:'pre',transform(code,id){const original=code
+
+ if(!id.includes('node_modules')&&!id.startsWith('\0'))inputs[id]={source:createHash('sha256').update(original).digest('hex'),transformed:createHash('sha256').update(code).digest('hex')};return{code,map:null}
+},generateBundle(_options,bundle){const artifacts:Record<string,{before:string,after:string}>={};let edges=0;for(const [name,item]of Object.entries(bundle)){if(item.type==='asset'&&name.endsWith('.css')&&typeof item.source==='string'){const before=item.source;const target=mutant==='avatar'?':root[data-appearance="light"] .conversation-avatar--agent':mutant==='spinner'?'[data-semantic-icon="status.loading"]':null;if(target&&before.includes(target)){if(before.split(target).length!==2)throw Error('Expected exactly one compiled CSS consumer edge');edges++;item.source=before.replace(target,mutant==='avatar'?':root[data-appearance="unavailable"] .conversation-avatar--agent':'.lucide-loader-circle')}artifacts[name]={before:createHash('sha256').update(before).digest('hex'),after:createHash('sha256').update(item.source).digest('hex')}}}if(mutant&&edges!==1)throw Error('CSS mutation was not applied');this.emitFile({type:'asset',fileName:'candidate-inputs.json',source:JSON.stringify({mutant,inputs,artifacts,edges},null,2)})}}],build:{target:'esnext',minify:false,outDir:resolve(process.env.NATIVE_COLOR_PROOF_DIR!,mutant?`shared-detail-${mutant}-mutant`:'shared-details-site'),emptyOutDir:true}}))
