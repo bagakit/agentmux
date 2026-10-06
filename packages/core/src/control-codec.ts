@@ -7,7 +7,7 @@ import { normalizeMessageChannel } from './message-origin.js'
 import { isPendingMessageOperation, parsePendingMessage } from './pending-message-control.js'
 import { parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal } from '@agentmux/demand/goals'
 import { validateAgentPromptAdmissionIntent, validateAgentPromptCondition } from './agent-prompt-condition.js'
-import { validateAgentInputWaitRef, type AgentInputSubmissionReceipt } from './agent-input-wait.js'
+import { parseAgentInputSubmissionReceipt } from './agent-input-receipt-codec.js'
 import { BROWSER_COMPLETION_UNAVAILABLE_WARNING, parseBrowserCompletionFacts } from './browser-completion-facts.js'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
@@ -1294,16 +1294,9 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (operation === 'open.browser') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { region: parseBrowserRegion(result.region) } }
   if (operation === 'send') {
     const agentSessionId = identity(result.agentSessionId, 'Control send result is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    const inputReceipt = result.inputReceipt as AgentInputSubmissionReceipt | undefined
-    if (inputReceipt !== undefined) {
-      const ref = validateAgentInputWaitRef(inputReceipt.ref)
-      if (ref.key.agentSessionId !== agentSessionId || JSON.stringify(ref.key) !== JSON.stringify(inputReceipt.key) || inputReceipt.persistence !== 'confirmed' ||
-          !['waiting', 'stopped', 'admitted', 'not-applied', 'unknown'].includes(inputReceipt.status) ||
-          inputReceipt.status === 'admitted' && (inputReceipt.admission?.admission?.transport !== 'native' ||
-            inputReceipt.admission.admission.native.outcome !== 'admitted' || inputReceipt.admission.admission.acknowledged !== true)) {
-        throw new AgentMuxError('Control send receipt changed its original input facts.', 'CONTROL_PROTOCOL_ERROR')
-      }
-    }
+    const inputReceipt = result.inputReceipt === undefined ? undefined : parseAgentInputSubmissionReceipt(result.inputReceipt)
+    if (inputReceipt && inputReceipt.key.agentSessionId !== agentSessionId) throw new AgentMuxError(
+      'Control send receipt changed its original Session.', 'CONTROL_PROTOCOL_ERROR')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId,
       ...(inputReceipt ? { inputReceipt } : {}) } }
   }

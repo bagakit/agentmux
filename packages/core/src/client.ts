@@ -60,7 +60,7 @@ import {
   type AgentMuxMessageEnvelope
 } from './agent-global-message-queue.js'
 import { renderAgentMuxMessageEnvelope } from './agent-message-render.js'
-import { agentInputJournalKey, validateAgentInputWaitRef,
+import { agentInputSubmissionStatus, agentInputJournalKey, validateAgentInputWaitRef,
   type AgentInputJournalIntent, type AgentInputSelector, type AgentInputSubmissionReceipt,
   type AgentInputWaitRef, type AgentInputWaitStopReceipt, type AgentInputSavedEnvironment, type AgentInputCallContext } from './agent-input-wait.js'
 import { answerAsk, cancelAsk, type AgentAsk } from './agent-ask.js'
@@ -5165,13 +5165,7 @@ export class AgentMuxClient {
       else await this.assertInputWaitingAuthor(saved.intent, caller)
     }
     const admission = await this.inspectAgentPromptSubmission(saved.intent.key)
-    const native = admission?.admission
-    const linked = native?.transport === 'native' && native.inputDispatch && saved.control.state === 'dispatch-authorized' &&
-      isDeepStrictEqual(native.inputDispatch.ref, saved.control.ref) && native.inputDispatch.gateId === saved.control.gateId
-    const status = native?.transport === 'native' && linked ? native.native.outcome === 'admitted' && native.acknowledged ? 'admitted'
-      : native.native.outcome === 'not-applied' && native.notApplied ? 'not-applied' : 'unknown'
-      : admission || saved.control.state === 'dispatch-authorized' ? 'unknown'
-      : saved.control.state === 'stopped-before-dispatch' ? 'stopped' : 'waiting'
+    const status = agentInputSubmissionStatus(saved.control, admission)
     const receipt: AgentInputSubmissionReceipt = { key: saved.intent.key, ref: saved.control.ref, control: saved.control,
       persistence: 'confirmed', status, admission, observation: saved.control.state !== 'enabled' || admission ? 'closed'
         : this.inputWaitingContexts.has(agentInputJournalKey(saved.intent.key)) ? 'owned' : 'rejoin-needed',
@@ -5208,9 +5202,8 @@ export class AgentMuxClient {
     // Agent author. Managed callers still prove the original author capability.
     if (input.caller) await this.assertInputWaitingAuthor(saved.intent, input.caller)
     const admission = await this.inspectAgentPromptSubmission(ref.key)
-    const native = admission?.admission
-    const settled = native?.transport === 'native' && native.inputDispatch && isDeepStrictEqual(native.inputDispatch.ref, ref) &&
-      native.inputDispatch.gateId === saved.control.gateId && (native.native.outcome === 'admitted' && native.acknowledged === true || native.native.outcome === 'not-applied' && native.notApplied === true)
+    const status = agentInputSubmissionStatus(saved.control, admission)
+    const settled = status === 'admitted' || status === 'terminal-confirmed' || status === 'not-applied'
     const receipt = await this.messageQueue.stopInputWaiting(ref, input.cancelOperationId, Boolean(settled), admission !== null)
     const waiting = this.inputWaitingContexts.get(agentInputJournalKey(ref.key))
     if (waiting && isDeepStrictEqual(waiting.ref, ref) && receipt.outcome !== 'stale-generation') {
@@ -5371,7 +5364,6 @@ export class AgentMuxClient {
     if (!this.connected || !this.kernel.isConnected()) {
       await waiting({ phase: 'runtime', reason: 'runtime-unavailable', wake: 'runtime-restored' })
     } else {
-      let prepared: import('./agent-provider.js').AgentProviderNativePromptInput | undefined
       let targetChanged = false
       let dispatchDeclined = false
       let authorizationFailed = false
@@ -5386,23 +5378,14 @@ export class AgentMuxClient {
           else await observePromptInput(context.controller.signal, () => context.authority!.assertCurrent())
         } catch (error) { authorizationFailed = true; throw error }
       } }
-      let preparationPhase: import('./agent-provider.js').AgentNativeInputPreparationPhase | 'input-coordination' = 'native-target'
+      let preparationPhase: 'current-run' | 'input-coordination' = 'current-run'
       try {
         const assertTarget = (value: AgentMuxAgentSession) => {
           const expected = saved.intent.environment, observed = this.inputSavedEnvironment(value)
-          const previous = expected.nativeHandle, current = observed.nativeHandle
-          const knownSourceChanged = previous && current && (previous.kind !== current.kind || previous.sessionId !== current.sessionId ||
-            previous.kind === 'provider' && current.kind === 'provider' && (previous.providerId !== current.providerId ||
-              previous.transcriptPath !== undefined && current.transcriptPath !== undefined && previous.transcriptPath !== current.transcriptPath) ||
-            previous.kind === 'acp' && current.kind === 'acp' && previous.adapterId !== current.adapterId)
-          targetChanged = !sameRun(value.run, key.expectedRun) || expected.providerId !== observed.providerId || expected.executorId !== observed.executorId ||
-            Boolean(knownSourceChanged) || Boolean(expected.nativeBinding && observed.nativeBinding && !isDeepStrictEqual(expected.nativeBinding, observed.nativeBinding)) ||
-            value.nativeSourceObservation?.state === 'changed' && sameRun(value.nativeSourceObservation.run, key.expectedRun)
-          if (targetChanged || !isDeepStrictEqual(observed, expected)) {
-            throw new AgentMuxError(targetChanged ? 'The original saved input environment changed; its target will not follow current metadata.'
-              : 'The original saved source is still unconfirmed; later observations cannot select a conversation for this input.',
-              targetChanged ? 'AGENT_PROMPT_SOURCE_CHANGED' : 'AGENT_NATIVE_INPUT_UNCONFIRMED')
-          }
+          // The accepted target is this original current terminal, not a
+          // separately discovered Native connection or its observation epoch.
+          targetChanged = !sameRun(value.run, key.expectedRun) || expected.providerId !== observed.providerId || expected.executorId !== observed.executorId
+          if (targetChanged) throw new AgentMuxError('The original Session, Run or executor changed before input.', 'AGENT_PROMPT_SOURCE_CHANGED')
         }
         assertTarget(await this.currentStoredAgentSession(key.agentSessionId))
         const current = await this.registry.refresh(key.agentSessionId, key.expectedRun)
@@ -5414,30 +5397,16 @@ export class AgentMuxClient {
           if (receipt) this.publisher.publish({ type: 'agent-input', receipt })
           return
         }
-        const run = await this.requireCurrentAgentRun(current), provider = this.providers.get(current.providerId)
-        const environment = provider.qualifyNativeInputEnvironment ? await provider.qualifyNativeInputEnvironment({ args: run.args, workspacePath: current.workspacePath,
-          ...(run.pid === null ? {} : { processId: run.pid }), ...(current.nativeHandle ? { nativeHandle: current.nativeHandle } : {}),
-          onPreparationPhase: phase => { preparationPhase = phase },
-          signal: AbortSignal.any([context.controller.signal, AbortSignal.timeout(40_000)]) }) : undefined
-        if (!environment || environment.state === 'unconfirmed') {
-          await waiting(context.controller.signal.aborted
-            ? { phase: 'observer', reason: 'observer-stopped', wake: 'explicit-rejoin',
-                failure: environment?.failure ?? deliveryFailure(context.controller.signal.reason), observation: { phase: environment?.phase ?? preparationPhase } }
-            : { phase: 'native-environment', reason: 'original-environment-unconfirmed', wake: 'explicit-rejoin',
-                mechanism: environment?.mechanism ?? 'unavailable', ...(environment ? { observation: { phase: environment.phase, failure: environment.failure } } : {}) })
-        } else {
-          prepared = environment.input
-          preparationPhase = 'input-coordination'
-          await this.submitPromptInternal({ ...context.input, signal: context.controller.signal }, context.authorAgentSessionId, assertTarget, false, undefined, authority, context.producer,
-            { prepared, authorizeDispatch: async () => {
-              const link = await this.messageQueue.authorizeInputDispatch(context.ref, context.controller.signal)
-              dispatchDeclined = link === null
-              dispatchAuthorized = link !== null
-              return link
-            } })
-          if (key.kind === 'message') await this.messageQueue.recordDelivery(key.messageId, 'delivered')
-          release()
-        }
+        preparationPhase = 'input-coordination'
+        await this.submitPromptInternal({ ...context.input, signal: context.controller.signal }, context.authorAgentSessionId, assertTarget, false, undefined, authority, context.producer,
+          { authorizeDispatch: async () => {
+            const link = await this.messageQueue.authorizeInputDispatch(context.ref, context.controller.signal)
+            dispatchDeclined = link === null
+            dispatchAuthorized = link !== null
+            return link
+          } })
+        if (key.kind === 'message') await this.messageQueue.recordDelivery(key.messageId, 'delivered')
+        release()
       } catch (error) {
         const admission = await this.inspectAgentPromptSubmission(key), controlled = await this.messageQueue.inspectInput({ key })
         if (admission || controlled?.control.state !== 'enabled') {
@@ -5456,14 +5425,10 @@ export class AgentMuxClient {
           ? { phase: 'authorization', reason: 'author-authorization-needed', wake: 'explicit-rejoin', failure: deliveryFailure(error) }
           : !this.connected || !this.kernel.isConnected()
           ? { phase: 'runtime', reason: 'runtime-unavailable', wake: 'runtime-restored', failure: deliveryFailure(error) }
-          : error instanceof AgentMuxError ? { phase: 'native-environment', reason: targetChanged ? 'original-target-changed' : 'original-environment-unconfirmed', wake: 'explicit-rejoin', mechanism: 'unconfirmed',
-            observation: { phase: preparationPhase, failure: deliveryFailure(error) } }
+          : error instanceof AgentMuxError ? { phase: 'input-environment', reason: targetChanged ? 'original-target-changed' : 'original-input-unconfirmed', wake: 'explicit-rejoin',
+            failure: deliveryFailure(error), observation: { phase: preparationPhase } }
           : { phase: 'service', reason: 'observation-failed', wake: 'explicit-rejoin', failure: deliveryFailure(error), observation: { phase: preparationPhase } })
-      } finally { if (prepared) try { await prepared.close() } catch (error) {
-        this.publisher.publish({ type: 'agent-error', agentSessionId: key.agentSessionId, code: 'AGENT_NATIVE_INPUT_CLEANUP_UNCONFIRMED',
-          message: error instanceof Error ? error.message : String(error), evidence: { source: 'agentmux', observedAt: Date.now(), run: key.expectedRun },
-          failure: deliveryFailure(error) })
-      } }
+      }
     }
     const receipt = await this.inspectAgentInput({ key })
     if (receipt) this.publisher.publish({ type: 'agent-input', receipt })
@@ -5574,7 +5539,7 @@ export class AgentMuxClient {
   private async submitPromptInternal(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string,
     assertSession?: (session: AgentMuxAgentSession) => void, questionReply = false, assertInput?: () => void,
     authority?: import('./prompt-submission.js').AgentPromptInputAuthority, producer: 'prompt' | 'message' = 'prompt',
-    nativeControl?: { prepared: import('./agent-provider.js').AgentProviderNativePromptInput; authorizeDispatch(): Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> }): Promise<void> {
+    inputControl?: { authorizeDispatch(): Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> }): Promise<void> {
     const startedAt = Date.now()
     const id = (value: unknown): string | null => typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\0\r\n]/u.test(value) ? value : null
     let sourceDevice: import('./types.js').AgentOperationDevice | undefined
@@ -5590,7 +5555,7 @@ export class AgentMuxClient {
     let stage = 'validation'
     try {
       assertInput?.()
-      await this.performPromptSubmission(input, authorAgentSessionId, assertSession, questionReply, value => { stage = value }, authority, producer, nativeControl)
+      await this.performPromptSubmission(input, authorAgentSessionId, assertSession, questionReply, value => { stage = value }, authority, producer, inputControl)
     } catch (error) {
       // All observations below come from this invocation's failure boundary. Missing
       // projections stay missing; they do not authorize replay of the logical message.
@@ -5627,7 +5592,7 @@ export class AgentMuxClient {
   private async performPromptSubmission(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string,
     assertSession?: (session: AgentMuxAgentSession) => void, questionReply = false, stage: (value: string) => void = () => {},
     authority?: import('./prompt-submission.js').AgentPromptInputAuthority, producer: 'prompt' | 'message' = 'prompt',
-    nativeControl?: { prepared: import('./agent-provider.js').AgentProviderNativePromptInput; authorizeDispatch(): Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> }): Promise<void> {
+    inputControl?: { authorizeDispatch(): Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> }): Promise<void> {
     stage('connection')
     this.requireConnected()
     stage('validation')
@@ -5684,57 +5649,7 @@ export class AgentMuxClient {
       throw new AgentMuxError('Agent Session changed before prompt submission.', 'STALE_AGENT_SESSION')
     }
     const provider = this.providers.get(session.providerId)
-    if (input.execution === 'immediate' && provider.catalog.capabilities.promptExecution?.immediate === 'native-steer' && provider.prepareNativePromptInput && !questionReply) {
-      // Native message admission uses the same Core claim, producer and condition.
-      // This early branch deliberately never creates a terminal prompt plan.
-      if (input.expectedCompletionId !== undefined || input.expectedFutureIntent !== undefined || input.preparationRetry !== undefined) {
-        throw new AgentMuxError('The requested Native admission contract is unavailable. This submission attempt has ended before dispatch; the original Session and terminal remain available. Keep the original caller input.', 'AGENT_NATIVE_INPUT_WAITING', JSON.stringify({ phase: 'native-intent', reason: 'automatic-admission-unavailable' }))
-      }
-      let prepared: import('./agent-provider.js').AgentProviderNativePromptInput | undefined = nativeControl?.prepared
-      try {
-        const original = await this.store.readPromptAdmission(session.agentSessionId, expectedRun, operationId)
-        if (!original && !prepared) {
-          stage('native-input-environment')
-          const run = await this.requireCurrentAgentRun(session)
-          const preparationSignal = input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(40_000)]) : AbortSignal.timeout(40_000)
-          const observation: { phase: import('./agent-provider.js').AgentNativeInputPreparationPhase; phaseEnteredAt: number } = { phase: 'native-peer', phaseEnteredAt: Date.now() }
-          try {
-            prepared = await provider.prepareNativePromptInput({ args: run.args, workspacePath: session.workspacePath, signal: preparationSignal,
-              onPreparationPhase: phase => { observation.phase = phase; observation.phaseEnteredAt = Date.now() },
-              ...(session.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
-              ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}) })
-          } catch (error) {
-            const reported = new AgentMuxError('The original Native input environment is unconfirmed. This read-only preparation observation has ended before dispatch; the original Session and terminal remain available. Keep the original caller input.',
-              'AGENT_NATIVE_INPUT_WAITING', JSON.stringify({ preclaimObservation: observation, reason: preparationSignal.aborted ? 'observation-cancelled' : 'original-environment-unconfirmed',
-                cause: error instanceof AgentMuxError ? { code: error.code, detail: error.detail } : {
-                  name: error instanceof Error ? error.name : 'unknown',
-                  ...(error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' && /^[A-Z0-9_]{1,64}$/u.test(error.code) ? { code: error.code } : {})
-                } }), { disposition: 'not_applied', confirmedInputBytes: 0 })
-            Object.defineProperty(reported, 'cause', { value: error }); throw reported
-          }
-        }
-        stage('input-coordination')
-        // Native atomically starts or appends on the original thread using the
-        // same durable prompt claim. It does not hold the Raw input lane while a
-        // Native reply is pending; Raw remains available after a lost Native ACK.
-        const currentRun = await this.requireCurrentAgentRun(session)
-        const delivered = await this.promptSubmission.submitNativeInputPlan(session, currentRun,
-          operationId, outbound, admissionIntent, message, input.execution ?? 'default', prepared, input.signal, assertSession, authority,
-          producer === 'prompt' ? { kind: producer, agentSessionId: session.agentSessionId, expectedRun, submissionId: operationId }
-            : { kind: producer, agentSessionId: session.agentSessionId, expectedRun, messageId: operationId }, nativeControl?.authorizeDispatch)
-        stage('receipt')
-        await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered)
-      } finally {
-        if (prepared && !nativeControl) try { await prepared.close() } catch (error) {
-          // Cleanup cannot revoke an admitted Native message or close the healthy Agent.
-          this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId, code: 'AGENT_NATIVE_INPUT_CLEANUP_UNCONFIRMED',
-            message: error instanceof Error ? error.message : String(error), evidence: { source: 'user', observedAt: Date.now(), run: session.run } })
-        }
-      }
-      return
-    }
-    if (admissionIntent.kind !== 'exact-condition') throw new AgentMuxError('This Provider input surface has no original Native manual admission contract.', 'AGENT_NATIVE_INPUT_WAITING')
-    const condition = admissionIntent.condition
+    const condition = admissionIntent.kind === 'exact-condition' ? admissionIntent.condition : admissionIntent
     const ordinaryPlan = provider.planPromptInput(outbound, input.execution === undefined ? undefined : { execution: input.execution })
     const protocolInput: AgentPromptProtocolInputBoundary = { invalid: false }
     let releasePreparationObservation: ((next?: AbortController) => void) | undefined
@@ -5791,7 +5706,8 @@ export class AgentMuxClient {
             return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
               input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertSession, transportQualification,
               producer === 'prompt' ? { kind: producer, agentSessionId: current.agentSessionId, expectedRun, submissionId: operationId }
-                : { kind: producer, agentSessionId: current.agentSessionId, expectedRun, messageId: operationId })
+                : { kind: producer, agentSessionId: current.agentSessionId, expectedRun, messageId: operationId },
+              { ...(authority ? { authority } : {}), ...(inputControl ? { authorizeDispatch: inputControl.authorizeDispatch } : {}) })
           }, { kind: 'semantic', bytes: null }, renderObservation, transportQualification ? protocolInput : undefined, releasePreparationObservation, release => { releasePreparationObservation = release }, transportQualification?.deadline)
           break
         } catch (error) {
@@ -5811,7 +5727,7 @@ export class AgentMuxClient {
               })
             if (!sameRun(current.run, session.run) || current.promptCompletionAdmission?.submissionId === operationId ||
                 current.terminalPromptSubmission?.submissionId === operationId ||
-                (current.promptCompletionAdmission === undefined ? null : current.promptCompletionAdmission.submissionId) !== condition.afterSubmissionId) {
+                'afterSubmissionId' in condition && (current.promptCompletionAdmission === undefined ? null : current.promptCompletionAdmission.submissionId) !== condition.afterSubmissionId) {
               throw new AgentMuxError('The original request changed while its protocol ACK was pending.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
             }
           } catch (error) {

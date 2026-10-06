@@ -1,5 +1,5 @@
 import { AgentMuxError } from './errors.js'
-import { agentPromptInputId, validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
+import { agentPromptNotApplied, agentPromptInputId, validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
 import type { AgentNativeBinding, AgentNativeSessionHandle, AgentOperationDevice, AgentMessageChannel, AgentPromptSubmissionRecord } from './types.js'
 
 /** In-process Host context, never a wire argument or a persisted grant. */
@@ -19,9 +19,10 @@ export type AgentInputWaitReason =
   | { phase: 'observer'; reason: 'observer-stopped'; wake: 'explicit-rejoin'; failure: import('./delivery-attempt.js').DeliveryFailure; observation?: { phase: string } }
   | { phase: 'native-environment'; reason: 'original-environment-unconfirmed' | 'original-target-changed'; wake: 'explicit-rejoin';
       mechanism?: 'unconfirmed' | 'unavailable'; observation?: { phase: string; failure: import('./delivery-attempt.js').DeliveryFailure } }
+  | { phase: 'input-environment'; reason: 'original-input-unconfirmed' | 'original-target-changed'; wake: 'explicit-rejoin'; failure: import('./delivery-attempt.js').DeliveryFailure; observation?: { phase: string } }
   | { phase: 'service'; reason: 'observation-failed'; wake: 'explicit-rejoin'; failure: import('./delivery-attempt.js').DeliveryFailure; observation?: { phase: string } }
 
-/** A saved locator constrains later qualification; saving it does not grant Ready. */
+/** Provider/executor identify the original target; Native locators are retained observations, not a terminal input gate. */
 export type AgentInputSavedEnvironment = {
   providerId: string
   executorId: string
@@ -60,8 +61,44 @@ export type AgentInputSubmissionReceipt = {
   persistence: 'confirmed'
   control: AgentInputWaitControl
   admission: AgentPromptSubmissionRecord | null
-  status: 'waiting' | 'stopped' | 'admitted' | 'not-applied' | 'unknown'
+  status: 'waiting' | 'stopped' | 'terminal-confirmed' | 'admitted' | 'not-applied' | 'unknown'
   observation: 'owned' | 'rejoin-needed' | 'closed'
+}
+/** Interpret the original owner receipt once for SDK and strict wire decoding.
+ * A linked terminal ACK confirms ordered input bytes, never Native acceptance. */
+export function agentInputSubmissionStatus(control: AgentInputWaitControl, admission: AgentPromptSubmissionRecord | null): AgentInputSubmissionReceipt['status'] {
+  const claim = admission?.admission
+  const linked = claim?.inputDispatch && control.state === 'dispatch-authorized' &&
+    claim.inputDispatch.ref.waitGeneration === control.ref.waitGeneration &&
+    claim.inputDispatch.ref.key.kind === control.ref.key.kind &&
+    claim.inputDispatch.ref.key.agentSessionId === control.ref.key.agentSessionId &&
+    claim.inputDispatch.ref.key.expectedRun.runId === control.ref.key.expectedRun.runId &&
+    agentPromptInputId(claim.inputDispatch.ref.key) === agentPromptInputId(control.ref.key) && claim.inputDispatch.gateId === control.gateId
+  if (linked && claim) {
+    if (claim.transport === 'native') return claim.native.outcome === 'admitted' && claim.acknowledged ? 'admitted'
+      : claim.native.outcome === 'not-applied' && claim.notApplied ? 'not-applied' : 'unknown'
+    const phases = admission?.terminalPromptSubmission, plan = claim.intent?.plan
+    const first = phases?.prepare?.interrupt ?? phases?.payload
+    const byteLength = (data: string) => new TextEncoder().encode(data).byteLength
+    const confirmedBytes = !phases
+      ? plan?.kind === 'single-phase' && claim.endByte - claim.startByte === byteLength(plan.data)
+      : plan?.kind === 'render-then-submit' && phases.run.runId === admission?.run.runId &&
+        phases.submissionId === claim.submissionId && first?.operationId === claim.operationId &&
+        first.inputByteRange.startByte === claim.startByte && phases.submit.inputByteRange.endByte === claim.endByte &&
+        phases.payload.inputByteRange.endByte === phases.submit.inputByteRange.startByte &&
+        phases.payload.inputByteRange.endByte - phases.payload.inputByteRange.startByte === byteLength(plan.payload) &&
+        phases.submit.inputByteRange.endByte - phases.submit.inputByteRange.startByte === byteLength(plan.submit) &&
+        (!phases.prepare?.interrupt || plan.prepare && phases.prepare.interrupt.acknowledged &&
+          phases.prepare.interrupt.inputByteRange.endByte === phases.payload.inputByteRange.startByte &&
+          phases.prepare.interrupt.inputByteRange.endByte - phases.prepare.interrupt.inputByteRange.startByte === byteLength(plan.prepare.interrupt)) &&
+        phases.payload.acknowledged && phases.submit.acknowledged
+    if (claim.acknowledged && !claim.notApplied && confirmedBytes) return 'terminal-confirmed'
+    if (admission && agentPromptNotApplied({ run: admission.run, promptCompletionAdmission: claim,
+      ...(phases ? { terminalPromptSubmission: phases } : {}) })) return 'not-applied'
+    return 'unknown'
+  }
+  return admission || control.state === 'dispatch-authorized' ? 'unknown'
+    : control.state === 'stopped-before-dispatch' ? 'stopped' : 'waiting'
 }
 export type AgentInputWaitJournalRecord =
   | { kind: 'input-intent'; sequence: number; intent: AgentInputJournalIntent; at: number }

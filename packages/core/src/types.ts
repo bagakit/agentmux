@@ -533,8 +533,8 @@ export type AgentCapabilities = {
   /** Native copies preserve their Provider context and receive a new conversation identity. */
   providerFork?: { current: true }
   replyCorrelation: 'none' | 'native-turn-id' | 'acp-turn-id'
-  /** Declared native immediate semantics; absence keeps ordinary prompt input available. */
-  promptExecution?: { immediate: 'interrupt-before-input' | 'native-steer' }
+  /** Manual current-terminal submit reports bytes; it does not promise Native steering. */
+  promptExecution?: { immediate: 'terminal-submit' | 'interrupt-before-input' | 'native-steer' }
   /**
    * 这个 Provider 是否报**真实**的原生 token 用量，以及它从哪条通道到达。
    *
@@ -1119,7 +1119,7 @@ export type AgentMuxAgentSession = {
   promptCompletionAdmission?: {
     /** Exact producer identity captured only by the original new input admission. */
     inputKey?: import('./agent-prompt-condition.js').AgentPromptInputKey
-    /** Original journal gate acknowledged before this new Native claim. */
+    /** Original journal gate acknowledged before this input claim. */
     inputDispatch?: import('./agent-input-wait.js').AgentInputDispatchLink
     /** Logical identity when captured at admission; operationId always binds the Run and bytes. */
     submissionId?: string

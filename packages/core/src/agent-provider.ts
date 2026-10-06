@@ -386,7 +386,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
   }
   const immediateStrategy = catalogSeed.capabilities.promptExecution?.immediate
   if (immediateStrategy !== undefined) {
-    if (immediateStrategy !== 'interrupt-before-input' && immediateStrategy !== 'native-steer') {
+    if (immediateStrategy !== 'terminal-submit' && immediateStrategy !== 'interrupt-before-input' && immediateStrategy !== 'native-steer') {
       throw new AgentMuxError('Provider immediate strategy is invalid.', 'INVALID_AGENT_PROVIDER')
     }
     if (immediateStrategy === 'native-steer' && !definition.prepareNativePromptInput) {
@@ -408,6 +408,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     : undefined
   const catalog: AgentCatalogEntry = {
     ...catalogSeed,
+    capabilities: { ...catalogSeed.capabilities, promptExecution: catalogSeed.capabilities.promptExecution ?? { immediate: 'terminal-submit' } },
     launchOptions: describeLaunchOptions(launchOptionDeclarations),
     ...(posture ? { postureControl: posture.control } : {})
   }
@@ -547,6 +548,14 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
       return resolveLaunchOptionArgv(catalog.id, launchOptionDeclarations, selections)
     },
     planPromptInput(prompt, context) {
+      if (context?.execution === 'immediate' && catalog.capabilities.promptExecution?.immediate === 'terminal-submit') {
+        // Encode the ordinary current TUI input only. A direct submit grants no
+        // interrupt, clearing, navigation or external machine-channel setup.
+        const plan = definition.planPromptInput?.(prompt) ?? { kind: 'single-phase' as const, data: `${prompt}\r` }
+        if (plan.kind === 'render-then-submit' && plan.prepare) throw new AgentMuxError(
+          'Current terminal input cannot add preparation actions.', 'INVALID_AGENT_PROVIDER')
+        return plan
+      }
       if (context?.execution === 'immediate' && catalog.capabilities.promptExecution?.immediate === 'native-steer') {
         throw new AgentMuxError('Native messages require the original machine input environment and Native admission; a terminal plan cannot represent steering.', 'AGENT_NATIVE_INPUT_WAITING')
       }
