@@ -275,6 +275,22 @@ export class AgentMuxRpcService {
     const caller = rpcRecord(context.caller, ['agentSessionId', 'capability'])
     const agentSessionId = rpcString(caller.agentSessionId, 'Caller Session ID')
     const capability = rpcString(caller.capability, 'Caller capability')
+    const scopes = await this.clients()
+    if (scopes.length === 1 && !this.endpointUnverified(scopes[0]!.client)) {
+      const scope = scopes[0]!
+      try {
+        // One confirmed semantic endpoint already fixes the route. Authenticate
+        // the exact durable identity; no unrelated inventory is an ingress gate.
+        const session = await scope.client.authorizeRetainedAgentCaller(capability, agentSessionId)
+        if (session.agentSessionId !== agentSessionId || session.hostId !== (scope.client.forwardRpc ? 'local' : scope.hostId)) throw new AgentMuxError(
+          'Caller identity does not belong to this exact semantic Host.', 'AGENT_CAPABILITY_INVALID')
+        return { ...scope, agentSessionId, capability, session, unavailable: [] }
+      } catch (error) {
+        // A prefix/undiscovered identity keeps the existing discovery semantics.
+        // Invalid authority and unreadable durable facts never fall back to a cache.
+        if (!(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION') throw error
+      }
+    }
     const owner = await this.owner(agentSessionId)
     // The claim must be exact. A capability cannot authenticate an ambiguous/prefix identity.
     if (owner.agentSessionId !== agentSessionId) throw new AgentMuxError('Caller Session ID must be exact.', 'AGENT_CAPABILITY_INVALID')
