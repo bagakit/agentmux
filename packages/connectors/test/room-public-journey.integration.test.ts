@@ -10,6 +10,8 @@ import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createDesktopExternalInputAuthority } from '../../../apps/host/src/external-input-authority.js'
+import { startAgentMuxHost } from '../../../apps/host/src/host.js'
 import { externalIngressMailbox } from '../../../apps/desktop/test/helpers/external-ingress-mailbox.js'
 import { createPublicationConversationPort } from '../src/core-conversation-port.js'
 import { createHostedIngressCorePort } from '../src/core-ingress-port.js'
@@ -20,15 +22,12 @@ const evidencePath = process.env.AGENTMUX_CONNECTOR_JOURNEY_RECEIPT
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 const native = (id: string, text: string, type: 'user' | 'assistant' = 'assistant') => JSON.stringify({ sessionId: 'journey-native', uuid: id, type,
   message: { role: type, content: type === 'user' ? text : [{ type: 'text', text }] } }) + '\n'
-async function fixture(coreAvailable = true, execution: 'direct' | 'hosted' = 'direct') {
+async function fixture(coreAvailable = true, execution: 'direct' | 'hosted' | 'node-host' = 'direct') {
   const original = await rpcOwnerFixture(['original-agent'], core, root => ({ providerId: 'claude', executorId: 'claude', nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'journey-native', transcriptPath: join(root, 'native.jsonl') } }))
   cleanup.push(() => original.close())
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const transcript = join(original.root, 'native.jsonl')
   await writeFile(transcript, native('history/before-binding', 'Existing private work', 'user'))
-  const provider = (original.client as unknown as { providers: { get(id: string): { planPromptInput(text: string): unknown } } }).providers.get('claude')
-  // Original Core journal and ordered Runtime I/O; this deterministic leaf does not claim native CLI ACK.
-  vi.spyOn(provider, 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
   const spatial = new core.AgentMuxSpatialStateStore(join(original.root, 'spatial.json'))
   await spatial.commit({ expectedRevision: 0, graph: {
     spaces: [{ spaceId: 'space', kind: 'topic', name: 'Team', hostId: 'local', directoryPath: original.root, projectId: 'project' }],
@@ -38,21 +37,43 @@ async function fixture(coreAvailable = true, execution: 'direct' | 'hosted' = 'd
     bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { resource: createWorkspaceLayout('group', ['tab']) },
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'original-region' }, activeRegionId: 'original-region' } }, resources: {}
   } })
+  const semanticPath = join(original.root, 'semantic.sock')
+  let nodeHost: Awaited<ReturnType<typeof startAgentMuxHost>> | undefined
+  if (execution === 'node-host') {
+    const runtime = original.inner.kernel
+    // Fixture bootstrap owns no semantic endpoint. Dispose it before the actual product Host takes the original Store.
+    await original.client.dispose()
+    const connect = vi.spyOn(core.AgentMuxClient.prototype, 'connect').mockImplementationOnce(async function () {
+      const inner = this as unknown as typeof original.inner
+      await inner.registry.load('local')
+      for (const name of ['isConnected', 'status', 'identity', 'input', 'observeOutput', 'attach', 'detach', 'stop']) inner.kernel[name] = runtime[name]
+      inner.connected = true
+    })
+    nodeHost = await startAgentMuxHost({ store: original.store, socketPath: semanticPath, desktopSocketPath: join(original.root, 'journey.sock'), mobileBuildDirectory: join(original.root, 'absent-mobile-assets') })
+    cleanup.push(() => nodeHost!.dispose())
+    original.client = nodeHost.client; original.inner = nodeHost.client as unknown as typeof original.inner
+    original.coreClients = () => [{ hostId: 'local', client: original.client }]
+    await vi.waitFor(() => expect(original.inner.connected).toBe(true)); connect.mockRestore()
+  }
+  const provider = (original.client as unknown as { providers: { get(id: string): { planPromptInput(text: string): unknown } } }).providers.get('claude')
+  // Original Core journal and ordered Runtime I/O; this deterministic leaf does not claim native CLI ACK.
+  vi.spyOn(provider, 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
   const hostedOwner = execution === 'hosted' ? new AgentMuxHostedRuntimeService(original.client, original.store.path, () => hostedTestOwner(original.client)) : undefined
   if (hostedOwner) cleanup.push(() => hostedOwner.dispose())
-  const semantic = hostedOwner ? new core.AgentMuxControlServer({ socketPath: join(original.root, 'semantic.sock'), hostedRuntime: () => hostedOwner, coreClients: original.coreClients }) : undefined
+  const semantic = hostedOwner ? new core.AgentMuxControlServer({ socketPath: semanticPath, hostedRuntime: () => hostedOwner, coreClients: original.coreClients }) : undefined
   if (semantic) { await semantic.start(); cleanup.push(() => semantic.stop()) }
-  const semanticRpc = semantic ? await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: semantic.path } }) : undefined
+  const semanticRpc = semantic || nodeHost ? await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: semanticPath } }) : undefined
   if (semanticRpc) cleanup.push(() => semanticRpc.dispose())
   const hosted = semanticRpc ? await connectHostedAgentMux({ rpc: semanticRpc }) : undefined
   if (hosted) cleanup.push(() => hosted.dispose())
   const executionClients = () => [{ hostId: 'local', client: hosted ?? original.client }]
   const inputCore = hosted ? createHostedIngressCorePort(executionClients) : () => original.client
+  const coreResolver = vi.fn((host: string) => coreAvailable && host === 'local' ? inputCore(host) : undefined)
   const wire = signedRoomAdapter()
   const services = await createDesktopConnections({ directory: join(original.root, 'connectors'), adapters: [wire.adapter],
     encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
-    bindings: { spatial, checkpoint: async ref => ({ ...ref, checkpoint: await original.client.conversationCheckpoint(ref.agentSessionId) }) },
-    publication: createPublicationConversationPort(executionClients), ingress: { core: host => coreAvailable && host === 'local' ? inputCore(host) : undefined } })
+    bindings: { spatial, checkpoint: async ref => ({ ...ref, checkpoint: await (hosted ?? original.client).conversationCheckpoint(ref.agentSessionId) }) },
+    publication: createPublicationConversationPort(executionClients), ingress: { core: coreResolver } })
   cleanup.push(() => services.close())
   const server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'journey.sock'), connections: services.connections, spatialState: spatial, coreClients: original.coreClients })
   await server.start(); cleanup.push(() => server.stop())
@@ -75,11 +96,11 @@ async function fixture(coreAvailable = true, execution: 'direct' | 'hosted' = 'd
   await vi.waitFor(() => expect(wire.endpoint, 'Original Desktop composition must start the registered transport').toBeDefined(), { timeout: 3_000 })
   const message = (suffix = 'α'): SignedRoomMessage => ({ deliveryKey: 'delivery/' + suffix, recordKey: 'post/' + suffix, roomKey: 'room/project-α', person: actor.userId,
     text: 'External question\n保留完整原文', addressing: 'broadcast' })
-  return { ...original, services, wire, transcript, spatial, sdk, cli, config, binding: bound.binding, grant, actor, message, hosted, setCoreAvailable: (value: boolean) => { coreAvailable = value } }
+  return { ...original, services, wire, transcript, spatial, sdk, cli, config, binding: bound.binding, grant, actor, message, hosted, coreResolver, setCoreAvailable: (value: boolean) => { coreAvailable = value } }
 }
 
-it('signed transport follows public configuration, original Core input, mounted Desktop reading and automatic replay publication back to the same room', async () => {
-  const f = await fixture(), metadata = await f.store.readMetadata('original-agent')
+it('signed transport follows public configuration, original Hosted Core input, mounted Desktop reading and automatic replay publication back to the same room', async () => {
+  const f = await fixture(true, 'node-host'), metadata = await f.store.readMetadata('original-agent')
   const submit = f.client.submitAgentMessage.bind(f.client)
   vi.spyOn(f.client, 'submitAgentMessage').mockImplementation((...args) => { f.wire.trace.push('core-submit'); return submit(...args) })
   expect(await f.wire.post(f.message(), false)).toBe(401)
@@ -130,7 +151,7 @@ it('signed transport follows public configuration, original Core input, mounted 
   expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.attach).not.toHaveBeenCalled()
   if (evidencePath) {
     await mkdir(dirname(evidencePath), { recursive: true })
-    await writeFile(evidencePath, JSON.stringify({ schema: 'agentmux.room-journey-receipt.v1', execution: 'original Core with deterministic Runtime I/O; signed HTTP and replay adapter test leaves',
+    await writeFile(evidencePath, JSON.stringify({ schema: 'agentmux.room-journey-receipt.v1', execution: 'original Hosted semantic service and Desktop authority adapter; deterministic Runtime I/O, signed HTTP and replay adapter test leaves',
       trace: f.wire.trace, ingress: inspected, originalQueue: { operationId: queued!.envelope.operationId, messageId: queued!.envelope.messageId, body: queued!.envelope.body, sender: queued!.envelope.sender },
       mountedReader: { speakerRole: read.detail.dataset.speakerRole, itemRef: read.detail.dataset.conversationItemRef, copiedOriginal: recorded.content },
       delivery: delivered, followUp: after, replayEffects: f.wire.effects, originalSessionId: current!.agentSessionId, originalRun: current!.run, agentLifecycleCalls: { stop: 0, attach: 0 } }, null, 2) + '\n')
@@ -210,4 +231,38 @@ it('the actual Hosted wire cannot adopt private author authority from a client c
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
   expect((await f.services.ingress!.inspect({ ingressId: record!.ingressId })).ingress!.input).toEqual(record!.input)
   expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 15_000)
+
+it('public authority reads only the original claim and current grant, and the execution adapter checks every frozen input field', async () => {
+  const f = await fixture()
+  expect(await f.wire.post(f.message())).toBe(202)
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
+  const record = (await f.services.ingress!.list({ connectionId: f.config.connectionId })).ingresses[0]!, input = record.input!
+  // Join the already claimed original dispatch before isolating authority's no-Core-read contract.
+  await f.services.ingress!.dispatch(record.ingressId)
+  f.coreResolver.mockClear()
+  const result = await f.cli(['connection', 'ingress', 'authority', '--operation-id', input.operationId])
+  expect(result).toEqual({ ingress: record, authority: 'current' }); expect(f.coreResolver).not.toHaveBeenCalled()
+  const authority = createDesktopExternalInputAuthority({ desktopSocketPath: join(f.root, 'journey.sock'), executionHostId: 'local' })
+  const intent = { agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, operationId: input.operationId, messageId: input.messageId, body: record.body }
+  await expect(authority.assertCurrent(input.author, intent)).resolves.toBeUndefined()
+  for (const change of [{ agentSessionId: 'replacement-agent' }, { expectedRun: { runId: 'replacement-run' } }, { operationId: 'replacement-operation' }, { messageId: 'replacement-message' }, { body: 'Replacement body' }]) {
+    await expect(authority.assertCurrent(input.author, { ...intent, ...change })).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
+  }
+  await expect(authority.assertCurrent({ ...input.author, externalMessageId: 'replacement/message' }, intent)).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
+  await expect(createDesktopExternalInputAuthority({ desktopSocketPath: join(f.root, 'journey.sock'), executionHostId: 'another-host' }).assertCurrent(input.author, intent)).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
+  await f.sdk.call('connection.grant', { ...f.grant, operationId: 'revoke-current-authority', expectedRevision: 1, state: 'revoked' })
+  expect(await f.cli(['connection', 'ingress', 'authority', '--operation-id', input.operationId])).toEqual({ ingress: record, authority: 'refused', code: 'INGRESS_ACTOR_NOT_AUTHORIZED' })
+  await expect(authority.assertCurrent(input.author, intent)).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
+  const failedRead = vi.spyOn(f.services.bindings!, 'findGrant').mockImplementation(() => { throw new Error('private connector diagnostic') })
+  const unknown = await f.cli(['connection', 'ingress', 'authority', '--operation-id', input.operationId])
+  expect(unknown).toEqual({ ingress: record, authority: 'unavailable', code: 'INGRESS_STORAGE_UNCONFIRMED' })
+  expect(JSON.stringify(unknown)).not.toContain('private connector diagnostic'); failedRead.mockRestore()
+  expect(await f.cli(['connection', 'ingress', 'authority', '--operation-id', 'unknown-original-operation'])).toEqual({ ingress: null, authority: 'refused', code: 'INGRESS_CLAIM_UNAVAILABLE' })
+  const { parseIngressResult, parseIngressParams } = await import('../../core/dist/connections.js')
+  for (const invalid of [{ ...result, authority: 'current', ingress: null }, { ...result, authority: ['current'] }, { ...result, code: 'private diagnostic' }, { ...result, authority: 'refused', code: ['INGRESS_ACTOR_NOT_AUTHORIZED'] }, { ...result, ingress: { ...record, state: ['claimed'] } }, { ...result, ingress: { ...record, input: { ...input, operationId: 'different-operation' } } }]) {
+    expect(() => parseIngressResult('connection.ingress.authority', invalid, { operationId: input.operationId })).toThrow()
+  }
+  expect(() => parseIngressParams('connection.ingress.authority', { operationId: input.operationId, authenticated: true })).toThrow()
+  expect(f.coreResolver).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 15_000)
