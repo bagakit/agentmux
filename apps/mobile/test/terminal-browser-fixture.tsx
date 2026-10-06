@@ -33,6 +33,8 @@ const attachment = (): AgentMuxRunAttachment => ({ run: { ...session.run, native
     restoreSize: { cols, rows }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
     restoreBytes: raw.length ? new Uint8Array(raw) : encoder.encode('\x1b[0m'), resizes: [] } })
 const finite = {
+  // Optional public read transport is absent in this bounded terminal SDK fixture.
+  subscribeRpc: undefined,
   // This bounded SDK fixture has no observed public RPC owner; diagnostics remain unknown.
   runtimeOwnerIdentity() { return null },
   runtimeIdentity() { return { hostId: 'local', instanceId: 'private-fixture-runtime', buildIdentity: 'fixture', protocolVersion: 1, processId: null } },
