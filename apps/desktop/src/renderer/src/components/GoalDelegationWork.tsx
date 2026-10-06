@@ -6,6 +6,7 @@ import type { DemandRecord } from '../lib/global-demand-board'
 import { goalDelegationRows } from '../lib/goal-delegation-presentation'
 import { goalStartRows } from '../lib/goal-start-presentation'
 import { GoalStartWork } from './GoalStartWork'
+import { GoalContinuationAgent } from './GoalContinuationControl'
 import { applyGoalDelegationResult, beginGoalDelegationRead, refreshGoalDelegations, useGoalDelegationObservation } from '../lib/goal-delegation-work'
 import { useAppStore } from '../store'
 import '../styles/goal-delegation.css'
@@ -63,19 +64,20 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
   return <section className="goal-delegation" aria-label="Delegated work">
     <div className="goal-delegation__heading"><strong>Delegated work</strong><button type="button" className="goals-button" onClick={() => void refresh()}>Refresh reports</button></div>
     {current.delegationObservationIssue || issue ? <p className="goals-service" role="status">{issue ?? current.delegationObservationIssue} Original Agents, tasks and last confirmed reports are kept.</p> : null}
-    <GoalStartWork rows={starts} supervisorSessionId={current.supervisorSessionId} openAgent={openAgent} review={review} />
+    <GoalStartWork rows={starts} supervisorSessionId={current.supervisorSessionId} active={active} openAgent={openAgent} review={review} />
     {rows.map(row => <article className="goal-delegation__item" key={row.delegation.operationId}>
       <strong>{row.next}</strong>
-      <p className="goal-delegation__identity">Agent <span>{row.delegation.workerAgentSessionId}</span> · Follow-up {current.supervisorSessionId
-        ? <span>{current.supervisorSessionId}</span> : 'needs an assigned Supervisor'}</p>
+      <p className="goal-delegation__identity">Agent <span><GoalContinuationAgent agentSessionId={row.delegation.workerAgentSessionId} hostId={row.delegation.hostId} active={active} size={14} /></span> · Follow-up {current.supervisorSessionId
+        ? <span><GoalContinuationAgent agentSessionId={current.supervisorSessionId} active={active} size={14} /></span> : 'needs an assigned Supervisor'}</p>
+      {row.report ? <p className="goal-delegation__summary">{row.report.grounding.summary}</p> : null}
       {row.issue && row.issue !== current.delegationObservationIssue ? <p className="goals-service" role="status">{row.issue}</p> : null}
-      {row.attention ? <p className="goals-service" role="status">Supervisor reminder {row.attention.state === 'confirmed' ? 'received' : row.attention.state === 'prepared' ? 'prepared' : 'unknown'}. {row.attention.reason} Reminder receipt does not accept this Goal.
-        {row.attention.state !== 'confirmed' && row.delegation.attention ? <button type="button" className="goals-button" onClick={() => void openAgent(row.delegation.attention!.supervisorAgentSessionId)}>Open original Supervisor</button> : null}
+      {row.attention?.state === 'confirmed' ? <details className="goal-delegation__notice"><summary>Supervisor reminder received</summary><p>{row.attention.reason} The report and human review remain separate.</p></details> : row.attention ? <p className="goals-service" role="status">Supervisor reminder {row.attention.state === 'prepared' ? 'prepared' : 'unknown'}. {row.attention.reason} Reminder receipt does not accept this Goal.
+        {row.delegation.attention ? <button type="button" className="goals-button" onClick={() => void openAgent(row.delegation.attention!.supervisorAgentSessionId)}>Open original Supervisor</button> : null}
       </p> : null}
       <div className="goal-delegation__actions">
-        {row.state === 'report' ? <button type="button" className="goals-button" disabled={busy.has(row.delegation.operationId)}
+        {row.state === 'report' ? <button type="button" className="goals-button goals-button--primary" disabled={busy.has(row.delegation.operationId)}
           onClick={() => void collect(row.delegation.operationId, row.report!.replyMessageId)}>{busy.has(row.delegation.operationId) ? 'Collecting…' : 'Collect report'}</button> : null}
-        {row.state === 'collected' ? <button type="button" className="goals-button" onClick={() => void review()}>Review results</button> : null}
+        {row.state === 'collected' ? <button type="button" className="goals-button goals-button--primary" onClick={() => void review()}>Review results</button> : null}
         <button type="button" className="goals-button" title={`Host ${row.delegation.hostId} · Session ${row.delegation.workerAgentSessionId}`}
           onClick={() => void openAgent(row.delegation.workerAgentSessionId)}>Open original Agent</button>
         <button type="button" className="goals-button" title={`Host ${row.delegation.hostId} · Session ${row.delegation.ownerAgentSessionId}`}
