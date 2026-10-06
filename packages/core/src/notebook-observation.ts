@@ -2,6 +2,7 @@ import { AgentMuxError } from './errors.js'
 export { AgentMuxError } from './errors.js'
 import type { NotebookState, NoteResource } from './notebook-catalog.js'
 import type { NotebookResolveParams, NotebookResolveResult } from './note-links.js'
+import { parseNoteWikiQuery } from './note-links.js'
 
 /** Original file observations, never another Note body or relationship store. */
 export type NoteContentObservation = { noteId: string; resource: NoteResource } & (
@@ -14,6 +15,8 @@ export type NoteGraphEndpoint = { noteId: string; blockId: string }
 export type NoteGraphTarget = { kind: 'page'; noteId: string } | { kind: 'block'; noteId: string; blockId: string } | { kind: 'unbound'; text: string }
 export type NoteGraphOccurrence = { kind: 'stored'; referenceId: string } | { kind: 'text'; revision: string; from: number; to: number }
 export type NoteGraphReference = { source: NoteGraphEndpoint; sourceResource: NoteResource; target: NoteGraphTarget; occurrence: NoteGraphOccurrence;
+  /** A query observed from the saved source; its file binding and occurrence are unchanged. */
+  query?: string;
   mode: 'reference' | 'embed' | 'link'; resolution: 'resolved' | 'missing' | 'unknown' | 'ambiguous' | 'unbound' }
 export type NotebookGraph = {
   catalogRevision: number
@@ -106,7 +109,7 @@ function validateNotebookGraph(value: unknown, params: NotebookGraphParams): Not
   list(p.hierarchy).forEach(v => { const e = object(v, ['parentNoteId', 'noteId']); id(e.parentNoteId); id(e.noteId); if (![e.parentNoteId, e.noteId].every(noteId => byNoteId.has(noteId as string))) bad('An original hierarchy endpoint is outside the observed catalog.') })
   const endpoint = (v: unknown) => { const e = object(v, ['noteId', 'blockId']); id(e.noteId); id(e.blockId) }
   list(p.references).forEach(v => {
-    const e = object(v, ['source', 'sourceResource', 'target', 'occurrence', 'mode', 'resolution']); endpoint(e.source); resource(e.sourceResource); member(e.mode, ['reference', 'embed', 'link']); member(e.resolution, ['resolved', 'missing', 'unknown', 'ambiguous', 'unbound'])
+    const e = object(v, ['source', 'sourceResource', 'target', 'occurrence', 'mode', 'resolution', 'query']); endpoint(e.source); resource(e.sourceResource); member(e.mode, ['reference', 'embed', 'link']); member(e.resolution, ['resolved', 'missing', 'unknown', 'ambiguous', 'unbound'])
     const source = e.source as NoteGraphEndpoint, target = object(e.target, ['kind', 'noteId', 'blockId', 'text'])
     const original = byNoteId.get(source.noteId)
     if (!original || original.status !== 'read' || resourceKey(original.resource) !== resourceKey(e.sourceResource as NoteResource) || !observedBlocks.get(source.noteId)?.has(source.blockId)) bad('The reference source is not an accurately observed original block.')
@@ -115,16 +118,19 @@ function validateNotebookGraph(value: unknown, params: NotebookGraphParams): Not
     else if (occurrence.kind === 'text') {
       if (e.mode !== 'link' || occurrence.referenceId !== undefined || occurrence.revision !== original?.revision || !Number.isSafeInteger(occurrence.from) || Number(occurrence.from) < 0 || !Number.isSafeInteger(occurrence.to) || Number(occurrence.to) <= Number(occurrence.from)) bad('The text occurrence belongs to another original revision.')
     } else bad('The original occurrence identity is missing.')
+    const query = e.query === undefined ? null : typeof e.query === 'string' ? parseNoteWikiQuery(e.query) : null
+    if (e.query !== undefined && (e.mode !== 'link' || query?.status !== 'valid')) bad('The observed Note query is invalid.')
     if (target.kind === 'unbound') {
       id(target.text)
-      if (e.mode !== 'link' || e.resolution !== 'unbound' || target.noteId !== undefined || target.blockId !== undefined || p.completeness === 'complete') bad('An unbound query cannot grant a confirmed target.')
+      if (e.mode !== 'link' || !['unbound', 'missing', 'unknown', 'ambiguous'].includes(String(e.resolution)) || target.noteId !== undefined || target.blockId !== undefined || p.completeness === 'complete' || e.query !== undefined && e.query !== target.text || e.resolution !== 'unbound' && !query) bad('An unbound query cannot grant a confirmed target.')
       return
     }
-    if (occurrence.kind === 'text' || e.resolution === 'unbound') bad('A text observation cannot grant a bound target.')
+    if (e.resolution === 'unbound' || occurrence.kind === 'text' && !query) bad('A text target requires its original observed query.')
     id(target.noteId)
     if (target.kind === 'block') id(target.blockId)
     else if (target.kind !== 'page' || target.blockId !== undefined || e.mode !== 'link') bad('Invalid page or block reference target.')
     if (target.text !== undefined || e.mode !== 'link' && target.kind !== 'block') bad('The original target kind is invalid.')
+    if (query && (e.resolution !== 'resolved' || query.status !== 'valid' || Boolean(query.query.fragment) !== (target.kind === 'block'))) bad('The observed query does not confirm this target kind.')
     if (params.noteId && source.noteId !== params.noteId && target.noteId !== params.noteId) bad('The returned edge does not touch the requested Note.')
     if (e.resolution === 'resolved') {
       const destination = byNoteId.get(target.noteId as string)
