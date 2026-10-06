@@ -46,7 +46,7 @@ async function mount(busy = false) {
   document.head.append(style)
   const node = document.createElement('div'); document.body.append(node)
   const anchor = document.createElement('div'); anchor.dataset.nativeBrowserStage = ''; document.body.append(anchor)
-  const props = { anchor, image: { mimeType: 'image/png' as const, dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 }, busy, onCancel: vi.fn(), onComplete: vi.fn() }
+  const props = { image: { mimeType: 'image/png' as const, dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 }, busy, onCancel: vi.fn(), onComplete: vi.fn() }
   root = createRoot(node)
   await act(async () => root!.render(<ScreenshotEditor {...props} />))
   const editor = document.querySelector<HTMLElement>('.browser-screenshot-editor')!
@@ -146,13 +146,14 @@ it('retains one toolbar and the complete actions without a repeated instructiona
   expect(editor.querySelector('canvas')).not.toBeNull()
 })
 
-it('preserves busy guards for a nonempty set of original controls', async () => {
+it('keeps Cancel available while image encoding or clipboard acknowledgement is busy', async () => {
   const { editor, props } = await mount(true)
   const controls = [...editor.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button,select')]
   expect(controls.length).toBeGreaterThan(SCREENSHOT_COLORS.length)
-  expect(controls.map(c => c.disabled)).toEqual(Array(controls.length).fill(true))
+  expect(controls.filter(c => c !== button(editor, 'Cancel')).map(c => c.disabled)).toEqual(Array(controls.length - 1).fill(true))
+  expect(button(editor, 'Cancel').disabled).toBe(false)
   await act(async () => button(editor, 'Cancel').click())
-  expect(props.onCancel).not.toHaveBeenCalled()
+  expect(props.onCancel).toHaveBeenCalledOnce()
   await act(async () => button(editor, 'Copying…').click())
   expect(props.onComplete).not.toHaveBeenCalled()
 })

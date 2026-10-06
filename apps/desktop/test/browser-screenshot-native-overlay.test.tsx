@@ -16,7 +16,7 @@ vi.mock('../src/renderer/src/lib/browser-stage-geometry', () => ({
   }
 }))
 // Canvas rasterization has its own native proof. These tests exercise the actual editor handlers,
-// body Portal, source CSS, and the one overlay collector, without starting Electron.
+// original stage DOM, source CSS, and the one overlay collector, without starting Electron.
 vi.mock('../src/renderer/src/components/browser-screenshot/canvas-render', () => ({ renderCommittedLayer() {}, renderScreenshotScene() {} }))
 const browserCss = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/browser.css'), 'utf8')
 const agentCss = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/agent.css'), 'utf8')
@@ -43,7 +43,7 @@ function prepareCss(): void {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 }
 
-it('the original screenshot editor is a bounded native float; movement, markup, copy and cancel keep their real handlers', async () => {
+it('the screenshot editor uses its original stage DOM without native bitmap projection; markup and cancel keep their handlers', async () => {
   prepareCss()
   const container = document.createElement('div'); container.id = 'root'; document.body.append(container)
   const anchor = document.createElement('div'); anchor.dataset.nativeBrowserStage = ''; container.append(anchor)
@@ -56,19 +56,16 @@ it('the original screenshot editor is a bounded native float; movement, markup, 
   const cancel = vi.fn(), complete = vi.fn()
   const mount = document.createElement('div'); container.append(mount)
   root = createRoot(mount)
-  await act(async () => root!.render(<ScreenshotEditor anchor={anchor} image={{ mimeType: 'image/png', dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 }} busy={false} onCancel={cancel} onComplete={complete} />))
-  const editor = document.querySelector<HTMLElement>('[data-overlay-host] .browser-screenshot-editor')
+  await act(async () => root!.render(<ScreenshotEditor image={{ mimeType: 'image/png', dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 }} busy={false} onCancel={cancel} onComplete={complete} />))
+  const editor = container.querySelector<HTMLElement>('.browser-screenshot-editor')
   expect(editor).not.toBeNull()
   expect(anchor.isConnected).toBe(true)
-  expect(container.querySelector('.browser-screenshot-editor')).toBeNull()
-  expect(getComputedStyle(editor!).position).toBe('fixed')
+  expect(editor!.closest('[data-overlay-host]')).toBeNull()
+  expect(getComputedStyle(editor!).position).toBe('absolute')
   expect(getComputedStyle(editor!).pointerEvents).toBe('auto')
   const publish = vi.fn()
   overlays = observeNativeOverlayRegions(document.body, () => 1.25, publish)
-  expect(publish.mock.calls[0]).toEqual([[{ id: 'chrome-1', bounds: { x: 100, y: 112.5, width: 500, height: 375 }, radius: 0 }], undefined])
-  stage = rect(90, 120, 400, 300)
-  await act(async () => { geometry.update!() })
-  expect(editor!.getBoundingClientRect()).toMatchObject({ x: 90, y: 120, width: 400, height: 300 })
+  expect(publish.mock.calls[0]).toEqual([[], undefined])
   const image = editor!.querySelector<HTMLImageElement>('img')!
   await act(async () => image.dispatchEvent(new Event('load')))
   const canvas = editor!.querySelector('canvas')!
@@ -85,7 +82,7 @@ it('the original screenshot editor is a bounded native float; movement, markup, 
   await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
   expect(cancel).toHaveBeenCalledTimes(1)
   await act(async () => root!.unmount()); root = undefined
-  expect(geometry.stop).toHaveBeenCalledTimes(1)
+  expect(geometry.stop).not.toHaveBeenCalled()
   expect(document.querySelector('.browser-screenshot-editor')).toBeNull()
 })
 
@@ -106,8 +103,8 @@ async function mountGestureEditor() {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => rect(0, 0, 400, 300))
   const complete = vi.fn(), cancel = vi.fn()
   const mount = document.createElement('div'); container.append(mount); root = createRoot(mount)
-  await act(async () => root!.render(<ScreenshotEditor anchor={anchor} image={{ mimeType: 'image/png', dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 }} busy={false} onCancel={cancel} onComplete={complete} />))
-  const editor = document.querySelector<HTMLElement>('[data-overlay-host] .browser-screenshot-editor')!
+  await act(async () => root!.render(<ScreenshotEditor image={{ mimeType: 'image/png', dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 }} busy={false} onCancel={cancel} onComplete={complete} />))
+  const editor = container.querySelector<HTMLElement>('.browser-screenshot-editor')!
   expect(editor).not.toBeNull()
   await act(async () => editor.querySelector('img')!.dispatchEvent(new Event('load')))
   const canvas = editor.querySelector('canvas')!
