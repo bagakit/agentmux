@@ -15,7 +15,7 @@ export function AnnotationOriginalMenu({ active, busy, loaded, onOpen, onSave }:
   const [open, setOpen] = useState(false), selectedAction = useRef(false)
   useEffect(() => { if (!active) setOpen(false) }, [active])
   if (!onOpen && !onSave) return null
-  return <DropdownMenu.Root open={active && open} onOpenChange={next => { if (next) selectedAction.current = false; setOpen(next) }}>
+  return <DropdownMenu.Root modal={false} open={active && open} onOpenChange={next => { if (next) selectedAction.current = false; setOpen(next) }}>
     <DropdownMenu.Trigger asChild><button type="button" disabled={busy} aria-label="Original file actions">Original <DownIcon size={12} /></button></DropdownMenu.Trigger>
     <DropdownMenu.Portal container={resolveOverlayContainer()}><DropdownMenu.Content className="tab-context-menu image-annotation-original-menu"
       align="start" sideOffset={4} collisionPadding={8}
