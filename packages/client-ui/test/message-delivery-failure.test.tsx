@@ -5,11 +5,19 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MessageDeliveryFailure } from '../src/components/MessageDeliveryFailure.js'
 import { messageDeliveryDiagnosticReport, presentMessageDeliveryFailure } from '../src/lib/message-delivery-presentation.js'
 import type { ClientDeliveryLog } from '../src/lib/delivery-diagnostics.js'
+import type { AgentInputSubmissionReceipt, AgentInputWaitStopReceipt } from '@agentmux/core'
 
 const logId = 'delivery-6156f51c-b81f-42cd-959a-1c43b99742be'
 const original = 'Original input preparation timed out. {"preclaimObservation":{"phase":"current-pane"}}'
 const failure = () => Object.assign(new Error(original), { code: 'AGENT_PROMPT_PREPARATION_FAILED',
   detail: '{"complete":"unaltered nested detail"}', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+function savedInput(): AgentInputSubmissionReceipt {
+  const key = { kind: 'prompt' as const, agentSessionId: 'original-session', expectedRun: { runId: 'original-run' }, submissionId: 'original-operation' }
+  const ref = { key, waitGeneration: 1 }
+  return { key, ref, persistence: 'confirmed', admission: null, status: 'waiting', observation: 'rejoin-needed',
+    control: { ref, state: 'enabled', at: _reshape_fixtureEpoch(0, 0, 2), waiting: { phase: 'observer', reason: 'observer-stopped', wake: 'explicit-rejoin',
+      failure: { name: 'AbortError', message: 'This operation was aborted' }, observation: { phase: 'native-peer' } } } }
+}
 const log = (): ClientDeliveryLog => ({ owner: 'original-owner', localSaved: true, localIssue: null, notificationIssue: null, remote: null, reportIssue: null,
   record: { logId, source: 'client', hostId: 'original-host', agentSessionId: 'original-session', expectedRunId: 'original-run',
     operationId: 'original-operation', afterSubmissionId: 'previous-submission', conditionAvailable: true, promptDigest: null,
@@ -126,4 +134,68 @@ it('cannot let an old delayed clipboard completion acknowledge a different repor
   await render(<MessageDeliveryFailure error="A different original error" copyText={copy} />)
   await act(async () => release(true))
   expect(container.querySelector('[data-copy-state]')!.getAttribute('data-copy-state')).toBe('idle')
+})
+
+it('uses the saved Core receipt after observation ends, retaining the full receipt and original error in copy', async () => {
+  const inputReceipt = savedInput(), error = new DOMException('This operation was aborted', 'AbortError')
+  const copy = vi.fn(async (_text: string) => true), retry = vi.fn()
+  await render(<MessageDeliveryFailure compact error={error} inputReceipt={inputReceipt} copyText={copy} onRetry={retry} />)
+  expect(container.querySelector('section')!.dataset.kind).toBe('saved-waiting')
+  expect(container.querySelector('.message-delivery-failure__heading')!.textContent).toBe('已保存 · 等待确认')
+  expect(container.querySelector('[role="alert"]')).toBeNull()
+  expect(container.querySelector('.message-delivery-failure__next')!.textContent).toContain('继续确认原环境')
+  await click()
+  const report = copy.mock.calls[0]![0]
+  expect(report).toContain('This operation was aborted')
+  expect(report).toContain(JSON.stringify(inputReceipt, null, 2))
+  expect(report).not.toContain('输入结果未知')
+  expect(retry).not.toHaveBeenCalled()
+  await click('继续确认'); expect(retry).toHaveBeenCalledOnce()
+})
+
+it('does not infer waiting or a non-dispatch result from an AbortError or a phase without a Core receipt', () => {
+  const error = { name: 'AbortError', message: 'This operation was aborted', waitingObservation: { phase: 'native-peer' } }
+  expect(presentMessageDeliveryFailure({ error }).kind).toBe('unknown')
+})
+
+it.each(['prior-unknown', 'partial', 'dispatch', 'admission', 'unknown-receipt'] as const)(
+  'keeps %s evidence ahead of a waiting projection', evidence => {
+    const inputReceipt = savedInput()
+    if (evidence === 'dispatch') inputReceipt.control.state = 'dispatch-authorized'
+    if (evidence === 'admission') inputReceipt.admission = { agentSessionId: inputReceipt.key.agentSessionId, run: inputReceipt.key.expectedRun }
+    if (evidence === 'unknown-receipt') inputReceipt.status = 'unknown'
+    const result = presentMessageDeliveryFailure({ inputReceipt, inputUnconfirmed: evidence === 'prior-unknown',
+      error: evidence === 'partial' ? { controlFailure: { disposition: 'not_applied', confirmedInputBytes: 1 } } : new Error('observation ended') })
+    expect(result.kind).toBe('unknown')
+    expect(result.action).toContain('避免重复发送')
+  })
+
+it('keeps an exact stop receipt ahead of a stale waiting projection, without borrowing another key or generation', () => {
+  const inputReceipt = savedInput()
+  const inputStopReceipt: AgentInputWaitStopReceipt = { ref: structuredClone(inputReceipt.ref), cancelOperationId: 'original-stop', outcome: 'stopped-before-dispatch', at: _reshape_fixtureEpoch(0, 0, 3) }
+  expect(presentMessageDeliveryFailure({ error: 'inspect failed', inputReceipt, inputStopReceipt }).kind).toBe('stopped')
+  const report = messageDeliveryDiagnosticReport({ error: 'inspect failed', inputReceipt, inputStopReceipt })
+  expect(report).toContain(JSON.stringify(inputStopReceipt, null, 2))
+  for (const ref of [
+    { ...inputReceipt.ref, waitGeneration: 2 },
+    { ...inputReceipt.ref, key: { ...inputReceipt.key, agentSessionId: 'other-session' } },
+    { ...inputReceipt.ref, key: { ...inputReceipt.key, expectedRun: { runId: 'other-run' } } },
+    { ...inputReceipt.ref, key: { kind: 'prompt' as const, agentSessionId: 'original-session', expectedRun: { runId: 'original-run' }, submissionId: 'other-input' } },
+    { ...inputReceipt.ref, key: { kind: 'message' as const, agentSessionId: 'original-session', expectedRun: { runId: 'original-run' }, messageId: 'original-operation' } }
+  ]) expect(presentMessageDeliveryFailure({ error: 'inspect failed', inputReceipt, inputStopReceipt: { ...inputStopReceipt, ref } }).kind).toBe('saved-waiting')
+})
+
+it.each(['admitted', 'not-applied'] as const)('reports the original %s receipt and offers no replay callback', async status => {
+  const inputReceipt = { ...savedInput(), status }, retry = vi.fn()
+  const diagnostic = log()
+  diagnostic.record.error.controlFailure = { disposition: 'unknown', confirmedInputBytes: 1 }
+  await render(<MessageDeliveryFailure error="Old observation ended" errorCode="AGENT_PROMPT_CONDITION_CHANGED" log={diagnostic}
+    inputUnconfirmed inputReceipt={inputReceipt} onRetry={retry} copyText={async () => true} />)
+  expect(container.querySelector('section')!.dataset.kind).toBe(status)
+  if (status === 'not-applied') {
+    expect(container.querySelector('.message-delivery-failure__state')!.textContent).toContain('Core 已确认')
+    expect(container.querySelector('.message-delivery-failure__state')!.textContent).not.toContain('Native 明确拒绝')
+  }
+  expect([...container.querySelectorAll('button')].some(button => button.textContent?.includes('重试'))).toBe(false)
+  expect(retry).not.toHaveBeenCalled()
 })

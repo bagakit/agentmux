@@ -4,7 +4,8 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { messageDeliveryDiagnostics } from '../../../src/renderer/src/lib/message-delivery-diagnostics'
 import { startDeliveryAttempt } from '@agentmux/client-ui/delivery-diagnostics'
-import { applyAppAppearance } from '../../../src/renderer/src/lib/app-appearance'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
+import type { AgentInputSubmissionReceipt } from '@agentmux/core'
 
 const config = api.config.get, snapshot = api.sessions.snapshot
 api.config.get = async () => {
@@ -28,6 +29,7 @@ api.sessions.attach = async (...args) => {
   } }
 }
 await import('../agent-region-actions/entry')
+mountThemeRuntime(window, useAppStore.getState().config?.appearance ?? {})
 const base = (window as any).regionActions
 const copies: string[] = []
 let copyFails = false
@@ -35,9 +37,9 @@ api.ui.writeClipboardText = async text => { if (copyFails) throw new Error('Priv
 api.continuousProgress.list = async () => []
 // The fixture supplies existing Store/API facts; it never owns admission or sends to a user Run.
 const probe = {
-  async seed(kind: 'preparation' | 'unknown' | 'legacy' | 'compaction' | 'first-wait' | 'exhausted', appearance: 'dark' | 'light') {
+  async seed(kind: 'preparation' | 'unknown' | 'legacy' | 'compaction' | 'first-wait' | 'exhausted' | 'observer', appearance: 'dark' | 'light') {
     const generation = base.mode('terminal')
-    applyAppAppearance(appearance)
+    updateThemeSelection({ ...useAppStore.getState().config?.appearance, appAppearance: appearance })
     const session = useAppStore.getState().sessions[0]!
     const operationId = `private-message-${kind}`
     const condition = { expectedRun: session.control.run, afterSubmissionId: null }
@@ -49,6 +51,13 @@ const probe = {
         runId: session.control.run.runId, operationId, inputByte: 0, nativeSourceId: 'private-native-source' } } : { preclaimObservation: { phase: 'current-pane', predicateEvaluations: 294 } }),
       ...(kind !== 'legacy' ? { controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } } : {})
     })
+    const key = { kind: 'prompt' as const, agentSessionId: session.id, expectedRun: { ...session.control.run }, submissionId: operationId }
+    const ref = { key, waitGeneration: 1 }
+    const inputReceipt: AgentInputSubmissionReceipt | undefined = kind === 'observer' ? {
+      key, ref, persistence: 'confirmed', status: 'waiting', admission: null, observation: 'rejoin-needed',
+      control: { ref, state: 'enabled', at: Date.now(), waiting: { phase: 'observer', reason: 'observer-stopped', wake: 'explicit-rejoin',
+        failure: { name: 'AbortError', message: 'This operation was aborted' }, observation: { phase: 'native-peer' } } }
+    } : undefined
     const seed = startDeliveryAttempt({ agentSessionId: session.id, operationId, hostId: session.hostId, condition, execution: 'immediate' })
     const diagnostic = kind === 'first-wait' ? undefined : await messageDeliveryDiagnostics.failed(seed, error, 'core-submit', 'private-original-host')
     copies.length = 0; copyFails = false
@@ -59,10 +68,11 @@ const probe = {
         text: '检查主对话的 Session 恢复逻辑，应用启动时自动恢复原对话。', status: 'deferred',
         promptCondition: kind === 'unknown' || kind === 'legacy' ? condition : null,
         ...(diagnostic ? { error: error.message, errorCode: error.code, logId: diagnostic.record.logId } : {}), enqueuedAt: Date.now(),
+        ...(inputReceipt ? { inputReceipt } : {}),
         ...(reason ? { preparationInputNotApplied: true, preparationWait: { reason, state: kind === 'exhausted' ? 'exhausted' : 'waiting',
           attempt: kind === 'exhausted' ? 3 : 2, maxAttempts: 3, nextAttemptAt: kind === 'exhausted' ? null : Date.now() + 4_000 } } : {}) }] }
     })))
-    return { generation, operationId, logId: seed.logId, report: diagnostic }
+    return { generation, operationId, logId: seed.logId, report: diagnostic, inputReceipt }
   },
   copyFails(value: boolean) { copyFails = value },
   facts() { const state = useAppStore.getState(); return { copies: [...copies], drafts: state.agentComposerDrafts,
