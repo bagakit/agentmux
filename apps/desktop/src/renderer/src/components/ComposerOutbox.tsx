@@ -64,7 +64,7 @@ export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteract
     }
     if (input.status === 'stopped') return { label: '已停止等待', detail: 'Core 已停止这一代等待，原消息保留。点击发送可重新确认这条消息；不会投递到其他 Run。', busy: false }
     if (input.status === 'admitted') return { label: '输入已确认', detail: '原消息已由 Native 接纳；这不是 Agent 完成任务的回执。', busy: false }
-    if (input.status === 'not-applied') return { label: '原输入未接纳', detail: '原 Native 明确拒绝了这条输入，原消息与回执保留。需要替换时创建一条明确的新消息。', busy: false }
+    if (input.status === 'not-applied') return { label: '原输入未接纳', detail: 'Core 已确认这条原输入未被接纳，原消息与回执保留。需要替换时创建一条明确的新消息。', busy: false }
     return { label: '已保存 · 结果待核实', detail: '原消息已保存，派发或回执仍未确认。这条原操作不会自动重放；可检查原终端与回执。', busy: false }
   }
   if (entry.archived) return { label: entry.confirmed ? '已归档 · 输入已确认' : '已归档', detail: entry.confirmed ? '原输入已由 Core 确认；归档不会撤回输入。可在 History 读取原记录，不能恢复为待发。' : `这条原消息已退出待发队列，不会自动发送。${entry.unconfirmed ? '\n此前是否已输入仍待核实；归档保留原操作，恢复也不会重建或重发。' : ''}${entry.error ? `\n此前记录：${entry.error}` : ''}`, busy: false }
@@ -134,6 +134,7 @@ export function QueuedDeliveryFailure({ entry, copy }: { entry: ComposerQueuedMe
   }, [logId])
   return <MessageDeliveryFailure compact error={original ? { ...original, inputRef: entry.inputReceipt!.ref, waitingObservation: entry.inputReceipt!.control.waiting } : entry.error ?? '投递没有确认完成。'} errorCode={original?.code ?? entry.errorCode}
     logId={logId} log={log?.record.logId === logId ? log : undefined} inputUnconfirmed={entry.unconfirmed}
+    inputReceipt={entry.inputReceipt} inputStopReceipt={entry.inputStopReceipt}
     preparationReason={entry.preparationWait?.reason} copyText={copy ?? (async () => false)} />
 }
 
