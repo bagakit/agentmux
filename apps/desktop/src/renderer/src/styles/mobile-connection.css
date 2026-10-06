@@ -18,7 +18,9 @@
 .phone-connection__link { color:var(--text-3); font-size:var(--fs-meta); }
 .phone-connection__link > summary { width:fit-content; margin:0 auto; padding:4px; cursor:pointer; }
 .phone-connection__link textarea { display:block; width:100%; resize:vertical; margin-top:8px; font:var(--fs-meta)/1.5 var(--font-mono); overflow-wrap:anywhere; }
-.phone-connection__feedback { margin:10px 0 0; color:var(--green); font-size:var(--fs-meta); }
+.phone-connection__feedback { margin:10px 0 0; color:var(--text-2); font-size:var(--fs-meta); }
+.phone-connection__feedback[role='status'] { color:var(--success); }
+.phone-connection__feedback[role='alert'] { color:var(--red-text); }
 .phone-connection__devices { border-top:1px solid var(--line-soft); padding:10px 0 4px; }
 .phone-connection__devices > header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .phone-connection__devices h3 { margin:0; font-size:var(--fs-body); font-weight:550; }

@@ -360,5 +360,5 @@
 .log-turn__id-copy { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 2px; color: inherit; background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer; }
 .log-turn__id-copy:hover { color: var(--text); background: var(--surface-3); }
 .log-turn__id-copy:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
-.log-turn__sender-id[data-copy-state='copied'] .log-turn__id-copy { color: var(--green-text); }
+.log-turn__sender-id[data-copy-state='copied'] .log-turn__id-copy { color: var(--success); }
 .log-turn__id-copy-error { position: absolute; z-index: 1; inset-inline-start: 0; top: 100%; padding: 2px var(--sp-2); white-space: nowrap; color: var(--red-text); background: var(--surface-2); border-radius: var(--radius-sm); font-size: var(--fs-micro); }

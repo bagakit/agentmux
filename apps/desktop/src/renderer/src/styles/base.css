@@ -156,7 +156,7 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .danger-button:disabled { opacity: .5; cursor: default; }
 .field-hint { padding:var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
 .check-pill { max-width: 260px; display: inline-flex; align-items: center; gap:var(--sp-2); padding:var(--sp-1) var(--sp-3); overflow: hidden; border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
-.check-pill--ready { color: var(--green); background: var(--green-bg); }
+.check-pill--ready { color: var(--success); background: var(--success-bg); }
 .check-pill--missing, .check-pill--error { color: var(--red-text); background: var(--red-bg); }
 .check-pill--checking { color: var(--amber); }
 .check-pill--unsupported, .check-pill--check-failed { color: var(--text-2); background: var(--surface-3); }

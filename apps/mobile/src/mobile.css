@@ -42,7 +42,7 @@ button, input { font: inherit; }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
 button { cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; color: inherit; border: 0; }
 button:disabled { opacity: .5; cursor: default; }
-[data-connection='connected'] .mobile-status-dot { background: var(--green); }
+[data-connection='connected'] .mobile-status-dot { background: var(--success); }
 .mobile-goal-panel[hidden] { display: none; }
 .mobile-session-toolbar .mobile-icon-button[aria-pressed='true'] { color: var(--green); background: var(--surface-1); border-radius: var(--radius); }
 .mobile-goal-work { overflow-wrap: anywhere; padding: 8px 12px 16px; }

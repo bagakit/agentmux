@@ -1,0 +1,6 @@
+/* Shared status colors; native observations own the status, hosts own glyph geometry. */
+.wf-ico--running { color: var(--text-2); }
+.wf-ico--completed { color: var(--success); }
+.wf-ico--failed { color: var(--red); }
+.wf-ico--paused { color: var(--amber); }
+.wf-ico--killed { color: var(--text-3); }

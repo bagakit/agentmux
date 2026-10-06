@@ -81,13 +81,8 @@
 .wf-rail { position: relative; display: block; flex: 0 0 auto; width: 72px; height: 10px; overflow: hidden; border: 1px solid var(--line-soft); border-radius: 2px; background: var(--surface-1); background-image: radial-gradient(circle, var(--text-3) 1px, transparent 1.35px); background-size: 4px 4px; }
 .wf-rail__fill { display: block; height: 100%; background: var(--wf-accent); transition: width var(--dur-enter) ease; }
 .wf-ico { flex: 0 0 auto; color: var(--text-3); }
-.wf-ico--running { color: var(--text-2); }
 .wf-streaming-glyph { transform-origin: center; animation: wf-streaming-turn 1.6s linear infinite; }
 @keyframes wf-streaming-turn { to { transform: rotate(360deg); } }
-.wf-ico--completed { color: var(--success); }
-.wf-ico--failed { color: var(--red); }
-.wf-ico--paused { color: var(--amber); }
-.wf-ico--killed { color: var(--text-3); }
 .wf-chev { flex: 0 0 auto; transition: transform var(--dur-fast) ease; }
 [aria-expanded='true'] > .wf-chev { transform: rotate(90deg); }
 .wf-flat-note, .wf-tool-row { min-width: 0; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; color: var(--text-3); font-size: var(--fs-meta); }

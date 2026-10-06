@@ -36,7 +36,8 @@
 .settings-resource-row__text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-meta); }
 .settings-resource-row__status { flex: none; display: flex; align-items: center; gap: var(--sp-2); }
 .settings-resource-row__status > svg { color: var(--green); }
-.settings-resource-row__check { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-meta); color: var(--text-3); white-space: nowrap; background: transparent; }
+.settings-resource-row__check { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-meta); white-space: nowrap; background: transparent; }
+:where(.settings-resource-row__check) { color: var(--text-3); }
 .settings-resource-editor { min-width: 0; min-height: 0; overflow: auto; padding-right: var(--sp-2); scrollbar-gutter: stable; }
 .settings-resource-back { display: none; }
 .settings-resource-workbench .settings-resource-check-tools { flex-direction: row; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-3); }
