@@ -135,6 +135,16 @@ function status(value: unknown, expected?: ReturnType<typeof normalizeAgentSessi
   member(observation.semantic, ['active', 'idle', 'awaiting-input', 'unknown', 'unsupported'])
   member(observation.readiness, ['ready', 'pending', 'unknown']); string(observation.source)
   count(observation.observedAt); bool(observation.stale)
+  if (observation.reason !== undefined) {
+    member(observation.reason, ['activity-stale', 'activity-unconfirmed'])
+    if (observation.semantic !== 'unknown' || observation.process !== 'running') fail()
+  }
+  if (observation.lastKnownActivity !== undefined) {
+    if (observation.reason === undefined) fail()
+    const last = record(observation.lastKnownActivity, ['state', 'source', 'observedAt'])
+    member(last.state, ['working', 'waiting', 'blocked', 'done', 'error'])
+    member(last.source, ['native-hook', 'native-transcript', 'acp']); count(last.observedAt)
+  }
 }
 function role(value: unknown): Record<string, unknown> {
   const binding = record(value, ['role', 'agentSessionId', 'workspacePath', 'providerId', 'registeredAt'])

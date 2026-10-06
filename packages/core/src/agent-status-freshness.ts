@@ -233,6 +233,10 @@ export type AgentObservation = {
    * 用的诚实标注，判据只看 observedAt、与 {@link agentEvidenceStale} 同口径。
    */
   stale: boolean
+  /** Why current activity is unknown; silence does not prove a task or request timed out. */
+  reason?: 'activity-stale' | 'activity-unconfirmed'
+  /** Historical activity only. It never grants current work, completion or input eligibility. */
+  lastKnownActivity?: { state: Exclude<AgentSemanticState, 'unknown'>; source: AgentMuxEvidenceSource; observedAt: number }
 }
 
 /**
@@ -255,6 +259,8 @@ export function observeAgent(
   input: {
     process: AgentMuxRunState
     status: Pick<AgentStatus, 'state' | 'source' | 'observedAt'>
+    /** Original native fact, retained when a client has decayed its display status. */
+    retainedStatus?: AgentStatus | undefined
     timelineCapability: AgentCapabilities['timeline']
     awaitingRequest: boolean
     terminalCapabilityUnverified: boolean
@@ -289,13 +295,24 @@ export function observeAgent(
     : input.awaitingRequest || input.terminalCapabilityUnverified
       ? 'pending'
       : 'ready'
+  const current = currentAgentSemanticStatus(input.retainedStatus) ?? input.status
+  const retained = current.state === 'working' ? current : input.retainedStatus ?? input.status
+  const reason = running && semantic === 'unknown'
+    ? isAgentActivityStatusSource(current.source) && semanticStatusStale(current, now)
+      ? 'activity-stale' as const : 'activity-unconfirmed' as const
+    : undefined
+  const lastKnownActivity = reason && isAgentActivityStatusSource(retained.source)
+    && (retained.state === 'working' || retained.state === 'waiting' || retained.state === 'blocked' || retained.state === 'done' || retained.state === 'error')
+    ? { state: retained.state, source: retained.source, observedAt: retained.observedAt } : undefined
   return {
     process: input.process,
     semantic,
     readiness,
     source: input.status.source,
     observedAt: input.status.observedAt,
-    stale: agentEvidenceStale(input.status, now)
+    stale: agentEvidenceStale(input.status, now),
+    ...(reason ? { reason } : {}),
+    ...(lastKnownActivity ? { lastKnownActivity } : {})
   }
 }
 

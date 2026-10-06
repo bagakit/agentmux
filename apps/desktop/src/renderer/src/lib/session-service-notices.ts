@@ -5,6 +5,7 @@ import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, hookIngressServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from './service-window-notice'
 import type { ServiceNoticeItem } from './use-service-notices'
 import { agentLifecycleFailureNotice, lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './agent-lifecycle-feedback'
+import { observeAgentSession, activityObservationPresentation } from './agent-observation'
 
 /** Both inboxes project the same current owners; reading a notice never settles its cause. */
 export function sessionServiceNotices(session: SessionSnapshot | undefined, queue: readonly AgentSteerQueueEntry[] = [], sendingId?: string,
@@ -30,6 +31,21 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
     } }
   })
   const identity = [session.hostId, session.id, session.control.run.runId]
+  const activity = activityObservationPresentation(observeAgentSession(session, Date.now()), observationAvailable && session.status.state !== 'disconnected')
+  if (activity) notices.push({ id: 'activity-observation', occurrence: JSON.stringify(identity),
+    cause: activity.detail, notice: { kind: 'indeterminate', notice: {
+      step: activity.label, mode: activity.detail,
+      restore: 'Open the original Agent to inspect its current work. A new native activity observation updates this state; no message is replayed.'
+    } } })
+  const nativeSource = session.nativeSourceObservation
+  if (nativeSource && nativeSource.run.runId === session.control.run.runId) notices.push({ id: 'native-source',
+    occurrence: JSON.stringify(identity), cause: JSON.stringify([nativeSource.state, nativeSource.reason]), observedAt: nativeSource.observedAt,
+    notice: { kind: 'indeterminate', notice: {
+      step: nativeSource.state === 'changed' ? 'Native conversation source changed'
+        : nativeSource.state === 'ambiguous' ? 'Native conversation source is ambiguous' : 'Native conversation source is unconfirmed',
+      mode: `${nativeSource.reason}. This source observation is separate from current activity. The original Session and available input are kept.`,
+      restore: 'Inspect the original Agent and refresh its native history to retry source confirmation.'
+    } } })
   const receipt = session.completedInteractionResponse
   if (receipt) notices.push({ id: 'interaction-receipt',
     occurrence: JSON.stringify([...identity, receipt.requestId, receipt.operationId]),

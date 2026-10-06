@@ -3303,6 +3303,7 @@ export class AgentMuxClient {
     const observation = observeAgent({
       process: projectedRun.state,
       status,
+      retainedStatus: session.semanticStatus,
       timelineCapability: capabilities.timeline,
       awaitingRequest: agentInteractionActiveRequest(session.pendingInteraction) !== undefined,
       terminalCapabilityUnverified: session.terminalCapability !== undefined
