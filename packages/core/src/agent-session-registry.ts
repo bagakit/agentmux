@@ -132,6 +132,17 @@ export class AgentMuxAgentSessionRegistry {
     return [...this.sessions.values()].map((session) => structuredClone(session))
   }
 
+  /** Existing metadata turns only; Native lifecycle waits do not enter this queue. */
+  pendingMetadataIds(): readonly string[] { return [...this.writeQueues.keys()] }
+
+  /** Take one exact read/publication cut before a later metadata turn may run. */
+  async readMetadata(agentSessionId: string, consume: (session: AgentMuxStoredAgentSession | null) => void, signal?: AbortSignal): Promise<void> {
+    await this.enqueue(agentSessionId, async readSignal => {
+      const session = await this.store.readMetadata(agentSessionId)
+      readSignal.throwIfAborted(); consume(session)
+    }, signal)
+  }
+
   /** Current public control facts, without cloning retained business bodies. */
   listPublic(): AgentMuxAgentSession[] {
     return [...this.sessions.values()].map(cloneSession)
@@ -313,34 +324,36 @@ export class AgentMuxAgentSessionRegistry {
     session: AgentMuxStoredAgentSession | null
   ): Promise<AgentMuxStoredAgentSession | null> {
     const normalized = session ? normalizeStoredAgentSession(session) : null
-    await this.persist(normalized, () => this.store.commitLifecycle(reservation, normalized))
-    const previous = this.sessions.get(reservation.agentSessionId)
-    if (previous) this.forget(previous)
-    if (!normalized) {
-      if (reservation.kind === 'stop' && previous) {
-        for (const run of [...previous.retiredRuns, previous.run]) {
-          this.unboundRetiredRuns.add(run.runId)
-        }
-        const retired = (await this.store.loadRetiredAgentSessions()).find(
-          (session) => session.agentSessionId === reservation.agentSessionId
-        )
-        if (!retired) {
-          throw new AgentMuxError(
-            'Stop lifecycle did not persist Agent Session retirement.',
-            'INVALID_AGENT_SESSION_STORE'
+    return await this.enqueue(reservation.agentSessionId, async () => {
+      await this.persist(normalized, () => this.store.commitLifecycle(reservation, normalized))
+      const previous = this.sessions.get(reservation.agentSessionId)
+      if (previous) this.forget(previous)
+      if (!normalized) {
+        if (reservation.kind === 'stop' && previous) {
+          for (const run of [...previous.retiredRuns, previous.run]) {
+            this.unboundRetiredRuns.add(run.runId)
+          }
+          const retired = (await this.store.loadRetiredAgentSessions()).find(
+            (session) => session.agentSessionId === reservation.agentSessionId
           )
+          if (!retired) {
+            throw new AgentMuxError(
+              'Stop lifecycle did not persist Agent Session retirement.',
+              'INVALID_AGENT_SESSION_STORE'
+            )
+          }
+          this.retiredAgentSessions.set(retired.agentSessionId, structuredClone(retired))
         }
-        this.retiredAgentSessions.set(retired.agentSessionId, structuredClone(retired))
+        this.sessions.delete(reservation.agentSessionId)
+        return null
       }
-      this.sessions.delete(reservation.agentSessionId)
-      return null
-    }
-    if (reservation.kind === 'reopen') {
-      this.retiredAgentSessions.delete(normalized.agentSessionId)
-      this.unboundRetiredRuns.delete(reservation.expectedRetirement.run.runId)
-    }
-    this.remember(normalized)
-    return this.get(normalized.agentSessionId)
+      if (reservation.kind === 'reopen') {
+        this.retiredAgentSessions.delete(normalized.agentSessionId)
+        this.unboundRetiredRuns.delete(reservation.expectedRetirement.run.runId)
+      }
+      this.remember(normalized)
+      return this.get(normalized.agentSessionId)
+    })
   }
 
   async put(

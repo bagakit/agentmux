@@ -64,8 +64,11 @@ export type AgentMuxHostedClient = DelegatedMethods & {
 }
 
 export type AgentMuxRuntimeOwnerIdentity = {
-  runtimeId: string; ownerInstanceId: string; protocolVersion: 1; processId: number
-  ctxmux: AgentMuxRuntimeIdentity; availability: 'connected' | 'unverified'
+  runtimeId: string; ownerInstanceId: string; protocolVersion: 2; processId: number
+  /** Current publicly confirmed Native identity. null is unconfirmed, never a dead Run fact. */
+  ctxmux: AgentMuxRuntimeIdentity | null
+  /** Semantic control-owner observation, independent of Native readiness. */
+  availability: 'connected' | 'unverified'
 }
 export type AgentMuxRuntimeFence = Pick<AgentMuxRuntimeOwnerIdentity, 'runtimeId' | 'ownerInstanceId'>
 export type AgentMuxHostedForwardRpc = <M extends import('./public-rpc.js').AgentMuxRpcMethod>(
@@ -81,7 +84,7 @@ export type AgentMuxHostedSubscribeRpc = <M extends import('./public-rpc.js').Ag
 
 export type AgentMuxHostedBootstrap = {
   owner: AgentMuxRuntimeOwnerIdentity
-  identity: AgentMuxRuntimeIdentity
+  connection: Extract<AgentMuxClientEvent, { type: 'connection-state' }> | null
   storePath: string | null
   hostProcessId: number
   catalog: AgentCatalogEntry[]
