@@ -1610,9 +1610,9 @@ export class AgentMuxRpcService {
         if (owners.length !== 1) throw new AgentMuxError('The exact conversation Host is unavailable or ambiguous.', 'RUNTIME_UNAVAILABLE')
         // Hosted Clients delegate this same reader to the original semantic Host.
         const observer = await owners[0]!.client.observeSessionHistory(input.agentSessionId, observation => {
-          void emit({ type: 'snapshot', data: { ...input, observation } })
+          void Promise.resolve().then(() => emit({ type: 'snapshot', data: { ...input, observation } })).catch(dispose).catch(() => {})
         }, { signal: controller.signal })
-        const ended = () => { void Promise.resolve(emit({ type: 'end', data: { reason: 'source-observation-released' } })).finally(dispose).catch(() => {}) }
+        const ended = () => { void Promise.resolve().then(() => emit({ type: 'end', data: { reason: 'source-observation-released' } })).finally(dispose).catch(() => {}) }
         observer.closed?.addEventListener('abort', ended, { once: true })
         initial = { ...input, source: observer.source }
         cleanup = () => { observer.closed?.removeEventListener('abort', ended); observer.dispose() }
