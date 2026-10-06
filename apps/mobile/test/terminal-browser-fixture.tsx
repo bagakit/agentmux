@@ -20,6 +20,7 @@ const encoder = new TextEncoder()
 let delayCallbacks = false, resizeRevision = 0, cols = 80, rows = 24, parsedWrites = 0
 let terminal: Terminal | null = null
 let inputCursor = 0, loseInputReceipt = false, explicitControlGesture = false
+let clipboardFailure = false, replayFailure = false
 const originalOpen = Terminal.prototype.open, originalWrite = Terminal.prototype.write
 Terminal.prototype.open = function (...args) { terminal = this; return originalOpen.apply(this, args) }
 Terminal.prototype.write = function (data, callback) {
@@ -48,7 +49,11 @@ const finite = {
   async observeSessionHistory() { return { source: { providerId: 'codex', nativeSessionId: 'private-native' }, dispose() {} } },
   onEvent(listener: (event: AgentMuxClientEvent) => void) { listeners.add(listener); return () => listeners.delete(listener) },
   async reattachAgent(...args: unknown[]) { calls.push({ method: 'reattachAgent', args }); return { session, attachment: attachment() } },
-  async readRunReplay(...args: unknown[]) { calls.push({ method: 'readRunReplay', args }); return attachment() },
+  async readRunReplay(...args: unknown[]) {
+    calls.push({ method: 'readRunReplay', args })
+    if (replayFailure) throw new Error('Private fixture retained-output observation unavailable')
+    return attachment()
+  },
   async releaseRunAttachment(...args: unknown[]) { calls.push({ method: 'releaseRunAttachment', args }) },
   async writeAgent(input: AgentMuxAgentWriteInput) {
     if (document.querySelector('.mobile-terminal')?.getAttribute('data-control') !== 'control' && !explicitControlGesture) {
@@ -80,7 +85,10 @@ const client = new Proxy(finite, { get(target, key: keyof typeof finite) {
   return (..._args: unknown[]) => { forbidden.push(String(key)); throw new Error(`Passive viewer called ${String(key)}`) }
 } }) as unknown as AgentMuxHostedClient
 let root = createRoot(document.getElementById('root')!)
-const platform = createBrowserPlatform({ clipboard: { async writeText(text) { copies.push(text) } } })
+const platform = createBrowserPlatform({ clipboard: { async writeText(text) {
+  if (clipboardFailure) throw new Error('Private fixture clipboard write unavailable')
+  copies.push(text)
+} } })
 const connection = { state: 'connected' as const, message: 'Private test fixture; authenticated Host and native devices are not exercised.' }
 const render = (visible = true, online = true, port = client, selectedId = session.agentSessionId) => root.render(<div className="mobile-app"><header className="mobile-header"><div className="mobile-brand">AgentMux</div><span>私有终端测试</span></header><div className="mobile-context">fixture / 原会话输出</div><main className="mobile-terminal-panel" hidden={!visible}>
   <MobileTerminalViewer client={online ? port : null} agentSessionId={selectedId} connection={online ? connection : { state: 'disconnected', message: '输出连接中断；原画面保留，Run 状态未知。' }} platform={platform} visible={visible} />
@@ -394,6 +402,13 @@ export async function renderControlVisualFixture(mode: 'watch' | 'control' | 'un
 }
 
 export function probeFacts() { return { calls, inputReceipts, forbidden, copies, notifications, parsedWrites, listeners: listeners.size } }
+export function setClipboardFailure(failed: boolean) { clipboardFailure = failed }
+export function setReplayFailure(failed: boolean) { replayFailure = failed }
+export function selectTerminalText(selected = true) {
+  if (selected) terminal!.select(0, 0, 11)
+  else terminal!.clearSelection()
+  return terminal!.getSelection()
+}
 
 
 /** Actual maintained xterm, retained Viewer and original controller input bytes. */
