@@ -1,0 +1,56 @@
+import type { ThemeDocument } from './schema.js'
+
+/* Analog instruments and warm archival paper; identity marks remain with their owners. */
+export const RETRO_THEME: ThemeDocument = {
+  format: 'agentmux.theme', version: 1, id: 'retro-future', name: 'Retro Future',
+  description: 'Warm paper, deep navy and amber controls, with cyan focus and rounded analog instruments.',
+  iconStyle: { strokeWidth: 1.75, linecap: 'round', linejoin: 'round' },
+  icons: {
+    'action.close': { kind: 'paths', paths: [{ d: 'M7 7 L17 17 M17 7 L7 17' }] },
+    'action.cancel': { kind: 'paths', paths: [{ d: 'M7 7 L17 17 M17 7 L7 17' }] },
+    'action.create': { kind: 'paths', paths: [{ d: 'M12 5 L12 19 M5 12 L19 12' }] },
+    'action.confirm': { kind: 'paths', paths: [{ d: 'M5 12 L10 17 L19 7' }] },
+    'action.remove': { kind: 'paths', paths: [{ d: 'M5 7 L19 7 M9 7 L9 4 L15 4 L15 7 M7 7 L8 20 L16 20 L17 7 M10 11 L10 16 M14 11 L14 16' }] },
+    'action.search': { kind: 'paths', paths: [{ d: 'M16 10 A6 6 0 1 1 4 10 A6 6 0 1 1 16 10 M15 15 L21 21 M7 8 L10 6' }] },
+    'action.copy': { kind: 'paths', paths: [{ d: 'M9 8 L18 8 Q20 8 20 10 L20 18 Q20 20 18 20 L10 20 Q8 20 8 18 L8 10 Q8 8 9 8 M15 8 L15 5 Q15 3 13 3 L5 3 Q3 3 3 5 L3 13 Q3 15 5 15 L8 15' }] },
+    'action.save': { kind: 'paths', paths: [{ d: 'M5 4 L17 4 L20 7 L20 18 Q20 20 18 20 L6 20 Q4 20 4 18 L4 6 Q4 4 5 4 M8 4 L8 10 L16 10 L16 4 M8 20 L8 15 Q8 13 10 13 L14 13 Q16 13 16 15 L16 20' }] },
+    'action.edit': { kind: 'paths', paths: [{ d: 'M5 16 L16 5 Q17 4 18 5 L19 6 Q20 7 19 8 L8 19 L4 20 Z M14 7 L17 10' }] },
+    'action.refresh': { kind: 'paths', paths: [{ d: 'M20 9 A8 8 0 1 0 20 15 M20 4 L20 9 L15 9' }] },
+    'action.upload': { kind: 'paths', paths: [{ d: 'M5 17 L5 19 Q5 21 7 21 L17 21 Q19 21 19 19 L19 17 M12 16 L12 4 M7 9 L12 4 L17 9' }] },
+    'action.download': { kind: 'paths', paths: [{ d: 'M5 17 L5 19 Q5 21 7 21 L17 21 Q19 21 19 19 L19 17 M12 3 L12 15 M7 10 L12 15 L17 10' }] },
+    'action.send': { kind: 'paths', paths: [{ d: 'M4 5 L21 12 L4 19 L7 12 Z M7 12 L17 12' }] },
+    'action.start': { kind: 'paths', paths: [{ d: 'M7 5 Q7 4 8 5 L19 11 Q20 12 19 13 L8 19 Q7 20 7 19 Z' }] },
+    'action.stop': { kind: 'paths', paths: [{ d: 'M7 5 L17 5 Q19 5 19 7 L19 17 Q19 19 17 19 L7 19 Q5 19 5 17 L5 7 Q5 5 7 5' }] },
+    'action.open-external': { kind: 'paths', paths: [{ d: 'M14 4 L20 4 L20 10 M20 4 L10 14 M10 5 L6 5 Q4 5 4 7 L4 18 Q4 20 6 20 L17 20 Q19 20 19 18 L19 14' }] },
+    'object.terminal': { kind: 'paths', paths: [{ d: 'M5 4 L19 4 Q21 4 21 6 L21 18 Q21 20 19 20 L5 20 Q3 20 3 18 L3 6 Q3 4 5 4 M6 8 L10 12 L6 16 M13 16 L18 16' }] },
+    'object.agent': { kind: 'paths', paths: [{ d: 'M7 7 L17 7 Q20 7 20 10 L20 17 Q20 20 17 20 L7 20 Q4 20 4 17 L4 10 Q4 7 7 7 M12 7 L12 3 M10 3 L14 3 M8 12 L8 13 M16 12 L16 13 M9 17 Q12 19 15 17' }] },
+    'object.file': { kind: 'paths', paths: [{ d: 'M7 3 L14 3 L19 8 L19 19 Q19 21 17 21 L7 21 Q5 21 5 19 L5 5 Q5 3 7 3 M14 3 L14 8 L19 8 M8 13 L16 13 M8 17 L13 17' }] },
+    'object.folder': { kind: 'paths', paths: [{ d: 'M5 5 L9 5 L12 8 L19 8 Q21 8 21 10 L21 18 Q21 20 19 20 L5 20 Q3 20 3 18 L3 7 Q3 5 5 5' }] },
+    'object.browser': { kind: 'paths', paths: [{ d: 'M20 12 A8 8 0 1 1 4 12 A8 8 0 1 1 20 12 M4 12 L20 12 M12 4 Q6 12 12 20 Q18 12 12 4' }] },
+    'object.goal': { kind: 'paths', paths: [{ d: 'M20 12 A8 8 0 1 1 4 12 A8 8 0 1 1 20 12 M16 12 A4 4 0 1 1 8 12 A4 4 0 1 1 16 12 M12 12 L18 6 M17 3 L18 6 L21 7' }] },
+    'status.completed': { kind: 'paths', paths: [{ d: 'M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M7 12 L11 16 L17 8' }] },
+    'status.failed': { kind: 'paths', paths: [{ d: 'M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M8 8 L16 16 M16 8 L8 16' }] },
+    'status.paused': { kind: 'paths', paths: [{ d: 'M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M9 8 L9 16 M15 8 L15 16' }] },
+    'status.running': { kind: 'paths', paths: [{ d: 'M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M12 8 L16 12 L12 16 L8 12 Z' }] },
+    'status.working': { kind: 'paths', paths: [{ d: 'M3 13 L7 13 L10 6 L14 18 L17 11 L21 11' }] },
+    'status.unknown': { kind: 'paths', paths: [{ d: 'M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M9 8 Q9 5 12 5 Q16 5 15 9 Q15 10 12 12 L12 14 M12 17 L12 18' }] },
+    'status.warning': { kind: 'paths', paths: [{ d: 'M11 4 Q12 2 13 4 L21 19 Q22 21 20 21 L4 21 Q2 21 3 19 Z M12 9 L12 14 M12 18 L12 18.1' }] },
+    'status.info': { kind: 'paths', paths: [{ d: 'M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M12 10 L12 17 M12 7 L12 7.1' }] },
+  },
+  variants: {
+    dark: { font: 'humanist', radius: 6, elevation: 'soft', colors: {
+      background: '#101c29', surface0: '#152333', surface1: '#1c2d3e', surface2: '#26394b', surface3: '#334757',
+      line: '#4c6070', lineSoft: '#2d4052', text: '#eee9db', textMuted: '#c6c9c4', textSubtle: '#abb7bf',
+      action: '#e6a26d', actionHover: '#f1b785', success: '#9ecaa2', warning: '#e8c977', danger: '#ee9484',
+      info: '#79c4c0', special: '#b9aad5', focus: '#79c4c0', neutral1: '#3f5260', neutral2: '#677d89',
+      neutral3: '#a0afb6',
+    } },
+    light: { font: 'humanist', radius: 6, elevation: 'soft', colors: {
+      background: '#f4efe3', surface0: '#fffaf0', surface1: '#eee7d7', surface2: '#e3ddcd', surface3: '#d9d9c8',
+      line: '#b5b6a5', lineSoft: '#d3cdbd', text: '#233442', textMuted: '#485965', textSubtle: '#4f5e68',
+      action: '#a14e24', actionHover: '#843b18', success: '#3c6d4c', warning: '#825c13', danger: '#ac4238',
+      info: '#246b70', special: '#69518c', focus: '#246b70', neutral1: '#c6c6b5', neutral2: '#8d978f',
+      neutral3: '#5f746f',
+    } },
+  }
+}
