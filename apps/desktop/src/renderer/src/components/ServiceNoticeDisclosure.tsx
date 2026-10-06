@@ -79,8 +79,7 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
   useEffect(() => {
     if (!open) return
     positionDetails()
-    const surface = trigger.current?.closest<HTMLElement>('[data-workbench-region-id], .agent-surface, .browser-surface, .terminal-view, .pane-group, .workspace-workbench')
-    if (!surface) return
+    const surface = trigger.current?.closest<HTMLElement>('[data-workbench-region-id], .agent-surface, .browser-surface, .terminal-view, .pane-group, .workspace-workbench') ?? document.documentElement
     const observer = new ResizeObserver(positionDetails)
     observer.observe(surface)
     return () => observer.disconnect()
