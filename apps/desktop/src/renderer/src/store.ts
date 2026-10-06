@@ -5424,6 +5424,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
 
     if (request.operation === 'open.terminal') {
+      if (signal?.aborted) throw controlCancellation(signal)
       const pendingId = `terminal-launch:${crypto.randomUUID()}`
       const pending: TerminalWorkbenchSurface = {
         regionId: plan.regionId, kind: 'terminal', phase: 'launching', workspaceId: workspace.id, sessionId: pendingId
@@ -5431,35 +5432,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       plan.tabs[plan.tabId] = replaceWorkbenchRegion(plan.tabs[plan.tabId]!, plan.regionId, pending)
       set({ ...(plan.kind === 'launcher' ? {} : { activeWorkspaceId: workspace.id }),
         mainSurface: 'workbench', tabs: plan.tabs, layouts: plan.layouts })
-      const cancel = (): void => rollback(pending)
-      signal?.addEventListener('abort', cancel, { once: true })
       let session: SessionSnapshot | null = null
-      const cleanup = async (primary: Error): Promise<never> => {
-        if (session) {
-          try { await api.sessions.stop(session.control) }
-          catch (cleanupError) {
-            set((current) => ({ sessions: [...current.sessions.filter((item) => item.id !== session!.id), session!] }))
-            throw controlFailure('LAUNCH_CLEANUP_FAILED', `${primary.message} Cleanup failed: ${presentError(cleanupError)}`, {
-              cause: new AggregateError([primary, cleanupError])
-            })
-          }
-        }
-        throw primary
-      }
       try {
-        session = await api.sessions.launchTerminal({
+        const result = await api.sessions.launchTerminal({
           hostId: workspace.hostId,
           workspacePath: workspace.path,
           createOperationId: request.requestId,
           ...(request.shellCommand === undefined ? {} : { shellCommand: request.shellCommand })
         })
-        if (session.kind !== 'terminal' || session.hostId !== workspace.hostId || session.workspacePath !== workspace.path) {
-          await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Terminal launch result does not match its request.'))
+        if (result.kind !== 'terminal' || result.hostId !== workspace.hostId || result.workspacePath !== workspace.path) {
+          throw controlFailure('LAUNCH_RESULT_MISMATCH', 'Terminal launch result does not match its request.')
         }
-        if (signal?.aborted) await cleanup(controlCancellation(signal))
+        session = result
         const owner = findWorkbenchRegion(get().tabs, plan.regionId)
-        if (!ownsSessionLaunch(owner?.surface, 'terminal', pendingId)) {
-          await cleanup(controlFailure('CONTROL_OWNER_LOST', 'Control Region owner disappeared during Terminal launch.'))
+        if (!ownsSessionLaunch(owner?.surface, 'terminal', pendingId) ||
+          owner && !workbenchViewCloseAllowsView(get().closingWorkbenchViews, owner.tab.id)) {
+          throw controlFailure('CONTROL_OWNER_LOST', 'Control Region owner disappeared during Terminal launch.')
         }
         const committed = session
         set((current) => {
@@ -5475,6 +5463,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           }
           return reduceSessionLaunchAttached({ ...current, tabs }, plan.regionId, committed)
         })
+        if (signal?.aborted) throw controlCancellation(signal)
         // 与 agent 那条路共用同一处落点解析。此前这里返回 `plan.tabId`——上面的两道 owner 闸都只认
         // surface 身份，没有一道比较过 Tab id，于是启动期间这一格被 promote 走时，回执交回的是旧 Tab。
         const landing = resolveSpatialCommit(get().tabs, plan.regionId, { kind: 'terminal', sessionId: committed.id })
@@ -5489,10 +5478,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           }
         }
       } catch (error) {
-        rollback(pending)
+        // Ending a reader or rejecting its target cannot stop an admitted Run.
+        // Keep its confirmed Session without reviving a closed or replaced view.
+        const confirmed = session
+        if (confirmed) set(current => current.sessions.some(item => item.id === confirmed.id)
+          ? current : { sessions: [...current.sessions, confirmed] })
+        // Missing replies are unknown; only the creation owner can confirm non-application.
+        else if (sessionLaunchFailure(error).controlFailure.disposition === 'not_applied') rollback(pending)
         throw error
-      } finally {
-        signal?.removeEventListener('abort', cancel)
       }
     }
 
