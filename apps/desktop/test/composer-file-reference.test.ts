@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   appendFileReferences,
   appendNamedFileReference,
+  appendSelectedFileReferences,
   workspaceRelativePath
 } from '@agentmux/client-ui/composer-file-reference'
 import { expandSemanticReferences, parseComposerDraft } from '@agentmux/client-ui/composer-semantic-reference'
@@ -48,4 +49,32 @@ describe('composer file references', () => {
     expect(documentDraft(draftDocument(draft))).toBe(draft)
     expect(expandSemanticReferences(draft)).toBe('请阅读 @' + path + ' ')
   })
+})
+
+it('uses named references only for explicit selection and preserves every original expanded path', () => {
+  const workspace = _hygiene_fixturePath('selected/workspace')
+  const first = workspace + '/src/a [draft].txt', outside = _hygiene_fixturePath('outside/a [draft].txt')
+  const draft = appendSelectedFileReferences('Read', [first, outside], workspace)
+  const parts = parseComposerDraft(draft).filter(part => 'reference' in part)
+  expect(parts).toHaveLength(2)
+  expect(parts.every(part => 'reference' in part && part.reference.label.endsWith('.txt'))).toBe(true)
+  expect(documentDraft(draftDocument(draft))).toBe(draft)
+  expect(expandSemanticReferences(draft)).toBe('Read @src/a [draft].txt @' + outside + ' ')
+  expect(appendSelectedFileReferences('unchanged', [], workspace)).toBe('unchanged')
+})
+
+it('keeps an app-owned pasted image as its original node while other selected files use the existing codec', () => {
+  const path = _hygiene_fixturePath('original-home/.agentmux/pasted/original.png')
+  const draft = appendSelectedFileReferences('', [path, _hygiene_fixturePath('ordinary/image.png')])
+  const doc = draftDocument(draft)
+  expect(doc.content![0]!.content?.map(node => node.type)).toEqual(['pastedImage', 'text', 'toolReference', 'text'])
+  expect(documentDraft(doc)).toBe(draft)
+})
+
+it('keeps a selected reference parsable when label cleanup leaves no display characters', () => {
+  const path = _hygiene_fixturePath('special/[]')
+  const draft = appendNamedFileReference('', path, '[]')
+  expect(parseComposerDraft(draft)).toContainEqual(expect.objectContaining({ reference: expect.objectContaining({ kind: 'file', reference: '@' + path }) }))
+  expect(documentDraft(draftDocument(draft))).toBe(draft)
+  expect(expandSemanticReferences(draft)).toBe('@' + path + ' ')
 })
