@@ -1072,6 +1072,16 @@ export type AgentSessionUserMessage = {
   deliveryStatus?: 'complete' | 'unverified' | 'failed'
 }
 
+/** Provider machine plan; this is a native admission, never a PTY byte receipt. */
+export type AgentNativePromptInputPlan = Readonly<{
+  kind: 'native-rpc'
+  protocolId: string
+  sourceId: string
+  actorId: string
+  threadId: string
+  expectedTurnId: string
+}>
+
 export type AgentMuxAgentSession = {
   kind: 'agent'
   agentSessionId: string
@@ -1108,8 +1118,6 @@ export type AgentMuxAgentSession = {
     completionId?: string
     futureIntent?: AgentFuturePromptOccurrence
     operationId: string
-    startByte: number
-    endByte: number
     /** Original native output boundary retained for passive future-message idle confirmation. */
     outputCursorBytes?: number
     /** Frozen before dispatch; missing input facts are unknown, never reconstructed. */
@@ -1117,7 +1125,7 @@ export type AgentMuxAgentSession = {
       run: AgentMuxRunRef
       ownerInstanceId: string
       prompt: string
-      plan: AgentPromptInputPlan
+      plan: AgentPromptInputPlan | AgentNativePromptInputPlan
       execution?: AgentPromptExecution
       /** Producer facts frozen with the first wire; tags in user text never establish these. */
       message?: AgentPromptMessageContent
@@ -1127,7 +1135,11 @@ export type AgentMuxAgentSession = {
     acknowledged?: boolean
     notApplied?: boolean
     uncertainTurn?: boolean
-  }
+  } & (
+    { transport?: 'pty'; startByte: number; endByte: number; native?: never } |
+    { transport: 'native'; startByte?: never; endByte?: never;
+      native: { plan: AgentNativePromptInputPlan; outcome: 'claimed' | 'admitted' | 'not-applied' | 'unknown'; turnId?: string; errorCode?: number } }
+  )
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
   terminalPromptDelivery?: AgentTerminalPromptDeliveryState
   terminalOutputChannel?: AgentTerminalOutputChannelState

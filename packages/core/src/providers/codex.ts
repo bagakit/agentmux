@@ -9,6 +9,8 @@ import { inspectCodexHookActivation } from './codex-hook-activation.js'
 import { isAbsolute } from 'node:path'
 import { join, resolve } from 'node:path'
 import { AgentMuxError } from '../errors.js'
+import { prepareCodexNativePromptInput } from './codex-native-prompt.js'
+import { codexMainNativeRecord } from './codex-native-record-role.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { CODEX_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
@@ -193,6 +195,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     verifyPromptExecutionTransport,
     preparePromptExecutionTransport: createCodexPromptTransportPreparation(verifyPromptExecutionTransport),
     readPromptExecutionEvidence: readCodexPromptExecutionEvidence,
+    prepareNativePromptInput: prepareCodexNativePromptInput,
     observeSessionStatus: observeCodexSessionStatus,
     planPromptInput: (prompt, context) => ({
       kind: 'render-then-submit',
@@ -206,7 +209,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     interaction,
     prepareInteractionResponse: createCodexInteractionResponsePreparation(interaction.planResponse),
     hook: CODEX_HOOKS,
-    discoverNativeSession: context => discoverAppServerNativeSession(context, 'codex'),
+    discoverNativeSession: context => discoverAppServerNativeSession(context, 'codex', codexMainNativeRecord),
     listNativeSessions: listCodexNativeSessions,
     assertNativeResumeSource: assertCodexNativeResumeSource,
     readSessionHistoryPage: context => context.transcriptPath ? readCodexSavedSessionHistoryPage(context) : readAppServerSessionHistoryPage(context),

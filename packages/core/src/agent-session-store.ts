@@ -1265,7 +1265,7 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
     }
     return value
   }
-  let input: AgentPromptInputPlan
+  let input: AgentPromptInputPlan | import('./types.js').AgentNativePromptInputPlan
   if (plan.kind === 'single-phase') input = { kind: plan.kind, data: bytes(plan.data) }
   else if (plan.kind === 'render-then-submit') input = {
     kind: plan.kind, payload: bytes(plan.payload), renderedText: bytes(plan.renderedText), submit: bytes(plan.submit),
@@ -1275,6 +1275,7 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
         ...(prepare.refresh === undefined ? {} : { refresh: bytes(prepare.refresh) }) }
     })() })
   }
+  else if (plan.kind === 'native-rpc') input = nativePromptPlan(plan)
   else throw new AgentMuxError('Frozen prompt input plan is invalid.', 'INVALID_AGENT_SESSION_STORE')
   return { run: runRef(source.run), ownerInstanceId: string(source.ownerInstanceId, 'promptCompletionAdmission.intent.ownerInstanceId'),
     prompt: bytes(source.prompt), plan: input,
@@ -1295,6 +1296,15 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
         ...(message.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(message.sourceChannel) })
       }
     })() }) }
+}
+
+function nativePromptPlan(value: unknown): import('./types.js').AgentNativePromptInputPlan {
+  const plan = record(value, 'native prompt plan')
+  if (plan.kind !== 'native-rpc' || Object.keys(plan).some(key => !['kind', 'protocolId', 'sourceId', 'actorId', 'threadId', 'expectedTurnId'].includes(key))) {
+    throw new AgentMuxError('Invalid native prompt plan.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  return { kind: 'native-rpc', protocolId: string(plan.protocolId, 'native protocol contract'), sourceId: string(plan.sourceId, 'native input source'), actorId: string(plan.actorId, 'native input actor'),
+    threadId: string(plan.threadId, 'native input thread'), expectedTurnId: string(plan.expectedTurnId, 'native input expected turn') }
 }
 
 /** Public and durable Session facts share the same validation owner. */
@@ -1397,9 +1407,28 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
         }),
     ...(source.promptCompletionAdmission === undefined ? {} : { promptCompletionAdmission: (() => {
       const admission = record(source.promptCompletionAdmission, 'promptCompletionAdmission')
-      const startByte = timestamp(admission.startByte, 'promptCompletionAdmission.startByte')
-      const endByte = positiveInteger(admission.endByte, 'promptCompletionAdmission.endByte')
-      if (endByte <= startByte) throw new AgentMuxError('Invalid prompt input range.', 'INVALID_AGENT_SESSION_STORE')
+      const transport = (() => {
+        if (admission.transport === 'native') {
+          if (admission.startByte !== undefined || admission.endByte !== undefined || admission.frameRefresh !== undefined || admission.uncertainTurn !== undefined) {
+            throw new AgentMuxError('Native admission cannot contain PTY input facts.', 'INVALID_AGENT_SESSION_STORE')
+          }
+          const native = record(admission.native, 'native input admission'), plan = nativePromptPlan(native.plan)
+          const intent = promptInputIntent(admission.intent)
+          if (admission.submissionId === undefined || admission.operationId !== admission.submissionId || intent.message === undefined ||
+              !['claimed', 'admitted', 'not-applied', 'unknown'].includes(String(native.outcome)) || JSON.stringify(intent.plan) !== JSON.stringify(plan) ||
+              (native.outcome === 'admitted' ? admission.acknowledged !== true || native.turnId !== plan.expectedTurnId : admission.acknowledged === true) ||
+              (native.outcome === 'not-applied') !== (admission.notApplied === true)) throw new AgentMuxError('Invalid native admission outcome.', 'INVALID_AGENT_SESSION_STORE')
+          return { transport: 'native' as const, native: { plan, outcome: native.outcome as 'claimed' | 'admitted' | 'not-applied' | 'unknown',
+            ...(native.turnId === undefined ? {} : { turnId: string(native.turnId, 'native admitted turn') }),
+            ...(native.errorCode === undefined ? {} : { errorCode: (() => { if (!Number.isSafeInteger(native.errorCode)) throw new AgentMuxError('Invalid native error code.', 'INVALID_AGENT_SESSION_STORE'); return Number(native.errorCode) })() }) } }
+        }
+        if (admission.transport !== undefined && admission.transport !== 'pty' || admission.native !== undefined ||
+            admission.intent !== undefined && promptInputIntent(admission.intent).plan.kind === 'native-rpc') throw new AgentMuxError('Invalid prompt transport.', 'INVALID_AGENT_SESSION_STORE')
+        const startByte = timestamp(admission.startByte, 'promptCompletionAdmission.startByte')
+        const endByte = positiveInteger(admission.endByte, 'promptCompletionAdmission.endByte')
+        if (endByte <= startByte) throw new AgentMuxError('Invalid prompt input range.', 'INVALID_AGENT_SESSION_STORE')
+        return { ...(admission.transport === 'pty' ? { transport: 'pty' as const } : {}), startByte, endByte }
+      })()
       return {
         ...(admission.submissionId === undefined ? {} : { submissionId: string(admission.submissionId, 'promptCompletionAdmission.submissionId') }),
         ...(admission.completionId === undefined ? {} : { completionId: string(admission.completionId, 'promptCompletionAdmission.completionId') }),
@@ -1430,7 +1459,7 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
           if (typeof admission.notApplied !== 'boolean') throw new AgentMuxError('Invalid prompt Input disposition.', 'INVALID_AGENT_SESSION_STORE')
           return admission.notApplied
         })() }),
-        operationId: string(admission.operationId, 'promptCompletionAdmission.operationId'), startByte, endByte }
+        operationId: string(admission.operationId, 'promptCompletionAdmission.operationId'), ...transport }
     })() }),
     ...(source.futurePromptIntents === undefined ? {} : { futurePromptIntents: (() => {
       const intents = record(source.futurePromptIntents, 'future prompt intents')
