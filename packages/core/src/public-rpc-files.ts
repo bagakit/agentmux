@@ -25,8 +25,11 @@ export type FileWriteParams = Omit<FileReadParams, 'maxBytes' | 'expectedResourc
 /** Create one absent file at the exact original read mapping; never overwrite existing bytes. */
 export type FileCreateParams = Omit<FileWriteParams, 'expectedRevision'> & { expectedRevision: null }
 export type FileCreateResult = FileWriteResult
+/** Host-internal authority, never accepted from a File request body. */
+export type FileWriteContext = { actor?: import('./notebook-catalog.js').NotebookActor | undefined }
+export type NoteWriteAttribution = { status: 'recorded' } | { status: 'unconfirmed'; reason: string }
 export type FileWriteReceipt =
-  | { status: 'written'; revision: string }
+  | { status: 'written'; revision: string; content?: string; noteAttribution?: NoteWriteAttribution }
   | { status: 'conflict'; observedRevision: string | null }
   | { status: 'error' | 'unknown'; code: string; message: string }
 export type FileWriteResult = { resource: FileReadResource | null; result: FileWriteReceipt }
@@ -54,7 +57,7 @@ export type FileParameterMap = { 'file.read': FileReadParams; 'file.list': FileL
 export type FileResultMap = { 'file.read': FileReadResult; 'file.list': FileListResult; 'file.write': FileWriteResult; 'file.create': FileCreateResult;
   'file.upload': FileUploadResult; 'file.upload.inspect': FileUploadResult }
 export type FileMethod = keyof FileParameterMap
-export interface AgentMuxRpcFilesOwner { read(params: FileReadParams): Promise<FileReadResult>; list(params: FileListParams): Promise<FileListResult>; write(params: FileWriteParams): Promise<FileWriteResult>; create(params: FileCreateParams): Promise<FileCreateResult> }
+export interface AgentMuxRpcFilesOwner { read(params: FileReadParams): Promise<FileReadResult>; list(params: FileListParams): Promise<FileListResult>; write(params: FileWriteParams, context?: FileWriteContext): Promise<FileWriteResult>; create(params: FileCreateParams, context?: FileWriteContext): Promise<FileCreateResult> }
 export const AGENTMUX_RPC_FILE_METHODS = { 'file.read': 'short', 'file.list': 'long', 'file.write': 'long', 'file.create': 'long', 'file.upload': 'long', 'file.upload.inspect': 'long' } as const
 export function isFileMethod(value: unknown): value is FileMethod { return typeof value === 'string' && Object.hasOwn(AGENTMUX_RPC_FILE_METHODS, value) }
 
@@ -210,14 +213,21 @@ export function parseFileCreateParams(value: unknown): FileCreateParams {
 }
 function parseFileMutationResult(value: unknown, params: FileWriteParams | FileCreateParams): FileWriteResult {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['resource', 'result'], code), r = rpcRecord(p.result, undefined, code)
-  const keys = r.status === 'written' ? ['status', 'revision'] : r.status === 'conflict' ? ['status', 'observedRevision']
+  const keys = r.status === 'written' ? ['status', 'revision', 'content', 'noteAttribution'] : r.status === 'conflict' ? ['status', 'observedRevision']
     : r.status === 'error' || r.status === 'unknown' ? ['status', 'code', 'message'] : null
   if (!keys) invalid('The original File write status is invalid.', code)
   rpcRecord(r, keys, code)
   // Keep the original resource/path mapping checks shared with reads.
   parseFileReadResult({ resource: p.resource, result: p.resource === null ? { ...r, message: 'Original write diagnostic follows.' } : { status: 'directory' } }, params)
   if (p.resource !== null && ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => (p.resource as Record<string, unknown>)[key] !== (params.expectedResource as unknown as Record<string, unknown>)[key])) invalid('The original File mapping changed.', code)
-  if (r.status === 'written') revision(r.revision, code)
+  if (r.status === 'written') {
+    revision(r.revision, code)
+    if (r.content !== undefined && (typeof r.content !== 'string' || fileUploadRevision(new TextEncoder().encode(r.content)) !== r.revision)) invalid('The canonical saved content does not match its revision.', code)
+    if (r.noteAttribution !== undefined) {
+      const attribution = rpcRecord(r.noteAttribution, ['status', 'reason'], code)
+      if (attribution.status !== 'recorded' && attribution.status !== 'unconfirmed' || attribution.status === 'recorded' && attribution.reason !== undefined || attribution.status === 'unconfirmed' && (typeof attribution.reason !== 'string' || !attribution.reason)) invalid('The Note write attribution is unconfirmed.', code)
+    }
+  }
   else if (r.status === 'conflict') { if (r.observedRevision !== null) revision(r.observedRevision, code) }
   else { string(r.code, code); if (typeof r.message !== 'string') invalid('File write diagnostics must remain text.', code) }
   return p as FileWriteResult

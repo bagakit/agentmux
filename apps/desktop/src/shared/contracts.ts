@@ -599,6 +599,8 @@ export type FileDocument = {
   path: string
   content: string
   revision: string
+  /** Local last-save observation; never part of the filesystem body or public read DTO. */
+  noteWriteAttribution?: import('@agentmux/core').NoteWriteAttribution | undefined
 }
 
 export type WorkspaceFileReadResult =
@@ -619,7 +621,7 @@ export type WorkspaceFileWriteInput = {
 }
 
 export type WorkspaceFileWriteResult =
-  | { status: 'written'; revision: string }
+  | { status: 'written'; revision: string; content?: string; noteAttribution?: import('@agentmux/core').NoteWriteAttribution }
   | { status: 'conflict'; observedRevision: string | null }
   | { status: 'error'; code: string; message: string }
   | { status: 'unknown'; code: string; message: string }

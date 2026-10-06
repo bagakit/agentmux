@@ -381,7 +381,9 @@ export function reduceDocumentWritten(
   savedGeneration: number,
   revision: string,
   expectedRevision: string | null = revision,
-  savedObservationGeneration = 0
+  savedObservationGeneration = 0,
+  savedContent?: string,
+  noteWriteAttribution?: FileDocument['noteWriteAttribution']
 ): FileWorkbenchState {
   const key = documentKey(workspaceId, path)
   const document = state.documents[key]
@@ -399,7 +401,8 @@ export function reduceDocumentWritten(
     (issue?.kind === 'deleted' && !clearsIssue)
   return {
     ...state,
-    documents: { ...state.documents, [key]: { ...document, revision } },
+    documents: { ...state.documents, [key]: { ...document, revision, noteWriteAttribution: noteWriteAttribution ?? document.noteWriteAttribution,
+      ...(savedContent !== undefined && (state.documentGenerations[key] ?? 0) === savedGeneration && !hasNewerDiskConflict ? { content: savedContent } : {}) } },
     dirtyDocuments: {
       ...state.dirtyDocuments,
       [key]: (state.documentGenerations[key] ?? 0) !== savedGeneration || hasNewerDiskConflict

@@ -195,6 +195,7 @@ import { ScratchTopics } from './scratch-topics.js'
 import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
 import { configWithRuntimeBindings, saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles, workspaceFileObserverCount } from './workspace-files.js'
+import { NoteFileWriter } from './note-file-writer.js'
 
 import { classifyRetention, WorktreeService } from './worktree-service.js'
 import { runFanOutRequest } from './fanout-request.js'
@@ -771,9 +772,10 @@ export async function registerIpc(args: {
   handle('files:list', async (workspaceId: string, path?: string, limit?: number) =>
     await files.listFiles(workspace(config, workspaceId), path, limit)
   )
-  const publicFiles = new FileReadOwner({ files: { read: files.read.bind(files), listFiles: files.listFiles.bind(files), write: (owner, input) => notesStorageOwner.write(owner, input, actual => files.write(actual, input)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
+  const noteFileWriter = new NoteFileWriter(files)
+  const publicFiles = new FileReadOwner({ files: { read: files.read.bind(files), listFiles: files.listFiles.bind(files), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
-  handleWithEvent('files:createPublic', async (event, input: import('@agentmux/core').FileCreateParams) => { requireTrustedSender('files:createPublic', event); return publicFiles.create(input) })
+  handleWithEvent('files:createPublic', async (event, input: import('@agentmux/core').FileCreateParams) => { requireTrustedSender('files:createPublic', event); return publicFiles.create(input, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }) })
   handleWithEvent('files:readPublic', async (event, input: import('@agentmux/core').FileReadParams) => {
     requireTrustedSender('files:readPublic', event)
     return await publicFiles.read(input)
@@ -842,8 +844,9 @@ export async function registerIpc(args: {
     if (!bytes) return { url: null, binary: false }
     return await readBookmark(kind, bytes, runProcess)
   })
-  handle('files:write', async (workspaceId: string, input: WorkspaceFileWriteInput) =>
-    notesStorageOwner.write(workspace(config, workspaceId), input, actual => files.write(actual, input))
+  handleWithEvent('files:write', async (event, workspaceId: string, input: WorkspaceFileWriteInput) =>
+    notesStorageOwner.write(workspace(config, workspaceId), input, actual => noteFileWriter.write(actual, input,
+      Object.is(event.sender, args.window.webContents) ? { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } } : undefined))
   )
   handle('files:observe', async (workspaceId: string, path: string) => {
     const key = `${workspaceId}\0${path}`
