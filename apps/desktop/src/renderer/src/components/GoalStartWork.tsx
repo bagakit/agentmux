@@ -10,7 +10,7 @@ export function GoalStartWork({ rows, supervisorSessionId, active, openAgent, re
     <strong>{next}</strong>
     <p className="goal-delegation__identity">Agent <span><GoalContinuationAgent agentSessionId={start.agentSessionId} hostId={start.hostId} active={active} size={14} /></span> · Follow-up {supervisorSessionId
       ? <span><GoalContinuationAgent agentSessionId={supervisorSessionId} active={active} size={14} /></span> : 'needs an assigned Supervisor'}</p>
-    {issue ? <p className="goals-service" role="status">{issue}</p> : null}
+    {issue && (observation?.attention?.state === 'confirmed' || issue !== observation?.attention?.reason) ? <p className="goals-service" role="status">{issue}</p> : null}
     {observation?.goalResult ? <p className="goals-service">Goal-level results are available. Their association with this Start is unknown.</p> : null}
     {observation?.attention?.state === 'confirmed' ? <details className="goal-delegation__notice"><summary>Supervisor reminder received</summary><p>{observation.attention.reason} Goal results and human review remain separate.</p></details> : observation?.attention ? <p className="goals-service" role="status">Supervisor reminder {observation.attention.state}. {observation.attention.reason} Reminder receipt does not accept this Goal.
       {start.attention ? <button type="button" className="goals-button"
