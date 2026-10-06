@@ -16,6 +16,7 @@ import { connectHostedAgentMux as SourceConnectHosted } from '../src/hosted-clie
 import type { AgentMuxHostedRpcPort, AgentMuxHostedOutputRpcPort, AgentMuxHostedRuntimeMethod,
   AgentMuxHostedStreamMethod, AgentMuxHostedRuntimeParameterMap } from '../src/hosted-client-contract.js'
 import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
+import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 
 const entry = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
 const compiled = entry ? await import(entry) : null
@@ -152,9 +153,24 @@ it('public send and original Control selector preserve waiting instead of claimi
     expect(inspected.input?.ref).toEqual(sent.inputReceipt?.ref); expect(inspected.record).toBeNull()
     const stopped = await rpc.call('agent.input.stop', { ref: sent.inputReceipt!.ref, cancelOperationId: 'public-stop' })
     expect(stopped.outcome).toBe('stopped-before-dispatch')
+    const inputCli = async (action: 'inspect' | 'stop' | 'rejoin', body: unknown) => {
+      const result = await runCompiledObjectCli(['--endpoint', 'unix://' + server.path, 'agent', 'input', action, '--input', '-'],
+        objectCliEnvironment(h.root), JSON.stringify(body))
+      expect(result.code, result.stderr).toBe(0)
+      return JSON.parse(result.stdout).result
+    }
+    const cliRead = await inputCli('inspect', { kind: 'message-control', originalControlOperationId: 'original-control' })
+    expect(cliRead.input).toMatchObject({ status: 'stopped', ref: sent.inputReceipt!.ref })
+    expect(await inputCli('stop', { ref: sent.inputReceipt!.ref, cancelOperationId: 'public-stop' })).toEqual(stopped)
+    const rejoined = await inputCli('rejoin', { ref: sent.inputReceipt!.ref })
+    expect(rejoined).toMatchObject({ status: 'waiting', persistence: 'confirmed', ref: { key: sent.inputReceipt!.key, waitGeneration: 2 } })
+    expect(h.dispatches).toEqual([])
+    expect(await inputCli('stop', { ref: rejoined.ref, cancelOperationId: 'compiled-cli-stop-generation-two' }))
+      .toMatchObject({ ref: rejoined.ref, outcome: 'stopped-before-dispatch' })
     h.restore(); await new Promise(resolve => setTimeout(resolve, 20)); expect(h.dispatches).toEqual([])
     expect((await h.queue.listAfter())[0]?.delivery.state).toBe('queued')
     expect((await h.queue.listAfter())[0]?.envelope.body).toBe(text)
+    expect(h.inner.kernel.stop).not.toHaveBeenCalled()
   } finally { await rpc.dispose(); await server.stop(); await h.close() }
 })
 
