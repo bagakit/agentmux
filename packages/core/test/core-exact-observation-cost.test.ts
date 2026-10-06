@@ -58,6 +58,28 @@ describe('exact Core status and single confirmed Host authentication', () => {
     } finally { await h.close() }
   }, 20_000)
 
+  it('admits one original cold durable binding before status without requiring unrelated metadata', async () => {
+    const h = await fixture(), cold = new core.AgentMuxClient({ store: h.store })
+    const inner = cold as unknown as typeof h.inner
+    inner.connected = true; inner.kernel.isConnected = () => true
+    inner.kernel.status = vi.fn(async (id: string) => h.run(id)); inner.kernel.identity = h.inner.kernel.identity
+    inner.kernel.stop = vi.fn()
+    try {
+      expect(() => cold.agentSession('recipient')).toThrow('Unknown Agent Session')
+      h.catalog.mockRejectedValue(new core.AgentMuxError('Unrelated cold inventory is unavailable.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED'))
+      h.clear()
+      const status = await cold.statusAgent('recipient')
+      expect(status.session).toMatchObject({ agentSessionId: 'recipient', providerId: 'codex', hostId: 'local', run: { runId: 'run-recipient' } })
+      expect(status.run).toMatchObject({ runId: 'run-recipient', state: 'running' })
+      expect(cold.agentSession('recipient').run.runId).toBe('run-recipient')
+      expect(() => cold.agentSession('caller')).toThrow('Unknown Agent Session')
+      expect(h.catalog).not.toHaveBeenCalled(); expect(h.inventories).not.toHaveBeenCalled()
+      expect(h.metadata.mock.calls.length).toBeGreaterThan(0)
+      expect(new Set(h.metadata.mock.calls.map(([id]) => id))).toEqual(new Set(['recipient']))
+      expect(inner.kernel.stop).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+    } finally { await cold.dispose(); await h.close() }
+  })
+
   it('keeps a selected healthy status available when unrelated catalog observation fails', async () => {
     const h = await fixture()
     try {
