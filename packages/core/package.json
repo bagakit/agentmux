@@ -237,6 +237,10 @@
     "./session-history-query-budget": {
       "types": "./dist/session-history-query-budget.d.ts",
       "import": "./dist/session-history-query-budget.js"
+    },
+    "./connections": {
+      "types": "./dist/connections.d.ts",
+      "import": "./dist/connections.js"
     }
   },
   "bin": {

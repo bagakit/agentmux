@@ -2,6 +2,8 @@ import { parseConversationRef, parseConversationCheckpointPage, parseConversatio
 import { createAgentMuxSearchReader, type AgentMuxSearchReadContext } from './search-reader.js'
 import { createAgentMuxSearchObservationOwner } from './search-observation.js'
 import { parseAgentMuxSearchInput } from './search-codec.js'
+import { isConnectionMethod, parseConnectionParams, parseConnectionResult } from './connections-codec.js'
+import type { ConnectionMethod, ConnectionPort } from './connections-contract.js'
 import { isGoalDelegationMethod, parseGoalDelegationParams, parseGoalDelegationResult, type GoalDelegationsOwner } from './goal-delegation.js'
 import { isMoteAvatarWriteMethod, parseMoteAvatarWriteParams, parseMoteAvatarWriteResult, type AgentMuxRpcMoteAvatarsOwner, type MoteAvatarWriteMethod } from './mote-avatar-write.js'
 import { parseAppearanceObservation, type AgentMuxAppearanceObservationPort } from './public-rpc-settings-observation.js'
@@ -81,6 +83,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   }
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
+  connections?: ConnectionPort
   goalDelegations?: GoalDelegationsOwner
   moteContext?: import('./diagnostic-evidence.js').AgentMuxMoteContextEvidencePort
   deliveryAttempts?: { hostId: string; store: DeliveryAttemptStore }
@@ -180,7 +183,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | ScheduleMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | ScheduleMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -379,6 +382,18 @@ export class AgentMuxRpcService {
   }
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
+    if (isConnectionMethod(method)) {
+      if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Connection administration requires a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
+      const input = parseConnectionParams(method, params)
+      if (!this.ports.connections) throw new AgentMuxError('The connection owner is not enabled on this Host. Existing Agent capabilities remain available.', 'CONTROL_UNAVAILABLE')
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      const owner = this.ports.connections
+      const result = method === 'connection.ls' ? await owner.list()
+        : method === 'connection.inspect' ? await owner.inspect(parseConnectionParams('connection.inspect', params))
+        : method === 'connection.configure' ? await owner.configure(parseConnectionParams('connection.configure', params))
+        : await owner.test(parseConnectionParams('connection.test', params))
+      return parseConnectionResult(method, result, input) as AgentMuxRpcResult<M>
+    }
     if (isAgentMuxRpcDeviceMethod(method)) {
       const local = context.caller === undefined && context.transport === 'unix' && context.principal?.kind === 'user'
       const device = context.caller === undefined && context.transport === 'relay' && context.principal?.kind === 'device'

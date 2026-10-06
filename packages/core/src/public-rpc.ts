@@ -1,3 +1,5 @@
+import { CONNECTION_RPC_METHODS } from './connections-codec.js'
+import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from './connections-contract.js'
 import { GOAL_DELEGATION_METHODS } from './goal-delegation-methods.js'
 import type { GoalDelegationParamsMap, GoalDelegationResultMap } from './goal-delegation.js'
 import { AGENTMUX_RPC_MOTE_AVATAR_WRITE_METHODS, type MoteAvatarParameterMap, type MoteAvatarResultMap, type MoteAvatarMethod } from './mote-avatar-write.js'
@@ -180,7 +182,7 @@ export type AgentMuxRpcOutputInitial = {
   session: ReturnType<AgentMuxClient['agentSession']>
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
-type NativeParams = GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+type NativeParams = GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
   'settings.appearance.watch': Record<string, never>
   'notebook.ls': Record<string, never>
   'notebook.inspect': { notebookId?: string; noteId?: string; operationId?: string; content?: boolean; maxBytes?: number }
@@ -240,7 +242,7 @@ type NativeParams = GoalDelegationParamsMap & MoteAvatarParameterMap & TopicPara
   'system.endpoint': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
 }
-type NativeResult = GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & ScheduleResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+type NativeResult = GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & ScheduleResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
   'settings.appearance.watch': never
   'notebook.ls': { state: import('./notebook-catalog.js').NotebookState }
   'notebook.inspect': { state: import('./notebook-catalog.js').NotebookState; notebook: import('./notebook-catalog.js').Notebook | null; pages: import('./notebook-catalog.js').NotebookPage[]; trail: import('./notebook-catalog.js').NoteTrailEvent[]; recordedOperation: import('./notebook-catalog.js').NotebookState['operations'][string] | null; storageOperation?: import('./notes-storage.js').NotesStorageOperation | null; content?: import('./notebook-observation.js').NoteContentObservation }
@@ -302,8 +304,8 @@ type NativeResult = GoalDelegationResultMap & MoteAvatarResultMap & TopicResultM
   'system.subscription.cancel': { disposed: boolean }
 }
 export type AgentMuxRpcMethod = ControlMethod | keyof NativeParams
-type PublicParameterMap = MoteAvatarParameterMap & TopicParameterMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
-  [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | MoteAvatarMethod | TopicMethod | HostSettingsMethod | FileMethod | GitMethod | ScheduleMethod>]: NativeParams[M] & { operationId?: string }
+type PublicParameterMap = MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
+  [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | MoteAvatarMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | FileMethod | GitMethod | ScheduleMethod>]: NativeParams[M] & { operationId?: string }
 } & { [M in ControlMethod]: ControlParams<M> & { operationId?: string } }
 export type AgentMuxRpcParams<M extends AgentMuxRpcMethod> = PublicParameterMap[M]
 type PublicResultMap = NativeResult & {
@@ -325,6 +327,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_RPC_FILE_METHODS,
   ...AGENTMUX_RPC_GIT_METHODS,
   ...AGENTMUX_RPC_SCHEDULE_METHODS,
+  ...CONNECTION_RPC_METHODS,
   ...AGENTMUX_RPC_DEVICE_METHODS,
   ...AGENTMUX_RPC_HOST_SETTINGS_METHODS,
   ...AGENTMUX_HOSTED_RPC_METHODS,
