@@ -37,7 +37,7 @@ it('renders a captured image in the Session draft, enlarges it, restores it and 
   await vi.waitFor(() => expect(thumbnail()?.src).toBe(dataUrl))
   expect(dom.draft()).toBe(draft)
   await dom.click('.composer-send')
-  expect(send).toHaveBeenCalledExactlyOnceWith('agent-1', draft, expect.any(Function))
+  expect(send).toHaveBeenCalledExactlyOnceWith('agent-1', draft, expect.any(Function), 'manual')
 })
 
 it('pasted image bytes resolve to the same preview and durable reference', async () => {
@@ -58,7 +58,8 @@ it('keeps the original image reference readable when preview loading fails', asy
   useAppStore.setState({ agentComposerDrafts: { 'agent-1': `before @${path} after` } })
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   expect(thumbnail()).toBeNull()
-  expect(dom.container.querySelector('.composer-image')?.textContent).toBe(`@${path}`)
+  expect(dom.container.querySelector('.md-conversation-image__reference')?.textContent).toBe(`@${path}`)
+  expect(dom.container.querySelector('.md-conversation-image__failure')?.textContent).toContain('Image no longer available')
   expect(dom.draft()).toBe(`before @${path} after`)
 })
 
