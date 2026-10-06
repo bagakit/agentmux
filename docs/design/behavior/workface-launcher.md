@@ -17,6 +17,7 @@
 
 
 - **Launch options 随当前 Agent 按需展开。** 默认以紧凑动作与已选状态摘要呈现，未修改时不重复选项个数和 Provider defaults。可选 Agent 名与 Tab 名属于按需配置，不占据常驻双输入行。Prompt、名称与启动选项沿原 durable 输入 owner 保留；选项按准确 Launcher Region 与 Provider 隔离，切 Provider 不串用，返回原 Provider 仍保留其显式选择。真正首次启动、空 Tab Group 尚无 Tab / Region 时，同一工作起点的原始未发送输入与选择在建立准确 Launcher Region 时保全归属，包括 Prompt、名称、各 Provider 配置及辅助工具的草稿与既有创建引用。启动失败回到该 Region 后仍可继续编辑和恢复原工作，建立工作面不得改变用户所选全局空间或把未发送稿误当已消费。展开、关闭、Region 变窄、pending 卸载后失败重挂以及进程重读都保留未发送输入和已选配置，不能恢复 Prompt 却悄悄改用 Provider 默认。只有成功请求确实使用且此后未改的原记录可以被消费，晚成功不得吞掉新编辑；其他 Mote 或上下文的启动不消费原 Mote 未发送草稿。Provider describe / argv 分层、未声明不渲染与启动姿态语义沿[《Provider Launch Option》](agent-capabilities-and-messaging.md#provider-launch-option)，不加具体厂商分支。
+- **启动选择在选择前可比较。** 选项面沿 Provider 原声明的标签与说明，区分未设置的 Agent 默认、显式草稿选择和仍保留的未知保存值；键盘高亮不改变值，只有明确选择才更新原启动草稿。说明只使用已有声明，不猜默认档位、推荐值或运行中模型／effort；清楚说明作用于该次启动，不把启动选项冒充 live SET。选择、关闭、Escape 和窄 Region 碰撞避让复用原控件／焦点 owner，保 Prompt、名字及各 Provider 选择。
 
 ## 工具开合与 Browser／Note
 
