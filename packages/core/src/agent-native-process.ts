@@ -6,6 +6,7 @@ import { open, mkdtemp, rm, type FileHandle } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 
 export type NativeProcessFile = {
   processId: number
@@ -77,13 +78,31 @@ export async function nativeProcessFiles(processId: number, signal: AbortSignal,
   return files
 }
 
-/** Read one OS-reported birth without interpreting an executable or arguments. */
+/** Ephemeral original process identity; never a persisted Session or Native actor ID.
+ * Reuse the same libproc owner as Native socket qualification. Clock-tick/date
+ * projections cannot establish this identity on other Hosts. */
 export async function nativeProcessBirth(processId: number, signal: AbortSignal): Promise<string> {
-  const result = await runProcess('ps', ['-p', String(processId), '-o', 'lstart='],
-    { signal, timeoutMs: 2_000, maxOutputBytes: 4096, env: { LC_ALL: 'C' } })
-  const birth = result.stdout.trim()
-  if (result.exitCode !== 0 || result.stderr || !birth || birth.includes('\n')) throw unavailable('The original process birth is unconfirmed.')
-  return birth
+  signal.throwIfAborted()
+  if (process.platform !== 'darwin' || !Number.isSafeInteger(processId) || processId <= 0) {
+    throw unavailable('The original kernel process identity is unconfirmed on this Host. The Agent and saved native identity remain available.')
+  }
+  // Source and distributed modules share this package-owned build artifact.
+  const executable = fileURLToPath(new URL('../dist/native-socket-peer-darwin', import.meta.url))
+  const result = await runProcess(executable, ['--process-identity', String(processId)],
+    { signal, timeoutMs: 2_000, maxOutputBytes: 4096 })
+  signal.throwIfAborted()
+  if (result.exitCode !== 0 || result.stderr) throw unavailable('The original kernel process identity is unconfirmed.')
+  let value: unknown
+  try { value = JSON.parse(result.stdout) } catch { throw unavailable('The kernel process identity receipt is incomplete.') }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw unavailable('The kernel process identity receipt is incomplete.')
+  const identity = value as Record<string, unknown>
+  if (identity.type !== 'native-process-identity' || identity.schema !== 1 || identity.pid !== processId ||
+      identity.uid !== process.getuid?.() || !Number.isSafeInteger(identity.uid) ||
+      typeof identity.startSec !== 'string' || !/^[1-9]\d*$/u.test(identity.startSec) ||
+      typeof identity.startUsec !== 'string' || !/^(?:0|[1-9]\d{0,5})$/u.test(identity.startUsec)) {
+    throw unavailable('The kernel process identity receipt does not belong to the original process.')
+  }
+  return JSON.stringify(['darwin', processId, identity.uid, identity.startSec, identity.startUsec])
 }
 
 export type NativeProcessImage = {
