@@ -2,6 +2,8 @@ const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => awa
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it, vi } from 'vitest'
 vi.mock('electron', () => ({ app: { getPath: () => _hygiene_fixturePath("tmp"), getAppPath: () => process.cwd() } }))
+// Text-only admission tests do not own an IPC stream; dedicated document tests use the real channel.
+vi.mock('@agentmux/core/toolkit-result-channel', () => ({ openToolkitResultChannel: async () => ({ env: {}, connected: false, close: async () => {} }) }))
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
@@ -167,7 +169,7 @@ describe('custom Toolkit owner admission and terminal facts', () => {
     const f = fixture(), admission = deferred(), result = deferred()
     let saves = 0
     f.storage.save.mockImplementation(async (id, value) => {
-      saves++; if (saves === 1) await admission.promise; if (saves === 3) await result.promise
+      saves++; if (saves === 1) await admission.promise; if (saves === 4) await result.promise
       f.receipts.set(id, structuredClone(value))
     })
     const running = f.custom.run('quota', f.input(), new AbortController().signal)
@@ -176,7 +178,7 @@ describe('custom Toolkit owner admission and terminal facts', () => {
     admission.release(); await flush()
     expect(f.port.create).toHaveBeenCalledTimes(1); expect(f.port.remove).not.toHaveBeenCalled()
     result.release(); await running
-    expect(f.port.remove).toHaveBeenCalledTimes(1); expect(saves).toBe(4)
+    expect(f.port.remove).toHaveBeenCalledTimes(1); expect(saves).toBe(5)
     await f.owner.update(current => ({ ...current, toolkit: { ...current.toolkit, tools: [] } }))
     expect(f.config.toolkit.tools).toEqual([])
   })
@@ -336,7 +338,7 @@ describe('custom Toolkit owner admission and terminal facts', () => {
     const f = fixture('natural_ACK')
     let saves = 0
     f.storage.save.mockImplementation(async (id, receipt) => {
-      if (++saves === 3) throw new Error('result-save-failed')
+      if (++saves === 4) throw new Error('result-save-failed')
       f.receipts.set(id, structuredClone(receipt))
     })
     const failedSave = await f.custom.run('quota', f.input(), new AbortController().signal)
@@ -419,7 +421,7 @@ describe('custom Toolkit owner admission and terminal facts', () => {
     const f = fixture('natural_ACK')
     let saves = 0
     f.storage.save.mockImplementation(async (id, receipt) => {
-      if (++saves === 3) throw new Error('result-save-failed')
+      if (++saves === 4) throw new Error('result-save-failed')
       f.receipts.set(id, structuredClone(receipt))
     })
     const value = await f.custom.run('quota', f.input(), new AbortController().signal)
@@ -823,7 +825,7 @@ describe('rejected Toolkit Stop observation boundaries', () => {
     f.port.stop = vi.fn(async () => { f.final('old_terminal_ACK'); f.exit(); await gate.promise; throw rejection })
     const stopping = f.custom.stop(tool.id, started.admission!.executionId)
     await flush()
-    expect(f.port.replay).toHaveBeenCalledOnce(); expect(f.storage.save).toHaveBeenCalledTimes(2)
+    expect(f.port.replay).toHaveBeenCalledOnce(); expect(f.storage.save).toHaveBeenCalledTimes(3)
     const original = (f.custom as any).tools.get(tool.id)
     original.admission = { ...structuredClone(started.admission!), executionId: 'replacement-execution', text: '', run: { hostId: 'local', runId: 'replacement-run' } }
     original.live = (f.custom as any).execution(original, original.admission)
@@ -831,7 +833,7 @@ describe('rejected Toolkit Stop observation boundaries', () => {
     gate.release()
     await expect(stopping).rejects.toBe(rejection)
     expect(await f.custom.get(tool.id)).toEqual(replacement)
-    expect(f.port.remove).not.toHaveBeenCalled(); expect(f.storage.save).toHaveBeenCalledTimes(2)
+    expect(f.port.remove).not.toHaveBeenCalled(); expect(f.storage.save).toHaveBeenCalledTimes(3)
   })
 })
 
