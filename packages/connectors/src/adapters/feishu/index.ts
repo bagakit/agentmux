@@ -9,6 +9,7 @@ import { feishuParentAddressing } from './reply.js'
 import { readFeishuAction } from './action.js'
 import { FeishuPublicationAdapter } from './publication.js'
 import { createFeishuRooms } from './rooms.js'
+import { createFeishuRoomDiscovery } from './room-discovery.js'
 
 export type FeishuAdapterOptions = { http?: HttpInstance }
 /** Only original application identity is needed by the SDK; Host authorization stays outside the leaf. */
@@ -28,6 +29,7 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   readonly ingress = this
   readonly transport: ConnectionIngressTransport = { start: input => this.startReceiver(input) }
   readonly rooms = createFeishuRooms((config, credential, call, signal) => this.withClient(config, credential, call, signal))
+  readonly roomDiscovery = createFeishuRoomDiscovery((config, credential, call, signal) => this.withClient(config, credential, call, signal))
   private readonly witnesses = new WeakSet<object>()
   private readonly callback = new AsyncLocalStorage<Witness>()
   private readonly requests = new AsyncLocalStorage<AbortSignal | undefined>()
