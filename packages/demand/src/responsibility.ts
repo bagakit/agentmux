@@ -32,6 +32,7 @@ export type DemandProgress = DemandProgressInput & {
   basis: DemandResponsibilityBasis
   /** Worker declarations remain a manager review until explicitly acknowledged. */
   managerVerified: boolean
+  reviewForHuman?: boolean
 }
 
 function object(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -77,15 +78,16 @@ export function parseDemandProgressInput(value: unknown): DemandProgressInput {
     ...(p.handoffExecution === undefined ? {} : { handoffExecution: parseDemandExecutionReference(p.handoffExecution) }) }
 }
 export function parseDemandProgress(value: unknown): DemandProgress {
-  const p = object(value, [...inputKeys, 'author', 'reportingRunId', 'recordedAt', 'basis', 'managerVerified'])
+  const p = object(value, [...inputKeys, 'author', 'reportingRunId', 'recordedAt', 'basis', 'managerVerified', 'reviewForHuman'])
   const input = parseDemandProgressInput(Object.fromEntries(inputKeys.filter(key => p[key] !== undefined).map(key => [key, p[key]])))
   const author = object(p.author, ['kind', 'id'])
   if (!['agent', 'user', 'device'].includes(String(author.kind)) || typeof p.managerVerified !== 'boolean') throw new Error('Responsibility author is invalid')
+  if (p.reviewForHuman !== undefined && typeof p.reviewForHuman !== 'boolean') throw new Error('Review responsibility is invalid')
   const recordedAt = nullableTime(p.recordedAt)
   if (recordedAt === null) throw new Error('Responsibility declaration requires its original recording time')
   return { ...input, author: { kind: author.kind as DemandProgress['author']['kind'], id: text(author.id) },
     reportingRunId: p.reportingRunId === null ? null : text(p.reportingRunId), recordedAt,
-    basis: parseDemandResponsibilityBasis(p.basis), managerVerified: p.managerVerified }
+    basis: parseDemandResponsibilityBasis(p.basis), managerVerified: p.managerVerified, ...(p.reviewForHuman === undefined ? {} : { reviewForHuman: p.reviewForHuman as boolean }) }
 }
 export function parseDemandProgressUpdates(value: unknown): DemandProgress[] {
   if (!Array.isArray(value)) throw new Error('Responsibility updates must be an array')

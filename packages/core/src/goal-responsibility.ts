@@ -1,3 +1,4 @@
+import { isDemandEvidenceReference } from '@agentmux/demand/goals'
 import { demandExecutionKey, demandHandoffDestinations, demandProgressBusinessCurrent, latestDemandProgress, sameDemandExecution, type Demand, type DemandExecutionReference,
   type DemandProgress, type DemandResponsibilityBasis } from '@agentmux/demand'
 import type { AgentMuxAgentRuntimeStatus } from './client.js'
@@ -73,7 +74,11 @@ export function observeGoalExecution(goal: Demand, facts: GoalExecutionFacts, no
   const grounding = goal.grounding
   if (current?.managerVerified && current.phase === 'review' && current.groundingSubmissionId &&
     grounding?.submissionId === current.groundingSubmissionId && grounding?.alignmentRevision === goal.alignment?.revision)
-    return set('result-review', current.summary, null, 'human', current.nextAction)
+    if (current.reviewForHuman === true && goal.status !== 'blocked' && goal.alignment && goal.alignment.criteria.length > 0 &&
+      grounding.checks.length === goal.alignment.criteria.length && goal.alignment.criteria.every(c => grounding.checks.some(check => check.criterionId === c.id)) &&
+      grounding.checks.every(check => check.outcome !== 'unknown' && check.evidence.length > 0 && check.evidence.every(isDemandEvidenceReference) && (check.outcome !== 'gap' || Boolean(check.note.trim()))))
+      return set('result-review', current.summary, null, 'human', current.nextAction)
+    else return set('result-review', 'The associated result still needs management follow-up for its gaps, unknowns or next responsibility.', 'manager-review', 'manager', current.nextAction)
   if (facts.collected) return set('result-review', 'This original worker report was collected. Management must verify the result and update the next step.', 'manager-review', 'manager', 'Verify the collected evidence and current Goal result; human acceptance is separate.')
   if (facts.report) return set('report-review', 'An original worker report awaits collection and verification.', 'manager-review', 'manager', 'Read and collect this original report, then update this Goal.')
   if (!facts.inputConfirmed) return set('unknown', facts.unknown ?? 'The original input is not confirmed. Keep its identity and inspect it before recovery.', 'unknown')
