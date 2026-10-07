@@ -76,6 +76,7 @@ function promptExecution(value: unknown): void {
 function agentCapabilities(value: unknown): void {
   const capabilities = record(value)
   promptExecution(capabilities.promptExecution)
+  if (capabilities.asyncQuestionReply !== undefined) member(capabilities.asyncQuestionReply, ['terminal'])
   if (capabilities.terminal !== true) fail()
   member(capabilities.timeline, ['unavailable', 'complete-events', 'streaming'])
   member(capabilities.permission, ['none', 'observe', 'respond']); bool(capabilities.providerResume)
@@ -271,7 +272,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.native.ls': {
         record(p, ['hostId', 'executorId', 'providerId', 'capabilities', 'availability', 'sessions', 'issues'])
         string(p.hostId); string(p.executorId); string(p.providerId)
-        record(p.capabilities, ['terminal', 'timeline', 'permission', 'providerResume', 'providerFork', 'replyCorrelation', 'promptExecution', 'usage'])
+        record(p.capabilities, ['terminal', 'timeline', 'permission', 'providerResume', 'providerFork', 'replyCorrelation', 'asyncQuestionReply', 'promptExecution', 'usage'])
         agentCapabilities(p.capabilities)
         if (p.hostId !== input.hostId || p.executorId !== input.executorId) fail()
         member(p.availability, ['available', 'unsupported'])

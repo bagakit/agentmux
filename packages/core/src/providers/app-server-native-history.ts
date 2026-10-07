@@ -1,10 +1,9 @@
-import { codexQuestionRequest, codexQuestionAnswers, encodeCodexQuestionReply } from './codex-question.js'
+import { codexQuestionRequest, codexQuestionAnswers } from './codex-question.js'
 import { withAppServerNativeRead } from './app-server-native-read.js'
 import { AgentMuxError } from '../errors.js'
 import type {
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryRecordContext,
-  AgentProviderSessionQuestionReplyContext,
   AgentProviderSessionHistoryPage,
   AgentSessionHistoryContentPart,
   AgentSessionHistoryCollaboration,
@@ -487,14 +486,4 @@ async function exactAppServerEntry(context: AgentProviderSessionHistoryRecordCon
 
 export async function readAppServerSessionHistoryRecord(context: AgentProviderSessionHistoryRecordContext): Promise<AgentSessionHistoryItem> {
   return itemEntry(await exactAppServerEntry(context), context.source)
-}
-
-/** Resolve one exact indexed record with bounded anchors, then encode its Provider-owned reply. */
-export async function prepareAppServerSessionQuestionReply(context: AgentProviderSessionQuestionReplyContext): Promise<string> {
-  const entry = await exactAppServerEntry(context, 'AGENT_QUESTION_REPLY_UNSUPPORTED', 'UNKNOWN_AGENT_QUESTION'), item = object(entry.item)
-  if (item.type !== 'agentMessage') throw new AgentMuxError(
-    'The native question lookup returned another record kind.', 'UNKNOWN_AGENT_QUESTION')
-  const questions = codexQuestionRequest(item)
-  if (!questions) throw new AgentMuxError('This record does not contain native asynchronous questions.', 'UNKNOWN_AGENT_QUESTION')
-  return encodeCodexQuestionReply(questions, context.answers)
 }

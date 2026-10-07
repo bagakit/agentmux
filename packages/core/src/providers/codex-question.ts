@@ -1,13 +1,11 @@
 import { AgentMuxError } from '../errors.js'
 import type {
   AgentSessionHistoryQuestionRequest,
-  AgentSessionHistoryQuestionAnswer,
-  AgentTerminalScreenSnapshot
+  AgentSessionHistoryQuestionAnswer
 } from '../types.js'
 
 const OPEN = '<send_user_message_question_reply>'
 const CLOSE = '</send_user_message_question_reply>'
-const MAX_REFERENCE_BYTES = 512
 
 function invalid(): never {
   throw new AgentMuxError('Native asynchronous question data is invalid.', 'INVALID_AGENT_SESSION_HISTORY_PAGE')
@@ -49,48 +47,4 @@ export function codexQuestionAnswers(content: unknown): AgentSessionHistoryQuest
   if (!replies.length || replies.some(reply => !reply || typeof reply !== 'object' || Array.isArray(reply) ||
     typeof reply.questionItemId !== 'string' || !reply.questionItemId || typeof reply.question !== 'string' || typeof reply.answer !== 'string')) return undefined
   return replies.map(reply => ({ questionId: reply.questionItemId, answer: reply.answer, prompt: reply.question }))
-}
-
-function nativeTitle(prompt: string): string {
-  // Native framing truncates on a UTF-8 boundary. Keep the original display/raw text elsewhere.
-  let title = '', bytes = 0
-  for (const point of prompt) {
-    const length = Buffer.byteLength(point)
-    if (bytes + length > 512) break
-    title += point; bytes += length
-  }
-  return title.replace(/[\r\n]/gu, ' ')
-}
-
-/** This is ordinary user input, not a permission response or AgentMux A2A envelope. */
-export function encodeCodexQuestionReply(request: AgentSessionHistoryQuestionRequest, answers: AgentSessionHistoryQuestionAnswer[]): string {
-  if (!answers.length) throw new AgentMuxError('A question reply requires at least one exact answer.', 'INVALID_AGENT_QUESTION_REPLY')
-  const ids = new Set<string>()
-  const replies = answers.map(({ questionId, answer }) => {
-    const question = request.questions.find(question => question.id === questionId)
-    if (!question || ids.has(questionId) || typeof answer !== 'string' || !answer.trim()) {
-      throw new AgentMuxError('The answer does not identify one original native question.', 'INVALID_AGENT_QUESTION_REPLY')
-    }
-    if (Buffer.byteLength(questionId) > MAX_REFERENCE_BYTES) throw new AgentMuxError(
-      'This native question identity cannot be represented by its reply protocol; ordinary terminal input remains available.',
-      'AGENT_QUESTION_REPLY_UNSUPPORTED')
-    ids.add(questionId)
-    return { answer, question: nativeTitle(question.prompt), questionItemId: questionId }
-  })
-  return OPEN + '\n' + JSON.stringify(replies) + '\n' + CLOSE
-}
-
-/** Leave only the current native async editor, preserving drafts in earlier questions. */
-export function codexQuestionComposerNavigation(screen: AgentTerminalScreenSnapshot | undefined): string {
-  if (!screen) return ''
-  const footer = screen.lines.slice(-4).map(line => line.text).join(' ')
-  if (!/\benter submit\b/u.test(footer) || !/ctrl\+\] skip\b/u.test(footer)) return ''
-  const destination = /shift\+→\s+(main prompt|prev question)(?:\s|$)/u.exec(footer)?.[1]
-  if (destination === 'main prompt') return '\u001b[1;2C'
-  const progress = screen.lines.slice(0, -4).map(line => /^\s*(\d+) of (\d+)\s*$/u.exec(line.text)).filter(match => match !== null).at(-1)
-  const current = Number(progress?.[1]), total = Number(progress?.[2])
-  if (destination !== 'prev question' || !Number.isSafeInteger(current) || !Number.isSafeInteger(total) || current <= 1 || current > total) {
-    throw new AgentMuxError('The current native question editor cannot be navigated safely; ordinary terminal input remains available.', 'AGENT_QUESTION_REPLY_UNSUPPORTED')
-  }
-  return '\u001b[1;2C'.repeat(current)
 }

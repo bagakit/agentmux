@@ -2,7 +2,6 @@ import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVe
 import { listCodexNativeSessions, assertCodexNativeResumeSource } from './codex-native-catalog.js'
 import { createCodexPromptTransportPreparation } from './codex-prompt-transport-preparation.js'
 import { inspectCodexPromptExecution, inspectCodexPromptPreparationWait } from './codex-prompt-execution.js'
-import { createCodexInteractionResponsePreparation } from './codex-interaction-target.js'
 import { observeCodexSessionStatus } from './codex-session-status.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import { inspectCodexHookActivation } from './codex-hook-activation.js'
@@ -14,8 +13,7 @@ import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { CODEX_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import { discoverAppServerNativeSession } from './app-server-native-session.js'
-import { codexQuestionAnswers, codexQuestionComposerNavigation } from './codex-question.js'
-import { readAppServerSessionHistoryPage, readAppServerSessionHistoryRecord, prepareAppServerSessionQuestionReply } from './app-server-native-history.js'
+import { readAppServerSessionHistoryPage, readAppServerSessionHistoryRecord } from './app-server-native-history.js'
 import { readCodexSavedSessionHistoryPage, readCodexSavedSessionHistoryRecord, readCodexSavedConversationChanges } from './codex-saved-history.js'
 import { createNumberedTerminalInteractionProtocol, type TerminalPermissionOption } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition, AgentProviderHookNormalizationContext } from '../agent-provider.js'
@@ -184,6 +182,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
       capabilities: {
         terminal: true, timeline: 'complete-events', permission: 'respond',
         providerResume: true, replyCorrelation: 'none',
+        asyncQuestionReply: 'terminal',
         providerFork: { current: true },
         promptExecution: { immediate: 'terminal-submit' },
         usage: { kind: 'native-transcript', transcriptFormat: 'codex-rollout' }
@@ -202,17 +201,14 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     preparePromptExecutionTransport: createCodexPromptTransportPreparation(verifyPromptExecutionTransport),
     readPromptExecutionEvidence: readCodexPromptExecutionEvidence,
     observeSessionStatus: observeCodexSessionStatus,
-    planPromptInput: (prompt, context) => ({
+    planPromptInput: prompt => ({
       kind: 'render-then-submit',
-      // Native async option editors treat a paste as an Other answer. Return to
-      // the original main composer only for an exact question reply on this visible editor.
-      payload: (context?.intent === 'question-reply' && codexQuestionAnswers([{ type: 'text', text: prompt }]) ? codexQuestionComposerNavigation(context.terminalScreen) : '') + buildPromptInputPayload(prompt),
+      payload: buildPromptInputPayload(prompt),
       renderedText: sanitizeBracketedPasteText(prompt).replace(/\r\n?/gu, '\n'),
       // The native composer submits into its active turn; interruption is not part of this input.
       submit: '\r'
     }),
     interaction,
-    prepareInteractionResponse: createCodexInteractionResponsePreparation(interaction.planResponse),
     hook: CODEX_HOOKS,
     discoverNativeSession: context => discoverAppServerNativeSession(context, 'codex', codexMainNativeRecord),
     listNativeSessions: listCodexNativeSessions,
@@ -220,7 +216,6 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     readConversationChanges: readCodexSavedConversationChanges,
     readSessionHistoryPage: context => context.transcriptPath ? readCodexSavedSessionHistoryPage(context) : readAppServerSessionHistoryPage(context),
     readSessionHistoryRecord: context => context.transcriptPath ? readCodexSavedSessionHistoryRecord(context) : readAppServerSessionHistoryRecord(context),
-    prepareSessionQuestionReply: prepareAppServerSessionQuestionReply,
     observeSessionHistory: observeNativeJsonlHistory,
     inspectHookActivation: inspectCodexHookActivation,
     launchOptions: CODEX_LAUNCH_OPTIONS,

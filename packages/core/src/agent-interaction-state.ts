@@ -30,7 +30,7 @@ export function agentInteractionActiveRequest(pending: AgentMuxPendingInteractio
     request.kind !== 'permission' || !request.permissionHook?.nativeTurnEnded) : pending.request
 }
 
-/** Explain why an observed request cannot currently be answered through typed terminal input. */
+/** Explain the original request reply route; terminal presentation never grants a typed target. */
 export function agentInteractionResponseUnavailableReason(pending: AgentMuxPendingInteraction): string | undefined {
   const request = agentInteractionActiveRequest(pending)
   if (!request) return undefined
@@ -57,7 +57,8 @@ export function agentInteractionResponseUnavailableReason(pending: AgentMuxPendi
     : 'Native input delivery is unknown. Check the terminal before answering; input will not be resent.'
   if (pending.additionalRequests?.length) return 'More than one native request is outstanding. Use the terminal until the current request is confirmed.'
   if (pending.response) return 'The original typed response receipt is unconfirmed. Reconcile its exact response; automatic input is paused.'
-  return pending.request.kind === 'question' ? pending.request.responseUnavailableReason : undefined
+  return request.evidence.source === 'acp' ? request.responseUnavailableReason : request.responseUnavailableReason ??
+    'This request has no addressable reply channel. Answer it in the original terminal.'
 }
 
 /** The native Hook owner has correlated this completion to the active invocation. */

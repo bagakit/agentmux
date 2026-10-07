@@ -190,6 +190,11 @@ export function parseHostedBootstrap(value: unknown): import('./hosted-client-co
   if (p.storePath !== null) wireString(p.storePath)
   if (!Array.isArray(p.sessions) || !Array.isArray(p.catalog)) throw new AgentMuxError(
     'Runtime bootstrap is malformed.', 'CONTROL_PROTOCOL_ERROR')
+  for (const entry of p.catalog) {
+    const route = (entry as import('./types.js').AgentCatalogEntry | null)?.capabilities?.asyncQuestionReply
+    if (route !== undefined && route !== 'terminal') throw new AgentMuxError(
+      'Provider asynchronous question reply route is malformed.', 'CONTROL_PROTOCOL_ERROR')
+  }
   if (p.connection !== null) parseHostedNativeConnection(p.connection)
   return p as unknown as import('./hosted-client-contract.js').AgentMuxHostedBootstrap
 }

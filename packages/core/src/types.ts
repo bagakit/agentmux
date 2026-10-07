@@ -533,6 +533,8 @@ export type AgentCapabilities = {
   /** Native copies preserve their Provider context and receive a new conversation identity. */
   providerFork?: { current: true }
   replyCorrelation: 'none' | 'native-turn-id' | 'acp-turn-id'
+  /** Structured async questions use the original CLI editor, not an automatic reply channel. */
+  asyncQuestionReply?: 'terminal'
   /** Manual current-terminal submit reports bytes; it does not promise Native steering. */
   promptExecution?: { immediate: 'terminal-submit' | 'interrupt-before-input' }
   /**
@@ -1017,12 +1019,6 @@ export type AgentSessionHistoryResourceReadResult = {
 export type AgentProviderSessionHistoryRecordContext = Omit<AgentProviderSessionHistoryContext, 'cursor' | 'limit'> & {
   turnId?: string
   recordId: string
-}
-
-export type AgentProviderSessionQuestionReplyContext = Omit<AgentProviderSessionHistoryContext, 'cursor' | 'limit'> & {
-  turnId: string
-  recordId: string
-  answers: AgentSessionHistoryQuestionAnswer[]
 }
 
 export type AgentSessionQuestionReplyReceipt = {

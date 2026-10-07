@@ -36,8 +36,7 @@ import {
   type AgentProvider,
   type AgentManagedHookPlanContext,
   type AgentProviderHookNormalizationContext,
-  type AgentProviderPromptExecutionContext,
-  type AgentProviderPreparedInteractionResponse
+  type AgentProviderPromptExecutionContext
 } from './agent-provider.js'
 import { createDefaultAgentMuxPluginRegistry, type AgentMuxPlugin } from './agent-plugin.js'
 import { releaseSubagentRoster, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation } from './hook-normalizer.js'
@@ -713,13 +712,6 @@ async function executorUnavailableError(
     ? `The configured ${label} executable is not available: ${result.cause.message}`
     : `${label} is not installed on this host.`, 'AGENT_NOT_FOUND', 'executor-missing')
 }
-
-type AgentInteractionInputQualification = Readonly<{
-  prepared: AgentProviderPreparedInteractionResponse
-  processId: number | null
-  nativeHandleIdentity: string
-  deadline: number
-}>
 
 type AgentInputObservation = {
   run: AgentMuxRunRef
@@ -5224,7 +5216,7 @@ export class AgentMuxClient {
     const exactKey = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId }
     if (await this.messageQueue.inspectInput({ key: exactKey })) throw new AgentMuxError(
       'The original controlled input has another admission intent. An exact caller condition cannot replace it.', 'AGENT_PROMPT_OPERATION_CONFLICT')
-    await this.submitPromptInternal(input, undefined, undefined, false, () => {
+    await this.submitPromptInternal(input, undefined, undefined, () => {
       if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use submitAgentMessage.', 'MESSAGE_ENVELOPE_REQUIRED')
     }, authority)
   }
@@ -5511,7 +5503,7 @@ export class AgentMuxClient {
           return
         }
         preparationPhase = 'input-coordination'
-        await this.submitPromptInternal({ ...context.input, signal: context.controller.signal }, context.authorAgentSessionId, assertTarget, false, undefined, authority, context.producer,
+        await this.submitPromptInternal({ ...context.input, signal: context.controller.signal }, context.authorAgentSessionId, assertTarget, undefined, authority, context.producer,
           { authorizeDispatch: async () => {
             const link = await this.messageQueue.authorizeInputDispatch(context.ref, context.controller.signal)
             dispatchDeclined = link === null
@@ -5585,11 +5577,14 @@ export class AgentMuxClient {
     })
   }
 
-  /** Exact manual answers explicitly continue an active turn unless the caller declines; never a pending Hook or A2A envelope. */
+  /** Route an exact historical question reply without guessing the live terminal's active editor. */
   async replySessionQuestion(input: AgentMuxSessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt> {
-    this.requireConnected()
     const condition = validateAgentPromptCondition(input)
-    const session = this.requireAgentSession(input.agentSessionId)
+    input = { ...input, ...condition, source: { ...input.source },
+      answers: Array.isArray(input.answers) ? input.answers.map(answer => ({ ...answer })) : input.answers }
+    safeId(input.operationId, 'Question reply operation id')
+    input.signal?.throwIfAborted()
+    const session = await this.registry.resolveMetadata(input.agentSessionId, 'local', () => input.signal?.throwIfAborted())
     if (!sameRun(session.run, condition.expectedRun)) throw new AgentMuxError(
       'Agent Session changed before its question was answered.', 'STALE_AGENT_SESSION')
     if (!input.source || input.source.providerId !== session.providerId ||
@@ -5599,58 +5594,22 @@ export class AgentMuxClient {
         !answer || typeof answer.questionId !== 'string' || !answer.questionId || typeof answer.answer !== 'string' || !answer.answer.trim())) {
       throw new AgentMuxError('A question reply requires an exact source, record and answers.', 'INVALID_AGENT_QUESTION_REPLY')
     }
-    // Copy the original caller intent before any native read can suspend this method.
-    input = { ...input, ...condition, source: { ...input.source },
-      answers: input.answers.map(answer => ({ questionId: answer.questionId, answer: answer.answer })),
-      ...(input.sourceDevice ? { sourceDevice: { ...input.sourceDevice } } : {}),
-      ...(input.args ? { args: [...input.args] } : {}), ...(input.env ? { env: { ...input.env } } : {}) }
-    const lifetime = this.providerReadLifetime('history')
-    const { controller, read } = lifetime
-    const cancel = (): void => controller.abort(input.signal?.reason)
-    input.signal?.addEventListener('abort', cancel, { once: true })
-    try {
-      input.signal?.throwIfAborted()
-      const binding = await read(this.nativeHistoryBinding(input.agentSessionId, input, controller.signal, 'read'))
-      const { provider, handle } = binding
-      input = { ...input, ...binding.executorOptions }
-      const source = { providerId: session.providerId, nativeSessionId: handle.sessionId }
-      if (source.providerId !== input.source.providerId || source.nativeSessionId !== input.source.nativeSessionId) {
-        throw new AgentMuxError('The question belongs to another native source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-      }
-      if (!provider.prepareSessionQuestionReply) throw new AgentMuxError(
-        'This Provider does not expose native question replies; ordinary input remains available.', 'AGENT_QUESTION_REPLY_UNSUPPORTED')
-      const prompt = await read(provider.prepareSessionQuestionReply({ source,
-        turnId: input.turnId, recordId: input.recordId, answers: input.answers,
-        command: resolveAgentExecutable(input.commandOverride, provider.executable),
-        args: input.args ?? [], env: input.env ?? {}, workspacePath: session.workspacePath,
-        ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }), signal: controller.signal }))
-      if (typeof prompt !== 'string' || !prompt.trim()) throw new AgentMuxError(
-        'The Provider returned an invalid question reply.', 'INVALID_AGENT_PROVIDER')
-      await read(binding.assertCurrent())
-      // Recheck source after joining the original input serializer, not before waiting in its queue.
-      await this.submitPromptInternal({ ...condition, agentSessionId: input.agentSessionId,
-        operationId: input.operationId, prompt,
-        ...(input.authorHuman === undefined ? {} : { authorHuman: input.authorHuman }),
-        ...(input.sourceDevice === undefined ? {} : { sourceDevice: input.sourceDevice }),
-        ...(input.sourceChannel === undefined ? {} : { sourceChannel: input.sourceChannel }),
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-        allowUncertainTurn: input.allowUncertainTurn ?? true },
-        undefined, current => {
-          const native = current.nativeHandle
-          if (current.providerId !== source.providerId || native?.kind !== 'provider' || native.providerId !== source.providerId || native.sessionId !== source.nativeSessionId) {
-            throw new AgentMuxError('The question source changed before Input admission. Ordinary input remains available.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-          }
-        }, true)
-      return { agentSessionId: input.agentSessionId, source, recordId: input.recordId,
-        questionIds: input.answers.map(answer => answer.questionId), operationId: input.operationId, outcome: 'submitted' }
-    } finally {
-      input.signal?.removeEventListener('abort', cancel)
-      lifetime.close()
+    if (session.nativeHandle?.kind === 'provider' && session.nativeHandle.sessionId !== input.source.nativeSessionId) {
+      throw new AgentMuxError('The question belongs to another native source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
     }
+    // A history reference identifies the question, not the live CLI editor.
+    // No current Provider exposes an exact automatic async reply protocol.
+    // Keep the original public entry and its recovery facts, without creating
+    // an input claim or drawing conclusions about an earlier operation.
+    const route = this.providers.get(session.providerId).catalog.capabilities.asyncQuestionReply
+    throw new AgentMuxError('Answer this question in the original terminal. Automatic question replies are not exposed by this Provider; your answer and existing operation remain available.',
+      'AGENT_QUESTION_REPLY_UNSUPPORTED', JSON.stringify({ reason: route === 'terminal'
+        ? 'original-terminal-required' : 'automatic-reply-not-declared',
+        recovery: { kind: 'terminal', agentSessionId: session.agentSessionId, expectedRun: session.run } }))
   }
 
   private async submitPromptInternal(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string,
-    assertSession?: (session: AgentMuxAgentSession) => void, questionReply = false, assertInput?: () => void,
+    assertSession?: (session: AgentMuxAgentSession) => void, assertInput?: () => void,
     authority?: import('./prompt-submission.js').AgentPromptInputAuthority, producer: 'prompt' | 'message' = 'prompt',
     inputControl?: { authorizeDispatch(): Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> }): Promise<void> {
     const startedAt = Date.now()
@@ -5668,7 +5627,7 @@ export class AgentMuxClient {
     let stage = 'validation'
     try {
       assertInput?.()
-      await this.performPromptSubmission(input, authorAgentSessionId, assertSession, questionReply, value => { stage = value }, authority, producer, inputControl)
+      await this.performPromptSubmission(input, authorAgentSessionId, assertSession, value => { stage = value }, authority, producer, inputControl)
     } catch (error) {
       // All observations below come from this invocation's failure boundary. Missing
       // projections stay missing; they do not authorize replay of the logical message.
@@ -5703,7 +5662,7 @@ export class AgentMuxClient {
   }
 
   private async performPromptSubmission(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string,
-    assertSession?: (session: AgentMuxAgentSession) => void, questionReply = false, stage: (value: string) => void = () => {},
+    assertSession?: (session: AgentMuxAgentSession) => void, stage: (value: string) => void = () => {},
     authority?: import('./prompt-submission.js').AgentPromptInputAuthority, producer: 'prompt' | 'message' = 'prompt',
     inputControl?: { authorizeDispatch(): Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> }): Promise<void> {
     stage('connection')
@@ -5714,7 +5673,7 @@ export class AgentMuxClient {
     }
     if (input.admissionIntent !== undefined && (input.admissionIntent.kind !== 'manual-actor' ||
         Object.keys(input.admissionIntent).some(k => k !== 'kind') || Object.hasOwn(input, 'afterSubmissionId') ||
-        input.execution !== 'immediate' || questionReply || input.expectedCompletionId !== undefined || input.expectedFutureIntent !== undefined ||
+        input.execution !== 'immediate' || input.expectedCompletionId !== undefined || input.expectedFutureIntent !== undefined ||
         input.expectedInputByte !== undefined || input.preparationRetry !== undefined)) {
       throw new AgentMuxError('Manual actor input cannot replace an exact condition or automatic/request intent.', 'INVALID_AGENT_PROMPT')
     }
@@ -5797,18 +5756,6 @@ export class AgentMuxClient {
         try {
           stage('input-coordination')
           delivered = await this.serializeAgentInput(session, async (current, run) => {
-            let plan = ordinaryPlan
-            if (questionReply) {
-              let terminalScreen: AgentTerminalScreenSnapshot | undefined
-              beginPromptPreparationPhase(protocolInput, 'current-pane')
-              await this.screenEvidence.wait(current, run.latestOutputBytes, false, screen => {
-                terminalScreen = screen.snapshot(); return true
-              }, { timeoutMs: SESSION_HISTORY_TIMEOUT_MS, timeoutMessage: 'Question input surface is unconfirmed; ordinary terminal input remains available.',
-                terminalMessage: 'The original question Run ended.', requireCompleteFrame: true,
-                ...(input.signal ? { signal: input.signal } : {}) })
-              completePromptPreparationPhase(protocolInput)
-              plan = provider.planPromptInput(outbound, { intent: 'question-reply', ...(terminalScreen ? { terminalScreen } : {}) })
-            }
             const savedMessage = input.expectedFutureIntent ? (await this.store.readFuturePromptIntent(current.agentSessionId, input.expectedFutureIntent.intentId))?.message : undefined
             // Timer transport is not the producer. Inherit only the original saved
             // authenticated source; retain this request's exact content for admission.
@@ -5817,7 +5764,7 @@ export class AgentMuxClient {
               ...(savedMessage?.authorAgentSessionId ? { authorAgentSessionId: savedMessage.authorAgentSessionId } : {}),
               ...(savedMessage?.sourceDevice ? { sourceDevice: savedMessage.sourceDevice } : {})
             } : message
-            return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
+            return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, ordinaryPlan, condition,
               input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertSession, transportQualification,
               producer === 'prompt' ? { kind: producer, agentSessionId: current.agentSessionId, expectedRun, submissionId: operationId }
                 : { kind: producer, agentSessionId: current.agentSessionId, expectedRun, messageId: operationId },
@@ -5949,7 +5896,7 @@ export class AgentMuxClient {
       ? { ...promptInput, expectedRun: originalIntent.expectedRun, admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' }
       : { ...promptInput, ...originalIntent.condition, execution: input.execution ?? 'default' }
     await this.submitPromptInternal(submission, authorAgentSessionId,
-      undefined, false, undefined, authority, 'message')
+      undefined, undefined, authority, 'message')
     await this.messageQueue.recordDelivery(envelope.messageId, 'delivered')
   }
 
@@ -6027,6 +5974,10 @@ export class AgentMuxClient {
       await this.respondPermissionHook(canonical, hookRequest, input.response, input.operationId, context)
       return
     }
+    if (pending && pending.request.evidence.source !== 'acp' && !pending.response) {
+      throw new AgentMuxError(agentInteractionResponseUnavailableReason(pending) ??
+        'This request has no addressable reply channel. Answer it in the original terminal.', 'AGENT_INTERACTION_UNCONFIRMED')
+    }
     await this.connect()
     const assertOriginalResponseTarget = () => {
       const current = this.requireAgentSession(requestedSession.agentSessionId)
@@ -6051,67 +6002,15 @@ export class AgentMuxClient {
       await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, current => interactionReceiptPatch(current, input.operationId, { delivery: 'acp-acknowledged' }))
       return
     }
-    await this.assertNativeInteractionSource(requestedSession)
-    const provider = this.providers.get(requestedSession.providerId)
-    const plan = provider.planInteractionResponse(pending.request, response)
-    if (!plan.data) {
-      throw new AgentMuxError('Provider interaction response bytes cannot be empty.', 'INVALID_AGENT_PROVIDER')
+    if (!pending.response) {
+      throw new AgentMuxError(agentInteractionResponseUnavailableReason(pending) ??
+        'This request has no addressable reply channel. Answer it in the original terminal.', 'AGENT_INTERACTION_UNCONFIRMED')
     }
-    const responseDigest = digestInteractionResponse(response)
-    const operationId = input.operationId
-    this.cancelPromptRenderObservation(requestedSession, 'interaction-response')
-    const deadline = Date.now() + 10_000
-    const renderObservation = new AbortController()
-    const prepared = await this.observeAgentInputPreparation(canonical, 10_000, async signal => {
-      const run = await this.requireCurrentAgentRun(canonical)
-      if (pending.response?.acknowledged || pending.response &&
-          (run.acceptedInputBytes === null || run.acceptedInputBytes >= pending.response.inputByteRange.endByte)) return undefined
-      const { response: _originalResponse, ...unanswered } = pending
-      const unavailable = agentInteractionResponseUnavailableReason(unanswered)
-      if (unavailable) throw new AgentMuxError(unavailable, 'AGENT_INTERACTION_UNCONFIRMED')
-      if (run.acceptedInputBytes === null) throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
-      if (!provider.prepareInteractionResponse || !pending.request.nativeToolCallId) {
-        throw new AgentMuxError('The native interaction input target is unconfirmed. The terminal remains available.', 'AGENT_INTERACTION_UNCONFIRMED')
-      }
-      const result = await provider.prepareInteractionResponse({
-        ...this.providerNativeContext(canonical, run), agentSessionId: canonical.agentSessionId,
-        run: canonical.run, inputByte: run.acceptedInputBytes, signal,
-        observeTarget: async inspect => {
-          let geometryRevision = -1, evidenceGeneration = -1
-          const outputThroughByte = await this.screenEvidence.wait(canonical, run.latestOutputBytes, false, screen => {
-            if (!inspect(screen.snapshot())) return false
-            geometryRevision = screen.geometryRevision
-            evidenceGeneration = this.screenEvidence.generation(canonical.agentSessionId)
-            return true
-          }, { timeoutMs: 10_000, requireCompleteFrame: true, signal,
-            timeoutMessage: 'The native interaction input target is unconfirmed.', terminalMessage: 'Agent Run ended before its interaction target was confirmed.' })
-          return { run: canonical.run, outputThroughByte, geometryRevision, evidenceGeneration }
-        }
-      }, pending.request, response)
-      if (!result || result.plan.data !== plan.data || result.target.agentSessionId !== canonical.agentSessionId ||
-          !sameRun(result.target.run, canonical.run) || result.target.requestId !== pending.request.id ||
-          result.target.nativeToolCallId !== pending.request.nativeToolCallId || !result.target.nativeSourceId ||
-          result.target.inputByte !== run.acceptedInputBytes || !sameRun(result.target.frame.run, canonical.run)) {
-        throw new AgentMuxError('Provider did not confirm the exact native interaction input target.', 'AGENT_INTERACTION_UNCONFIRMED')
-      }
-      return { prepared: result, processId: run.pid,
-        nativeHandleIdentity: JSON.stringify(canonical.nativeHandle ?? null), deadline }
-    })
+    const data = this.providers.get(requestedSession.providerId).planInteractionResponse(pending.request, response).data
     await this.serializeAgentInput(requestedSession, async (session, run) => {
-      await context?.assertCurrent?.()
-      await this.submitNativeInteractionResponse(
-        session,
-        run,
-        pending.request,
-        response,
-        responseDigest,
-        operationId,
-        plan.data,
-        prepared,
-        renderObservation.signal,
-        context?.assertCurrent
-      )
-    }, { kind: 'semantic', bytes: null }, renderObservation)
+      await this.submitNativeInteractionResponse(session, run, pending.request, response,
+        digestInteractionResponse(response), input.operationId, data)
+    }, { kind: 'semantic', bytes: null })
   }
 
   private async closePermissionHook(agentSessionId: string, runId: string, receiptId: string, decided: boolean): Promise<void> {
@@ -6448,14 +6347,10 @@ export class AgentMuxClient {
     }
   }
 
-  private async recoverPendingInteractionResponses(
-    runs: readonly CtxmuxAdapterRun[]
-  ): Promise<void> {
+  private async recoverPendingInteractionResponses(runs: readonly CtxmuxAdapterRun[]): Promise<void> {
     for (const session of this.registry.list()) {
       const pending = session.pendingInteraction
-      if (!pending) continue
-      // A source observation cannot authorize replay into another conversation. Keep its original operation for review.
-      if (session.nativeSourceObservation) continue
+      if (!pending || session.nativeSourceObservation) continue
       if (pending.request.evidence.source === 'acp') {
         if (!this.acp.hasPendingPermission(session.agentSessionId, pending.request.id)) {
           const settled = await this.clearPendingInteraction(session, pending.request.id)
@@ -6464,95 +6359,31 @@ export class AgentMuxClient {
         continue
       }
       if (pending.response?.acknowledged) {
-        if (agentInteractionResponseSettled(pending)) {
-          const settled = await this.clearPendingInteraction(session, pending.request.id)
-          this.publishSession(settled)
-        }
+        if (agentInteractionResponseSettled(pending)) this.publishSession(await this.clearPendingInteraction(session, pending.request.id))
         continue
       }
-      // Native takeover does not identify the earlier typed response. Keep that
-      // original tuple unknown; an explicit same-response caller may join its receipt.
-      if (pending.nativeInput) continue
-      // A completed target or competing request must never receive new bytes.
-      if (pending.nativeCompleted || pending.additionalRequests?.length) {
-        const response = pending.response
-        const run = runs.find(candidate => candidate.runId === session.run.runId)
-        if (!response || !run || run.acceptedInputBytes === null || run.acceptedInputBytes < response.inputByteRange.endByte) continue
-      }
       const response = pending.response
-      const run = runs.find((candidate) => candidate.runId === session.run.runId)
-      if (!response || pending.request.evidence.source !== 'native-hook') continue
-      if (!run) {
-        throw new AgentMuxError(
-          'A persisted Agent interaction response points to a missing CtxMux Run.',
-          'AGENT_INTERACTION_STATE_INVALID'
-        )
-      }
-      const acceptedInputBytes = run.acceptedInputBytes
-      if (run.state.type === 'running' && (acceptedInputBytes === null || acceptedInputBytes < response.inputByteRange.endByte)) {
-        // A reconnect has no current input-target qualification. Retain the original
-        // tuple and healthy connection; only an explicit exact response can requalify it.
+      if (!response || pending.request.evidence.source !== 'native-hook' || pending.nativeInput) continue
+      const run = runs.find(candidate => candidate.runId === session.run.runId)
+      if (!run || run.acceptedInputBytes === null || run.acceptedInputBytes < response.inputByteRange.endByte) {
         this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
           code: 'AGENT_INTERACTION_UNCONFIRMED',
-          message: 'The original typed response receipt is unconfirmed. Reconcile its exact response; automatic input is paused. The terminal remains available.',
+          message: 'The original typed response receipt is unconfirmed. It will not be replayed; continue in the original terminal.',
           evidence: { source: 'agentmux', observedAt: Date.now(), run: { ...session.run } } })
         continue
       }
-      if (
-        acceptedInputBytes === null ||
-        acceptedInputBytes < response.inputByteRange.startByte ||
-        (
-          acceptedInputBytes > response.inputByteRange.startByte &&
-          acceptedInputBytes < response.inputByteRange.endByte
-        )
-      ) {
-        throw new AgentMuxError(
-          'CtxMux Input cursor cannot reconcile the persisted Agent interaction response.',
-          'AGENT_INTERACTION_STATE_INVALID'
-        )
-      }
       const normalized = normalizeAgentInteractionResponse(pending.request, response.value)
-      const plan = this.providers.get(session.providerId).planInteractionResponse(
-        pending.request,
-        normalized
-      )
-      const recover = async (current: AgentMuxAgentSession, currentRun: CtxmuxAdapterRun) => {
-        await this.submitNativeInteractionResponse(
-          current,
-          currentRun,
-          pending.request,
-          normalized,
-          digestInteractionResponse(normalized),
-          response.operationId,
-          plan.data
-        )
-      }
-      if (run.state.type === 'running') {
-        await this.serializeAgentInput(session, recover, { kind: 'semantic', bytes: null })
-        continue
-      }
+      const data = this.providers.get(session.providerId).planInteractionResponse(pending.request, normalized).data
+      const reconcile = (current: AgentMuxAgentSession, currentRun: CtxmuxAdapterRun) => this.submitNativeInteractionResponse(
+        current, currentRun, pending.request, normalized, digestInteractionResponse(normalized), response.operationId, data)
       try {
-        await recover(session, run)
+        if (run.state.type === 'running') await this.serializeAgentInput(session, reconcile, { kind: 'semantic', bytes: null })
+        else await reconcile(session, run)
       } catch (error) {
-        if (
-          error instanceof AgentMuxError &&
-          error.detail === 'not_applied' &&
-          acceptedInputBytes === response.inputByteRange.startByte
-        ) {
-          const settled = await this.clearPendingInteraction(session, pending.request.id)
-          this.publishSession(settled)
-          continue
-        }
-        if (error instanceof AgentMuxError && error.detail === 'unknown') {
-          // The ended Run cannot receive new bytes. An unavailable original receipt
-          // belongs to this tuple, not to the shared connection or a healthy sibling.
-          this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
-            code: 'AGENT_INTERACTION_UNCONFIRMED',
-            message: `The ended Run's original typed response receipt is unconfirmed: ${error.message} Other terminals remain available.`,
-            evidence: { source: 'agentmux', observedAt: Date.now(), run: { ...session.run } } })
-          continue
-        }
-        throw error
+        // A missing or refused original operation is not proof that another input was our answer.
+        this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+          code: 'AGENT_INTERACTION_UNCONFIRMED', message: `The original typed response receipt is unconfirmed: ${error instanceof Error ? error.message : String(error)} The original terminal remains available.`,
+          evidence: { source: 'agentmux', observedAt: Date.now(), run: { ...session.run } } })
       }
     }
   }
@@ -7667,228 +7498,56 @@ export class AgentMuxClient {
     })
   }
 
-  private async assertNativeInteractionSource(session: AgentMuxAgentSession): Promise<void> {
-    if (!session.nativeSourceObservation && !session.nativeConfirmation) return
-    const provider = this.providers.get(session.providerId)
-    if (!provider.discoverNativeSession) {
-      if (!session.nativeSourceObservation) return
-      throw new AgentMuxError('This interaction belongs to an unconfirmed native conversation. Use the native CLI or confirm its exact current source.', 'AGENT_INTERACTION_SOURCE_CHANGED')
-    }
-    const run = await this.requireCurrentAgentRun(session), epoch = this.connectionEpoch
-    const witness = run.pid && run.state.type === 'running' ? await provider.discoverNativeSession({ processId: run.pid,
-      command: run.program ?? provider.executable, args: run.args ?? [], env: {}, workspacePath: session.workspacePath,
-      signal: new AbortController().signal }) : null
-    const bound = session.nativeHandle
-    if (!witness || bound?.kind !== 'provider' || witness.handle.providerId !== bound.providerId || witness.handle.sessionId !== bound.sessionId ||
-      (bound.transcriptPath !== undefined && witness.handle.transcriptPath !== bound.transcriptPath)) {
-      throw new AgentMuxError('This interaction is not proven to belong to the current native conversation. Raw Agent input remains available.', 'AGENT_INTERACTION_SOURCE_CHANGED')
-    }
-    await witness.assertCurrent()
-    const after = await this.requireCurrentAgentRun(session)
-    const current = this.registry.get(session.agentSessionId)
-    if (after.pid !== run.pid || epoch !== this.connectionEpoch || !sameNativeHandle(current.nativeHandle, session.nativeHandle)) {
-      throw new AgentMuxError('The native source changed before this interaction response.', 'AGENT_INTERACTION_SOURCE_CHANGED')
-    }
-  }
-
+  /** Reconcile only an already crossed original Input range; never create or replay an answer. */
   private async submitNativeInteractionResponse(
-    session: AgentMuxAgentSession,
-    run: CtxmuxAdapterRun,
-    request: AgentMuxInteractionRequest,
-    response: AgentMuxInteractionResponse,
-    responseDigest: string,
-    operationId: string,
-    data: string,
-    qualification?: AgentInteractionInputQualification,
-    renderSignal?: AbortSignal,
-    assertCurrent?: () => void | Promise<void>
+    session: AgentMuxAgentSession, run: CtxmuxAdapterRun, request: AgentMuxInteractionRequest,
+    response: AgentMuxInteractionResponse, responseDigest: string, operationId: string, data: string
   ): Promise<void> {
-    await this.assertNativeInteractionSource(session)
-    if (
-      request.agentSessionId !== session.agentSessionId ||
-      request.evidence.source !== 'native-hook' ||
-      request.evidence.run?.runId !== session.run.runId
-    ) {
-      throw new AgentMuxError(
-        'Native Agent interaction does not match the exact Session and Run.',
-        'INVALID_AGENT_INTERACTION'
-      )
+    if (request.agentSessionId !== session.agentSessionId || request.evidence.source !== 'native-hook' ||
+        request.evidence.run?.runId !== session.run.runId || run.runId !== session.run.runId) {
+      throw new AgentMuxError('Native interaction receipt does not match the original Session and Run.', 'INVALID_AGENT_INTERACTION')
     }
     const bytes = Buffer.byteLength(data)
-    const prepared = qualification?.prepared
-    const assertTargetFrame = (currentRun: CtxmuxAdapterRun, currentSession = session): void => {
-      if (qualification && (renderSignal?.aborted || Date.now() >= qualification.deadline ||
-          currentRun.pid !== qualification.processId ||
-          JSON.stringify(currentSession.nativeHandle ?? null) !== qualification.nativeHandleIdentity)) {
-        throw new AgentMuxError('The original native interaction identity or input qualification changed.', 'AGENT_INTERACTION_UNCONFIRMED')
-      }
-      const frame = prepared && this.screenEvidence.currentCompleteFrame(session)
-      if (!prepared || !frame || frame.outputThroughByte !== currentRun.latestOutputBytes ||
-          frame.outputThroughByte < prepared.target.frame.outputThroughByte ||
-          frame.geometryRevision !== prepared.target.frame.geometryRevision ||
-          frame.evidenceGeneration !== prepared.target.frame.evidenceGeneration ||
-          currentRun.acceptedInputBytes !== prepared.target.inputByte ||
-          !prepared.inspectCurrentTarget(frame.snapshot)) {
-        throw new AgentMuxError('The native interaction target changed before input. The original request is kept.', 'AGENT_INTERACTION_UNCONFIRMED')
+    const assertResponse = (state: NonNullable<AgentMuxAgentSession['pendingInteraction']>['response']): void => {
+      if (!state || !bytes || state.responseDigest !== responseDigest || state.operationId !== operationId ||
+          state.inputByteRange.endByte - state.inputByteRange.startByte !== bytes || !isDeepStrictEqual(state.value, response)) {
+        throw new AgentMuxError('The original interaction response claim is missing or has different content.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
       }
     }
-    const prior = session.pendingInteraction?.response
-    const canApply = run.state.type === 'running' && !prior?.acknowledged && (!prior || run.acceptedInputBytes !== null && run.acceptedInputBytes < prior.inputByteRange.endByte)
-    const observeFinalTarget = async (current: AgentMuxAgentSession, verify: boolean): Promise<CtxmuxAdapterRun> => {
-      if (!qualification || !prepared || Date.now() >= qualification.deadline) {
-        throw new AgentMuxError('The original native interaction target is unconfirmed.', 'AGENT_INTERACTION_UNCONFIRMED')
+    let current = await this.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+      if (!stored.pendingInteraction || !isDeepStrictEqual(agentInteractionRequestTarget(stored.pendingInteraction.request), agentInteractionRequestTarget(request))) {
+        throw new AgentMuxError('The original interaction request changed before receipt reconciliation.', 'UNKNOWN_AGENT_INTERACTION')
       }
-      return await this.observeAgentInputPreparation(current, qualification.deadline - Date.now(), async signal => {
-        if (verify && !await prepared.verifyCurrentTarget({ ...this.providerNativeContext(current, run),
-            nativeSourceId: prepared.target.nativeSourceId, signal })) {
-          throw new AgentMuxError('The native invocation or source changed before its answer.', 'AGENT_INTERACTION_UNCONFIRMED')
-        }
-        const fresh = await this.requireCurrentAgentRun(current)
-        signal.throwIfAborted()
-        return fresh
-      }, renderSignal)
+      assertResponse(stored.pendingInteraction.response)
+      return stored
+    })
+    const state = current.pendingInteraction!.response!
+    // The shared cursor only makes this old operation safe to query; it never confirms this answer.
+    if (run.acceptedInputBytes === null || run.acceptedInputBytes < state.inputByteRange.endByte) {
+      throw new AgentMuxError('The original typed response receipt is unconfirmed. It will not be replayed; continue in the original terminal.', 'AGENT_INTERACTION_UNCONFIRMED')
     }
-    if (canApply) {
-      run = await observeFinalTarget(session, true)
-      assertTargetFrame(run)
-    }
-    const assertResponse = (
-      state: NonNullable<NonNullable<AgentMuxAgentSession['pendingInteraction']>['response']>
-    ): void => {
-      if (
-        state.responseDigest !== responseDigest ||
-        state.operationId !== operationId ||
-        state.inputByteRange.endByte - state.inputByteRange.startByte !== bytes ||
-        JSON.stringify(state.value) !== JSON.stringify(response)
-      ) {
-        throw new AgentMuxError(
-          'Agent interaction was answered with conflicting content.',
-          'AGENT_INTERACTION_RESPONSE_CONFLICT'
-        )
-      }
-    }
-    let current = await this.updateExactAgentSession(
-      session.agentSessionId,
-      session.run,
-      (stored) => {
-        const pending = stored.pendingInteraction
-        if (!pending || pending.request.id !== request.id) {
-          throw new AgentMuxError('Agent interaction is not pending.', 'UNKNOWN_AGENT_INTERACTION')
-        }
-        if (canApply) assertTargetFrame(run, stored)
-        if (JSON.stringify(pending.request) !== JSON.stringify(request)) {
-          throw new AgentMuxError('The native request changed during input preparation.', 'AGENT_INTERACTION_UNCONFIRMED')
-        }
-        if (pending.response) {
-          assertResponse(pending.response)
-          return stored
-        }
-        const unavailableReason = agentInteractionResponseUnavailableReason(pending)
-        if (unavailableReason) throw new AgentMuxError(unavailableReason, 'AGENT_INTERACTION_UNCONFIRMED')
-        const expectedByte = run.acceptedInputBytes
-        if (expectedByte === null) {
-          throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
-        }
-        return {
-          ...invalidateAgentIdleEvidence(stored),
-          pendingInteraction: {
-            request: pending.request,
-            response: {
-              value: structuredClone(response),
-              responseDigest,
-              operationId,
-              inputByteRange: {
-                startByte: expectedByte,
-                endByte: expectedByte + bytes
-              },
-              acknowledged: false
-            }
-          },
-          updatedAt: Date.now()
-        }
-      }
-    )
-    let state = current.pendingInteraction?.response
-    if (!state) {
-      throw new AgentMuxError(
-        'Agent interaction response claim was not persisted.',
-        'AGENT_INTERACTION_STATE_INVALID'
-      )
-    }
-    assertResponse(state)
     let acceptedInputBytes = run.acceptedInputBytes
     if (!state.acknowledged) {
-      if (canApply) {
-        run = await observeFinalTarget(current, true)
-        assertTargetFrame(run, current)
-      }
-      await assertCurrent?.()
-      if (canApply) assertTargetFrame(run, this.requireAgentSession(session.agentSessionId))
-      current = await this.updateExactAgentSession(session.agentSessionId, session.run, stored => interactionReceiptPatch(stored, operationId, { delivery: 'unknown', inputByteRange: state!.inputByteRange }))
       const accepted = await this.kernel.input(session.run.runId, {
-        ownerInstanceId: this.kernel.identity().daemonInstanceId,
-        operationId: state.operationId,
-        expectedByte: state.inputByteRange.startByte,
-        data
+        ownerInstanceId: this.kernel.identity().daemonInstanceId, operationId: state.operationId,
+        expectedByte: state.inputByteRange.startByte, data
       })
-      if (
-        accepted.appliedByteRange.startByte !== state.inputByteRange.startByte ||
-        accepted.appliedByteRange.endByte !== state.inputByteRange.endByte ||
-        accepted.run.acceptedInputBytes === null ||
-        accepted.run.acceptedInputBytes < state.inputByteRange.endByte
-      ) {
-        throw new AgentMuxError(
-          'CtxMux interaction receipt does not match the persisted Input claim.',
-          'AGENT_INTERACTION_RECEIPT_MISMATCH'
-        )
+      if (accepted.run.runId !== session.run.runId || accepted.appliedByteRange.startByte !== state.inputByteRange.startByte ||
+          accepted.appliedByteRange.endByte !== state.inputByteRange.endByte || accepted.run.acceptedInputBytes === null ||
+          accepted.run.acceptedInputBytes < state.inputByteRange.endByte) {
+        throw new AgentMuxError('CtxMux interaction receipt does not match the original Input claim.', 'AGENT_INTERACTION_RECEIPT_MISMATCH')
       }
       acceptedInputBytes = accepted.run.acceptedInputBytes
-      current = await this.updateExactAgentSession(
-        session.agentSessionId,
-        session.run,
-        (stored) => {
-          // A subsequent native request can arrive while this accepted Input awaits its ACK.
-          // Record the cursor, but never settle or overwrite that newer request.
-          stored = interactionReceiptPatch(stored, operationId, { delivery: 'bytes-accepted', inputByteRange: state!.inputByteRange })
-          if (stored.pendingInteraction?.request.id !== request.id) return stored
-          const responseState = stored.pendingInteraction.response
-          if (!responseState) {
-            throw new AgentMuxError(
-              'Agent interaction response claim disappeared.',
-              'AGENT_INTERACTION_STATE_INVALID'
-            )
-          }
-          assertResponse(responseState)
-          if (responseState.acknowledged) return stored
-          return {
-            ...stored,
-            pendingInteraction: {
-              ...stored.pendingInteraction,
-              response: { ...responseState, acknowledged: true }
-            },
-            updatedAt: Date.now()
-          }
-        }
-      )
-      if (current.pendingInteraction?.request.id !== request.id) {
-        this.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
-        this.publishSession(current)
-        return
-      }
-      state = current.pendingInteraction?.response
-    }
-    if (
-      !state?.acknowledged ||
-      acceptedInputBytes === null ||
-      acceptedInputBytes < state.inputByteRange.endByte
-    ) {
-      throw new AgentMuxError(
-        'CtxMux Input cursor precedes the persisted interaction receipt.',
-        'AGENT_INTERACTION_STATE_INVALID'
-      )
+      current = await this.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+        stored = interactionReceiptPatch(stored, operationId, { delivery: 'bytes-accepted', inputByteRange: state.inputByteRange })
+        if (stored.pendingInteraction?.request.id !== request.id) return stored
+        assertResponse(stored.pendingInteraction.response)
+        return { ...stored, pendingInteraction: { ...stored.pendingInteraction,
+          response: { ...stored.pendingInteraction.response!, acknowledged: true } }, updatedAt: Date.now() }
+      })
     }
     this.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
-    const settled = current.pendingInteraction && agentInteractionResponseSettled(current.pendingInteraction)
+    const settled = current.pendingInteraction?.request.id === request.id && agentInteractionResponseSettled(current.pendingInteraction)
       ? await this.clearPendingInteraction(current, request.id) : current
     this.publishSession(settled)
   }

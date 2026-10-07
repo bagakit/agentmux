@@ -664,7 +664,6 @@ export class AgentMuxRpcService {
       const target = await this.owner(rpcString(input.agentSessionId, 'Question Session ID'))
       context.signal?.throwIfAborted()
       if (target.client.forwardRpc) return await target.client.forwardRpc('agent.question.reply', { ...input, agentSessionId: target.agentSessionId }, context) as AgentMuxRpcResult<M>
-      await target.client.connect()
       const sourceDevice = this.ports.operationSource?.(context)
       return await target.client.replySessionQuestion({ ...input, agentSessionId: target.agentSessionId, authorHuman: true, sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api'),
         ...(sourceDevice ? { sourceDevice } : {}),
