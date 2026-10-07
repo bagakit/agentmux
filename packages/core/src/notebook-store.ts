@@ -5,7 +5,7 @@ import { durableWriteFile } from './durable-write.js'
 import { AgentMuxNotesStorage, defaultNotesDirectory, withNotesStorageFileLock } from './notes-storage.js'
 import { AgentMuxError } from './errors.js'
 import { applyNotebookChange, emptyNotebookState, type NotebookActor, type NotebookObservation, type NotebookState, type NotebookWrite } from './notebook-catalog.js'
-import { NOTEBOOK_DATABASE_NAME, initializeNotebookDatabase, readNotebookDatabase, readNotebookProvenance, writeNotebookDatabase, readNotebookHistory, writeNotebookHistory, readNotebookHistoryProvenance } from './notebook-database.js'
+import { NOTEBOOK_DATABASE_NAME, initializeNotebookDatabase, readNotebookDatabase, readNotebookProvenance, writeNotebookDatabase, readNotebookHistory, writeNotebookHistory, readNotebookHistoryProvenance, readNotebookHistoryOperation } from './notebook-database.js'
 import { parseNoteProvenanceWrite, type NoteProvenanceQuery, type NoteProvenanceSnapshot, type NoteProvenanceWrite } from './note-provenance.js'
 import { parseNoteHistoryQuery, parseNoteHistoryRecord, type NoteHistoryQuery, type NoteHistoryRecord, type NoteHistorySnapshot } from './note-history.js'
 export * from './notes-storage.js'
@@ -113,6 +113,12 @@ export class AgentMuxNotebookStore {
     const original = parseNoteHistoryQuery(query)
     await this.locate()
     return readNotebookHistory(this.path, original)
+  }
+  /** Original writer only: includes the private request fingerprint, never exposed by file.history. */
+  async readHistoryOperation(eventId: string): Promise<NoteHistoryRecord | undefined> {
+    if (typeof eventId !== 'string' || !eventId || /[\0\r\n]/u.test(eventId)) throw new AgentMuxError('An original operation identity is required.', 'NOTE_HISTORY_INVALID')
+    const run = async () => { await this.locate(); return this.withWriteLock(() => readNotebookHistoryOperation(this.path, eventId)) }
+    return this.storage ? this.storage.withLock(run) : run()
   }
   /** Trusted host-internal journal port; body callers cannot submit authors or event outcomes. */
   async recordHistory(input: NoteHistoryRecord): Promise<NoteHistoryRecord> {

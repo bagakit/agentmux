@@ -18,7 +18,7 @@ import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { parseAgentForkSource } from './agent-fork.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
 import { parseSettingsCommand } from './settings-cli.js'
-import { parseFileReadCommand } from './agentmux-cli-files.js'
+import { parseFileReadCommand, readFileWriteBase } from './agentmux-cli-files.js'
 import { parseGitParams, parseGitOpenParams } from './public-rpc-git.js'
 
 import { AGENTMUX_SCHEDULE_CLI_COMMANDS } from './schedule-cli.js'
@@ -441,11 +441,15 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     f => parseFileHistoryParams({ zoneId: value(f, '--zone', true)!, path: value(f, '--path', true)!, expectedResource: jsonValue(value(f, '--resource', true)!, 'Original Files resource'), noteId: id(f, '--note', true),
       ...fields(f, { '--space': 'spaceId', '--event-id': 'eventId' }), ...numbers(f, { '--limit': 'limit', '--before': 'before' }), ...(f.booleans.has('--content') ? { includeContent: true } : {}) }) as unknown as Record<string, unknown>,
     'Read file.read first and pass its complete resource JSON. Events are newest first; continue with --before using the oldest returned sequence. The timeline returns metadata. --event-id selects one original event; only then may --content include its revision-checked before/after bodies. Oversized content reads remain explicitly unavailable while metadata and the original event are retained. Unconfirmed or unavailable history remains explicit. This query never restores, undoes, writes a file or sends Agent input.'),
-  command('file.write', '--zone ID --path PATH --resource JSON --expected-revision REV [--space ID] < content', 'Save the exact existing file pinned by its original read resource and revision.',
-    { '--zone': 'data', '--path': 'data', '--resource': 'data', '--space': 'data', '--expected-revision': 'data' },
-    f => ({ zoneId: value(f, '--zone', true)!, path: value(f, '--path', true)!, expectedResource: JSON.parse(value(f, '--resource', true)!),
-      ...(f.values.has('--space') ? { spaceId: value(f, '--space', true)! } : {}), expectedRevision: value(f, '--expected-revision', true)! }),
-    'Content is read verbatim from stdin. Read the original file first and pass its complete resource JSON (including zonePath and mapped path) plus sha256 revision. Changed Zone mapping is refused. Written, conflict, error and unknown remain distinct; reconcile unknown by reading the same file, never automatically resend.'),
+  command('file.write', '--zone ID --path PATH --resource JSON --expected-revision REV [--space ID] [--base FILE --operation-id ID] < content', 'Save the exact existing file pinned by its original read resource and revision.',
+    { '--zone': 'data', '--path': 'data', '--resource': 'data', '--space': 'data', '--expected-revision': 'data', '--base': 'data', '--operation-id': 'data' },
+    async f => {
+      if (f.values.has('--base') !== f.values.has('--operation-id')) invalid('--base and --operation-id must be provided together for an original Note edit.')
+      return { zoneId: value(f, '--zone', true)!, path: value(f, '--path', true)!, expectedResource: jsonValue(value(f, '--resource', true)!, 'Original Files resource'),
+        ...(f.values.has('--space') ? { spaceId: value(f, '--space', true)! } : {}), expectedRevision: value(f, '--expected-revision', true)!,
+        ...(f.values.has('--base') ? { baseContent: await readFileWriteBase(value(f, '--base', true)!), operationId: id(f, '--operation-id') } : {}) }
+    },
+    'Content is read verbatim from stdin. Read the original file first and pass its complete resource JSON (including zonePath and mapped path) plus sha256 revision. Ordinary writes keep exact-revision CAS. For .note.md concurrent editing, provide both --base FILE (the exact observed UTF-8 body, not stdin) and --operation-id ID; the base hash must match expected-revision. Retain this operation ID and input unchanged. The original owner merges nonconflicting edits; overlapping, identity or structural conflicts preserve base/current/proposed content. If those three bodies exceed one RPC frame, noteConflictUnavailable retains the confirmed conflict and original history status/IDs; use file.read and, when available, file.history --event-id ID --content to read content separately. Enhanced written receipts include canonical saved bytes and the same history event ID; replayed:true reports a committed original operation, not another write. Changed Zone mapping is refused. Written, conflict, error and unknown remain distinct; inspect the same original file/event after unknown, never automatically resend or mint another ID.'),
   command('file.create', '--input FILE|-', 'Create one absent text file at its exact original Zone mapping without overwriting existing bytes.', { '--input': 'data' },
     async f => await readControlJsonInput(value(f, '--input', true)!, 'File creation') as Record<string, unknown>,
     'Read the absent target with file.read first. JSON carries zoneId, optional spaceId, path, the complete returned expectedResource, content and expectedRevision:null. The original Files owner validates the mapping and atomically refuses an existing target. Written, conflict, error and unknown remain distinct; after unknown read this same target before deciding, never automatically resend.'),

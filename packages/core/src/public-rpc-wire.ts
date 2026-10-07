@@ -36,7 +36,7 @@ export class AgentMuxRpcDispatcher {
       this.server.addMethodAdvanced(method, async (request, channel) => {
         try {
           const { caller, runtimeFence, ...params } = rpcRecord(request.params ?? {})
-          const context: AgentMuxRpcCallContext = { signal: channel.signal, afterResponse: channel.afterResponse,
+          const context: AgentMuxRpcCallContext = { signal: channel.signal, afterResponse: channel.afterResponse, responseId: request.id ?? null,
             ...(channel.assertCurrent ? { assertCurrent: channel.assertCurrent } : {}),
             ...(runtimeFence === undefined ? {} : { runtimeFence: rpcRecord(runtimeFence, ['runtimeId', 'ownerInstanceId']) as NonNullable<AgentMuxRpcCallContext['runtimeFence']> }),
             ...(channel.principal === undefined ? {} : { principal: channel.principal }),

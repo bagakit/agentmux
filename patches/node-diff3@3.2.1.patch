@@ -1,0 +1,206 @@
+diff --git a/dist/diff3.cjs b/dist/diff3.cjs
+index 1a4ab71832f2564414657e96029c49f20520c8e7..a00b087823ba3a5f9bb6d6899182c8800e79717b 100644
+--- a/dist/diff3.cjs
++++ b/dist/diff3.cjs
+@@ -183,7 +183,7 @@ function diffPatch(buffer1, buffer2) {
+   result.reverse();
+   return result;
+ }
+-function diff3MergeRegions(a, o, b) {
++function diff3MergeRegions(a, o, b, getDiffIndices = diffIndices) {
+   let hunks = [];
+   function addHunk(h, ab) {
+     hunks.push({
+@@ -194,8 +194,8 @@ function diff3MergeRegions(a, o, b) {
+       abLength: h.buffer2[1]
+     });
+   }
+-  diffIndices(o, a).forEach((item) => addHunk(item, "a"));
+-  diffIndices(o, b).forEach((item) => addHunk(item, "b"));
++  getDiffIndices(o, a).forEach((item) => addHunk(item, "a"));
++  getDiffIndices(o, b).forEach((item) => addHunk(item, "b"));
+   hunks.sort((x, y) => x.oStart - y.oStart);
+   let results = [];
+   let currOffset = 0;
+@@ -289,7 +289,7 @@ function diff3Merge(a, o, b, options) {
+   if (typeof b === "string")
+     b = b.split(options.stringSeparator);
+   let results = [];
+-  const regions = diff3MergeRegions(a, o, b);
++  const regions = diff3MergeRegions(a, o, b, options.diffIndices);
+   let okBuffer = [];
+   function flushOk() {
+     if (okBuffer.length) {
+@@ -308,10 +308,10 @@ function diff3Merge(a, o, b, options) {
+   }
+   regions.forEach((region) => {
+     if (region.stable) {
+-      okBuffer.push(...region.bufferContent);
++      for (const item of region.bufferContent) okBuffer.push(item);
+     } else {
+       if (options.excludeFalseConflicts && isFalseConflict(region.aContent, region.bContent)) {
+-        okBuffer.push(...region.aContent);
++        for (const item of region.aContent) okBuffer.push(item);
+       } else {
+         flushOk();
+         results.push({
+diff --git a/dist/diff3.iife.js b/dist/diff3.iife.js
+index 3d1ac26746a03d24bc21f15e5b0eb2810bc4ed54..4ee759cc555372d51f8de41bcda229a40910c8de 100644
+--- a/dist/diff3.iife.js
++++ b/dist/diff3.iife.js
+@@ -160,7 +160,7 @@
+     result.reverse();
+     return result;
+   }
+-  function diff3MergeRegions(a, o, b) {
++  function diff3MergeRegions(a, o, b, getDiffIndices = diffIndices) {
+     let hunks = [];
+     function addHunk(h, ab) {
+       hunks.push({
+@@ -171,8 +171,8 @@
+         abLength: h.buffer2[1]
+       });
+     }
+-    diffIndices(o, a).forEach((item) => addHunk(item, "a"));
+-    diffIndices(o, b).forEach((item) => addHunk(item, "b"));
++    getDiffIndices(o, a).forEach((item) => addHunk(item, "a"));
++    getDiffIndices(o, b).forEach((item) => addHunk(item, "b"));
+     hunks.sort((x, y) => x.oStart - y.oStart);
+     let results = [];
+     let currOffset = 0;
+@@ -266,7 +266,7 @@
+     if (typeof b === "string")
+       b = b.split(options.stringSeparator);
+     let results = [];
+-    const regions = diff3MergeRegions(a, o, b);
++    const regions = diff3MergeRegions(a, o, b, options.diffIndices);
+     let okBuffer = [];
+     function flushOk() {
+       if (okBuffer.length) {
+@@ -285,10 +285,10 @@
+     }
+     regions.forEach((region) => {
+       if (region.stable) {
+-        okBuffer.push(...region.bufferContent);
++        for (const item of region.bufferContent) okBuffer.push(item);
+       } else {
+         if (options.excludeFalseConflicts && isFalseConflict(region.aContent, region.bContent)) {
+-          okBuffer.push(...region.aContent);
++          for (const item of region.aContent) okBuffer.push(item);
+         } else {
+           flushOk();
+           results.push({
+diff --git a/dist/diff3.mjs b/dist/diff3.mjs
+index 8df4f85ce7b621bf0ea8981086fae61d90e5357b..c0a9cd13d57b48fc38b97511c3d57ded974ea53a 100644
+--- a/dist/diff3.mjs
++++ b/dist/diff3.mjs
+@@ -129,7 +129,7 @@ function diffPatch(buffer1, buffer2) {
+   result.reverse();
+   return result;
+ }
+-function diff3MergeRegions(a, o, b) {
++function diff3MergeRegions(a, o, b, getDiffIndices = diffIndices) {
+   let hunks = [];
+   function addHunk(h, ab) {
+     hunks.push({
+@@ -140,8 +140,8 @@ function diff3MergeRegions(a, o, b) {
+       abLength: h.buffer2[1]
+     });
+   }
+-  diffIndices(o, a).forEach((item) => addHunk(item, "a"));
+-  diffIndices(o, b).forEach((item) => addHunk(item, "b"));
++  getDiffIndices(o, a).forEach((item) => addHunk(item, "a"));
++  getDiffIndices(o, b).forEach((item) => addHunk(item, "b"));
+   hunks.sort((x, y) => x.oStart - y.oStart);
+   let results = [];
+   let currOffset = 0;
+@@ -235,7 +235,7 @@ function diff3Merge(a, o, b, options) {
+   if (typeof b === "string")
+     b = b.split(options.stringSeparator);
+   let results = [];
+-  const regions = diff3MergeRegions(a, o, b);
++  const regions = diff3MergeRegions(a, o, b, options.diffIndices);
+   let okBuffer = [];
+   function flushOk() {
+     if (okBuffer.length) {
+@@ -254,10 +254,10 @@ function diff3Merge(a, o, b, options) {
+   }
+   regions.forEach((region) => {
+     if (region.stable) {
+-      okBuffer.push(...region.bufferContent);
++      for (const item of region.bufferContent) okBuffer.push(item);
+     } else {
+       if (options.excludeFalseConflicts && isFalseConflict(region.aContent, region.bContent)) {
+-        okBuffer.push(...region.aContent);
++        for (const item of region.aContent) okBuffer.push(item);
+       } else {
+         flushOk();
+         results.push({
+diff --git a/src/diff3.d.ts b/src/diff3.d.ts
+index e9b2fa9c6c839a2c7258f53c08fdb094f5aea179..42836063896abc0449bf82284867c599f40145e1 100644
+--- a/src/diff3.d.ts
++++ b/src/diff3.d.ts
+@@ -115,7 +115,7 @@ export type IRegion<T> = IStableRegion<T> | IUnstableRegion<T>;
+  * @param {T[]} b
+  * @returns {IRegion<T>[]}
+  */
+-export function diff3MergeRegions<T>(a: T[], o: T[], b: T[]): IRegion<T>[];
++export function diff3MergeRegions<T>(a: T[], o: T[], b: T[], getDiffIndices?: typeof diffIndices): IRegion<T>[];
+ 
+ export interface MergeRegion<T> {
+   ok?: T[];
+@@ -135,6 +135,8 @@ export interface MergeResult<T = string> {
+ }
+ 
+ export interface IMergeOptions {
++  /** Optional exact two-way differ; three-way region semantics remain unchanged. */
++  diffIndices?: typeof diffIndices;
+   excludeFalseConflicts?: boolean;
+   stringSeparator?: string | RegExp;
+ }
+diff --git a/src/diff3.mjs b/src/diff3.mjs
+index 7b43ba56eaf242444384ce940da3cef944761922..273b41c6aa8de640132e6d0b9f7258c01f833a54 100644
+--- a/src/diff3.mjs
++++ b/src/diff3.mjs
+@@ -205,7 +205,7 @@ function diffPatch(buffer1, buffer2) {
+ //
+ // (http://www.cis.upenn.edu/~bcpierce/papers/diff3-short.pdf)
+ //
+-function diff3MergeRegions(a, o, b) {
++function diff3MergeRegions(a, o, b, getDiffIndices = diffIndices) {
+ 
+   // "hunks" are array subsets where `a` or `b` are different from `o`
+   // https://www.gnu.org/software/diffutils/manual/html_node/diff3-Hunks.html
+@@ -221,8 +221,8 @@ function diff3MergeRegions(a, o, b) {
+     });
+   }
+ 
+-  diffIndices(o, a).forEach(item => addHunk(item, 'a'));
+-  diffIndices(o, b).forEach(item => addHunk(item, 'b'));
++  getDiffIndices(o, a).forEach(item => addHunk(item, 'a'));
++  getDiffIndices(o, b).forEach(item => addHunk(item, 'b'));
+   hunks.sort((x,y) => x.oStart - y.oStart);
+ 
+   let results = [];
+@@ -337,7 +337,7 @@ function diff3Merge(a, o, b, options) {
+   if (typeof b === 'string') b = b.split(options.stringSeparator);
+ 
+   let results = [];
+-  const regions = diff3MergeRegions(a, o, b);
++  const regions = diff3MergeRegions(a, o, b, options.diffIndices);
+ 
+   let okBuffer = [];
+   function flushOk() {
+@@ -357,10 +357,10 @@ function diff3Merge(a, o, b, options) {
+ 
+   regions.forEach(region =>  {
+     if (region.stable) {
+-      okBuffer.push(...region.bufferContent);
++      for (const item of region.bufferContent) okBuffer.push(item);
+     } else {
+       if (options.excludeFalseConflicts && isFalseConflict(region.aContent, region.bContent)) {
+-        okBuffer.push(...region.aContent);
++        for (const item of region.aContent) okBuffer.push(item);
+       } else {
+         flushOk();
+         results.push({

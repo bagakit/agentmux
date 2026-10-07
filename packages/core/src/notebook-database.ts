@@ -15,7 +15,8 @@ const historySchema = `CREATE TABLE IF NOT EXISTS note_history_content (revision
   CREATE TABLE IF NOT EXISTS note_history_event (sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     note_id TEXT NOT NULL, resource TEXT NOT NULL, event_id TEXT NOT NULL, batch_id TEXT NOT NULL, json TEXT NOT NULL,
     UNIQUE(note_id,resource,event_id));
-  CREATE INDEX IF NOT EXISTS note_history_original ON note_history_event(note_id,resource,sequence);`
+  CREATE INDEX IF NOT EXISTS note_history_original ON note_history_event(note_id,resource,sequence);
+  CREATE INDEX IF NOT EXISTS note_history_operation ON note_history_event(event_id);`
 const applicationId = 0x414d4e42, header = Buffer.from('SQLite format 3\0')
 const failure = (message: string) => new AgentMuxError(message + ' Original knowledge and files are retained.', 'NOTEBOOK_READ_UNCONFIRMED')
 const schema = `PRAGMA application_id = ${applicationId}; PRAGMA user_version = 2;
@@ -105,6 +106,28 @@ export async function readNotebookHistory(path: string, query: NoteHistoryQuery)
     return noteHistorySnapshot(query, entries, rows.length > limit)
   } finally { original.db.close() }
 }
+/** Trusted writer lookup, not a public timeline. Its derived index is built once under the original lock. */
+export async function readNotebookHistoryOperation(path: string, eventId: string): Promise<NoteHistoryRecord | undefined> {
+  let original = await openRead(path)
+  if (!original) return
+  try {
+    if (!hasHistory(original.db)) return
+    if (!original.db.prepare("SELECT name FROM sqlite_schema WHERE type='index' AND name='note_history_operation'").get()) {
+      original.db.close(); original = null
+      const { DatabaseSync } = await import('node:sqlite'), db = new DatabaseSync(path)
+      try {
+        configure(db); validateIdentity(db, await identity(path)); hasHistory(db)
+        db.exec('CREATE INDEX IF NOT EXISTS note_history_operation ON note_history_event(event_id)')
+      } finally { db.close() }
+      await syncNotebookDatabase(path)
+      original = await openRead(path)
+      if (!original) throw failure('The original operation journal disappeared during lookup.')
+    }
+    const rows = original.db.prepare('SELECT * FROM note_history_event WHERE event_id=? LIMIT 2').all(eventId)
+    if (rows.length > 1) throw failure('This operation identity has ambiguous original events.')
+    return rows[0] ? historyRecord(original.db, rows[0]) : undefined
+  } finally { original?.db.close() }
+}
 /** Current attribution needs only the newest committed event, never historical body inflation. */
 export async function readNotebookHistoryProvenance(path: string, query: NoteProvenanceQuery): Promise<Pick<NoteHistoryRecord, 'status' | 'revision' | 'provenance'> | undefined> {
   const original = await openRead(path)
@@ -129,7 +152,7 @@ export async function writeNotebookHistory(path: string, record: NoteHistoryReco
     // Extend the original v1 metadata database once, without replacing its data or identity.
     // Once v2 acknowledges history, missing tables are a failure, never an empty new journal.
     if (db.prepare('PRAGMA user_version').get()?.user_version === 1) { hasHistory(db); db.exec(historySchema); db.exec('PRAGMA user_version=2') }
-    else hasHistory(db)
+    else { hasHistory(db); db.exec('CREATE INDEX IF NOT EXISTS note_history_operation ON note_history_event(event_id)') }
     result = putHistory(db, record); db.exec('COMMIT')
   } catch (error) { try { db.exec('ROLLBACK') } catch {} throw error } finally { db.close() }
   await syncNotebookDatabase(path)

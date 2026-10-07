@@ -23,7 +23,7 @@ export type NoteHistorySnapshot = { noteId: string; resource: NoteResource; entr
   | { status: 'read'; reason?: never }
   | { status: 'unconfirmed'; reason: string }
 )
-export type NoteHistoryReceipt = { eventId: string; batchId: string; status: NoteHistoryStatus } | { status: 'unconfirmed'; reason: string; eventId?: string; batchId?: string }
+export type NoteHistoryReceipt = { eventId: string; batchId: string; status: NoteHistoryStatus; replayed?: true } | { status: 'unconfirmed'; reason: string; eventId?: string; batchId?: string }
 export const NOTE_HISTORY_BATCH_WINDOW_MS = 5 * 60 * 1000
 export function noteHistoryRevision(content: string): string {
   return 'sha256:' + Array.from(sha256(new TextEncoder().encode(content)), byte => byte.toString(16).padStart(2, '0')).join('')

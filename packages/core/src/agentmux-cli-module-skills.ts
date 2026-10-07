@@ -138,6 +138,17 @@ same upload/build after a lost reply instead of issuing a new logical operation.
 and build output do not certify a user's acceptance. Wrong targets reject only that request;
 unavailable resource reads never authorize removing a view, replacing content or stopping a Run.
 
+For concurrent .note.md edits, file write accepts --base FILE together with --operation-id ID.
+Keep the exact observed UTF-8 base and its sha256 expected revision; the proposed body remains
+stdin. The original Note owner merges safe changes and preserves overlapping base/current/proposed
+content as a conflict. Preserve the same operation and inputs after an unknown result; do not
+automatically retry or replace the ID. A committed replay receipt is observation of the original
+edit, never permission to overwrite later work. Ordinary writes without this pair retain CAS.
+When three conflict bodies cannot fit one RPC frame, the confirmed conflict and original history
+status/IDs remain in the receipt with noteConflictUnavailable; read the original file and, when
+available, the selected history event for content. This does not authorize resubmitting the edit.
+Read amux notebook --skill for exact Note links, attribution and history recovery.
+
 ${SPATIAL_GUIDE}`
   },
   git: {

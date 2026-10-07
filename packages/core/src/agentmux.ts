@@ -11,6 +11,7 @@ import {
 import { forwardAgentMuxRpcStdio } from './agentmux-rpc-stdio.js'
 import { isAgentMuxRpcMethod, isAgentMuxRpcStream } from './public-rpc.js'
 import { AgentMuxError } from './errors.js'
+import { parseFileWriteParams } from './public-rpc-files.js'
 import { AGENTMUX_RPC_MAX_MESSAGE_BYTES, rpcEncode } from './public-rpc-wire.js'
 import {
   AGENTMUX_CLI_COMMANDS, agentMuxCliArguments, agentMuxCliMatch,
@@ -169,7 +170,7 @@ async function main(): Promise<number> {
       catch { throw new AgentMuxError('A spatial graph JSON object is required on stdin.', 'INVALID_CLI_ARGUMENT') }
     }
     if (method === 'browser.run') invocation.params.code = await readStdin()
-    if (method === 'file.write') invocation.params.content = await readStdin()
+    if (method === 'file.write') invocation.params = parseFileWriteParams({ ...invocation.params, content: await readStdin() }) as unknown as Record<string, unknown>
     if (method === 'browser.task.run') {
       const text = await readStdin(65_536)
       try { invocation.params.parameters = text.trim() ? JSON.parse(text) : {} }

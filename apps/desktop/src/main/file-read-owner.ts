@@ -62,7 +62,8 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
     const { resource, workspace } = resolved
     if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => resource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) throw new AgentMuxError('The original File mapping changed. Read that exact file before deciding another save.', 'FILE_RESOURCE_MISMATCH')
     try {
-      return { resource, result: await this.ports.files.write(workspace, { path: resource.path, content: params.content, expectedRevision: params.expectedRevision }, context) }
+      return { resource, result: await this.ports.files.write(workspace, { path: resource.path, content: params.content, expectedRevision: params.expectedRevision,
+        ...(params.baseContent === undefined ? {} : { baseContent: params.baseContent, operationId: params.operationId! }) }, context) }
     } catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_WRITE_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
   }
   async create(input: FileCreateParams, context?: FileWriteContext): Promise<FileCreateResult> {

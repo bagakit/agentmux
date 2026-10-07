@@ -1,6 +1,6 @@
 import type { FileWriteContext } from '@agentmux/core'
 import { NOTE_FILE_EXTENSION, NOTE_BLOCK_TYPES, readNoteDocument, serializeNoteDocument, type NoteDocument } from '../shared/note-document.js'
-import { attributeNoteBlocks } from '@agentmux/client-ui/note/note-provenance'
+import { attributeNoteBlocks, noteBlockContentFingerprint } from '@agentmux/client-ui/note/note-provenance'
 import { hydrateNoteProvenance } from '@agentmux/client-ui/note/note-metadata'
 import { noteContentSchema } from '../shared/note-content-schema.js'
 import type { WorkspaceFileReadResult, WorkspaceFileWriteInput, WorkspaceFileWriteResult, WorkspaceRecord } from '../shared/contracts.js'
@@ -11,7 +11,9 @@ import type { NotebookState } from '@agentmux/core/notebook-catalog'
 import type { NotebookObservationOwner } from './notebook-observation-owner.js'
 import type { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 import type { NoteProvenanceSnapshot, NoteBlockProvenance } from '@agentmux/core/note-provenance'
+import { noteProvenanceResourceKey } from '@agentmux/core/note-provenance'
 import { NOTE_HISTORY_BATCH_WINDOW_MS, noteHistoryRevision, type NoteHistoryRecord, type NoteHistoryReceipt, type NoteHistoryQuery } from '@agentmux/core/note-history'
+import { mergeNoteTextInWorker } from '@agentmux/core/note-merge-node'
 
 const resourceOf = (workspace: WorkspaceRecord, path: string) => ({ hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path })
 function blockMetadata(note: NoteDocument): Record<string, NoteBlockProvenance> {
@@ -22,16 +24,51 @@ function blockMetadata(note: NoteDocument): Record<string, NoteBlockProvenance> 
   }
   visit(note.content); return blocks
 }
+/** A text merge must not transplant an edit to a deleted or replaced stable block. */
+function replacesEditedBlock(base: NoteDocument, current: NoteDocument, proposed: NoteDocument): boolean {
+  const blocks = (note: NoteDocument) => {
+    const result = new Map<string, { content: string; parent: string | null }>()
+    const visit = (node: NoteDocument['content'], parent: string | null) => {
+      const id = typeof node.attrs?.blockId === 'string' ? node.attrs.blockId : null
+      if (id !== null) result.set(id, { content: noteBlockContentFingerprint(node), parent })
+      node.content?.forEach(child => visit(child, id ?? parent))
+    }
+    visit(note.content, null); return result
+  }
+  const before = blocks(base), saved = blocks(current), submitted = blocks(proposed)
+  const changed = (first: { content: string; parent: string | null }, second: typeof first) => first.content !== second.content || first.parent !== second.parent
+  for (const [id, original] of before) {
+    const left = saved.get(id), right = submitted.get(id)
+    if (!left && right && changed(original, right) || !right && left && changed(original, left)) return true
+  }
+  return false
+}
 
 /** The original Files writer, enriched with Note metadata; neither a content store nor a new save lane. */
 export class NoteFileWriter {
   constructor(private readonly files: Pick<WorkspaceFiles, 'read' | 'write'>,
     private readonly links?: { state(): Promise<NotebookState>; owner: NotebookObservationOwner },
-    private readonly metadata?: Pick<AgentMuxNotebookStore, 'readProvenance' | 'recordProvenance'> & Partial<Pick<AgentMuxNotebookStore, 'readHistory' | 'recordHistory'>>) {}
+    private readonly metadata?: Pick<AgentMuxNotebookStore, 'readProvenance' | 'recordProvenance'> & Partial<Pick<AgentMuxNotebookStore, 'readHistory' | 'recordHistory' | 'readHistoryOperation'>>) {}
   async history(workspace: WorkspaceRecord, input: Omit<NoteHistoryQuery, 'resource'> & { path: string }) {
     if (!this.metadata?.readHistory) throw new Error('The original Note history owner is unavailable. Original files remain available.')
     const { path, ...query } = input
     return this.metadata.readHistory({ ...query, resource: resourceOf(workspace, path) })
+  }
+  /** A rejected enhanced operation is still the same operation after the surrounding file changes. */
+  private async rejectedSubmission(workspace: WorkspaceRecord, input: WorkspaceFileWriteInput, noteId: string, requestFingerprint: string,
+    current: Extract<WorkspaceFileReadResult, { status: 'read' }> | undefined, reason: 'overlap' | 'identity' | 'invalid-structure', context?: FileWriteContext): Promise<WorkspaceFileWriteResult> {
+    const eventId = input.operationId!, resource = resourceOf(workspace, input.path)
+    const result: WorkspaceFileWriteResult = { status: 'conflict', observedRevision: current?.document.revision ?? null,
+      ...(current ? { noteConflict: { reason, baseContent: input.baseContent!, currentContent: current.document.content, proposedContent: input.content } } : {}) }
+    try {
+      if (!this.metadata?.recordHistory || !this.metadata.readHistory) throw new Error('The original operation journal is unavailable.')
+      const previous = (await this.metadata.readHistory({ noteId, resource, limit: 1 })).entries[0]
+      await this.metadata.recordHistory({ eventId, batchId: eventId, sequence: 0, noteId, resource, originalResource: resource, actor: context?.actor ?? null,
+        parentEventId: previous?.status === 'committed' && previous.revision === current?.document.revision ? previous.eventId : null,
+        at: Date.now(), operation: 'edit', requestFingerprint, status: 'not-applied', beforeContent: current?.document.content ?? null,
+        baseRevision: current?.document.revision ?? null, content: input.content, revision: noteHistoryRevision(input.content) })
+      return { ...result, noteHistory: { status: 'not-applied', eventId, batchId: eventId } }
+    } catch (error) { return { ...result, noteHistory: { status: 'unconfirmed', eventId, reason: error instanceof Error ? error.message : String(error) } } }
   }
   /** Same original file read, enriched independently; metadata failure never removes readable bytes. */
   async read(workspace: WorkspaceRecord, path: string, options?: Parameters<WorkspaceFiles['read']>[2]): Promise<WorkspaceFileReadResult> {
@@ -52,14 +89,62 @@ export class NoteFileWriter {
     return { ...result, document: { ...result.document, noteProvenance } }
   }
   async write(workspace: WorkspaceRecord, input: WorkspaceFileWriteInput, context?: FileWriteContext): Promise<WorkspaceFileWriteResult> {
-    if (!input.path.endsWith(NOTE_FILE_EXTENSION)) return this.files.write(workspace, input)
-    const candidate = readNoteDocument(input.content)
+    const submitted = { ...input }, enhanced = input.baseContent !== undefined || input.operationId !== undefined
+    input = submitted
+    if (!input.path.endsWith(NOTE_FILE_EXTENSION)) return enhanced
+      ? { status: 'error', code: 'NOTE_SUBMISSION_UNSUPPORTED', message: 'Baseline-aware submissions apply to original Note Markdown files. Ordinary file revision saves remain available.' }
+      : this.files.write(workspace, input)
+    let candidate = readNoteDocument(input.content)
+    let requestFingerprint: string | undefined, submissionBaseline: NoteDocument | undefined
+    if (enhanced) {
+      if (typeof input.baseContent !== 'string' || typeof input.operationId !== 'string' || !input.operationId || /[\0\r\n]/u.test(input.operationId) || input.expectedRevision === null || noteHistoryRevision(input.baseContent) !== input.expectedRevision) {
+        return { status: 'error', code: 'NOTE_SUBMISSION_INVALID', message: 'Keep the original operation ID and exact baseline bytes matching expectedRevision. The original file and draft are unchanged.' }
+      }
+      const base = readNoteDocument(input.baseContent)
+      if (base.status !== 'valid') return { status: 'error', code: 'NOTE_SUBMISSION_INVALID', message: 'The original Note baseline is not valid. Preserve its bytes and inspect the same source before another submission.' }
+      submissionBaseline = base.note
+      requestFingerprint = noteHistoryRevision(JSON.stringify([resourceOf(workspace, input.path), base.note.noteId, input.expectedRevision, input.content, context?.actor ?? null]))
+      try {
+        if (!this.metadata?.readHistoryOperation || !this.metadata.recordHistory) throw new Error('The original durable operation owner is unavailable. Ordinary revision saves remain available.')
+        const original = await this.metadata.readHistoryOperation(input.operationId)
+        if (original) {
+          if (original.requestFingerprint !== requestFingerprint || original.noteId !== base.note.noteId || original.operation !== 'edit' ||
+              noteProvenanceResourceKey(original.resource) !== noteProvenanceResourceKey(resourceOf(workspace, input.path))) return { status: 'error', code: 'NOTE_OPERATION_CONFLICT', message: 'This operation ID belongs to another original request, actor or resource. Its body and event are retained.' }
+          if (original.status === 'committed') return { status: 'written', revision: original.revision, content: original.content,
+            noteHistory: { status: 'committed', eventId: original.eventId, batchId: original.batchId, replayed: true },
+            ...(original.provenance ? { noteProvenance: { ...original.provenance, status: 'recorded' as const } } : {}) }
+          if (original.status === 'not-applied') return { status: 'error', code: 'NOTE_OPERATION_NOT_APPLIED', message: 'The original operation was confirmed not applied. Inspect current content before deciding a new edit.', noteHistory: { status: original.status, eventId: original.eventId, batchId: original.batchId } }
+          return { status: 'unknown', code: 'NOTE_OPERATION_UNCONFIRMED', message: 'The original operation remains unconfirmed. Inspect that same event; it has not been replayed.', noteHistory: { status: original.status, eventId: original.eventId, batchId: original.batchId } }
+        }
+      } catch (error) { return { status: 'unknown', code: 'NOTE_OPERATION_UNCONFIRMED', message: error instanceof Error ? error.message : String(error), noteHistory: { status: 'unconfirmed', eventId: input.operationId, reason: 'The original operation could not be inspected; it has not been replayed.' } } }
+    }
     let content = input.content, reason: string | undefined
     let attributed: NoteDocument | undefined
     const at = Date.now()
     let baseline: Extract<WorkspaceFileReadResult, { status: 'read' }> | undefined
+    let baselineObservation: WorkspaceFileReadResult | undefined, baselineIssue: string | undefined
     if (input.expectedRevision !== null) {
-      try { const observed = await this.read(workspace, input.path); if (observed.status === 'read') baseline = observed } catch { /* Original CAS save remains available; history and attribution stay unconfirmed. */ }
+      try { baselineObservation = await this.read(workspace, input.path); if (baselineObservation.status === 'read') baseline = baselineObservation }
+      catch (error) { baselineIssue = error instanceof Error ? error.message : String(error) }
+    }
+    if (enhanced) {
+      const conflict = (why: 'overlap' | 'identity' | 'invalid-structure') => this.rejectedSubmission(workspace, submitted, submissionBaseline!.noteId, requestFingerprint!, baseline, why, context)
+      if (!baseline) {
+        if (baselineObservation?.status === 'deleted' || baselineObservation?.status === 'directory' || baselineObservation?.status === 'binary') return conflict('invalid-structure')
+        return { status: 'unknown', code: 'NOTE_BASELINE_UNAVAILABLE', message: baselineIssue ?? (baselineObservation?.status === 'error' ? baselineObservation.message : 'The current original Note could not be observed. Keep the baseline, draft and operation ID; no merge or write was attempted.'),
+          noteHistory: { status: 'unconfirmed', eventId: submitted.operationId!, reason: 'Current baseline observation is unavailable. This is not a confirmed content conflict.' } }
+      }
+      const current = readNoteDocument(baseline.document.content)
+      if (candidate.status !== 'valid' || current.status !== 'valid') return conflict('invalid-structure')
+      if (candidate.note.noteId !== submissionBaseline!.noteId || current.note.noteId !== submissionBaseline!.noteId || replacesEditedBlock(submissionBaseline!, current.note, candidate.note)) return conflict('identity')
+      let merged: Awaited<ReturnType<typeof mergeNoteTextInWorker>>
+      try { merged = await mergeNoteTextInWorker(submitted.baseContent!, baseline.document.content, submitted.content) }
+      catch (error) { return { status: 'unknown', code: 'NOTE_MERGE_UNAVAILABLE', message: error instanceof Error ? error.message : String(error), noteHistory: { status: 'unconfirmed', eventId: submitted.operationId!, reason: 'The merge could not be observed; the original file and proposed bytes are retained without a write.' } } }
+      if (merged.status === 'conflict') return conflict('overlap')
+      candidate = readNoteDocument(merged.content)
+      if (candidate.status !== 'valid' || candidate.note.noteId !== submissionBaseline!.noteId) return conflict('invalid-structure')
+      content = merged.content
+      input = { ...input, content, expectedRevision: baseline.document.revision }
     }
     if (candidate.status !== 'valid') reason = 'This source is not a valid Note. Its file bytes were saved without confirmed block attribution.'
     else {
@@ -109,18 +194,24 @@ export class NoteFileWriter {
       const noteId = candidate.status === 'valid' ? candidate.note.noteId : old?.status === 'valid' ? old.note.noteId : undefined
       if (!noteId || input.expectedRevision !== null && !baseline || old?.status === 'valid' && old.note.noteId !== noteId) throw new Error('The original Note identity or history baseline cannot be confirmed.')
       const resource = resourceOf(workspace, input.path), previous = (await this.metadata.readHistory({ noteId, resource, limit: 1 })).entries[0]
-      const eventId = randomUUID(), actor = context?.actor ?? null
+      const eventId = submitted.operationId ?? randomUUID(), actor = context?.actor ?? null
       const sameActivity = previous?.status === 'committed' && previous.operation === 'edit' && previous.revision === baseline?.document.revision &&
         previous.actor !== null && actor !== null && previous.actor.kind === actor.kind && previous.actor.id === actor.id && at >= previous.at && at - previous.at <= NOTE_HISTORY_BATCH_WINDOW_MS
       historyIdentity = { eventId, batchId: sameActivity ? previous.batchId : eventId }
       journal = await this.metadata.recordHistory({ eventId, sequence: 0, batchId: sameActivity ? previous.batchId : eventId,
         noteId, resource, originalResource: { ...resource }, status: 'prepared', at, actor, operation: 'edit',
         parentEventId: previous?.status === 'committed' && previous.revision === baseline?.document.revision ? previous.eventId : null,
-        requestFingerprint: noteHistoryRevision(JSON.stringify([input.expectedRevision, input.content, actor])),
+        requestFingerprint: requestFingerprint ?? noteHistoryRevision(JSON.stringify([input.expectedRevision, input.content, actor])),
         baseRevision: baseline?.document.revision ?? null, beforeContent: baseline?.document.content ?? null,
         revision: noteHistoryRevision(content), content })
     } catch (error) { historyIssue = error instanceof Error ? error.message : String(error) }
-    const result = await this.files.write(workspace, { ...input, content })
+    // This opt-in request promises durable operation identity. Do not execute it without its original prepared event.
+    // Ordinary CAS saves above retain the existing body-first availability when history bookkeeping fails.
+    if (enhanced && !journal) return { status: 'unknown', code: 'NOTE_OPERATION_UNCONFIRMED', message: historyIssue ?? 'The original operation preparation is unconfirmed.',
+      noteHistory: { status: 'unconfirmed', ...historyIdentity, eventId: submitted.operationId!, reason: historyIssue ?? 'Inspect this same operation before another save.' } }
+    let result: WorkspaceFileWriteResult
+    try { result = await this.files.write(workspace, { ...input, content }) }
+    catch (error) { result = { status: 'unknown', code: 'FILE_WRITE_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } }
     const bodyReason = reason
     let noteProvenance: NoteProvenanceSnapshot | undefined
     if (result.status === 'written' && attributed) {
@@ -143,7 +234,7 @@ export class NoteFileWriter {
         if (status === 'committed' && provenance) { noteProvenance = { ...provenance, status: 'recorded' }; reason = bodyReason }
       } catch (error) { noteHistory = { status: 'unconfirmed', eventId: journal.eventId, batchId: journal.batchId, reason: error instanceof Error ? error.message : String(error) } }
     }
-    return result.status === 'written' ? { ...result, ...(content !== input.content ? { content } : {}), noteHistory,
+    return result.status === 'written' ? { ...result, ...(enhanced || content !== input.content ? { content } : {}), noteHistory,
       ...(noteProvenance ? { noteProvenance } : {}), noteAttribution: reason ? { status: 'unconfirmed', reason } : { status: 'recorded' } } : { ...result, noteHistory }
   }
 }

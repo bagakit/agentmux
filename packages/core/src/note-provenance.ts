@@ -30,7 +30,7 @@ export function parseNoteProvenanceWrite(value: unknown): NoteProvenanceWrite {
   const author = (value: unknown) => {
     if (value === null) return
     const a = object(value, ['actor', 'at']), actor = object(a.actor, ['kind', 'id'])
-    if (!['user', 'agent', 'device'].includes(String(actor.kind)) || !Number.isSafeInteger(a.at) || Number(a.at) < 0) fail('The original block author is invalid.')
+    if (typeof actor.kind !== 'string' || !['user', 'agent', 'device'].includes(actor.kind) || !Number.isSafeInteger(a.at) || Number(a.at) < 0) fail('The original block author is invalid.')
     text(actor.id)
   }
   for (const [id, value] of Object.entries(p.blocks as Record<string, unknown>)) {
@@ -43,6 +43,6 @@ export function parseNoteProvenanceSnapshot(value: unknown): NoteProvenanceSnaps
   const { status, reason, ...original } = p
   const write = parseNoteProvenanceWrite(original)
   if (status === 'recorded' && reason === undefined) return { ...write, status }
-  if (status === 'unconfirmed') return { ...write, status, reason: text(reason) }
+  if (status === 'unconfirmed' && typeof reason === 'string' && reason.length) return { ...write, status, reason }
   return fail('The Note provenance confirmation is invalid.')
 }
