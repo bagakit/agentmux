@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process'
+import { StringDecoder } from 'node:string_decoder'
+import { openToolkitResultChannel } from '../src/toolkit-result-channel.js'
 import { terminalWriteContextFixture } from './helpers/renderer-performance.js'
 import { expect, it, vi } from 'vitest'
 import { createRendererPerformance } from '../../../apps/desktop/src/renderer/src/lib/renderer-performance'
@@ -9,7 +11,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../src/control.js'
 import { parseAgentMuxControlReceipt } from '../src/control-codec.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { AgentMuxControlServer } from '../src/control-host.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { parseMetricsObservation } from '../src/metrics.js'
@@ -101,25 +103,38 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
     const toolkitCli = await runCompiledObjectCli(['--endpoint', 'unix://' + path, 'toolkit', 'inspect', 'performance'], objectCliEnvironment(directory))
     expect(toolkitCli.code).toBe(0); expect(toolkitCli.stderr).toBe('')
     expect(JSON.parse(toolkitCli.stdout.trim()).result.snapshot).toEqual(toolkit)
-    const child = spawn(process.execPath, [resolve('apps/desktop/resources/toolkit/performance.mjs'), resolve('packages/core/bin/amux')], {
-      env: objectCliEnvironment(directory), stdio: ['ignore', 'pipe', 'pipe'] })
+    let resultOutput = '', resultError: unknown
+    const decoder = new StringDecoder('utf8')
+    const channel = await openToolkitResultChannel({
+      onBytes(bytes) { resultOutput += decoder.write(Buffer.from(bytes)) },
+      onEnd() { resultOutput += decoder.end() },
+      onError(error) { resultError = error }
+    })
+    const compiledCli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux')
+    const child = spawn(process.execPath, [resolve('apps/desktop/resources/toolkit/performance.mjs'), compiledCli], {
+      env: objectCliEnvironment(directory, { ...channel.env, AGENTMUX_RPC_ENDPOINT: 'unix://' + path }), stdio: ['ignore', 'pipe', 'pipe'] })
     let scriptOutput = '', scriptError = ''
     child.stdout.on('data', bytes => { scriptOutput += bytes.toString() }); child.stderr.on('data', bytes => { scriptError += bytes.toString() })
     const closed = new Promise(resolve => child.once('close', resolve))
     try {
-      await vi.waitFor(() => expect(scriptOutput.split('\n').filter(Boolean).length, scriptError).toBeGreaterThan(0), { timeout: 5000 })
-      const frame = JSON.parse(scriptOutput.split('\n')[0]!)
+      await vi.waitFor(() => {
+        expect(resultError).toBeUndefined()
+        expect(resultOutput.split('\n').filter(Boolean).length, scriptError).toBeGreaterThan(0)
+      }, { timeout: 5000 })
+      expect(channel.connected).toBe(true)
+      const frame = JSON.parse(resultOutput.split('\n')[0]!)
       expect(frame.event, scriptError).toBe('result')
       expect(frame.payload.renderer.data.performance).toEqual(expectedRenderer)
       expect(parseToolkitSnapshot({ ...toolkit, observation: frame.payload, document: frame.document })).toMatchObject({ observation: { renderer: { data: { performance: expectedRenderer } } } })
       expect(scriptError).toBe('')
-    } finally { child.kill('SIGTERM'); await closed }
+      expect(scriptOutput).toBe('')
+    } finally { child.kill('SIGTERM'); await closed; await channel.close() }
 
     const evidencePath = process.env.AGENTMUX_TERMINAL_INPUT_LOADED
     if (evidencePath) appendFileSync(evidencePath + '.correlation', JSON.stringify({ case: 'actual-unix-compiled-cli-typed-toolkit',
       diagnostics: observation.diagnostics, rendererInput: expectedRenderer.inputRequestDetails, toolkitReceiptParsed: true,
       unixToolkitExact: true, cliMetricsExact: true, cliToolkitExact: true,
-      compiledCLISHA256: createHash('sha256').update(readFileSync(new URL('../dist/agentmux.js', import.meta.url))).digest('hex') }) + '\n')
+      compiledCLISHA256: createHash('sha256').update(readFileSync(resolve(dirname(compiledCli), '../dist/agentmux.js'))).digest('hex') }) + '\n')
     const text = JSON.stringify(parsedCli)
     for (const fact of ['native-input', 'one-logical-core', 'connected owner could not answer', 'main-user-home-volume', 'parentMatch', 'observerId', 'oldestPendingMs', 'public-daemon']) expect(text).toContain(fact)
     expect(text).not.toContain('synthetic rejected input')
