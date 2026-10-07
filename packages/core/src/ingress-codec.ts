@@ -14,10 +14,10 @@ const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b
 export const CONNECTION_INGRESS_AUTHORITY_CODES = ['INGRESS_CLAIM_UNAVAILABLE', 'INGRESS_CONNECTION_UNAVAILABLE', 'INGRESS_BINDING_UNAVAILABLE', 'INGRESS_ACTOR_NOT_AUTHORIZED', 'INGRESS_INPUT_OUTSIDE_SCOPE', 'INGRESS_ADDRESSING_UNCONFIRMED', 'INGRESS_AUTHORITY_REVISED', 'INGRESS_STORAGE_UNCONFIRMED'] as const satisfies readonly import('./ingress-contract.js').ConnectionIngressAuthorityCode[]
 function addressing(value: unknown): ConnectionIngressAddressing {
   const p = object(value, ['replyToMessageId', 'state', 'selection', 'reason']), replyToMessageId = text(p.replyToMessageId)
-  if (p.state === 'confirmed' && ['reply', 'message'].includes(String(p.selection)) && p.reason === undefined) return { replyToMessageId, state: 'confirmed', selection: p.selection as 'reply' | 'message' }
+  if (p.state === 'confirmed' && (p.selection === 'reply' || p.selection === 'message') && p.reason === undefined) return { replyToMessageId, state: 'confirmed', selection: p.selection }
   if (p.selection !== undefined) fail()
   if (p.state === 'unknown' && p.reason === 'reply-unconfirmed') return { replyToMessageId, state: 'unknown', reason: 'reply-unconfirmed' }
-  if (p.state === 'unavailable' && ['adapter-unavailable', 'credential-missing'].includes(String(p.reason))) return { replyToMessageId, state: 'unavailable', reason: p.reason as 'adapter-unavailable' | 'credential-missing' }
+  if (p.state === 'unavailable' && (p.reason === 'adapter-unavailable' || p.reason === 'credential-missing')) return { replyToMessageId, state: 'unavailable', reason: p.reason }
   return fail()
 }
 export function parseConnectionIngressRecord(value: unknown): ConnectionIngressRecord {
