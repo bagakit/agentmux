@@ -163,13 +163,29 @@ app.whenReady().then(async () => {
       result.otherViewAnswer = { before, after, refusal, inputBefore, inputAfter, canonicalAfter }
       await win.webContents.executeJavaScript('window.nativeCloseExtra(); true')
       await client().stopAgent(extraSession.id, extraSession.control.run)
+      const beforeEscape = await client().readRunReplay(ids.run)
       armed = true
       await win.webContents.executeJavaScript('window.terminals.find(one=>one.element?.isConnected).focus(); true')
       await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
       await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
       await until('window.nativeState().session?.interactionResponseUnavailableReason?.includes("delivery is unknown")')
       assert.ok(result.lostReceipt)
-      await until('window.terminals.some(t=>Array.from({length:t.buffer.active.length},(_,n)=>t.buffer.active.getLine(n)?.translateToString()).some(line=>line?.includes("codex-permission-cancelled")))')
+      // The fixture overwrites its cancellation diagnostic with the ready frame.
+      // Ordered bytes retain both observations even when no painted frame does.
+      const outputDeadline = Date.now() + 15000
+      let replay: any, output = ''
+      do {
+        replay = await client().readRunReplay(ids.run, beforeEscape.run.latestOutputBytes, 'raw')
+        output = Buffer.concat(replay.replay.map((chunk: any) => Buffer.from(chunk.dataBytes))).toString('utf8')
+        if (output.includes('codex-permission-cancelled') && output.includes('codex-composer-ready-frame')) break
+        await delay(30)
+      } while (Date.now() < outputDeadline)
+      assert.equal(replay.run.runId, ids.run.runId)
+      assert.equal(replay.gap, null, 'The cancellation witness requires complete ordered output')
+      assert.equal(output.split('codex-permission-cancelled').length - 1, 1, 'The original CLI must handle the accepted Escape exactly once')
+      assert.ok(output.includes('codex-composer-ready-frame'), 'The same CLI must become ready for fresh input')
+      assert.ok(output.indexOf('codex-composer-ready-frame') > output.indexOf('codex-permission-cancelled'), 'Readiness must follow the original cancellation')
+      result.nativeEscape = { afterByte: beforeEscape.run.latestOutputBytes, runId: replay.run.runId, replay: replay.replay, output }
     } else {
       assert.equal(calls.filter(call => call.operation === 'launch').length, 0, 'Restart must reattach the original Agent')
       const expected = JSON.parse(await fs.readFile(path.join(privateRoot, 'expected.json'), 'utf8'))
@@ -227,6 +243,7 @@ app.whenReady().then(async () => {
     if (win && !win.isDestroyed()) {
       result.observationAtFailure = await state().catch(() => null)
       result.liveAtFailure = await win.webContents.executeJavaScript('window.nativeLiveReady()').catch(() => null)
+      result.domAtFailure = await win.webContents.executeJavaScript('document.body.innerText').catch(() => null)
     }
     result.storeAtFailure = (await store.load().catch(() => [])).map((one: any) => ({ agentSessionId: one.agentSessionId, run: one.run, pendingInteraction: one.pendingInteraction }))
   } finally {
