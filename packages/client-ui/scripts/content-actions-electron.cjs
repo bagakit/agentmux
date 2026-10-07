@@ -25,11 +25,45 @@ app.whenReady().then(async () => {
     await win.loadURL(url); win.webContents.focus(); await read(() => document.fonts.ready)
     if (slice === 'image-remove') {
     await until(() => document.querySelectorAll('#draft .composer-image__remove').length === 2)
+    await until(() => document.querySelectorAll('#spacing .md-conversation-image__thumb').length === 3)
+    await until(() => document.querySelectorAll('#compact .md-conversation-image__thumb').length === 3)
     assert.equal(await read(() => document.querySelectorAll('#disabled .composer-image__remove, #history .composer-image__remove').length), 0)
     for (const width of [1024, 390]) {
       win.setContentSize(width, 900); await settle()
       for (const mode of ['dark', 'light']) {
         if (await read(() => document.documentElement.dataset.appearance) !== mode) await read(() => document.querySelector('nav button').click())
+        const geometry = await read(() => [...document.querySelectorAll('#spacing .composer-image, #compact .composer-image')].map(node => {
+          const preview = node.querySelector('.md-conversation-image').getBoundingClientRect(), bounds = node.getBoundingClientRect()
+          const remove = node.querySelector('.composer-image__remove').getBoundingClientRect()
+          const editor = node.closest('.tiptap').getBoundingClientRect()
+          let atom = node
+          while (!atom.nextSibling && atom.parentElement !== node.closest('.tiptap')) atom = atom.parentElement
+          const text = atom.nextSibling, range = document.createRange(); range.setStart(text, 1); range.setEnd(text, 2)
+          const next = range.getBoundingClientRect(), hit = document.elementFromPoint(next.x + next.width / 2, next.y + next.height / 2)
+          const previousText = atom.previousSibling, previousRange = document.createRange()
+          previousRange.setStart(previousText, previousText.length - 2); previousRange.setEnd(previousText, previousText.length - 1)
+          const previous = previousRange.getBoundingClientRect(), previousHit = document.elementFromPoint(previous.x + previous.width / 2, previous.y + previous.height / 2)
+          return { extraWidth: bounds.width - preview.width, margin: parseFloat(getComputedStyle(node).marginInlineEnd),
+            removeAtRightCorner: remove.right <= preview.right + .5, removeWidth: remove.width,
+            removeWithinEditor: remove.top >= editor.top && remove.bottom <= editor.bottom,
+            previousTextAvailable: !previousHit?.closest('.composer-image__remove'),
+            nextTextAvailable: !hit?.closest('.composer-image__remove') }
+        }))
+        for (const image of geometry) {
+          assert.ok(image.extraWidth <= .5 && image.margin <= 4, 'A decoded image must not reserve a trailing action column')
+          assert.equal(image.removeAtRightCorner, true); assert.equal(image.removeWidth, 12)
+          assert.equal(image.removeWithinEditor, true)
+          assert.equal(image.previousTextAvailable, true); assert.equal(image.nextTextAvailable, true)
+        }
+        // Exercise the remaining preview area with a real pointer, including the narrow portrait.
+        for (const index of [0, 1, 2, 3, 4, 5]) {
+          const point = await win.webContents.executeJavaScript(`(() => { const r = document.querySelectorAll('#spacing .md-conversation-image, #compact .md-conversation-image')[${index}].getBoundingClientRect(); return {x:Math.round(r.x+r.width/2), y:Math.floor(r.bottom-2)} })()`)
+          win.webContents.sendInputEvent({ type: 'mouseMove', ...point }); await settle()
+          win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...point })
+          win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...point }); await settle()
+          await until(() => document.querySelector('[role="dialog"]'))
+          await press('Escape'); await until(() => !document.querySelector('[role="dialog"]'))
+        }
         await read(() => document.querySelector('#draft .composer-image__remove').focus({ preventScroll: true }))
         const keysBefore = await read(() => window.contentActionsFixture.keyEvents.length)
         await press('Enter')
@@ -47,12 +81,33 @@ app.whenReady().then(async () => {
         await read(() => document.querySelector('#draft .composer-image__remove').focus({ preventScroll: true }))
         assert.equal(await read(() => document.documentElement.scrollWidth === innerWidth), true)
         await frame(`${slice}-${mode}-${width}.png`)
-        result.operations.push({ width, mode, exactDuplicateRemoval: true, draftPreserved: true, undoRedo: true, editorFocusRestored: true })
+        result.operations.push({ width, mode, geometry, landscapePortraitSquarePreview: true, exactDuplicateRemoval: true, draftPreserved: true, undoRedo: true, editorFocusRestored: true })
       }
     }
     await read(() => document.querySelector('#failed .composer-image__remove').focus({ preventScroll: true })); await press('Enter')
     assert.equal(await read(() => document.querySelector('#failed output').textContent), 'Keep the surrounding text  and continue.')
     result.operations.push({ failedReferenceRemovable: true })
+    await read(() => document.querySelectorAll('#spacing .composer-image__remove')[1].focus({ preventScroll: true }))
+    await frame(`${slice}-portrait-focus-390.png`)
+    win.webContents.debugger.attach('1.3')
+    await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true })
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }] })
+    await read(() => document.activeElement?.blur()); await settle()
+    assert.equal(await read(() => getComputedStyle(document.querySelector('#spacing .composer-image__remove')).opacity), '1')
+    const touch = await read(() => { const r = document.querySelector('#spacing .composer-image__remove').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })
+    await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [touch] })
+    await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await until(() => document.querySelectorAll('#spacing .composer-image__remove').length === 2)
+    await frame(`${slice}-touch-390.png`); win.webContents.debugger.detach()
+    const portraitTouch = await read(() => { const r = document.querySelector('#spacing .composer-image__remove').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })
+    win.webContents.debugger.attach('1.3')
+    await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [portraitTouch] })
+    await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await until(() => document.querySelectorAll('#spacing .composer-image__remove').length === 1)
+    assert.equal(await read(() => document.querySelector('#spacing output').textContent.includes(window.contentActionsFixture.path)), false)
+    assert.equal(await read(() => document.querySelector('#spacing output').textContent.includes('portrait.png')), false)
+    await frame(`${slice}-portrait-touch-removed-390.png`); win.webContents.debugger.detach()
+    result.operations.push({ touchRemovalVisibleAndWorks: true, portraitTouchPreciseRemoval: true })
     } else if (slice === 'trace-copy') {
       await until(() => document.querySelector('#conversation details'))
       const openDetails = async () => {
