@@ -96,7 +96,7 @@ beforeAll(async () => {
   observation = { schema: 'agentmux.desktop-client-observation.v1', main: { pid: process.pid, package: null,
     renderer: { kind: 'bundled', id: 'a'.repeat(64), identity: { shell: 'fixture', ctxmux: 'fixture' } }, runtimes: [{ hostId: 'local', identity: {
       hostId: 'local', buildIdentity: runtime.buildId, protocolVersion: runtime.protocolGeneration, processId: daemon.pid!, instanceId: runtime.daemonInstanceId, ownership: 'unverified'
-    } }] }, workbench: { loading: false, startupProgress: { step: 'layout' }, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
+    } }] }, workbench: { loading: false, startupProgress: { step: 'layout' }, startupAgentAvailability: null, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
     focus: { executionSessionId: 'agent-region', pmoSessionId: null }, tabs: [
       { id: 'live-tab', workspaceId: 'workspace', titleRegionId: 'agent-region', layout: { activeRegionId: 'agent-region', root: {
         type: 'split', direction: 'horizontal', ratio: 0.6, first: { type: 'leaf', regionId: 'agent-region' }, second: {

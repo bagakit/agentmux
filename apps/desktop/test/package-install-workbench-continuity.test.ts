@@ -84,7 +84,7 @@ async function fixture() {
     schema: 'agentmux.desktop-client-observation.v1',
     main: { pid: 201, package: identity, renderer: { kind: 'bundled', id: 'd'.repeat(64), identity: { shell: 'same-shell', ctxmux: 'same-native' } },
       storage: { userData: root, sessionData: root, directory: root, localStorage: 'present', detail: null }, runtimes: [] },
-    workbench: { loading: false, startupProgress: { step: 'layout' }, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
+    workbench: { loading: false, startupProgress: { step: 'layout' }, startupAgentAvailability: null, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
       focus: { executionSessionId: 'agent-session', pmoSessionId: null },
       desktop: { selection: { surface: 'space', mainSurface: 'workbench', space: null, goalId: null },
         presentation: { provenance: 'observed', state: 'main-visible', tabId: 'tab-a', regionId: 'agent', blockers: [] },
