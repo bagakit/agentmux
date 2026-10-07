@@ -10,7 +10,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { ConversationMessage, type ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 import { UNKNOWN_SPEAKER_ID } from '@agentmux/client-ui/conversation-speaker'
-import { MailboxRecordRow, MailboxTime } from './MailboxReading'
+import { MailboxDraftAction, MailboxRecordRow, MailboxTime } from './MailboxReading'
 
 const ThemeStatusCopiedIcon = semanticIconComponent('status.copied')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
@@ -21,6 +21,9 @@ const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeActionMoveDownIcon = semanticIconComponent('action.move-down')
 const ThemeActionRestoreIcon = semanticIconComponent('action.restore')
 const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
+const StopIcon = semanticIconComponent('action.stop')
+const DraftIcon = semanticIconComponent('action.move-to-folder')
+const ReadIcon = semanticIconComponent('object.history')
 
 
 export type ComposerQueuedMessage = {
@@ -71,7 +74,7 @@ export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteract
     if (input.status === 'not-applied') return { label: '原输入未接纳', detail: 'Core 已确认这条原输入未被接纳，原消息与回执保留。需要替换时创建一条明确的新消息。', busy: false }
     return { label: '已保存 · 结果待核实', detail: '原消息已保存，派发或回执仍未确认。这条原操作不会自动重放；可检查原终端与回执。', busy: false }
   }
-  if (entry.archived) return { label: entry.confirmed ? '已归档 · 输入已确认' : '已归档', detail: entry.confirmed ? '原输入已由 Core 确认；归档不会撤回输入。可在 History 读取原记录，不能恢复为待发。' : `这条原消息已退出待发队列，不会自动发送。${entry.unconfirmed ? '\n此前是否已输入仍待核实；归档保留原操作，恢复也不会重建或重发。' : ''}${entry.error ? `\n此前记录：${entry.error}` : ''}`, busy: false }
+  if (entry.archived) return { label: entry.confirmed ? '已归档 · 输入已确认' : '已归档', detail: entry.confirmed ? '原输入已由 Core 确认；归档不会撤回输入。可读取原记录，不能恢复为待发。' : `这条原消息已退出待发队列，不会自动发送。${entry.unconfirmed ? '\n此前是否已输入仍待核实；归档保留原操作，恢复也不会重建或重发。' : ''}${entry.error ? `\n此前记录：${entry.error}` : ''}`, busy: false }
   if (entry.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED' && !entry.preparing && !entry.sending) return { label: '发送条件已变化', detail: '本次尝试未写入输入；原消息此前的投递结果仍需核对。查看对话后，可移至草稿，作为新消息编辑。', busy: false }
   if (entry.preparationWait) {
     const wait = entry.preparationWait, reason = wait.reason === 'context-compaction' ? '正在整理上下文' : 'Agent 正在准备输入'
@@ -96,7 +99,7 @@ export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteract
 /** A retained queue record is not a submission receipt or a conversation position. */
 export function queuedMessageLocation(entry: ComposerQueuedMessage) {
   if (entry.inputReceipt?.status === 'terminal-confirmed') return '原终端输入字节已确认；Native 采用与回复位置尚未确认'
-  if (entry.confirmed) return '原输入已确认，可在 History 读取'
+  if (entry.confirmed) return '原输入已确认，可读取原记录'
   if (entry.archived) return entry.unconfirmed ? '已归档；此前输入结果待核实' : '已归档；不会自动发送'
   if (entry.preparing) return '准备发送，对话位置暂不可用'
   if (entry.sending) return '正在提交，对话位置等待确认'
@@ -143,8 +146,11 @@ export function QueuedDeliveryFailure({ entry, copy }: { entry: ComposerQueuedMe
     preparationReason={entry.preparationWait?.reason} copyText={copy ?? (async () => false)} />
 }
 
-export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive, onMoveToDraft, onHistory, onMove, onSend, onCancelPreparation, onEdit, sendImmediately = false, reading, sessionId, pendingInteraction = false }: {
+export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive, onMoveToDraft, onHistory, onMove, onSend, onCancelPreparation, onEdit, sendImmediately = false, reading, sessionId, pendingInteraction = false, onFill, hideHeading = false, rowsOnly = false }: {
   pendingInteraction?: boolean
+  hideHeading?: boolean
+  rowsOnly?: boolean
+  onFill?: ((text: string) => Promise<string | void>) | undefined
   reading?: ConversationReadingProps | undefined
   sessionId?: string | undefined
   queued: readonly ComposerQueuedMessage[]
@@ -163,10 +169,7 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
   const [editingId, setEditingId] = useState<string | null>(null)
   const [failure, setFailure] = useState<{id:string;text:string;message:string} | null>(null)
   if (!queued.length) return null
-  return <section className="composer-outbox" aria-label={queued[0]?.archived ? 'Archived messages' : 'Queued messages'}>
-    <h3>{queued[0]?.archived ? 'Archived' : 'Pending'} ({queued.length})</h3>
-    <ol className="composer-mailbox__messages">
-      {queued.map((entry,index) => {
+  const rows = queued.map((entry,index) => {
         const selected = selectedId === entry.id, state = queuedMessageState(entry,pendingInteraction)
         const conditionChanged = entry.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED'
         const canSend = !conditionChanged && !entry.archived && !state.busy && editingId !== entry.id
@@ -174,18 +177,19 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
         return <li key={entry.id} data-state={entry.status} data-operation-id={entry.id} data-archived={Boolean(entry.archived)}>
           <MailboxRecordRow recordKey={`queue:${entry.id}`} label={state.label}
             avatar={<ConversationSpeakerAvatar speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} name="Author unknown" size={18} />}
-            text={entry.text} metadata={<MailboxTime value={entry.enqueuedAt} />}
+            text={entry.text} metadata={<MailboxTime value={entry.enqueuedAt} />} source={entry.archived ? 'Archived original message' : 'Pending original message'}
             onOpen={(_key,event) => { if (!editingId) onSelect(entry.id,event) }} />
           <div className="composer-mailbox__record-actions composer-outbox__actions">
-            {!conditionChanged && !entry.archived && onSend ? <button key="send" type="button" className="composer-tool" disabled={!canSend}
+            {!conditionChanged && !entry.archived && onSend ? <button key="send" type="button" className="composer-tool composer-outbox__send" disabled={!canSend}
               aria-label={(entry.immediateSend ?? sendImmediately) ? 'Send queued message immediately' : 'Send queued message'} title={canSend ? '只发送这条原消息' : state.detail}
               onClick={() => onSend(entry.id)}><ThemeActionSubmitIcon size={14} /></button> : null}
-            {conditionChanged && !entry.archived && onMoveToDraft ? <button type="button" className="composer-tool" disabled={state.busy || Boolean(editingId)} title="保留原投递记录，将正文追加到当前草稿；不会立即发送" onClick={async () => {
+            {onFill ? <MailboxDraftAction key={`fill:${entry.id}`} value={entry.text} onFill={() => onFill(entry.text)} /> : null}
+            {conditionChanged && !entry.archived && onMoveToDraft ? <button type="button" className="composer-tool" disabled={state.busy || Boolean(editingId)} aria-label="移至草稿" title="退出待发队列并追加正文到草稿；保留原投递记录，不会发送" onClick={async () => {
               setFailure(null)
               try { await onMoveToDraft(entry.id, entry.text) } catch (error) { setFailure({ id: entry.id, text: entry.text, message: presentError(error) }) }
-            }}>移至草稿</button> : null}
-            {(entry.preparationWait?.state === 'waiting' || entry.inputReceipt?.status === 'waiting') && onCancelPreparation ? <button type="button" className="composer-tool" onClick={() => onCancelPreparation(entry.id)}>停止等待</button> : null}
-            {onCopy ? <CopyQueuedMessage key="copy" entry={entry} onCopy={onCopy} /> : null}
+            }}><DraftIcon size={14} aria-hidden="true" /></button> : null}
+            {(entry.preparationWait?.state === 'waiting' || entry.inputReceipt?.status === 'waiting') && onCancelPreparation ? <button type="button" className="composer-tool" aria-label="停止等待" title="停止这一代等待，保留原消息与投递记录" onClick={() => onCancelPreparation(entry.id)}><StopIcon size={14} aria-hidden="true" /></button> : null}
+            {onCopy && !selected ? <CopyQueuedMessage key="copy" entry={entry} onCopy={onCopy} /> : null}
             {!entry.archived && onEdit ? <button key="edit" type="button" className="composer-tool" aria-label="编辑这条待发消息" title="编辑原消息，保存不会发送"
               disabled={!entry.editable || Boolean(editingId)} onClick={event => { onSelect(entry.id,event); setEditingId(entry.id) }}><ThemeActionEditIcon size={14} /></button> : null}
             {selected && !entry.archived && onMove ? <>
@@ -193,24 +197,26 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
               <button key="down" type="button" className="composer-tool" disabled={Boolean(editingId) || state.busy || index===queued.length-1 || queued[index+1]?.sending || queued[index+1]?.preparing} onClick={() => onMove(entry.id,'down')} title="Move down" aria-label="Move down"><ThemeActionMoveDownIcon size={14} /></button>
             </> : null}
             {onArchive ? <button key="archive" type="button" className="composer-tool" aria-label={entry.archived ? '恢复为待发' : '归档这条待发消息'}
-              title={entry.archived ? entry.confirmed ? '原输入已确认，请查看 History；不能重新投递' : '恢复原条目，等待明确发送' : '归档原条目，保留原文和投递记录；不会撤回已经输入的内容'}
+              title={entry.archived ? entry.confirmed ? '原输入已确认，可读取原记录；不能重新投递' : '恢复原条目，等待明确发送' : '归档原条目，保留原文和投递记录；不会撤回已经输入的内容'}
               disabled={state.busy || Boolean(editingId) || Boolean(entry.archived && entry.confirmed)} onClick={async () => {
                 setFailure(null)
                 try { await onArchive(entry.id,entry.text,!entry.archived) } catch(error) { setFailure({id:entry.id,text:entry.text,message:presentError(error)}) }
               }}>{entry.archived ? <ThemeActionRestoreIcon size={14} /> : <ThemeActionArchiveIcon size={14} />}</button> : null}
-            {entry.archived && entry.confirmed && onHistory ? <button key="history" type="button" className="composer-tool" onClick={() => onHistory(entry.id)}>History</button> : null}
+            {entry.archived && entry.confirmed && onHistory ? <button key="history" type="button" className="composer-tool" aria-label="读取原记录" title="读取原记录" onClick={() => onHistory(entry.id)}><ReadIcon size={14} aria-hidden="true" /></button> : null}
           </div>
           {ownFailure ? <p role="alert" className="composer-mailbox__risk">{ownFailure}</p> : null}
           {selected ? <MailboxLocationContext sessionId={sessionId} pending>{(_summary,executionDetails) => <article className="composer-outbox__inline" data-record-key={`queue:${entry.id}`}>
             {editingId === entry.id && onEdit ? <ComposerQueuedMessageEditor key={entry.id} entry={entry} onSave={onEdit} onCancel={() => setEditingId(null)} /> : null}
             {queuedInputFailure(entry) || entry.error || entry.logId || entry.unconfirmed ? <QueuedDeliveryFailure entry={entry} copy={onCopy} /> : !entry.preparationWait && !entry.inputReceipt && (state.busy || !entry.deliverable || entry.archived) ? <p className={entry.archived && (entry.confirmed || !entry.unconfirmed) ? 'composer-mailbox__record-note' : 'composer-mailbox__risk'} data-kind={state.busy ? 'working' : 'attention'}>{state.detail}</p> : null}
             {entry.preparationWait || entry.inputReceipt ? <p className="composer-pending__retry" role="status">{state.detail}</p> : null}
-            <ConversationMessage {...reading} compact recordedIdentity messageId={`queue:${entry.id}`} speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} content={entry.text}
+            <ConversationMessage {...reading} compact recordedIdentity detailsOnlyMetadata messageId={`queue:${entry.id}`} speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} content={entry.text}
               {...(entry.enqueuedAt === undefined ? {} : {createdAt:entry.enqueuedAt})} {...(onCopy ? {onCopy} : {})}
               messageDetails={<><dl className="composer-mailbox__record-facts"><dt>Record</dt><dd>{entry.archived ? 'Archived original message' : 'Pending original message'}</dd><dt>Enqueued</dt><dd><MailboxTime value={entry.enqueuedAt} complete /></dd><dt>Delivery</dt><dd>{state.detail}</dd>{entry.errorCode ? <><dt>Code</dt><dd>{entry.errorCode}</dd></> : null}</dl>{executionDetails}</>} />
           </article>}</MailboxLocationContext> : null}
         </li>
-      })}
-    </ol>
+      })
+  return rowsOnly ? <>{rows}</> : <section className="composer-outbox" aria-label={queued[0]?.archived ? 'Archived messages' : 'Queued messages'}>
+    {!hideHeading ? <h3>{queued[0]?.archived ? 'Archived' : 'Pending'} ({queued.length})</h3> : null}
+    <ol className="composer-mailbox__messages">{rows}</ol>
   </section>
 }

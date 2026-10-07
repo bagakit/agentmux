@@ -279,7 +279,7 @@ export function AgentSessionComposer({
   const inbox = useServiceNotices(sessionId, notices, session?.kind === 'agent')
 
   return (
-    <SessionMailbox key={sessionId} inputHistory={inputHistory.render} historyResourceReader={inputHistory.resourceReader} userMessages={inputHistory.messages} onHistoryVisible={inputHistory.setMailboxOpen} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
+    <SessionMailbox key={sessionId} inputHistory={inputHistory} historyResourceReader={inputHistory.resourceReader} userMessages={inputHistory.messages} onHistoryVisible={inputHistory.setMailboxOpen} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
         noticePresentation={feedback.failure ? { id: 'tool', content: <ComposerFeedback compact failure={feedback.failure} onDismiss={feedback.dismiss} /> } : undefined}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}

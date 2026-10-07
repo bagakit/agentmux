@@ -233,8 +233,8 @@
 .composer-mailbox__progress { align-self: center; flex-shrink: 0; color: var(--text-2); pointer-events: none; }
 .composer__mailbox[data-progress-state='active'] .composer-mailbox__progress { color: var(--green); }
 .composer__mailbox[data-progress-state='unconfirmed'] .composer-mailbox__progress { color: var(--amber); }
-.composer-mailbox__folders { display: flex; flex-wrap: wrap; gap: var(--sp-1); padding-bottom: var(--sp-3); border-bottom: 1px solid var(--line-soft); margin-bottom: var(--sp-2); }
-.composer-mailbox__folders > button { flex: 1 1 auto; display: inline-flex; justify-content: center; align-items: center; gap: var(--sp-1); min-width: 0; min-height: var(--sp-7); padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); font-size: var(--fs-meta); color: var(--text-3); background: transparent; cursor: pointer; }
+.composer-mailbox__folders { display: flex; flex-wrap: wrap; gap: var(--sp-1); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--line-soft); margin-bottom: var(--sp-2); }
+.composer-mailbox__folders > button { flex: 1 1 calc(33.333% - var(--sp-1)); display: inline-flex; justify-content: center; align-items: center; gap: var(--sp-1); min-width: 0; min-height: var(--sp-7); padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); font-size: var(--fs-meta); color: var(--text-3); background: transparent; cursor: pointer; }
 .composer-mailbox__folders > button[aria-selected='true'] { background: var(--surface-3); color: var(--text); }
 .composer-mailbox__folders > button:focus-visible { outline: 1px solid var(--focus-line); }
 .composer-mailbox > [role='tabpanel'] > p { margin: var(--sp-3); color: var(--text-3); }
@@ -287,31 +287,33 @@
 .composer-mailbox__back > button { padding: 0 var(--sp-2); min-height: var(--sp-7); }
 .composer-mailbox__messages { list-style: none; margin: 0; padding: 0; }
 .composer-mailbox__messages > li { margin: 0; padding: 0; border-top: 1px solid var(--line-soft); }
-.composer-mailbox__record-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-3) var(--sp-3); }
-.composer-mailbox__reveal { display: inline-flex; align-items: center; min-height: var(--sp-6); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-meta); cursor: pointer; }
-.composer-mailbox__reveal:hover { background: var(--surface-3); color: var(--text); }
-.composer-mailbox__reveal:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
-.composer-mailbox__reveal:disabled { cursor: default; color: var(--text-3); }
+.composer-mailbox__record-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-1); padding: 0 var(--sp-2) var(--sp-2); }
+.composer-mailbox__record-actions > .composer-tool { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; padding: 4px; }
+.composer-mailbox__record-actions > .composer-tool:hover { background: var(--surface-3); }
+.composer-mailbox__action-feedback { order: 1; flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; color: var(--text-3); font-size: var(--fs-meta); text-align: end; }
 .composer-mailbox__navigation-feedback, .composer-mailbox__pending-location { color: var(--text-3); font-size: var(--fs-meta); }
 .composer-mailbox__pending-location { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-.composer-mailbox__row { width: 100%; display: grid; gap: var(--sp-2); padding: var(--sp-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-body); cursor: pointer; }
+.composer-mailbox__row { width: 100%; display: grid; gap: var(--sp-1); padding: var(--sp-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-body); cursor: pointer; }
 .composer-mailbox__row:hover { background: var(--surface-3); }
 .composer-mailbox__row:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; background: var(--surface-3); }
 .composer-mailbox__row-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
-.composer-mailbox__row-head > strong { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-meta); font-weight: 600; }
+.composer-mailbox__row-head > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 600; }
+.composer-mailbox__row-head > :is(.agent-avatar, .conversation-speaker-avatar, .space-object-icon) { flex-shrink: 0; }
 .composer-mailbox__row-head > .composer-mailbox__metadata { margin-left: auto; flex-shrink: 0; }
+.composer-mailbox__source { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
 .composer-mailbox__preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .composer-mailbox__metadata { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
 .composer-mailbox__detail { padding: var(--sp-3); font-size: var(--fs-body); overflow-wrap: anywhere; }
 .composer-mailbox__detail header { display: grid; gap: var(--sp-2); }
-.composer-mailbox__history { margin-top: var(--sp-3); }
-.composer-mailbox__history > h3, .composer-outbox > h3 { margin: var(--sp-2) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; }
+.composer-outbox > h3 { margin: var(--sp-2) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; }
 .composer-outbox ol { list-style: none; padding: 0; }
-.composer-outbox__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.composer-outbox__actions { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.composer-outbox__send { margin-inline-end: auto; color: var(--blue); }
 .composer-mailbox__boundary, .composer-mailbox__error { padding: var(--sp-3); font-size: var(--fs-meta); }
 
 
-.composer-mailbox__folders > .composer-mailbox__progress-tab { flex: 0 1 auto; margin-left: auto; color: var(--text-2); }
+.composer-mailbox__folders > .composer-mailbox__utility-tab { flex: 0 1 auto; min-height: 24px; }
+.composer-mailbox__folders > .composer-mailbox__utility-tab:nth-child(4) { margin-inline-start: auto; }
 .composer-mailbox__count { padding-inline: var(--sp-1); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--text-2); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .composer-mailbox__empty { display: grid; justify-items: center; gap: var(--sp-3); padding: var(--sp-6) var(--sp-3); color: var(--text-3); text-align: center; }
 .composer-mailbox__empty strong { color: var(--text-2); font-size: var(--fs-body); font-weight: 500; }
@@ -448,3 +450,20 @@
 .composer-file__reference button { flex: none; padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
 .composer-file__reference button:hover { color: var(--text); background: var(--surface-3); }
 .composer-file__reference button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
+
+/* The same reading rows sit directly below the original query controls. */
+.composer-mailbox .input-history { gap: 0; }
+.composer-mailbox .input-history__search { padding: 0 var(--sp-1) var(--sp-2); }
+.composer-mailbox .input-history__search input { padding: 6px 8px; font-size: var(--fs-meta); }
+.composer-mailbox .input-history__coverage { padding: 0 var(--sp-1) var(--sp-2); font-size: var(--fs-micro); }
+.composer-mailbox .input-history__sources, .composer-mailbox .input-history__local { padding: var(--sp-2) var(--sp-1); }
+.composer-mailbox .input-history__local > summary { padding-block: var(--sp-1); }
+@media (pointer: coarse) {
+  .composer-mailbox__record-actions > .composer-tool { min-width: 44px; min-height: 44px; }
+  .composer-mailbox__folders > button { min-height: 44px; }
+
+}
+
+/* A transient result must wrap below the actions, never squeeze the recorded author. */
+.composer-mailbox__detail .log-turn__head:has(.composer-mailbox__action-feedback) > .log-turn__actions { grid-column: 1 / -1; grid-row: 2; display: flex; flex-wrap: wrap; justify-content: flex-end; min-width: 0; width: 100%; margin-inline-start: 0; }
+.composer-mailbox__detail .log-turn__head:has(.composer-mailbox__action-feedback) .conversation-input-details__body { grid-row: 3; }

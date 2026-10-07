@@ -32,6 +32,8 @@ export type ConversationMessageProps = {
   recordTitle?: string
   /** A compact record face, without changing ordinary conversation defaults. */
   compact?: boolean
+  /** Keep secondary identity/context facts in the existing Info disclosure. */
+  detailsOnlyMetadata?: boolean
   /** A Provider-recorded public message phase; never inferred from the text. */
   messagePhase?: AgentSessionHistoryMessagePhase
   recordedIdentity?: boolean
@@ -127,7 +129,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  active = true, compact = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
+  active = true, compact = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
   speaker: recordedSpeaker, conversationSessionId, itemRef, inputSource, publicContent, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
@@ -302,6 +304,25 @@ export function ConversationMessage({
   const hasMetadata = Boolean(described?.project || isDeclaredSender || showOrigin || located ||
     prefix && prefix.sourceLabel.length > 0 && !isDeclaredSender || prefix?.packet && (!isDeclaredSender || !agentReference))
 
+  const senderIdentity = agentReference ? <span className="log-turn__sender-id" data-copy-state={idCopyState}>
+              <code>{agentReference.speaker.id}</code>
+              <button type="button" className="log-turn__id-copy" title={idCopyState === 'copied' ? 'Agent ID copied' : idCopyState === 'failed' ? 'Copy Agent ID failed; retry' : 'Copy Agent ID'}
+                aria-label={idCopyState === 'copied' ? 'Agent ID copied' : 'Copy Agent ID'}
+                onClick={() => { void copyValue(agentReference.speaker.id, 'agent-id') }}>
+                {idCopyState === 'copied' ? <SemanticIcon name="action.confirm" size={12} aria-hidden="true" /> : <SemanticIcon name="action.copy" size={12} aria-hidden="true" />}
+              </button>
+              {idCopyState === 'failed' ? <span className="log-turn__id-copy-error" role="alert">Copy failed · retry</span> : null}
+            </span> : null
+  const metadata = hasMetadata ? <div className="log-turn__meta">
+        {described?.project ? <span className="log-turn__context" title={`${described.project.name}${described.project.branch ? ` · ${described.project.branch}` : ''} · Current project`}>{described.project.name}{described.project.branch ? <span> · {described.project.branch}</span> : null}</span> : null}
+        {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
+        {showOrigin && inputOrigin ? <span className="log-turn__input-source" title={inputOrigin.title}>
+          <SemanticIcon name="action.reply" size={11} aria-hidden="true" /><span>{inputOrigin.caption}</span></span> : null}
+        {located ? <span className="log-turn__location" role="status">已定位此消息</span> : null}
+        {prefix && prefix.sourceLabel.length > 0 && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
+        {prefix?.packet && (!isDeclaredSender || !agentReference) ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
+      </div> : null
+
   return (
     <div
       className="log-turn"
@@ -335,17 +356,9 @@ export function ConversationMessage({
             {systemSummary ? <span className="log-turn__system-summary">{systemSummary}</span> : null}
           </button> : <span className="log-turn__sender">
             <span className="log-turn__who">{recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.packet?.name ?? prefix.sourceLabel : displayName}</span>
-            {agentReference ? <span className="log-turn__sender-id" data-copy-state={idCopyState}>
-              <code>{agentReference.speaker.id}</code>
-              <button type="button" className="log-turn__id-copy" title={idCopyState === 'copied' ? 'Agent ID copied' : idCopyState === 'failed' ? 'Copy Agent ID failed; retry' : 'Copy Agent ID'}
-                aria-label={idCopyState === 'copied' ? 'Agent ID copied' : 'Copy Agent ID'}
-                onClick={() => { void copyValue(agentReference.speaker.id, 'agent-id') }}>
-                {idCopyState === 'copied' ? <SemanticIcon name="action.confirm" size={12} aria-hidden="true" /> : <SemanticIcon name="action.copy" size={12} aria-hidden="true" />}
-              </button>
-              {idCopyState === 'failed' ? <span className="log-turn__id-copy-error" role="alert">Copy failed · retry</span> : null}
-            </span> : null}
+            {!detailsOnlyMetadata ? senderIdentity : null}
           </span>}
-          {isPeerAgent ? <span className="log-turn__sender-kind">Agent</span> : null}
+          {isPeerAgent && !detailsOnlyMetadata ? <span className="log-turn__sender-kind">Agent</span> : null}
           {recordTitle && !isSystemContext ? <span className="log-turn__sender-kind">{recordTitle}</span> : null}
           {hasQuestionAnswers ? <span className="log-turn__sender-kind">问题答复</span> : null}
           {status === 'streaming' ? (
@@ -371,18 +384,10 @@ export function ConversationMessage({
             <SemanticIcon name="action.copy" size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
           </button> : null}
         </span> : null}
-        {isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity ? <ConversationInputDetails messageId={messageId} source={inputSource} publicContent={publicContent} executionHostId={executionHostId} speaker={recordedSpeaker}
-          declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{messageDetails}</ConversationInputDetails> : null}
+        {isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity || detailsOnlyMetadata ? <ConversationInputDetails messageId={messageId} source={inputSource} publicContent={publicContent} executionHostId={executionHostId} speaker={recordedSpeaker}
+          declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{detailsOnlyMetadata ? <>{senderIdentity}{metadata}</> : null}{messageDetails}</ConversationInputDetails> : null}
       </div>
-      {hasMetadata ? <div className="log-turn__meta">
-        {described?.project ? <span className="log-turn__context" title={`${described.project.name}${described.project.branch ? ` · ${described.project.branch}` : ''} · Current project`}>{described.project.name}{described.project.branch ? <span> · {described.project.branch}</span> : null}</span> : null}
-        {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
-        {showOrigin && inputOrigin ? <span className="log-turn__input-source" title={inputOrigin.title}>
-          <SemanticIcon name="action.reply" size={11} aria-hidden="true" /><span>{inputOrigin.caption}</span></span> : null}
-        {located ? <span className="log-turn__location" role="status">已定位此消息</span> : null}
-        {prefix && prefix.sourceLabel.length > 0 && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
-        {prefix?.packet && (!isDeclaredSender || !agentReference) ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
-      </div> : null}
+      {!detailsOnlyMetadata ? metadata : null}
       {hasContent && (!isSystemContext || systemContextOpen) ? discloseBody(
         <div ref={bodyRef} id={isSystemContext ? systemContentId : undefined} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
