@@ -18,7 +18,11 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
       verify: async (config, raw, proof) => (await feishu()).verify(config, raw, proof),
       qualifyReply: async (config, event, raw, credential, signal) => (await feishu()).qualifyReply(config, event, raw, credential, signal)
     },
-    transport: { start: async input => (await feishu()).transport.start(input) }
+    transport: { start: async input => (await feishu()).transport.start(input) },
+    rooms: {
+      create: async (input, credential, signal) => (await feishu()).rooms.create(input, credential, signal),
+      addMembers: async (input, credential, signal) => (await feishu()).rooms.addMembers(input, credential, signal)
+    }
   }
   return [adapter]
 }
