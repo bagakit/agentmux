@@ -5,7 +5,7 @@ import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryObservation, AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
-import { createClientUiRoot } from './helpers/client-ui-render'
+import { createAgentInformationRoot as createClientUiRoot } from './helpers/agent-information-root'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 
@@ -139,12 +139,15 @@ it('reads the original selected reply as strong/code, separate paragraphs and a 
   expect(inputTime.title).toContain('Submission record · Current reading window')
   expect(inputTime.getAttribute('aria-label')).toContain(inputTime.textContent)
   expect(inputTime.title).toContain(later.content)
-  const location = panel().querySelector('footer')!
+  const location = panel().querySelector('.agent-information-reader__heading > small')!
+  expect(location.textContent).toContain('Reading project')
+  await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__service button')!.click())
+  expect(panel().querySelector('.agent-information-reader__metadata')!.textContent).toContain(recipient)
+  await act(async () => panel().querySelector<HTMLButtonElement>('[aria-label="Back to original content"]')!.click())
   expect(location.textContent).toContain('Reading project')
   expect(location.textContent).not.toContain(recipient)
   expect(location.title).toContain(_hygiene_fixturePath("reading/repo"))
-  expect(location.title).toContain(recipient)
-  expect(location.getAttribute('aria-label')).toBe(location.title)
+  expect(location.getAttribute('title')).toContain(_hygiene_fixturePath("reading/repo"))
   expect(recap().querySelector('strong')?.textContent).toBe('关键结论')
   expect(recap().querySelector('code.md-code')?.textContent).toBe('src/scroll-anchor.ts')
   const paragraphs = [...recap().querySelectorAll('.md-paragraph')]
@@ -160,7 +163,7 @@ it('reads the original selected reply as strong/code, separate paragraphs and a 
   expect(card().getAttribute('aria-label')).toContain('**关键结论**')
   expect(api.sessions.historyPage).toHaveBeenCalledExactlyOnceWith(before.sessions[0]!.control, { limit: 30 })
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
-  expect(document.activeElement).toBe(editable)
+  expect(document.activeElement).toBe(panel().querySelector('.agent-information-reader__reading'))
 })
 
 it('reads complete Agent wrappers as body while declarations cannot authenticate the author or replace the recorded time', async () => {
@@ -231,10 +234,10 @@ it('keeps complete observed reply and input tails without reading an earlier pag
   expect(inputBodyNode.querySelector('strong')!.textContent).toBe('literal input')
   expect(replyBody.textContent).toContain('UNSEEN-REPLY-TAIL'); expect(inputBodyNode.textContent).toContain('UNSEEN-INPUT-TAIL')
   expect(card().textContent).not.toContain('UNSEEN-REPLY-TAIL')
-  expect(panel().tabIndex).toBe(0)
+  expect(panel().querySelector<HTMLElement>('.agent-information-reader__reading')!.tabIndex).toBe(0)
   await act(async () => card().focus())
   await act(async () => card().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
-  await act(async () => vi.waitFor(() => expect(document.activeElement).toBe(panel())))
+  await act(async () => vi.waitFor(() => expect(document.activeElement).toBe(panel().querySelector('.agent-information-reader__reading'))))
   expect(originalContent()).toBe(longReply)
   expect(nativePage.items[0]!.contentParts[0]).toEqual({ kind: 'text', text: longInput })
   expect(inputRows()[0]!.dataset.inputAuthor).toBe('unknown')
@@ -244,7 +247,7 @@ it('keeps complete observed reply and input tails without reading an earlier pag
   await act(async () => panel().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
   expect(document.querySelector('.focus-context-hover')).toBeNull(); expect(document.activeElement).toBe(card())
   await act(async () => card().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
-  await act(async () => vi.waitFor(() => expect(document.activeElement).toBe(panel())))
+  await act(async () => vi.waitFor(() => expect(document.activeElement).toBe(panel().querySelector('.agent-information-reader__reading'))))
   expect(api.sessions.historyPage).toHaveBeenCalledTimes(2)
 
 })

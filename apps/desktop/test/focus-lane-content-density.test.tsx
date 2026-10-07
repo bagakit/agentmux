@@ -14,7 +14,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import * as allocation from '../src/renderer/src/lib/focus-lane-layout'
 import * as projection from '../src/renderer/src/lib/focus-context'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
-import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+import { createAgentInformationRoot as createRoot } from './helpers/agent-information-root'
 import { focusFilterOptions } from './fixtures/focus-filter-menu'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
@@ -195,11 +195,11 @@ it('keeps the actual rename input and exact menu target across 1 to 2 to 1 and a
   await act(async () => { rename.focus(); rename.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' })) })
   const editing = container.querySelector<HTMLInputElement>('.focus-context__rename')!; expect(editing).not.toBeNull()
   await act(async () => { const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!; setter.call(editing, 'Original ongoing edit'); editing.dispatchEvent(new Event('input', { bubbles: true })); editing.setSelectionRange(3, 9) })
-  const caret = [editing.selectionStart,editing.selectionEnd]
+  const caret = [editing.selectionStart,editing.selectionEnd], editingParent = editing.parentElement
   await seed([agent(A), agent(B)]); expect(container.querySelector('.focus-context__rename')).toBe(editing); expect(editing.value).toBe('Original ongoing edit'); expect([editing.selectionStart,editing.selectionEnd]).toEqual(caret)
-  await seed([agent(A)]); expect(container.querySelector('.focus-context__rename')).toBe(editing); expect(editing.parentElement!.parentElement).toBe(parent); expect(parent!.parentElement).toBe(group); expect(group!.parentElement).toBe(holder)
+  await seed([agent(A)]); expect(container.querySelector('.focus-context__rename')).toBe(editing); expect(editing.parentElement).toBe(editingParent); expect(editingParent!.parentElement).toBe(group); expect(group!.parentElement).toBe(holder)
   await act(async () => editing.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })))
-  expect(card().parentElement).toBe(parent)
+  expect(card().parentElement!.parentElement).toBe(group)
   await seed([agent(A), agent(B)])
   const search = container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
   await act(async () => { const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!;setter.call(search,A);search.dispatchEvent(new Event('input',{bubbles:true})) })
@@ -238,7 +238,11 @@ it('shows a complete wrapper body as the ordinary recap while raw aria/hover and
   expect(preview()?.querySelector('.focus-context-hover__recap p')?.textContent).toBe(excerpt(body))
   expect(useAppStore.getState().timelines[A]!.items[0]!.content).toBe(wrapped)
   expect(card().getAttribute('aria-label')).toContain(excerpt(wrapped))
-  expect(preview()?.textContent).toContain('Bash pnpm test --filter density'); expect(document.activeElement).toBe(input)
+  await act(async () => preview()!.querySelector<HTMLButtonElement>('.agent-information-reader__facts')!.click())
+  await act(async () => [...preview()!.querySelectorAll<HTMLButtonElement>('.agent-information-details__tabs button')].find(button => button.textContent === 'Source')!.click())
+  expect(preview()?.textContent).toContain('Bash pnpm test --filter density')
+  await act(async () => preview()!.querySelector<HTMLButtonElement>('[aria-label="Back to original content"]')!.click())
+  expect(document.activeElement).toBe(preview()!.querySelector('.agent-information-reader__reading'))
   expect(useAppStore.getState().timelines[A]).toBe(original); expect(original.items[0]!.content).toBe(wrapped); await escape()
   const unrecognized = [
     ("[Message from Agent declared]\n<bagakit-msg type=\"result\" name=\"Unknown\" time=\"" + _hygiene_fixtureIso(24141600000, "second") + "\"><unknown>原未知结构</unknown></bagakit-msg>"),

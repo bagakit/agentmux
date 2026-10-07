@@ -8,7 +8,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
-const dom = composerDOM(), name = 'Original Agent', reply = 'Original reply with **evidence** and an unchanged reading source.'
+const dom = composerDOM({ agentInformation: true }), name = 'Original Agent', reply = 'Original reply with **evidence** and an unchanged reading source.'
 const session = composerSession('density-subject')
 const base = () => agentContextForSession(session, undefined, name, composerConfig.workspaces[0], null)
 const identity: FocusContextIdentity = { occurrenceCount: 2, tabs: ['first', 'second'].map(group => ({
@@ -27,10 +27,15 @@ async function open(context: FocusContext, positions = identity) {
   await act(async () => dom.container.querySelector<HTMLButtonElement>('.focus-context')!.focus())
   expect(preview()).not.toBeNull()
 }
+async function source() {
+  await act(async () => preview().querySelector<HTMLButtonElement>('.agent-information-reader__service button')!.click())
+}
 beforeEach(() => { useAppStore.setState({ sessions: [session], timelines: {}, mainSurface: 'agents' }) })
 
 it('keeps every exact occurrence in compact shared glyphs without repeating its Agent title or large map', async () => {
   await open({ ...base(), recap, detailIsRecap: true })
+  expect(preview().querySelector('.focus-context-hover__workbench')).toBeNull()
+  await source()
   const positions = preview().querySelector('.focus-context-hover__workbench')!
   expect(positions.getAttribute('aria-label')).toBe('2 confirmed positions')
   expect(positions.querySelectorAll('[data-focus-occurrence-key]')).toHaveLength(2)
@@ -45,18 +50,22 @@ it('keeps every exact occurrence in compact shared glyphs without repeating its 
 
 it('retains a distinct Tab title and original proportional geometry rather than guessing a new position', async () => {
   await open(base(), { occurrenceCount: 1, tabs: [{ ...identity.tabs[0]!, title: 'Distinct original Tab' }] })
+  await source()
   const position = preview().querySelector('.focus-context-hover__position-copy')!
   expect(position.querySelector('strong')?.textContent).toBe('Distinct original Tab')
-  const region = preview().querySelector<HTMLElement>('[data-region-id=subject]')!
+  const region = preview().querySelector<HTMLElement>('.focus-context-hover__workbench [data-region-id=subject]')!
   expect(region.style.left).toBe('40%'); expect(region.style.width).toBe('60%')
 })
 
-it.each(['Activity not confirmed · original input readiness unknown', 'Permission required · original edit request'])('keeps necessary service text directly readable once: %s', async detail => {
-  await open({ ...base(), stateLabel: detail.split(' · ')[0]!, detail, detailKind: 'service', recap, detailIsRecap: false })
-  expect(preview().querySelector('.focus-context-hover__activity')?.textContent).toBe(detail)
+it.each(['unknown', 'permission'] as const)('keeps necessary service directly readable with its full source: %s', async kind => {
+  const detail = kind === 'permission' ? 'Permission required · original edit request' : 'Activity not confirmed · original input readiness unknown'
+  const context = { ...base(), ...(kind === 'permission' ? { bucket: 'attention' as const, state: 'waiting' as const } : {}), stateLabel: detail.split(' · ')[0]!, detail, detailKind: 'service' as const, recap, detailIsRecap: false }
+  await open(context)
+  const service = preview().querySelector('.agent-information-reader__service p')!
+  expect(service.textContent).toBe(kind === 'permission' ? detail : 'Current activity unconfirmed · Run running')
   expect(preview().querySelector('header')?.textContent).not.toContain(detail.split(' · ')[0])
   expect(preview().querySelector('.focus-context-hover__state')?.getAttribute('aria-label')).toContain(detail.split(' · ')[0])
-  expect(preview().querySelector('.focus-context-hover__activity-details')).toBeNull()
+  await source(); expect(preview().querySelector('.agent-information-reader__metadata')!.textContent).toContain(detail)
 })
 
 it('discloses ordinary held activity only when the original reply already owns the reading space', async () => {
@@ -64,13 +73,12 @@ it('discloses ordinary held activity only when the original reply already owns t
   const reads = vi.spyOn(api.sessions, 'historyPage'), control = vi.spyOn(api.sessions, 'stop')
   const context = { ...base(), detail, detailKind: 'activity' as const, detailIsRecap: false, recap }
   await open(context)
-  const supplementary = preview().querySelector<HTMLDetailsElement>('.focus-context-hover__activity-details')!
-  expect(supplementary).not.toBeNull(); expect(supplementary.open).toBe(false)
+  expect(preview().querySelector('.agent-information-reader__metadata')).toBeNull()
   const originalBody = preview().querySelector('.focus-context-hover__prose')!
   const range = document.createRange(); range.selectNodeContents(originalBody); window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
   const readCount = reads.mock.calls.length
-  await act(async () => { supplementary.open = true })
-  expect(supplementary.querySelector('p')?.textContent).toBe(detail)
+  await source()
+  expect(preview().querySelector('.agent-information-reader__metadata')?.textContent).toContain(detail)
   expect(preview().querySelector('.focus-context-hover__prose')).toBe(originalBody)
   expect(window.getSelection()!.toString()).toContain('Original reply')
   expect(reads).toHaveBeenCalledTimes(readCount); expect(control).not.toHaveBeenCalled()
@@ -83,7 +91,7 @@ it('keeps keyboard reading inside the disclosure, returns Escape to the original
   const context = { ...base(), detail: 'Read original-source.ts', detailKind: 'activity' as const, detailIsRecap: false, recap }
   await open(context)
   const original = preview(), card = dom.container.querySelector<HTMLButtonElement>('.focus-context')!
-  const summary = original.querySelector<HTMLElement>('.focus-context-hover__activity-details summary')!
+  const summary = original.querySelector<HTMLElement>('.agent-information-reader__facts')!
   expect(summary).not.toBeNull()
   await act(async () => summary.focus())
   await act(async () => new Promise(resolve => setTimeout(resolve, 220)))
@@ -96,7 +104,7 @@ it('keeps keyboard reading inside the disclosure, returns Escape to the original
   const outside = document.createElement('input'); document.body.append(outside)
   try {
     await open(context)
-    await act(async () => preview().querySelector<HTMLElement>('summary')!.focus())
+    await act(async () => preview().querySelector<HTMLElement>('.agent-information-reader__facts')!.focus())
     await act(async () => outside.focus())
     await act(async () => new Promise(resolve => setTimeout(resolve, 220)))
     expect(document.querySelector('.focus-context-hover')).toBeNull(); expect(document.activeElement).toBe(outside)

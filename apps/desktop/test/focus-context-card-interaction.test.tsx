@@ -7,7 +7,8 @@ import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { acknowledgedNameProjection } from '../src/renderer/src/lib/name-authority'
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import { act, createElement, useMemo } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
+import { createAgentInformationRoot as createRoot } from './helpers/agent-information-root'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -96,7 +97,7 @@ it('reveals held facts and scoped inputs after intent, allows reading transfer a
   destination.focus(); await pointer(card(), 'pointerover'); await advance(179); expect(preview()).toBeNull()
   expect(reads.every(read => read.mock.calls.length === 0)).toBe(true)
   await advance(1); expect(preview()?.textContent).toContain(response); expect(preview()?.querySelector('.focus-context-hover__recap small')?.getAttribute('title')).toContain('Last assistant message')
-  expect(preview()?.textContent).toContain(_hygiene_fixturePath("private/card-interaction")); expect(preview()?.querySelector('footer')?.getAttribute('title')).toContain(second)
+  expect(preview()?.querySelector('.agent-information-reader__heading > small')?.getAttribute('title')).toContain(_hygiene_fixturePath("private/card-interaction")); expect(preview()?.querySelector('.agent-information-reader__facts')?.getAttribute('aria-label')).toContain('source')
   expect(document.activeElement).toBe(destination)
   const panel = preview()!; await pointer(card(), 'pointerout', panel); await pointer(panel, 'pointerover', card()); await advance(170)
   await act(async () => panel.dispatchEvent(new Event('scroll', { bubbles: false }))); expect(preview()).toBe(panel)

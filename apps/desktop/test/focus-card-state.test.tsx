@@ -1,7 +1,8 @@
 import { fixturePath as _hygiene_fixturePath, fixtureTime as _hygiene_fixtureTime } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement, useMemo } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
+import { createAgentInformationRoot as createRoot } from './helpers/agent-information-root'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
