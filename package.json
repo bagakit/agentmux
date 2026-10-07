@@ -28,7 +28,9 @@
     "check": "pnpm typecheck && pnpm test && pnpm build",
     "update:renderer": "pnpm --filter @agentmux/client-ui... build && pnpm --filter @agentmux/desktop build && node apps/desktop/scripts/update-renderer.mjs",
     "update:renderer:rollback": "node apps/desktop/scripts/update-renderer.mjs --rollback",
-    "update:local": "pnpm --filter @agentmux/client-ui... build && pnpm --filter @agentmux/desktop build && node apps/desktop/scripts/update-local.mjs"
+    "update:local": "pnpm --filter @agentmux/client-ui... build && pnpm --filter @agentmux/desktop build && node apps/desktop/scripts/update-local.mjs",
+    "icons:dev": "pnpm --filter @agentmux/desktop icons:dev",
+    "icons:build": "pnpm --filter @agentmux/desktop icons:build"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

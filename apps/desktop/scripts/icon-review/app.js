@@ -7,6 +7,10 @@ const editable = ['glyph','feature','meaning','note','status'];
 let data, roleById, draft, activeId = 'status.working', category = 'all', mode = 'gallery', query = '', modifiedOnly = false;
 let storageAvailable = true, corruptRaw = null, toastTimer, lastTrigger = null;
 let manifest, sessionExportTime, projectedTheme;
+if (import.meta.hot) import.meta.hot.on('icon-review:source-change', () => {
+  if (!window.iconReview?.ready || storageAvailable) location.reload();
+  else notice('源码已更新；当前草稿尚未保存，请先导出修改，再手动刷新。');
+});
 // Simulated instance parameters never enter the saved draft or a theme file.
 const samplePresentation = { animation:'none', color:undefined };
 const mobile = () => matchMedia('(max-width:950px)').matches;
@@ -142,7 +146,7 @@ function renderInspector() {
   const r=roleById.get(activeId);if(!r)return;
   const e=effective(r),siblings=data.roles.filter(x=>x.glyph===r.glyph), diff=e.glyph!==r.glyph;
   $('#inspector-content').innerHTML=`
-    <div class="inspector-top"><div class="inspector-heading"><h2>图标与用途</h2><span class="source-tag">${data.customGlyphs.includes(r.glyph)?'项目自绘':'Lucide 来源'}</span><button class="icon-button close-inspector" aria-label="关闭用途编辑" data-close="inspector">×</button></div>
+    <div class="inspector-top"><div class="inspector-heading"><h2>图标与用途</h2><span class="source-tag">${data.customGlyphs.includes(r.glyph)?'项目自绘':'共享目录'}</span><button class="icon-button close-inspector" aria-label="关闭用途编辑" data-close="inspector">×</button></div>
     <div class="icon-comparison"><div class="comparison-item"><div class="preview">${icon(r.glyph,39)}</div><small>目录默认</small></div><span class="comparison-arrow" aria-hidden="true">→</span><div class="comparison-item proposed"><div class="preview" id="proposed-preview">${semantic(r.id,39)}</div><small>当前主题与草稿</small></div></div>
     <div class="active-glyph-name">${escape(r.glyph)}</div><p class="reuse-label">${siblings.length} 个用途复用此图形 · 选择要调整的一项</p><div class="reuse-list">${siblings.map(x=>`<button class="reuse-button" data-reuse="${x.id}" aria-pressed="${x.id===r.id}">${x.id===r.id?'✓ ':''}${escape(x.id)}</button>`).join('')}</div></div>
     <form class="inspector-form" id="role-form"><p class="semantic-id">${escape(r.id)}</p><p class="editing-label">修改只针对这一语义项。<span id="editing-state">${changed(r.id)?'已有人工修改。':'当前显示原始定义。'}</span></p>
@@ -352,6 +356,7 @@ async function init() {
     $('#totals').innerHTML=`<div><strong>${count}</strong><span>默认图形</span></div><div><strong>${data.roles.length}</strong><span>语义用途</span></div>`;
     $('#search-icon').innerHTML=icon('search',16);
     $('#snapshot-label').textContent=data.head.slice(0,8)+' · '+data.generatedAt.slice(0,10);
+    $('#source-mode').textContent=data.sourceMode==='live'?'当前源码 · 自动刷新':'源码快照';
     $('#catalog-version').textContent='共享语义图标 · v2';
     applyPreview();renderSamples();attachEvents();renderSaveState();renderCategories();renderInventory();renderInspector();
     window.iconReview={ready:true,buildPacket,sourceSnapshot:data.snapshot,exportTheme:()=>ThemeBridge.serializeThemeFile(currentTheme()),parseThemeFile:ThemeBridge.parseThemeFile};
