@@ -21,6 +21,7 @@ const clientUiAliases = Object.entries(clientUi.exports).flatMap(([key, value]) 
  return [{ find: new RegExp('^' + name.split('*').map(escape).join('(.*)') + '$'), replacement: resolve(root, 'packages/client-ui', target.replace('*', '$1')) }]
 }).sort((a, b) => b.find.source.length - a.find.source.length)
 const mutations = {
+  navigation: ['apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx', '{ tabId, ...(groupId === undefined ? {} : { groupId }) }', '{ tabId }'],
   highlight: ['apps/desktop/src/renderer/src/components/WorkbenchTopology.tsx', 'data-subject-region={tab.highlightedRegionIds?.includes(region.regionId) || undefined}', 'data-subject-region={undefined}'],
   consumer: ['apps/desktop/src/renderer/src/components/TopicRowPresence.tsx', '{ highlightedRegionIds: [subject.regionId] }', '{ highlightedRegionIds: undefined }'],
   location: ['apps/desktop/src/renderer/src/components/WorkbenchTopology.tsx', '{inspected?.locationLabel ? <small>{inspected.locationLabel}</small> : null}', '{null}']
@@ -46,7 +47,7 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
     JSON.stringify({ path, sha256: createHash('sha256').update(output).digest('hex'), originalSHA256: createHash('sha256').update(code).digest('hex'), mutated: output !== code }) + '\n')
   return output !== code ? { code: output, map: null } : undefined
  }}],
- test: { include: ['apps/desktop/test/workbench-identity.test.tsx','apps/desktop/test/topic-selection-cost.test.tsx',
+ test: { include: ['apps/desktop/test/workbench-identity.test.tsx','apps/desktop/test/topic-occurrence-navigation.test.tsx','apps/desktop/test/topic-selection-cost.test.tsx',
    'apps/desktop/test/mote-icon-identity.test.tsx','apps/desktop/test/agent-avatar-settings.test.tsx'],
    passWithNoTests: false, fileParallelism: false, testTimeout: 15000, globalSetup: [],
    setupFiles: [resolve(root,'vitest.setup.ts')], server: { deps: { inline: ['@agentmux/client-ui'] } } }
