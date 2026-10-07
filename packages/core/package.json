@@ -284,6 +284,7 @@
     "@scure/base": "2.2.0",
     "@xmldom/xmldom": "0.9.12",
     "@xterm/headless": "5.5.0",
+    "dequal": "2.0.3",
     "fs-native-extensions": "1.5.1",
     "wa-sqlite": "1.0.0",
     "yaml": "2.9.0",

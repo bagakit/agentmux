@@ -1990,9 +1990,9 @@ export class AgentMuxClient {
   /** Exact creation facts; only a genuinely started, unconfirmed projection may supplement the Store. */
   private async readCreationSession(agentSessionId: string): Promise<AgentMuxAgentSession | undefined> {
     const durable = await this.store.readMetadata(agentSessionId)
-    if (durable) return cloneSession(durable)
+    if (durable) return this.projectSession(durable)
     const started = this.registry.has(agentSessionId) ? this.registry.get(agentSessionId) : undefined
-    return started?.creation?.persistence === 'unconfirmed' ? cloneSession(started) : undefined
+    return started?.creation?.persistence === 'unconfirmed' ? this.projectSession(started) : undefined
   }
 
   /** Retained body by exact identity; absence is explicit, never inferred from a control projection. */

@@ -496,6 +496,9 @@ importers:
       '@xterm/headless':
         specifier: 5.5.0
         version: 5.5.0
+      dequal:
+        specifier: 2.0.3
+        version: 2.0.3
       fs-native-extensions:
         specifier: 1.5.1
         version: 1.5.1
