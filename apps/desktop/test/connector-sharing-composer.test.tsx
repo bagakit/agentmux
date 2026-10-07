@@ -18,8 +18,8 @@ const input = () => document.querySelector<HTMLElement>('[data-workbench-region-
 async function bindExisting() {
   await f.menu('Bind existing group chat'); await f.fill('Existing group ID', 'existing-exact-group')
   const box = document.querySelector<HTMLInputElement>('.agent-connector-check input')!
-  await act(async () => box.click()); await f.button('Confirm binding')
-  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Sharing authorized'))
+  await act(async () => box.click()); await f.button('Connect group')
+  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Sharing on'))
   await f.button('Close')
   await wait(() => expect(document.querySelector('.connector-sharing')?.textContent).toContain('Shared group · existing-exact-group'))
   return (await f.services.connections.bindings!.list({})).bindings[0]!
@@ -69,10 +69,8 @@ it('the Composer group link opens original details and observes bounded delivery
   const before = f.calls.filter(call => ['connection.room.create', 'connection.bind', 'connection.grant'].includes(call.method)).length
   await act(async () => document.querySelector<HTMLButtonElement>('.connector-sharing__group')!.click())
   await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Shared group details'))
-  await wait(() => expect(document.querySelector('[role="dialog"] details')).not.toBeNull())
-  const details = document.querySelector<HTMLDetailsElement>('[role="dialog"] details')!
-  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
-  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Delivery observation unconfirmed'))
+  await f.button('Check delivery')
+  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Delivery not confirmed'))
   expect(vi.mocked(api.connections.call).mock.calls.filter(([method]) => method === 'connection.delivery.ls').at(-1)?.[1]).toEqual({ connectionId: binding.connectionId, bindingId: binding.bindingId, bindingRevision: binding.revision, limit: 5 })
   expect(f.calls.filter(call => ['connection.room.create', 'connection.bind', 'connection.grant'].includes(call.method))).toHaveLength(before)
   expect(f.calls.some(call => call.method === 'connection.delivery.retry')).toBe(false)
@@ -92,7 +90,7 @@ it('a known Composer audience selects its exact application when the Session has
   expect(selected.getAttribute('aria-label')).toContain('another-app')
   await act(async () => selected.click())
   await wait(() => expect(document.querySelector<HTMLSelectElement>('[aria-label="Group application"]')?.value).toBe('another-connection'))
-  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('another-exact-group · Sharing authorized'))
+  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('another-exact-groupSharing on'))
   const inspected = f.calls.filter(call => call.method === 'connection.binding.inspect').at(-1)!
   expect(inspected.input).toEqual({ bindingId: 'another-binding', revision: 1 })
   expect(f.original.create).not.toHaveBeenCalled(); await f.original.unchanged()
