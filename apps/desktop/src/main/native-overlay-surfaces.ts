@@ -103,17 +103,14 @@ export class NativeOverlaySurfaces {
     for (const region of regions) {
       if (generation !== this.generation || this.disposed) break
       let projection = this.projections.get(region.id)
-      let created = false
       if (!projection) {
-        created = true
         // This paints existing Renderer chrome; loading it must not claim that input's focus.
         const view = new WebContentsView({ webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, focusOnNavigation: false } })
         view.setBackgroundColor('#00000000')
         view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
         view.webContents.on('will-navigate', event => event.preventDefault())
-        // Establish the native owner and actual rectangle before navigation starts.
-        // Load completion remains distinct from a usable compositor surface.
-        this.window.contentView.addChildView(view)
+        // Prepare this exact rectangle and document before its first native attachment.
+        // The image must then paint into its actual native compositor owner.
         view.setBounds(region.bounds)
         view.setVisible(true)
         // A first native Renderer startup is a different boundary from an already loaded frame.
@@ -134,7 +131,6 @@ export class NativeOverlaySurfaces {
         projection.paintStage = 'Chrome geometry'
         // CSS pixels scaled by UI zoom can be fractional; the native View takes integer pixels.
         projection.view.setBorderRadius(Math.round(region.radius))
-        if (created) this.window.contentView.addChildView(projection.view)
         await projection.ready
         await boundedChromePaint(this.paint(projection))
         if (this.current(projection) && generation === this.generation) projection.interactive = true
@@ -170,7 +166,7 @@ export class NativeOverlaySurfaces {
   // window owns departure; a current attached projection owns the original menu route.
   hasProjectionInFocusedWindow(): boolean {
     return !this.disposed && !this.window.isDestroyed() && this.window.isFocused() &&
-      [...this.projections.values()].some(projection => this.current(projection) && projection.view.getVisible() &&
+      [...this.projections.values()].some(projection => this.current(projection) && projection.interactive && projection.view.getVisible() &&
         this.window.contentView.children.includes(projection.view))
   }
 
@@ -179,6 +175,13 @@ export class NativeOverlaySurfaces {
     projection.paintStage = 'Chrome document'
     await projection.ready
     if (!this.current(projection) || revision !== projection.revision) return
+    if (!this.window.contentView.children.includes(projection.view)) {
+      projection.paintStage = 'Chrome attachment'
+      // Initialize the drawable without covering or intercepting the original workface.
+      // Only a prepared image is moved into its actual menu rectangle below.
+      projection.view.setBounds({ ...projection.region.bounds, x: -projection.region.bounds.width, y: -projection.region.bounds.height })
+      this.window.contentView.addChildView(projection.view)
+    }
     // Reapply the current rectangle for any pending native layout. Equal bounds do not
     // guarantee compositor invalidation or prove that the first frame is available.
     projection.view.setBounds(projection.view.getBounds())
@@ -201,13 +204,13 @@ export class NativeOverlaySurfaces {
 
   private finishLoadedPaint(projection: Projection, revision: number): void {
     if (!this.current(projection) || revision !== projection.revision) return
-    // Set the platform state explicitly once on the attached, loaded owner.
-    // Document/image load and this call still do not prove a compositor frame.
+    projection.view.setBounds(projection.region.bounds)
+    // Synchronize once on the actual attached owner, after document and image preparation.
+    // Further paints reuse the same native attachment and its original input route.
     if (!projection.throttlingSynchronized) {
       projection.view.webContents.setBackgroundThrottling(false)
       projection.throttlingSynchronized = true
     }
-    projection.view.setBounds(projection.region.bounds)
     this.arrangeLayers()
   }
 
@@ -222,7 +225,7 @@ export class NativeOverlaySurfaces {
     if (this.disposed || this.window.isDestroyed()) return
     const layers = this.requested.flatMap(region => {
       const projection = this.projections.get(region.id)
-      if (!projection || !this.current(projection)) return []
+      if (!projection || !this.current(projection) || !this.window.contentView.children.includes(projection.view)) return []
       const pages = projection.region.browserStages?.flatMap(stage => {
         const owner = this.containedOwner(projection, stage)
         return owner ? [owner.view] : []
