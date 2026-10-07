@@ -1266,6 +1266,22 @@ export class RuntimeController {
     return { ...await client.inspectAgentCreation(agentSessionId), hostId }
   }
 
+  async observeGoalAgent(hostId: string, agentSessionId: string) {
+    return await (await this.connectedClient(hostId)).statusAgent(agentSessionId)
+  }
+
+  /** Exact Session lookup across original Core owners. A worker Host is not management provenance. */
+  async resolveGoalAgent(agentSessionId: string) {
+    // These are exact retained identities at the original Core owners, not remote
+    // status probes. An unrelated unresponsive Host cannot delay this known Agent.
+    const matches = this.rpcClients().filter(({ client }) => {
+      try { return client.agentSession(agentSessionId).agentSessionId === agentSessionId } catch { return false }
+    })
+    if (matches.length === 1) return { hostId: matches[0]!.hostId, status: await matches[0]!.client.statusAgent(agentSessionId) }
+    if (matches.length > 1) throw new AgentMuxError('This exact management Session is observed at multiple Host owners. Choose its original authority explicitly.', 'CONTROL_REQUEST_CONFLICT')
+    throw new AgentMuxError('The exact management Session has no retained original Host binding yet. Keep its identity, reconnect the original owner or explicitly select management; no unrelated Host was probed.', 'CONTROL_UNAVAILABLE')
+  }
+
   async resolveCreationSessionId(hostId: string, createOperationId: string): Promise<string> {
     return (await this.connectedClient(hostId)).resolveAgentCreationSessionId(createOperationId)
   }
@@ -2420,6 +2436,20 @@ export class RuntimeController {
     if (session.run.runId !== input.supervisorRunId) throw new AgentMuxError('The original reminder target Run changed. Keep its Goal responsibility and inspect the original reminder.', 'STALE_AGENT_SESSION')
     await client.saveAgentFuturePromptIntent({ agentSessionId: input.supervisorAgentSessionId, intentId: input.intentId,
       operationId: input.operationId, prompt: '', agentMuxNote: input.agentMuxNote, active: true })
+  }
+
+  /** Cancel only the old same-Session intent after explicit continuation; a new Run is expected here. */
+  async disableGoalAttention(input: { hostId: string; supervisorAgentSessionId: string; intentId: string; operationId: string; agentMuxNote: string }): Promise<void> {
+    const client = await this.connectedClient(input.hostId)
+    const status = await client.statusAgent(input.supervisorAgentSessionId)
+    if (status.session.agentSessionId !== input.supervisorAgentSessionId)
+      throw new AgentMuxError('The original PMO identity is unconfirmed. Its request and native input are retained.', 'STALE_AGENT_SESSION')
+    const original = await client.readAgentFuturePromptIntent(input.supervisorAgentSessionId, input.intentId)
+    if (original && (original.operationId !== input.operationId || original.message.systemContext !== input.agentMuxNote))
+      throw new AgentMuxError('The original PMO intent differs from this retained request. Inspect it without replacing input.', 'CONTROL_REQUEST_CONFLICT')
+    if (!original) return
+    await client.saveAgentFuturePromptIntent({ agentSessionId: input.supervisorAgentSessionId, intentId: input.intentId,
+      operationId: input.operationId, prompt: '', agentMuxNote: input.agentMuxNote, active: false })
   }
 
   async inspectGoalStart(input: import('@agentmux/demand').DemandDispatch) {

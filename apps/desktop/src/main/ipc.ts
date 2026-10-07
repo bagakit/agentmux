@@ -1,8 +1,10 @@
 import { goalRoleInputNote } from './goal-role-input.js'
+import { GoalPatrolOwner } from './goal-patrol-owner.js'
 import { createPublicationConversationPort, createHostedIngressCorePort } from '@agentmux/connectors'
 import { createDesktopConnections } from './connector-host.js'
 import { registerConnectorIpc } from './connector-ipc.js'
 import { GoalStartResponsibilityOwner } from './goal-start-responsibility.js'
+import { GoalResponsibilityOwner } from './goal-responsibility-owner.js'
 import { parseGoalDelegationParams, parseGoalDelegationResult, type GoalDelegationParamsMap } from '@agentmux/core/goal-delegation'
 import { GoalDelegationAttentionOwner } from './goal-delegation-attention.js'
 import { GoalDelegationOwner } from './goal-delegation-owner.js'
@@ -928,6 +930,8 @@ export async function registerIpc(args: {
   )
   let goalAttention: GoalDelegationAttentionOwner | undefined
   let goalStartResponsibility: GoalStartResponsibilityOwner | undefined
+  let goalResponsibility: GoalResponsibilityOwner | undefined
+  let goalPatrol: GoalPatrolOwner | undefined
   const goalDelegations = new GoalDelegationOwner(demands, args.runtime, input => publicFiles.read(input), {
     call: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context),
     readDispatch: (hostId, sourceMessageId) => args.runtime.readOriginalDispatch(hostId, sourceMessageId),
@@ -936,6 +940,29 @@ export async function registerIpc(args: {
     async (goal, start) => {
       if (!goalStartResponsibility) throw new AgentMuxError('The original Goal Start responsibility reader is unavailable; keep its input and worker.', 'CONTROL_UNAVAILABLE')
       return goalStartResponsibility.observe(goal, start)
+    }, {
+      observe: (goal, work) => {
+        if (!goalResponsibility) throw new AgentMuxError('The original Goal responsibility reader is not ready. Original work remains available.', 'CONTROL_UNAVAILABLE')
+        return goalResponsibility.observe(goal, work)
+      },
+      progress: (goalId, input, context, authority) => {
+        if (!goalResponsibility) throw new AgentMuxError('The original Goal responsibility owner is not ready. Original work remains available.', 'CONTROL_UNAVAILABLE')
+        return goalResponsibility.progress(goalId, input, context, authority)
+      }
+    }, {
+      request: (goalId, operationId, context, authority) => {
+        if (!goalPatrol) throw new AgentMuxError('Original patrol owner is not ready; retain work.', 'CONTROL_UNAVAILABLE')
+        return goalPatrol.request(goalId, operationId, context, authority)
+      },
+      continue: (goalId, patrolId, operationId, runId, context, authority) => {
+        if (!goalPatrol) throw new AgentMuxError('Original patrol owner is not ready; retain request.', 'CONTROL_UNAVAILABLE')
+        return goalPatrol.continue(goalId, patrolId, operationId, runId, context, authority)
+      },
+      report: (goalId, patrolId, report, authority) => {
+        if (!goalPatrol) throw new AgentMuxError('Original patrol owner is not ready; retain report.', 'CONTROL_UNAVAILABLE')
+        return goalPatrol.report(goalId, patrolId, report, authority)
+      },
+      observe: goal => goalPatrol ? goalPatrol.observe(goal) : Promise.resolve([])
     })
   const goalVersions = new Map<string, string>()
   const disposeDemandChanges = demands.subscribe(snapshot => {
@@ -957,9 +984,18 @@ export async function registerIpc(args: {
     if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('demands:changed', goalIds)
   })
   void goalStartResponsibility.start()
-  handleWithEvent('demands:delegation', async (event, method: 'goal.delegations' | 'goal.collect', input: GoalDelegationParamsMap['goal.delegations'] | GoalDelegationParamsMap['goal.collect']) => {
+  goalResponsibility = new GoalResponsibilityOwner(demands, args.runtime,
+    (goalId, context) => goalDelegations.call('goal.delegations', { goalId }, context, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'current') } }), goalIds => {
+      if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('demands:changed', goalIds)
+    })
+  void goalResponsibility.start()
+  goalPatrol = new GoalPatrolOwner(demands, args.runtime,
+    (goalId, context) => goalDelegations.call('goal.delegations', { goalId }, context, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'current') } }),
+    goalIds => { if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('demands:changed', goalIds) })
+  void goalPatrol.start()
+  handleWithEvent('demands:delegation', async (event, method: 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue', input: GoalDelegationParamsMap['goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue']) => {
     requireTrustedSender('demands:delegation', event)
-    if (method !== 'goal.delegations' && method !== 'goal.collect') throw new AgentMuxError('This UI action requires the original Goal read or explicit report collection.', 'INVALID_CONTROL_REQUEST')
+    if (!['goal.delegations', 'goal.collect', 'goal.patrol', 'goal.patrol.continue'].includes(method)) throw new AgentMuxError('This UI action requires the original Goal read or explicit report collection.', 'INVALID_CONTROL_REQUEST')
     const parsed = parseGoalDelegationParams(method, input)
     const actor = { kind: 'user' as const, id: 'local-user:' + (process.getuid?.() ?? 'current') }
     return parseGoalDelegationResult(await goalDelegations.call(method, parsed, { principal: actor }, { actor }), parsed)
@@ -2019,6 +2055,8 @@ export async function registerIpc(args: {
       { owner: 'spatial', dispose: () => disposeSpatial() },
       { owner: 'goal-attention', dispose: () => goalAttention?.dispose() },
       { owner: 'goal-start-responsibility', dispose: () => goalStartResponsibility?.dispose() },
+      { owner: 'goal-responsibility', dispose: () => goalResponsibility?.dispose() },
+      { owner: 'goal-patrol', dispose: () => goalPatrol?.dispose() },
       { owner: 'demand-changes', dispose: () => disposeDemandChanges() },
       { owner: 'notebook', dispose: () => { notebookObservation.requests.dispose(); disposeNotebook() } },
       { owner: 'toolkit-ipc', dispose: () => disposeToolkitIpc() },

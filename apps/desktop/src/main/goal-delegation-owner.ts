@@ -12,6 +12,8 @@ import { validateDemandDelegationReport, type DemandDelegation, type DemandDeleg
 import type { DurableAgentMuxMessage } from '@agentmux/core'
 import type { DemandStore, Demand, DemandDispatch, GoalStartObservation } from '@agentmux/demand'
 import type { RuntimeController } from './runtime-controller.js'
+import type { GoalPatrolOwner } from './goal-patrol-owner.js'
+import type { GoalResponsibilityOwner } from './goal-responsibility-owner.js'
 
 export type GoalDelegationCoreMethod = Extract<AgentMuxRpcMethod,
   'message.read' | 'agent.send' | 'message.dispatch.open' | 'message.dispatch.read' | 'message.dispatch.report'>
@@ -27,11 +29,27 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     private readonly readMaterials?: (input: FileReadParams) => Promise<FileReadResult>,
     private readonly core?: GoalDelegationCorePort,
     private readonly readAttention?: (goalId: string, delegation: DemandDelegation) => Promise<GoalDelegationObservation['attention']>,
-    private readonly readStart?: (goal: Demand, start: DemandDispatch) => Promise<GoalStartObservation>) {}
+    private readonly readStart?: (goal: Demand, start: DemandDispatch) => Promise<GoalStartObservation>,
+    private readonly responsibility?: Pick<GoalResponsibilityOwner, 'observe' | 'progress'>,
+    private readonly patrol?: Pick<GoalPatrolOwner, 'request' | 'continue' | 'report' | 'observe'>) {}
 
   async call<M extends GoalDelegationMethod>(method: M, input: GoalDelegationParamsMap[M],
     context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<GoalDelegationResult> {
     context.signal?.throwIfAborted()
+    if (method === 'goal.patrol' || method === 'goal.patrol.continue' || method === 'goal.patrol.report') {
+      if (!this.patrol) throw new AgentMuxError('The original Goal patrol owner is unavailable; retain original requests and native input.', 'CONTROL_UNAVAILABLE')
+      if (method === 'goal.patrol') {
+        const p = input as GoalDelegationParamsMap['goal.patrol']; await this.patrol.request(p.goalId, p.operationId, context, authority)
+      } else if (method === 'goal.patrol.continue') {
+        const p = input as GoalDelegationParamsMap['goal.patrol.continue']; await this.patrol.continue(p.goalId, p.patrolOperationId, p.operationId, p.expectedRunId, context, authority)
+      } else {
+        const p = input as GoalDelegationParamsMap['goal.patrol.report']; await this.patrol.report(p.goalId, p.patrolOperationId, p.report, authority)
+      }
+    }
+    if (method === 'goal.progress') {
+      if (!this.responsibility) throw new AgentMuxError('The original Goal responsibility owner is unavailable. Original work and native input remain available.', 'CONTROL_UNAVAILABLE')
+      await this.responsibility.progress(input.goalId, (input as GoalDelegationParamsMap['goal.progress']).progress, context, authority)
+    }
     if (method === 'goal.delegation.prepare' || method === 'goal.delegate' || method === 'goal.delegation.bind') {
       const request = input as GoalDelegationParamsMap['goal.delegation.prepare']
       let intent = request.intent
@@ -165,10 +183,15 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
       : await Promise.all((goal.delegations ?? []).map(delegation => this.observeDelegation(input.goalId, delegation, context, authority, goal.supervisorSessionId)))
     const startObservations = method === 'goal.delegation.prepare' || !this.readStart ? undefined
       : await Promise.all((goal.dispatches ?? []).filter(start => start.execution === 'finite').map(start => this.readStart!(goal, start)))
-    return { goalId: goal.id, goalUpdatedAt: goal.updatedAt, delegations: goal.delegations ?? [],
+    const result: GoalDelegationResult = { goalId: goal.id, goalUpdatedAt: goal.updatedAt, delegations: goal.delegations ?? [],
+      goalState: { status: goal.status, supervisorSessionId: goal.supervisorSessionId, ...(goal.alignment ? { alignment: goal.alignment } : {}) },
       ...(startObservations ? { dispatches: goal.dispatches ?? [], startObservations } : {}),
       ...(observations ? { observations } : {}),
+      ...(goal.progressUpdates ? { progressUpdates: goal.progressUpdates } : {}),
+      ...(goal.patrols ? { patrols: goal.patrols, ...(this.patrol ? { patrolObservations: await this.patrol.observe(goal) } : {}) } : {}),
       ...(goal.grounding ? { grounding: goal.grounding } : {}), diskDurability: 'confirmed' }
+    if (this.responsibility && method !== 'goal.delegation.prepare') result.responsibility = await this.responsibility.observe(goal, result)
+    return result
   }
 
   private requireCore(): GoalDelegationCorePort {
