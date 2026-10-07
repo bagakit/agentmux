@@ -1,3 +1,4 @@
+import { sha256 } from '@noble/hashes/sha2.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import type { ConnectionProfileMethod, ConnectionProfileObservation, ConnectionProfileOperation, ConnectionProfileParamsMap, ConnectionProfileResultMap, ConnectionProfileReason, DesiredConnectionProfile } from './connection-profile-contract.js'
@@ -14,6 +15,11 @@ function choice<T extends string>(v: unknown, values: readonly T[]): T { if (!va
 const reasons: readonly ConnectionProfileReason[] = ['adapter-unavailable','credential-unavailable','connection-revised','source-unconfirmed','storage-unconfirmed','permission-required','creation-origin-unsupported','application-under-review','platform-rejected','effect-unconfirmed','online-unconfirmed']
 const reason = (v: unknown) => v === undefined ? {} : { reason: choice(v, reasons) }
 function application(v: unknown) { const p = object(v, ['domain','appId']), domain = text(p.domain); if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail(); return { domain, appId: id(p.appId) } }
+function avatarDigest(pngDataUrl: string): string {
+  let bytes: Uint8Array
+  try { bytes = Uint8Array.from(atob(pngDataUrl.slice(22)), char => char.charCodeAt(0)) } catch { return fail() }
+  return Array.from(sha256(bytes), byte => byte.toString(16).padStart(2, '0')).join('')
+}
 function url(v: unknown): string { const s = text(v); try { const u = new URL(s); if (u.protocol !== 'https:' || u.username || u.password) fail() } catch { fail() }; return s }
 export function parseDesiredConnectionProfile(v: unknown): DesiredConnectionProfile {
   const p = object(v, ['name','description','avatar']), out: DesiredConnectionProfile = {}
@@ -61,6 +67,6 @@ export function parseConnectionProfileResult<M extends ConnectionProfileMethod>(
   if (method === 'connection.profile.ls') { const p=object(v,['operations','next']),i=input as ConnectionProfileParamsMap['connection.profile.ls']; if(!Array.isArray(p.operations)||p.operations.length>(i.limit??25)) fail(); const operations=(p.operations as unknown[]).map(parseConnectionProfileOperation); if(new Set(operations.map(o=>o.operationId)).size!==operations.length||operations.some(o=>o.connectionId!==i.connectionId)) fail(); return {operations,next:p.next===null?null:text(p.next)} as ConnectionProfileResultMap[M] }
   const r=method==='connection.profile.inspect'?(()=>{const p=object(v,['operation']);return p.operation===null?null:parseConnectionProfileOperation(p.operation)})():parseConnectionProfileOperation(v)
   if(r&&r.operationId!==(input as {operationId:string}).operationId) fail()
-  if(r&&method==='connection.profile.sync'){const i=input as ConnectionProfileParamsMap['connection.profile.sync'];if(r.connectionId!==i.connectionId||r.connectionRevision!==i.expectedConnectionRevision||r.desired.name!==i.desired.name||r.desired.description!==i.desired.description||r.fields.includes('avatar')!==!!i.desired.avatar)fail()}
+  if(r&&method==='connection.profile.sync'){const i=input as ConnectionProfileParamsMap['connection.profile.sync'];if(r.connectionId!==i.connectionId||r.connectionRevision!==i.expectedConnectionRevision||r.desired.name!==i.desired.name||r.desired.description!==i.desired.description||r.fields.includes('avatar')!==!!i.desired.avatar)fail();if(i.desired.avatar&&r.desired.avatarSha256!==avatarDigest(i.desired.avatar.pngDataUrl))fail()}
   return (method==='connection.profile.inspect'?{operation:r}:r) as ConnectionProfileResultMap[M]
 }
