@@ -7,7 +7,7 @@ import { selectDisplacedAgentNotices, displacedAgentStepOutcome } from '../lib/c
 import { classifyServiceNotice, serviceNoticeToRender, serviceNoticeAriaLive } from '../lib/service-window-notice'
 import { NotificationItem } from './NotificationItem'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
-import { sessionServiceNotices } from '../lib/session-service-notices'
+import { createSessionServiceNoticeSelector } from '../lib/session-service-notices'
 import { runServiceProjection, useRunServiceHealthChanges } from '../lib/run-service-projection'
 import { agentLifecycleFailureNotice } from '../lib/agent-lifecycle-feedback'
 import { desktopElementVisible } from '../lib/desktop-presentation'
@@ -33,6 +33,8 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const displacedIds = useAppStore((state) => state.displacedAgentSessionIds)
   const loading = useAppStore((state) => state.loading)
   const selectSession = useAppStore((state) => state.selectSession)
+  const sessionServiceNotices = useMemo(() => createSessionServiceNoticeSelector(), [])
+  const sessionNoticeViews = useMemo(() => new WeakMap<ServiceNoticeItem, ServiceNoticeItem>(), [selectSession])
   const queues = useAppStore((state) => state.agentSteerQueues)
   const sending = useAppStore((state) => state.agentSteerInFlight)
   const workbenchSaveWarning = useAppStore(state => state.workbenchSaveWarning)
@@ -131,8 +133,15 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     !(endpointWarnings ?? []).some(warning => warning.hostId === session.control.hostId &&
       warning.observationOrigin !== undefined))
     .filter(item => item.id !== 'connection' || !(endpointWarnings ?? []).some(warning => warning.scope !== 'observation' && warning.hostId === session.hostId && warning.availability !== 'connected'))
-    .map(item => ({ ...item, id: JSON.stringify([session.hostId, session.id, item.id]),
-      action: { label: `Open ${session.label} Session`, run: () => selectSession(session.id) } })))
+    .map(item => {
+      let view = sessionNoticeViews.get(item)
+      if (!view) {
+        view = { ...item, id: JSON.stringify([session.hostId, session.id, item.id]),
+          action: { label: `Open ${session.label} Session`, run: () => selectSession(session.id) } }
+        sessionNoticeViews.set(item, view)
+      }
+      return view
+    }))
   const sessionInbox = useServiceNotices('global:sessions', sessionNotices, !loading)
   const storage: ServiceNoticeItem[] = workbenchSaveWarning ? [{ id: 'workbench-save', notice: {
     kind: 'indeterminate', notice: {

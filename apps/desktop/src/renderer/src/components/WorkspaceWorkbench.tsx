@@ -29,8 +29,8 @@ import { CSS } from '@dnd-kit/utilities'
 import { createPortal } from 'react-dom'
 import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { createSessionViewModeSelector, effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
-import { recordForWorkbenchTab, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
+import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
+import { useWorkbenchActivityPresentation, useWorkbenchTabRecord, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { Panel, PanelGroup, type ImperativePanelGroupHandle } from 'react-resizable-panels'
 import { WorkbenchSplitHandle } from './WorkbenchSplitHandle'
 import { BrowserPane } from './BrowserPane'
@@ -145,8 +145,8 @@ function DragPreview({ tab }: { tab: WorkbenchTab }) {
   const noteName = useTabNoteName(tab)
   const sessions = useWorkbenchTabSessions(tab)
   const sessionNameMetadata = useWorkbenchTabNameMetadata(tab)
-  const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
-  const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
+  const agentNames = useWorkbenchTabRecord('agentNames', tab)
+  const timelines = useWorkbenchTabRecord('timelines', tab)
   const label = workbenchTabDisplayName(tab, sessions, agentNames, timelines, sessionNameMetadata, noteName)
   return (
     <div className="tab-drag-preview">
@@ -171,8 +171,8 @@ function SortableWorkbenchTab({
   const mote = useContext(MoteWorkfaceContext)
   const sessions = useWorkbenchTabSessions(tab)
   const sessionNameMetadata = useWorkbenchTabNameMetadata(tab)
-  const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
-  const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
+  const agentNames = useWorkbenchTabRecord('agentNames', tab)
+  const timelines = useWorkbenchTabRecord('timelines', tab)
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   const activateTab = useAppStore((state) => state.activateTab)
   const closeTab = useAppStore((state) => state.closeTab)
@@ -678,8 +678,8 @@ function WorkbenchRegionTree(props: {
   const [dragging, setDragging] = useState(false)
   const sessions = useWorkbenchTabSessions(tab)
   const sessionNameMetadata = useWorkbenchTabNameMetadata(tab)
-  const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
-  const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
+  const agentNames = useWorkbenchTabRecord('agentNames', tab)
+  const timelines = useWorkbenchTabRecord('timelines', tab)
   const swapTargets = useMemo(() => {
     const agentFactsFor = workbenchAgentFactsFor(sessions, agentNames, timelines, sessionNameMetadata)
     return regionIds(tab.layout.root).flatMap((regionId) => {
@@ -1553,8 +1553,8 @@ function UnplacedWorkbenchTab({ tab, onSelect }: { tab: WorkbenchTab; onSelect()
   const noteName = useTabNoteName(tab)
   const sessions = useWorkbenchTabSessions(tab)
   const metadata = useWorkbenchTabNameMetadata(tab)
-  const names = useAppStore(useShallow(state => recordForWorkbenchTab(state.agentNames, tab)))
-  const timelines = useAppStore(useShallow(state => recordForWorkbenchTab(state.timelines, tab)))
+  const names = useWorkbenchTabRecord('agentNames', tab)
+  const timelines = useWorkbenchTabRecord('timelines', tab)
   const name = workbenchTabDisplayName(tab, sessions, names, timelines, metadata, noteName)
   return <button type="button" className="workbench-tab" data-workbench-tab-id={tab.id}
     title={`Choose location · ${name}`} onClick={onSelect}><span className="workbench-tab__label">{name}</span></button>
@@ -1682,9 +1682,7 @@ export function WorkspaceWorkbench({
     : workbenchDisplayTabs(state.tabs, workspaceId, residentLayout)))
   const presentedAgentIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
     Object.values(tab.regions).flatMap(region => region.kind === 'agent' ? [region.sessionId] : [])))], [tabs])
-  const presentedModes = useMemo(() => presentedAgentIds.map(id => [id, createSessionViewModeSelector(id)] as const), [presentedAgentIds])
-  const activityPresentable = useAppStore(useShallow(state => Object.fromEntries(presentedModes.map(([id, mode]) =>
-    [id, sessionPresentationById(state.sessions).get(id)?.kind === 'agent' && mode(state) !== 'terminal']))))
+  const activityPresentable = useWorkbenchActivityPresentation(presentedAgentIds)
   const ordinaryDisplayIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
     tab.workspaceId === workspaceId && viewTargets?.[tab.id] ? viewTargets[tab.id]!.flatMap(target => (target.surface === 'space' || target.surface === 'mote') && target.reference ? [target.reference.displayWorkspaceId] : []) : []))], [tabs, viewTargets, workspaceId])
   const ordinaryLayouts = useAppStore(useShallow(state => Object.fromEntries(ordinaryDisplayIds.map(id => [id, state.layouts[id]]))))

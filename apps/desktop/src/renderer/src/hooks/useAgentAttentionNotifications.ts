@@ -6,7 +6,7 @@ import {
 import { api } from '../lib/api'
 import { createAttentionNotifier } from '../lib/attention-notifier'
 import { summarizeAgentAttention } from '../lib/agent-attention'
-import { visibleSessionIdsForState } from '../lib/session-visibility'
+import { createVisibleSessionIdsSelector } from '../lib/session-visibility'
 import { useAppStore } from '../store'
 
 // Wires the attention decision to the OS.
@@ -64,6 +64,7 @@ export function useAgentAttentionNotifications(): void {
     void publishBadge()
 
     let windowFocused = document.hasFocus()
+    const visibleSessionIdsForState = createVisibleSessionIdsSelector()
     const onFocus = (): void => { windowFocused = true }
     const onBlur = (): void => { windowFocused = false }
     window.addEventListener('focus', onFocus)

@@ -4,21 +4,29 @@ import { rendererPerformance } from './renderer-performance'
 import { sessionPresentationById } from './session-presentation'
 import { workbenchNavigationTabs } from './workbench-navigation-catalog'
 
-type ConsumerKind = 'composer' | 'sessionPane'
+type MeasuredConsumerKind = 'composer' | 'sessionPane'
+type ConsumerKind = MeasuredConsumerKind | 'reactions' | 'workbenchTab'
 type State = ReturnType<typeof useAppStore.getState>
 // This is the read protocol for the retained Pane/Composer, not a second Store.
 // A new fact read must join its notification owner here; actions are imperative.
 const sharedFacts = {
   composer: ['config', 'scratchTopicSnapshots', 'providerCatalog', 'errorNoticeContext', 'error', 'lastError', 'lastActiveFileByWorkspace'],
   sessionPane: ['config', 'workbenchSaveWarning', 'scratchTopicSnapshots', 'sessionNameMetadata', 'runtimeEndpointWarnings',
-    'localHome', 'demandPmoTabIds', 'demands', 'layouts', 'spaceZoneBindings', 'spatialRequests', 'topicCategories', 'projectGroups']
+    'localHome', 'demandPmoTabIds', 'demands', 'layouts', 'spaceZoneBindings', 'spatialRequests', 'topicCategories', 'projectGroups'],
+  reactions: ['config'],
+  workbenchTab: ['layouts', 'config', 'scratchTopicSnapshots']
 } as const satisfies Record<ConsumerKind, readonly (keyof State)[]>
 const navigationFacts = ['retainedSpatialFocus', 'workbenchNavigationInputPolicy', 'mainSurface', 'activeWorkspaceId', 'workbenchSpaceSelection'] as const
 const sessionFacts = [
   'agentComposerDrafts', 'agentComposerHistoryNavigation', 'agentSteerInFlight', 'agentSteerInFlightPhase', 'agentSteerQueues', 'agentNames',
   'pendingAgentLaunches', 'viewModes', 'timelines', 'questionReplies', 'questionReplyDrafts'
 ] as const satisfies readonly (keyof State)[]
-type ConsumerFacts<K extends ConsumerKind> = Pick<State, typeof sharedFacts[K][number] | typeof sessionFacts[number] | 'sessions' | 'recoveryCandidates' | (K extends 'sessionPane' ? 'tabs' | typeof navigationFacts[number] : never)>
+const sessionFactsByKind = {
+  composer: sessionFacts, sessionPane: sessionFacts,
+  reactions: ['agentSteerQueues'],
+  workbenchTab: ['agentNames', 'pendingAgentLaunches', 'timelines', 'viewModes']
+} as const satisfies Record<ConsumerKind, readonly (typeof sessionFacts[number])[]>
+type ConsumerFacts<K extends ConsumerKind> = Pick<State, typeof sharedFacts[K][number] | typeof sessionFactsByKind[K][number] | 'sessions' | 'recoveryCandidates' | (K extends 'sessionPane' ? 'tabs' | typeof navigationFacts[number] : K extends 'workbenchTab' ? 'sessionNameMetadata' : never)>
 export type RetainedConsumerScope = { readonly sessionIds: readonly string[]; readonly navigation: boolean }
 type Listener = () => void
 const listenersByScope = new Map<RetainedConsumerScope, { kind: ConsumerKind; listeners: Set<Listener> }>()
@@ -30,18 +38,22 @@ const timelineRevisions = new Map<string, number | undefined>()
 
 function notify(current: State, previous: State): void {
   const changed = new Set<RetainedConsumerScope>()
-  const addSession = (id: string): void => {
-    for (const scope of scopesBySession.get(id) ?? []) changed.add(scope)
+  const addSession = (id: string, fact?: typeof sessionFacts[number]): void => {
+    for (const scope of scopesBySession.get(id) ?? []) {
+      const kind = listenersByScope.get(scope)!.kind
+      if (!fact || (sessionFactsByKind[kind] as readonly string[]).includes(fact)) changed.add(scope)
+    }
   }
   // Shared capabilities/configuration remain live when hidden. Only visible primary
   // Pane autofocus reads navigation facts; Composer and hidden Pane do not.
-  const composerChanged = sharedFacts.composer.some(key => current[key] !== previous[key])
-  const paneChanged = sharedFacts.sessionPane.some(key => current[key] !== previous[key])
   const navigationChanged = navigationFacts.some(key => current[key] !== previous[key])
   const tabsChanged = current.tabs !== previous.tabs && workbenchNavigationTabs(current.tabs) !== workbenchNavigationTabs(previous.tabs)
-  if (composerChanged || paneChanged || navigationChanged || tabsChanged) {
+  const sharedChanged = new Set<ConsumerKind>((Object.keys(sharedFacts) as ConsumerKind[])
+    .filter(kind => sharedFacts[kind].some(key => current[key] !== previous[key])))
+  if (sharedChanged.size || tabsChanged || navigationChanged) {
     for (const [scope, group] of listenersByScope) {
-      if (group.kind === 'composer' ? composerChanged : paneChanged || tabsChanged || scope.navigation && navigationChanged) changed.add(scope)
+      if (sharedChanged.has(group.kind) || (group.kind === 'sessionPane' || group.kind === 'workbenchTab') && tabsChanged ||
+        group.kind === 'sessionPane' && scope.navigation && navigationChanged) changed.add(scope)
     }
   }
   if (current.sessions !== previous.sessions) {
@@ -52,7 +64,17 @@ function notify(current: State, previous: State): void {
     if (current[key] === previous[key]) continue
     const before = previous[key], after = current[key]
     for (const id of scopesBySession.keys()) {
-      if (before?.[id] !== after?.[id] || key === 'timelines' && timelineRevisions.get(id) !== current.timelines[id]?.revision) addSession(id)
+      if (before?.[id] !== after?.[id] || key === 'timelines' && timelineRevisions.get(id) !== current.timelines[id]?.revision) addSession(id, key)
+    }
+  }
+  if (current.sessionNameMetadata !== previous.sessionNameMetadata) {
+    // Metadata keys include the Host. Compare their original entries once, then
+    // admit only readers of that Session (including removed/ambiguous names).
+    for (const [key, value] of Object.entries(current.sessionNameMetadata)) {
+      if (value !== previous.sessionNameMetadata[key]) addSession(value.agentSessionId)
+    }
+    for (const [key, value] of Object.entries(previous.sessionNameMetadata)) {
+      if (!Object.hasOwn(current.sessionNameMetadata, key)) addSession(value.agentSessionId)
     }
   }
   if (current.recoveryCandidates !== previous.recoveryCandidates) {
@@ -107,7 +129,7 @@ export function useObservedAppStore<K extends ConsumerKind, T>(kind: K, visible:
     const changed = initialized.current && !Object.is(previous.current, value)
     previous.current = value
     initialized.current = true
-    rendererPerformance.check(kind, visibility.current, changed)
+    if (kind === 'composer' || kind === 'sessionPane') rendererPerformance.check(kind, visibility.current, changed)
     return value
   }, [kind, selector])
   const subscribeScope = useCallback((listener: Listener) => subscribe(kind, scope, listener), [kind, scope])
@@ -115,6 +137,6 @@ export function useObservedAppStore<K extends ConsumerKind, T>(kind: K, visible:
   return useSyncExternalStore(subscribeScope, observed, observed)
 }
 /** One per component, after a successful commit; aborted renders are not commits. */
-export function useObservedConsumerCommit(kind: ConsumerKind, visible: boolean): void {
+export function useObservedConsumerCommit(kind: MeasuredConsumerKind, visible: boolean): void {
   useLayoutEffect(() => { rendererPerformance.commit(kind, visible) })
 }

@@ -5,6 +5,8 @@ import { resolveComposerShortcuts } from '../../../shared/composer-shortcut-libr
 import { api } from './api'
 import { useAppStore, type AgentSteerQueueEntry } from '../store'
 import { pendingSteerInput } from './steer-queue-delivery'
+import { useObservedAppStore } from './use-observed-app-store'
+import { sessionPresentationById } from './session-presentation'
 const NO_PENDING: readonly AgentSteerQueueEntry[] = Object.freeze([])
 
 /** Explicit click reads the current ConfigOwner snapshot; background rendering does no I/O. */
@@ -43,12 +45,13 @@ export async function sendConversationReaction(sessionId: string, expected: Prom
 
 /** One location subscription supplies all visible message actions, not one reader per card. */
 export function useConversationReactions(sessionId: string, enabled: boolean) {
-  const prompts = useAppStore(state => resolveComposerShortcuts(state.config))
-  const providerId = useAppStore(state => {
-    const session = state.sessions.find(item => item.id === sessionId)
+  const scope = useMemo(() => ({ sessionIds: [sessionId], navigation: false }), [sessionId])
+  const prompts = useObservedAppStore('reactions', enabled, scope, state => resolveComposerShortcuts(state.config))
+  const providerId = useObservedAppStore('reactions', enabled, scope, state => {
+    const session = sessionPresentationById(state.sessions).get(sessionId)
     return session?.kind === 'agent' ? session.providerId : undefined
   })
-  const queue = useAppStore(state => state.agentSteerQueues[sessionId] ?? NO_PENDING)
+  const queue = useObservedAppStore('reactions', enabled, scope, state => state.agentSteerQueues[sessionId] ?? NO_PENDING)
   const definitions = useMemo(() => promptReactionDefinitions(prompts, providerId), [prompts, providerId])
   const onSend = useCallback<ConversationReactionSend>((definition, source, rejected) =>
     sendConversationReaction(sessionId, definition, source, rejected), [sessionId])

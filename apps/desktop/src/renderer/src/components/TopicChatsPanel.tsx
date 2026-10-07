@@ -5,7 +5,7 @@ import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/cont
 import { useWorkbenchObjectLayout } from '../hooks/useWorkbenchObjectLayout'
 import type { WorkbenchTab } from '../lib/workbench-tabs'
 import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
-import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
+import { useWorkbenchTabRecord, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
 import { SelectorListHeader, SelectorRow } from './SelectorList'
@@ -63,8 +63,8 @@ function TopicChatRow({ tab, selected, onOpen, positions }: {
   tab: WorkbenchTab; selected: boolean; onOpen(groupId?: string): void; positions: readonly { groupId: string; label: string }[]
 }) {
   const sessions = useWorkbenchTabSessions(tab)
-  const names = useAppStore(useShallow(state => recordForWorkbenchTab(state.agentNames, tab)))
-  const timelines = useAppStore(useShallow(state => recordForWorkbenchTab(state.timelines, tab)))
+  const names = useWorkbenchTabRecord('agentNames', tab)
+  const timelines = useWorkbenchTabRecord('timelines', tab)
   const title = workbenchTabDisplayName(tab, sessions, names, timelines)
   const panes = Object.keys(tab.regions).length
   return <div><div className={`workspace-topic-item ${selected ? 'current' : ''}`}>

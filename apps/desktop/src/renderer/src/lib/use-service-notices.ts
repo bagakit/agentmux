@@ -17,10 +17,17 @@ export type ServiceNoticeItem = {
 }
 
 const EMPTY_RECEIPTS: Readonly<Record<string, string>> = Object.freeze({})
+const fingerprints = new WeakMap<ServiceNoticeItem, { facts: readonly unknown[]; value: string }>()
 export function serviceNoticeFingerprint(item: ServiceNoticeItem): string {
   const cause = item.cause ?? item.notice.notice
-  return JSON.stringify([item.occurrence, item.notice.kind,
+  const facts = [item.occurrence, item.notice.kind, ...(typeof cause === 'string'
+    ? [cause] : [cause.step, cause.mode, cause.restore])]
+  const known = fingerprints.get(item)
+  if (known && facts.length === known.facts.length && facts.every((fact, index) => fact === known.facts[index])) return known.value
+  const value = JSON.stringify([item.occurrence, item.notice.kind,
     compactNotificationIdentity(typeof cause === 'string' ? cause : JSON.stringify(cause))])
+  fingerprints.set(item, { facts, value })
+  return value
 }
 
 /** Only acknowledgement is persisted. Only a complete, available owner projection may prune receipts. */

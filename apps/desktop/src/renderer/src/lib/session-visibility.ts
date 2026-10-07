@@ -4,6 +4,7 @@ import { isSessionSurface } from './workbench-surface-kinds'
 import type { WorkspaceLayout } from '@agentmux/layout'
 import { surfaceNavigationVisibility } from './surface-navigation-visibility'
 import type { AttentionVisibility } from './attention-event'
+import { workbenchNavigationTabs } from './workbench-navigation-catalog'
 
 // Which Sessions the user can actually see right now.
 //
@@ -77,7 +78,7 @@ export function visibleSessionIds(input: {
 export function visibleSessionIdsForState(state: {
   mainSurface: string
   activeWorkspaceId?: string | null
-  tabs?: Readonly<Record<string, WorkbenchTab>>
+  tabs?: Readonly<Record<string, WorkbenchTab>> | undefined
   layouts?: Readonly<Record<string, WorkspaceLayout>>
 }): Set<string> {
   return visibleSessionIds({
@@ -87,6 +88,21 @@ export function visibleSessionIdsForState(state: {
     // The Board replaces the workbench, so no Region is on screen there.
     workbenchVisible: state.mainSurface === 'workbench'
   })
+}
+
+/** Status observations reuse only the structural answer; notification facts stay current. */
+export function createVisibleSessionIdsSelector() {
+  let previous: readonly unknown[] | undefined
+  let visible = new Set<string>()
+  return (state: Parameters<typeof visibleSessionIdsForState>[0]): ReadonlySet<string> => {
+    const tabs = state.tabs ? workbenchNavigationTabs(state.tabs) : undefined
+    const facts = [tabs, state.layouts, state.activeWorkspaceId ?? null, state.mainSurface]
+    if (!previous || facts.some((fact, index) => fact !== previous![index])) {
+      visible = visibleSessionIdsForState({ ...state, tabs })
+      previous = facts
+    }
+    return visible
+  }
 }
 
 /**
