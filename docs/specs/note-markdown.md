@@ -4,6 +4,8 @@
 公共调用入口归 [公共能力来源](public-capabilities.md)。语法实现由共享 [Markdown codec](../../packages/client-ui/src/note/note-markdown.ts)
 及 [Core 身份头](../../packages/core/src/note-format.ts) 持有。
 
+文件格式与后续演进须遵守知识工作流中「文件自足是 Note 的基础原则」。本文记录当前格式和存储机制，不代表仅从文件恢复正文、显式引用及索引的完整流程已实现或验收。
+
 ## 正文和身份
 
 `.note.md` 是唯一持久正文，编辑树只在内存中存在。普通无身份头的 `.md` 沿普通 Markdown 文件处理。
