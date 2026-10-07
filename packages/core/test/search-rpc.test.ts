@@ -77,3 +77,21 @@ it('keeps identical Session scalars on two original endpoint routes separate', a
     ['route-a', 'local', 'route A needle'], ['route-b', 'local', 'route B needle']])
   expect(page.coverage.complete).toBe(true); await a.noControls(); await b.noControls()
 })
+
+it('uses exact source observation through public search and the compiled CLI without unrelated discovery', async () => {
+  const f = await fixture()
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: f.session.agentSessionId, item: f.captured(20, 'exact source needle') })
+  const directory = [vi.spyOn(f.store, 'loadMetadata'), vi.spyOn(f.store, 'loadRetiredAgentSessions'), vi.spyOn(f.store, 'loadReopenCorrelations')]
+  for (const read of directory) read.mockRejectedValue(new Error('Unrelated source discovery unavailable'))
+  const sources = vi.spyOn(f.client, 'sessionHistorySources')
+  const input = { mode: 'history' as const, query: 'needle', hostId: 'local', agentSessionId: f.session.agentSessionId, source: 'captured' as const, scanLimit: 50 }
+  const page = await f.rpc.call('app.search', input)
+  expect(page.coverage.complete).toBe(true); expect(page.hits[0]).toMatchObject({ reference: { agentSessionId: f.session.agentSessionId }, page: { items: [{ item: { content: 'exact source needle' } }] } })
+  const cli = await runCompiledObjectCli(['app', 'search', '--mode', 'history', '--query', 'needle', '--host', 'local', '--session', f.session.agentSessionId, '--source', 'captured', '--scan-limit', '50'], objectCliEnvironment(f.root))
+  expect(cli.code, cli.stderr).toBe(0)
+  const originalRecords = (hits: typeof page.hits) => hits.map(hit => hit.kind === 'history' ? { reference: hit.reference, items: hit.page.items } : hit)
+  expect(originalRecords(JSON.parse(cli.stdout).result.hits)).toEqual(originalRecords(page.hits))
+  expect(sources.mock.calls).toHaveLength(2)
+  expect(sources.mock.calls.every(([options]) => options?.agentSessionId === f.session.agentSessionId && options.signal instanceof AbortSignal)).toBe(true)
+  expect(directory.map(read => read.mock.calls.length)).toEqual([0, 0, 0]); await f.noControls()
+})
