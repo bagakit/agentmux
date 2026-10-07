@@ -1,4 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { SemanticIcon } from './semantic-icons'
 import { useAppStore } from '../store'
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
 import type { AgentActivityHistoryProjection } from '@agentmux/core'
@@ -64,7 +65,8 @@ export function Ruler({
   controls,
   recentFraction = 0,
   activity = [],
-  reading
+  reading,
+  pending = false
 }: {
   items: readonly RulerAxisItem[]
   scale: RulerScale
@@ -82,7 +84,8 @@ export function Ruler({
   controls?: (close: () => boolean) => ReactNode
   recentFraction?: number | null
   activity?: AgentActivityHistoryProjection['segments']
-  reading?: { loading: boolean; hasMore: boolean }
+  reading?: { hasMore: boolean }
+  pending?: boolean
   axes?: (peek: {
     width: number
     onPeek: (peek: { rect: DOMRect; mark: ConversationAxisMark; name: string }) => void
@@ -311,8 +314,15 @@ export function Ruler({
           <span className="activity-ruler__span-range"><span>{span.from}</span><span className="activity-ruler__span-arrow" aria-hidden="true"><ThemeConversationRangeIcon size={10} /></span><span>{span.to}</span></span>
 
         </span> : <span className="activity-ruler__span">Record order</span>}
-        <span className="activity-ruler__count" data-loading={reading?.loading ? 'true' : undefined} >
-          {scale.count} records
+        <span className="activity-ruler__record-state">
+          <span className="activity-ruler__count" data-loading={pending ? 'true' : undefined}>
+            {scale.count} records
+          </span>
+          <span className="activity-ruler__pending" role={pending ? 'status' : undefined} aria-live="polite"
+            title={pending ? 'Reading records…' : undefined}>
+            {pending ? <SemanticIcon name="status.loading" animation="spin" size={12} /> : null}
+            <span className="activity-ruler__pending-label">{pending ? 'Reading records…' : ''}</span>
+          </span>
         </span>
       </div>
       <div className="activity-ruler__actions">

@@ -319,7 +319,5 @@
 .activity-feed__history-divider { display: flex; align-items: center; gap: 12px; padding: 18px 0 10px; color: var(--text-3); font-size: 10px; }
 .activity-feed__history-divider::before, .activity-feed__history-divider::after { content: ''; height: 1px; flex: 1; background: var(--line-soft); }
 
-/* Pending work floats above this local viewport; it never inserts a row into the message flow. */
 .activity-feed-frame { position: relative; height: 100%; min-height: 0; }
-.activity-feed__loading-layer { position: absolute; z-index: 3; top: var(--activity-reading-top, 8px); inset-inline: 12px; display: flex; justify-content: center; pointer-events: none; }
-.activity-feed__loading-layer > .activity-feed__reading-status { min-height: 28px; padding: 5px 12px; border-radius: 999px; color: var(--text-2); background: color-mix(in oklab, var(--surface-1) 88%, transparent); box-shadow: var(--elev-1), inset 0 0 0 1px var(--line-soft); backdrop-filter: blur(12px); }
+.activity-feed__empty-reading { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) 18px; color: var(--text-3); font: var(--fs-meta)/1.4 var(--font-sans); }

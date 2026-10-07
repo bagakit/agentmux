@@ -1,6 +1,9 @@
 /* Window controls and density refine the existing shared ruler. */
 .activity-ruler { grid-template-columns:minmax(0,1fr) auto; row-gap:0; padding-block:3px 2px; }
 .activity-ruler__summary { align-items:center; gap:2px 8px; }
+.activity-ruler__record-state { display:inline-flex; align-items:center; gap:4px; }
+.activity-ruler__pending { position:relative; display:inline-flex; align-items:center; justify-content:center; flex:none; width:12px; height:12px; color:var(--text-3); }
+.activity-ruler__pending-label { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
 .activity-ruler__span { display:inline-flex; }
 .activity-ruler__span-range { row-gap:0; }
 .activity-ruler__stack { gap:0; }
@@ -70,7 +73,7 @@
 .activity-ruler__guide-states i[data-key='waiting'] { background:var(--amber); }
 .activity-ruler__guide-footnote { margin:9px 0 0; color:var(--text-3); font-size:var(--fs-micro); }
 
-/* Loaded count stays stable; waiting feedback belongs to the message flow. */
+/* Loaded count keeps its width; pending has an independent fixed-size slot. */
 .activity-ruler[data-reading-surface] .activity-ruler__count {
   display:inline-flex; align-items:center; gap:4px; width:78px; flex:none;
 }
