@@ -50,7 +50,7 @@ contains quotes, backslashes and newlines that every shell layer would re-escape
 
 It runs as an async function body in an isolated subprocess, so \`await\` and \`return\` both
 work, and a runaway program cannot take AgentMux down with it. Page functions (${capabilityExamples()}, …)
-are injected into that subprocess; \`amux --skill\` lists them.
+are injected into that subprocess; \`amux browser --skill\` lists them.
 Elements are addressed by the refs a snapshot hands you — never coordinates.
 \`snapshot(options)\` and \`snapshotText(options)\` accept \`scope: "page"|"viewport"\`,
 \`within\` (a unique CSS region in the main document), \`withinRef\` (an issued ref's actual document),

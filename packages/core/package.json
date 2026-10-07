@@ -253,6 +253,10 @@
     "./connections": {
       "types": "./dist/connections.d.ts",
       "import": "./dist/connections.js"
+    },
+    "./goal-role-guidance": {
+      "types": "./dist/goal-role-guidance.d.ts",
+      "import": "./dist/goal-role-guidance.js"
     }
   },
   "bin": {
