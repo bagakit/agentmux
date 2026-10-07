@@ -48,7 +48,8 @@ export function WorkbenchTabGlyph({ tab }: { tab: WorkbenchTabDetail }) {
   const singleRegion = tab.regions.length === 1
   const region = tab.regions[0]
   if (singleRegion && region) {
-    return <span className="workbench-topology__tab-glyph workbench-topology__tab-glyph--single" data-region-count="1" data-region-kind={region.surfaceKind}>
+    return <span className="workbench-topology__tab-glyph workbench-topology__tab-glyph--single" data-region-count="1" data-region-kind={region.surfaceKind}
+      data-region-id={region.regionId} data-subject-region={tab.highlightedRegionIds?.includes(region.regionId) || undefined}>
       <WorkbenchRegionMark region={region} />
     </span>
   }
