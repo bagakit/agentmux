@@ -1,5 +1,6 @@
 import { parseConversationCheckpoint, parseConversationChangesPage } from './conversation-changes.js'
 import { sanitizeInputObservationArguments } from './performance-diagnostics.js'
+import { dequal } from 'dequal'
 import { parseControlEndpointState } from './control-endpoint-state.js'
 import { randomClientRequestId } from './client-request-id.js'
 import { AgentMuxError } from './errors.js'
@@ -702,7 +703,10 @@ export async function connectHostedAgentMux(options: {
     if (value && typeof value === 'object') {
       const result = value as { agentSessionId?: string; session?: AgentMuxAgentSession }
       const updated = result.agentSessionId ? value as AgentMuxAgentSession : result.session
-      if (updated?.kind === 'agent') emit({ type: 'agent-session', session: updated })
+      // A read receipt is not another mutation. Re-publishing the same Session
+      // lets an observer's status read trigger its own next read indefinitely.
+      const previous = updated?.kind === 'agent' ? bootstrap?.sessions.find(session => session.agentSessionId === updated.agentSessionId) : undefined
+      if (updated?.kind === 'agent' && !dequal(previous, updated)) emit({ type: 'agent-session', session: updated })
     }
     return value
   }
