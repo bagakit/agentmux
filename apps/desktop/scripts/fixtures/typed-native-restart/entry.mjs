@@ -31,7 +31,8 @@ api.sessions.detach = async id => request('detach', id)
 api.sessions.resize = async (id, cols, rows) => request('resize', id, cols, rows)
 api.sessions.write = async (control, data, source) => request('write', control, data, source)
 api.sessions.paste = async (control, text, data) => request('paste', control, text, data)
-api.sessions.respondInteraction = async (control, response) => request('respond', control, response)
+api.sessions.respondInteraction = async (control, response, intent) => request('respond', control, response, intent)
+api.sessions.inspectInteraction = async (control, operationId) => request('inspect-interaction', control, operationId)
 api.sessions.resolve = async control => request('resolve', control)
 api.sessions.refresh = async control => request('refresh', control)
 const spatialEvent = event => event.kind === 'native-proof-spatial-state'
@@ -96,8 +97,11 @@ window.nativeExtraState = id => {
     cards: [...document.querySelectorAll('#private-extra-consumers .agent-interaction')].map(card => card.dataset.requestId) }
 }
 window.nativeCloseExtra = () => { extraRoot.unmount(); document.getElementById('private-extra-consumers').remove() }
-window.nativeRespond = () => useAppStore.getState().respondInteraction(identity.sessionId,
-  { kind: 'permission', requestId: useAppStore.getState().sessions.find(one => one.id === identity.sessionId).pendingInteraction.id,
-    decision: { outcome: 'selected', optionId: 'allow-once' } })
+window.nativeRespond = () => {
+  const original = useAppStore.getState().sessions.find(one => one.id === identity.sessionId).pendingInteraction
+  return useAppStore.getState().respondInteraction(identity.sessionId,
+    { kind: 'permission', requestId: original.id, decision: { outcome: 'selected', optionId: 'allow-once' } },
+    { operationId: 'private-original-typed-response', expectedRequest: original })
+}
 createRoot(document.getElementById('root')).render(createElement(App))
 window.nativeReady = true
