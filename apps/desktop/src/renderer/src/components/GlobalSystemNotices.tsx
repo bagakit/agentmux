@@ -12,6 +12,7 @@ import { runServiceProjection, useRunServiceHealthChanges } from '../lib/run-ser
 import { agentLifecycleFailureNotice } from '../lib/agent-lifecycle-feedback'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { SettingsNavigation } from './SettingsNavigation'
+import { executorsForHost, hostExecutorInventoryMatches } from '../lib/executors'
 import { runtimeEndpointNotice } from '../lib/runtime-endpoint-notice'
 
 const ThemeStatusUnreadIcon = semanticIconComponent('status.unread')
@@ -27,6 +28,10 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const hosts = useAppStore((state) => state.runtimeOwnershipWarnings)
   const endpointWarnings = useAppStore((state) => state.runtimeEndpointWarnings)
   const config = useAppStore((state) => state.config)
+  const startupAgents = useAppStore(state => state.startupAgentAvailability)
+  const detections = useAppStore(state => state.executorDetections)
+  const inventories = useAppStore(state => state.hostExecutorInventories)
+  const detectExecutors = useAppStore(state => state.detectExecutors)
   const settings = useContext(SettingsNavigation)
   const sessions = useAppStore((state) => state.sessions)
   const tabs = useAppStore((state) => state.tabs)
@@ -115,6 +120,22 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   })
   // Keep each owner's receipts through its unknown startup projection. Displaced IDs are durable;
   // missing Session facts during recovery cannot prove that their placement problem resolved.
+  const agentChecks = useMemo((): ServiceNoticeItem[] => {
+    const agentHost = config?.hosts.find(host => host.id === startupAgents?.hostId)
+    const inventory = agentHost ? inventories[agentHost.id] : undefined
+    const failedAgents = executorsForHost(config, agentHost?.id, detections, inventory)
+      .filter(executor => executor.detection?.state === 'error' || executor.detection?.state === 'checking' && executor.detection.detail)
+    const hostFailure = agentHost && hostExecutorInventoryMatches(inventory, agentHost) && inventory.detail
+    const agentFailures = hostFailure ? [inventory.detail!] : failedAgents.map(executor => `${executor.label}: ${executor.detection?.detail ?? 'The executable check did not complete.'}`)
+    return agentHost && agentFailures.length ? [{
+      id: agentHost.id, cause: JSON.stringify([agentHost, agentFailures]), notice: { kind: 'indeterminate', notice: {
+        step: 'Agent availability check needs attention',
+        mode: `${agentHost.label}: ${agentFailures.join(' ')} Existing Sessions and launch actions remain available.`,
+        restore: 'Check these Agent commands again on the same environment.'
+      } }, action: { label: 'Check Agents again', run: () => { void detectExecutors(agentHost.id) } }
+    }] : []
+  }, [config, startupAgents?.hostId, detections, inventories, detectExecutors])
+  const agentChecksInbox = useServiceNotices('global:startup-agent-availability', agentChecks, !loading)
   const environmentInbox = useServiceNotices('global:environment', environment, warning !== undefined)
   const ownershipInbox = useServiceNotices('global:runtime-ownership', ownership, hosts !== undefined)
   const nameMetadataInbox = useServiceNotices('global:session-names', nameMetadataWarning ? [{
@@ -172,7 +193,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       restore: 'Close and reopen the floating panel. Existing Browser pages and Agents remain available.'
     } }
   }] : [], true)
-  const inboxes = [environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox, currentErrorInbox]
+  const inboxes = [agentChecksInbox, environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox, currentErrorInbox]
   const notices = inboxes.flatMap((inbox) => inbox.notices)
   const currentCount = notices.length + projection.current.length
   const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, eventInbox.unread.length)
@@ -191,7 +212,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     if (!open) return
     for (const inbox of inboxes) if (inbox.unread.length) inbox.acknowledge(inbox.unread)
     if (eventInbox.unread.length) eventInbox.acknowledge(eventInbox.unread)
-  }, [open, environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox, currentErrorInbox, eventInbox])
+  }, [open, agentChecksInbox, environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox, currentErrorInbox, eventInbox])
   const recentEvents = [...projection.history].reverse()
   const sessionsByIdentity = new Map(sessions.map(session => [JSON.stringify([session.hostId, session.id]), session]))
   const unreadEventIds = new Set(eventInbox.unread)

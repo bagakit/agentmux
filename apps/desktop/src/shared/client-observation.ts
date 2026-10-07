@@ -50,6 +50,8 @@ export const desktopWorkbenchObservationSchema = z.object({
     z.object({ step: z.enum(['saved-workspace', 'runtime', 'layout']) }).strict(),
     z.object({ step: z.enum(['sessions', 'browsers']), current: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).strict()
   ]),
+  startupAgentAvailability: z.object({ hostId: id, current: z.number().int().nonnegative(),
+    total: z.number().int().nonnegative().nullable(), pending: z.boolean(), waiting: z.boolean() }).strict().nullable().optional(),
   activeWorkspaceId: nullableId, mainSurface: z.enum(['survey', 'agents', 'workbench', 'board', 'recall']),
   focus: z.object({ executionSessionId: nullableId, pmoSessionId: nullableId }).strict(),
   desktop: desktopObservationSchema,
