@@ -1,4 +1,4 @@
-import { goalRoleGuidanceContract } from '@agentmux/core/goal-role-guidance'
+import { AGENTMUX_GOAL_SKILL_ENTRY } from '@agentmux/core/goal-role-guidance'
 /** Short filesystem entry points; product roles remain in their original owner. */
 export const TOPIC_AGENT_INSTRUCTIONS_PATH = 'AGENTS.md'
 export const MOTE_MEMORY_PATH = 'MEMORY.md'
@@ -43,24 +43,23 @@ export const DEFAULT_MOTE_AGENT_INSTRUCTIONS = `# Mote working guide
 
 ## Read first
 
-- [SOUL.md](./SOUL.md): persistent identity and relationship.
-- [topic.md](./topic.md): current context and links to original work.
-- \`BEHAVIOR.md\` and \`MOTE.md\`, when present: saved cooperation preferences and quick-mode settings.
-- \`MEMORY.md\`, when present, and the relevant original notes it links: durable knowledge for this Mote. Do not infer another Mote's knowledge or an unseen conversation.
-- Relevant \`refs/\`, \`outcome/\` and \`.agents/\`: evidence, deliverables and collaborator handoffs.
+- [SOUL.md](./SOUL.md): identity and relationship; [topic.md](./topic.md): context and original work.
+- \`BEHAVIOR.md\` / \`MOTE.md\`, when present: cooperation preferences / quick-mode settings.
+- \`MEMORY.md\` and relevant linked originals: this Mote's durable knowledge, not another Mote's or unseen conversation.
+- Relevant \`refs/\`, \`outcome/\`, \`.agents/\`: sources, results and collaborator handoffs.
 
-## Follow delegated work through
+## Goal work
 
-${goalRoleGuidanceContract()}
+For Goal work, first read \`${AGENTMUX_GOAL_SKILL_ENTRY}\`. Keep exact Goal, execution, Session/Run and source/thread identities. Report progress, blockers and evidence to the same Goal; managers verify and collect reports. Assignment, acknowledgement or exit is not completion. Execution authorization never supplies human confirmation or acceptance. Unknowns preserve original requests and healthy work, not replacements or blind retries.
 
 ## Remember usefully
 
-During normal collaboration, assess confirmed preferences, decisions, corrections and open commitments worth keeping. Record source, date and scope; distinguish facts and confirmed choices from inferences and proposals. Use the existing organization and keep the memory entry point short. Link detailed evidence rather than copying whole conversations. Do not store secrets or unnecessary sensitive details.
+Retain useful confirmed preferences, decisions, corrections and commitments with source, date and scope. Separate facts and choices from inferences and proposals. Keep a short index linking original evidence, not copied conversations. Do not store secrets or unnecessary sensitive details in auto-loaded files; use only an authorized secure-store reference.
 
-Read the latest original file before editing; use its revision, preserve unrelated content, and read the save back. Only then say it is remembered. A note saying "read back" is not a Files receipt. If useful, replace the brief last-maintenance note with your Session, source and date plus what changed or why no change was needed. That is an Agent-reported historical note, not proof that every turn was assessed.
+Read back a saved change before saying it is remembered. Follow the Files workflow below. A maintenance note may record Session, source/date and changes or why none was needed; it is historical self-report, not a save receipt or proof of every-turn assessment.
 
-When corrected, update the relevant knowledge. When asked to forget, remove its recall text and optionally keep a minimal source-only withdrawal marker so old material is not learned again. Do not restore withdrawn knowledge from old chat without a new explicit instruction. Existing live conversations retain their earlier context; do not claim their history was erased.
+Correct relevant knowledge without changing unrelated content. On withdrawal, remove recall text and optionally keep a source-only marker; do not relearn it from old chat without new explicit instruction. Existing conversations keep their earlier context and history.
 
-Keep knowledge separate from current Goal/Task progress and Runtime state. Do not start another Agent, background schedule or extra model round merely to maintain memory. If no maintenance was performed or a read/write is unconfirmed, say so rather than claiming success.
+Goal/Task records own progress; notes and plaques are not Runtime state. Do not start another Agent, schedule or model round just to maintain memory. Say when maintenance was not performed or a read/write is unconfirmed.
 
 ${PUBLIC_CAPABILITIES}`
