@@ -545,3 +545,154 @@ it('preserves original connections when optional parent schema fails, and refuse
   expect(f.counts.begin).toBe(0)
 }, 30_000)
 
+it('recovers the same parent after a real child is killed after Files commit and before the parent ACK', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'mote-bot-process-')))
+  clean.push(() => rm(root, { recursive: true, force: true }))
+  const exported = Object.fromEntries(
+    await Promise.all(
+      ['core', 'connectors', 'client-ui'].map(async (name) => [
+        name,
+        JSON.parse(await readFile(resolve('packages', name, 'package.json'), 'utf8')) as { exports: Record<string, { import: string }> }
+      ])
+    )
+  )
+  const program = join(root, 'owner.mjs')
+  const packagePath = (request: string) => {
+    const [, name, ...rest] = request.split('/'),
+      subpath = rest.length ? './' + rest.join('/') : '.',
+      manifest = exported[name!]!
+    const key = manifest.exports[subpath]
+      ? subpath
+      : Object.keys(manifest.exports)
+          .sort((a, b) => b.length - a.length)
+          .find((key) => key.includes('*') && subpath.startsWith(key.split('*')[0]!) && subpath.endsWith(key.split('*')[1]!))!
+    const wildcard = key.includes('*')
+      ? subpath.slice(key.split('*')[0]!.length, key.split('*')[1]!.length ? -key.split('*')[1]!.length : undefined)
+      : ''
+    return resolve('packages', name!, manifest.exports[key]!.import.replace('*', wildcard))
+  }
+  const requireDesktop = createRequire(resolve('apps/desktop/package.json'))
+  await build({
+    entryPoints: ['apps/desktop/test/fixtures/mote-connection-process.ts'],
+    outfile: program,
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    packages: 'external',
+    plugins: [
+      {
+        name: 'original-owner-paths-and-native-leaf',
+        setup(b: {
+          onResolve(options: { filter: RegExp }, callback: (args: { path: string }) => unknown): void
+          onLoad(options: { filter: RegExp; namespace?: string }, callback: (args: { path: string }) => unknown): void
+        }) {
+          b.onResolve({ filter: /^electron$/ }, () => ({ path: 'electron', namespace: 'controlled' }))
+          b.onLoad({ filter: /.*/, namespace: 'controlled' }, () => ({
+            contents: 'export const nativeImage={createFromBuffer(){throw Error("No native image fallback")}};'
+          }))
+          b.onResolve({ filter: /^@agentmux\// }, (args) => ({ path: packagePath(args.path), external: true }))
+          b.onResolve({ filter: /^[^./]/ }, (args) =>
+            args.path.startsWith('node:')
+              ? { path: args.path, external: true }
+              : { path: requireDesktop.resolve(args.path), external: true }
+          )
+          b.onLoad({ filter: /\.(?:ts|mjs)$/ }, async (args) => ({
+            contents: (await readFile(args.path, 'utf8'))
+              .replaceAll('import.meta.dirname', JSON.stringify(resolve(args.path, '..')))
+              .replaceAll('import.meta.url', JSON.stringify(new URL('file://' + args.path).href)),
+            loader: args.path.endsWith('.ts') ? 'ts' : 'js'
+          }))
+        }
+      }
+    ]
+  })
+  const spawn = async (mode: string) => {
+    const child = fork(program, [root, mode], {
+      cwd: process.cwd(),
+      env: objectCliEnvironment(root),
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc']
+    })
+    clean.push(async () => {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL')
+        await once(child, 'exit')
+      }
+    })
+    let stderr = ''
+    child.stderr!.on('data', (c) => {
+      stderr += String(c)
+    })
+    await new Promise<void>((resolve, reject) => {
+      child.on('message', (v) => {
+        if ((v as { kind: string }).kind === 'ready') resolve()
+      })
+      child.once('exit', () => reject(new Error('Owner exited before ready: ' + stderr)))
+    })
+    return child
+  }
+  const first = await spawn('lose-ack'),
+    request = JSON.parse(await readFile(join(root, 'request.json'), 'utf8'))
+  const call = (action: string, input: unknown) =>
+    runCompiledObjectCli(
+      [
+        '--endpoint',
+        'unix:' + join(root, 'owner.sock'),
+        'space',
+        'mote',
+        'connection',
+        action,
+        ...(['create', 'ls'].includes(action) ? ['--input', '-'] : ['--operation-id', request.operationId])
+      ],
+      objectCliEnvironment(root),
+      JSON.stringify(input)
+    )
+  const pending = body(await call('create', request)),
+    reached = new Promise<void>((resolve) =>
+      first.on('message', (value) => {
+        if ((value as { kind: string }).kind === 'file-published') resolve()
+      })
+    )
+  const advancing = call('advance', { operationId: request.operationId })
+  await reached
+  const before = await readFile(join(root, 'file-effects'), 'utf8')
+  expect(before.trim().split('\n').map(line => JSON.parse(line))).toEqual([{status:'written'}])
+  first.kill('SIGKILL')
+  await once(first, 'exit')
+  expect((await advancing).code).not.toBe(0)
+  await spawn('recover')
+  const reopened = body(await call('inspect', { operationId: request.operationId })).operation
+  expect(reopened).toMatchObject({
+    operationId: request.operationId,
+    enrollmentOperationId: pending.enrollmentOperationId,
+    profileOperationId: pending.profileOperationId,
+    defaultLink: { state: 'unknown' },
+    defaultSave: { observedReceipt: null }
+  })
+  const recovered = body(await call('advance', { operationId: request.operationId }))
+  expect(recovered.defaultLink).toMatchObject({ state: 'unknown', current: { connection: recovered.connection } })
+  expect(recovered.defaultSave.observedReceipt).toBeNull()
+  expect(recovered.profile.patch.state).toBe('confirmed')
+  expect(body(await call('ls', { target: request.source.target })).operations).toEqual([recovered])
+  expect(await readFile(join(root, 'file-effects'), 'utf8')).toBe(before)
+  expect((await readFile(join(root, 'platform-effects'), 'utf8')).trim().split('\n')).toEqual(['begin', 'poll', 'upload', 'patch'])
+  const childProgram = await readFile(program)
+  await record('child-program-binding', {
+    sha256: createHash('sha256').update(childProgram).digest('hex'),
+    bytes: childProgram.length,
+    node: process.version
+  })
+  await writeFile(
+    resolve('.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts/mote-bot-identities-plan/T-030-live/child-owner.mjs'),
+    childProgram
+  )
+  await record('process-recovery-receipts', {
+    originalPid: first.pid,
+    originalExitSignal: first.signalCode,
+    request,
+    pending,
+    reopened,
+    recovered,
+    fileEffects: before,
+    platformEffects: await readFile(join(root, 'platform-effects'), 'utf8')
+  })
+}, 60_000)
