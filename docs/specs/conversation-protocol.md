@@ -8,6 +8,10 @@ Core owns source-qualified conversation semantics. Clients retain presentation, 
 
 The shared UI consumes this projection and adds speaker presentation. The projection creates no reader, cache, Session or Runtime. Source IO and pagination remain in the original Core history owner.
 
+Typed user-message reads expose `publicContent` independently of the recorded author and source. `confirmed` means the original input writer retained the exact `userContent` separately from generated `systemContext`; it establishes a content boundary, not sharing authorization, content safety, delivery or personal identity. Unmarked captured records and native records without a qualified content-boundary producer remain `unknown`. Original text, parts and Copy remain complete. Updating a captured body without that producer clears its boundary fact; a status-only update does not.
+
+Use the existing `agent.history --host HOST --session SESSION --source captured|native --kind user-message` query for the same bounded observation through public RPC and the CLI. The original conversation projection and first-party message details consume that result. Plain conversation reads retain the original records and fragments; no native-reference association is invented. Sharing still requires the original audience, binding and authorization scope.
+
 `AgentMuxClient.readAgentConversation` and public `agent.conversation.inspect` reuse that owner's bounded read envelope. Required fields are `hostId`, `agentSessionId` and `source` (`native` or `captured`); `limit`, `cursor` and `maxBytes` retain the original history contract. The envelope keeps the original source identity, revision, ordering, items and opaque continuation. Scope and bodies are not duplicated in an outer snapshot.
 
 ```sh
