@@ -1,4 +1,4 @@
-import { formatAmuxObjectLink } from '@agentmux/core'
+import { formatAmuxObjectLink } from '@agentmux/core/sharing'
 import type { useAppStore } from '../store'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { isSystemWebUrl, type SystemWebUrlRequest, type SystemWebUrlResult } from '../../../shared/system-web-url'
