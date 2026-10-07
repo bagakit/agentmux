@@ -1362,6 +1362,30 @@ it('offers the original Zone controls without an address picker or a Tab-only mo
   expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection);healthy()
 })
 
+it('offers an already-open chooser for the exact ambiguous Survey source without a second disclosure click', async () => {
+  await renderApp(); await enterSurvey(); await choose()
+  const before = useAppStore.getState(), held = before.surveyZoneSelection
+  const create = vi.spyOn(api.files, 'createPublic')
+  const row = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === originalZoneId())!
+  await act(async () => row.querySelector<HTMLButtonElement>('[aria-label^="New note in Recall from"]')!.click())
+  // The production parent supplies `open`: a file-level raw-import prohibition would
+  // change this already-disclosed exact-location decision for no user benefit.
+  await vi.waitFor(() => expect(document.querySelector('[role="menu"] .survey-panel-choice')).not.toBeNull())
+  const choices = [...document.querySelectorAll<HTMLElement>('[data-survey-panel-reference]')]
+  expect(choices).toHaveLength(2)
+  expect(document.querySelector('.survey-recall-capture')).toBeNull(); expect(create).not.toHaveBeenCalled()
+  const second = choices.find(item => JSON.parse(item.dataset.surveyPanelReference!).regionId === pageB.regionId)!
+  expect(second).toBeDefined()
+  await act(async () => second.click())
+  await vi.waitFor(() => expect(document.querySelector('.survey-recall-capture')).not.toBeNull())
+  expect(document.querySelector('.survey-recall-capture .topic-knowledge-sources p')?.textContent).toBe(pageB.url)
+  expect(document.querySelector('[role="menu"] .survey-panel-choice')).toBeNull()
+  expect(create).not.toHaveBeenCalled()
+  expect(useAppStore.getState().surveyZoneSelection).toBe(held)
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  healthy()
+})
+
 it('ignores stale foreign coordinates while retaining the original page input and every foreign binding', async () => {
   const foreign=createWorkspaceLayout('foreign',[mixed.id])
   useAppStore.setState({config:{...composerConfig,workspaces:[workspace,otherWorkspace]},layouts:{...useAppStore.getState().layouts,[otherWorkspace.id]:foreign}})
