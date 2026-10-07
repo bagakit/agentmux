@@ -9,6 +9,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { DEFAULT_MOTE_AGENT_INSTRUCTIONS, DEFAULT_TOPIC_AGENT_INSTRUCTIONS, DEFAULT_MOTE_MEMORY } from '../src/shared/topic-agent-instructions'
+import { AGENTMUX_GOAL_SKILL_ENTRY, goalRoleGuidanceContract } from '@agentmux/core/goal-role-guidance'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 
 vi.mock('electron', () => ({ nativeImage: {}, app: { getPath: () => _hygiene_fixturePath("not-used-by-this-test") } }))
@@ -101,15 +102,24 @@ it('loads the exact 64 KiB boundary without truncating the original text', async
   expect(prepared.prompt).not.toContain('was not loaded:')
 })
 
-it('delivers exact guide bytes through the real RuntimeController launch and original Core creation, keeping human input separate', async () => {
+it.each(['original-custom', 'compact-default'] as const)('delivers %s guide through real RuntimeController and Core creation, keeping human input separate', async kind => {
   const { injectedContextCore } = await import('./helpers/injected-context-core')
   const { RuntimeController } = await import('../src/main/runtime-controller')
   const { DEFAULT_CONFIG } = await import('../src/main/config-store')
   const h = await fixture(), mote = await h.owner.ensureMote(h.workspace, 'launcher:actual-context-consumer')
-  const text = '# Actual guide\nKeep the source distinction.\n'
+  const text = kind === 'compact-default' ? await readFile(join(mote.physicalDirectoryPath!, 'AGENTS.md'), 'utf8')
+    : '# Actual guide\nKeep the source distinction.\n'
   const memory = ("# Memory\nConfirmed scoped choice, source original fixture, " + _hygiene_fixtureCivil(10, 12) + ".\n")
   await writeFile(join(mote.physicalDirectoryPath!, 'MEMORY.md'), memory)
-  await writeFile(join(mote.physicalDirectoryPath!, 'AGENTS.md'), text)
+  if (kind === 'original-custom') await writeFile(join(mote.physicalDirectoryPath!, 'AGENTS.md'), text)
+  else {
+    // The default file is a discoverable entry, while the full contract stays with the Goal owner.
+    // Compare against the independent canonical module, not a second copy of the entry's prose.
+    expect(text).toContain(AGENTMUX_GOAL_SKILL_ENTRY)
+    expect(text).not.toContain(goalRoleGuidanceContract())
+    expect(text).not.toContain('## Executor responsibilities')
+    expect(text).not.toContain('## Management responsibilities')
+  }
   const coreRoot = join(h.root, 'private-core'); await mkdir(coreRoot)
   const f = await injectedContextCore(coreRoot)
   const runtime = new RuntimeController(f.store, async () => { throw new Error('Unrelated Host connection must not be created') })
@@ -126,9 +136,11 @@ it('delivers exact guide bytes through the real RuntimeController launch and ori
     expect(create.mock.calls[0]![0].agentMuxNote).toContain(text)
     expect(create.mock.calls[0]![0].agentMuxNote).toContain(memory)
     const saved = f.core.agentSession(result.created.agentSessionId)
-    const timeline = JSON.stringify(await f.core.sessionTimeline(result.created.agentSessionId))
-    expect(timeline).toContain('Keep the source distinction.')
-    expect(timeline).toContain('Confirmed scoped choice, source original fixture')
+    const timeline = await f.core.sessionTimeline(result.created.agentSessionId)
+    const system = timeline.items.filter(item => item.kind === 'system_message').map(item => item.content).join('\n\n')
+    expect(system).toContain(text)
+    expect(system).toContain('Confirmed scoped choice, source original fixture')
+    expect(timeline.items.filter(item => item.kind === 'user_message').map(item => item.content)).toEqual(['Original human request'])
     expect(saved.workspacePath).toBe(mote.physicalDirectoryPath)
     expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled()
   } finally { await runtime.dispose(); await f.dispose(); vi.unstubAllEnvs() }
