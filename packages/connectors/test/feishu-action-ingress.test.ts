@@ -92,6 +92,10 @@ it('default Desktop receives original SDK actions before ACK and exposes unsuppo
   const missingRecord = (await cli(['ingress', 'ls', '--connection', feishuConfig.connectionId])).ingresses.find((record: { eventId: string }) => record.eventId === 'missing-context-event')
   expect(missingRecord).toMatchObject({ kind: 'action', state: 'refused', code: 'INGRESS_ACTION_UNSUPPORTED' })
   for (const field of ['actor', 'externalConversationId', 'sourceMessageId', 'actionRef']) expect(missingRecord).not.toHaveProperty(field)
+  const foreign = actionPayload('foreign-action-event'); foreign.header.app_id = 'another-application'
+  await sdk.receive(foreign)
+  expect(sdk.ack().map(ack => ack.code)).toEqual([200, 200, 200, 500, 200, 500])
+  expect((await cli(['ingress', 'ls', '--connection', feishuConfig.connectionId])).ingresses).toHaveLength(3)
   const fakeAck = vi.fn()
   await expect(ingress.receive({ connectionId: feishuConfig.connectionId, raw, transportProof: { authenticated: true, appId: feishuConfig.application.appId } }, fakeAck))
     .rejects.toMatchObject({ code: 'INGRESS_AUTHENTICATION_FAILED' })
