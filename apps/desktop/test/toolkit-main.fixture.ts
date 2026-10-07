@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import { spawn, execFile, type ChildProcess } from 'node:child_process'
 import { mkdir, readFile, appendFile, readdir, stat } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
-import { promisify } from 'node:util'
+import { inspect, promisify } from 'node:util'
 import { afterEach, expect, vi } from 'vitest'
 const fixture = vi.hoisted(() => ({ directory: process.env.AGENTMUX_TOOLKIT_EVIDENCE ?? process.cwd(), handlers: new Map<string, (...args: any[]) => unknown>(),
   ipc: new (class { listeners = new Map<string, Set<Function>>() })(),
@@ -15,10 +15,12 @@ vi.mock('electron', () => ({ app: { get isPackaged(){return fixture.packaged},ge
   ipcMain: { handle: (channel: string, handler: (...args: any[]) => unknown) => fixture.handlers.set(channel, handler),
     removeHandler: (channel: string) => fixture.handlers.delete(channel),
     on: (channel: string, handler: Function) => { const values = fixture.ipc.listeners.get(channel) ?? new Set(); values.add(handler); fixture.ipc.listeners.set(channel, values) },
+    off: (channel: string, handler: Function) => fixture.ipc.listeners.get(channel)?.delete(handler),
     removeListener: (channel: string, handler: Function) => fixture.ipc.listeners.get(channel)?.delete(handler) },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {},
+  safeStorage: { isEncryptionAvailable: () => false },
   nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: false }) }))
-vi.mock('@agentmux/demand', async original => ({ ...await original(), openDemandStore: () => ({}) }))
+vi.mock('node:os', async original => ({ ...await original(), homedir: () => fixture.directory }))
 vi.mock('../src/main/browser-profile-manager.js', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal.js', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-journal.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
@@ -126,7 +128,7 @@ export async function nativeMain() {
     expect(cleanup.namespace,JSON.stringify(cleanup)).toBe('removed')
     return cleanup
     } catch(error) {
-      await record('fixture-cleanup-error',{directory,namespace:'retained-unless-release-confirmed',error:String(error)})
+      await record('fixture-cleanup-error',{directory,namespace:'retained-unless-release-confirmed',error:inspect(error,{depth:5})})
       throw error
     }
   })()

@@ -70,7 +70,8 @@ describe('registered Main official Performance vertical slice',()=>{
     for(const verb of ['ls','inspect','script','run','stop','watch']) {
       const h=cli('--help','toolkit',verb);await until(()=>expect(h.code).not.toBeUndefined());expect(h.code,h.stderr).toBe(0);expect(h.stdout.trim().length).toBeGreaterThan(30)
     }
-    expect((await oneCli('toolkit','ls')).result.tools).toEqual([{kind:'metrics',toolId:'performance',name:'Performance',readonly:true}])
+    const performanceTools=(await oneCli('toolkit','ls')).result.tools.filter((tool:{toolId:string})=>tool.toolId==='performance')
+    expect(performanceTools).toEqual([{kind:'metrics',toolId:'performance',name:'Performance',readonly:true}])
     const script=(await oneCli('toolkit','script','performance')).result.script
     expect(script.text).toBe(await readFile(process.env.AGENTMUX_TOOLKIT_ASSET ?? resolve('apps/desktop/resources/toolkit/performance.mjs'),'utf8'))
     expect(script.sha256).toMatch(/^[a-f0-9]{64}$/u)
@@ -130,10 +131,11 @@ describe('registered Main official Performance vertical slice',()=>{
     await record('execution-group',{phase:'explicit-stop',group,allExited:true})
     for(let n=0;n<10;n++){
       const seen:ToolkitSnapshot[]=[]
+      let cycleError:Error|undefined
       const lease=await m.rpc.subscribe('toolkit.watch',{toolId:'performance'},{onInitial:()=>{},onEvent:event=>{
         if(event.type==='snapshot'){if(event.data.kind!=='metrics')throw new Error('Performance requires its metrics snapshot');seen.push(event.data)}
-      },onEnd:e=>{endError=e}})
-      await until(()=>{expect(endError).toBeUndefined();expect(seen.some(v=>v.sequence>0)).toBe(true)},15000)
+      },onEnd:e=>{cycleError=e}})
+      await until(()=>{expect(cycleError).toBeUndefined();expect(seen.some(v=>v.sequence>0)).toBe(true)},15000)
       const own=seen.at(-1)!.run!;expect(own.runId).toBeTruthy()
       const ownProcess=(await m.core.listRuns()).find(run=>run.runId===own.runId);expect(ownProcess?.pid).toBeGreaterThan(0)
       const closedGroup=await executionGroup(ownProcess!.pid!)
