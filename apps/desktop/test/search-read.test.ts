@@ -52,3 +52,33 @@ it('keeps cancellation in Renderer and rejects late transport results without ac
   coverage: { complete: true, examined: 0, totalSources: 1, completedSources: 0, remainingSources: 1, unavailableCount: 0, unavailable: [] } } }))
  await expect(forged(input)).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
 })
+
+it('releases Desktop search ownership while the original exact source discovery is still pending', async () => {
+ const f = await createHistoryQueryFixture(cleanups), socket = join(f.root, 'discovery.sock')
+ const server = new AgentMuxControlServer({ socketPath: socket, coreClients: () => [{ hostId: 'local', client: f.client }] })
+ await server.start(); cleanups.push(() => server.stop())
+ const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } }); cleanups.push(() => rpc.dispose())
+ const handlers = new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>()
+ const sender = Object.assign(new EventEmitter(), { id: 2, isDestroyed: () => false }), event = { sender } as unknown as IpcMainInvokeEvent
+ const ipc = registerSearchIpc({ handle: (channel, handler) => { handlers.set(channel, handler as (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) },
+  trust: (channel, event) => assertSenderTrusted(senderTrust(channel, event.sender, sender)), query: (input, signal) => rpc.call('app.search', input, { signal }) })
+ cleanups.push(async () => ipc.dispose())
+ const read = createRendererSearchRead(async (input, context) => {
+  const token = crypto.randomUUID(), pending = handlers.get('search:query')!(event, token, input)
+  const release = context?.onAbort?.(() => handlers.get('search:cancel')!(event, token))
+  try { return JSON.parse(JSON.stringify(await pending)) } finally { release?.() }
+ })
+ let entered!: () => void, release!: () => void, received: AbortSignal | undefined
+ const ready = new Promise<void>(resolve => { entered = resolve })
+ const blocked = new Promise<null>(resolve => { release = () => resolve(null) })
+ vi.spyOn(f.store, 'readHistorySource').mockImplementation((_id, signal) => { received = signal; entered(); return blocked })
+ const controller = new AbortController(), reason = new Error('Only this Desktop search closed')
+ const pending = read({ mode: 'history', query: 'needle', hostId: 'local', agentSessionId: f.session.agentSessionId, source: 'captured' }, { signal: controller.signal })
+ const rejected = expect(pending).rejects.toBe(reason)
+ try {
+  await ready; expect(sender.listenerCount('destroyed')).toBe(1)
+  controller.abort(reason); await rejected
+  await vi.waitFor(() => { expect(received?.aborted).toBe(true); expect(sender.listenerCount('destroyed')).toBe(0); expect(sender.listenerCount('did-start-navigation')).toBe(0) })
+  await f.noControls()
+ } finally { release() }
+})
