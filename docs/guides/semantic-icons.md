@@ -46,6 +46,8 @@ container.append(node)
 
 参数以 [SemanticIconPresentation](../../packages/client-ui/src/theme/icon-presentation.ts) 为准，支持尺寸、颜色、线宽、端点、连接及有限动画预设。明确参数优先于 inline style，再继承主题笔触和上下文颜色。默认静态；标题、历史与未知状态按呈现合同处理。按钮仍负责可访问名称，图标不能代替动作标签。
 
+`animation="work"` 只驱动原作者绘图里声明的 `writing-pen` 部位；`work-writing` 的文字线保持静止。部位身份随 `icon-authored.ts` 的原几何登记，CSS 动作仍归共享 `semantic-icons.css`，不在调用方复制路径或逐帧操作 DOM。选择其它库字形或自定义 paths 时，不猜哪段是笔，完整图形保持静态；切回声明了笔部位的字形后沿原主题投影恢复。减少动态、原宿主停泊及明确 motion-off 继续适用。`animation="wait"` 沿同一机制驱动 `operation-wait` 的沙漏部位：漏沙与堆沙、停顿、翻面；这是等待活动示意，不是任务进度或剩余时长。等待舞台沿原 busy/visible 选择该参数，不自行给图标叠加旋转样式。
+
 ## 添加新含义或新图形
 
 1. 先检查 [SEMANTIC_ICON_CATALOG](../../packages/client-ui/src/theme/icon-catalog.ts)。只有新的产品含义才新增稳定 ID，并填写准确 `label` 与默认 `glyph`；复用现有类别前缀。不要为尺寸、颜色或动画新增 ID。
