@@ -66,7 +66,7 @@ describe('Prompts library and one editor through the real SettingsPanel', () => 
     const second = dom.container.querySelector('[data-prompt-id="two"]')!
     expect(second.textContent).toContain('Two')
     expect(second.textContent).toContain('/two')
-    expect(second.textContent).toContain('Review the changes carefully.')
+    expect(second.textContent).not.toContain('Review the changes carefully.')
     expect(second.textContent).toContain('Codex only')
     expect(second.textContent).toContain('Turn ended')
     expect(dom.container.querySelectorAll('[data-prompt-editor]')).toHaveLength(1)
