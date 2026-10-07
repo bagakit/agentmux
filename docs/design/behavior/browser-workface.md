@@ -7,6 +7,7 @@
 **本页章节**
 
 - [Browser 工作面](#browser-工作面-1)
+- [匿名 Browser](#匿名-browser)
 - [Browser 空白起始页](#browser-空白起始页)
 - [Browser 通用交接闭环](#browser-通用交接闭环)
 - [Browser RSI 记录与回放可达性](#browser-rsi-记录与回放可达性)
@@ -64,6 +65,15 @@
 
 - **「把一个链接存成文件」和「打开一个存着链接的文件」是一般浏览器的既有能力，走标准格式，不自造。** 本机实测确认三种格式都被系统认得：`.webloc`（macOS，plist，键为 `URL`；`kMDItemContentType = com.apple.web-internet-location`，XML 与二进制 plist 两种皆可）、`.url`（`[InternetShortcut]` + `URL=`，CRLF；macOS 报 `com.microsoft.internet-shortcut`）、以及 Netscape bookmark HTML（`<!DOCTYPE NETSCAPE-Bookmark-file-1>`，每家浏览器导入导出都用它）。约束：单条链接的存取用前两者（`.webloc` 在本平台是首选，`.url` 只读即可），整批导入导出用第三者。存下来的文件必须能被本机 Finder 与其他浏览器直接打开——自造一份 JSON 就把这条能力关在了应用内部，那还不如不做。
 - 内置浏览器只能打开本机可达的地址。**没有 SSH 转发或隧道**，因此"看远端主机的 dev server"当前不成立。远端 Agent 的 Runtime 管理沿[联邦 Runtime 与远端恢复边界](session-recovery.md#联邦-runtime-与远端恢复边界)；这项能力不提供 Browser 的端口转发，也不为 Browser 单开私有通路。
+
+### 匿名 Browser
+
+- Browser 在创建时明确采用 `normal` 或 `private` 模式，Main 持有准确模式与网站数据上下文；创建后不在两种模式间切换。普通 Profile 继续沿原持久 owner 使用和切换，不被匿名创建、更名、清空或替换；匿名 Browser 不使用普通 Profile。失败或未知不回退普通 Profile，也不删除原页面、草稿或健康 Run。
+- 每个匿名 Browser 有独立的一次性网站 session，不与普通或其他匿名 Browser 共享 Cookie、网站存储及缓存；其原生子窗口继承所属 Browser 的匿名 session。网站数据不持久化；模式不授予新的自动化、认证、应用交接或文件权限，不承诺隐藏 IP、网络身份或网站指纹。
+- 隐藏或只释放原生页面资源不结束匿名 session；重复恢复仍指向原 Browser 和同次 session。本人明确关闭该 Browser 才结束其 session，之后新建不继承旧状态。关闭清理只作用准确匿名 owner 及其子窗口，不能扩大到普通 Profile 或其他匿名页；清理结果未知须如实说明，不复用可能遗留数据的 session。
+- 匿名导航与人工地址／搜索输入不持久记录，不读取普通 Profile 的历史建议。普通重启保留原 Tab、Region、混合内容及分割布局，匿名位置恢复为新的匿名空白页并明确临时数据已结束；不保存或恢复匿名访问 URL、标题、favicon、网页历史或临时 session 身份。正常页面的原 URL／Profile 恢复保持。
+- Survey 创建菜单和 Browser 更多菜单提供明确的新匿名页动作，沿原准确资源和放置链创建独立 Browser，不改变当前页的模式或 Profile，不要求先关闭原页。公开 `browser.open` 使用同一模式合同，CLI 的 `--private` 明确创建匿名页；返回与目标发现表达必要的非敏感模式，不暴露 partition、Cookie 或本机凭据路径。未指定仍按正常模式创建，不增加默认匿名偏好。
+- 用户明确保存的文件、书签、下载及 Agent 操作回执按其原合同保留，匿名不等于磁盘零痕迹；入口说明实际网站数据生命周期和这些留存边界，不自动抹除成果或权威操作身份。网站临时数据结束与工作面身份保全分别验证，不以清空 Profile、删除 Region 或空截图代签隔离。
 
 ### Browser 页面截图与标记
 
