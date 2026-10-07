@@ -4233,6 +4233,7 @@ export class AgentMuxClient {
           now,
           'user',
           { status: promptConfirmed ? 'complete' : 'failed',
+            ...(!initialEnvelope ? { publicContent: 'confirmed' as const } : {}),
             ...(initialEnvelope?.senderSessionId ? { authorAgentSessionId: initialEnvelope.senderSessionId } : {}) }
         )
       }
@@ -7141,7 +7142,7 @@ export class AgentMuxClient {
     if (message.systemContext) await this.recordMessageAfterSideEffect(session, `system-context:${operationId}`,
       'AgentMux context', message.systemContext, now, 'agentmux', { status })
     if (message.userContent) await this.recordMessageAfterSideEffect(session, `prompt:${operationId}`,
-      title, message.userContent, now, 'user', { status,
+      title, message.userContent, now, 'user', { status, publicContent: 'confirmed',
         ...(message.authorAgentSessionId ? { authorAgentSessionId: message.authorAgentSessionId } : {}),
         ...(message.authorHuman ? { authorHuman: true } : {}),
         ...(message.authorExternal ? { authorExternal: message.authorExternal } : {}),
@@ -7165,7 +7166,7 @@ export class AgentMuxClient {
     content: string,
     observedAt: number,
     source: 'user' | 'agentmux',
-    delivery: { sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; authorExternal?: import('./external-author.js').AgentExternalMessageAuthor; status?: 'complete' | 'failed' } = {}
+    delivery: { sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; authorExternal?: import('./external-author.js').AgentExternalMessageAuthor; status?: 'complete' | 'failed'; publicContent?: 'confirmed' } = {}
   ): Promise<void> {
     const mutation: AgentTimelineMutation = {
       type: 'append',
@@ -7180,6 +7181,7 @@ export class AgentMuxClient {
         updatedAt: observedAt,
         title,
         content,
+        ...(source === 'user' && delivery.publicContent ? { publicContent: delivery.publicContent } : {}),
         ...(delivery.sourceDevice ? { sourceDevice: delivery.sourceDevice } : {}),
         ...(delivery.sourceChannel ? { sourceChannel: delivery.sourceChannel } : {}),
         ...(source === 'user' && delivery.authorExternal ? { authorExternal: delivery.authorExternal } : {}),

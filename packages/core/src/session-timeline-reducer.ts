@@ -59,8 +59,10 @@ export function applyNormalizedTimelineMutation(
   if (mutation.updatedAt < previous.updatedAt) {
     throw new AgentMuxError('Timeline update is stale.', 'STALE_AGENT_TIMELINE_ITEM')
   }
+  // An ordinary content update does not carry the original userContent writer's fact.
+  const { publicContent: _publicContent, ...unqualified } = previous
   const next: AgentTimelineItem = {
-    ...previous,
+    ...(mutation.content === undefined ? previous : unqualified),
     updatedAt: mutation.updatedAt,
     ...(mutation.status === undefined ? {} : { status: mutation.status }),
     ...(mutation.title === undefined ? {} : { title: mutation.title }),
