@@ -139,6 +139,7 @@ it('reads the original selected reply as strong/code, separate paragraphs and a 
   expect(inputTime.title).toContain('Submission record · Current reading window')
   expect(inputTime.getAttribute('aria-label')).toContain(inputTime.textContent)
   expect(inputTime.title).toContain(later.content)
+  expect(api.sessions.historyPage).toHaveBeenCalledExactlyOnceWith(before.sessions[0]!.control, { limit: 30 })
   const location = panel().querySelector('.agent-information-reader__heading > small')!
   expect(location.textContent).toContain('Reading project')
   await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__service button')!.click())
@@ -161,7 +162,9 @@ it('reads the original selected reply as strong/code, separate paragraphs and a 
   expect(recap().querySelector('[data-reading-format]')?.getAttribute('data-reading-format')).toBe('markdown')
   expect(originalContent()).toBe(text)
   expect(card().getAttribute('aria-label')).toContain('**关键结论**')
-  expect(api.sessions.historyPage).toHaveBeenCalledExactlyOnceWith(before.sessions[0]!.control, { limit: 30 })
+  // Returning to visible reading resumes the original shared reader with one same-source revalidation.
+  expect(api.sessions.historyPage).toHaveBeenCalledTimes(2)
+  for (const call of vi.mocked(api.sessions.historyPage).mock.calls) expect(call).toEqual([before.sessions[0]!.control, { limit: 30 }])
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(document.activeElement).toBe(panel().querySelector('.agent-information-reader__reading'))
 })
