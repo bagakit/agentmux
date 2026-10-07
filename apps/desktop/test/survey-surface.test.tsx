@@ -85,7 +85,7 @@ const scratchWorkspace = { ...workspace, id: SCRATCH_WORKSPACE_ID, path: _hygien
 const session = composerSession('ABCDEFGHIJKLMNOP')
 session.control.run.runId = '11111111-1111-4111-8111-111111111111'
 const agent = { regionId: 'agent-region', kind: 'agent' as const, phase: 'attached' as const, workspaceId: workspace.id, sessionId: session.id }
-const browser: BrowserSnapshot = { id: 'browser-a', navigationId: 'navigation-a', profileId: 'default', url: 'https://example.test/a', title: 'Same title', loading: false, canGoBack: true, canGoForward: true, viewport: 'responsive', driving: false, appLinkPrompt: null, error: null }
+const browser: BrowserSnapshot = { mode: 'normal', id: 'browser-a', navigationId: 'navigation-a', profileId: 'default', url: 'https://example.test/a', title: 'Same title', loading: false, canGoBack: true, canGoForward: true, viewport: 'responsive', driving: false, appLinkPrompt: null, error: null }
 const pageA = { ...browser, regionId: 'page-a', kind: 'browser' as const, workspaceId: workspace.id, browserId: browser.id }
 const pageB = { ...pageA, id: 'browser-b', browserId: 'browser-b', regionId: 'page-b', url: 'https://example.test/b' }
 const pageC = { ...pageB, id: 'browser-c', browserId: 'browser-c', regionId: 'page-c' }
@@ -130,7 +130,7 @@ beforeEach(() => {
     documents: { [key]: { path: file.path, content: 'Unsaved file', revision: 'disk' } }, dirtyDocuments: { [key]: true },
     error: null, lastError: null, errorDismissed: true, displacedAgentSessionIds: [], retainedSpatialFocus: null, regionCaretFocus: null })
   vi.spyOn(api.browser, 'setBounds').mockResolvedValue(undefined)
-  vi.spyOn(api.browser, 'create').mockImplementation(async (id, url = 'about:blank') => ({ ...browser, id, url }))
+  vi.spyOn(api.browser, 'create').mockImplementation(async (id, url = 'about:blank', _workspaceId, _profileId, mode = 'normal') => ({ ...browser, id, url, mode, profileId: mode === 'private' ? null : browser.profileId }))
   vi.spyOn(api.browser, 'navigate').mockImplementation(async (id, url) => ({ ...browser, id, url, navigationId: `navigation-${id}` }))
   vi.spyOn(api.browser, 'listProfiles').mockResolvedValue([{ id: 'default', label: 'Default', createdAt: 1, isDefault: true, source: null }])
   vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
@@ -376,7 +376,7 @@ it.runIf(process.env.SURVEY_RESTART_PHASE === 'read')('restores new Survey brows
     expect(current.surveyCollectedZones).toEqual({ [fixture.zoneId]: true })
     expect(current.tabs[reference.tabId]!.layout.root.type).toBe('split')
     expect(current.tabs[reference.tabId]!.regions[reference.regionId]?.kind).toBe('browser')
-    expect(api.browser.create).toHaveBeenCalledWith(reference.regionId, 'about:blank', SCRATCH_WORKSPACE_ID)
+    expect(api.browser.create).toHaveBeenCalledWith(reference.regionId, 'about:blank', SCRATCH_WORKSPACE_ID, undefined, 'normal')
     expect(catalog().bindings.some(binding => binding.zoneId === fixture.zoneId && binding.spaceId === fixture.spaceId)).toBe(true)
     expect(dom.container.querySelector('.global-survey-surface [data-native-browser-stage]')).not.toBeNull()
     healthy()
@@ -649,7 +649,7 @@ it('creates an original temporary Zone from raw central input and navigates the 
   expect(selection.zoneId).not.toBe(originalZoneId())
   expect(useAppStore.getState().surveyCollectedZones).toEqual({ [selection.zoneId]: true })
   expect(useAppStore.getState().tabs[reference.tabId]!.space?.zoneId).toBe(selection.zoneId)
-  expect(api.browser.create).toHaveBeenCalledExactlyOnceWith(reference.regionId, '  protocol notes  ', SCRATCH_WORKSPACE_ID)
+  expect(api.browser.create).toHaveBeenCalledExactlyOnceWith(reference.regionId, '  protocol notes  ', SCRATCH_WORKSPACE_ID, undefined, 'normal')
   expect(useAppStore.getState().layouts[workspace.id]!.groups[0]!.activeTabId).toBe(mixed.id)
   await fill(address(), '  second raw query  '); await submit(address().form!)
   expect(api.browser.navigate).toHaveBeenLastCalledWith(reference.regionId, '  second raw query  ')
@@ -684,7 +684,7 @@ it('keeps the same failed exact preparation and refuses to reclaim it after anot
   const launcher = Object.values(useAppStore.getState().tabs).find(tab => tab.id !== mixed.id)!
   await submit(field.form!)
   expect(createZone).toHaveBeenCalledTimes(1); expect(api.browser.create).toHaveBeenCalledTimes(2)
-  expect(api.browser.create).toHaveBeenNthCalledWith(2, launcher.layout.activeRegionId, 'Keep query', SCRATCH_WORKSPACE_ID)
+  expect(api.browser.create).toHaveBeenNthCalledWith(2, launcher.layout.activeRegionId, 'Keep query', SCRATCH_WORKSPACE_ID, undefined, 'normal')
   await act(async () => useAppStore.getState().splitRegion(SCRATCH_WORKSPACE_ID, launcher.id, launcher.layout.activeRegionId, 'right'))
   const changed = useAppStore.getState().tabs[launcher.id]
   await submit(field.form!)
@@ -701,7 +701,7 @@ it('adds a Tab and splits a Region through the original default Zone controls', 
   expect(launcher).toHaveBeenLastCalledWith({ workspaceId: workspace.id, displayWorkspaceId: workspace.id, tabGroupId: 'original-group', zoneId: selection.zoneId, reveal: false })
   expect(useAppStore.getState().tabs[reference.tabId]?.space?.zoneId).toBe(selection.zoneId)
   expect(useAppStore.getState().tabs[reference.tabId]?.regions[reference.regionId]?.kind).toBe('browser')
-  expect(api.browser.create).toHaveBeenLastCalledWith(reference.regionId, 'about:blank', workspace.id)
+  expect(api.browser.create).toHaveBeenLastCalledWith(reference.regionId, 'about:blank', workspace.id, undefined, undefined)
   const blankInput = selectedRegion().querySelector<HTMLInputElement>('[aria-label="Search or enter a web address"]')!
   expect(blankInput).not.toBeNull(); expect(document.activeElement).toBe(blankInput)
   expect(useAppStore.getState().layouts[workspace.id]!.groups[0]!.activeTabId).toBe(before.layouts[workspace.id]!.groups[0]!.activeTabId)
@@ -1207,7 +1207,7 @@ it('creates independent research from the project page, keeping its original ide
   expect(selected.zoneId).not.toBe(originalZoneId())
   expect(target.tabId).not.toBe(mixed.id); expect(target.regionId).not.toBe(pageA.regionId)
   expect(current.tabs[target.tabId]!.regions[target.regionId]).toMatchObject({ kind: 'browser', url: pageA.url, workspaceId: workspace.id, browserId: target.regionId })
-  expect(api.browser.create).toHaveBeenCalledExactlyOnceWith(target.regionId, pageA.url, workspace.id)
+  expect(api.browser.create).toHaveBeenCalledExactlyOnceWith(target.regionId, pageA.url, workspace.id, undefined, 'normal')
   expect(current.tabs[mixed.id]).toBe(mixed)
   expect(current.layouts[workspace.id]!.groups[0]!.activeTabId).toBe(before.layouts[workspace.id]!.groups[0]!.activeTabId)
   expect(current.surveyCollectedZones).toEqual({ [selected.zoneId]: true })
@@ -1252,7 +1252,7 @@ it('starts ordinary browsing with only Scratch and no selected project', async (
   await fill(field, 'https://example.test/daily'); await submit(field.form!)
   const state = useAppStore.getState(), reference = state.surveyZoneSelection!.active!
   expect(state.tabs[reference.tabId]!.workspaceId).toBe(SCRATCH_WORKSPACE_ID)
-  expect(api.browser.create).toHaveBeenCalledExactlyOnceWith(reference.regionId, 'https://example.test/daily', SCRATCH_WORKSPACE_ID)
+  expect(api.browser.create).toHaveBeenCalledExactlyOnceWith(reference.regionId, 'https://example.test/daily', SCRATCH_WORKSPACE_ID, undefined, 'normal')
   // Survey's resource workspace does not replace the original Work selection.
   expect(state.activeWorkspaceId).toBeNull(); expect(state.tabs[mixed.id]).toBe(mixed)
   expect(api.sessions.stop).not.toHaveBeenCalled()
@@ -1816,4 +1816,100 @@ it.runIf(process.env.SURVEY_LAST_TAB_RESTART_PHASE === 'read')('last-tab closure
   expect(slot().querySelector('[data-terminal-probe]')).not.toBeNull()
   await selectRegion(file.regionId)
   await vi.waitFor(() => expect(slot().querySelector('[data-file-probe]')).not.toBeNull()); healthy()
+})
+
+
+async function choosePrivateAction(trigger: HTMLElement, label: string) {
+  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === label)
+  expect(item, `Actual menu action ${label}`).toBeDefined()
+  await act(async () => { item!.focus(); item!.click() })
+}
+
+it('private Survey creation consumes the actual menu and original creation owner without changing ordinary work', async () => {
+  await renderApp(); await enterSurvey()
+  const before = useAppStore.getState()
+  const trigger = dom.container.querySelector<HTMLElement>('[aria-label="New browser options"]')!
+  expect(trigger).not.toBeNull(); await choosePrivateAction(trigger, 'New private page')
+  const created = vi.mocked(api.browser.create).mock.calls
+  expect(created).toHaveLength(1)
+  const id = created[0]![0]
+  expect(created[0]).toEqual([id, 'about:blank', SCRATCH_WORKSPACE_ID, undefined, 'private'])
+  const current = useAppStore.getState(), selected = current.surveyZoneSelection!.active!
+  expect(current.tabs[selected.tabId]!.regions[selected.regionId]).toMatchObject({ kind: 'browser', mode: 'private', profileId: null, browserId: id })
+  expect(current.tabs[mixed.id]).toBe(before.tabs[mixed.id]); healthy()
+})
+
+it('private More creates another private page in the exact original Zone and Group while retaining its source', async () => {
+  const privatePage = { ...pageA, mode: 'private' as const, profileId: null }
+  const privateTab = { ...mixed, regions: { ...mixed.regions, [pageA.regionId]: privatePage } }
+  useAppStore.setState({ tabs: { [mixed.id]: privateTab } })
+  await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageA.regionId)
+  const before = useAppStore.getState(), original = before.surveyZoneSelection!.active!, zoneId = before.surveyZoneSelection!.zoneId
+  const trigger = slot().querySelector<HTMLElement>('[aria-label="More browser tools"]')!
+  expect(trigger).not.toBeNull(); await choosePrivateAction(trigger, 'New private page')
+  expect(api.browser.create).toHaveBeenCalledTimes(1)
+  const current = useAppStore.getState(), selected = current.surveyZoneSelection!.active!
+  expect(current.mainSurface).toBe('survey'); expect(selected.tabId).not.toBe(original.tabId)
+  expect(selected.groupId).toBe(original.groupId); expect(current.surveyZoneSelection!.zoneId).toBe(zoneId)
+  expect(current.tabs[selected.tabId]!.space!.zoneId).toBe(zoneId)
+  expect(current.tabs[selected.tabId]!.regions[selected.regionId]).toMatchObject({ mode: 'private', profileId: null })
+  expect(current.tabs[mixed.id]!.regions[pageA.regionId]).toBe(privatePage); healthy()
+})
+
+it('private Research in Survey retains private creation intent and the original URL through the actual host helper', async () => {
+  const privatePage = { ...pageA, mode: 'private' as const, profileId: null }
+  useAppStore.setState({ tabs: { [mixed.id]: { ...mixed, regions: { ...mixed.regions, [pageA.regionId]: privatePage } } } })
+  await renderApp()
+  const trigger = dom.container.querySelector<HTMLElement>('[aria-label="More browser tools"]')!
+  expect(trigger).not.toBeNull(); await choosePrivateAction(trigger, 'Research in Survey…')
+  expect(api.browser.create).toHaveBeenCalledTimes(1)
+  const [id, url, owner, profile, mode] = vi.mocked(api.browser.create).mock.calls[0]!
+  expect({ url, owner, profile, mode }).toEqual({ url: pageA.url, owner: workspace.id, profile: undefined, mode: 'private' })
+  const created = Object.values(useAppStore.getState().tabs).flatMap(tab => Object.values(tab.regions)).find(region => region.kind === 'browser' && region.browserId === id)
+  expect(created).toMatchObject({ mode: 'private', profileId: null, url: pageA.url })
+  expect(useAppStore.getState().tabs[mixed.id]!.regions[pageA.regionId]).toBe(privatePage); healthy()
+})
+
+
+it('private More retries the same prepared page and mode after a creation failure without allocating another Launcher', async () => {
+  await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageA.regionId)
+  vi.mocked(api.browser.create).mockRejectedValueOnce(new Error('Native private create is unavailable'))
+  const original = useAppStore.getState().surveyZoneSelection
+  const trigger = selectedRegion().querySelector<HTMLElement>('[aria-label="More browser tools"]')!
+  await choosePrivateAction(trigger, 'New private page')
+  expect(api.browser.create).toHaveBeenCalledTimes(1)
+  const first = vi.mocked(api.browser.create).mock.calls[0]!, prepared = Object.keys(useAppStore.getState().tabs)
+  expect(first[4]).toBe('private'); expect(useAppStore.getState().surveyZoneSelection).toBe(original)
+  const retry = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Retry same private page')!
+  expect(retry).toBeDefined(); await act(async () => retry.click())
+  expect(api.browser.create).toHaveBeenCalledTimes(2)
+  expect(vi.mocked(api.browser.create).mock.calls[1]).toEqual(first)
+  expect(Object.keys(useAppStore.getState().tabs)).toEqual(prepared)
+  expect(useAppStore.getState().surveyZoneSelection!.active!.regionId).toBe(first[0])
+  expect(api.browser.close).not.toHaveBeenCalled(); healthy()
+})
+
+
+it('private More never selects a preparation whose original owner disappeared during native creation', async () => {
+  await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageA.regionId)
+  let finish!: (value: BrowserSnapshot) => void
+  vi.mocked(api.browser.create).mockImplementationOnce(() => new Promise(done => { finish = done }))
+  const original = useAppStore.getState().surveyZoneSelection
+  await choosePrivateAction(selectedRegion().querySelector<HTMLElement>('[aria-label="More browser tools"]')!, 'New private page')
+  const [id] = vi.mocked(api.browser.create).mock.calls[0]!
+  const prepared = Object.values(useAppStore.getState().tabs).find(tab => tab.regions[id]?.regionId === id)!
+  expect(prepared).toBeDefined()
+  const occurrences = Object.entries(useAppStore.getState().layouts).flatMap(([displayWorkspaceId, layout]) =>
+    layout.groups.filter(group => group.tabOrder.includes(prepared.id)).map(group => ({ displayWorkspaceId, groupId: group.id })))
+  expect(occurrences.length).toBeGreaterThan(0)
+  await act(async () => { for (const occurrence of occurrences) await useAppStore.getState().closeTab(occurrence.displayWorkspaceId, occurrence.groupId, prepared.id) })
+  expect(useAppStore.getState().tabs[prepared.id]).toBeUndefined()
+  const afterClose = useAppStore.getState().surveyZoneSelection
+  await act(async () => finish({ ...browser, id, url: 'about:blank', mode: 'private', profileId: null }))
+  expect(useAppStore.getState().surveyZoneSelection).toBe(afterClose)
+  expect(useAppStore.getState().tabs[prepared.id]).toBeUndefined()
+  expect(dom.container.querySelector('.browser-address-error')?.textContent).toContain('has not confirmed attachment')
+  expect(api.browser.close).toHaveBeenCalledExactlyOnceWith(id)
+  healthy()
 })

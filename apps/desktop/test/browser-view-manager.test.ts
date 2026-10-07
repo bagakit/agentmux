@@ -154,6 +154,7 @@ const fakeElectron = vi.hoisted(() => {
       FakeWebContentsView.instances.push(this)
       this.webPreferences = options?.webPreferences
       this.partition = options?.webPreferences?.partition as string | undefined
+      if (this.partition?.startsWith('agentmux-browser-private:')) Object.assign(this.webContents, { session: fromPartition(this.partition) })
       const nextLoadURLImpl = FakeWebContentsView.nextLoadURLImpl
       FakeWebContentsView.nextLoadURLImpl = null
       if (nextLoadURLImpl) {
@@ -165,13 +166,23 @@ const fakeElectron = vi.hoisted(() => {
     setBounds(value: typeof this.bounds) { this.bounds = value; this.boundsHistory.push({ ...value }) }
   }
 
-  return { FakeWebContentsView }
+  const privateSessions = new Map<string, FakeWebContents['session'] & { clearStorageData: ReturnType<typeof vi.fn>; clearCache: ReturnType<typeof vi.fn>; closeAllConnections: ReturnType<typeof vi.fn> }>()
+  const fromPartition = vi.fn((partition: string) => {
+    let value = privateSessions.get(partition)
+    if (!value) {
+      value = Object.assign(new FakeWebContents().session, { clearStorageData: vi.fn(async () => {}), clearCache: vi.fn(async () => {}), closeAllConnections: vi.fn(async () => {}) })
+      privateSessions.set(partition, value)
+    }
+    return value
+  })
+  return { FakeWebContentsView, fromPartition }
 })
 
 // `app` 只为 BrowserRefLedgerStore 的默认路径参数而在：本文件每次都显式给路径，所以它不会被读到。
 // 不给的话，那条 import 在 mock 的命名空间里取不到名字。
 vi.mock('electron', () => ({
   WebContentsView: fakeElectron.FakeWebContentsView,
+  session: { fromPartition: fakeElectron.fromPartition },
   app: { getPath: () => tmpdir() }
 }))
 
@@ -260,6 +271,116 @@ function fakeWindow() {
 }
 
 describe('BrowserViewManager', () => {
+  it('private owner retains one session across release and ends only that incarnation on close', async () => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    const normal = await manager.create('normal-sibling', 'https://normal.example/', 'workspace-a', 'work')
+    const normalView = f.children.at(-1)!
+    const first = await manager.create('private-page', 'https://private.example/', 'workspace-a', undefined, 'private')
+    const firstView = f.children.at(-1)!, partition = firstView.partition!
+    const storage = fakeElectron.fromPartition(partition)
+    expect(first).toMatchObject({ mode: 'private', profileId: null })
+    expect(partition, 'private session must not use a persistent partition').not.toMatch(/^persist:/)
+    expect(manager.targets().find(row => row.id === first.id)).toMatchObject({ mode: 'private' })
+    expect(manager.inputHistoryScope(first.id, null)).toEqual({ workspaceId: 'workspace-a', profileId: null })
+    expect(await manager.create(first.id, 'https://ignored.example/', 'workspace-a', undefined, 'private')).toMatchObject({ id: first.id, url: first.url, mode: 'private' })
+    await expect(manager.create(first.id, 'about:blank', 'workspace-a', undefined, 'normal')).rejects.toThrow('cannot change mode')
+    await expect(manager.switchProfile(first.id, 'work')).rejects.toThrow('private Browser')
+    await manager.release(first.id)
+    expect(storage.clearStorageData).not.toHaveBeenCalled()
+    await manager.restore(first.id, { workspaceId: 'workspace-a', profileId: null, mode: 'private' })
+    expect(f.children.at(-1)!.partition).toBe(partition)
+    await manager.close(first.id)
+    expect(storage.clearStorageData).toHaveBeenCalledTimes(1)
+    expect(storage.clearCache).toHaveBeenCalledTimes(1)
+    await manager.create(first.id, 'about:blank', 'workspace-a', undefined, 'private')
+    expect(f.children.at(-1)!.partition, 'closed private incarnation must never be reused').not.toBe(partition)
+    expect(normalView.webContents.isDestroyed()).toBe(false)
+    expect(manager.targets().find(row => row.id === normal.id)).toMatchObject({ mode: 'normal' })
+    await manager.close(first.id)
+    manager.dispose()
+  })
+
+  it('separate private Browser identities never share a partition and never resolve a saved Profile', async () => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    await manager.create('private-one', 'about:blank', 'workspace-a', undefined, 'private')
+    const first = f.children.at(-1)!.partition
+    await manager.create('private-two', 'about:blank', 'workspace-a', undefined, 'private')
+    expect(f.children.at(-1)!.partition).not.toBe(first)
+    await expect(manager.create('wrong-private', 'about:blank', 'workspace-a', 'work', 'private')).rejects.toThrow('saved Profile')
+    await manager.close('private-one'); await manager.close('private-two')
+    manager.dispose()
+  })
+
+  it.each(['parent-close', 'closed-receipt', 'first-popup', 'storage'] as const)('private close attempts every cleanup after a %s failure and revokes late popups', async failure => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    await manager.create('normal-kept', 'about:blank', 'workspace-a', 'work')
+    const normal = f.children.at(-1)!
+    await manager.create('private-failure', 'about:blank', 'workspace-a', undefined, 'private')
+    const original = f.children.at(-1)!, storage = fakeElectron.fromPartition(original.partition!)
+    const popup = () => {
+      let destroyed = false
+      return { isDestroyed: () => destroyed, destroy: vi.fn(() => { destroyed = true }), once: vi.fn(),
+        webContents: new fakeElectron.FakeWebContentsView().webContents }
+    }
+    const first = popup(), second = popup()
+    const opened = original.webContents.listeners.get('did-create-window')![0]!
+    opened(first); opened(second)
+    if (failure === 'parent-close') vi.spyOn(original.webContents, 'close').mockImplementationOnce(() => { throw new Error('Parent close failed') })
+    if (failure === 'closed-receipt') vi.spyOn(f.window.webContents, 'send').mockImplementationOnce(() => { throw new Error('Receipt failed') })
+    if (failure === 'first-popup') first.destroy.mockImplementationOnce(() => { throw new Error('Popup close failed') })
+    if (failure === 'storage') storage.clearStorageData.mockRejectedValueOnce(new Error('Storage clear failed'))
+    await expect(manager.close('private-failure')).rejects.toThrow('cleanup failures')
+    expect(original.webContents.isDestroyed()).toBe(true)
+    expect(first.destroy).toHaveBeenCalledTimes(1)
+    expect(second.destroy).toHaveBeenCalledTimes(1)
+    expect(storage.clearStorageData).toHaveBeenCalledTimes(1)
+    expect(storage.clearCache).toHaveBeenCalledTimes(1)
+    expect(storage.closeAllConnections).toHaveBeenCalledTimes(1)
+    expect(storage.checkHandler?.()).toBe(false)
+    const permission = vi.fn(); storage.requestHandler?.(original.webContents, 'notifications', permission)
+    expect(permission).toHaveBeenCalledWith(false)
+    expect(manager.targets().map(target => target.id)).toEqual(['normal-kept'])
+    const late = popup(); opened(late)
+    expect(late.destroy).toHaveBeenCalledTimes(1)
+    await manager.create('private-failure', 'about:blank', 'workspace-a', undefined, 'private')
+    expect(f.children.at(-1)!.partition).not.toBe(original.partition)
+    expect(normal.webContents.isDestroyed()).toBe(false)
+    manager.dispose()
+  })
+
+  it('disposal continues exact private-session cleanup after a native close failure and reaches the next owner', async () => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    await manager.create('dispose-private-first', 'about:blank', 'workspace-a', undefined, 'private')
+    const first = f.children.at(-1)!, firstSession = fakeElectron.fromPartition(first.partition!)
+    await manager.create('dispose-private-next', 'about:blank', 'workspace-a', undefined, 'private')
+    const second = f.children.at(-1)!, secondSession = fakeElectron.fromPartition(second.partition!)
+    vi.spyOn(first.webContents, 'close').mockImplementationOnce(() => { throw new Error('Native close failed') })
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(() => manager.dispose()).not.toThrow()
+    await vi.waitFor(() => expect(warning).toHaveBeenCalledWith('Private website-data cleanup failed during disposal:', expect.any(AggregateError)))
+    for (const storage of [firstSession, secondSession]) {
+      expect(storage.clearStorageData).toHaveBeenCalledTimes(1)
+      expect(storage.clearCache).toHaveBeenCalledTimes(1)
+      expect(storage.closeAllConnections).toHaveBeenCalledTimes(1)
+    }
+    expect(second.webContents.isDestroyed()).toBe(true)
+    warning.mockRestore()
+  })
+
+  it('disposal retires private consumers even when an earlier normal owner preserves its native teardown error', async () => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    await manager.create('dispose-normal-first', 'about:blank', 'workspace-a', 'work')
+    const normal = f.children.at(-1)!
+    await manager.create('dispose-private-after', 'about:blank', 'workspace-a', undefined, 'private')
+    const privateView = f.children.at(-1)!, storage = fakeElectron.fromPartition(privateView.partition!)
+    vi.spyOn(normal.webContents, 'close').mockImplementationOnce(() => { throw new Error('Normal native close failed') })
+    expect(() => manager.dispose()).toThrow('Normal native close failed')
+    await vi.waitFor(() => expect(storage.clearStorageData).toHaveBeenCalledTimes(1))
+    expect(storage.clearCache).toHaveBeenCalledTimes(1)
+    expect(storage.closeAllConnections).toHaveBeenCalledTimes(1)
+    expect(privateView.webContents.isDestroyed()).toBe(true)
+  })
+
   it('T049 retains destroyed metadata and announces owner loss when resource cleanup throws', async () => {
     const fixture = fakeWindow(), manager = browserManager(fixture.window)
     const current = await manager.create('cleanup-resource', 'https://original.example/path', 'workspace-a', 'work')

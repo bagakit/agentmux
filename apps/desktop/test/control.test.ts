@@ -160,6 +160,21 @@ afterEach(() => {
 })
 
 describe('Desktop Control owner', () => {
+  it('private public creation reaches the original createControlBrowser owner and reports the actual returned mode', async () => {
+    const original = fixture()
+    const create = vi.spyOn(api.browser, 'create').mockImplementation(async (id, url = 'about:blank', _workspaceId, _profileId, mode = 'normal') => ({
+      id, url, mode, profileId: mode === 'private' ? null : 'default', title: '', canGoBack: false, canGoForward: false,
+      loading: false, viewport: 'responsive', navigationId: 'private-created-navigation', error: null, driving: false, appLinkPrompt: null
+    }))
+    const result = await useAppStore.getState().executeControl(request({ operation: 'open.browser', mode: 'private',
+      url: 'https://private.example/', destination: { kind: 'new-tab', after: { kind: 'tab', tabId: original.id } } }))
+    expect(result.operation).toBe('open.browser')
+    if (result.operation !== 'open.browser') throw new Error('Unexpected original control result')
+    expect(create).toHaveBeenCalledExactlyOnceWith(result.region.browserId, 'https://private.example/', 'workspace', undefined, 'private')
+    expect(result.region.mode).toBe('private')
+    expect(useAppStore.getState().tabs[result.region.tabId]!.regions[result.region.regionId]).toMatchObject({ mode: 'private', profileId: null })
+    expect(useAppStore.getState().tabs[original.id]).toBe(original)
+  })
   it('inspects one Tab with closed Agent, Terminal, Browser, File, and Launcher projections', async () => {
     let tab = fixture([terminal('terminal-run')])
     tab = addWorkbenchRegion(tab, 'region-caller', 'right', {
@@ -403,7 +418,7 @@ describe('Desktop Control owner', () => {
     expect(openedBrowser.operation).toBe('open.browser')
     if (openedBrowser.operation !== 'open.browser') throw new Error('Unexpected result')
     expect(openedBrowser.region.browserId).not.toBe(openedBrowser.region.regionId)
-    expect(createBrowser).toHaveBeenCalledWith(openedBrowser.region.browserId, 'https://example.com', 'workspace')
+    expect(createBrowser).toHaveBeenCalledWith(openedBrowser.region.browserId, 'https://example.com', 'workspace', undefined, undefined)
     expect(openedTerminal.operation).toBe('open.terminal')
   })
 
