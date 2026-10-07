@@ -18,9 +18,18 @@ import { validateNativeReceipt } from './lib/browser-capability-proof-join.mjs'
 // No saved Workbench seeding, Store setter, bridge replacement or manual storage flush.
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const desktopRoot = join(repositoryRoot, 'apps/desktop')
+const privateCase = process.argv.includes('--case-private')
+const privateApp = process.env.AGENTMUX_BROWSER_PRIVATE_APP ? resolve(process.env.AGENTMUX_BROWSER_PRIVATE_APP) : null
+assert.ok(!privateApp || privateCase, 'The optional qualification App belongs only to the private Browser case')
+const qualificationRoot = privateApp ? resolve(privateApp, '../../../../..') : repositoryRoot
+if (privateApp) assert.equal(privateApp, join(qualificationRoot, 'apps/desktop/release/mac/AgentMux.app'), 'Consume the exact qualification release without copying or installing it')
+const packageRoot = privateApp ? join(privateApp, 'Contents/Resources/app') : null
+const coreRoot = packageRoot ? join(packageRoot, 'node_modules/@agentmux/core') : join(repositoryRoot, 'packages/core')
+const mainPath = packageRoot ? join(packageRoot, 'out/main/index.js') : join(desktopRoot, 'out/main/index.js')
+const appExecutable = privateApp ? join(privateApp, 'Contents/MacOS/AgentMux') : null
 const require = createRequire(join(desktopRoot, 'package.json'))
 const { listProbeProcesses, signalOwnedProbeProcess } = await import(pathToFileURL(join(desktopRoot, 'scripts/probe-process.mjs')))
-const { connectAgentMuxRpc } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { connectAgentMuxRpc } = await import(pathToFileURL(join(coreRoot, 'dist/index.js')))
 const exec = promisify(execFile)
 const digest = value => createHash('sha256').update(value).digest('hex')
 const delay = ms => new Promise(done => setTimeout(done, ms))
@@ -31,7 +40,6 @@ const workspacePath = join(root, 'workspace'), codexHome = join(privateHome, 'co
 const workspaceId = 'private-browser-recovery', workspaceName = 'Private Browser recovery'
 const children = new Set(), connections = new Set()
 const launchedProbes = new Set()
-const privateCase = process.argv.includes('--case-private')
 const privateCrash = process.argv.includes('--private-crash')
 const privateVisual = process.argv.includes('--private-visual')
 assert.ok(!privateCrash || privateCase); assert.ok(!privateVisual || privateCase)
@@ -138,7 +146,7 @@ async function cleanupOwnedProbes(temporaryRoot) {
   return {remaining:remaining??null,errors}
 }
 async function identity() {
-  const rendererFiles = (await readdir(join(desktopRoot, 'out/renderer/assets'))).filter(name => /\.(js|css)$/.test(name))
+  const rendererFiles = (await readdir(join(packageRoot ?? desktopRoot, 'out/renderer/assets'))).filter(name => /\.(js|css)$/.test(name))
   assert.ok(rendererFiles.length > 0)
   const files = ['apps/desktop/out/main/index.js', 'apps/desktop/out/preload/index.cjs', 'apps/desktop/out/renderer/index.html',
     ...rendererFiles.map(name => `apps/desktop/out/renderer/assets/${name}`),
@@ -237,17 +245,42 @@ async function identity() {
       'apps/desktop/src/main/browser-outcome-journal.ts','apps/desktop/src/shared/browser-outcome-criteria.ts',
       'apps/desktop/src/renderer/src/components/BrowserOutcomeCriteria.tsx','apps/desktop/scripts/browser-outcome-probe-scenario.mjs',
       'apps/desktop/scripts/browser-demonstration-probe-scenario.mjs','apps/desktop/scripts/browser-demonstration-probe-diagnostics.mjs'] : [])]
-  const values = await Promise.all(files.map(async name => { const bytes = await readFile(join(repositoryRoot, name)); assert.ok(bytes.length > 0, name); return [name, digest(bytes)] }))
-  const electron = require('electron'); values.push([electron, digest(await readFile(electron))])
+  const values = await Promise.all(files.map(async name => {
+    let source = join(repositoryRoot, name)
+    if (packageRoot && name.startsWith('apps/desktop/out/')) source = join(packageRoot, name.slice('apps/desktop/'.length))
+    else if (packageRoot && name.startsWith('packages/core/dist/')) source = join(coreRoot, name.slice('packages/core/'.length))
+    else if (packageRoot && !name.startsWith('apps/desktop/scripts/')) source = join(qualificationRoot, name)
+    const bytes = await readFile(source); assert.ok(bytes.length > 0, name)
+    if (packageRoot && (name.startsWith('apps/desktop/out/') || name.startsWith('packages/core/dist/'))) {
+      assert.equal(digest(bytes), digest(await readFile(join(qualificationRoot, name))), 'Package bytes must equal the qualification build: ' + name)
+    }
+    return [name, digest(bytes)]
+  }))
+  const executable = appExecutable ?? require('electron'); values.push([executable, digest(await readFile(executable))])
+  if (privateApp) {
+    const packageIdentity = JSON.parse(await readFile(join(packageRoot, 'package-identity.json'), 'utf8'))
+    assert.equal(packageIdentity.schema, 'agentmux.package-identity.v1')
+    assert.equal(packageIdentity.sourceCommit, (await exec('git', ['rev-parse', 'HEAD'], { cwd: qualificationRoot })).stdout.trim())
+    assert.equal(packageIdentity.sourceTree, (await exec('git', ['rev-parse', 'HEAD^{tree}'], { cwd: qualificationRoot })).stdout.trim())
+    const info = JSON.parse((await exec('/usr/bin/plutil', ['-convert', 'json', '-o', '-', join(privateApp, 'Contents/Info.plist')])).stdout)
+    assert.equal(info.CFBundleExecutable, 'AgentMux'); assert.equal(info.CFBundleShortVersionString, packageIdentity.appVersion)
+    for (const name of files.filter(name => name.includes('/src/') || name.endsWith('package.json') || name === 'pnpm-lock.yaml')) {
+      assert.equal(digest(await readFile(join(qualificationRoot, name))), digest((await exec('git', ['show', packageIdentity.sourceCommit + ':' + name], { cwd: qualificationRoot, maxBuffer: 8 * 1024 * 1024 })).stdout), 'Qualification source must match its package commit: ' + name)
+    }
+    const artifacts = Object.fromEntries(await Promise.all(['Contents/Info.plist', 'Contents/Resources/app/package-identity.json', 'Contents/Resources/app/package.json'].map(async name => [name, digest(await readFile(join(privateApp, name)))])))
+    values.push(...Object.entries(artifacts))
+    receipt.qualificationApp = { app: privateApp, packageIdentity, executable, executableSha256: digest(await readFile(executable)), artifacts,
+      core: 'Actual package Core SDK and CLI, byte-equal to the qualification build.', boundary: 'Non-installed production App with private home, userData and Runtime; no OS default-browser setter.' }
+  }
   return Object.fromEntries(values)
 }
 async function launch(label) {
   phase = `launch-${label}`
   for (const name of ['AGENTMUX_DESKTOP_RECOVERY_SEED', 'AGENTMUX_DESKTOP_RECOVERY_REPORT', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY']) assert.equal(process.env[name], undefined, `Ordinary launch inherited ${name}`)
   const readyFile = join(root, `ready-${label}.json`)
-  const child = spawn(require('electron'), ['--inspect-brk=0', join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0', `--agentmux-probe-root=${root}`], {
+  const child = spawn(appExecutable ?? require('electron'), ['--inspect-brk=0', ...(!privateApp ? [mainPath] : []), '--remote-debugging-port=0', `--agentmux-probe-root=${root}`], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...(privateCase ? Object.fromEntries(Object.entries(process.env).filter(([key])=>!key.startsWith('AGENTMUX_')&&!key.startsWith('CTXMUX_'))) : process.env), ...fixtureEnvironment, AGENTMUX_DESKTOP_READY_FILE: readyFile }
+    env: { ...(privateCase ? Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^(?:AGENTMUX_|CTXMUX_|ELECTRON_)/.test(key))) : process.env), ...fixtureEnvironment, AGENTMUX_DESKTOP_READY_FILE: readyFile }
   })
   children.add(child)
   let diagnostics = '', mainUrl, rendererUrl, spawnError
@@ -266,9 +299,10 @@ async function launch(label) {
   // Imports must finish before querying Electron. Pause before the first home-dependent constant;
   // require() during Node's --inspect-brk bootstrap can run an uninitialized module loader.
   await main.call('Debugger.enable')
-  const mainPath = join(desktopRoot, 'out/main/index.js')
   const lines = (await readFile(mainPath, 'utf8')).split('\n')
-  const anchors = lines.flatMap((line, index) => line.includes('const SCRATCH_BACKING_PATH = join(app.getPath("home")') ? [index] : [])
+  const anchors = lines.flatMap((line, index) => (privateApp
+    ? /^const SCRATCH_BACKING_PATH = [\w$]+\(app\.getPath\("home"\), "\.agentmux", "scratch"\);$/.test(line)
+    : line.includes('const SCRATCH_BACKING_PATH = join(app.getPath("home")')) ? [index] : [])
   assert.equal(anchors.length, 1, 'The compiled home boundary must exist exactly once')
   const breakpoint = await main.call('Debugger.setBreakpointByUrl', { url: pathToFileURL(mainPath).href, lineNumber: anchors[0] })
   await main.call('Runtime.runIfWaitingForDebugger')
@@ -326,6 +360,7 @@ async function launch(label) {
     receipt.launchDiagnostics ??= {}; receipt.launchDiagnostics[label] = observed
     throw error
   }
+  if (privateApp) { assert.equal(ready.packaged, true); assert.equal(ready.executable, appExecutable) }
   const endpoint = new URL(await waitFor(`${label} Renderer debugger`, () => { alive(); return rendererUrl }))
   const target = await waitFor(`${label} Renderer target`, async () => (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(item => item.type === 'page' && item.url.startsWith('file:')))
   const cdp = await connectCdp(target.webSocketDebuggerUrl, `${label}:renderer`); await cdp.call('Runtime.enable')
@@ -863,9 +898,10 @@ try {
   const scenarioContext = (probe,browserId,pageUrl)=>({probe,browserId,pageUrl,urls,receipt,localRecoveryKind,click,selectors,waitFor,runBrowser,setPhase:value=>{phase=value},nativeFrameReady:actualPageUrl=>observeNativeFrameReady(probe,actualPageUrl),nativePageScript:(target,expression,actualPageUrl=pageUrl)=>nativePageScript(target,expression,actualPageUrl),resize,
     rpc,
     diagnoseTarget:process.argv.includes('--diagnose-demonstration-target'),
-    capture:(probe,label,content,actualPageUrl=pageUrl)=>capture(probe,label,content??(demonstrationCase||taskAssetsCase||taskDownloadCase?'demonstration':overlayCase?'overlay':browserToolsCase?'page':structuredCase?'structured-output':'operations'),actualPageUrl),desktopRoot,userData,workspacePath,repositoryRoot})
+    capture:(probe,label,content,actualPageUrl=pageUrl)=>capture(probe,label,content??(demonstrationCase||taskAssetsCase||taskDownloadCase?'demonstration':overlayCase?'overlay':browserToolsCase?'page':structuredCase?'structured-output':'operations'),actualPageUrl),desktopRoot,userData,workspacePath,repositoryRoot,coreRoot})
   await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true})])
-  receipt.identityBefore=await identity();receipt.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repositoryRoot})).stdout.trim()
+  receipt.identityBefore=await identity();receipt.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:qualificationRoot})).stdout.trim()
+  if (privateApp) receipt.verifierCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repositoryRoot})).stdout.trim()
   server=createServer((request,response)=>{
     if(privateScenario?.handlePrivateRequest(request,response,receipt))return
     if(localRecovery?.handleLocalRecoveryDisconnect(request,response,receipt))return

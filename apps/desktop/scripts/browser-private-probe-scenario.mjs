@@ -30,7 +30,7 @@ async function cli(ctx, argv) {
   Object.assign(env, { HOME: ctx.privateHome, AGENTMUX_RPC_ENDPOINT: 'unix:' + join(ctx.runtimeDirectory, 'control.sock'),
     AGENTMUX_RUNTIME_DIRECTORY: ctx.runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(ctx.runtimeDirectory, 'state') })
   return new Promise((done, reject) => {
-    const child = spawn(process.execPath, [join(ctx.repositoryRoot, 'packages/core/dist/agentmux.js'), ...argv], {
+    const child = spawn(process.execPath, [join(ctx.coreRoot, 'dist/agentmux.js'), ...argv], {
       cwd: ctx.workspacePath, env, stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = '', errors = '', expired = false, escalation
