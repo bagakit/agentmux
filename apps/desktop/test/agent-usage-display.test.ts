@@ -1,3 +1,4 @@
+import { fixtureEpoch as _newTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
 import { agentUsageDisplay, contextPressure, formatTokenCount } from '../src/renderer/src/lib/agent-usage'
@@ -58,7 +59,7 @@ describe('formatTokenCount', () => {
 })
 
 describe('agentUsageDisplay', () => {
-  it('shows the real last-turn output tokens when the provider reports usage', () => {
+  it('shows original output tokens without assigning unrecorded historical scope', () => {
     const display = agentUsageDisplay(agentSession({
       capabilities: {
         terminal: true, timeline: 'complete-events', permission: 'respond',
@@ -68,13 +69,23 @@ describe('agentUsageDisplay', () => {
       turnUsage: { inputTokens: 2, outputTokens: 5, totalTokens: 7, observedAt: 1234 }
     }))
     expect(display.kind).toBe('tokens')
-    // 显示的是真实 output token，不是任何 /s；title 说清是"最近一 turn"并逐项钉住 in/out/total，
+    // 显示的是真实 output token，不是任何 /s；title 保留未知范围并逐项钉住 in/out/total，
     // 这样把 title 里任一项写错字段（例如 in 显示成 total）都会发红。
     expect(display.text).toBe('5 tok')
-    expect(display.title).toContain('Last turn')
+    expect(display.title).toContain('scope unrecorded')
     expect(display.title).toContain('in 2')
     expect(display.title).toContain('out 5')
     expect(display.title).toContain('total 7')
+  })
+
+  it('names response usage without promoting it to a whole turn', () => {
+    const display = agentUsageDisplay(agentSession({
+      capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: true,
+        replyCorrelation: 'none', usage: { kind: 'native-transcript', transcriptFormat: 'codex-rollout' } },
+      turnUsage: { scope: 'response', inputTokens: 12, outputTokens: 127, totalTokens: 139, observedAt: _newTailFixtureEpoch(0, 0, 1234) }
+    }))
+    expect(display.text).toBe('127 tok')
+    expect(display.title).toBe('Last response · in 12 · out 127 · total 139 tokens')
   })
 
   it('says "no token usage" — never 0 — when the provider does not declare usage', () => {
