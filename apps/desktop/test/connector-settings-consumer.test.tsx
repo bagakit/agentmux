@@ -48,6 +48,60 @@ async function open() { const Pane = connectionsSettingsModule.Pane; await dom.r
 async function draft() { await act(async () => { dom.container.querySelector<HTMLDetailsElement>('.connector-optional')!.open = true }); await fill('Connection name', 'Shared team'); await fill('Connection app ID', 'app-a'); await fill('Connection app secret', secret) }
 
 describe('Settings uses the original connection owner through public service', () => {
+  it('keeps the confirmed saved revision when an earlier library list arrives late', async () => {
+    await owner.configure({ operationId: 'seed-before-late-list', expectedRevision: null, connection: { connectionId: 'original-application', adapterId: 'sample', application: { domain: 'chat.example', appId: 'app-a' }, label: 'Original application', enabled: true, credentialRef: 'credential-a' } })
+    await open()
+    let holdNextList = true, release: (() => void) | undefined
+    const delayed = new Promise<void>(resolve => { release = resolve })
+    vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
+      const result = await originalCall(method, params)
+      if (method === 'connection.ls' && holdNextList) { holdNextList = false; await delayed }
+      return result
+    })
+    try {
+      await dom.click('.connector-library .small-button')
+      await vi.waitFor(() => expect(completedLists).toBe(2))
+      await dom.click('[data-connection] button')
+      await dom.click('[data-connection-editor] .connector-editor-actions .small-button')
+      await fill('Connection name', 'Updated application')
+      await dom.click('[data-connection-save]')
+      await vi.waitFor(async () => { await act(async () => {}); expect(completedLists).toBe(3); expect(dom.container.querySelector('.connector-editor-title')?.textContent).toBe('Updated application') })
+      await act(async () => { release!(); await delayed })
+      const confirmed = (await owner.inspect({ connectionId: 'original-application' })).connection!
+      expect(confirmed.revision).toBe(2)
+      expect(confirmed.config.label).toBe('Updated application')
+      expect(dom.container.querySelector('.connector-editor-title')?.textContent).toBe('Updated application')
+    } finally { release!() }
+  })
+
+  it('retains the confirmed saved revision when the followup list refresh is unavailable', async () => {
+    await owner.configure({ operationId: 'seed-before-edit', expectedRevision: null, connection: { connectionId: 'original-application', adapterId: 'sample', application: { domain: 'chat.example', appId: 'app-a' }, label: 'Original application', enabled: true, credentialRef: 'credential-a' } })
+    await open()
+    await dom.click('[data-connection] button')
+    await dom.click('[data-connection-editor] .connector-editor-actions .small-button')
+    await fill('Connection name', 'Updated application')
+    let edited = false
+    vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
+      if (method === 'connection.ls' && edited) throw new Error('List refresh unavailable')
+      const result = await originalCall(method, params)
+      if (method === 'connection.configure') edited = true
+      return result
+    })
+    await dom.click('[data-connection-save]')
+    await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('.connector-issue')?.textContent).toContain('List refresh unavailable') })
+    const confirmed = (await owner.inspect({ connectionId: 'original-application' })).connection!
+    expect(confirmed.revision).toBe(2)
+    expect(confirmed.config.label).toBe('Updated application')
+    expect(dom.container.querySelector('.connector-editor-title')?.textContent).toBe('Updated application')
+    await dom.click('.connector-back')
+    expect(dom.container.querySelector('[data-connection]')?.textContent).toContain('Updated application')
+    await dom.click('[data-connection] button')
+    await dom.click('[data-connection-editor] .connector-editor-actions .small-button')
+    await fill('Connection name', 'Updated again')
+    await dom.click('[data-connection-save]')
+    await vi.waitFor(async () => { await act(async () => {}); expect((await owner.inspect({ connectionId: 'original-application' })).connection?.revision).toBe(3) })
+  })
+
   it('contributes to Connections and stores encrypted credentials before the real configure/list path', async () => {
     expect(settingsNavGroups('').find(group => group.id === 'connections')!.items.map(item => item.id)).toContain('chat-connections')
     await open(); await draft(); await dom.click('[data-connection-editor] .primary-button')
