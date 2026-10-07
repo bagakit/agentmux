@@ -1,4 +1,4 @@
-import { currentNotificationRows, notificationEventRows, toggleNotificationCenter } from './helpers/notification-center'
+import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter } from './helpers/notification-center'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -463,11 +463,18 @@ it('a successful launch retry settles its captured record without clearing a lat
   const later = lifecycleNotice({ regionId })!
   expect(later).not.toBe(first)
   expectCurrent(later)
+  await collapseFailure(container.querySelector('.agent-launch-notice')!)
+  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  const laterReads = useAppStore.getState().noticeReadReceipts
+  expect(laterReads['global:events']?.[later.id]).toBe('read')
   await act(async () => release())
   await vi.waitFor(() => expect(container.querySelector('.launcher-launch-button')?.textContent).toBe('Launch'))
   expect(lifecycleNotice({ regionId })).toBe(later)
   expectCurrent(later)
   expect(useAppStore.getState().notificationEvents).not.toContain(first)
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[later.id]).toBe('read')
+  const localScope = `local:lifecycle:${JSON.stringify(['launch', regionId])}`
+  expect(useAppStore.getState().noticeReadReceipts[localScope]).toEqual(laterReads[localScope])
 })
 
 it('keeps two actual Resume failures independent and rejects a late success clearing the newer exact-Run record', async () => {
@@ -511,6 +518,7 @@ it('keeps two actual Resume failures independent and rejects a late success clea
   expect(failureWindow(firstPane).textContent).toContain('Controlled resume refusal')
   expect(failureWindow(secondPane).textContent).toContain('Controlled resume refusal')
   await act(async () => useAppStore.getState().reportError('Independent file observation refusal'))
+  const ordinary = useAppStore.getState().notificationEvents.find(record => !record.context?.lifecycle)!
   await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
   await act(async () => useAppStore.getState().clearReadNotificationEvents())
   expectCurrent(first); expectCurrent(second)
@@ -527,24 +535,91 @@ it('keeps two actual Resume failures independent and rejects a late success clea
   await act(async () => useAppStore.getState().recoverSession(firstId))
   const later = lifecycleNotice({ subject: firstSession.control })!
   expect(later).not.toBe(first)
+  await collapseFailure(firstPane.querySelector('.agent-launch-notice')!)
+  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  const firstScope = `local:lifecycle:${JSON.stringify(['resume', firstSession.control.hostId, firstId, firstSession.control.run.runId])}`
+  const laterReads = useAppStore.getState().noticeReadReceipts
+  expect(laterReads['global:events']?.[later.id]).toBe('read')
   await act(async () => {
     resolve({ kind: 'reattachable', session: firstAttached })
     await pending
   })
   expect(lifecycleNotice({ subject: firstSession.control })).toBe(later)
   expectCurrent(later); expectCurrent(second)
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[later.id]).toBe('read')
+  expect(useAppStore.getState().noticeReadReceipts[firstScope]).toEqual(laterReads[firstScope])
   recover.mockResolvedValueOnce({ kind: 'reattachable', session: firstAttached })
   await click('Retry Resume', firstPane)
   expect(lifecycleNotice({ subject: firstSession.control })).toBeUndefined()
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[later.id]).toBeUndefined()
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[second.id]).toBe('read')
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[ordinary.id]).toBe('read')
   expectCurrent(second)
   recover.mockResolvedValueOnce({ kind: 'reattachable', session: secondAttached })
   await click('Retry Resume', secondPane)
   expect(lifecycleNotice({ subject: secondSession.control })).toBeUndefined()
   expect(currentNotificationRows(container).filter(row => row.textContent?.includes('resume refusal'))).toHaveLength(0)
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[second.id]).toBeUndefined()
+  const unreadBefore = Number(notificationTrigger(container).getAttribute('aria-label')!.match(/: (\d+) unread/)![1])
+  await act(async () => useAppStore.getState().reportError(second.message, second.context!))
+  const repeated = lifecycleNotice({ subject: secondSession.control })!
+  expect(repeated.id).toBe(second.id)
+  expectCurrent(repeated)
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[repeated.id]).toBeUndefined()
+  expect(Number(notificationTrigger(container).getAttribute('aria-label')!.match(/: (\d+) unread/)![1])).toBe(unreadBefore + 1)
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[ordinary.id]).toBe('read')
   expect(useAppStore.getState().tabs).toBe(tabs); expect(useAppStore.getState().layouts).toBe(layouts)
   expect(useAppStore.getState().agentComposerDrafts).toMatchObject({
     [firstId]: `Draft for ${firstId}`, [secondId]: `Draft for ${secondId}` })
   expect(core.agentSession(firstId).nativeHandle).toMatchObject({ sessionId: `native-${firstId}` })
   expect(core.agentSession(secondId).nativeHandle).toMatchObject({ sessionId: `native-${secondId}` })
   expect(stop).not.toHaveBeenCalled()
+})
+
+
+it('expires only an accurately settled launch read while a repeated same-cause failure becomes unread', async () => {
+  const secondary = addLauncher('read-preserved-launcher'), originalStart = kernel.start
+  kernel.start = async () => { throw new AgentMuxError('Controlled repeated launch refusal', 'CTXMUX_io', undefined,
+    { disposition: 'not_applied', confirmedInputBytes: 0 }) }
+  await twoLaunchers(secondary)
+  await click('Launch', launcherSurface('original'))
+  await vi.waitFor(() => expect(lifecycleNotice({ regionId })).toBeDefined())
+  await click('Launch', launcherSurface('secondary'))
+  await vi.waitFor(() => expect(lifecycleNotice({ regionId: secondary.regionId })).toBeDefined())
+  const first = lifecycleNotice({ regionId })!, second = lifecycleNotice({ regionId: secondary.regionId })!
+  await collapseFailure(launcherSurface('original').querySelector('.agent-launch-notice')!)
+  await collapseFailure(launcherSurface('secondary').querySelector('.agent-launch-notice')!)
+  await act(async () => useAppStore.getState().reportError('Independent ordinary reading fact'))
+  const ordinary = useAppStore.getState().notificationEvents.find(record => !record.context?.lifecycle)!
+  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  const firstScope = `local:lifecycle:${JSON.stringify(['launch', regionId])}`
+  const secondScope = `local:lifecycle:${JSON.stringify(['launch', secondary.regionId])}`
+  const prior = useAppStore.getState().noticeReadReceipts
+  expect(prior['global:events']?.[first.id]).toBe('read')
+  expect(prior['global:events']?.[second.id]).toBe('read')
+  expect(prior['global:events']?.[ordinary.id]).toBe('read')
+  expect(prior[firstScope]?.lifecycle).toBeDefined()
+  expect(prior[secondScope]?.lifecycle).toBeDefined()
+  // Unmount local consumers: their projection-pruning effects cannot substitute for source settlement.
+  await act(async () => root.render(<GlobalSystemNotices />))
+  kernel.start = originalStart
+  await act(async () => useAppStore.getState().launchAgent('fixture', '', 'projection-group', { tabId: launcherId, regionId }))
+  expect(lifecycleNotice({ regionId })).toBeUndefined()
+  const settled = useAppStore.getState().noticeReadReceipts
+  expect(settled['global:events']?.[first.id]).toBeUndefined()
+  expect(settled[firstScope]?.lifecycle).toBeUndefined()
+  expect(settled['global:events']?.[second.id]).toBe('read')
+  expect(settled['global:events']?.[ordinary.id]).toBe('read')
+  expect(settled[secondScope]).toEqual(prior[secondScope])
+  expectCurrent(second)
+  const unreadBefore = Number(notificationTrigger(container).getAttribute('aria-label')!.match(/: (\d+) unread/)![1])
+  await act(async () => useAppStore.getState().reportError(first.message, first.context!))
+  const repeated = lifecycleNotice({ regionId })!
+  expect(repeated.id).toBe(first.id)
+  expectCurrent(repeated)
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[repeated.id]).toBeUndefined()
+  expect(Number(notificationTrigger(container).getAttribute('aria-label')!.match(/: (\d+) unread/)![1])).toBe(unreadBefore + 1)
+  expectCurrent(second)
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[second.id]).toBe('read')
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[ordinary.id]).toBe('read')
 })

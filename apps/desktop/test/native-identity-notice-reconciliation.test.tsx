@@ -1,4 +1,4 @@
-import { currentNotificationRows, notificationEventRows, toggleNotificationCenter } from './helpers/notification-center'
+import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter } from './helpers/notification-center'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 // @vitest-environment happy-dom
@@ -31,6 +31,7 @@ vi.mock('../src/main/host-factory', () => ({ createExecutionHost: (config: { id:
 const dom = composerDOM()
 const original = composerSession()
 const native = { kind: 'provider' as const, providerId: 'codex', sessionId: 'confirmed-main', transcriptPath: fixturePath('main.jsonl') }
+const nativeDiagnostic = 'Controlled native identity observation remains unconfirmed.'
 const cleanups: Array<() => Promise<void>> = []
 let directory: string
 beforeEach(async () => {
@@ -72,7 +73,7 @@ function fact(extra: Partial<AgentMuxAgentSession> = {}): AgentMuxAgentSession {
 }
 function error(code = 'AGENT_NATIVE_IDENTITY_UNCONFIRMED'): RuntimeEvent {
   return { type: 'core', hostId: original.hostId, event: { type: 'agent-error', agentSessionId: original.id, code,
-    message: 'Controlled native identity observation remains unconfirmed.',
+    message: nativeDiagnostic,
     evidence: { source: 'agentmux', run: original.control.run, observedAt: _reshape_fixtureEpoch(0, 0, 2) } } }
 }
 function sessionEvent(extra: Partial<AgentMuxAgentSession> = {}, hostId = original.hostId): RuntimeEvent {
@@ -238,7 +239,7 @@ it('keeps two native subjects current through ordinary history, wrong facts and 
   const first = await showMissing()
   await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: secondary.hostId, event: {
     type: 'agent-error', agentSessionId: secondary.id,
-    code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: first.message,
+    code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: nativeDiagnostic,
     evidence: { source: 'agentmux', run: secondary.control.run, observedAt: _reshape_fixtureEpoch(0, 0, 2) }
   } }))
   const second = identityNotice(secondary.control)!
@@ -247,10 +248,14 @@ it('keeps two native subjects current through ordinary history, wrong facts and 
   expect(currentNotificationRows(dom.container).filter(row => row.dataset.noticeId === first.id || row.dataset.noticeId === second.id)).toHaveLength(2)
   await act(async () => useAppStore.getState().reportError('Independent clipboard failure'))
   expect(notificationEventRows(dom.container)).toHaveLength(1)
+  const ordinary = useAppStore.getState().notificationEvents.find(record => !record.context?.cause)!
   await toggleNotificationCenter(dom.container, 'open')
   await toggleNotificationCenter(dom.container, 'closed')
   await act(async () => useAppStore.getState().clearReadNotificationEvents())
   expect(notificationEventRows(dom.container)).toHaveLength(0)
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[ordinary.id]).toBe('read')
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[first.id]).toBe('read')
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[second.id]).toBe('read')
   expectRetained(first); expectRetained(second)
   await act(async () => useAppStore.getState().applyEvent(sessionEvent({
     agentSessionId: 'foreign-agent', nativeHandle: native, nativeHandlePersistence: 'confirmed',
@@ -269,12 +274,29 @@ it('keeps two native subjects current through ordinary history, wrong facts and 
   expectRetained(first); expectRetained(second)
   await act(async () => useAppStore.getState().applyEvent(sessionEvent(secondaryFact, secondary.hostId)))
   expectRetained(first); expectSettled(second)
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[second.id]).toBeUndefined()
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[first.id]).toBe('read')
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[ordinary.id]).toBe('read')
   expect(currentNotificationRows(dom.container).filter(row => row.dataset.noticeId === first.id || row.dataset.noticeId === second.id)).toHaveLength(1)
   await act(async () => useAppStore.getState().applyEvent(sessionEvent({ nativeHandle: native,
     nativeHandlePersistence: 'confirmed', updatedAt: _reshape_fixtureEpoch(0, 0, 20) })))
   expectSettled(first)
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[first.id]).toBeUndefined()
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[ordinary.id]).toBe('read')
   expect(currentNotificationRows(dom.container).filter(row => row.dataset.noticeId === first.id || row.dataset.noticeId === second.id)).toHaveLength(0)
   expect(useAppStore.getState().tabs).toBe(tabs); expect(useAppStore.getState().layouts).toBe(layouts)
+  await act(async () => useAppStore.getState().applyEvent(sessionEvent({ updatedAt: _reshape_fixtureEpoch(0, 0, 30) })))
+  const unreadBefore = Number(notificationTrigger(dom.container).getAttribute('aria-label')!.match(/: (\d+) unread/)![1])
+  await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: original.hostId, event: {
+    type: 'agent-error', agentSessionId: original.id, code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: nativeDiagnostic,
+    evidence: { source: 'agentmux', run: original.control.run, observedAt: _reshape_fixtureEpoch(0, 0, 31) }
+  } }))
+  const repeated = identityNotice()!
+  expect(repeated.id).toBe(first.id)
+  expectRetained(repeated)
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[repeated.id]).toBeUndefined()
+  expect(Number(notificationTrigger(dom.container).getAttribute('aria-label')!.match(/: (\d+) unread/)![1])).toBe(unreadBefore + 1)
+  expect(useAppStore.getState().noticeReadReceipts['global:events']?.[ordinary.id]).toBe('read')
   expect(dom.draft()).toBe('Keep my draft'); expect(dom.draft(secondary.id)).toBe('Secondary draft')
   expect(composerSubmitMode(useAppStore.getState().sessions.find(session => session.id === secondary.id)!))
     .toMatchObject({ canType: true, canSubmit: true })
