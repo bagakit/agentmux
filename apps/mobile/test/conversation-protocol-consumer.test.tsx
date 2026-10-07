@@ -164,7 +164,10 @@ it.each(['question', 'permission'] as const)('retains an unknown original synchr
   const view = await mount(f.surface())
   await vi.waitFor(() => expect(view.element.querySelector('[data-request-id]')).not.toBeNull())
   await click(button(view.element, kind === 'permission' ? 'Reject' : 'Keep sync original'))
-  await vi.waitFor(() => expect(saved().responses[0][1].phase).toBe('unknown'))
+  await vi.waitFor(() => {
+    expect(saved().responses).toHaveLength(1)
+    expect(saved().responses[0][1].phase).toBe('unknown')
+  })
   expect(f.respond).toHaveBeenCalledOnce(); const frozen = saved().responses[0][1].original
   expect(frozen.input).toMatchObject({ expectedRequest: request, operationId: expect.any(String), expectedRun: { runId: RUN_ID } })
   await paste(view.element, 'New unsent draft remains')
