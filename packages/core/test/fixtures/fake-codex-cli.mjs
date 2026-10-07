@@ -2,8 +2,9 @@
 import { tmpdir as fixtureTmpdir } from 'node:os'
 import { join as fixtureJoin, sep as fixtureSep } from 'node:path'
 const fixturePath = relative => { const temporary = relative.replace(/^(?:private\/)?tmp\//u, ''); return (temporary === relative ? fixtureJoin(fixtureTmpdir(), 'agentmux-fixtures') : fixtureTmpdir()) + fixtureSep + temporary.replaceAll('/', fixtureSep) }
-import { closeSync, mkdirSync, openSync, realpathSync, writeFileSync, writeSync } from 'node:fs'
+import { closeSync, mkdirSync, openSync, readFileSync, realpathSync, writeFileSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 const args = process.argv.slice(2)
 const nonFlags = args.filter((arg) => !arg.startsWith('-'))
 const resumeIndex = nonFlags.indexOf('resume')
@@ -20,7 +21,8 @@ if (capabilityReceipt) {
   if (!agentSessionId || !capability) throw new Error('missing Core-issued fixture credentials')
   writeFileSync(capabilityReceipt, JSON.stringify({ agentSessionId, capability }), { mode: 0o600 })
 }
-const readyMode = process.env.AGENTMUX_FAKE_READY_MODE ?? 'before-delayed'
+const configuredReadyMode = process.env.AGENTMUX_FAKE_READY_MODE ?? 'before-delayed'
+const readyMode = configuredReadyMode === 'working-until-resume' ? (isResume ? 'before' : 'no-stop') : configuredReadyMode
 const promptRenderMode = process.env.AGENTMUX_FAKE_PROMPT_RENDER_MODE ?? 'normal'
 const publishPermissionRequest = process.env.AGENTMUX_FAKE_PERMISSION_REQUEST === '1'
 const exitAfterPermission = process.env.AGENTMUX_FAKE_EXIT_AFTER_PERMISSION === '1'
@@ -61,9 +63,35 @@ if (process.env.AGENTMUX_FAKE_NATIVE_RECORD === '1' && process.env.AGENTMUX_FAKE
   const directory = process.env.AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY ?? join(process.env.HOME, '.codex', 'sessions')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   nativeRecordPath = join(realpathSync(directory), `rollout-${agentSessionId}.jsonl`)
-  nativeRecordDescriptor = openSync(nativeRecordPath, 'w', 0o600)
-  writeSync(nativeRecordDescriptor, `${JSON.stringify({ type: 'session_meta', payload: {
+  const preserveNative = isResume && process.env.AGENTMUX_FAKE_NATIVE_PRESERVE === '1'
+  if (preserveNative) {
+    const original = readFileSync(nativeRecordPath, 'utf8')
+    const records = original.split('\n').filter(Boolean).map(line => JSON.parse(line))
+    const metadata = records.find(one => one.type === 'session_meta')
+    if (nonFlags[resumeIndex + 1] !== metadata?.payload.id || metadata.payload.cwd !== process.cwd()) {
+      throw new Error('Native resume must select the exact retained conversation and execution directory')
+    }
+    if (process.env.AGENTMUX_FAKE_NATIVE_CONTEXT) {
+      const bodies = records.filter(one => one.type === 'response_item' && one.payload?.type === 'message')
+        .map(one => ({ role: one.payload.role, text: one.payload.content.map(part => part.text ?? '').join('') }))
+      if (!bodies.some(one => one.role === 'user' && one.text) || !bodies.some(one => one.role === 'assistant' && one.text)) throw new Error('Native resume must read the retained nonempty conversation')
+      process.stdout.write(`codex-restored-context:${JSON.stringify({ nativeSessionId: metadata.payload.id, bodies,
+        bodySha256: createHash('sha256').update(JSON.stringify(bodies)).digest('hex') })}\n`)
+    }
+  }
+  nativeRecordDescriptor = openSync(nativeRecordPath, preserveNative ? 'a' : 'w', 0o600)
+  if (!preserveNative) writeSync(nativeRecordDescriptor, `${JSON.stringify({ type: 'session_meta', payload: {
     id: `native-${agentSessionId}`, source: 'cli', cwd: process.cwd()
+  } })}\n`)
+  if (!preserveNative && process.env.AGENTMUX_FAKE_NATIVE_CONTEXT) {
+    for (const [role, text] of [['user', process.env.AGENTMUX_FAKE_NATIVE_CONTEXT], ['assistant', 'Recorded decision: preserve the original Session and the unsent draft.']]) {
+      writeSync(nativeRecordDescriptor, `${JSON.stringify({ timestamp: new Date().toISOString(), type: 'response_item', payload: {
+        type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text }]
+      } })}\n`)
+    }
+  }
+  if (preserveNative) writeSync(nativeRecordDescriptor, `${JSON.stringify({ type: 'fixture_resume', payload: {
+    id: nonFlags[resumeIndex + 1], cwd: process.cwd()
   } })}\n`)
   writeNativeBoundary('task_started')
   process.once('exit', () => closeSync(nativeRecordDescriptor))
