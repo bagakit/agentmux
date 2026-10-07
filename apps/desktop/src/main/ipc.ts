@@ -215,7 +215,9 @@ import { configWithRuntimeBindings, saveRuntimeConfig } from './runtime-config-t
 import { WorkspaceFiles, workspaceFileObserverCount } from './workspace-files.js'
 import { NoteFileWriter } from './note-file-writer.js'
 
-import { classifyRetention, WorktreeService } from './worktree-service.js'
+import { WorktreeService } from './worktree-service.js'
+import { WorktreeCloseoutOwner } from './worktree-closeout.js'
+import { worktreeExecutionReferences } from './worktree-execution-references.js'
 import { runFanOutRequest } from './fanout-request.js'
 import { createSpaceZoneResource } from './space-zone-resources.js'
 import type { SpaceZoneResourceInput } from '../shared/space-addresses.js'
@@ -349,6 +351,17 @@ export async function registerIpc(args: {
   const deliveryAttempts = { hostId: 'local', store: new DeliveryAttemptStore(join(app.getPath('userData'), 'client-delivery-attempts'), { clientJournal: true }) }
   const demands = args.demands ?? openDemandStore({ root: join(app.getPath('userData'), 'demands') })
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), { save: (next, expected) => configOwner.edit(expected, next) })
+  const worktreeCloseout = new WorktreeCloseoutOwner({ config: configOwner, spatial: spatialState, worktrees,
+    prepare: async () => {
+      const result = await controlBridge.execute({ operation: 'worktree.closeout.prepare', requestId: randomUUID() })
+      if (result.operation !== 'worktree.closeout.prepare' || result.diskDurability !== 'confirmed') throw new Error('Original workface save is unconfirmed. Keep the directory and retry after restoring its workface.')
+    },
+    executionReferences: async workspace => {
+      const host = args.runtime.rpcClients().find(item => item.hostId === workspace.hostId)
+      if (!host) throw new Error('The original Runtime Host is unavailable.')
+      return await worktreeExecutionReferences(workspace, host.client)
+    }
+  })
   const git = new GitService((id) => args.runtime.executionHost(id))
   // `git` is handed in rather than let GhService build its own: the PR readiness read asks git and gh
   // about the same repository in one breath, and two separately-constructed services could resolve a
@@ -701,15 +714,7 @@ export async function registerIpc(args: {
     note: await worktrees.orphanCommitNote(workspaceId, config)
   }))
   handle('workspaces:removeWorktree', async (input: RemoveWorktreeInput): Promise<RemoveWorktreeOutcome> => {
-    try {
-      const removal = await worktrees.removeWorktree(input, config)
-      return { status: 'removed', removedPath: removal.removedPath, config: removal.config }
-    } catch (error) {
-      // `classifyRetention` rather than a local re-derivation: the renderer decides what to offer from
-      // `retention` (discard is only a real next step for `uncommitted-changes`), and computing that
-      // classification twice is how the two removal paths came to disagree about the same failure.
-      return { status: 'retained', ...classifyRetention(error) }
-    }
+    return await worktreeCloseout.close(input, randomUUID())
   })
   // One fan-out. The orchestration lives in `fanout-request` so it is reachable from a test: this
   // handler is one forwarding expression with no statement position to disable. Text guards on this
@@ -745,8 +750,7 @@ export async function registerIpc(args: {
   // The dirty-tree protection is not bypassed here — a lane holding uncommitted work comes back as
   // `retained` and stays on disk, because "it lost" is not a reason to discard someone's work.
   handle('workspaces:keepOneOfFanOut', async (input: KeepOneOfFanOutInput): Promise<KeepOneOfFanOutOutcome> => {
-    const result = await worktrees.keepOneOfFanOut(input, config)
-    return { keptWorkspaceId: result.keptWorkspaceId, outcomes: result.outcomes }
+    return await worktreeCloseout.keepOne(input)
   })
   handle('git:commitDetails', async (workspaceId: string, input: import('../shared/git-contracts').GitCommitDetailsInput) =>
     await git.commitDetails(workspaceId, input, config))
@@ -815,6 +819,7 @@ export async function registerIpc(args: {
   const notebookObservation = createNotebookObservationServices(notebookStore, { files, workspace: id => config.workspaces.find(item => item.id === id) }, () => notesStorageReady)
   const noteFileWriter = new NoteFileWriter(files, { state: async () => { await notesStorageReady; return notebookStore.read() }, owner: notebookObservation.owner }, notebookStore)
   const publicFiles = new FileReadOwner({ files: { read: noteFileWriter.read.bind(noteFileWriter), listFiles: files.listFiles.bind(files), history: noteFileWriter.history.bind(noteFileWriter), restore: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.restore(actual, input, context)), undo: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.undo(actual, input, context)), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
+    retiredZone: async id => (await spatialState.read())?.graph.resources['zone:' + id],
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
   const moteConnectionPreferences = new MoteConnectionPreferences({ files: publicFiles,
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
@@ -2037,7 +2042,7 @@ export async function registerIpc(args: {
     nameHistory: query => desktopNameHistory(spatialState, demands, query),
     spatialState,
     files: publicFiles,
-    git: new GitPublicControl({ config: () => config, git }),
+    git: new GitPublicControl({ config: () => config, git, closeWorktree: input => worktreeCloseout.publicClose(input) }),
     fileUploads: new FileUploadOwner(join(homedir(), '.agentmux', 'attachments')),
     topics: topicKnowledge,
     moteAvatars,

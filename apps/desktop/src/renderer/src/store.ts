@@ -357,6 +357,7 @@ import {
   type FileExplorerViewState
 } from './lib/file-explorer-selection'
 import { moveSessionViewToWorkspace as reduceMoveSessionView } from './lib/move-session-view'
+import { rehomeClosedWorkspaces } from './lib/worktree-closeout-state'
 import { promoteRegionToTab as reducePromoteRegionToTab } from './lib/promote-region-to-tab'
 import {
   evaluateCreatePrIntent,
@@ -1329,7 +1330,7 @@ type AppState = {
    * Date.now()，判定才可断言、测试才不 flake。什么都不该降时不写入，避免无谓的重渲染。
    */
   decayStaleAgentStatuses(now: number): void
-  setConfig(config: AppConfig): void
+  setConfig(config: AppConfig, preferredWorkspaceId?: string): void
   reportError(error: unknown, context?: ErrorNoticeContext): void
   dismissError(): void
   reopenError(): void
@@ -4052,7 +4053,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       else get().applyBrowserEvent(event)
     })
-    const disposeControl = api.control.onRequest((request, signal) => request.operation === 'browser.openFromSystem' ? openSystemUrlInSurvey({ get, navigation: () => fileNavigationSelection(get()), subscribe: listener => useAppStore.subscribe(listener) }, request, signal) : request.operation === 'continuous-progress.observeInput'
+    const disposeControl = api.control.onRequest((request, signal) => request.operation === 'worktree.closeout.prepare'
+      ? (async () => {
+          if (!coreSpatialPersistence?.ready) throw new Error('Original workface storage is unconfirmed. Keep the worktree and restore storage before closing it.')
+          await coreSpatialPersistence.flush()
+          return { operation: request.operation, requestId: request.requestId, diskDurability: 'confirmed' as const }
+        })()
+      : request.operation === 'browser.openFromSystem' ? openSystemUrlInSurvey({ get, navigation: () => fileNavigationSelection(get()), subscribe: listener => useAppStore.subscribe(listener) }, request, signal) : request.operation === 'continuous-progress.observeInput'
       ? readContinuousProgressInput(get(), request, signal)
       : request.operation === 'metrics.renderer'
         ? { operation: 'metrics.renderer', window: request.window, observedAt: Date.now(), ...api.readRendererMemory(), counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() }
@@ -4359,6 +4366,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         disposeCoreSpatial=()=>{offLocal();offRemote()}
         try {
           await spatial.bootstrap(capture())
+          const closed = get().config?.workspaces.filter(workspace => workspace.closeout) ?? []
+          if (closed.length) {
+            for (const workspace of closed) spatial.closeWorkspace(workspace.id)
+            spatial.stage(capture())
+            await spatial.flush()
+          }
           const acknowledged = await api.spatial.retainLabels(retainedDisplayNames)
           spatial.acceptNames(acknowledged)
           applyNameAcknowledgement(acknowledged)
@@ -4501,7 +4514,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set((state) => {
       const existingLayout = state.layouts[workspace.id]
       return {
-        config: result.config,
+        ...adoptedConfig(state.activeWorkspaceId, result.config),
         ...(reveal ? { activeWorkspaceId: workspace.id, workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null,
           mainSurface: 'workbench' as const, regionCaretFocus: null, error: null, errorDismissed: true } : {}),
         layouts: existingLayout
@@ -4610,6 +4623,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   async keepOneOfFanOut(input) {
     try {
+      await coreSpatialPersistence?.flush()
       const result = await api.workspaces.keepOneOfFanOut(input)
       // 输家的记录刚被撤掉，而活动位很可能正指着其中一个——用户就是在看那几条 lane 才按下 Keep 的。
       const next = await api.config.get()
@@ -4617,7 +4631,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // 落到胜者身上。落到胜者而不是通用兜底，是因为「留下这一个」这句话本身就说明了该看哪儿。
       // 输家的记录连同它们的文件 Tab 一起被撤，那些 Tab 攥着的 Main 侧观察者也要在这里释放（#559）。
       disposeObserversForRemovedWorkspaces(get().tabs, next)
-      set((state) => adoptedConfig(state.activeWorkspaceId, next, input.keepWorkspaceId))
+      get().setConfig(next, input.keepWorkspaceId)
       // A lane refused because it still holds uncommitted work is reported, never silently dropped —
       // losing a bake-off is not a reason to discard someone's work. 分档措辞在 `retentionReport`
       // 里，因为「哪一档说哪句话」是判断：这里曾经把三档折成一句硬编码的「because they still hold
@@ -4634,14 +4648,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   async removeWorktree(input) {
+    await coreSpatialPersistence?.flush()
     const outcome = await api.workspaces.removeWorktree(input)
     // `removed` 带回来的 config 就是权威的那一份，不再另外 get() 一次：多一次往返就多一个能与这次
     // 移除结果不一致的窗口。`retained` 什么都没删，所以什么都不写——它是保护生效了，不是一次变更。
-    if (outcome.status === 'removed') {
+    if (outcome.status === 'removed' || outcome.status === 'closed') {
       // The removed worktree's file Tabs still hold Main-side observers; drop them at the same seam
       // that reseats the active Workspace (see disposeObserversForRemovedWorkspaces / #559).
       disposeObserversForRemovedWorkspaces(get().tabs, outcome.config)
-      set((state) => adoptedConfig(state.activeWorkspaceId, outcome.config))
+      get().setConfig(outcome.config)
     }
     // 抛不抛由调用方决定：单条移除的 `retained` 要在对话框里重问，压成 null 会把 git 的理由吃掉。
     return outcome
@@ -10724,7 +10739,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return decayed === state.sessions ? state : { sessions: decayed }
     })
   },
-  setConfig(config) {
+  setConfig(config, preferredWorkspaceId) {
     if (Object.hasOwn(config.appearance, 'spaceObjectIcons')) retainedSpaceIconHandoff = undefined
     const iconProjection = restoreSpaceIconOverrides(config.appearance.spaceObjectIcons)
     const runtimeConfigChanged = JSON.stringify(get().config?.hosts) !== JSON.stringify(config.hosts) ||
@@ -10746,8 +10761,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // 一个 Main 侧观察者子进程。撤活动位让它们不可达却不释放那些子进程，于是它们一直活到 app 退出
     // （#559 的子进程泄漏）。在同一处把它们撤掉——与「谁负责在记录消失时收尾」是同一个决定。
     disposeObserversForRemovedWorkspaces(get().tabs, config)
+    for (const workspace of config.workspaces) if (workspace.closeout) coreSpatialPersistence?.closeWorkspace(workspace.id)
     set((state) => ({
-      ...adoptedConfig(state.activeWorkspaceId, config),
+      ...adoptedConfig(state.activeWorkspaceId, config, preferredWorkspaceId),
+      ...rehomeClosedWorkspaces(state, config),
       ...(Object.hasOwn(config.appearance, 'spaceObjectIcons') ? { spaceObjectIcons: configValuesEqual(state.spaceObjectIcons, iconProjection) ? state.spaceObjectIcons : iconProjection } : {}),
       ...(runtimeConfigChanged ? { executorDetections: Object.fromEntries(Object.entries(state.executorDetections).filter(([, check]) => {
         const input = check.input
