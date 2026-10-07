@@ -1,3 +1,4 @@
+import { isConnectionEnrollmentMethod, parseConnectionEnrollmentParams } from './connection-enrollment-codec.js'
 import { isConnectionDeliveryMethod, parseConnectionDeliveryParams } from './connection-delivery-codec.js'
 import { isRoomBindingMethod, parseRoomBindingParams } from './room-binding-codec.js'
 import { isRoomProvisioningMethod, parseRoomProvisioningParams } from './room-provisioning-codec.js'
@@ -399,6 +400,15 @@ export class AgentMuxRpcService {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       const owner = this.ports.connections
       const administration = { actor: { kind: context.principal.kind as 'user' | 'device', id: context.principal.id }, assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.() } }
+      if (isConnectionEnrollmentMethod(method)) {
+        const enrollment = owner.enrollment
+        if (!enrollment) throw new AgentMuxError('Application enrollment is unavailable on this Host. Existing Agents and connections remain available.', 'CONTROL_UNAVAILABLE')
+        const result = method === 'connection.enrollment.begin' ? await enrollment.begin(parseConnectionEnrollmentParams(method, params), { ...administration, ...(context.signal ? { signal: context.signal } : {}) })
+          : method === 'connection.enrollment.advance' ? await enrollment.advance(parseConnectionEnrollmentParams(method, params), { ...administration, ...(context.signal ? { signal: context.signal } : {}) })
+          : method === 'connection.enrollment.ls' ? await enrollment.list(parseConnectionEnrollmentParams(method, params))
+          : await enrollment.inspect(parseConnectionEnrollmentParams(method, params))
+        return parseConnectionResult(method, result, input) as AgentMuxRpcResult<M>
+      }
       if (isRoomDiscoveryMethod(method)) {
         const rooms = owner.rooms
         const handler = method === 'connection.room.ls' ? rooms?.list : method === 'connection.room.search' ? rooms?.search : method === 'connection.room.get' ? rooms?.get

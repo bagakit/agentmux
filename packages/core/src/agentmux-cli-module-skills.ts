@@ -101,7 +101,10 @@ Read connection ingress and delivery records for their original source and ackno
 Pause/relink affects the exact binding; it does not complete external work or stop Agents.
 After an unknown delivery, inspect the original delivery identity. Retry only as the explicit
 supported delivery operation with its frozen facts; never generate a second logical message
-because a response was lost. Unavailable adapters retain configured bindings and known receipts.`
+because a response was lost. Unavailable adapters retain configured bindings and known receipts.
+Enrollment begin creates an original application intent; advance may perform a platform request.
+Enrollment ls/inspect are local reads for restart recovery. Unknown one-time credential delivery
+is inspect-only, never a reason to begin or poll again. Credentials never belong on public wire.`
   },
   device: {
     summary: 'Local device pairing, encrypted identity and revocation',
