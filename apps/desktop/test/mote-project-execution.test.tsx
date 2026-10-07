@@ -17,7 +17,7 @@ import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { configOwnerFixture } from './helpers/config-owner-fixture'
-import { AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../../../packages/core/src/agentmux-cli-help'
+import { agentMuxCommandHelp } from '../../../packages/core/src/agentmux-cli-help'
 
 const roots: string[] = []
 const initial = useAppStore.getState()
@@ -36,7 +36,7 @@ describe('Mote coordination reaches original execution owners', () => {
     const help = agentMuxCommandHelp('demand')
     expect(help).toBeTruthy()
     for (const flag of flags) expect(help).toContain(flag)
-    for (const flag of ['--risk', '--confirm', '--wiki-version']) expect(AGENTMUX_CLI_SKILL).toContain(flag)
+    for (const flag of ['--risk', '--confirm', '--wiki-version']) expect(agentMuxCommandHelp('goal.create')).toContain(flag)
     expect(help).toContain('use its exact projectId')
     expect(help).toContain('Workspace id; it is not the Project id')
     expect(help).toContain('risk=unknown and confirmation=pending')

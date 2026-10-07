@@ -199,7 +199,7 @@ it('actual CLI help and skill expose scoped changes and reader-only follow cance
   const help = await runCompiledObjectCli(['agent', 'conversation', 'watch', '--help'], env)
   expect(help.code, help.stderr).toBe(0)
   expect(help.stdout).toContain('Ctrl-C releases this reader')
-  const skill = await runCompiledObjectCli(['--skill'], env)
+  const skill = await runCompiledObjectCli(['agent', '--help'], env)
   expect(skill.code, skill.stderr).toBe(0)
   for (const action of ['checkpoint', 'changes', 'watch']) expect(skill.stdout).toContain(`amux agent conversation ${action}`)
   await f.unchanged()

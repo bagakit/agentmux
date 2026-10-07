@@ -1,3 +1,4 @@
+import { agentMuxModuleSkill } from '../../../packages/core/src/agentmux-cli-module-skills.js'
 import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
@@ -19,7 +20,7 @@ import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-ser
 import { rpcControlRequest } from '../../../packages/core/src/rpc-business-codec'
 import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands'
 import type { AgentMuxRpcResult } from '../../../packages/core/src/public-rpc'
-import { AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../../../packages/core/src/agentmux-cli-help'
+import { agentMuxCommandHelp } from '../../../packages/core/src/agentmux-cli-help'
 import type { AppConfig, BrowserSnapshot, SessionSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, warmTerminalKey } from '../src/renderer/src/store'
@@ -372,7 +373,7 @@ describe('public Source CLI consumes the existing Browser owner', () => {
     expect(selection()).toEqual(before)
   })
   it('generates the discover-first CLI route and rejects GUI fallback without a second capability list', () => {
-    const skill = AGENTMUX_CLI_SKILL.replace(/\s+/g, ' ')
+    const skill = agentMuxModuleSkill('browser')!.replace(/\s+/g, ' ')
     expect(skill.length).toBeGreaterThan(0)
     expect(skill).toContain('First inspect the exact Tab/Region and read its typed Browser id')
     expect(skill).toContain('or use GUI input to get around that result.')

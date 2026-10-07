@@ -126,7 +126,7 @@ describe('original domain owners → typed public RPC → compiled CLI', () => {
     expect(JSON.parse(cli.stdout)).toMatchObject({ ok: true, operation: 'system.diagnostics.inspect', result: { relations: [{ verification: 'target-matched' }] } })
     const help = await runCompiledObjectCli(['system', 'diagnostics', 'inspect', '--help'], objectCliEnvironment(root))
     expect(help.code).toBe(0); expect(help.stdout).toContain('--list'); expect(help.stdout).toContain('--include-raw')
-    const skill = await runCompiledObjectCli(['--skill'], objectCliEnvironment(root))
+    const skill = await runCompiledObjectCli(['system', '--skill'], objectCliEnvironment(root))
     expect(skill.code).toBe(0); expect(skill.stdout).toContain('system diagnostics inspect')
     const discovery = await rpc.call('system.diagnostics.inspect', {})
     expect(discovery.reads).toEqual([]); expect(discovery.capabilities.length).toBeGreaterThan(1)

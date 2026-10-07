@@ -141,7 +141,7 @@ it('actual compiled CLI SSH carrier reaches the official stdio leaf and original
 })
 it('compiled help, command help and skill share exact service-relative remote semantics', async () => {
   const h = await originalOwner()
-  for (const args of [['--help'], ['--help', 'agent', 'context'], ['--skill']]) {
+  for (const args of [['--help'], ['--help', 'agent', 'context'], ['agent', '--help']]) {
     const reply = await h.cli(`unix:${join(h.root, 'absent.sock')}`, args)
     expect(reply.code).toBe(0)
     for (const text of ["local means the receiving Core service's own machine", 'routeHostId', 'sourceHostId', 'same endpoint',

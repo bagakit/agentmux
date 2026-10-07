@@ -84,7 +84,7 @@ it('default shipping CLI and GUI observe raw/null query targets and closed incom
   expect(f.forwarded.map(call => call.method)).toEqual(['notebook.graph', 'notebook.graph', 'notebook.inspect', 'notebook.resolve'])
   expect(f.forwarded.every(call => (call.caller as { agentSessionId: string }).agentSessionId === actor.id)).toBe(true)
   expect(await readFile(join(f.root, 'source.note.md'), 'utf8')).toBe(sourceBytes); expect(await readFile(join(f.root, 'target.note.md'), 'utf8')).toBe(targetBytes)
-  const skill = await runCompiledObjectCli(['--skill'], f.env); expect(skill.code).toBe(0); for (const term of ['never a file binding', 'one observation', 'retain query and their original occurrence']) expect(skill.stdout).toContain(term)
+  const skill = await runCompiledObjectCli(['notebook', '--skill'], f.env); expect(skill.code).toBe(0); for (const term of ['never a file binding', 'one observation', 'retain query and their original occurrence']) expect(skill.stdout).toContain(term)
 })
 
 it('uses exactly the graph original observations even if the target file changes after its first read', async () => {

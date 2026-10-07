@@ -244,7 +244,7 @@ it('original activity public Source CLI authenticates the author and reaches Mai
   try {
     const help = (await execute(process.execPath, [sourceCli, 'goal', 'activity', 'append', '--help'], { env: environment })).stdout
     expect(help).toContain('--operation-id'); expect(help).toContain('--message')
-    expect((await execute(process.execPath, [sourceCli, '--skill'], { env: environment })).stdout).toContain('goal activity inspect')
+    expect((await execute(process.execPath, [sourceCli, 'goal', '--skill'], { env: environment })).stdout).toContain('goal activity inspect')
     await act(async () => {
       await useAppStore.getState().refreshDemand('goal')
       root.render(<Consumer />)
@@ -840,7 +840,7 @@ it('original SDK and CLI create/update/list/inspect persist exact content refs t
     const run = async (args: string[]) => JSON.parse((await execute(process.execPath, [sourceCli, '--endpoint', 'unix:' + server.path, ...args], { env: environment, timeout: 15000 })).stdout)
     const help = (await execute(process.execPath, [sourceCli, 'goal', 'update', '--help'], { env: environment, timeout: 15000 })).stdout
     expect(help).toContain('--content-refs'); expect(help).toContain('--expected-updated-at')
-    expect((await execute(process.execPath, [sourceCli, '--skill'], { env: environment, timeout: 15000 })).stdout).toContain('content provenance')
+    expect((await execute(process.execPath, [sourceCli, 'goal', '--skill'], { env: environment, timeout: 15000 })).stdout).toContain('content provenance')
     const updated = await run(['goal', 'update', '--goal', 'content-original', '--content-refs', JSON.stringify([ref]), '--expected-updated-at', String(created.goal.updatedAt), '--operation-id', 'content-append'])
     expect(updated.result.goal.contentRefs).toEqual([ref])
     const byCli = await run(['goal', 'create', '--goal', 'content-cli', '--title', 'CLI content', '--content-refs', JSON.stringify([ref]), '--risk', 'low', '--confirm', 'user'])

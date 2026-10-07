@@ -62,6 +62,6 @@ it('generates actual CLI help and skill discovery with the theme icon catalog co
   const env = objectCliEnvironment(directory)
   const help = await runCompiledObjectCli(['settings', 'themes', 'ls', '--help'], env)
   expect(help.code, help.stderr).toBe(0); expect(help.stdout).toContain('semantic icon catalog')
-  const skill = await runCompiledObjectCli(['--skill'], env)
+  const skill = await runCompiledObjectCli(['settings', '--skill'], env)
   expect(skill.code, skill.stderr).toBe(0); expect(skill.stdout).toContain('iconCatalog: groups with labels/descriptions')
 })

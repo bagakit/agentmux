@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import { parseTopicParams, parseTopicResult, type TopicKnowledge, type TopicKnowledgeWrite, type TopicResult } from '../src/public-rpc-topics.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
-import { AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
+import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
@@ -33,11 +33,11 @@ describe('Topic typed public contract', () => {
     expect(() => parseTopicResult('topic.migrate.apply', { spatialRevision: 1, backupPath: null, migratedTopicIds: ['self'], diskDurability: 'confirmed' }, { expectedRevision: 0 })).toThrow()
   })
   it('discovers actual executable commands in help and skill without replacing Notebook capabilities', () => {
-    expect(AGENTMUX_CLI_SKILL).toContain('amux topic category create')
-    expect(AGENTMUX_CLI_SKILL).toContain('amux topic migrate preview')
-    expect(AGENTMUX_CLI_SKILL).toContain('amux notebook ls')
+    expect(agentMuxCommandHelp('topic')).toContain('amux topic category create')
+    expect(agentMuxCommandHelp('topic')).toContain('amux topic migrate preview')
+    expect(agentMuxCommandHelp('notebook')).toContain('amux notebook ls')
     expect(agentMuxCommandHelp('topic.move')).toContain('--revision NUMBER')
-    expect(AGENTMUX_CLI_SKILL).toContain('amux topic knowledge search')
+    expect(agentMuxCommandHelp('topic')).toContain('amux topic knowledge search')
     expect(agentMuxCommandHelp('topic.knowledge.write')).toContain('--input FILE|-')
   })
   it('requires typed original sources, exact revisions and bounded scopes for knowledge writes and results', () => {

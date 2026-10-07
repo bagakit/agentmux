@@ -64,7 +64,8 @@ it('discovers exact fixed commands offline in the sole help and skill, with no C
     const result = await run(args, offline)
     expect(result.code).toBe(0); expect(result.stdout.length).toBeGreaterThan(0)
     expect(result.stdout).toContain('system')
-    if (args[0] !== '--help') {
+    if (args[0] === '--skill') expect(result.stdout).toContain('amux system --skill')
+    else if (args[0] !== '--help') {
       expect(result.stdout).toContain('amux system crash-log')
       expect(result.stdout).toContain('amux system crash-log reveal')
     }

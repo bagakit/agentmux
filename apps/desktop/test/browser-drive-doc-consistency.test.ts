@@ -1,7 +1,7 @@
+import { agentMuxModuleSkill } from '../../../packages/core/src/agentmux-cli-module-skills.js'
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { AGENTMUX_CLI_SKILL } from '../../../packages/core/src/agentmux-cli-help.js'
 import { BROWSER_PAGE_CAPABILITY_NAMES } from '@agentmux/core'
 import { BROWSER_PAGE_FUNCTION_NAMES } from '../src/main/browser-script-runner.js'
 
@@ -221,7 +221,7 @@ describe('Agent 驱动页面：文档与实现自洽', () => {
     ).toEqual([...names])
 
     // skill 是渲染出来的，所以判「每个名字都在场」，而不是判源码里有没有字面量。
-    const skill = AGENTMUX_CLI_SKILL
+    const skill = agentMuxModuleSkill('browser')!
     for (const name of names) {
       expect(skill, `skill 没教 \`${name}\`——它注入进了子进程，但 Agent 无从知道它存在`).toContain(name)
     }
@@ -232,11 +232,11 @@ describe('Agent 驱动页面：文档与实现自洽', () => {
     //
     // 锚点先判在场再切（两端都判），否则 -1 会让 slice 切出个宽到没有意义的段，
     // 而下面的 `toContain` 在那种段上恒真——这条测试此前就是这么失明的。
-    const start = skill.indexOf('## Drive an open Browser')
-    expect(start, 'skill 里没有「Drive an open Browser」这一节——判据的范围落空').toBeGreaterThan(-1)
+    const start = skill.indexOf('Page capabilities come from the actual owner:')
+    expect(start, 'Browser 模块的实际能力清单不存在——判据的范围落空').toBeGreaterThan(-1)
     const section = skill.slice(start)
-    const sentenceEnd = section.indexOf('Write one program')
-    expect(sentenceEnd, '这一节里没有「Write one program」——右界锚点没了，切片没有右界').toBeGreaterThan(0)
+    const sentenceEnd = section.indexOf('Run a program in an open Browser')
+    expect(sentenceEnd, 'Browser program guide 不存在——右界锚点没了，切片没有右界').toBeGreaterThan(0)
     const injectedSentence = section.slice(0, sentenceEnd)
     expect(injectedSentence.length, '「注入了哪些函数」那句话切出来是空的').toBeGreaterThan(80)
     const taught = new Set([...injectedSentence.matchAll(/`([a-zA-Z]+)`/g)].map((match) => match[1]!))

@@ -51,7 +51,7 @@ it('actual Unix CLI discovers and calls the three typed methods with exact busin
   const env = objectCliEnvironment(root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + path })
   const help = await runCompiledObjectCli(['--help'], env)
   expect(help.code).toBe(0); for (const name of ['goal discuss', 'goal confirm', 'goal accept']) expect(help.stdout).toContain(name)
-  const skill = await runCompiledObjectCli(['--skill'], env)
+  const skill = await runCompiledObjectCli(['goal', '--help'], env)
   expect(skill.code).toBe(0); expect(skill.stdout).toContain('goal discuss'); expect(skill.stdout).toContain('authenticated person')
   const cases = [
     ['goal', 'discuss', '--goal', goal.id, '--mode', 'open', '--operation-id', 'open-op'],

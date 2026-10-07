@@ -93,7 +93,7 @@ describe('compiled public delivery consumers', () => {
     expect(help.code).toBe(0); expect(help.stdout).toContain('--binding-revision'); expect(help.stdout).toContain('--after'); expect(help.stdout).toContain('--limit')
     const retryHelp = await runCompiledObjectCli(['connection', 'delivery', 'retry', '--help'], f.env)
     expect(retryHelp.code).toBe(0); expect(retryHelp.stdout).toContain('Unknown operations cannot be retried'); expect(retryHelp.stdout).toContain('same operation')
-    const skill = await runCompiledObjectCli(['--skill'], f.env)
+    const skill = await runCompiledObjectCli(['connection', '--help'], f.env)
     expect(skill.code).toBe(0); expect(skill.stdout).toContain('connection delivery inspect'); expect(skill.stdout).toContain('connection delivery retry')
     expect((await f.cli(['ls', '--connection', f.first.target.connectionId, '--binding', f.first.bindingId, '--binding-revision', '3', '--limit', '101'])).code).not.toBe(0)
     const probe = new ObjectCliProbe(() => ({ delivery: { ...f.first, operationId: 'foreign', prepared: 'private-wire', payload: 'private-body' } })); await probe.start(); close.push(() => probe.stop())

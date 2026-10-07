@@ -17,7 +17,7 @@ const commands = AGENTMUX_CLI_COMMANDS.filter(command => command.method.startsWi
 describe('compiled schedule discovery and invocation', () => {
   it('prints one usable syntax with parser-accurate inputs in every discovery surface', async () => {
     expect(commands).toHaveLength(6)
-    const surfaces = await Promise.all([['--help'], ['schedule', '--help'], ['--skill']].map(args => run(args)))
+    const surfaces = await Promise.all([['--help'], ['schedule', '--help']].map(args => run(args)))
     for (const surface of surfaces) expect(surface.code, surface.stderr).toBe(0)
     for (const command of commands) {
       let acceptsEmpty = false
@@ -35,6 +35,10 @@ describe('compiled schedule discovery and invocation', () => {
       expect(leaf.stdout.split('\n').find(line => line.startsWith('Usage: '))).toBe('Usage: ' + syntax)
       expect(leaf.stdout).toContain(command.details)
     }
+    const guide = await run(['schedule', '--skill'])
+    expect(guide.code, guide.stderr).toBe(0)
+    expect(guide.stdout).toContain('The scheduler owns schedule identity')
+    expect(guide.stdout).toContain('amux schedule --help')
     // Help is available offline and does not create state or start a service.
     expect(await readdir(root)).toEqual([])
   })

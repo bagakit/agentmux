@@ -751,7 +751,7 @@ describe('external page owner uses the existing program and journal', () => {
       if (event.event.type === 'step-finished' && event.event.step.status === 'stopped') stopped.resolve()
     })
     try {
-      for (const args of [['--help'], ['--help', 'browser'], ['--help', 'browser', 'stop'], ['--skill']]) {
+      for (const args of [['--help'], ['--help', 'browser'], ['--help', 'browser', 'stop'], ['browser', '--help']]) {
         const output = await cli.run(args)
         expect(output.code, output.stderr).toBe(0)
         expect(output.stdout).toContain('Stop an active Browser operation; return retained state if finished.')

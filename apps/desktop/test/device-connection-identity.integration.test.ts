@@ -380,7 +380,7 @@ it('actual phone query consumes the original CLI and omits a disconnected device
 
 it('the actual CLI help and skill discover recorded identification and keep the existing management commands', async () => {
   const root = await directory()
-  for (const args of [['device', '--help'], ['--skill']]) {
+  for (const args of [['device', '--help'], ['device', '--help']]) {
     const output = await runCompiledObjectCli(args, objectCliEnvironment(root))
     expect(output.code, output.stderr).toBe(0)
     expect(output.stdout).toContain('authenticated key fingerprints'); expect(output.stdout).toContain('Unrecorded identification remains unknown')

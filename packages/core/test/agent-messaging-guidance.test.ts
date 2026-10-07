@@ -116,11 +116,12 @@ it('real creation, whoami and compiled skill discover messaging and advisory ope
     expect(JSON.stringify(output)).not.toContain(issued.capability)
     const skill = (await exec(process.execPath, [cli, '--skill'], { env })).stdout
     expect(skill).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
-    const openingStart = skill.indexOf('## Delegation and opening playbook (advisory)')
-    const openingEnd = skill.indexOf('## Read an amux object link', openingStart)
+    const spaceSkill = (await exec(process.execPath, [cli, 'space', '--skill'], { env })).stdout
+    const openingStart = spaceSkill.indexOf('## Delegation and opening playbook (advisory)')
+    const openingEnd = spaceSkill.indexOf('## Read an amux object link', openingStart)
     expect(openingStart).toBeGreaterThanOrEqual(0)
     expect(openingEnd).toBeGreaterThan(openingStart)
-    const opening = skill.slice(openingStart, openingEnd).trim()
+    const opening = spaceSkill.slice(openingStart, openingEnd).trim()
     expect(opening).toMatch(/Provider-native delegation[\s\S]*independent AgentMux Session/)
     expect(opening).toMatch(/Agent or file[\s\S]*same-Tab split[\s\S]*new Tab/)
     expect(opening).toMatch(/real order[\s\S]*do not offer before\/after Tab flags/)

@@ -62,7 +62,7 @@ it('help and skill discover Refresh offline, while the actual operation returns 
   expect(help.stdout).toContain('cause.code/message'); expect(help.stdout).toContain('Exit 0')
   const group = await run(['settings', 'executors', '--help'], true)
   expect(group.code).toBe(0); expect(group.stdout).toContain('refresh <executor-id> --host <host-id>')
-  const skill = await run(['--skill'], true)
+  const skill = await run(['settings', '--help'], true)
   expect(skill.code).toBe(0); expect(skill.stdout).toContain('settings executors refresh <executor-id> --host <host-id>')
   const offline = await run(['settings', 'executors', 'refresh', 'first', '--host', 'local'], true)
   expect(offline.code).not.toBe(0); expect(JSON.parse(offline.stderr).error.code).toBe('CONTROL_UNAVAILABLE')

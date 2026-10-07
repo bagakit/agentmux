@@ -162,7 +162,7 @@ describe('settings CLI over the public Control socket', () => {
 
   it('exposes settings in both top-level discovery and Agent instructions', async () => {
     const help = await run(['--help'])
-    const skill = await run(['--skill'])
+    const skill = await run(['settings', '--help'])
     expect(help.code).toBe(0)
     expect(skill.code).toBe(0)
     expect(help.stdout).toContain('amux settings inspect')

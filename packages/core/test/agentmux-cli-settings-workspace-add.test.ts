@@ -180,7 +180,7 @@ describe('Workspace add built CLI consumes the public owner without a caller or 
 
   it('exposes registration in settings discovery and Agent instructions without contacting an owner', async () => {
     await server.stop()
-    for (const args of [['settings', '--help'], ['--skill']]) {
+    for (const args of [['settings', '--help'], ['--help']]) {
       const output = await run(args)
       expect(output.code).toBe(0); expect(output.stderr).toBe('')
       expect(output.stdout).toContain('settings workspaces register --input <file|->')

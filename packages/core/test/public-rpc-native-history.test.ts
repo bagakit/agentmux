@@ -1,3 +1,4 @@
+import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
 import { createHash } from 'node:crypto'
 import { appendFile, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -10,7 +11,7 @@ import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-s
 import { AgentMuxHostExecutorOwner } from '../src/executor-owner.js'
 import { NativeJsonlHistoryReader } from '../src/native-jsonl-history-reader.js'
 import { parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
-import { agentMuxCommandHelp, AGENTMUX_CLI_SKILL } from '../src/agentmux-cli-help.js'
+import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { AgentMuxRpcService, type AgentMuxRpcServiceOptions } from '../src/public-rpc-service.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
@@ -229,7 +230,7 @@ describe('saved native conversation history through its actual public reader', (
     expect(parsed.command.method).toBe('agent.native.history'); expect(parsed.params).toEqual({ ...f.params, limit: 2 })
     expect(agentMuxCommandHelp('agent.native.history')).toContain('nextCursor')
     expect(agentMuxCommandHelp('agent.native')).toContain('amux agent native history --input FILE|-')
-    expect(AGENTMUX_CLI_SKILL).toContain('Reading and cancellation operate no Session or Run.')
+    expect(agentMuxModuleSkill('agent')!).toContain('Reading and cancellation operate no Session or Run.')
     for (const command of [['agent', 'native', 'history'], ['agent', 'native', 'history', 'resource']]) {
       const help = await f.cli([...command, '--help'])
       expect(help.code, help.stderr).toBe(0)

@@ -146,7 +146,7 @@ it('ordinary CLI executable consumes Notes/Goals via an owned private public soc
   const options = { timeout: 5000, env: { ...process.env, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } }
   await server.start()
   try {
-    const guide = (await cli(process.execPath, [args[0]!, '--skill'], options)).stdout
+    const guide = (await cli(process.execPath, [args[0]!, 'settings', '--skill'], options)).stdout
     expect(guide).toContain('settings set notes.fontSize 16')
     expect(guide).toContain('settings set goals.defaultView board')
     const found = JSON.parse((await cli(process.execPath, [...args, 'inspect', 'notes'], options)).stdout).result

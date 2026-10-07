@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import packageManifest from '../package.json' with { type: 'json' }
 import { AGENTMUX_CLI_COMMANDS, agentMuxCliMatch, parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
 import { AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
+import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
 import { browserPageCapabilityNames } from '../src/browser-page-capability.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from '../src/agent-messaging-guidance.js'
@@ -97,20 +98,24 @@ describe('compiled object-first CLI help and discovery', () => {
     }
   }, 120_000)
 
-  it('prints the same actual command registration in the skill without retired aliases', async () => {
+  it('prints the actual module directory without retired aliases and reads Agent details on demand', async () => {
     const result = await run(['--skill'])
     expect(result.code, result.stderr).toBe(0)
     expect(result.stdout.trim()).toBe(AGENTMUX_CLI_SKILL.trim())
     expect(result.stdout).toMatch(/^---\nname: amux\n/u)
     expect(result.stdout).not.toMatch(/\bagentmux[ \t]+/u)
     expect(AGENTMUX_CLI_COMMANDS.length).toBeGreaterThan(0)
-    for (const command of AGENTMUX_CLI_COMMANDS) expect(result.stdout).toContain('amux ' + command.method.replaceAll('.', ' '))
+    const roots = [...new Set(AGENTMUX_CLI_COMMANDS.map(command => command.method.split('.')[0]!))]
+    expect(roots.length).toBeGreaterThan(0)
+    for (const root of roots) expect(result.stdout).toContain(`amux ${root} --skill`)
     for (const old of ['amux pmo ', 'amux list ', 'amux demand ', 'amux open ', 'amux focus ', 'amux send ', 'amux roles ', 'amux toolkit add ', 'amux settings get ']) {
       expect(result.stdout).not.toContain(old)
     }
     expect(result.stdout).not.toContain('--request-id')
-    expect(result.stdout).toContain('--project PROJECT')
-    expect(result.stdout).toContain('--source-workspace WORKSPACE')
+    const agent = await run(['agent', '--skill'])
+    expect(agent.code, agent.stderr).toBe(0)
+    expect(agent.stdout).toContain('--project PROJECT')
+    expect(agent.stdout).toContain('--source-workspace WORKSPACE')
     expect(result.stdout).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
     expect(agentMuxCommandHelp('agent.send')).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
   })
@@ -129,13 +134,16 @@ describe('compiled object-first CLI help and discovery', () => {
     expect(agentMuxCommandHelp('space.mv')).toContain('Session, Run, Host and cwd')
   })
 
-  it('retains Browser page capabilities and result/transfer recovery from their actual owner', async () => {
+  it('retains Browser page capabilities in its module and result/transfer recovery from their actual owner', async () => {
     const browser = agentMuxCommandHelp('browser.run')!
+    const module = await run(['browser', '--skill'])
+    expect(module.code, module.stderr).toBe(0)
+    expect(module.stdout.trim()).toBe(agentMuxModuleSkill('browser')!.trim())
     expect(browser.length).toBeGreaterThan(0)
     for (const effect of ['observe', 'act', 'wait', 'navigate'] as const) {
       const names = browserPageCapabilityNames(effect)
       expect(names.length).toBeGreaterThan(0)
-      for (const name of names) expect(AGENTMUX_CLI_SKILL).toContain('`' + name + '`')
+      for (const name of names) expect(module.stdout).toContain('`' + name + '`')
     }
     expect(browser).toContain('withinRef')
     expect(browser).toContain('missingFrames')
@@ -147,7 +155,7 @@ describe('compiled object-first CLI help and discovery', () => {
   })
 
   it('guides web pages into an exact reusable Browser or a readable Region in the Agent Tab', async () => {
-    const result = await run(['--skill'])
+    const result = await run(['space', '--skill'])
     expect(result.code, result.stderr).toBe(0)
     const guide = result.stdout.replace(/\s+/gu, ' ')
     expect(guide).toContain("prefer AgentMux's embedded Browser and public CLI")

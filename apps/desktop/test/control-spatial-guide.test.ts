@@ -9,6 +9,7 @@ import {
   AGENTMUX_CLI_SKILL,
   agentMuxCommandHelp
 } from '../../../packages/core/src/agentmux-cli-help.js'
+import { agentMuxModuleSkill } from '../../../packages/core/src/agentmux-cli-module-skills.js'
 import { AGENTMUX_CLI_COMMANDS, agentMuxCliArguments, agentMuxCliMatch, parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands.js'
 import {
   directionalNeighbor,
@@ -16,8 +17,9 @@ import {
 } from '../src/renderer/src/lib/directional-addressing.js'
 
 // T-006「简短通用的空间操作引导」的验收。注入引导有两个面：**启动提示**（`AGENTMUX_RUNTIME_GUIDE`
-// 经 `composeAgentLaunchPrompt` 注入，负责让 Agent **发现**这些能力存在），与 **skill**（`AGENTMUX_CLI_SKILL`
-// 经 `amux --skill` 产出，负责**确切用法**）。目标的四件事各配一个会咬的守卫，且尽量从 SSOT 派生，
+// 经 `composeAgentLaunchPrompt` 注入，负责让 Agent **发现**这些能力存在），与按需模块 skill
+// （`amux space --skill` 等）及实际 help/parser（确切参数）。基础 skill 只持有共同边界与模块目录。
+// 目标的四件事各配一个会咬的守卫，且尽量从 SSOT 派生，
 // 不把命令表手抄第二份——命令名称、对象与描述都来自实际的 `AGENTMUX_CLI_COMMANDS`。
 //
 // 关键设计：内容守卫直接 import 源码常量，**不经 dist**——`@agentmux/core` 解析到 dist，而 dist 相对
@@ -27,6 +29,7 @@ import {
 const CORE_SRC = new URL('../../../packages/core/src/', import.meta.url)
 const clientSource = readFileSync(fileURLToPath(new URL('client.ts', CORE_SRC)), 'utf8')
 const cliSource = readFileSync(fileURLToPath(new URL('agentmux.ts', CORE_SRC)), 'utf8')
+const SPACE_SKILL = agentMuxModuleSkill('space')!
 
 function commandRegistry(): Map<string, string> {
   return new Map(AGENTMUX_CLI_COMMANDS.map(command => [command.method, command.summary]))
@@ -34,7 +37,7 @@ function commandRegistry(): Map<string, string> {
 
 /** 匹配完整对象路径，避免把 browser run / browser task run 都误认成一个 browser 动词。 */
 function taughtCommands() {
-  return [...AGENTMUX_CLI_SKILL.matchAll(/^\s*amux ([^\n]+)/gm)].map(match => {
+  return [...AGENTMUX_CLI_HELP.matchAll(/^  amux ([^\n]+)/gm)].map(match => {
     const line = match[1]!
     // Discover the object path through the real global-option parser and registry matcher.
     // Argument syntax is checked separately on the runnable spatial examples below.
@@ -45,10 +48,10 @@ function taughtCommands() {
 
 /** 取 skill 里一个带右界的小节，避免只取左界让邻节顶上（见记忆 section-slice-without-right-bound）。 */
 function skillSection(startHeader: string, endHeader: string): string {
-  const start = AGENTMUX_CLI_SKILL.indexOf(startHeader)
+  const start = SPACE_SKILL.indexOf(startHeader)
   if (start < 0) return ''
-  const end = AGENTMUX_CLI_SKILL.indexOf(endHeader, start + startHeader.length)
-  return end < 0 ? '' : AGENTMUX_CLI_SKILL.slice(start, end)
+  const end = SPACE_SKILL.indexOf(endHeader, start + startHeader.length)
+  return end < 0 ? '' : SPACE_SKILL.slice(start, end)
 }
 
 const launchGuide = composeAgentLaunchPrompt('do the work', true).text
@@ -83,7 +86,7 @@ describe('T-006 注入引导：可发现自定义 Executor 与移动命令', () 
     expect(moveCommands.length).toBeGreaterThan(0) // 扫描非空
     // 注入的确切用法面必须教出每一个移动动词——新增一个移动动词到注册表却不在 skill 教，这里红。
     for (const method of moveCommands) {
-      expect(AGENTMUX_CLI_SKILL).toContain(`amux ${method.replaceAll('.', ' ')} --region`)
+      expect(SPACE_SKILL).toContain(`amux ${method.replaceAll('.', ' ')} --region`)
     }
     // 且它教的是"移动/搬出"，不是"再开一份"——promote 不碰 Run。
     const section = skillSection('## Move a Region into its own Tab', '## Read what is in a direction')
@@ -107,7 +110,7 @@ describe('T-006 注入引导：可发现自定义 Executor 与移动命令', () 
     for (const method of registry.keys()) {
       const syntax = `amux ${method.replaceAll('.', ' ')}`
       expect(AGENTMUX_CLI_HELP).toContain(syntax)
-      expect(AGENTMUX_CLI_SKILL).toContain(syntax)
+      expect(AGENTMUX_CLI_SKILL).toContain(`amux ${method.split('.')[0]} --skill`)
     }
   })
 
@@ -117,11 +120,11 @@ describe('T-006 注入引导：可发现自定义 Executor 与移动命令', () 
     expect(registry.has('settings.executors.ls')).toBe(true)
     // 启动提示（发现面）：让 Agent 知道自定义 executor 能按名开出来。
     expect(launchGuide).toMatch(/executor .*configured|configured .*executor|found by name/i)
-    expect(AGENTMUX_CLI_SKILL).toMatch(/configured executor[\s\S]{0,120}amux settings executors ls[\s\S]{0,80}exact ID/i)
+    expect(agentMuxModuleSkill('agent')).toMatch(/configured executor[\s\S]{0,120}amux settings executors ls[\s\S]{0,80}exact ID/i)
   })
 
   it('空间示例经实际 CLI parser 接受，不把旧 flag 或虚构目的地教给 Agent', async () => {
-    const section = skillSection('## Choose a split from the visible layout', 'Agent-first workflow:')
+    const section = skillSection('## Choose a split from the visible layout', '## Current command contract')
     expect(section.length).toBeGreaterThan(0)
     const examples = [...section.matchAll(/^amux ([^\n]+)$/gm)].map(match => match[1]!)
     expect(examples.length).toBeGreaterThan(0)
@@ -145,8 +148,8 @@ describe('T-006 注入引导：可发现自定义 Executor 与移动命令', () 
     expect(launchGuide, '启动提示抄了命令行语法，与 skill 争夺唯一真相').not.toContain('browser run --browser')
 
     // 用法面（skill）：教出确切命令与授权前提。
-    expect(AGENTMUX_CLI_SKILL, 'skill 没教 browser run 的确切用法').toContain('amux browser run --browser')
-    expect(AGENTMUX_CLI_SKILL, 'skill 没说授权开关在哪，Agent 撞到拒绝时无路可走').toContain('Settings › Browser')
+    expect(agentMuxModuleSkill('browser'), 'Browser 模块没教 page program 入口').toContain('amux browser run --browser')
+    expect(agentMuxModuleSkill('browser'), 'Browser 模块没说授权开关在哪，Agent 撞到拒绝时无路可走').toContain('Settings › Browser')
   })
 
   it('两个 SSOT 常量都有真实生产消费者（排除定义文件后扫描非空）', () => {
@@ -200,7 +203,7 @@ describe('T-006 以方向、可读性、最小扰动决策并回读', () => {
     expect(sectionStart).toBeGreaterThanOrEqual(0)
     const section = spaceHelp.slice(sectionStart)
     expect(section.length).toBeGreaterThan(0)
-    expect(AGENTMUX_CLI_SKILL).toContain(section.trim())
+    expect(SPACE_SKILL).toContain(section.trim())
     expect(section).toMatch(/after any move inspect the result/i)
     expect(section).toContain('--display-workspace')
     expect(section).toContain('--group')

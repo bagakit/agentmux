@@ -424,7 +424,7 @@ it('rejects mixed CLI query modes and preserves real legacy diagnostic flags/hel
   expect(JSON.parse(legacy.stdout).result.reads[0].availability).toBe('not-exposed')
   const help = await cli.run(['system', 'diagnostics', 'inspect', '--help'])
   expect(help.code).toBe(0); expect(help.stdout).toContain('--input FILE|-')
-  const skill = await cli.run(['--skill'])
+  const skill = await cli.run(['system', '--skill'])
   expect(skill.code).toBe(0); expect(skill.stdout).toContain('mote.context.client')
 })
 

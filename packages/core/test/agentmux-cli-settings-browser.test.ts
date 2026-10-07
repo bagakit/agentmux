@@ -187,11 +187,11 @@ describe('Browser settings built CLI consumes the public Control owner without a
   })
 
   it('includes links and configuration authority in settings discovery and Agent instructions', async () => {
-    for (const args of [['settings', '--help'], ['settings', 'set', '--help'], ['--skill']]) {
+    for (const args of [['settings', '--help'], ['settings', 'set', '--help'], ['settings', '--skill']]) {
       const output = await run(args); expect(output.code).toBe(0)
       expect(output.stdout).toContain('current Unix user'); expect(output.stdout).toContain('does not establish human approval')
     }
-    const skill = await run(['--skill'])
+    const skill = await run(['settings', '--skill'])
     expect(skill.stdout).toContain('settings browser-links forget --input <file|->'); expect(seen).toEqual([])
   })
 

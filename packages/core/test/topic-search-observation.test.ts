@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseTopicParams, parseTopicResult, parseTopicSearchRecord, type TopicSearchRecord } from '../src/public-rpc-topics.js'
-import { AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
+import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 
 const record: TopicSearchRecord = {
   searchId: '11111111-1111-4111-8111-111111111111', query: '磁盘', topicId: 'view:disk', limit: 32,
@@ -53,6 +53,6 @@ describe('Executed search observations remain exact and separate from persistenc
       expect(() => parseTopicParams('topic.knowledge.history', p)).toThrow()
     expect(agentMuxCommandHelp('topic.knowledge.history')).toContain('--search UUID')
     expect(agentMuxCommandHelp('topic.knowledge.history')).toContain('No search or Agent execution')
-    expect(AGENTMUX_CLI_SKILL).toContain('amux topic knowledge history')
+    expect(agentMuxCommandHelp('topic')).toContain('amux topic knowledge history')
   })
 })

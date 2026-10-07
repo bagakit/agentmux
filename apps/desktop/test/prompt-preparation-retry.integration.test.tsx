@@ -154,7 +154,7 @@ it.each(['rpc', 'cli'] as const)('the actual public %s stops only the selected l
     expect(queue()[0]?.promptCondition).toEqual(condition)
     if (consumer === 'cli') {
       const help = await runCompiledObjectCli(['--help', 'message', 'pending', 'stop'], objectCliEnvironment(root))
-      const skill = await runCompiledObjectCli(['--skill'], objectCliEnvironment(root))
+      const skill = await runCompiledObjectCli(['message', '--help'], objectCliEnvironment(root))
       expect(help.code).toBe(0); expect(help.stdout).toContain('message pending stop'); expect(help.stdout).toContain('--pending-id')
       expect(skill.code).toBe(0); expect(skill.stdout).toContain('message pending stop')
       if (process.env.AGENTMUX_T004_EVIDENCE) await writeFile(join(process.env.AGENTMUX_T004_EVIDENCE, 'public-stop-consumer-T004.json'), JSON.stringify({ stopped, read, cli, help, skill }))
