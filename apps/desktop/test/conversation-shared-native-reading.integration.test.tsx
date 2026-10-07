@@ -103,7 +103,7 @@ describe('shared native presentation preserves the existing reading owner', () =
     console.log('SHARED_READING_USER_TRACE_IDENTITY', JSON.stringify({ rawId: f.rawId, traceId: trace.dataset.traceId, expanded: trace.getAttribute('aria-expanded') }))
     expect(trace.getAttribute('aria-expanded')).toBe('true')
     expect(parseTraceDisclosureKey(trace.dataset.traceId!)).toEqual([projectSessionUserMessages({ agentSessionId: f.control.agentSessionId, historyPage: pages[0]! })[0]!.id, JSON.stringify(['tool-result', 'opaque:call:0', 0])])
-    const latest = [...host.querySelectorAll<HTMLButtonElement>('.activity-feed__reading button')].find(button => button.textContent?.trim() === 'Current')!
+    const latest = host.querySelector<HTMLButtonElement>('[aria-label="Return to latest messages"]')!
     await act(async () => latest.click())
     expect(history).toHaveBeenCalledTimes(2)
     await act(async () => { await Promise.all(pending) })
