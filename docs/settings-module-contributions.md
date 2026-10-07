@@ -23,6 +23,8 @@ export const featureSettingsModule = {
 
 模块的元信息同时用于侧栏、窄窗菜单、搜索和 Overview；`SettingsSectionId` 从注册数组的 literal id 派生，不另维护一份类型名单。`overview` 是呈现页，不能作为模块 ID；ID 在注册数组内唯一，组使用现有 Preferences、Message Tool、Connections、Resources、Work、Mote 或 Mods。组顺序和 Overview 列归属由 `settings-catalog.ts` 的唯一 `SETTINGS_GROUPS` 表达，注册数组只决定组内次序；所有导航投影沿同一目录。Work 组织 Space、Focus、Goals、Notes 的真实偏好，以及 Survey、Notes 原管理入口；Mote 是与 Preferences 平级的组，Mote Club 内容仍归原 owner。管理入口本身不生成 AppConfig 或新 CLI；只有新增实际偏好字段才补现 Main scalar 与公开调用者。Mods 的模块组 ID 是 `toolkit`，入口为 Toolkit Library。Connections 组织环境连接与手机设备接入；分组只改变导航，不成为另一套配置或授权 owner。
 
+模块可用 `searchTargets` 贡献具体字段、动作或说明的静态 `id`、`title`、可选 `description` 与 `keywords`；原 Pane 用同一局部 ID 的 `data-settings-field` 标记准确位置。动作和说明分别声明 `kind: 'action'`／`'info'`，其余为设置字段。搜索只消费这些静态贡献，明确点选后才进入原 Pane 并定位；不扫描用户值、正文或隐藏页，不执行动作。动态资源仍经原库与准确对象导航；不要为其每个当前对象生成静态目标。行为与恢复边界见[设置页的信息架构](design/behavior/settings-and-observation.md#设置页的信息架构)。
+
 `Pane` 定义在模块作用域，不能在每次渲染时生成新的组件函数。壳只在首次访问时挂载编辑器，随后保留同一个实例；`active` 表达当前是否可见。像 Executor 这样的精确目标，仅在 `active` 时触发原焦点能力。`savedSummary` 只读已保存 config 与原默认解析器，不读取编辑草稿或触发诊断。
 
 小设置优先加入现有领域模块的 Pane，保持原设置组与控件语言；不为每个字段新增一级入口。功能的保存适配留在模块，继续调用 `api.config.save(next, expected)`：提交值和编辑时捕获的基线分别传入，保存时合并当前无关字段。Browser 这类嵌套域不能用旧快照覆盖后来的 toolbar 或链接选择。原 draft/save hooks、空列表删除、pending 后续输入与冲突反馈继续复用。
