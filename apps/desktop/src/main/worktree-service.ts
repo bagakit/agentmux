@@ -197,6 +197,24 @@ export class WorktreeService {
     private readonly configWriter: ConfigWriter
   ) {}
 
+  async isRegistered(workspace: WorkspaceRecord): Promise<boolean> {
+    if (!workspace.repoPath) throw new Error('The original repository path is unavailable.')
+    const result = await this.hostFor(workspace.hostId).run('git',
+      ['-C', workspace.repoPath, 'worktree', 'list', '--porcelain', '-z'], GIT_ENUMERATION_OPTIONS)
+    this.assertGit(result, 'Could not inspect the original Git worktree registration')
+    const registered = parseGitWorktreePorcelain(result.stdout)
+    if (registered.some(item => item.path === workspace.path)) return true
+    if (!await this.directoryPresent(workspace)) return false
+    const canonical = await this.hostFor(workspace.hostId).run('node', ['-e',
+      'process.stdout.write(require("node:fs").realpathSync(process.argv[1]))', workspace.path], METADATA_PROBE_OPTIONS)
+    if (canonical.exitCode !== 0) throw new Error('The original directory identity is unconfirmed; its contents are retained.')
+    return registered.some(item => item.path === canonical.stdout)
+  }
+
+  async directoryPresent(workspace: WorkspaceRecord): Promise<boolean> {
+    return await this.pathPresent(this.hostFor(workspace.hostId), workspace.path)
+  }
+
   async list(workspaceId: string, config: AppConfig): Promise<WorkspaceBranchesSnapshot> {
     const workspace = this.workspace(config, workspaceId)
     const host = this.hostFor(workspace.hostId)
