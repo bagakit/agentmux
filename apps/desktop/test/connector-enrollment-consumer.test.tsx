@@ -128,16 +128,73 @@ it('closing and reopening the original settings recovers the exact durable inten
   expect(platformCalls).toEqual(['begin'])
 })
 
-it('unknown registration keeps the original operation and never refreshes its QR or repeats creation', async () => {
+it('an unchanged unknown registration explains each check and keeps the existing-bot route on the original page', async () => {
   loseBegin = true
   await mount(); const operation = await pending()
   expect(operation.authorization).toBe('unknown')
   expect(dom.container.querySelector('[data-enrollment-code] svg')).toBeNull()
+  expect(dom.container.querySelector('[data-enrollment-advance]')?.textContent).toBe('Check saved progress')
   await click('[data-enrollment-inspect]')
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-bot-enrollment] [role="status"]')?.textContent).toContain('No new progress was found'))
   await click('[data-enrollment-advance]')
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-enrollment-advance]')?.hasAttribute('disabled')).toBe(false))
+  expect(dom.container.querySelector('[data-bot-enrollment] [role="status"]')?.textContent).toContain('confirmation link is still unavailable')
+  expect((await services.connections.enrollment!.inspect({ operationId: operation.operationId })).operation).toEqual(operation)
   expect(platformCalls).toEqual(['begin'])
   expect((await services.connections.enrollment!.list({})).operations.map(value => value.operationId)).toEqual([operation.operationId])
   expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe(operation.operationId)
+  await click('[data-bot-enrollment] [data-enrollment-existing]')
+  expect(dom.container.querySelector('[aria-label="Connection app ID"]')).not.toBeNull()
+  expect((await services.connections.enrollment!.inspect({ operationId: operation.operationId })).operation).toEqual(operation)
+  expect(platformCalls).toEqual(['begin'])
+})
+
+it('explains an early confirmation check without polling before the original platform interval', async () => {
+  await mount(); const operation = await pending()
+  await click('[data-enrollment-advance]')
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-bot-enrollment] [role="status"]')?.textContent).toContain('Give it a moment, then check again'))
+  expect((await services.connections.enrollment!.inspect({ operationId: operation.operationId })).operation).toEqual(operation)
+  expect(platformCalls).toEqual(['begin'])
+})
+
+it('opens a separate setup directly from the original unknown result without creating a second bot', async () => {
+  loseBegin = true
+  await mount(); const operation = await pending()
+  await click('[data-enrollment-separate] > summary')
+  expect(dom.container.querySelector('[data-enrollment-separate]')?.textContent).toContain('may create another bot')
+  await click('[data-enrollment-start-another]')
+  expect(dom.container.querySelector('[data-enrollment-create]')).not.toBeNull()
+  expect(dom.container.querySelector('[data-enrollment-operation]')).toBeNull()
+  expect(platformCalls).toEqual(['begin'])
+  expect((await services.connections.enrollment!.list({})).operations).toEqual([operation])
+  await click('.connector-enrollment__history > summary')
+  await click('[data-enrollment-select="' + operation.operationId + '"]')
+  expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe(operation.operationId)
+  expect(platformCalls).toEqual(['begin'])
+})
+
+it('keeps a late unchanged check attached to its original setup after the user opens a separate intent', async () => {
+  loseBegin = true
+  await mount(); const operation = await pending()
+  const forward = vi.mocked(api.connections.call).getMockImplementation()!
+  let release!: () => void, checked = false
+  const gate = new Promise<void>(resolve => { release = resolve })
+  vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
+    const result = await forward(method, input)
+    if (method === 'connection.enrollment.advance') { checked = true; await gate }
+    return result
+  })
+  try {
+    await click('[data-enrollment-advance]'); await vi.waitFor(() => expect(checked).toBe(true))
+    await click('[data-enrollment-separate] > summary'); await click('[data-enrollment-start-another]')
+    expect(dom.container.querySelector('[data-enrollment-create]')).not.toBeNull()
+    await act(async () => { release(); await gate })
+    expect(dom.container.querySelector('[data-enrollment-operation]')).toBeNull()
+    expect(dom.container.querySelector('[data-enrollment-create]')).not.toBeNull()
+    expect(dom.container.querySelector('[data-bot-enrollment] [role="status"]')).toBeNull()
+    expect((await services.connections.enrollment!.inspect({ operationId: operation.operationId })).operation).toEqual(operation)
+    expect(platformCalls).toEqual(['begin'])
+  } finally { release() }
 })
 
 it('an authorized bot whose secure save is interrupted continues locally without polling its one-time credential twice', async () => {
