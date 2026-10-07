@@ -81,7 +81,7 @@ export function BrowserOperationStatus({
         <DropdownMenu.Trigger asChild>
           <button type="button" className="browser-operation-status__trigger" aria-label={`Browser activity: ${description}`} title={description}>
             {phase === 'idle' ? <ThemeObjectHistoryIcon size={14} aria-hidden="true" />
-              : phase === 'unknown' ? <ThemeStatusWarningIcon size={14} aria-hidden="true" /> : <PhaseGlyph phase={phase} />}
+              : phase === 'unknown' ? <ThemeStatusWarningIcon size={14} aria-hidden="true" /> : <PhaseGlyph phase={phase} current={Boolean(operation && !terminal && activity.control === 'agent')} />}
           </button>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
@@ -290,7 +290,7 @@ export function BrowserReplayPreview({
       </ol>
       {outcome && outcome.kind !== 'completed' ? <p className={`browser-rsi-replay__outcome browser-rsi-replay__outcome--${outcome.kind}`} role="status"><ThemeStatusWarningIcon size={12} aria-hidden="true" /><strong>{replayOutcomeLabel(outcome.kind)}</strong><span>{outcome.message}</span></p> : null}
       <footer className="browser-rsi-replay__actions">
-        {onPreview ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy} onClick={onPreview}><ThemeStatusLoadingIcon className={busy ? 'spin' : undefined} size={12} aria-hidden="true" />{busy ? 'Preparing…' : 'Preview page'}</button> : null}
+        {onPreview ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy} onClick={onPreview}><ThemeStatusLoadingIcon animation={busy ? 'spin' : 'none'} size={12} aria-hidden="true" />{busy ? 'Preparing…' : 'Preview page'}</button> : null}
         {onRun ? <button type="button" className="browser-rsi-button browser-rsi-button--primary" disabled={busy || blockedCount > 0} title={blockedCount > 0 ? 'Resolve blocked steps before running' : 'Run replay'} onClick={onRun}><ThemeActionStartIcon size={12} aria-hidden="true" />Run replay</button> : null}
       </footer>
     </section>
@@ -335,9 +335,9 @@ function replayOutcomeLabel(kind: Exclude<BrowserScriptRunReport['outcome']['kin
   }
 }
 
-function PhaseGlyph({ phase }: { phase: BrowserOperationPhase }) {
-  if (phase === 'running') return <SemanticIcon name="status.browser-running" size={13} />
-  if (phase === 'preparing') return <ThemeStatusLoadingIcon className="spin" size={13} aria-hidden="true" />
+function PhaseGlyph({ phase, current = false }: { phase: BrowserOperationPhase; current?: boolean }) {
+  if (phase === 'running') return <SemanticIcon name="status.browser-running" animation={current ? 'execute' : 'none'} size={13} />
+  if (phase === 'preparing') return <ThemeStatusLoadingIcon animation={current ? 'spin' : 'none'} size={13} aria-hidden="true" />
   if (phase === 'waiting') return <ThemeActionPauseIcon size={13} aria-hidden="true" />
   if (phase === 'human') return <ThemeObjectUserIcon size={13} aria-hidden="true" />
   if (phase === 'completed') return <ThemeStatusCompletedIcon size={13} aria-hidden="true" />
@@ -346,7 +346,7 @@ function PhaseGlyph({ phase }: { phase: BrowserOperationPhase }) {
 }
 
 function StepGlyph({ status }: { status: BrowserOperationStep['status'] }) {
-  if (status === 'running') return <ThemeStatusLoadingIcon className="spin" size={11} aria-hidden="true" />
+  if (status === 'running') return <ThemeStatusLoadingIcon size={11} aria-hidden="true" />
   if (status === 'completed') return <ThemeStatusCompletedIcon size={11} aria-hidden="true" />
   if (status === 'failed') return <ThemeStatusFailedIcon size={11} aria-hidden="true" />
   return <ThemeActionPanIcon size={11} aria-hidden="true" />

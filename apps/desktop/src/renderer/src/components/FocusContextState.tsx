@@ -20,5 +20,5 @@ export function FocusContextStateMark({ context }: { context: FocusContext }) {
           : context.processState === 'interrupted' ? ['interrupted', ThemeStatusWarningIcon]
           : unknown ? ['unknown', ThemeStatusUnknownIcon]
           : context.processState !== 'running' ? ['recovery', ThemeStatusDisconnectedIcon] : ['idle', ThemeActionPauseIcon]
-  return <span className="focus-state-mark" data-focus-state-icon={kind} aria-hidden="true"><Icon size={12} strokeWidth={1.8} /></span>
+  return <span className="focus-state-mark" data-focus-state-icon={kind} aria-hidden="true"><Icon size={12} strokeWidth={1.8} animation={kind === 'working' ? 'work' : 'none'} /></span>
 }

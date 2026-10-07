@@ -4,7 +4,7 @@ import { SemanticIcon, WorkflowSemanticIcon } from '../semantic-icons'
 export function WorkflowStatusGlyph({ status, size = 12, recorded = false }: { status: WorkflowAgentStatus; size?: number; recorded?: boolean }) {
   if (status === 'running') {
     return <SemanticIcon name="status.workflow-running" size={size}
-      className={`wf-ico wf-ico--running${recorded ? '' : ' wf-streaming-glyph'}`} />
+      animation={recorded ? 'none' : 'spin'} className="wf-ico wf-ico--running" />
   }
   return <WorkflowSemanticIcon status={status} size={size} className={`wf-ico wf-ico--${status}`} />
 }

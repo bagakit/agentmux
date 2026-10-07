@@ -5,6 +5,7 @@ import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type ComponentProps, type KeyboardEvent, type WheelEvent } from 'react'
 import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
+import type { AgentObservation } from '@agentmux/core/agent-status'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
   initFollowState,
@@ -329,11 +330,11 @@ function placeSegments(segments: Segment[]): PlacedSegment[] {
  * 用 aria-live 而不是纯视觉动画：读屏用户同样需要知道 Agent 已经在做事了，否则那一段静默对他们
  * 而言与"没发出去"无法区分。`polite` 是因为这不是需要打断当前朗读的紧急事件。
  */
-function WorkingIndicator(): JSX.Element {
+function WorkingIndicator({ active }: { active: boolean }): JSX.Element {
   return (
     <div className="activity-working" role="status" aria-live="polite">
       <span className="activity-working__dots" aria-hidden="true">
-        <SemanticIcon name="status.working" size={12} />
+        <SemanticIcon name="status.working" animation={active ? 'work' : 'none'} size={12} />
       </span>
       Working…
     </div>
@@ -384,6 +385,7 @@ export function ActivityView({
   revealRequest,
   capability,
   displayState,
+  activitySemantic,
   openWorkspaceFile,
   readPastedImage,
   readHistoryResource,
@@ -412,6 +414,8 @@ export function ActivityView({
   capability: 'unavailable' | 'complete-events' | 'streaming'
   /** Session 的显示状态——「这个 turn 在不在工作」的唯一真相，不从时间轴形状反推。 */
   displayState?: AgentDisplayState
+  /** Original current observation only qualifies decorative motion; retained display state stays intact. */
+  activitySemantic?: AgentObservation['semantic']
   /** Absent means file references in agent prose stay plain text. */
   openWorkspaceFile?: OpenWorkspaceFile
   /** Absent means pasted-image references stay plain text (a text link, as before). */
@@ -916,7 +920,7 @@ export function ActivityView({
         {readingWindow.hasMore ? (
           <button type="button" className="activity-feed__reading-action" disabled={readingWindow.loading && !readingWindow.coverageLoading || !conversationReading.enabled}
             aria-busy={readingWindow.loadingEarlier || undefined} onClick={readingWindow.readEarlier}>
-            {readingWindow.loadingEarlier ? <SemanticIcon name="status.loading" size={12} className="spin" /> : <ThemeNavigationUpIcon size={12} aria-hidden="true" />}
+            {readingWindow.loadingEarlier ? <SemanticIcon name="status.loading" animation="spin" size={12} /> : <ThemeNavigationUpIcon size={12} aria-hidden="true" />}
             <span {...(readingWindow.loadingEarlier ? { role: 'status', 'aria-live': 'polite' as const } : {})}>{readingWindow.loadingEarlier ? 'Loading earlier…' : 'Earlier'}</span>
           </button>
         ) : null}
@@ -952,7 +956,7 @@ export function ActivityView({
   const renderSurface = (content: JSX.Element | ((findTrigger: ReactNode) => JSX.Element)): JSX.Element => {
     const loading = conversationReading?.enabled !== false && (readingWindow.loading && !readingWindow.loadingEarlier || userMessageRead?.loading) ? <div className="activity-feed__loading-layer">
       <span role="status" aria-live="polite" className="activity-feed__reading-status">
-        <SemanticIcon name="status.loading" size={12} className="spin" />Reading records…
+        <SemanticIcon name="status.loading" animation="spin" size={12} />Reading records…
       </span>
     </div> : null
     return <ReadingFind className="activity-feed-frame"
@@ -1001,7 +1005,7 @@ export function ActivityView({
         {readNotice}
         {readingEntry}
         {fileReferenceNotice}
-        <WorkingIndicator />
+        <WorkingIndicator active={activitySemantic === 'active'} />
       </div>
     )
   }
@@ -1192,7 +1196,7 @@ export function ActivityView({
         <div className="activity-feed__observation-scope">包含发送回执和运行观察，不代表 Agent 已接纳的对话消息</div>
         <div className="activity-log">{placed.filter(({ entry }) => !nativeSupplement(entry)).map(renderPlaced)}</div>
       </details> : null}
-      {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
+      {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator active={activitySemantic === 'active'} /> : null}
       {showJump && !readingWindow.historical ? (
         <button
           type="button"

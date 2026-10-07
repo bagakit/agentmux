@@ -175,7 +175,7 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .status__dot { position: relative; width: 7px; height: 7px; background: var(--status-ink); mask: var(--native-presence-neutral-mask) center / contain no-repeat; }
 .status--unknown .status__dot { mask-image: var(--native-presence-unknown-mask); }
 .status--starting .status__dot { mask-image: var(--native-presence-starting-mask); }
-.status--working .status__dot { mask-image: var(--native-presence-working-mask); animation: pulse var(--dur-breath) infinite; }
+.status--working .status__dot { mask-image: var(--native-presence-working-mask); }
 .status--running .status__dot { mask-image: var(--native-presence-running-mask); }
 .status--waiting .status__dot { width: 9px; height: 9px; mask-image: var(--native-presence-waiting-mask); }
 .status--blocked .status__dot { width: 9px; height: 9px; mask-image: var(--native-presence-blocked-mask); }
