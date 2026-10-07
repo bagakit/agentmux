@@ -145,7 +145,7 @@ it('a lost join-link response and persisted Dialog remount inspect the same orig
   expect(useAppStore.getState().connectorRoomIntents[intent.input.operationId]).toEqual(intent)
   await f.mount(); await f.menu('Bind existing group chat'); await ready('Join link ready')
   expect(document.querySelector('[aria-label="Existing group"]')?.getAttribute('data-value')).toBe('oc_other')
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Your platform account is not linked here')
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Your own membership is not verified here')
   await f.button('Check link status'); await ready('Join link ready')
   expect(f.calls.filter(call => call.method === 'connection.room.link.create')).toHaveLength(1)
   expect(f.calls.filter(call => call.method === 'connection.room.link.inspect').every(call => (call.input as { operationId: string }).operationId === intent.input.operationId)).toBe(true)
@@ -220,11 +220,13 @@ it('a known refused link can be explicitly regenerated after repair using the cu
 it('a confirmed link is explicitly replaced without a clock inference and its new unknown head remains inspect-only after remount', async () => {
   await f.mount(); await f.menu('Bind existing group chat'); await chooseGroup('oc_other'); await f.button('Create join link'); await ready('Join link ready'); await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role=dialog]')?.getAttribute('aria-busy')).toBe('false') })
   const original = Object.values(useAppStore.getState().connectorRoomIntents).find(value => value.method === 'connection.room.link.create')!
+  expect(document.querySelector<HTMLDetailsElement>('[aria-label="Joining this group"]')?.open).toBe(true)
   const originalNative = native
   native = async request => { if (request.url?.endsWith('/link')) throw new Error('Controlled replacement outcome unknown'); return await originalNative(request) }
   await f.button('Generate a new join link')
   await vi.waitFor(async () => { await act(async () => {}); expect(f.calls.filter(call => call.method === 'connection.room.link.create')).toHaveLength(2); expect((f.calls.filter(call => call.method === 'connection.room.link.create')[1]!.result as { state?: string })?.state).toBe('unknown'); expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-busy')).toBe('false') })
   const latest = f.calls.filter(call => call.method === 'connection.room.link.create')[1]!.input as { operationId: string }
+  expect(document.querySelector<HTMLDetailsElement>('[aria-label="Joining this group"]')?.open, 'changing the original operation keeps the user’s open reading section').toBe(true)
   expect(latest.operationId).not.toBe(original.input.operationId)
   expect(useAppStore.getState().connectorRoomIntents[latest.operationId]).toMatchObject({ replacesOperationId: original.input.operationId })
   const persisted = localStorage.getItem('agentmux-workbench-v1')!
@@ -243,6 +245,7 @@ it('a confirmed link is explicitly replaced without a clock inference and its ne
   expect(previous, 'original link receipt remains reachable').toBeDefined()
   await act(async () => { previous.querySelector('summary')!.click(); previous.querySelector<HTMLButtonElement>('button')!.click() })
   await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.room.link.inspect').at(-1)?.input).toEqual({ operationId: original.input.operationId }))
+  await vi.waitFor(async () => { await act(async () => {}); expect(previous.textContent).toContain('Result · confirmed'); expect(previous.textContent).toContain('Valid until'); expect(previous.textContent).toContain('https://applink.feishu.cn/') })
   expect(f.platformCalls.filter(call => call.url?.endsWith('/link'))).toHaveLength(2)
   expect((await f.cli(['room', 'link', 'inspect', '--operation-id', original.input.operationId])).operation.state).toBe('confirmed')
   expect((await f.cli(['room', 'link', 'inspect', '--operation-id', latest.operationId])).operation.state).toBe('unknown')

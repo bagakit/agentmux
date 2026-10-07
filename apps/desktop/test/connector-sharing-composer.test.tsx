@@ -90,7 +90,7 @@ it('a known Composer audience selects its exact application when the Session has
   expect(selected.getAttribute('aria-label')).toContain('another-app')
   await act(async () => selected.click())
   await wait(() => expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value).toBe('another-connection'))
-  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('another-exact-groupSharing on'))
+  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Sharing on'))
   const inspected = f.calls.filter(call => call.method === 'connection.binding.inspect').at(-1)!
   expect(inspected.input).toEqual({ bindingId: 'another-binding', revision: 1 })
   expect(f.original.create).not.toHaveBeenCalled(); await f.original.unchanged()

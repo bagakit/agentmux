@@ -41,11 +41,11 @@ it('the original Agent menu creates a dedicated group through actual IPC/Core/Ho
   expect(document.querySelector('[role="dialog"] code')?.closest('details')?.open).toBe(false)
   await ready('No members approved')
   const access = document.querySelector('[aria-label="Group member access"]')!
-  expect(access.textContent).toBe('No members approved'); expect(access.closest('details')).toBeNull()
+  expect(access.textContent).toBe('No members approved to use this Agent'); expect(access.closest('details')).toBeNull()
   expect(binding).toMatchObject({ executionHostId: 'local', agentSessionId: 'original-agent', externalConversationId: 'created-room', scope: { input: 'mentions-and-replies' } })
   expect((await f.services.connections.bindings!.inspect({ bindingId: binding!.bindingId })).grants).toHaveLength(0)
   await f.button('Close'); await f.menu('Create group chat', 'other-region'); await ready('Sharing on')
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Connected group')
+  expect(document.querySelector('[aria-label="Group connection status"]')?.textContent).toContain('Sharing on')
   expect([...document.querySelectorAll('button')].some(node => node.textContent === 'Create group')).toBe(false)
   expect(f.original.create).toHaveBeenCalledTimes(1)
   expect(f.calls.filter(call => call.method === 'connection.room.create')).toHaveLength(1)
@@ -126,11 +126,12 @@ it('the original Region context menu binds an existing group and keeps actor app
   }
   await f.button('Approve this member')
   await ready('exact-member: active')
-  expect(document.querySelector('[aria-label="Group member access"]')?.textContent).toBe('1 member approved')
+  expect(document.querySelector('[aria-label="Group member access"]')?.textContent).toBe('1 member approved to use this Agent')
   expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).grants).toMatchObject([{ actor: { idType: 'account_id', userId: 'exact-member' }, capabilities: ['input', 'answer'] }])
   await act(async () => [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Change connected group')!.querySelector('summary')!.click())
   await f.fill('Existing group ID', 'another-exact-group'); await consent(); await f.button('Change group')
-  await ready('another-exact-groupSharing on'); await ready('No members approved')
+  await ready('Sharing on'); await ready('No members approved')
+  expect(document.querySelector('.agent-connector-pairing__group')?.textContent).toContain('another-exact-group')
   binding = (await f.services.connections.bindings!.list({})).bindings[0]!
   expect(binding.revision).toBe(2)
   expect((await f.services.connections.bindings!.inspect({ bindingId: binding.bindingId, revision: 2 })).grants).toHaveLength(0)
