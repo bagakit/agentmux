@@ -192,3 +192,11 @@ export function workspaceOwnsSessionPath(
   return workspace.id === SCRATCH_WORKSPACE_ID &&
     scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics) !== null
 }
+
+/** Saved public topic copy only. Missing title stays unknown; UI may add a display fallback. */
+export function topicPublicCopy(content: string): { title: string | null; summary: string } {
+  const lines = content.split(/\r?\n/)
+  const title = lines.find(line => /^#\s+\S/.test(line))?.replace(/^#\s+/, '').trim() || null
+  const summary = lines.find(line => { const value = line.trim(); return !!value && !value.startsWith('#') })?.trim() ?? ''
+  return { title, summary }
+}
