@@ -262,7 +262,7 @@ it('explicitly chooses among multiple original positions instead of silently tak
   const before = useAppStore.getState(), selection = before.surveyZoneSelection, tabs = before.tabs, layouts = before.layouts
   const link = dom.container.querySelector<HTMLButtonElement>('.note-reference__source button')
   expect(link).not.toBeNull(); await act(async () => link!.click())
-  const choices = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-source-choices button')]
+  const choices = [...document.querySelectorAll<HTMLButtonElement>('.note-source-choices button')]
   expect(choices).toHaveLength(2)
   expect(useAppStore.getState().surveyZoneSelection).toBe(selection)
   expect(useAppStore.getState().documentRevealTargets[sourceKey]).toBeUndefined()
@@ -270,7 +270,7 @@ it('explicitly chooses among multiple original positions instead of silently tak
   expect(second).toBeDefined(); await act(async () => second!.click())
   expect(useAppStore.getState().surveyZoneSelection?.active).toEqual({ tabId: mixed.id, regionId: sourceRegion.regionId })
   expect(useAppStore.getState().tabs).toBe(tabs); expect(useAppStore.getState().layouts).toBe(layouts)
-  expect(dom.container.querySelector('.note-source-choices')).toBeNull()
+  expect(document.querySelector('.note-source-choices')).toBeNull()
 })
 it('keeps the exact target when a block disappears while its original position chooser is open', async () => {
   useAppStore.setState({ layouts: { workspace: twoPositions() } }); await mount(referring, referringTab.id)
@@ -278,13 +278,83 @@ it('keeps the exact target when a block disappears while its original position c
   expect(link).not.toBeNull(); await act(async () => link!.click())
   await act(async () => useAppStore.getState().updateDocument(mixed.id, serializeNoteDocument(newNoteDocument('Replacement block', 'source-note', 'replacement-block')), sourceRegion.regionId))
   const selection = useAppStore.getState().surveyZoneSelection, tabs = useAppStore.getState().tabs
-  const choices = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-source-choices button')]
+  const choices = [...document.querySelectorAll<HTMLButtonElement>('.note-source-choices button')]
   expect(choices).toHaveLength(2); await act(async () => choices[1]!.click())
-  expect(dom.container.querySelector('.note-surface > .note-knowledge-notice')?.textContent).toContain('no longer confirmed')
+  expect(document.querySelector('.note-position-dialog [role="status"]')?.textContent).toContain('no longer confirmed')
   expect(useAppStore.getState().surveyZoneSelection).toBe(selection); expect(useAppStore.getState().tabs).toBe(tabs)
   expect(useAppStore.getState().documentRevealTargets[sourceKey]).toBeUndefined()
   expect(readNoteDocument(useAppStore.getState().documents[referenceKey]!.content)).toEqual({ status: 'valid', note: reference, unanchoredBlockCount: 0 })
   expect(api.files.read).not.toHaveBeenCalled(); expect(api.files.write).not.toHaveBeenCalled()
+})
+it('reuses the exact current File occurrence for a self-reference even when this file is open in another Tab', async () => {
+  const self = newNoteDocument('123', source.noteId, 'source-block')
+  self.content.content!.push({ type: 'blockReference', attrs: { blockId: 'self-reference-block', referenceId: 'self-reference', target: { noteId: self.noteId, blockId: 'source-block' }, mode: 'reference' } })
+  const duplicate = { ...createWorkbenchTab('duplicate-tab', { ...sourceRegion, regionId: 'duplicate-file' }), space: mixed.space! }
+  useAppStore.setState(state => ({ tabs: { ...state.tabs, [duplicate.id]: duplicate }, layouts: { workspace: createWorkspaceLayout('original-group', [mixed.id, duplicate.id, referringTab.id]) },
+    documents: { ...state.documents, [sourceKey]: { ...state.documents[sourceKey]!, content: serializeNoteDocument(self) } } }))
+  await mount(); const originalEditor = editor()
+  await act(async () => originalEditor.commands.insertContentAt(1, 'Unsaved '))
+  const before = useAppStore.getState(), draft = before.documents[sourceKey], tabs = before.tabs, layouts = before.layouts
+  const open = vi.spyOn(before, 'openFile')
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('.note-reference__source button')!.click())
+  await vi.waitFor(() => expect(open).toHaveBeenCalled())
+  expect(open.mock.lastCall?.[5]?.reference).toEqual(display().reference)
+  expect(document.querySelector('.note-source-choices')).toBeNull()
+  expect(editor()).toBe(originalEditor); expect(originalEditor.state.doc.textContent).toContain('Unsaved 123')
+  expect(originalEditor.state.selection.$from.parent.attrs.blockId).toBe('source-block')
+  const after = useAppStore.getState()
+  expect(after.documents[sourceKey]).toBe(draft); expect(after.dirtyDocuments[sourceKey]).toBe(true)
+  expect(after.tabs).toBe(tabs); expect(after.layouts).toBe(layouts)
+  expect(api.files.read).not.toHaveBeenCalled(); expect(api.files.write).not.toHaveBeenCalled()
+})
+it('shows distinct Tab positions in the compact chooser and Escape preserves navigation and draft', async () => {
+  const duplicate = { ...createWorkbenchTab('duplicate-tab', { ...sourceRegion, regionId: 'duplicate-file' }), space: mixed.space! }
+  useAppStore.setState(state => ({ tabs: { ...state.tabs, [duplicate.id]: duplicate }, layouts: { workspace: createWorkspaceLayout('original-group', [mixed.id, duplicate.id, referringTab.id]) } }))
+  await mount(referring, referringTab.id)
+  const before = useAppStore.getState(), originalEditor = editor(), open = vi.spyOn(before, 'openFile')
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('.note-reference__source button')!.click())
+  const choices = [...document.querySelectorAll<HTMLButtonElement>('.note-source-choices button')]
+  expect(choices).toHaveLength(2)
+  expect(choices.map(choice => choice.querySelector('small')!.textContent)).toEqual(['Panel 1 · Tab 1 · View 2', 'Panel 1 · Tab 2 · View 1'])
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Choose where to show its block')
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  expect(document.querySelector('.note-source-choices')).toBeNull()
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  expect(useAppStore.getState().documents).toBe(before.documents); expect(editor()).toBe(originalEditor)
+  expect(open).not.toHaveBeenCalled(); expect(api.files.write).not.toHaveBeenCalled()
+})
+it('uses the original catalog name for the file header and reference, updates after rename and keeps paths for Source', async () => {
+  const rootPath = await realpath(await mkdtemp(join(tmpdir(), 'amx-note-reading-name-')))
+  const store = new AgentMuxNotebookStore(join(rootPath, 'catalog.sqlite'))
+  const workspace = composerConfig.workspaces.find(workspace => workspace.id === 'workspace')!
+  try {
+    let catalog = await store.apply({ operationId: 'register-readable-name', expectedRevision: 0, change: { kind: 'register', noteId: source.noteId, title: 'N2.1',
+      resource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path: sourceRegion.path } } }, { kind: 'user', id: 'original-person' })
+    useNotebookLibrary.setState({ state: catalog })
+    await mount(referring, referringTab.id); const originalEditor = editor(), before = useAppStore.getState().documents
+    const sourceButton = () => dom.container.querySelector<HTMLButtonElement>('.note-reference__source button')!
+    expect(sourceButton().textContent).toBe('N2.1'); expect(sourceButton().title).toContain(sourceRegion.path)
+    catalog = await store.apply({ operationId: 'rename-readable-name', expectedRevision: catalog.revision, change: { kind: 'rename-page', noteId: source.noteId, title: 'N2.1 renamed' } }, { kind: 'user', id: 'original-person' })
+    await act(async () => useNotebookLibrary.setState({ state: catalog }))
+    expect(sourceButton().textContent).toBe('N2.1 renamed'); expect(editor()).toBe(originalEditor)
+    await mount()
+    expect(dom.container.querySelector('.editor-header__path')?.textContent).toBe('N2.1 renamed')
+    expect(dom.container.querySelector('.editor-header__path')?.getAttribute('title')).toBe(sourceRegion.path)
+    await click('Source')
+    expect(dom.container.querySelector('.editor-header__path')?.textContent).toBe(sourceRegion.path)
+    expect(useAppStore.getState().documents).toBe(before); expect(api.files.write).not.toHaveBeenCalled()
+  } finally { await rm(rootPath, { recursive: true, force: true }) }
+})
+it('keeps the original filename when the same Note identity is catalogued at a different resource', async () => {
+  const catalog = emptyNotebookState(), workspace = composerConfig.workspaces.find(workspace => workspace.id === 'workspace')!
+  catalog.pages[source.noteId] = { noteId: source.noteId, title: 'Another original', notebookId: 'quick-notes', parentNoteId: null,
+    resource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path: 'other.note.md' }, sources: [], topics: [], createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1) }
+  useNotebookLibrary.setState({ state: catalog })
+  await mount(referring, referringTab.id)
+  expect(dom.container.querySelector('.note-reference__source button')?.textContent).toBe(sourceRegion.path)
+  await mount()
+  expect(dom.container.querySelector('.editor-header__path')?.textContent).toBe(sourceRegion.path)
+  expect(api.files.write).not.toHaveBeenCalled()
 })
 it('checks its real directory only on explicit refresh and leaves closed Note sources unread without adding Tabs', async () => {
   vi.mocked(api.files.readDirectory).mockResolvedValue([
