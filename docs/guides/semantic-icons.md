@@ -46,12 +46,16 @@ container.append(node)
 
 参数以 [SemanticIconPresentation](../../packages/client-ui/src/theme/icon-presentation.ts) 为准，支持尺寸、颜色、线宽、端点、连接及有限动画预设。明确参数优先于 inline style，再继承主题笔触和上下文颜色。默认静态；标题、历史与未知状态按呈现合同处理。按钮仍负责可访问名称，图标不能代替动作标签。
 
-`animation="work"` 只驱动原作者绘图里声明的 `writing-pen` 部位；`work-writing` 的文字线保持静止。部位身份随 `icon-authored.ts` 的原几何登记，CSS 动作仍归共享 `semantic-icons.css`，不在调用方复制路径或逐帧操作 DOM。选择其它库字形或自定义 paths 时，不猜哪段是笔，完整图形保持静态；切回声明了笔部位的字形后沿原主题投影恢复。减少动态、原宿主停泊及明确 motion-off 继续适用。`animation="wait"` 沿同一机制驱动 `operation-wait` 的沙漏部位：漏沙与堆沙、停顿、翻面；这是等待活动示意，不是任务进度或剩余时长。等待舞台沿原 busy/visible 选择该参数，不自行给图标叠加旋转样式。
+`animation="none"` 是静止态，默认就使用完整轮廓，不需要另建状态或监听。所有项目自绘都在原作者条目中同时声明 `design.rest` 与 `design.motion`，后者区分有条件循环、单次反馈和保持静止。`AUTHORED_ICON_DESIGNS` 从这些条目派生供工具展示；设计说明不作为运行、权限或成功事实。
+
+`work` 只驱动笔，`stream` 只推进正文光标，`execute` 只推进浏览器箭头，`wait` 表现漏沙、积沙与停顿翻面，`orbit` 只转静态轨道上的短弧。这些局部循环须由原准确活动事实显式选择；沙漏和短弧均不是任务百分比或剩余时长。`feedback` 仅播放已登记的笔、加号、方向或恢复弧一次，随后回完整静止轮廓；调用方只在对应呈现或操作已应用的事实成立时选择，不能凭点击或展示文字猜成功。长期工作台中的“演示”是明确模拟，不是业务回执。需要再次播放单次反馈时，按新的明确呈现或已应用事实重建该图标实例（React 可使用对应事实的稳定 `key`，native 使用原工厂替换该实例）；持续渲染同一实例不代表新的触发，不新增重播计时器。代码类型、对象、历史、身份与精确几何没有合理动态时明确保持静止。
+
+部位身份随 `icon-authored.ts` 的原几何登记，CSS 动作归共享 `semantic-icons.css`，不在调用方复制路径、操作逐帧 DOM 或加整枚摇晃样式。选择其它库字形或自定义 paths 时，不猜哪段是部位，保留完整资产；切回声明部位的图形后沿原主题投影恢复。减少动态、原宿主停泊及明确 motion-off 继续适用。控件禁用规则仍归原宿主，busy 按钮中的真实加载状态不因此被一律停止。
 
 ## 添加新含义或新图形
 
 1. 先检查 [SEMANTIC_ICON_CATALOG](../../packages/client-ui/src/theme/icon-catalog.ts)。只有新的产品含义才新增稳定 ID，并填写准确 `label` 与默认 `glyph`；复用现有类别前缀。不要为尺寸、颜色或动画新增 ID。
-2. 默认图形已在库中时直接引用 `IconGlyphId`。确需项目自绘时，在 [AUTHORED_ICON_GLYPHS](../../packages/client-ui/src/theme/icon-authored.ts) 登记数据式 24 单位 SVG 几何，核对静态单色、小尺寸、主题笔触与授权来源；原 [ICON_GLYPHS](../../packages/client-ui/src/theme/icon-glyphs.ts) 自动聚合库字形与自绘，并派生完整类型。同族使用一致的轮廓尺度、端点和留白；对象先画可辨轮廓，动作增加最少的方向或操作提示，避免用装饰、字面谐义或另一操作的惯用符号代替语义。不要在业务组件粘贴第二份路径，也不要手工维护工作台的自绘名单。
+2. 默认图形已在库中时直接引用 `IconGlyphId`。确需项目自绘时，在 [AUTHORED_ICON_DEFINITIONS](../../packages/client-ui/src/theme/icon-authored.ts) 同一条目登记数据式 24 单位 SVG `shapes`、静止设计 `design.rest` 及 `design.motion`；类型要求每个新条目都提供完整设计。动态选择为 `still/none`、`loop/对应局部预设` 或 `once/feedback`，写清动作部位与准确触发依据，不能为了凑数让每个对象循环。原几何表和设计投影均从这一个条目派生，原 [ICON_GLYPHS](../../packages/client-ui/src/theme/icon-glyphs.ts) 自动聚合库字形与自绘并派生完整类型。核对静态单色、小尺寸、主题笔触与授权来源；同族使用一致的轮廓尺度、端点和留白，对象先画可辨轮廓，动作增加最少的方向或操作提示。不要在业务组件粘贴第二份路径，也不要手工维护工作台的自绘或状态名单。
 3. [getSemanticIconCatalog](../../packages/client-ui/src/theme/icon-catalog-metadata.ts) 从目录派生元数据；只有新增类别或上下文描述时才修改其分组信息。`SemanticIconId`、glyph ID 类型也从原目录派生，无须另写 ID 清单。
 4. 接到真实产品调用方并检查内置主题的显式覆盖。目录默认、主题覆盖和本次实例呈现分别由各自 owner 持有；主题文件中的 `icons[id]` 可选择登记 glyph 或合法 paths，解析与导出沿原 [schema](../../packages/client-ui/src/theme/schema.ts)。
 5. 在工作台核对新语义、默认图形、浅深主题与实际小尺寸，再在真实消费界面核对含义、对齐及状态变化。测试与变异沿[测试策略](../testing/strategy.md#任务验收与假绿防护)，视觉改动沿[看图验收](agent-visual-e2e-review.md)。
@@ -72,7 +76,7 @@ pnpm icons:build
 | --- | --- |
 | 产品含义、稳定 ID、默认映射 | `icon-catalog.ts` |
 | 可选 SVG 几何 | `icon-glyphs.ts` |
-| 项目自绘几何与派生作者标记 | `icon-authored.ts` |
+| 项目自绘几何、静止与动态设计及其派生投影 | `icon-authored.ts` |
 | Settings、公共发现和工具的目录投影 | `icon-catalog-metadata.ts` |
 | React 与原生 sprite 投影 | `icons.tsx`、`icon-sprite.ts` |
 | 实例呈现参数与共享动效 | `icon-presentation.ts`、`styles/semantic-icons.css` |
