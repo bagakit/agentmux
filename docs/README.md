@@ -16,7 +16,10 @@
 | Agent 的目标、边界和交付责任 | [AGENTS.md](../AGENTS.md) |
 | Core 公共 API、Provider 与 Session | [Core 接入说明](../packages/core/README.md) |
 | 分屏树代数 / 目标存储 | [Layout](../packages/layout/README.md)、[Demand](../packages/demand/README.md) |
-| 共享对话、Composer 与客户端平台适配 | [Client UI](../packages/client-ui/README.md) |
+| 整个对话模式的行为与呈现规则 | [对话模式行为 SSOT](design/behavior/conversation-mode.md) · [呈现 SSOT](design/presentation/conversation-mode.md) |
+| 对话模式怎样接到 Core、Desktop、Mobile 与公共协议 | [机制与接线](architecture/conversation.md) · [公共协议](specs/conversation-protocol.md) |
+| Composer、邮箱、草稿、队列与持续推进 | [输入与邮箱](design/behavior/conversation-input.md) |
+| 共享对话组件、Composer 与客户端平台适配 | [Client UI](../packages/client-ui/README.md) |
 
 ## 按改动定位规则
 

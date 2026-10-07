@@ -19,7 +19,8 @@
 | 目标正文、需求卡片、详情和 Board 密度 | [Goals 与需求面的呈现](presentation/goals-and-demand.md) |
 | 执行台、焦点历史、泳道和底部音轨 | [Focus 执行台的呈现](presentation/focus-context.md) |
 | 连接、恢复、启动、服务窗和版本边界 | [Session 与恢复的呈现](presentation/session-recovery.md) |
-| 对话正文、输入工具、消息和图片密度 | [对话与输入的呈现](presentation/conversation-input.md) |
+| 对话消息、身份、正文／资源、过程与请求卡密度 | [对话模式的呈现](presentation/conversation-mode.md) |
+| 输入工具、队列、Mailbox 容器与持续推进密度 | [输入工具与邮箱的呈现](presentation/conversation-input.md) |
 | 身份、能力、Agent 状态、注入上下文与消息队列 | [Agent 身份与消息的呈现](presentation/agent-capabilities-and-messaging.md) |
 | 终端字形、历史、恢复阅读和链接提示 | [Terminal 阅读的呈现](presentation/terminal-reading.md) |
 | Browser 工具、证据、控制权和确认层次 | [Browser 工作面的呈现](presentation/browser-workface.md) |

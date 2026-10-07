@@ -2,6 +2,8 @@
 
 本文以当前已提交源码说明 Core、ctxmux 与客户端如何分工，以及接入时应向哪个 owner 读取事实。产品必须满足的约束归 [交互设计](../design/agentmux-desktop-interaction.md)；源码合同、工作树副本、安装包与实际运行能力分别核对。
 
+对话模式的原生／captured／PTY 来源、共享呈现与 Desktop／Mobile 消费链见[对话机制与接线](conversation.md)；本页继续持有系统分层，不复制对话细则。
+
 ## 从哪一层接入
 
 AgentMux 的优先目标是可独立消费的本地 Agent Core；Desktop 是它的第一方 client。包消费者从 [Core 接入说明](../../packages/core/README.md) 开始，了解导出边界见 [公共能力来源导航](../specs/public-capabilities.md)。

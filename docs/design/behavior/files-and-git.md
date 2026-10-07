@@ -16,7 +16,7 @@
 
 ## Explorer 与 Editor
 
-- 用户要求「完整重新设计 Explorer」：当前项目标题与 Explorer 标题合并以节省空间，项目路径去重，名称双击就能编辑，不再依赖行右侧老式 Edit／Delete；同时检查其他交互。文件树的共用项目头在收起后仍可读、可展开；文件、Branches、Changes 与新增 Git History 共享准确的 Selected Worktree／Host 上下文，不因整理 chrome 改变原选择、Tab／Region、草稿、执行焦点、布局或健康 Run。路径表示唯一沿[《路径显示与复制》](spaces-and-layout.md#路径显示与复制)，视觉与液态玻璃约束唯一见密度文档[《Explorer 与快捷输入区》](../presentation/conversation-input.md#explorer-与快捷输入区)。
+- 用户要求「完整重新设计 Explorer」：当前项目标题与 Explorer 标题合并以节省空间，项目路径去重，名称双击就能编辑，不再依赖行右侧老式 Edit／Delete；同时检查其他交互。文件树的共用项目头在收起后仍可读、可展开；文件、Branches、Changes 与新增 Git History 共享准确的 Selected Worktree／Host 上下文，不因整理 chrome 改变原选择、Tab／Region、草稿、执行焦点、布局或健康 Run。路径表示唯一沿[《路径显示与复制》](spaces-and-layout.md#路径显示与复制)，视觉与液态玻璃约束唯一见密度文档[《Explorer 与快捷输入区》](../presentation/files-and-git.md#explorer-与-editor-的共用头和列表)。
 - 名称单击选择、双击进入既有行内 Rename；文件图标／名称外的明确打开命中区与 Enter 打开文件，目录 disclosure 展开／收起，F2 和键盘／右键菜单继续可达。双击名称不能顺带重复打开、展开或启动拖拽；范围／切换多选仍只改选择，拖拽沿原单项 Move。移除名称右侧重复 Edit／Delete 动作，Rename／Delete 留在同一菜单与键盘入口；删除仍有准确对象与后果确认。改名开始即选中文件名主体，保留末尾扩展名；目录和无末尾扩展名文件（含 .env 这类单点前缀文件）选中全名，长名称从开头可读。行内名称编辑由可复用的通用输入控件承载选择、IME、Enter／Escape、失焦及等待／错误反馈，业务调用者继续持有准确对象、draft、提交与取消意图；Reusable 参考面提供实际可操作的同组件示例。Enter 与紧随的失焦只提交一次，组字确认不提交，等待中不重复写入；失败保留草稿，在仍属当前编辑意图时保留或返回输入焦点，新作用域／新意图不被旧失败抢回。通用控件不持有文件路径解析或写入，磁盘成功与原路径投影事务边界不变。
 
 - Explorer 以 Selected Worktree 为根，使用层级目录、文件夹优先排序、多选、键盘导航、Reveal、刷新和受 Workspace Root 约束的文件操作。Move 当前明确为单项操作：Pointer drag 在开始时收敛到被拖动项；Context Menu/`Shift+F10` 使用 `Move This Item to` 子菜单，并在执行时收敛到该项，不用多选外观暗示尚未实现的批量移动。
@@ -64,7 +64,7 @@
 
 ## Git 源码控制与 PR
 
-History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 提交历史的密度、分支颜色与连线》](../presentation/conversation-input.md#explorer-提交历史的密度分支颜色与连线)，每行图宽与标签适配见[《Git History 行内图宽与标签》](../presentation/files-and-git.md#git-history-行内图宽与标签)。收敛提交行只改变呈现，真实 Git 分支身份、固定分页、全部 parent 与未读边界仍沿本节；不能改变选中引用、已读历史、原 Workspace/Tab/Region、草稿或健康 Run。
+History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 提交历史的密度、分支颜色与连线》](../presentation/files-and-git.md#explorer-提交历史的密度分支颜色与连线)，每行图宽与标签适配见[《Git History 行内图宽与标签》](../presentation/files-and-git.md#git-history-行内图宽与标签)。收敛提交行只改变呈现，真实 Git 分支身份、固定分页、全部 parent 与未读边界仍沿本节；不能改变选中引用、已读历史、原 Workspace/Tab/Region、草稿或健康 Run。
 
 - Git 的定位与审阅不局限于左侧目录：完整审阅可进入独立 Git 工作面，也可由既有文件、分支比较及 Agent 结果 Review 入口抵达。各入口共用原 Host／Workspace／仓库与固定版本事实，不建立第二份 Git 注册表或结果所有者；打开与导航不改变已有 Session 的执行 cwd，也不把 Agent 在场等同改动归属。独立工作面沿已有可寻址 Region、Tab、布局与恢复机制承载，不能伪装为可写磁盘文件或为它另造空间身份。
 - 扩展后的 Git 能力须有独立、相对中立的模块目录，承载仓库查询、Git 对象、固定版本与索引事实，业务模块不依赖 Renderer、Electron、AppConfig 或 Agent 生命周期。Desktop 继续持有原 Host／Workspace 的授权、准确资源解析、worktree 注册与界面导航；公共服务只委托同一业务 owner，Core 不因提供 RPC／CLI 获得 Git 执行或 UI 职责。
@@ -82,11 +82,11 @@ History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 
 - worktree 的行内路径摘要以原仓库根为基准，根本身可用 `.`、内部用 `./…`；同 Host 下有共同目录的相邻 worktree 可用更短的 `../…`，明确表达在仓库根外。只有文件系统根或盘符相同、跨盘或归属未确认时保留原路径偏好。上下文须使基准可辨；完整目标的 tooltip、复制偏好、Host 与原始操作路径继续沿[《路径显示与复制》](spaces-and-layout.md#路径显示与复制)，相对摘要不成为执行 cwd 或新的资源身份。长分支、提交标题与引用即使行内省略，也须经原有 hover／键盘入口完整可读，不能以截断冒称数据缺失或另增读取事实。
 
 - 用户要求 Git 增加「所有历史分支」选项：History 默认看已存在本地分支、本地已知 remote-tracking 引用与当前 HEAD 所可达的提交和真实分叉／合并关系，可明确选择一个引用读取其历史，再回到全部范围；它与 Branches 的工作线管理、Changes 的未提交改动各有清楚职责。远程引用只是本地已知事实，已读提交上的 tag 可作真实装饰，不为 tag 另扩根集合；查看不自动 fetch、checkout、创建 worktree、修改索引或触发 Agent。已删除引用／reflog 的范围尚未确认，不冒称包含。
-- History 每次读取固定准确仓库／Host、范围与 tip commit，提交身份和全部真实 parent 关系来自 Desktop Main 的 Git 事实。长历史有界、按需继续，范围、已加载边界与未读 parent 可辨；不能把一页当全历史、把缺对象或读取失败画成根节点／空仓库，不能让后来移动的引用混入同一分页快照。切 Workspace／引用或 History 不可见后停止无效读取，迟到结果不抢回旧选择，不把错误伪装成零提交。同 Workspace 内切 Branches／Changes／History、临时被设置覆盖或窗口隐藏时，仍存在的历史阅读面保留同一范围已读页；离开整个工具面或换 Workspace 后重新进入可重新读取，不把旧范围内容带入新范围。文件树收起但 History 仍可见时保持读取。单个历史读取失败仍保原工作面与健康 Run。视觉唯一见密度文档[《Explorer 与快捷输入区》](../presentation/conversation-input.md#explorer-与快捷输入区)。
+- History 每次读取固定准确仓库／Host、范围与 tip commit，提交身份和全部真实 parent 关系来自 Desktop Main 的 Git 事实。长历史有界、按需继续，范围、已加载边界与未读 parent 可辨；不能把一页当全历史、把缺对象或读取失败画成根节点／空仓库，不能让后来移动的引用混入同一分页快照。切 Workspace／引用或 History 不可见后停止无效读取，迟到结果不抢回旧选择，不把错误伪装成零提交。同 Workspace 内切 Branches／Changes／History、临时被设置覆盖或窗口隐藏时，仍存在的历史阅读面保留同一范围已读页；离开整个工具面或换 Workspace 后重新进入可重新读取，不把旧范围内容带入新范围。文件树收起但 History 仍可见时保持读取。单个历史读取失败仍保原工作面与健康 Run。视觉唯一见密度文档[《Explorer 与快捷输入区》](../presentation/files-and-git.md#explorer-与-editor-的共用头和列表)。
 - History 的行与图形按可视窗及必要邻域窗口化呈现，已读事实和真实 parent 关系仍保留；连续加载不能让每次 hover、焦点或滚动都随累计已读行数重绘整表与整幅图。hover 状态与列表／图布局隔离，行输入和回调保持稳定，相关范围、提交或图关系变化才更新对应消费者；单提交详情只读所选固定目标，隐藏面不为布局或摘要继续读 History。性能优化不裁掉未读边界、不改变行语义或破坏原阅读位置。
 
 - History 向下阅读时在到达已加载末尾之前自动读取下一页，提前量随当前可视窗高度设定，沿同一范围、固定快照与 cursor；同一 cursor 的在途读取去重，隐藏／后台、加载中或已有错误时不重复发起。首屏不自动拉完整历史，追加页保留已读行与滚动位置，换仓库／引用后的迟到响应不进入新范围。失败保留已读页与原位置，并给显式可重试入口；重试由用户触发，不自动重放失败，手动继续只作兜底。继续读取和显式重试均沿同一读取 owner，不新建历史或滚动缓存。
-- 已持有的提交与引用事实通过 hover 和键盘焦点按需读取：完整 subject、OID、author、时间、全部真实 parent OID 与全部引用；引用保真实种类、名称和 tip，未知时间如实未知，不为 hover 追加 Git／网络读取。图线的颜色 guide 只辅助追踪，不能冒称某提交独占某分支或伪造包含关系。单个信息面可进入、选择复制；Escape、离开触发行及信息面、历史阅读面滚动、范围／Workspace／快照换代或隐藏关闭，迟到定位不重新打开旧信息。呈现唯一见密度 SSOT[《Explorer 提交历史的密度、分支颜色与连线》](../presentation/conversation-input.md#explorer-提交历史的密度分支颜色与连线)。
+- 已持有的提交与引用事实通过 hover 和键盘焦点按需读取：完整 subject、OID、author、时间、全部真实 parent OID 与全部引用；引用保真实种类、名称和 tip，未知时间如实未知，不为 hover 追加 Git／网络读取。图线的颜色 guide 只辅助追踪，不能冒称某提交独占某分支或伪造包含关系。单个信息面可进入、选择复制；Escape、离开触发行及信息面、历史阅读面滚动、范围／Workspace／快照换代或隐藏关闭，迟到定位不重新打开旧信息。呈现唯一见密度 SSOT[《Explorer 提交历史的密度、分支颜色与连线》](../presentation/files-and-git.md#explorer-提交历史的密度分支颜色与连线)。
 
 - **已经提交的两条本地分支也必须能比较**。从现有 Branches 工作面明确选择 A、B；默认看 B 从共同祖先分叉后的改动，也可明确选择 A 与 B 两个提交的差异。比较不签出、不改工作树、不创建 worktree，不触发 Agent。一次结果固定两个 commit 和实际比较起点；分支随后移动不能混入同一结果，显式刷新才产生新快照。
 - **只读比较面仍是可寻址的真实 Region**。Control 用通用只读 view 表达这种工作面，不伪装成磁盘 File、Launcher 或 Agent，也不因它的存在让整个 Tab 无法 inspect。Git 快照与 blob 仍归 Desktop，Core 只持有通用 Region 身份。Tab/Region 地址沿用既有短的不透明身份并持久保存；比较的去重与逻辑身份由已有 Tab 中的完整快照和文件事实决定，合法长路径不能撑破地址协议，也不另建比较身份表。

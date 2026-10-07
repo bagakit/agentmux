@@ -1,5 +1,7 @@
 # Shared conversation UI
 
+Product requirements are defined by the [conversation behavior SSOT](../../docs/design/behavior/conversation-mode.md) and [presentation SSOT](../../docs/design/presentation/conversation-mode.md). The [mechanism map](../../docs/architecture/conversation.md) traces current Desktop, Mobile, resource and public API consumers; sharing a component does not by itself prove client parity.
+
 `@agentmux/client-ui` contains the same message, native-history, trace, permission-card and Tiptap composer implementations consumed by AgentMux Desktop. It owns presentation and editing; Core and the Host retain all Agent and Run facts. There is no conversation log, Runtime client, Provider adapter or Session store in this package.
 
 `ConversationRecordSequence` presents optional native turn/response metrics from the already-read Core records. It retains source order and mounted reading nodes, shows each loaded turn's latest cumulative sample once, and reuses `NativeProcessObservation` disclosure. Response-only reports retain their own record identity. Import the shared styles (or `styles/conversation-metrics.css` with the host's individual style imports); no additional reader, timer or execution channel is needed.
