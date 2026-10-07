@@ -150,7 +150,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
         // Recovery is read-only even when no platform lookup can establish the effect.
         if (original.state === 'dispatching') original = this.store.settle(original.operationId, original.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
         if (adapter.inspect && original.prepared) {
-          try { const receipt = await adapter.inspect(parsePreparedPublication(original.prepared, adapter), original.target, credential, AbortSignal.any([signal, AbortSignal.timeout(30_000)])); if (receipt) this.store.settle(original.operationId, original.attempt!, receipt) } catch { /* Unknown original effect is retained without replay or changing its audience. */ }
+          try { const receipt = await adapter.inspect(parsePreparedPublication(original.prepared, adapter), original.target, credential, AbortSignal.any([signal, AbortSignal.timeout(30_000)]), original.mapping); if (receipt) this.store.settle(original.operationId, original.attempt!, receipt) } catch { /* Unknown original effect is retained without replay or changing its audience. */ }
         }
         if (this.store.inspect(original.operationId)?.state === 'confirmed') continue
         lane.observation = { state: 'unknown', reason: 'effect-unconfirmed' }; return
@@ -160,7 +160,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (signal.aborted || !this.authorized(binding)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); return }
       const timeout = AbortSignal.timeout(30_000), dispatchSignal = AbortSignal.any([signal, timeout])
       let effect: Promise<PublicationReceipt>
-      try { effect = Promise.resolve(adapter.dispatch(claimed.prepared!, claimed.target, credential, dispatchSignal)) }
+      try { effect = Promise.resolve(adapter.dispatch(claimed.prepared!, claimed.target, credential, dispatchSignal, claimed.mapping)) }
       catch { effect = Promise.reject(new Error('Unconfirmed original platform effect.')) }
       const settle = (receipt: PublicationReceipt) => { if (!this.closed) this.store.settle(claimed.operationId, claimed.attempt!, receipt) }
       // A late authoritative receipt can settle this same identity after timeout, never launch another effect.
