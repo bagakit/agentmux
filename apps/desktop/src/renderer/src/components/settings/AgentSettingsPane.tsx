@@ -72,7 +72,7 @@ function statusCopy(state: ReturnType<typeof useAppStore.getState>['executorDete
   const label = executorDetectionLabel(state)
   switch (state?.state) {
     case 'ready': return { label, icon: <ThemeStatusCompletedIcon size={13} /> }
-    case 'checking': return { label, icon: <ThemeStatusLoadingIcon className="spin" size={13} /> }
+    case 'checking': return { label, icon: <ThemeStatusLoadingIcon animation="spin" size={13} /> }
     case 'error': return { label, icon: <ThemeStatusWarningIcon size={13} /> }
     default: return { label, icon: <ThemeStatusFailedIcon size={13} /> }
   }
@@ -349,7 +349,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
         <div className="settings-resource-workbench settings-executor-detail-layout" data-resource-view={view}>
           <div className="settings-pane-toolbar settings-executor-toolbar">
             <strong>Executors <span>{visibleExecutors.length}{filter.query.trim() ? ` of ${scopedExecutors.length}` : ''}</span></strong>
-            <button className="icon-button" aria-label="Refresh saved executor availability" title="Refresh saved commands" disabled={checking} onClick={() => void detectExecutors(hostId)}>{checking ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionRefreshIcon size={14} />}</button>
+            <button className="icon-button" aria-label="Refresh saved executor availability" title="Refresh saved commands" disabled={checking} onClick={() => void detectExecutors(hostId)}>{checking ? <ThemeStatusLoadingIcon animation="spin" size={14} /> : <ThemeActionRefreshIcon size={14} />}</button>
             <button className="small-button" disabled={saving} onClick={() => addExecutor()}><ThemeActionCreateExecutorIcon size={13} /> Add executor</button>
           </div>
           <div className="settings-resource-split">

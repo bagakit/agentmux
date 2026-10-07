@@ -256,7 +256,7 @@ export function BrowserProfilesPanel({
       </header>
       {profiles === null ? (
         <div className="browser-profiles__loading" role="status">
-          {profilesLoading ? <><ThemeStatusLoadingIcon className="spin" size={13} /> Loading Profiles…</> : 'Profiles unavailable'}
+          {profilesLoading ? <><ThemeStatusLoadingIcon animation="spin" size={13} /> Loading Profiles…</> : 'Profiles unavailable'}
         </div>
       ) : (
         <BrowserProfileCatalog
@@ -283,13 +283,13 @@ export function BrowserProfilesPanel({
           onChange={(event) => setCreateLabel(event.target.value)}
         />
         <button type="submit" aria-label="Create Browser Profile" disabled={profiles === null || !createLabel.trim() || busy !== null}>
-          {busy === 'create' ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionCreateProfileIcon size={13} />}
+          {busy === 'create' ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeActionCreateProfileIcon size={13} />}
         </button>
       </form>
 
       {sources === null ? (
         <button className="small-button browser-profiles__import-open" type="button" disabled={profiles === null || busy !== null} onClick={() => void openImport()}>
-          {busy === 'detect' ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionDownloadIcon size={12} />}
+          {busy === 'detect' ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeActionDownloadIcon size={12} />}
           {busy === 'detect' ? 'Detecting…' : 'Import Profile…'}
         </button>
       ) : (
@@ -315,7 +315,7 @@ export function BrowserProfilesPanel({
             <button className="small-button" type="button" disabled={busy === 'import'} onClick={closeImport}>Cancel</button>
             {sources.length > 0 ? (
               <button className="primary-button" type="button" disabled={!sourceToken || !importLabel.trim() || busy !== null} onClick={() => void importProfile()}>
-                {busy === 'import' ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionDownloadIcon size={12} />}
+                {busy === 'import' ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeActionDownloadIcon size={12} />}
                 {busy === 'import' ? 'Importing…' : 'Import'}
               </button>
             ) : null}

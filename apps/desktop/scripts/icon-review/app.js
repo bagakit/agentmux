@@ -344,7 +344,9 @@ function attachEvents() {
     const pause=event.target.closest('#pause-motion');
     if(pause){
       const paused=pause.getAttribute('aria-pressed')!=='true';
-      $('#authored-demo .semantic-icon-motion').style.animationPlayState=paused?'paused':'running';
+      const carrier=$('#authored-demo .semantic-icon-motion');
+      carrier.style.animationPlayState=paused?'paused':'running';
+      carrier.style.setProperty('--icon-motion-play-state',paused?'paused':'running');
       pause.setAttribute('aria-pressed',paused);pause.textContent=paused?'继续循环':'暂停循环';
     }
     const role=event.target.closest('[data-motion-role]');

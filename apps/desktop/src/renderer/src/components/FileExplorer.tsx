@@ -1043,7 +1043,7 @@ export function FileExplorer({
     <button onClick={() => beginCreate('create-file')} title="New file"><ThemeActionCreateFileIcon size={13} /></button>
     <button onClick={() => beginCreate('create-directory')} title="New folder"><ThemeActionCreateFolderIcon size={13} /></button>
     <button onClick={() => void refreshExplorer()} title="Refresh explorer">
-      {tree.rootCache?.loading ? <ThemeStatusLoadingIcon className="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
+      {tree.rootCache?.loading ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
     </button>
     <button onClick={collapseAll} title="Collapse all folders" aria-label="Collapse all folders"><ThemeLayoutCollapseAllIcon size={13} /></button>
     <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" aria-label="Explorer options" title="Explorer options"><ThemeActionMoreIcon size={13} /></button></DropdownMenu.Trigger>
@@ -1193,7 +1193,7 @@ export function FileExplorer({
                 <button className="small-button" onClick={() => void refreshExplorer()}>Retry</button>
                 {workspace?.hostId === 'local' && isFolderWorkspace(workspace) ? (
                   <button className="small-button" disabled={relinking} onClick={() => void rebindWorkspacePath()}>
-                    {relinking ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeObjectFolderOpenIcon size={12} />}
+                    {relinking ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeObjectFolderOpenIcon size={12} />}
                     {relinking ? 'Choosing…' : 'Choose new folder'}
                   </button>
                 ) : null}

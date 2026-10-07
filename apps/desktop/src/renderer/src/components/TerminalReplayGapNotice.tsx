@@ -41,7 +41,7 @@ export function TerminalReplayGapNotice({ scope, visible = true, canRedraw, onRe
         }).catch((cause) => setError(`Screen redraw failed: ${presentError(cause)}`))
           .finally(() => setRedrawing(false))
       }}>
-      {redrawing ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionRefreshIcon size={12} />}
+      {redrawing ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeActionRefreshIcon size={12} />}
       {redrawing ? 'Requesting…' : 'Redraw'}
     </button> : null}
   </div>

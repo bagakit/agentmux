@@ -72,7 +72,7 @@ export function InlineRenameField({
           event.preventDefault(); event.stopPropagation(); cancelled.current = true; clearTimeout(deferred.current); onCancel()
         }
       }} />
-    {pending ? <SemanticIcon name="status.loading" className="inline-rename-field__pending" size={12} aria-label="Saving name" /> : null}
+    {pending ? <span className="inline-rename-field__pending"><SemanticIcon name="status.loading" animation="spin" size={12} aria-label="Saving name" /></span> : null}
     {error ? <span id={errorId} className="inline-rename-field__error" role="alert">{error}</span> : null}
   </span>
 }

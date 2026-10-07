@@ -123,9 +123,6 @@
 .device-management__connection-record time { margin-left: var(--sp-2); font-variant-numeric: tabular-nums; }
 .device-management__records summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
 @media (max-width: 560px) { .device-management__identity > div { grid-template-columns: 1fr; gap: 0; } }
-.device-management__spinner { animation: device-management-spin 1s linear infinite; }
-@keyframes device-management-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .device-management__spinner { animation: none; } }
 .host-creation-trust { padding: 16px; border: 1px solid var(--line-soft); border-radius: 8px; min-width: 0; }
 .host-creation-trust > header { display: flex; align-items: flex-start; gap: 8px; }
 .host-creation-trust > header svg { margin-top: 2px; color: var(--text-3); flex-shrink: 0; }

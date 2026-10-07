@@ -56,7 +56,7 @@ export function LauncherFileReferences({ workspace, hostLabel, onSelect, onClose
           aria-label="Parent directory" onClick={() => setDirectory(directory.split('/').slice(0, -1).join('/'))}><ThemeNavigationBackIcon size={14} /></button>
           <span title={fullPath(directory)}>{directory || workspace.path}</span>
           <button type="button" className="icon-button" aria-label="Refresh project files" onClick={() => setRevision(value => value + 1)}>
-            {loading ? <ThemeStatusLoadingIcon size={14} className="spin" /> : <ThemeActionRefreshIcon size={14} />}</button></div>
+            {loading ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionRefreshIcon size={14} />}</button></div>
         <div className="launcher-target__projects" aria-busy={loading}>
           {entries?.map(entry => <button type="button" key={entry.path} className="launcher-target__project" data-reference-path={entry.path}
             title={`${entry.name}\n${fullPath(entry.path)}`}

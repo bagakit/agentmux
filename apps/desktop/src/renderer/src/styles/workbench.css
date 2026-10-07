@@ -388,6 +388,7 @@
     .workspace-workbench-slot--focus-source, .pane-body__region[data-active="false"],
     .workbench-layout-body[data-workbench-layout-state="parked"],
     .workbench-reference-body[data-workbench-layout-state="parked"], .retained-workbench-parking) * {
+  --icon-motion-play-state: paused;
   animation-play-state: paused !important;
 }
 

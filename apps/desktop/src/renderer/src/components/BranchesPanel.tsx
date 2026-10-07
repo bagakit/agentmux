@@ -422,7 +422,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
             onClick={() => void openBranch(branch)}
           >
             <SelectorRow
-              leading={busyBranch === branch.name ? <ThemeStatusLoadingIcon className="spin" size={12} /> : pinned ? <ThemeActionPinIcon size={12} aria-label="Pinned branch" /> : <ThemeObjectBranchIcon size={12} />}
+              leading={busyBranch === branch.name ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : pinned ? <ThemeActionPinIcon size={12} aria-label="Pinned branch" /> : <ThemeObjectBranchIcon size={12} />}
               title={branch.name}
               titleTooltip={worktree ? `${branch.name} · ${displayPath(worktree, workspace.hostId)}` : branch.name}
               subtitle={worktree && worktree !== workspace.path ? pathSummary(worktree) : null}
@@ -492,7 +492,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               </button>
             ) : null}
             <button type="button" title="Refresh branches" onClick={() => void refresh()} disabled={loading}>
-              {loading ? <ThemeStatusLoadingIcon className="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
+              {loading ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
             </button>
         </div>
       </header>
@@ -600,7 +600,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
                   <button className="small-button" type="button" disabled={busyBranch !== null}>Cancel</button>
                 </Dialog.Close>
                 <button className="primary-button" type="submit" disabled={!worktreePath.trim() || busyBranch !== null}>
-                  {busyBranch ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionCreateWorktreeIcon size={12} />}
+                  {busyBranch ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeActionCreateWorktreeIcon size={12} />}
                   {busyBranch ? 'Creating…' : 'Create Worktree'}
                 </button>
               </footer>
@@ -665,7 +665,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
                   <button className="small-button" type="button" disabled={fanningOut}>Cancel</button>
                 </Dialog.Close>
                 <button className="primary-button" type="submit" disabled={!fanOutPrompt.trim() || fanningOut}>
-                  {fanningOut ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeGitCompareIcon size={12} />}
+                  {fanningOut ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeGitCompareIcon size={12} />}
                   {fanningOut ? 'Starting…' : `Fan out ${fanOutCount} lanes`}
                 </button>
               </footer>

@@ -85,7 +85,7 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
           <p className="phone-connection__scan">Scan with your phone’s camera</p>
           <p className="phone-connection__address">{new URL(connection.url).host}</p>
           <div className="phone-connection__buttons"><button type="button" className="primary-button" onClick={() => void copy()}><ThemeActionCopyIcon size={14} /> Copy link</button>
-            <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void refresh()}>{evaluating || refreshing ? <ThemeStatusLoadingIcon size={14} className="toolkit-result__spinner" /> : <ThemeActionRefreshIcon size={14} />} Refresh</button></div>
+            <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void refresh()}>{evaluating || refreshing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionRefreshIcon size={14} />} Refresh</button></div>
           <p className="phone-connection__updated">{connection.current ? 'Checked' : 'Saved'} <time dateTime={new Date(connection.result.endedAt).toISOString()}>{new Date(connection.result.endedAt).toLocaleString()}</time></p>
           <details className="phone-connection__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={connection.url} onFocus={event => event.target.select()} /></details>
         </> : <>
@@ -102,7 +102,7 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
         <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void refresh()}><ThemeActionRefreshIcon size={13} /> Retry connection</button>
       </section> : null}
       <section className="phone-connection__devices" aria-label="Device status">
-        <header><h3>Devices</h3><button type="button" className="performance-icon-button" aria-label="Refresh devices" title="Refresh devices" disabled={!canEvaluate} onClick={() => void refresh()}>{evaluating || refreshing ? <ThemeStatusLoadingIcon size={14} className="toolkit-result__spinner" /> : <ThemeActionRefreshIcon size={14} />}</button></header>
+        <header><h3>Devices</h3><button type="button" className="performance-icon-button" aria-label="Refresh devices" title="Refresh devices" disabled={!canEvaluate} onClick={() => void refresh()}>{evaluating || refreshing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionRefreshIcon size={14} />}</button></header>
         {devices ? <><p className="phone-connection__device-summary">{devices.document.summary}<time dateTime={new Date(devices.at).toISOString()}>Checked {new Date(devices.at).toLocaleTimeString()}</time></p>
           {devices.document.items.length ? <ul>{devices.document.items.map((device, index) => <li key={index}><ThemeObjectPhoneIcon size={15} aria-hidden="true" /><span>{device.label}</span><small>{device.value}</small></li>)}</ul> : <p className="phone-connection__hint">Your phone appears here while connected.</p>}
           {devices.document.notice ? <details className="phone-connection__device-details"><summary>Connection information</summary><p>{devices.document.notice}</p></details> : null}

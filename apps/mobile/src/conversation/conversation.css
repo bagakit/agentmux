@@ -124,9 +124,6 @@
 .mobile-attachment-copy p, .mobile-attachment-notice { color: var(--text-3); font-size: 11px; line-height: 1.4; margin: 5px 0 0; overflow-wrap: anywhere; }
 .mobile-attachment-notice { display: flex; align-items: center; gap: 6px; padding: 0 4px; }
 .mobile-attachment[data-phase="unknown"] { border-color: var(--amber); }
-.mobile-attachment-spin { animation: mobile-attachment-spin 1s linear infinite; }
-@keyframes mobile-attachment-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .mobile-attachment-spin { animation: none; } }
 .mobile-message-tools { display: flex; flex-direction: column; overflow: hidden; }
 .mobile-message-tools__records { flex: 1; max-height: 60dvh; }
 .mobile-message-tools .input-history p { margin: 0; }

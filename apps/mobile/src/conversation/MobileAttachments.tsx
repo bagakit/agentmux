@@ -132,7 +132,7 @@ export function MobileAttachments({ client, session, connected, promptOperationI
   }
   const visible = uploads.filter(upload => upload.identity.agentSessionId === session?.agentSessionId && upload.phase !== 'inserted')
   return <div className="mobile-attachments" aria-live="polite">
-    {choosing && <p className="mobile-attachment-notice"><SemanticIcon name="status.loading" size={13} className="mobile-attachment-spin" />读取所选附件…</p>}
+    {choosing && <p className="mobile-attachment-notice"><SemanticIcon name="status.loading" size={13} animation="spin" />读取所选附件…</p>}
     {visible.map(upload => {
       const image = upload.identity.mimeType.startsWith('image/'), file = bytes.current.get(upload.identity.operationId)
       const busy = upload.phase === 'sending', unknown = upload.phase === 'unknown', ready = upload.phase === 'uploaded'
@@ -146,7 +146,7 @@ export function MobileAttachments({ client, session, connected, promptOperationI
         {!busy && <button type="button" className="mobile-icon-button" aria-label={ready ? `将 ${upload.identity.name} 加入消息` : unknown ? `核对 ${upload.identity.name} 原上传` : `上传并加入 ${upload.identity.name}`}
           title={ready ? '加入消息' : unknown ? '核对原上传' : '上传并加入消息'} onClick={() => { void act(upload, unknown) }}>
           {ready ? <SemanticIcon name="action.confirm" size={17} /> : unknown ? <SemanticIcon name="action.refresh" size={17} /> : <SemanticIcon name="action.upload" size={17} />}</button>}
-        {busy && <SemanticIcon name="status.loading" size={17} className="mobile-attachment-spin" aria-label="上传回执待确认" />}
+        {busy && <SemanticIcon name="status.loading" size={17} animation="spin" aria-label="上传回执待确认" />}
         {canRemove && <button type="button" className="mobile-icon-button" aria-label={`移除 ${upload.identity.name} 本地引用`} onClick={() => remove(upload)}><SemanticIcon name="action.close" size={15} /></button>}
       </div>
     })}

@@ -178,7 +178,7 @@ export function BoardDiscussionCanvas({
                     <header>
                       <div><span>Agent</span><small>Detected on {host.kind === 'local' ? 'this computer' : host.label}</small></div>
                       <button type="button" className="icon-button" title="Refresh Agents" disabled={detecting} onClick={() => void detectExecutors(hostId)}>
-                        {detecting ? <ThemeStatusLoadingIcon className="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
+                        {detecting ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
                       </button>
                     </header>
                     <div className="discussion-provider-grid">
@@ -231,7 +231,7 @@ export function BoardDiscussionCanvas({
             </span>
             <button type="button" className="small-button" disabled={launching} onClick={onClose}>Cancel</button>
             <button type="button" className="primary-button" disabled={!canLaunch || launching} onClick={() => void startDiscussion()}>
-              {launching ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionStartIcon size={14} />}
+              {launching ? <ThemeStatusLoadingIcon animation="spin" size={14} /> : <ThemeActionStartIcon size={14} />}
               {launching ? 'Starting…' : 'Start discussion'}
             </button>
           </footer>

@@ -61,7 +61,7 @@ export function TerminalStorageDetails({ control, scope, visible = true, continu
   return <section className="terminal-storage-details" aria-label="Terminal storage facts">
     <header><strong><ThemeFileDatabaseIcon size={13} />Storage</strong><button type="button" className="small-button"
       disabled={checking || !visible} onPointerDown={event => event.preventDefault()} onClick={() => void checkStorage()}>
-      {checking ? <ThemeStatusLoadingIcon size={12} className="spin" /> : <ThemeActionRefreshIcon size={12} />}
+      {checking ? <ThemeStatusLoadingIcon size={12} animation="spin" /> : <ThemeActionRefreshIcon size={12} />}
       {checking ? 'Checking storage…' : observation ? 'Refresh storage' : 'Check storage'}
     </button></header>
     {!observation && !error ? <p>Read this Run’s storage facts on demand. This check leaves terminal input unchanged.</p> : null}

@@ -404,7 +404,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
             <div className="launcher-resume__detail-heading"><AgentAvatar label={selected.name} providerId={selected.candidate.providerId} size={24} />
               <div><strong>{selected.name}</strong><span>{selectedProviderLabel === selected.executorName ? selectedProviderLabel : `${selectedProviderLabel} · ${selected.executorName}`}</span></div></div>
             {nativeCandidate ? <div className="launcher-resume__conversation"><h3>Conversation</h3>
-              {selectedNativeRead?.state === 'loading' ? <p className="launcher-resume__muted"><ThemeStatusLoadingIcon size={12} className="spin" /> Reading this saved conversation…</p> : null}
+              {selectedNativeRead?.state === 'loading' ? <p className="launcher-resume__muted"><ThemeStatusLoadingIcon size={12} animation="spin" /> Reading this saved conversation…</p> : null}
               {selectedNativeRead?.page ? <>
                 {nativeMessages.map((item, index) => <article key={`${nativeSourceKey}:${item.id}`} ref={index === nativeMessages.length - 1 ? nativeLastMessageRef : undefined} className="launcher-resume__message">
                   <ConversationMessage compact content={item.contentParts} messageId={item.id} providerId={selectedNativeRead.page!.source.providerId}
@@ -422,7 +422,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
                 <button type="button" className="small-button" onClick={() => setRecapRetry(value => value + 1)}>Retry conversation</button></div> : null}
             </div> : <div className="launcher-resume__recap"><h3>Recap</h3>
               {selected.recap ? <><p>{selected.recap.text}</p><small>{selected.recap.source} · {selected.recap.origin === 'native' ? 'Provider conversation' : 'Captured conversation'}</small></>
-                : selectedRead?.state === 'loading' ? <p className="launcher-resume__muted"><ThemeStatusLoadingIcon size={12} className="spin" /> Reading this Session’s recap…</p>
+                : selectedRead?.state === 'loading' ? <p className="launcher-resume__muted"><ThemeStatusLoadingIcon size={12} animation="spin" /> Reading this Session’s recap…</p>
                   : <p className="launcher-resume__muted">No recap available. This Session has no readable conversation excerpt.</p>}
               {!selected.recap && selectedRead?.state === 'error' ? <div className="launcher-resume__recap-notice" role="status">
                 <span>Recap could not be read: {selectedRead.error}. Resume remains available.</span>
@@ -443,7 +443,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
           </section> : null}
         </div>
         {discovery.pending.length || discoveryPaused ? <div className="launcher-resume__discovery" role="status">
-          <div><span>{discoveryPaused ? 'Discovery updates paused' : <><ThemeStatusLoadingIcon size={12} className="spin" /> Reading saved conversations</>} · {discovery.total - discovery.pending.length}/{discovery.total} sources checked</span>
+          <div><span>{discoveryPaused ? 'Discovery updates paused' : <><ThemeStatusLoadingIcon size={12} animation="spin" /> Reading saved conversations</>} · {discovery.total - discovery.pending.length}/{discovery.total} sources checked</span>
             <button type="button" className="small-button" onClick={() => { if (discoveryPaused) { setDiscoveryPaused(false); setDiscoveryRetry(value => value + 1) } else setDiscoveryPaused(true) }}>
               {discoveryPaused ? 'Refresh discovery' : 'Pause updates'}</button></div>
           <details><summary>{discovery.pending.length} {discovery.pending.length === 1 ? 'source' : 'sources'} still unconfirmed · Listed Sessions remain available</summary>
@@ -458,7 +458,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
         <footer className="launcher-resume__footer"><span>{filtered.length} {filtered.length === 1 ? 'Session' : 'Sessions'}{workspace && scope === 'project' ? ` · ${workspace.name}` : ' · all projects'}</span>
           <button type="button" className="primary-button" disabled={!selected || busyId !== null || disabled}
             onClick={() => selected && void resume(selected)}>
-            {busyId ? <ThemeStatusLoadingIcon size={13} className="spin" /> : <ThemeActionResumeSessionIcon size={13} />}
+            {busyId ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeActionResumeSessionIcon size={13} />}
             {busyId ? 'Restoring…' : selectedSession?.status.continuityConflict === 'session-run-changed' ? 'Open current Session' : selected && !selected.workspace && selectedHostConfigured ? 'Open project & resume' : 'Resume Session'}
           </button></footer>
       </Dialog.Content>

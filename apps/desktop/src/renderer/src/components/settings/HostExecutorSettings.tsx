@@ -68,7 +68,7 @@ export function HostExecutorSettings({ config, active }: { config: AppConfig; ac
         {config.hosts.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
       </select></label>
       <span className="settings-resource-count">{descriptors.length} configurations</span>
-      <button className="icon-button" aria-label="Refresh Host executors" disabled={checking} onClick={() => void refresh()}>{checking ? <ThemeStatusLoadingIcon size={14} className="spin" /> : <ThemeActionRefreshIcon size={14} />}</button>
+      <button className="icon-button" aria-label="Refresh Host executors" disabled={checking} onClick={() => void refresh()}>{checking ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionRefreshIcon size={14} />}</button>
       <button className="small-button" disabled={saving || !host} onClick={() => setAdding(true)}><ThemeActionRegisterCommandIcon size={13} />Register command</button>
     </div>
     <p className="settings-group-note">Commands and launch configuration belong to {host?.label ?? hostId}. Custom wrappers need an explicit target command. Discovery does not install software.</p>

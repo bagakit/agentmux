@@ -145,7 +145,7 @@ export function SessionTakeoverSurface({ source, active, onClose }: {
       <AgentExecutorPicker executors={executors} selected={selected} active={active && !closing} disabled={busy || unconfirmed}
         onSelect={id => { void choose(id) }} />
       <div className="session-takeover__footer" aria-live="polite">
-        {busy ? <span><ThemeStatusLoadingIcon size={13} className="spin" />{unconfirmed ? 'Checking the original request…' : 'Passing the work to your Agent…'}</span>
+        {busy ? <span><ThemeStatusLoadingIcon size={13} animation="spin" />{unconfirmed ? 'Checking the original request…' : 'Passing the work to your Agent…'}</span>
           : <span>Context follows automatically. Your original session stays here.</span>}
         <button type="button" className="session-takeover__back" onClick={() => close()}>Back<span aria-hidden="true">Esc</span></button>
       </div>
