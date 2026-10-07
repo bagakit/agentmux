@@ -42,6 +42,17 @@ it('disabled options cannot alter the value or invoke the caller', async () => {
   expect(changed).not.toHaveBeenCalled(); expect(submitted).not.toHaveBeenCalled(); expect(trigger.textContent).toContain('Bravo')
   expect(document.querySelector('[role="menu"] [data-value="d"]')?.getAttribute('aria-disabled')).toBe('true')
 })
+it('a compact change trigger keeps the original selected identity, keyboard choice and focus', async () => {
+  const changed = vi.fn()
+  await act(async () => root.render(<SelectionField label="Original choice" value="b" options={choices} triggerLabel="Change" onValueChange={changed} />)); await settle()
+  const trigger = container.querySelector<HTMLButtonElement>('button')!
+  expect(trigger.textContent).toContain('Change'); expect(trigger.title).toBe('Bravo')
+  expect(document.getElementById(trigger.getAttribute('aria-describedby')!)?.textContent).toBe('Bravo')
+  await key(trigger, 'ArrowDown')
+  expect(document.querySelector('[aria-checked="true"]')?.textContent).toBe('Bravo')
+  await chooseField(trigger, 'c')
+  expect(changed).toHaveBeenCalledExactlyOnceWith('c'); expect(document.activeElement).toBe(trigger)
+})
 it('unknown current identity stays visible and never becomes the first choice', async () => {
   const { trigger, changed } = await mount({ value: 'original-unknown' })
   expect(document.getElementById(trigger.getAttribute('aria-describedby')!)?.textContent).toContain('original-unknown'); expect(trigger.title).toContain('original-unknown'); expect(trigger.textContent).toContain('not in current options')
