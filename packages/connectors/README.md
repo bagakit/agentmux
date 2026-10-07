@@ -95,7 +95,8 @@ stop healthy Agents or replace their Sessions.
 ## Durable room creation
 
 `RoomProvisioningHost` borrows `ConnectionHost.database`, its configured adapter
-registry and the original Core spatial read port. Attach it as `connections.rooms`;
+registry and the original Core spatial read port. Attach its `create` and `inspect`
+methods to `connections.rooms`, preserving that original port's discovery methods;
 Desktop composes this port alongside its original binding owner. The public SDK
 and CLI use the same Host owner:
 
@@ -141,6 +142,60 @@ Creation returns an exact room ID, authoritative non-application or unknown;
 member results must match every original typed member. An adapter must qualify its
 platform key, failure and partial-member semantics against the native contract.
 Controlled adapter tests establish the generic Host boundary only.
+
+## Room discovery and joining
+
+The original ConnectionHost exposes `connection.room.ls`, `search`, `get` and
+`members` through the same typed SDK, RPC and compiled CLI. Reads require the
+exact `connectionId` and `expectedConnectionRevision`; the Host resolves its
+original credential and rejects a late page from a changed configuration. No
+Agent, spatial binding, Runtime, membership change or sharing link is created by
+a read. Names identify choices visually and never route operations.
+
+```sh
+amux connection room ls --connection team --revision 1 --limit 20
+amux connection room search --connection team --revision 1 --query Project
+amux connection room get --connection team --revision 1 --room original-room
+amux connection room members --connection team --revision 1 --room original-room
+```
+
+Use each returned opaque `next` cursor for the same original query and revision.
+An unavailable or unknown observation is distinct from a confirmed empty page.
+The Feishu list is the bot's joined rooms; search also includes rooms visible to
+that application. Partial group information retains unknown fields. The official
+member API returns platform user accounts and filters bots; a same-join batch can
+exceed `page_size`. The leaf retains that complete page within the original RPC
+wire budget, without cropping or inventing another cursor. Platform accounts do
+not establish the local creator, human identity or an Agent chat grant.
+[List rooms](https://open.feishu.cn/document/server-docs/group/chat/list.md),
+[Search visible rooms](https://open.feishu.cn/document/server-docs/group/chat/search.md),
+[Read a room](https://open.feishu.cn/document/server-docs/group/chat/get-2.md),
+[Read members](https://open.feishu.cn/document/server-docs/group/chat-member/get.md).
+
+An explicit `connection.room.link.create` accepts
+`{operationId,connectionId,expectedConnectionRevision,externalConversationId}`
+from a current trusted user or device. It records the exact original intent in
+the same database before one native request. `connection.room.link.inspect`
+only reads that original operation. Unknown requests stay inspect-only across
+Host restart; there is no supported lookup by a platform deduplication key, and
+inspection does not issue another link. A reused operation cannot change rooms.
+
+The Feishu leaf uses the official `chat.link` API with `week` validity and keeps
+the actual returned expiry in Unix seconds. A confirmed receipt only proves
+that this link was issued. It does not prove the link is still usable, that a
+person joined, or that membership and a chat grant exist. The bot must be in the
+group; platform sharing settings, administrator restrictions and tenant rules
+still apply. Disabling the bot or removing it from the group invalidates its
+links. When no local-to-platform identity is proven, this official joining path
+avoids guessing a creator ID. Creation, invitation, membership, Binding and
+sharing remain separate original facts.
+[Official sharing-link contract](https://open.feishu.cn/document/server-docs/group/chat/link.md).
+
+The default Desktop composition delegates these methods to the original owner
+and lazy official SDK adapter. Controlled SDK transport tests consume the real
+Host, protected RPC and compiled CLI; they do not certify live credentials,
+actual member access or a real group. Full GUI acceptance belongs to the consuming
+journey using this same port.
 
 ## Room bindings
 
