@@ -7,6 +7,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const component = 'packages/client-ui/src/components/ReadingFind.tsx'
 const helper = 'packages/client-ui/src/lib/reading-find.ts'
 const changes = {
+  pointer: [component, 'onMouseDown={event => event.preventDefault()} onClick={show}', 'onClick={show}'],
   hidden: [helper, "(element.tagName === 'DETAILS' && !element.hasAttribute('open'))", 'false'],
   literal: [helper, "query.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')", 'query'],
   retain: [component, 'const index = retained >= 0 ? retained : 0', 'const index = 0'],
