@@ -5,11 +5,11 @@ import { durableWriteFile } from './durable-write.js'
 import { AgentMuxNotesStorage, defaultNotesDirectory, withNotesStorageFileLock } from './notes-storage.js'
 import { AgentMuxError } from './errors.js'
 import { applyNotebookChange, emptyNotebookState, notebookFingerprint, parseNotebookState, type NoteResource, type NotebookActor, type NotebookObservation, type NotebookState, type NotebookWrite } from './notebook-catalog.js'
-import { NOTEBOOK_DATABASE_NAME, initializeNotebookDatabase, readNotebookDatabase, readNotebookProvenance, writeNotebookDatabase, readNotebookHistory, writeNotebookHistory, readNotebookHistoryProvenance, readNotebookHistoryOperation } from './notebook-database.js'
+import { NOTEBOOK_DATABASE_NAME, initializeNotebookDatabase, readNotebookDatabase, readNotebookProvenance, writeNotebookDatabase, readNotebookHistory, writeNotebookHistory, readNotebookHistoryProvenance, readNotebookHistoryOperation, readNotebookHistoryBatch } from './notebook-database.js'
 import { parseNoteProvenanceWrite, type NoteProvenanceQuery, type NoteProvenanceSnapshot, type NoteProvenanceWrite } from './note-provenance.js'
 import { parseNoteFileTitle, parseNoteTitleIntent, parseNoteTitleOperation, type NoteTitlePort, type NoteTitleIntent, type NoteTitleOperation, type NoteFileTitle, type NoteTitleProjection, type NoteTitleInspection } from './note-title.js'
 import { noteProvenanceResourceKey } from './note-provenance.js'
-import { parseNoteHistoryQuery, parseNoteHistoryRecord, type NoteHistoryQuery, type NoteHistoryRecord, type NoteHistorySnapshot } from './note-history.js'
+import { parseNoteHistoryQuery, parseNoteHistoryRecord, type NoteHistoryQuery, type NoteHistoryRecord, type NoteHistorySnapshot, type NoteHistoryEntry } from './note-history.js'
 export * from './notes-storage.js'
 export * from './notebook-catalog.js'
 export * from './note-provenance.js'
@@ -239,6 +239,14 @@ export class AgentMuxNotebookStore {
     const original = parseNoteHistoryQuery(query)
     await this.locate()
     return readNotebookHistory(this.path, original)
+  }
+  /** Trusted history action owner: exact full batch metadata, not a public pagination bypass. */
+  async readHistoryBatch(query: Pick<NoteHistoryQuery, 'noteId' | 'resource'> & { batchId: string }): Promise<NoteHistoryEntry[]> {
+    const original = parseNoteHistoryQuery({ noteId: query.noteId, resource: query.resource })
+    if (typeof query.batchId !== 'string' || !query.batchId || /[\0\r\n]/u.test(query.batchId)) throw new AgentMuxError('An exact original history batch is required.', 'NOTE_HISTORY_INVALID')
+    const input = { noteId: original.noteId, resource: original.resource, batchId: query.batchId }
+    const run = async () => { await this.locate(); return this.withWriteLock(() => readNotebookHistoryBatch(this.path, input)) }
+    return this.storage ? this.storage.withLock(run) : run()
   }
   /** Original writer only: includes the private request fingerprint, never exposed by file.history. */
   async readHistoryOperation(eventId: string): Promise<NoteHistoryRecord | undefined> {

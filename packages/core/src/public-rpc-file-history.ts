@@ -1,6 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { noteHistoryRevision, type NoteHistorySnapshot } from './note-history.js'
+import { noteHistoryRevision, parseNoteHistorySource, type NoteHistorySnapshot } from './note-history.js'
 import { noteProvenanceResourceKey, parseNoteProvenanceWrite } from './note-provenance.js'
 import type { NoteResource, NotebookActor } from './notebook-catalog.js'
 import { parseFileReadParams, parseFileReadResult, type FileReadParams, type FileReadResource, type FileReadUnknown } from './public-rpc-files.js'
@@ -63,12 +63,16 @@ export function parseFileHistoryResult(value: unknown, params: FileHistoryParams
   const events = new Map<string, { batchId: string; actor: unknown; at: number }>()
   let previous = params.before ?? Infinity
   for (const raw of r.entries) {
-    const entry = rpcRecord(raw, ['eventId', 'sequence', 'batchId', 'parentEventId', 'noteId', 'resource', 'originalResource', 'status', 'at', 'actor', 'operation', 'baseRevision', 'revision', ...(params.includeContent ? ['beforeContent', 'content', 'provenance'] : [])], code)
+    const entry = rpcRecord(raw, ['eventId', 'sequence', 'batchId', 'parentEventId', 'noteId', 'resource', 'originalResource', 'status', 'at', 'actor', 'operation', 'source', 'baseRevision', 'revision', ...(params.includeContent ? ['beforeContent', 'content', 'provenance'] : [])], code)
     text(entry.eventId, code); text(entry.batchId, code); count(entry.sequence, code); count(entry.at, code); actor(entry.actor, code)
     if (entry.parentEventId !== null) text(entry.parentEventId, code)
     if (entry.parentEventId === entry.eventId) invalid('A history event cannot be its own parent.', code)
     if (entry.noteId !== params.noteId || events.has(entry.eventId) || Number(entry.sequence) >= previous || params.eventId !== undefined && entry.eventId !== params.eventId ||
         !['prepared', 'committed', 'unconfirmed', 'not-applied'].includes(entry.status as string) || !['edit', 'restore', 'undo'].includes(entry.operation as string)) invalid('The original Note history event, ordering or status is invalid.', code)
+    try {
+      const source = parseNoteHistorySource(entry.operation as 'edit' | 'restore' | 'undo', entry.source)
+      if (source && ('eventId' in source ? source.eventId : source.lastEventId) === entry.eventId) throw Error('Self-selected history event')
+    } catch { invalid('The original history action source is invalid.', code) }
     originalResource(entry.resource, params.expectedResource, code)
     try { noteProvenanceResourceKey(entry.originalResource as NoteResource) }
     catch { invalid('The historical original resource is invalid.', code) }

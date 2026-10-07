@@ -7,7 +7,7 @@ import { AgentMuxError } from './errors.js'
 import { durableWriteFile } from './durable-write.js'
 import { emptyNotebookState, notebookFingerprint, parseNotebookState, type NotebookState, type NoteResource } from './notebook-catalog.js'
 import { noteProvenanceResourceKey, parseNoteProvenanceWrite, type NoteAuthorship, type NoteProvenanceQuery, type NoteProvenanceSnapshot, type NoteProvenanceWrite } from './note-provenance.js'
-import { noteHistoryRevision, noteHistorySnapshot, parseNoteHistoryRecord, parseNoteHistoryQuery, type NoteHistoryRecord, type NoteHistoryEntry, type NoteHistoryQuery, type NoteHistorySnapshot } from './note-history.js'
+import { noteHistoryRevision, noteHistorySnapshot, parseNoteHistoryRecord, parseNoteHistoryQuery, parseNoteHistorySource, type NoteHistoryRecord, type NoteHistoryEntry, type NoteHistoryQuery, type NoteHistorySnapshot } from './note-history.js'
 
 export const NOTEBOOK_DATABASE_NAME = 'notebooks.sqlite'
 export type NotebookDatabaseSnapshot = { incarnation: string; state: NotebookState; provenance: NoteProvenanceWrite[]; history?: NoteHistoryRecord[] }
@@ -16,7 +16,8 @@ const historySchema = `CREATE TABLE IF NOT EXISTS note_history_content (revision
     note_id TEXT NOT NULL, resource TEXT NOT NULL, event_id TEXT NOT NULL, batch_id TEXT NOT NULL, json TEXT NOT NULL,
     UNIQUE(note_id,resource,event_id));
   CREATE INDEX IF NOT EXISTS note_history_original ON note_history_event(note_id,resource,sequence);
-  CREATE INDEX IF NOT EXISTS note_history_operation ON note_history_event(event_id);`
+  CREATE INDEX IF NOT EXISTS note_history_operation ON note_history_event(event_id);
+  CREATE INDEX IF NOT EXISTS note_history_batch ON note_history_event(note_id,resource,batch_id,sequence);`
 const applicationId = 0x414d4e42, header = Buffer.from('SQLite format 3\0')
 const failure = (message: string) => new AgentMuxError(message + ' Original knowledge and files are retained.', 'NOTEBOOK_READ_UNCONFIRMED')
 const schema = `PRAGMA application_id = ${applicationId}; PRAGMA user_version = 2;
@@ -62,6 +63,7 @@ function historyMetadata(row: Record<string, unknown>): Omit<NoteHistoryRecord, 
       !['prepared', 'committed', 'unconfirmed', 'not-applied'].includes(value.status) || !['edit', 'restore', 'undo'].includes(value.operation) ||
       !Number.isSafeInteger(value.at) || value.at < 0 || !value.requestFingerprint ||
       value.actor !== null && (!['user', 'agent', 'device'].includes(value.actor.kind) || typeof value.actor.id !== 'string' || !value.actor.id || /[\0\r\n]/u.test(value.actor.id))) throw failure('The original history event identity cannot be confirmed.')
+  parseNoteHistorySource(value.operation, value.source)
   return { ...value, sequence: Number(row.sequence) }
 }
 function historyRecord(db: DatabaseSync, row: Record<string, unknown>): NoteHistoryRecord {
@@ -106,27 +108,47 @@ export async function readNotebookHistory(path: string, query: NoteHistoryQuery)
     return noteHistorySnapshot(query, entries, rows.length > limit)
   } finally { original.db.close() }
 }
-/** Trusted writer lookup, not a public timeline. Its derived index is built once under the original lock. */
-export async function readNotebookHistoryOperation(path: string, eventId: string): Promise<NoteHistoryRecord | undefined> {
+/** Derived indexes are rebuilt under the original writer lock, never by an independent data owner. */
+async function openIndexedHistory(path: string, index: 'operation' | 'batch') {
   let original = await openRead(path)
-  if (!original) return
+  if (!original) return null
+  const name = index === 'operation' ? 'note_history_operation' : 'note_history_batch'
+  const sql = index === 'operation' ? 'CREATE INDEX IF NOT EXISTS note_history_operation ON note_history_event(event_id)' : 'CREATE INDEX IF NOT EXISTS note_history_batch ON note_history_event(note_id,resource,batch_id,sequence)'
   try {
-    if (!hasHistory(original.db)) return
-    if (!original.db.prepare("SELECT name FROM sqlite_schema WHERE type='index' AND name='note_history_operation'").get()) {
+    if (!hasHistory(original.db)) { original.db.close(); return null }
+    if (!original.db.prepare("SELECT name FROM sqlite_schema WHERE type='index' AND name=?").get(name)) {
       original.db.close(); original = null
       const { DatabaseSync } = await import('node:sqlite'), db = new DatabaseSync(path)
-      try {
-        configure(db); validateIdentity(db, await identity(path)); hasHistory(db)
-        db.exec('CREATE INDEX IF NOT EXISTS note_history_operation ON note_history_event(event_id)')
-      } finally { db.close() }
+      try { configure(db); validateIdentity(db, await identity(path)); hasHistory(db); db.exec(sql) } finally { db.close() }
       await syncNotebookDatabase(path)
       original = await openRead(path)
       if (!original) throw failure('The original operation journal disappeared during lookup.')
     }
+    return original
+  } catch (error) { original?.db.close(); throw error }
+}
+/** Trusted writer lookup, not a public timeline. */
+export async function readNotebookHistoryOperation(path: string, eventId: string): Promise<NoteHistoryRecord | undefined> {
+  const original = await openIndexedHistory(path, 'operation')
+  if (!original) return
+  try {
     const rows = original.db.prepare('SELECT * FROM note_history_event WHERE event_id=? LIMIT 2').all(eventId)
     if (rows.length > 1) throw failure('This operation identity has ambiguous original events.')
     return rows[0] ? historyRecord(original.db, rows[0]) : undefined
-  } finally { original?.db.close() }
+  } finally { original.db.close() }
+}
+/** Full indexed membership without inflating every intermediate body. The writer selects exact endpoints separately. */
+export async function readNotebookHistoryBatch(path: string, query: Pick<NoteHistoryQuery, 'noteId' | 'resource'> & { batchId: string }): Promise<NoteHistoryEntry[]> {
+  parseNoteHistoryQuery({ noteId: query.noteId, resource: query.resource })
+  if (typeof query.batchId !== 'string' || !query.batchId || /[\0\r\n]/u.test(query.batchId)) throw new AgentMuxError('An exact original history batch is required.', 'NOTE_HISTORY_INVALID')
+  const original = await openIndexedHistory(path, 'batch')
+  if (!original) return []
+  try {
+    return original.db.prepare('SELECT * FROM note_history_event WHERE note_id=? AND resource=? AND batch_id=? ORDER BY sequence').all(query.noteId, noteProvenanceResourceKey(query.resource), query.batchId).map(row => {
+      const { requestFingerprint: _private, provenance: _provenance, ...entry } = historyMetadata(row)
+      return entry
+    })
+  } finally { original.db.close() }
 }
 /** Current attribution needs only the newest committed event, never historical body inflation. */
 export async function readNotebookHistoryProvenance(path: string, query: NoteProvenanceQuery): Promise<Pick<NoteHistoryRecord, 'status' | 'revision' | 'provenance'> | undefined> {
@@ -152,7 +174,7 @@ export async function writeNotebookHistory(path: string, record: NoteHistoryReco
     // Extend the original v1 metadata database once, without replacing its data or identity.
     // Once v2 acknowledges history, missing tables are a failure, never an empty new journal.
     if (db.prepare('PRAGMA user_version').get()?.user_version === 1) { hasHistory(db); db.exec(historySchema); db.exec('PRAGMA user_version=2') }
-    else { hasHistory(db); db.exec('CREATE INDEX IF NOT EXISTS note_history_operation ON note_history_event(event_id)') }
+    else { hasHistory(db); db.exec('CREATE INDEX IF NOT EXISTS note_history_operation ON note_history_event(event_id); CREATE INDEX IF NOT EXISTS note_history_batch ON note_history_event(note_id,resource,batch_id,sequence)') }
     result = putHistory(db, record); db.exec('COMMIT')
   } catch (error) { try { db.exec('ROLLBACK') } catch {} throw error } finally { db.close() }
   await syncNotebookDatabase(path)

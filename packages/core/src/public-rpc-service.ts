@@ -30,12 +30,13 @@ import { parseNoteCorpusParams, parseNoteCorpusResult } from './note-corpus.js'
 import { parseNotebookObservationParams, type NotebookObservationPort } from './notebook-observation.js'
 import { parseNotebookResolveParams } from './note-links.js'
 import { inspectNotebook } from './notebook-catalog.js'
+import { NOTE_FILE_EXTENSION, readNoteMarkdownHeader } from './note-format.js'
 import { AgentMuxNotebookStore } from './notebook-store.js'
 import { normalizeMessageChannel } from './message-origin.js'
 
 import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult, type AgentMuxRpcFileUploadsOwner, type FileMethod } from './public-rpc-files.js';
 import { isTopicMethod, parseTopicParams, parseTopicResult, type AgentMuxRpcTopicsOwner, type TopicMethod } from './public-rpc-topics.js'
-import { isFileMethod, parseFileHistoryParams, parseFileHistoryResult, parseFileCreateParams, parseFileCreateResult, parseFileWriteParams, parseFileWriteResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult, type AgentMuxRpcFilesOwner } from './public-rpc-files.js'
+import { isFileMethod, parseFileHistoryParams, parseFileHistoryResult, parseFileCreateParams, parseFileCreateResult, parseFileWriteParams, parseFileWriteResult, parseFileRestoreParams, parseFileRestoreResult, parseFileUndoParams, parseFileUndoResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult, type AgentMuxRpcFilesOwner, type FileWriteResult } from './public-rpc-files.js'
 import { isGitMethod, parseGitParams, parseGitResult, type AgentMuxRpcGitOwner, type GitMethod } from './public-rpc-git.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult, type AgentMuxRpcSchedulesOwner, type ScheduleMethod } from './public-rpc-schedules.js'
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
@@ -156,6 +157,24 @@ export type AgentMuxRpcServiceSubscription<M extends AgentMuxRpcStreamMethod = A
   initial: AgentMuxRpcStreamInitial<M>; start?(): void | Promise<void>; dispose(): void | Promise<void>
 }
 type SearchCallContext = AgentMuxSearchReadContext & { rpc: AgentMuxRpcCallContext }
+function boundedFileResult(parsed: FileWriteResult, responseId: JSONRPCID = null, allowContentUnavailable = false): FileWriteResult {
+  if (parsed.result.status === 'conflict' && parsed.result.noteConflict !== undefined || allowContentUnavailable && parsed.result.status === 'written') {
+    try { rpcEncode({ jsonrpc: '2.0', id: responseId, result: parsed }) }
+    catch (error) {
+      if (!(error instanceof AgentMuxError) || error.code !== 'CONTROL_PROTOCOL_ERROR') throw error
+      if (parsed.result.status === 'written') {
+        const { content: _content, noteProvenance: _provenance, noteAttribution: _attribution, noteTitleProjection: _title, ...receipt } = parsed.result
+        return { resource: parsed.resource, result: { ...receipt,
+          contentUnavailable: 'The original body was saved. Its canonical content and accompanying metadata cannot fit the original RPC frame budget. Keep this revision and operation ID; read the exact file or, when available, the selected original history event separately.' } }
+      }
+      if (parsed.result.status !== 'conflict') throw error
+      const { noteConflict: _content, ...receipt } = parsed.result
+      return { resource: parsed.resource, result: { ...receipt,
+        noteConflictUnavailable: 'The conflict is confirmed, but its three bodies exceed the original RPC frame budget. Keep the original inputs and operation ID. Read the same original file and, when available, its selected history event for content.' } }
+    }
+  }
+  return parsed
+}
 const NATIVE_FIELDS = {
   'goal.delegation.prepare': ['goalId', 'intent', 'materials'], 'goal.delegation.bind': ['goalId', 'intent'], 'goal.delegate': ['goalId', 'intent', 'materials'],
   'goal.report': ['goalId', 'operationId', 'report'], 'goal.collect': ['goalId', 'operationId', 'collection'], 'goal.delegations': ['goalId'],
@@ -663,7 +682,7 @@ export class AgentMuxRpcService {
         context.signal?.throwIfAborted()
         if (!this.ports.files && !this.ports.forwardControl) throw new AgentMuxError('The original Host file owner is unavailable. Original files and Agents are retained.', 'CONTROL_UNAVAILABLE')
         const result = this.ports.files ? await this.ports.files.create(input, { actor: caller ? { kind: 'agent', id: caller.agentSessionId } : context.principal }) : await this.ports.forwardControl!('file.create', input, context)
-        return parseFileCreateResult(result, input) as AgentMuxRpcResult<M>
+        return boundedFileResult(parseFileCreateResult(result, input), context.responseId, input.path.endsWith(NOTE_FILE_EXTENSION) && readNoteMarkdownHeader(input.content).status === 'valid') as AgentMuxRpcResult<M>
       }
 
       if (method === 'file.write') {
@@ -671,17 +690,23 @@ export class AgentMuxRpcService {
         context.signal?.throwIfAborted()
         if (!this.ports.files && !this.ports.forwardControl) throw new AgentMuxError('The original Host file owner is unavailable. Original files and Agents are retained.', 'CONTROL_UNAVAILABLE')
         const result = this.ports.files ? await this.ports.files.write(input, { actor: caller ? { kind: 'agent', id: caller.agentSessionId } : context.principal }) : await this.ports.forwardControl!('file.write', input, context)
-        const parsed = parseFileWriteResult(result, input)
-        if (parsed.result.status === 'conflict' && parsed.result.noteConflict !== undefined) {
-          try { rpcEncode({ jsonrpc: '2.0', id: context.responseId ?? null, result: parsed }) }
-          catch (error) {
-            if (!(error instanceof AgentMuxError) || error.code !== 'CONTROL_PROTOCOL_ERROR') throw error
-            const { noteConflict: _content, ...receipt } = parsed.result
-            return { resource: parsed.resource, result: { ...receipt,
-              noteConflictUnavailable: 'The conflict is confirmed, but its three bodies exceed the original RPC frame budget. Keep the original inputs and operation ID. Read the same original file and, when available, its selected history event for content.' } } as AgentMuxRpcResult<M>
-          }
-        }
-        return parsed as AgentMuxRpcResult<M>
+        return boundedFileResult(parseFileWriteResult(result, input), context.responseId, input.path.endsWith(NOTE_FILE_EXTENSION) && readNoteMarkdownHeader(input.content).status === 'valid') as AgentMuxRpcResult<M>
+      }
+
+      if (method === 'file.restore') {
+        const input = parseFileRestoreParams(params)
+        context.signal?.throwIfAborted()
+        if (!this.ports.files?.restore && !this.ports.forwardControl) throw new AgentMuxError('The original Host restore owner is unavailable. Original files, history and Agents remain available.', 'CONTROL_UNAVAILABLE')
+        const result = this.ports.files?.restore ? await this.ports.files.restore(input, { actor: caller ? { kind: 'agent', id: caller.agentSessionId } : context.principal }) : await this.ports.forwardControl!('file.restore', input, context)
+        return boundedFileResult(parseFileRestoreResult(result, input), context.responseId, true) as AgentMuxRpcResult<M>
+      }
+
+      if (method === 'file.undo') {
+        const input = parseFileUndoParams(params)
+        context.signal?.throwIfAborted()
+        if (!this.ports.files?.undo && !this.ports.forwardControl) throw new AgentMuxError('The original Host undo owner is unavailable. Original files, history and Agents remain available.', 'CONTROL_UNAVAILABLE')
+        const result = this.ports.files?.undo ? await this.ports.files.undo(input, { actor: caller ? { kind: 'agent', id: caller.agentSessionId } : context.principal }) : await this.ports.forwardControl!('file.undo', input, context)
+        return boundedFileResult(parseFileUndoResult(result, input), context.responseId, true) as AgentMuxRpcResult<M>
       }
 
       if (method === 'file.history') {

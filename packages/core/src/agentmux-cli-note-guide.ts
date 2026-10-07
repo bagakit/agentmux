@@ -96,6 +96,25 @@ inspect that same event plus file.read; never replay a body merely to repair his
 Unknown/unconfirmed history is a partial receipt, not a confirmed empty timeline. A missing
 history owner affects this query only. This read-only query does not restore or undo a version.
 
+Restore one whole saved after-body with amux file restore --zone ZONE --path PATH
+--resource RESOURCE_JSON --note NOTE_ID --expected-revision CURRENT_REVISION
+--event-id EVENT_ID --operation-id NEW_OP_ID. This explicitly replaces the whole saved body,
+preserving its exact historical bytes and all recovery points; it does not merge a whole restore.
+Undo a selected edit activity with amux file undo using the same exact target/current revision
+and --batch BATCH_ID --batch-last-event LAST_EVENT_ID --operation-id NEW_OP_ID.
+The original owner checks complete batch membership, its trusted actor and selected tail;
+never treat one paginated window as the full batch. Inverse merging keeps later nonconflicting
+edits, while overlap, block identity or invalid merged structure keeps all three bodies and
+does not write. Undoing a confirmed creation activity empties its content while preserving
+the original Note identity, current title and catalog; it does not delete the page.
+Both actions create their own restore/undo history event with the selected source, require
+no stdin/body/actor claims, and share original Files permission, lease and CAS. Keep each
+operation ID for an unknown/replayed outcome. A committed retry returns its original receipt
+without overwriting later content; a prepared/unconfirmed action is never replayed from matching bytes.
+An oversized written Note receipt can keep written/revision/history with contentUnavailable.
+Retain that known result and later local drafts, then read the same original revision to
+recover canonical content. Never substitute your submitted bytes for unavailable canonical content.
+
 Use amux notebook graph --note NOTE_ID, --notebook NOTEBOOK_ID or --all for saved relationships.
 The original owner scans the durable catalog for incoming sources, including closed pages.
 Results include catalogRevision, per-file status/revision, hierarchy, exact source block/resource,

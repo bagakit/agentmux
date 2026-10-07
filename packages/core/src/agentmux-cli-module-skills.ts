@@ -151,6 +151,17 @@ edit, never permission to overwrite later work. Ordinary writes without this pai
 When three conflict bodies cannot fit one RPC frame, the confirmed conflict and original history
 status/IDs remain in the receipt with noteConflictUnavailable; read the original file and, when
 available, the selected history event for content. This does not authorize resubmitting the edit.
+Use file restore with a selected committed --event-id to restore that whole saved version as
+a new revision. Use file undo with --batch and --batch-last-event to reverse one complete
+trusted actor batch while keeping later nonconflicting edits. The original owner reads the
+full batch; a history page is never complete membership. Both actions pin the current
+resource/revision and require an explicit operation ID; they accept no replacement body or actor.
+Undoing a confirmed creation batch removes its created body while retaining the Note identity,
+title, directory and permanent links; it never deletes the page. An unknown prior body is not
+creation evidence. Later overlapping edits remain conflicts; independent additions are retained.
+If a written receipt has contentUnavailable, the write succeeded: its canonical body and attached
+metadata could not fit that response. Keep the revision and original event, read them separately,
+and preserve any later unsaved draft; missing inline content never authorizes overwriting it.
 Read amux notebook --skill for exact Note links, attribution and history recovery.
 
 ${SPATIAL_GUIDE}`
