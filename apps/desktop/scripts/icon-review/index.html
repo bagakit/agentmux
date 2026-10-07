@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>AgentMux · 图标语义工作台</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="semantic-icons.css">
   <script src="app.js" type="module"></script>
 </head>
 <body>
@@ -36,6 +37,12 @@
         <label>主题 <select id="preview-theme" aria-label="预览主题"></select></label>
         <label>明度 <select id="preview-mode" aria-label="预览明度"><option value="light">浅色</option><option value="dark">深色</option></select></label>
         <button id="export-theme" class="button">导出主题文件</button>
+      </div>
+      <div class="instance-preview-tools" aria-label="图标实例模拟">
+        <label>动效 <select id="preview-animation" aria-label="模拟动画"></select></label>
+        <label>颜色 <input type="color" id="preview-color" value="#267a48" aria-label="实例预览颜色"></label>
+        <button id="inherit-color" class="button quiet">继承主题色</button>
+        <small>仅模拟下方样例，不写入主题文件。</small>
       </div>
       <div id="semantic-samples" class="semantic-samples" aria-label="工作相关语义预览"></div>
       <div class="inventory-tools">

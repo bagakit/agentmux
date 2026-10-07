@@ -85,6 +85,9 @@ const catalog = { format: 'agentmux.icon-catalog.v1', pageId: 'agentmux-icon-mat
   scanScope:{roots:['packages/client-ui/src','apps/desktop/src/renderer/src','apps/mobile/src'],extensions:['.ts','.tsx','.css'],excluded:['theme directory in ordinary scan','index.ts'],nativeSource:'packages/client-ui/src/theme/icon-sprite.ts',dynamic:'Prefix candidates only; exact targets are not resolved and do not prove actual consumer coverage.'} }
 await fs.writeFile(join(out, 'catalog.json'), JSON.stringify(catalog))
 for (const file of ['index.html', 'styles.css', 'review-manifest.json']) await fs.copyFile(join(source, file), join(out, file))
+const motionStyle='packages/client-ui/src/styles/semantic-icons.css'
+await fs.copyFile(join(root,motionStyle),join(out,'semantic-icons.css'))
+inputs.set(motionStyle,sha(await fs.readFile(join(root,motionStyle))))
 await build({configFile:false,root:source,logLevel:'error',plugins:[inputCapture()],build:{emptyOutDir:false,outDir:out,minify:false,lib:{entry:join(source,'app.js'),formats:['es'],fileName:()=> 'app.js'},rollupOptions:{output:{inlineDynamicImports:true}}}})
 for(const name of ['index.html','styles.css','review-manifest.json','context-labels.json','build.mjs'])inputs.set(relative(root,join(source,name)),sha(await fs.readFile(join(source,name))))
 await fs.writeFile(join(out, 'build-inputs.json'), JSON.stringify({ inputs:[...inputs].map(([path,sha256])=>({path,sha256})), publicContract: 'Original catalog, native semantic sprite, theme runtime and validated complete theme file; no product configuration writes.' }, null, 2))
