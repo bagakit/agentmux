@@ -403,6 +403,8 @@ export type AgentMuxDemand = {
   activityLog?: string[]
   delegations?: import('@agentmux/demand').DemandDelegation[]
   dispatches?: import('@agentmux/demand').DemandDispatch[]
+  progressUpdates?: import('@agentmux/demand').DemandProgress[]
+  patrols?: import('@agentmux/demand').DemandPatrol[]
   activities?: AgentMuxDemandActivity[]
   participations: import('@agentmux/demand').DemandParticipation[]
   creationOrigin?: import('@agentmux/demand').DemandCreationOrigin
