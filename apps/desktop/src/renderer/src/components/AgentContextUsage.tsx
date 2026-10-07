@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Poin
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentTurnUsage } from '@agentmux/core'
-import { contextUsedPercent, formatTokenCount } from '../lib/agent-usage'
+import { agentUsageScopeLabel, contextUsedPercent, formatTokenCount } from '../lib/agent-usage'
 import { useAppStore } from '../store'
 
 const ThemeObjectPerformanceIcon = semanticIconComponent('object.performance')
@@ -126,11 +126,11 @@ export function AgentContextUsage({ usage, source, visible = true }: { usage?: A
           <p>Unavailable — this Agent has not reported used tokens and capacity, so the compression
             threshold is unknown. This is a native reading, never an estimate from lifetime billing.</p>
         )}
-        {usage ? <div className="composer__context-turn"><h3>Last turn</h3><dl>
+        {usage ? <div className="composer__context-turn"><h3>{agentUsageScopeLabel(usage)}</h3><dl>
           <div><dt>Input</dt><dd>{formatTokenCount(usage.inputTokens)}</dd></div>
           <div><dt>Output</dt><dd>{formatTokenCount(usage.outputTokens)}</dd></div>
           <div><dt>Total</dt><dd>{formatTokenCount(usage.totalTokens)}</dd></div>
-        </dl><p>Reported turn tokens, not a breakdown of the context window.</p></div> : null}
+        </dl><p>Native usage report, separate from the context window observation.</p></div> : null}
       </div>
     </>
   )

@@ -5,6 +5,7 @@ import { stepTitle } from '../lib/activity-step-summary.js'
 import { useId, useState, type ReactNode } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 import { RecordedStepsCard as WorkflowCard, RecordedToolRow as WorkflowToolRow, RecordedAgentRow as WorkflowAgentRow, type WorkflowObservationStatus, type WorkflowRecordedTime } from './WorkflowObservation.js'
+import { ConversationMetricsDetails, ConversationMetricsInline, conversationMetricsLabel } from './ConversationMetrics.js'
 
 function recordedStatus(item: AgentSessionHistoryItem): WorkflowObservationStatus | undefined {
   const collaboration = item.collaboration
@@ -31,23 +32,27 @@ function recordTime(item: AgentSessionHistoryItem, origin?: number): WorkflowRec
 }
 
 /** Read-only observations over Core records. A native reference is never a Desktop Session. */
-export function NativeProcessObservation({ id, items, renderRecord, compact = false }: ConversationProcessProps & { compact?: boolean }) {
+export function NativeProcessObservation({ id, items, renderRecord, metrics, compact = false }: ConversationProcessProps & { compact?: boolean }) {
   const [expanded, setExpanded] = useState(!compact)
   const states = items.map(recordedStatus)
-  const status = states.includes('failed') ? 'failed' : states.includes('running') ? 'running'
+  const recordedStepStatus = states.includes('failed') ? 'failed' : states.includes('running') ? 'running'
     : states.includes('interrupted') ? 'interrupted'
     : states.every(state => state === 'complete') ? 'complete' : undefined
+  const status = recordedStepStatus ?? (metrics?.metrics.status === 'completed' ? 'complete' : metrics?.metrics.status)
   const first = items[0]!
   const last = items.at(-1)!
   const recordedTime = items.every(item => item.startedAt !== undefined) ? recordTime({
     ...first, completedAt: last.completedAt ?? last.startedAt!
   }) : undefined
-  return <div className={compact ? 'native-process-observation native-process-observation--compact' : 'native-process-observation'}><WorkflowCard compact={compact} observation={{ id, label: compact ? '执行过程' : 'Process', stepCount: items.length,
+  return <div className={compact ? 'native-process-observation native-process-observation--compact' : 'native-process-observation'}><WorkflowCard compact={compact} observation={{ id, label: metrics ? conversationMetricsLabel(metrics) : compact ? '执行过程' : 'Process', stepCount: items.length,
+    ...(metrics ? { metrics: <ConversationMetricsInline observation={metrics} /> } : {}),
     ...(status ? { status } : {}), ...(recordedTime ? { recordedTime } : {}) }}
     expanded={expanded} onExpandedChange={setExpanded}>
+    {metrics ? <ConversationMetricsDetails observation={metrics} /> : null}
     {items.map(item => renderRecord(item, body =>
       <NativeProcessStep item={item} {...(first.startedAt === undefined ? {} : { origin: first.startedAt })}>{body}</NativeProcessStep>))}
-  </WorkflowCard></div>
+  </WorkflowCard>{items.map(item => item.metricsDiagnostic
+    ? <p key={item.id} className="conversation-metrics__notice" role="status">{item.metricsDiagnostic.message}</p> : null)}</div>
 }
 
 function NativeProcessStep({ item, origin, children }: {
