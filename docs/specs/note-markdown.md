@@ -54,8 +54,8 @@ note-id: "original-note-id"
 
 ## 元数据与公共消费
 
-原 [NotebookStore](../../packages/core/src/notebook-store.ts) 的 `notebooks.sqlite` 持有目录、关注、操作指纹／轨迹及块归因，
-不保存第二份正文。Canvas 布局仍由原 client owner 持有。普通目录读取不扫描全部作者历史；graph／resolve 从原文件派生关系。
+原 [NotebookStore](../../packages/core/src/notebook-store.ts) 的 `notebooks.sqlite` 持有目录、关注、操作指纹／轨迹、块归因与不可变正文历史，
+不保存第二份可写当前正文。Canvas 布局仍由原 client owner 持有。普通目录读取不扫描全部作者历史；graph／resolve 从原文件派生关系。
 
 `file.read/write/create` 复用原 Files 的准确资源与 revision CAS；`notebook.content`／`inspect --content` 观察同一已保存正文。
 `noteProvenance` 绑定 Note ID、完整 resource、正文 revision 和稳定 block ID。可信 actor 来自原调用权限边界，不能从正文声明作者。
@@ -69,6 +69,29 @@ note-id: "original-note-id"
 block inline PM UTF16 offset，不是 Markdown 字节位置。它不是跨文件原子快照；未读、歧义和未锚定状态不能被空边列表代签。
 `notebook apply` 的 `follow/unfollow` 只改变可信调用者自己的持久关注，不表示在线或通知授权。
 完整 Agent 操作指引由 [CLI Note guide](../../packages/core/src/agentmux-cli-note-guide.ts) 随 `amux --skill` 提供。
+
+## 持久正文历史
+
+[原 Note writer](../../apps/desktop/src/main/note-file-writer.ts) 沿既有 NotesStorage 锁和 Files revision CAS 保存正文，
+在同一原元数据 owner 中准备历史事件并分别确认正文与历史结果。当前 Markdown 是唯一当前正文；历史保存不可变的前后内容快照，
+不是可独立写入的另一份当前文档，也不是从当前 Markdown 可重建的缓存。
+
+[历史模型](../../packages/core/src/note-history.ts) 的 `eventId` 区分每次编辑；`revision` 仍是正文摘要。
+相同字节再次写入、A → B → A 不能复用旧事件或把旧作者当成本次操作者。事件保留原 Note、准确资源、前后 revision、
+可确认的 parent、可信 actor、时间及操作类型。`resource` 随已确认的目录搬迁更新查询归属，`originalResource` 保原事件地址。
+连续同一操作者的活动可归为同一 `batchId`，聚合不删除底层事件。
+
+原 SQLite 数据库以压缩、按摘要去重的内容保存历史，以事件序列索引准确 Note／资源；时间线查询只读取请求窗口的元数据。
+历史内容与原目录、关注和归因一同备份、校验和搬迁。已确认历史 schema 的表缺失或内容损坏是未确认，不能重建空表冒充没有历史；
+原目录和健康正文读写仍可用。历史准备或结果记账失败不否定已写成的正文，回执分别返回正文结果与 `noteHistory`。
+`prepared`／`unconfirmed` 保原事件地址，不能凭匹配字节追认本次提交或自动重写正文。
+
+`file.history`／`amux file history` 读取准确 `file.read` resource 和 Note ID 的历史。默认新到旧返回元数据，
+`before` 以最旧返回项的 `sequence` 续页；`batches` 只聚合本次窗口成员，不保证是完整批次。
+只有选择准确 `eventId` 并启用 `includeContent`／`--content` 才读取前后内容供比较。内容对超出原 RPC 帧容量时，
+仅本次内容读取明确不可用，同一事件的元数据及普通正文读写继续可用，不截断持久历史或改变公共帧上限。
+可信作者来自原写入调用边界，查询不能自报 actor。历史不可用或未确认不能返回“已确认空历史”。
+该只读入口不执行恢复或撤销；协同产品要求及其交付边界见[人和 Agent 协同编辑](../design/behavior/knowledge-workflows.md#note-中-agent-与人的协同编辑)。
 
 ## 存量转换与恢复
 
