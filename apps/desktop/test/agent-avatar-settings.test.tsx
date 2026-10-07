@@ -105,7 +105,7 @@ it('shows details on hover and focus, then routes the settings action to the mat
   const session = { ...composerSession(), executorId: 'review', status: { ...composerSession().status, detail: 'Stopped by user' } }
   useAppStore.setState({ config, sessions: [session] })
   const open = vi.fn()
-  await dom.render(<ExecutorIdentityContext.Provider value={{ config }}><SettingsNavigation.Provider value={{ open }}><AgentSessionComposer sessionId="agent-1" /></SettingsNavigation.Provider></ExecutorIdentityContext.Provider>)
+  await dom.render(<ExecutorIdentityContext.Provider value={{ config }}><SettingsNavigation.Provider value={{ open, openToolkit: vi.fn(), openHost: vi.fn() }}><AgentSessionComposer sessionId="agent-1" /></SettingsNavigation.Provider></ExecutorIdentityContext.Provider>)
   expect(badges()).toEqual(['shield'])
   const identity = dom.container.querySelector<HTMLElement>('.composer-agent-identity .agent-avatar')!
   const mailbox = dom.container.querySelector<HTMLButtonElement>('.composer__mailbox')!
