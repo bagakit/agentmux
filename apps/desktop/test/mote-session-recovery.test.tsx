@@ -52,7 +52,7 @@ describe('original Mote conversation recovery', () => {
   })
   it('recovers the original conversation without focus, layout, draft or prompt mutation', async () => {
     preferences(); const before = useAppStore.getState(); await render()
-    expect(api.sessions.recover).toHaveBeenCalledTimes(1); expect(api.sessions.recover).toHaveBeenCalledWith(ended.control, ended.workspacePath, expect.any(String))
+    expect(api.sessions.recover).toHaveBeenCalledTimes(1); expect(api.sessions.recover).toHaveBeenCalledWith(ended.control, ended.workspacePath, expect.any(String), { trigger: 'mote-open', timingOverride: 'startup' })
     const after = useAppStore.getState()
     expect(after.sessions.find(s => s.id === ended.id)?.control.run.runId).toBe('resumed-run')
     expect(after.tabs).toBe(before.tabs); expect(after.layouts).toBe(before.layouts); expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)

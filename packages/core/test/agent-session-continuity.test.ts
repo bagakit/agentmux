@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
-import { decideAgentSessionContinuity } from '../src/agent-session-continuity.js'
+import { decideAgentSessionContinuity, DEFAULT_AGENT_CONTINUITY_POLICY } from '../src/agent-session-continuity.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxError } from '../src/errors.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -21,6 +21,8 @@ import type {
   AgentMuxStoredAgentSession,
   AgentTerminalPromptDeliveryState
 } from '../src/types.js'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 
 const providers = new AgentProviderRegistry()
 
@@ -453,6 +455,128 @@ async function continuityHarness(options: {
     spawnedRunIds: () => [...runIds]
   }
 }
+
+describe('Core-owned continuity policy and original-operation receipts', () => {
+  async function working(harness: ContinuityHarness) {
+    const registry = (harness.client as any).registry
+    await registry.update('agent-1', { runId: 'run-1' }, (value: AgentMuxStoredAgentSession) => ({ ...value, updatedAt: _historyFixtureEpoch(0, 0, 10),
+      semanticStatus: { state: 'working', source: 'native-hook', observedAt: _historyFixtureEpoch(0, 0, 10) } }))
+  }
+  const original = { agentSessionId: 'agent-1', expectedRun: { runId: 'run-1' }, operationId: 'continuity-original', trigger: 'startup' as const }
+  it('automatically restores interrupted working without an idle completion or timestamp', async () => {
+    const harness = await continuityHarness(); await working(harness)
+    const probe = vi.spyOn(harness.client, 'probeAgent')
+    const result = await harness.client.ensureAgentContinuity(original)
+    expect(result).toMatchObject({ kind: 'resumed', session: { agentSessionId: 'agent-1', nativeHandle: { sessionId: 'native-1' } },
+      continuity: { reason: 'interrupted-working', policy: DEFAULT_AGENT_CONTINUITY_POLICY, previousRun: { runId: 'run-1' }, newRun: { runId: 'spawned-run-1' } } })
+    expect(result.continuity?.recoveryInputs?.reminder.length).toBeGreaterThan(0)
+    expect(result.continuity?.recoveryInputs?.continuation.length).toBeGreaterThan(0)
+    expect(probe).toHaveBeenCalledTimes(1); expect(harness.spawnCount()).toBe(1)
+    const stored = await harness.store.readMetadata('agent-1')
+    expect(stored?.continuityOperations?.[original.operationId]?.newRun).toEqual({ runId: 'spawned-run-1' })
+    const again = await harness.client.ensureAgentContinuity({ ...original, policy: { activeRecovery: 'manual', continuationEnabled: false } })
+    expect(again.kind).toBe('resumed'); expect(again.continuity?.policy.continuationEnabled).toBe(true)
+    expect(harness.spawnCount()).toBe(1)
+    await harness.client.dispose()
+  })
+  it('keeps a healthy Run attach-only before policy or Provider probes', async () => {
+    const harness = await continuityHarness({ runId1State: { type: 'running' } }); await working(harness)
+    const probe = vi.spyOn(harness.client, 'probeAgent')
+    const result = await harness.client.ensureAgentContinuity({ ...original, policy: { activeRecovery: 'manual', resumeAfterExit: false } })
+    expect(result).toMatchObject({ kind: 'reattachable', run: { runId: 'run-1' } })
+    expect(result.continuity?.recoveryInputs).toBeUndefined()
+    expect(probe).not.toHaveBeenCalled(); expect(harness.spawnCount()).toBe(0)
+    await harness.client.dispose()
+  })
+  it('delays interrupted work without taking a lifecycle lease and keeps explicit recovery usable', async () => {
+    const harness = await continuityHarness(); await working(harness)
+    const probe = vi.spyOn(harness.client, 'probeAgent'), reserve = vi.spyOn(harness.store, 'reserveLifecycle')
+    const result = await harness.client.ensureAgentContinuity({ ...original, policy: { activeRecoveryDelayMs: 60000 } })
+    expect(result).toMatchObject({ kind: 'pending', reason: 'active-delay' })
+    expect(result.continuity?.nextActionAt).toBe(result.continuity!.admittedAt + 60000)
+    expect(reserve).not.toHaveBeenCalled(); expect(probe).not.toHaveBeenCalled()
+    expect((await harness.client.ensureAgentContinuity({ ...original, operationId: 'manual-original', trigger: 'manual' })).kind).toBe('resumed')
+    expect(harness.spawnCount()).toBe(1); await harness.client.dispose()
+  })
+  it('preserves unknown observation as unknown without probing or starting a Run', async () => {
+    const harness = await continuityHarness(); await working(harness)
+    const kernel = (harness.client as any).kernel
+    kernel.status = async () => { throw new Error('observation unavailable') }
+    const probe = vi.spyOn(harness.client, 'probeAgent')
+    const result = await harness.client.ensureAgentContinuity({ ...original, policy: { recheckMaxAttempts: 0 } })
+    expect(result).toMatchObject({ kind: 'pending', reason: 'runtime-unverified', evidence: { kind: 'run-unknown' } })
+    expect(probe).not.toHaveBeenCalled(); expect(harness.spawnCount()).toBe(0)
+    expect(harness.client.agentSession('agent-1').run).toEqual({ runId: 'run-1' })
+    await harness.client.dispose()
+  })
+  it('fences the exact expected Run before a Provider probe or new start', async () => {
+    const harness = await continuityHarness(); await working(harness)
+    const probe = vi.spyOn(harness.client, 'probeAgent')
+    expect(await harness.client.ensureAgentContinuity({ ...original, expectedRun: { runId: 'wrong-original' } })).toMatchObject({ kind: 'conflict', reason: 'session-run-changed' })
+    expect(probe).not.toHaveBeenCalled(); expect(harness.spawnCount()).toBe(0)
+    await harness.client.dispose()
+  })
+  it('reconciles a lost start reply by the exact original lifecycle operation without starting again', async () => {
+    const harness = await continuityHarness(); await working(harness)
+    const kernel = (harness.client as any).kernel, start = kernel.start
+    let started: CtxmuxAdapterRun | undefined
+    kernel.start = async (input: { operationKey: string }) => {
+      started = { ...await start(input), lifecycleOperationId: input.operationKey }
+      throw new Error('start ACK lost')
+    }
+    kernel.list = async () => started ? [started] : []
+    const first = await harness.client.ensureAgentContinuity({ ...original, policy: { recheckMaxAttempts: 0 } })
+    expect(first).toMatchObject({ kind: 'pending', reason: 'operation-unconfirmed' })
+    const second = await harness.client.ensureAgentContinuity(original)
+    expect(second).toMatchObject({ kind: 'resumed', run: { runId: 'spawned-run-1' } })
+    expect(harness.spawnCount()).toBe(1)
+    expect((await harness.store.readMetadata('agent-1'))?.continuity?.newRun).toEqual({ runId: 'spawned-run-1' })
+    await harness.client.dispose()
+  })
+  it('keeps the legally committed new Run usable after Hook observation fails', async () => {
+    const harness = await continuityHarness(); await working(harness)
+    const internals = harness.client as any, stop = vi.fn()
+    internals.kernel.stop = stop
+    internals.ensureTerminalHandshakeOrDegrade = async () => { throw new Error('observation failed after commit') }
+    expect(await harness.client.ensureAgentContinuity(original)).toMatchObject({ kind: 'resumed', run: { runId: 'spawned-run-1' } })
+    expect(stop).not.toHaveBeenCalled()
+    expect(harness.client.agentSession('agent-1').run).toEqual({ runId: 'spawned-run-1' })
+    const inputRuns: string[] = []
+    internals.kernel.input = async (runId: string, op: { data: string }) => {
+      inputRuns.push(runId)
+      return { run: continuityRun(runId, { type: 'running' }, harness.client.agentSession('agent-1').workspacePath),
+        appliedByteRange: { startByte: 0, endByte: Buffer.byteLength(op.data) } }
+    }
+    await harness.client.writeAgent({ agentSessionId: 'agent-1', expectedRun: { runId: 'spawned-run-1' }, data: 'still-usable', source: 'user' })
+    expect(inputRuns).toEqual(['spawned-run-1'])
+    await harness.client.dispose()
+  })
+  it('lets a genuinely new startup policy act after an earlier manual-policy parking decision', async () => {
+    const harness = await continuityHarness(); await working(harness)
+    expect(await harness.client.ensureAgentContinuity({ ...original, policy: { activeRecovery: 'manual' } })).toMatchObject({ kind: 'pending', reason: 'active-manual' })
+    const result = await harness.client.ensureAgentContinuity({ ...original, operationId: 'new-startup', policy: { activeRecovery: 'automatic' } })
+    expect(result).toMatchObject({ kind: 'resumed', continuity: { operationId: 'new-startup' } })
+    expect(harness.client.agentSession('agent-1').continuityOperations?.[original.operationId]?.policy.activeRecovery).toBe('manual')
+    expect(harness.spawnCount()).toBe(1); await harness.client.dispose()
+  })
+  it('commits the original operation and new Run atomically even when a later receipt update fails', async () => {
+    const harness = await continuityHarness(); await working(harness)
+    const swap = harness.store.compareAndSwapMetadata.bind(harness.store)
+    vi.spyOn(harness.store, 'compareAndSwapMetadata').mockImplementation(async (expected, next, ...rest) => {
+      if (next?.continuity?.kind === 'resumed') throw new Error('later receipt ACK failed')
+      return await swap(expected, next, ...rest)
+    })
+    expect(await harness.client.ensureAgentContinuity(original)).toMatchObject({ kind: 'resumed', run: { runId: 'spawned-run-1' } })
+    expect((await harness.store.readMetadata('agent-1'))?.continuity).toMatchObject({ operationId: original.operationId, kind: 'resumed', newRun: { runId: 'spawned-run-1' } })
+    expect(harness.spawnCount()).toBe(1); await harness.client.dispose()
+  })
+  it('records first-new-input restoration independently without automatic recovery inputs', async () => {
+    const harness = await continuityHarness(); await working(harness)
+    const result = await harness.client.ensureAgentContinuity({ ...original, trigger: 'input' })
+    expect(result).toMatchObject({ kind: 'resumed', continuity: { trigger: 'input', recoveryInputs: { reminder: '', continuation: '' } } })
+    await harness.client.dispose()
+  })
+})
 
 describe('并发恢复的去重（f-23j8f43ck / T-002）', () => {
   it('同一 Session 的两次真并发恢复最多产生一个新 Run，输家得到确定的 session-run-changed', async () => {

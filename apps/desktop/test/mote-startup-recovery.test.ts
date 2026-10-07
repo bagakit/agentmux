@@ -86,7 +86,7 @@ afterEach(async () => {
 it('actual initialize restores original workface before mandatory Main continuity', async () => {
   const f = await fixture('on-open', true)
   expect(f.recover).toHaveBeenCalledTimes(1)
-  expect(f.recover).toHaveBeenCalledWith(f.selected.control, f.selected.workspacePath, expect.any(String))
+  expect(f.recover).toHaveBeenCalledWith(f.selected.control, f.selected.workspacePath, expect.any(String), { trigger: 'mote-startup', timingOverride: 'startup' })
   expectOriginalWorkface(f, true)
 })
 it('actual initialize and later canonical membership do not resume an on-open fixed conversation through the old 24-hour policy', async () => {
