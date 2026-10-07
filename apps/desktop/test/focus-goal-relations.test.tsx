@@ -65,6 +65,21 @@ beforeEach(async () => {
 })
 
 describe('actual Focus Goal relationships', () => {
+  it('keeps actual card Goal authority separate when two Hosts share the presentation SID', async () => {
+    const remote = { ...other, id: first.id }
+    useAppStore.setState({ sessions: [first, remote], demands: { remote: goal('remote', { participations: [participation('remote-record', 'other-host')] }) } })
+    await mount()
+    const cards = [...dom.container.querySelectorAll<HTMLButtonElement>('.focus-context[data-session-id]')]
+    const localCard = cards.find(card => card.getAttribute('aria-label')?.startsWith('Original Agent ·'))!
+    const remoteCard = cards.find(card => card.getAttribute('aria-label')?.startsWith('Other Host Agent ·'))!
+    expect(localCard).toBeDefined(); expect(remoteCard).toBeDefined()
+    expect(localCard.parentElement?.querySelector('.focus-goal__trigger')).toBeNull()
+    expect(remoteCard.parentElement?.querySelector('.focus-goal__trigger')).not.toBeNull()
+    await act(async () => useAppStore.setState({ demands: { local: goal('local', { participations: [participation('local-record')] }) } }))
+    expect([...dom.container.querySelectorAll('.focus-context')].find(card => card.getAttribute('aria-label')?.startsWith('Original Agent ·'))).toBe(localCard)
+    expect(localCard.parentElement?.querySelector('.focus-goal__trigger')).not.toBeNull()
+    expect(remoteCard.parentElement?.querySelector('.focus-goal__trigger')).toBeNull()
+  })
   it('keeps an absent relation slot absent and a historical exact relation readable despite unknown activity', async () => {
     useAppStore.setState({ demands: { closed: goal('closed', { status: 'done', participations: [participation('requirements-record', 'local', 'requirements')] }) } })
     await mount()
@@ -99,7 +114,8 @@ describe('actual Focus Goal relationships', () => {
     expect(bare.textContent).toContain('Supervisor')
     await inspect(other.id)
     expect(menu().querySelector('[data-goal-roles="confirmed"]')).toBeNull()
-    expect(menu().textContent).toContain('Session Host unconfirmed · Related Session'); expect(menu().textContent).not.toContain('discussion-a')
+    expect(menu().querySelector('[data-goal-roles="unconfirmed"]')?.textContent).toBe('Related Session · Assignee · Supervisor')
+    expect(menu().textContent?.match(/Session Host unconfirmed/gu)).toHaveLength(1); expect(menu().textContent).not.toContain('discussion-a')
   })
 
   it('keeps a sole bare role unknown and permits only exact Goal viewing', async () => {
@@ -154,12 +170,13 @@ describe('actual Focus Goal relationships', () => {
       latestOutputBytes: revision * 4096, status: { ...session.status, state: index === subjects.length - 1 && revision % 2 ? 'error' : 'running' } })), browserAnnotationsByBrowserId: {} }))
     expect(project).toHaveBeenCalledTimes(subjects.length); expect(outputs[outputs.length - 1]).toBe(held)
     expect(trigger(subjects[0]!.id)).toBe(button); expect(card(subjects[0]!.id)).toBe(originalCard)
-    expect(held.get(subjects[0]!.id)).toBe(outputs[outputs.length - 1]!.get(subjects[0]!.id))
-    const related = held.get(subjects[1]!.id)
+    const firstKey = linksOwner.focusGoalCardKey('local', subjects[0]!.id), secondKey = linksOwner.focusGoalCardKey('local', subjects[1]!.id)
+    expect(held.get(firstKey)).toBeDefined(); expect(held.get(firstKey)).toBe(outputs[outputs.length - 1]!.get(firstKey))
+    const related = held.get(secondKey)
     await act(async () => useAppStore.setState({ demands: { ...demands, 'cost-goal-0': { ...demands['cost-goal-0']!, title: 'Updated original Goal' } } }))
     expect(project).toHaveBeenCalledTimes(subjects.length + 1)
     const changed = outputs[outputs.length - 1]!
-    expect(changed.get(subjects[1]!.id)).toBe(related); expect(changed.get(subjects[0]!.id)?.items[0]?.title).toBe('Updated original Goal')
+    expect(changed.get(secondKey)).toBe(related); expect(changed.get(firstKey)?.items[0]?.title).toBe('Updated original Goal')
     for (const name of forbidden) expect(api.sessions[name]).not.toHaveBeenCalled()
   })
 
