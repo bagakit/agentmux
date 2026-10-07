@@ -54,7 +54,9 @@ it('keeps a missing sender identifiable without borrowing the recipient or trust
   expect(panel().querySelector('.log-turn__who')?.textContent).toBe('Author unknown')
   expect(panel().querySelector('.log-turn__node [data-speaker-role="agent"]')).toBeNull()
   expect(panel().querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('unknown')
-
+  await dom.click('[aria-label="Message details"]')
+  expect(panel().querySelector('.conversation-input-details__body')?.textContent).toContain('peer')
+  expect(panel().querySelector('.conversation-input-details__body')?.textContent).toContain('Declared source')
 })
 
 it('does not resolve visible senders again for unrelated Session/name churn', async () => {

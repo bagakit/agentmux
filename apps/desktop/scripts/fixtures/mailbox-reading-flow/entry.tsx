@@ -2,7 +2,7 @@ import { fixtureIso as _hygiene_fixtureIso, fixturePath as _hygiene_fixturePath 
 import { flushSync } from 'react-dom'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
-import { applyAppAppearance } from '../../../src/renderer/src/lib/app-appearance'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import type { ContinuousProgressLoop } from '@agentmux/core'
 
 // The existing local preview uses a relative resource path. This private Workbench
@@ -18,6 +18,7 @@ api.sessions.snapshot = async () => {
   const snapshot = await previewSnapshot()
   return { ...snapshot, sessions: snapshot.sessions.map(session => session.workspacePath === 'home//agentmux' ? { ...session, workspacePath: previewDirectory } : session) }
 }
+mountThemeRuntime()
 await import('../result-ready-input-continuity/entry')
 const original = (window as any).resultReady
 const longBody = Array.from({ length: 90 }, (_, index) => `Original message line ${index + 1}: review the recorded facts and retain these exact words.`).join('\n')
@@ -56,7 +57,7 @@ const probe = {
   notice() { flushSync(() => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === original.sessionId
     ? { ...session, terminalCapability: { state: 'unknown', mode: 'degraded', reason: 'handshake-timeout', run: session.control.run, observedAt: 30 } } : session) }))) },
   draft(text: string) { flushSync(() => useAppStore.getState().setAgentComposerDraft(original.sessionId, text)) },
-  appearance(mode: 'dark' | 'light') { applyAppAppearance(mode) },
+  appearance(mode: 'dark' | 'light') { updateThemeSelection({ appAppearance: mode }) },
   terminal: original.terminal,
   facts() { return { ...original.facts(), queues: useAppStore.getState().agentSteerQueues, receipts: useAppStore.getState().noticeReadReceipts, clipboard, sends, fileRequests, progress: { reads, observers: listeners.size } } }
 }

@@ -31,7 +31,7 @@ api.sessions.attach = async (...args) => {
   return { ...attached, session: { ...attached.session, latestOutputBytes: outputBytes.length },
     currentSize: { cols: 80, rows: 24 }, resizeRevision: 0,
     terminal: degraded ? { type: 'unknown' as const, reason: 'origin_unknown' as const }
-      : { type: 'basic-vt' as const, checkpoint: { runId, throughByte: 0, resizeRevision: 0, size: { cols: 80, rows: 24 } }, restoreBytes: new Uint8Array(), resizes: [] },
+      : { type: 'basic-vt' as const, checkpoint: { runId, throughByte: 0, resizeRevision: 0, size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 }, restoreBytes: new TextEncoder().encode('\u001b[0m'), resizes: [] },
     replay: [{ type: 'data' as const, runId, startByte: 0, endByte: outputBytes.length, data: output, dataBytes: outputBytes }], gap: null }
 }
 function echo(control: Parameters<typeof api.sessions.write>[0], text: string) {

@@ -56,7 +56,9 @@ async function query(sheet: HTMLElement, text: string) {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text)
     input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true }))
   })
-  await click(button(sheet, '查询'))
+  const submit = button(sheet, '查询')
+  expect(submit.textContent).toBe('查询'); expect(submit.querySelector('svg')).toBeNull()
+  await click(submit)
 }
 function row(sheet: HTMLElement, item: AgentSessionUserMessage) {
   const result = [...sheet.querySelectorAll<HTMLElement>('[data-input-history-id]')].find(node => node.dataset.inputHistoryId === item.id)
@@ -151,7 +153,9 @@ describe('Mobile input history consumes the original shared reader and draft own
     const sheet = await openHistory(view.element), local = sheet.querySelector<HTMLElement>('.input-history__local')!
     expect(local).not.toBeNull(); expect(local.textContent).toContain('不代表已经发送')
     await act(async () => { local.setAttribute('open', '') })
-    await click(button(local, '填入草稿'))
+    const fill = button(local, '填入草稿')
+    expect(fill.textContent).toBe('填入草稿'); expect(fill.querySelector('svg')).toBeNull()
+    await click(fill)
     expect(editor(view.element).textContent).toBe('刚提交而尚无原生记录的原正文')
     expect(JSON.parse(localStorage.getItem(STORAGE)!).conversation.attempts).toEqual(before)
     const changed = { ...f.sessions.get('session-original')!, hostId: 'another-execution-host' }
