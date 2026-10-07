@@ -34,6 +34,9 @@ it('the original Agent menu creates a dedicated group through actual IPC/Core/Ho
     expect(section.open, label + ' begins folded').toBe(false)
   }
   expect(document.querySelector('[role="dialog"] code')?.closest('details')?.open).toBe(false)
+  await ready('No members approved')
+  const access = document.querySelector('[aria-label="Group member access"]')!
+  expect(access.textContent).toBe('No members approved'); expect(access.closest('details')).toBeNull()
   expect(binding).toMatchObject({ executionHostId: 'local', agentSessionId: 'original-agent', externalConversationId: 'created-room', scope: { input: 'mentions-and-replies' } })
   expect((await f.services.connections.bindings!.inspect({ bindingId: binding!.bindingId })).grants).toHaveLength(0)
   await f.button('Close'); await f.menu('Create group chat', 'other-region'); await ready('Sharing on')
@@ -55,6 +58,7 @@ it('an unknown original create stays inspect-only across closing, reopening and 
   const [original] = Object.values(useAppStore.getState().connectorRoomIntents)
   await f.button('Close'); await f.menu('Create group chat'); await ready('Creation not confirmed')
   await f.button('Check status'); await ready('Creation not confirmed')
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-busy')).toBe('false') })
   // An accidental fresh-create button is exercised, so withdrawal cannot hide behind Core dedup.
   const fresh = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(node => node.textContent === 'Create group')
   if (fresh) { await act(async () => fresh.click()); await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.room.create').length).toBeGreaterThan(1)) }
@@ -115,9 +119,10 @@ it('the original Region context menu binds an existing group and keeps actor app
   }
   await f.button('Approve this member')
   await ready('exact-member: active')
+  expect(document.querySelector('[aria-label="Group member access"]')?.textContent).toBe('1 member approved')
   expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).grants).toMatchObject([{ actor: { idType: 'account_id', userId: 'exact-member' }, capabilities: ['input', 'answer'] }])
   await f.fill('Existing group ID', 'another-exact-group'); await consent(); await f.button('Change group')
-  await ready('another-exact-groupSharing on')
+  await ready('another-exact-groupSharing on'); await ready('No members approved')
   binding = (await f.services.connections.bindings!.list({})).bindings[0]!
   expect(binding.revision).toBe(2)
   expect((await f.services.connections.bindings!.inspect({ bindingId: binding.bindingId, revision: 2 })).grants).toHaveLength(0)
