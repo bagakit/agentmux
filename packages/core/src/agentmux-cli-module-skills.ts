@@ -167,13 +167,21 @@ Read amux notebook --skill for exact Note links, attribution and history recover
 ${SPATIAL_GUIDE}`
   },
   git: {
-    summary: 'Read-only Git history/diff and exact Desktop Git presentation',
-    roles: 'Agents inspecting repository evidence',
-    when: 'Read commits or display the original repository history',
+    summary: 'Git history/diff, exact Desktop presentation and worktree closeout',
+    roles: 'Agents inspecting repositories or closing completed worktrees',
+    when: 'Read commits, display original repository history or close a worktree',
     guide: `The Git owner reads an exact resource repository. Commits, parent-selected trees and
 diff snapshots retain their original identities; a displayed history is not a checkout or
 workspace mutation. Begin with global resource discovery, then preserve complete OIDs and
 the returned pagination/snapshot facts through each read and presentation request.
+
+Use git worktree close for product closeout after integrating the work. It gathers the
+original Tabs into the same project's default workspace while retaining Session/Run and
+execution cwd. workface moved confirms the saved display move; pending keeps its unfinished
+responsibility visible. Read cleanup separately: pending means the directory and cleanup responsibility
+remain; removed confirms directory cleanup. Keep the original operation ID and exact Host/path
+when recovering an unknown result. Discarding Git changes never authorizes stopping a healthy
+Agent or deleting its cwd.
 
 ${GIT_GUIDE}`
   },
