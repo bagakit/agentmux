@@ -152,6 +152,8 @@ beforeEach(async () => {
     scratchTopics: { listTopics: async () => [], setNameAudit: () => {} } as unknown as ScratchTopics,
     workspaceFiles: { dispose: async () => {}, read: vi.fn(), listFiles: vi.fn(), observe: async () => () => {} } as unknown as WorkspaceFiles })
   expect(fixture.handlers.has('ui:setAgentAttentionCount')).toBe(true)
+  // Finish the actual private bootstrap before teardown can remove its files.
+  expect((await api.notesStorage.inspect()).directory).toBe(join(fixture.directory, 'notes'))
 })
 afterEach(async () => {
   try {
