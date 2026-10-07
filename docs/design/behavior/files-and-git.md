@@ -1,5 +1,13 @@
 # 文件、编辑与 Git
 
+## Worktree 收尾与工作面收拢
+
+结束 worktree 时，将其原 Tab、分屏、Agent 与展示 occurrence 收拢到同 Host、同项目的默认目录工作区。保留目标已有工作面及原 Tab、Region、Session、Run、历史、草稿、文件资源与输入身份，不按相同 Session 去重，不创建替代 Agent。旧 worktree 的普通 Zone、布局与分支展示一并退出，重启后不重新出现。
+
+展示迁移不修改执行 cwd。原 Workspace 记录在清理尚未完成时继续承载原资源和准确收尾目标，但不冒充仍开放的工作分区。原 Session、Terminal、文件面或未知 Runtime 仍可能使用目录时，保留目录，分别报告展示已收拢与清理待完成，并在所属项目提供重试入口；不为清理而停止、重启或替换健康 Run。准确 Git 注册已结束时，仍可撤掉旧展示，遗留目录中的用户资料和证据不自动删除。
+
+Git、配置与空间持久化结果分别成立。失败保原事实和可接续责任；未持久收拢的工作面不能被磁盘删除抢先清空。单条关闭、批量收尾和公共调用消费同一实现，不从名称、分支文案或界面消失推断执行或清理已完成。
+
 本文定义准确 Host／Workspace 资源上的文件编辑、修订保存、Git 审阅与 PR，以及文件打开目的地。文件和 Git 事实由宿主业务 owner 持有，Desktop 负责授权与呈现；展示位置不改变资源地址或 Session 执行 cwd。要求与当前实现分别表达，本文不代签交付验收。
 
 [返回交互合同](../agentmux-desktop-interaction.md) · [同主题视觉](../presentation/files-and-git.md)
