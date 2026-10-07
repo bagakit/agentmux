@@ -84,12 +84,12 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
   return <div className="settings-pane-stack" data-connector-settings>
     <section className="settings-group connector-list" aria-label="Saved chat applications">
       <div className="settings-pane-toolbar"><span className="connector-section-label">Saved applications · {records.length}</span><button className="small-button" onClick={() => { void read() }}>Refresh</button><button className="small-button" onClick={() => edit(null)}>Add connection</button></div>
-      <p className="settings-group-note">Application secrets stay in this environment’s secure storage. Link a Region after checking the saved application.</p>
+      <p className="settings-group-note">Application secrets stay in this environment’s secure storage. Enable the Connector here. Create or bind a group from an Agent’s menu; configuration never creates a group. See delivery in Shared group details in that Agent’s menu.</p>
       {!records.length && <p className="settings-group-note">No chat connections saved.</p>}
       {records.map(record => <article className="settings-group connector-record" key={record.config.connectionId} data-connection={record.config.connectionId}>
         <div className="settings-pane-toolbar"><strong className="connector-record__name">{record.config.label}</strong><button className="small-button" onClick={() => edit(record)}>Edit</button><button className="small-button" disabled={busy} onClick={() => { void test(record) }}>{checking === record.config.connectionId ? 'Checking…' : 'Check connection'}</button></div>
         <p className="settings-group-note">{record.config.application.domain} · {record.config.application.appId}</p>
-        <dl className="connector-stage-list">{(['authentication', 'transport', 'intake', 'delivery'] as const).map(key => <div key={key}><dt>{stageLabels[key]}</dt><dd>{stage(record.observation[key])}{record.observation[key].reason && ` · ${record.observation[key].reason!.replaceAll('-', ' ')}`}</dd></div>)}</dl>
+        <dl className="connector-stage-list">{(['authentication', 'transport', 'intake', 'delivery'] as const).map(key => <div key={key}><dt>{stageLabels[key]}</dt><dd>{key === 'delivery' && record.observation[key].state === 'unknown' && record.observation[key].reason === 'not-started' ? 'Delivery is shown per group' : <>{stage(record.observation[key])}{record.observation[key].reason && ` · ${record.observation[key].reason!.replaceAll('-', ' ')}`}</>}</dd></div>)}</dl>
         {checks[record.config.connectionId]?.revision === record.revision && <p role="status" className="settings-group-note connector-check-feedback">{checks[record.config.connectionId]!.text}</p>}
       </article>)}
     </section>
