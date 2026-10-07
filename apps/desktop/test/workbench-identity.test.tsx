@@ -64,7 +64,7 @@ describe('original Topic row consumes shared workbench identity', () => {
     expect(expanded[0]!.textContent).toContain('Current Agent')
     expect(expanded[0]!.style.left).toBe(highlighted()[0]!.style.left)
     await act(async () => chip.click())
-    expect(onSelectTab).toHaveBeenCalledExactlyOnceWith(topic.id, tab.id)
+    expect(onSelectTab).toHaveBeenCalledExactlyOnceWith(topic.id, tab.id, reference.groupId)
     expect(useAppStore.getState().agentFocus.execution.reference).toEqual(reference)
   })
 
@@ -89,7 +89,7 @@ describe('original Topic row consumes shared workbench identity', () => {
     expect(highlighted()).toHaveLength(0)
     expect(dom.container.querySelectorAll('.workbench-topology__tab-chip')).toHaveLength(1)
     await dom.click('.workbench-topology__tab-chip')
-    expect(onSelectTab).toHaveBeenCalledExactlyOnceWith(topic.id, tab.id)
+    expect(onSelectTab).toHaveBeenCalledExactlyOnceWith(topic.id, tab.id, reference.groupId)
   })
 
   it('does not borrow an identically named Session from another Host', async () => {
