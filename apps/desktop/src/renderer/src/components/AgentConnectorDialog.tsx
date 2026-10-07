@@ -5,7 +5,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SelectionField } from './SelectionField'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import type { ConnectionGrant, ConnectionRecord, ConnectionDeliveryResultMap, RoomBinding, RoomBindingOperation, RoomBindingTarget, RoomLinkOperation, RoomProvisioningOperation } from '@agentmux/core/connections'
+import type { ConnectionGrant, ConnectionRecord, RoomBinding, RoomBindingOperation, RoomBindingScope, RoomBindingTarget, RoomLinkOperation, RoomProvisioningOperation } from '@agentmux/core/connections'
 import type { AgentNativeSourceReference } from './AgentNativeSourceControls'
 import { api } from '../lib/api'
 import { clearConnectorRoomIntent, retainConnectorRoomIntent, useAppStore } from '../store'
@@ -16,6 +16,7 @@ import { resolveOverlayContainer } from './WindowOverlayHost'
 import { ResolvedAgentAvatar } from './AgentAvatar'
 import { ConnectorRoomPeople, ConnectorRoomSelection, roomName, useConnectorRoomFacts } from './ConnectorRoomSelection'
 import { ConnectorRoomJoinLink, ConnectorRoomJoinReceipt } from './ConnectorRoomJoinLink'
+import { ConnectorDeliveryDetails } from './ConnectorDeliveryDetails'
 
 const CloseIcon = semanticIconComponent('action.close')
 const AgentIcon = semanticIconComponent('object.agent')
@@ -36,6 +37,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   const [connectionId, setConnectionId] = useState(original.connectionId ?? ''), [name, setName] = useState(original.name + ' · AgentMux')
   const [group, setGroup] = useState(''), [members, setMembers] = useState(''), [memberType, setMemberType] = useState('')
   const [scope, setScope] = useState<'mentions-and-replies' | 'all-messages'>('mentions-and-replies'), [confirmed, setConfirmed] = useState(false)
+  const [publication, setPublication] = useState<RoomBindingScope['publication']>('future-native-user-facing')
   const [actorId, setActorId] = useState(''), [actorType, setActorType] = useState(''), [actorInput, setActorInput] = useState(false), [actorAnswer, setActorAnswer] = useState(false)
   const [facts, setFacts] = useState<Record<string, Fact>>({}), [issue, setIssue] = useState(''), [busy, setBusy] = useState(false)
   const [actors, setActors] = useState<{ bindingId: string; revision: number; grants: ConnectionGrant[] } | null>(null)
@@ -71,7 +73,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   }, [connection, mode])
   const approvedMembers = binding && actors?.bindingId === binding.bindingId && actors.revision === binding.revision
     ? new Set(actors.grants.filter(grant => grant.state === 'active').map(grant => JSON.stringify([grant.actor.application.domain, grant.actor.application.appId, grant.actor.idType, grant.actor.userId]))).size : null
-  useEffect(() => { setGroup(binding?.externalConversationId ?? ''); setConfirmed(false); setChangingGroup(false); setActorId(''); setActorType(''); setAccessOpen(false) }, [connectionId, binding?.bindingId, binding?.revision])
+  useEffect(() => { setGroup(binding?.externalConversationId ?? ''); setScope(binding?.scope.input ?? 'mentions-and-replies'); setPublication(binding?.scope.publication ?? 'future-native-user-facing'); setConfirmed(false); setChangingGroup(false); setActorId(''); setActorType(''); setAccessOpen(false) }, [connectionId, binding?.bindingId, binding?.revision])
   const frozenRoom = roomIntent?.method === 'connection.room.create' ? roomIntent.input : null
   async function inspect(intent: ConnectorRoomIntent) {
     const value = intent.method === 'connection.room.create'
@@ -140,7 +142,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
     if (previous) { void work(async () => { await inspect(previous) }); return }
     const input = { ...target, operationId: crypto.randomUUID(), bindingId: binding?.bindingId ?? crypto.randomUUID(), connectionId,
       expectedConnectionRevision: connection.revision, externalConversationId: audience,
-      scope: { input: scope, publication: 'future-native-user-facing' as const }, expectedSource: { providerId: native.providerId, nativeSessionId: native.sessionId } }
+      scope: { input: scope, publication }, expectedSource: { providerId: native.providerId, nativeSessionId: native.sessionId } }
     void work(() => execute(binding ? { method: 'connection.binding.relink', input: { ...input, expectedRevision: binding.revision }, target, phase: 'not-dispatched' } : { method: 'connection.bind', input, target, phase: 'not-dispatched' }))
   }
   function pause() { const previous = relevant.find(intent => intent.method === 'connection.binding.pause'); if (previous) { void work(async () => { await inspect(previous) }); return } if (binding) void work(() => execute({ method: 'connection.binding.pause', target, phase: 'not-dispatched', input: { operationId: crypto.randomUUID(), bindingId: binding.bindingId, expectedRevision: binding.revision } })) }
@@ -157,10 +159,12 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   }
   const bindingPending = relevant.some(intent => intent.method === 'connection.bind' || intent.method === 'connection.binding.relink')
   const sharing = <section className="agent-connector-fields"><h3>{binding ? 'Change connected group' : 'Share with this group'}</h3>
+    <div className="agent-connector-field"><label htmlFor={fieldId + '-publication'}>Share to the group</label><SelectionField id={fieldId + '-publication'} label="Group sharing content" value={publication} disabled={busy} onValueChange={value => { if (value === 'future-native-user-facing' || value === 'future-shared-conversation') { setPublication(value); setConfirmed(false) } }} options={[{ value: 'future-native-user-facing', label: 'Agent replies and questions' }, { value: 'future-shared-conversation', label: 'New shared conversation' }]} /></div>
+    {publication === 'future-shared-conversation' ? <p className="agent-connector-note">Allow new human messages, including Terminal input, Agent replies, questions, answers and resources to be shared. Some sources or attachments may not sync yet; delivery details show missing content. Earlier history is not published.</p> : null}
     <div className="agent-connector-field"><label htmlFor={fieldId + '-scope'}>Accept requests</label><SelectionField id={fieldId + '-scope'} label="Group input scope" value={scope} disabled={busy} onValueChange={value => { if (value === 'mentions-and-replies' || value === 'all-messages') setScope(value) }} options={[{ value: 'mentions-and-replies', label: 'Mentions and replies only' }, { value: 'all-messages', label: 'Every group message' }]} /></div>
     <p className="agent-connector-note">This Agent may use its existing private context in replies. A separate discussion keeps contexts apart.</p>
     {mote ? <button className="agent-connector-text-action" onClick={newContext}>Start a separate discussion</button> : <p className="agent-connector-note">For separate context, start a new Agent in Mote before connecting it.</p>}
-    <label className="agent-connector-check"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} />Share new replies and questions with this group.</label>
+    <label className="agent-connector-check"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} />{publication === 'future-shared-conversation' ? 'Share new conversation content with this group.' : 'Share new replies and questions with this group.'}</label>
     {session.nativeHandle?.kind !== 'provider' ? <p role="status" className="agent-connector-note">The Agent’s conversation source is not confirmed yet. You can keep working locally.</p> : null}
   </section>
   const applicationChoice = <SelectionField id={fieldId + '-application'} label="Group application" value={connectionId} disabled={busy}
@@ -255,43 +259,4 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
         </footer>
       </Dialog.Content></Dialog.Portal>
   </Dialog.Root>
-}
-
-/** Bounded safe receipt observation opens only on demand; it never retries delivery. */
-function ConnectorDeliveryDetails({ binding }: { binding: RoomBinding }) {
-  const [read, setRead] = useState<ConnectionDeliveryResultMap['connection.delivery.ls'] | null>(null), [issue, setIssue] = useState('')
-  const [detail, setDetail] = useState<ConnectionDeliveryResultMap['connection.delivery.inspect'] | null>(null), [pending, setPending] = useState(false)
-  const flight = useRef(false), identity = JSON.stringify([binding.bindingId, binding.revision]), current = useRef(identity)
-  current.current = identity
-  async function inspect(after?: string) {
-    if (flight.current) return
-    const original = identity; flight.current = true; setPending(true)
-    try {
-      const result = await api.connections.call('connection.delivery.ls', { connectionId: binding.connectionId, bindingId: binding.bindingId, bindingRevision: binding.revision, limit: 5, ...(after ? { after } : {}) })
-      if (current.current === original) { setRead(result); setIssue('') }
-    } catch (error) { if (current.current === original) setIssue(presentError(error)) }
-    finally { flight.current = false; setPending(false) }
-  }
-  async function inspectOriginal(operationId: string) {
-    if (flight.current) return
-    const original = identity; flight.current = true; setPending(true)
-    try { const result = await api.connections.call('connection.delivery.inspect', { operationId }); if (current.current === original) { setDetail(result); setIssue('') } }
-    catch (error) { if (current.current === original) setIssue(presentError(error)) }
-    finally { flight.current = false; setPending(false) }
-  }
-  useEffect(() => { setRead(null); setDetail(null); setIssue('') }, [identity])
-  const latest = read?.deliveries[0], receipt = latest?.receipt
-  return <section className="agent-connector-fields" aria-busy={pending}><h3>Delivery</h3>
-    <p className="agent-connector-note">{receipt?.state === 'confirmed' ? 'Latest delivery confirmed' : receipt?.state === 'not-applied' ? 'Latest delivery was not sent' : receipt?.state === 'unknown' || issue ? 'Delivery not confirmed' : read ? 'No delivery receipt recorded for this connection' : 'Status not checked'}</p>
-    <button className="small-button" disabled={pending} onClick={() => void inspect()}>Check delivery</button>
-    <details className="agent-connector-disclosure" onToggle={event => { if (event.currentTarget.open) void inspect() }}><summary>Delivery receipt details</summary><div className="agent-connector-fields">
-      {read?.observation ? <p className="agent-connector-note">Worker: {read.observation.state}{read.observation.reason ? ' · ' + read.observation.reason : ''}</p> : null}
-      {read?.deliveries.map(delivery => <div className="agent-connector-receipt" key={delivery.operationId}><span>Queue: {delivery.state} · Platform receipt: {delivery.receipt?.state ?? 'Not recorded'}</span><code>{delivery.operationId}</code><button className="small-button" disabled={pending} onClick={() => void inspectOriginal(delivery.operationId)}>Check receipt</button></div>)}
-      {read && !read.deliveries.length ? <p className="agent-connector-note">No delivery in this bounded scope. This does not prove platform availability.</p> : null}
-      {read?.next ? <button className="small-button" disabled={pending} onClick={() => void inspect(read.next!)}>Earlier receipts</button> : null}
-      {detail ? <p className="agent-connector-note" role="status">{detail.delivery ? 'Original queue: ' + detail.delivery.state + ' · Platform receipt: ' + (detail.delivery.receipt?.state ?? 'Not recorded') + ' · ' + detail.delivery.operationId : 'Original receipt unavailable; no retry was sent.'}</p> : null}
-      {issue ? <p role="status" className="agent-connector-note">Delivery observation unconfirmed · {issue}</p> : null}
-      <button className="small-button" disabled={pending} onClick={() => void inspect()}>Latest receipts</button>
-    </div></details>
-  </section>
 }

@@ -69,3 +69,7 @@
 .agent-connector-status > p { flex-basis: 100%; }
 .agent-connector-pairing__group > strong, .agent-connector-room-choice > .selection-field { font-size: var(--fs-title); }
 .connector-sharing__metadata { color: var(--text-3); }
+
+.agent-connector-section-title { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
+.agent-connector-service { display: grid; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-left: 2px solid var(--text-3); background: var(--surface-1); }
+.agent-connector-service > strong { color: var(--text); font-size: var(--fs-meta); font-weight: 500; }
