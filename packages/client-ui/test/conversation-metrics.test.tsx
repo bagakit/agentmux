@@ -1,12 +1,13 @@
 import { act, type ComponentProps } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { AgentSessionHistoryPage } from '@agentmux/core'
+import type { AgentSessionHistoryItem, AgentSessionHistoryPage } from '@agentmux/core'
 import { ConversationView } from '../src/components/ConversationView.js'
 import { ConversationNativeThread } from '../src/components/ConversationNativeThread.js'
 import { NativeProcessObservation } from '../src/components/NativeProcessObservation.js'
 import { ClientUiProvider, type ClientUiPlatform } from '../src/platform.js'
 import { metricsPage, responsePage } from './fixtures/conversation-metrics.js'
+import { projectConversationMetrics } from '../src/lib/conversation-metrics.js'
 
 let root: Root, host: HTMLDivElement
 const copy = vi.fn(async () => true)
@@ -26,6 +27,38 @@ async function show(page: AgentSessionHistoryPage, native = false) {
 async function click(element: Element) { await act(async () => (element as HTMLElement).click()) }
 function record(id: string) { const node = host.querySelector<HTMLElement>(`[data-native-record-id="${id}"]`); expect(node).not.toBeNull(); return node! }
 function summaryHead() { const head = [...host.querySelectorAll<HTMLButtonElement>('.wf-head')].find(node => node.textContent?.includes('输出 127 tokens')); expect(head).toBeDefined(); return head! }
+
+it('accumulates a full loaded window without repeatedly copying prior source IDs or mutating input and previous output', () => {
+  const count = 1200
+  const items: AgentSessionHistoryItem[] = Array.from({ length: count }, (_, index) => ({
+    id: `cost-record:${index}`, turnId: 'one-original-turn', kind: 'activity', contentParts: [],
+    metrics: { scope: 'turn', usage: { outputTokens: index } }
+  }))
+  for (const item of items) {
+    Object.freeze(item.metrics!.usage); Object.freeze(item.metrics)
+    Object.freeze(item.contentParts); Object.freeze(item)
+  }
+  Object.freeze(items)
+  const originalIterator = Array.prototype[Symbol.iterator]
+  let copiedIds = 0
+  // Count actual prior-ID iteration, not elapsed time; a frozen input does not count.
+  Array.prototype[Symbol.iterator] = function* () {
+    const iterator = originalIterator.call(this)
+    for (let step = iterator.next(); !step.done; step = iterator.next()) {
+      if (typeof step.value === 'string' && step.value.startsWith('cost-record:')) copiedIds++
+      yield step.value
+    }
+  }
+  let projection: ReturnType<typeof projectConversationMetrics>
+  try { projection = projectConversationMetrics(items) } finally { Array.prototype[Symbol.iterator] = originalIterator }
+  const observed = projection.get(`cost-record:${count - 1}`)!
+  expect(observed.recordIds).toEqual(items.map(item => item.id))
+  expect(observed.metrics.usage?.outputTokens).toBe(count - 1)
+  expect(copiedIds).toBeLessThanOrEqual(count * 2)
+  projectConversationMetrics(items.slice(0, 100))
+  expect(observed.recordIds).toHaveLength(count)
+  expect(items[0]!.metrics!.usage!.outputTokens).toBe(0)
+})
 
 it('shows one exact cumulative turn report at its original process position, with public progress and final reply visible', async () => {
   await show(metricsPage())
