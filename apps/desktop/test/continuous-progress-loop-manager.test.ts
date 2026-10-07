@@ -1,12 +1,42 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE, observeAgent } from '@agentmux/core'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 
 describe('ContinuousProgressLoopManager', () => {
+  it.each([1, 100, 1000])('checks its real scheduler without copying %i unrelated saved prompts', async (count) => {
+    const dir = await mkdtemp(join(_hygiene_fixturePath('tmp'), 'agentmux-idle-clock-'))
+    const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
+    const onTick = vi.fn(async () => 'sent' as const)
+    const observe = vi.fn(observedDone)
+    const manager = new ContinuousProgressLoopManager(store, onTick, () => 100, observe)
+    let restoreClone: (() => void) | undefined
+    try {
+      await store.save(Array.from({ length: count }, (_, n) => ({ loopId: `idle-${n}`, hostId: 'local',
+        agentSessionId: `a-${n}`, providerId: 'codex', workspacePath: _hygiene_fixturePath('w'), intervalMs: 10,
+        prompt: 'Retained prompt '.repeat(128), nextCheckAt: _historyFixtureEpoch(0, 1, 0),
+        status: (['paused', 'stopped', 'active'] as const)[n % 3]! })))
+      await manager.start()
+      const clone = vi.spyOn(globalThis, 'structuredClone')
+      restoreClone = () => clone.mockRestore()
+      await manager.check(100)
+      await manager.check(101)
+      expect(clone).not.toHaveBeenCalled()
+      expect(observe).not.toHaveBeenCalled()
+      expect(onTick).not.toHaveBeenCalled()
+      expect((await store.load()).map(loop => loop.loopId)).toEqual(Array.from({ length: count }, (_, n) => `idle-${n}`))
+    } finally {
+      restoreClone?.()
+      await manager.stop()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('claims a completed turn once without screen readiness, including after restart', async () => {
     const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-completion-'))
     const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
