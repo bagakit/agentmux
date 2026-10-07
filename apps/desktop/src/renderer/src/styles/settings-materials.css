@@ -33,6 +33,7 @@
 }
 .settings-page .settings-pane-actions > span { min-width: 0; overflow-wrap: anywhere; }
 .settings-page .settings-pane-actions > button { flex-shrink: 0; }
+.settings-pane-actions[data-settings-save-bar] > button { align-self: flex-end; }
 .settings-page .settings-pane-actions > .primary-button:disabled {
   color: var(--text-3);
   background: var(--surface-2);
