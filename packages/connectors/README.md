@@ -28,6 +28,39 @@ can contain credentials. Desktop uses the operating system encryption service an
 stores only encrypted credential bytes. Unavailable encryption, including a
 plaintext storage backend, does not write a credential.
 
+## Connector service policy
+
+The original `ConnectionHost.service` owns one endpoint-wide enabled/revision
+policy in the same SQLite database. Its strict public types and result validation
+are defined in [the Core service contract](../core/src/connection-service-contract.ts)
+and [codec](../core/src/connection-service-codec.ts). An accurately absent row means
+enabled at revision zero; storage uncertainty cannot supply that default.
+Service schema failures stay local to this policy and preserve application
+management and existing receiver/publication lanes.
+
+```sh
+amux connection service get
+amux connection service configure --input service-policy.json
+amux connection service inspect --operation-id connector-off
+```
+
+For example, after reading revision zero, the configure input is
+`{"operationId":"connector-off","expectedRevision":0,"service":{"enabled":false}}`.
+A saved receipt remains inspectable after later changes or owner restart. Retain
+that exact input after a lost reply; current policy does not acknowledge the
+original operation. Service and application configure share the original
+configuration operation index and reject cross-method operation ID reuse.
+
+Off prevents new automatic intake and publication without rewriting application
+enabled values, Bindings, grants, source cuts, retained inputs or delivery progress.
+An unclaimed received message stays received and continues with the same ingress
+identity after enable. Claimed input with no Core receipt and unknown external
+effects remain inspect-only. An original enabled Core wait requires explicit
+rejoin under current authority; a positively not-applied publication requires its
+original explicit retry. Already started effects may settle their same attempt
+while off. Read-only recovery, application management and ordinary local Agent
+input remain available.
+
 ## Public consumers
 
 The SDK, CLI and Desktop Settings use the same public service:

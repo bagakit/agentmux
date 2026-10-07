@@ -226,6 +226,23 @@ amux connection room inspect --operation-id create-team-room
 [严格解析](src/room-provisioning-codec.ts)为准；Host 接入见
 [connectors 指南](../connectors/README.md#durable-room-creation)。
 
+### Connector 服务 policy
+
+`@agentmux/core/connections` 的 [service 合同](src/connection-service-contract.ts)
+与[严格解析](src/connection-service-codec.ts)通过原 `ConnectionPort.service`
+接入宿主的 Connection owner。SDK、CLI 与透明 `connections:call` 共享同一状态：
+
+```sh
+amux connection service get
+amux connection service configure --input service-policy.json
+amux connection service inspect --operation-id connector-off
+```
+
+开关作用于当前 endpoint 的整个 Connector 自动收发，不改写每个应用的 enabled。
+configure 沿 transport-approved user/device 权限与原 operationId/CAS 回执；请求未知时
+保原输入查 inspect，get 的当前值不代 ACK。宿主的持久、默认与恢复边界见
+[Connection owner 使用说明](../connectors/README.md#connector-service-policy)。
+
 ### 外部投递观察与原操作重试
 
 `@agentmux/core/connections` 导出纯 `ConnectionDelivery` 合同与严格解析器。
