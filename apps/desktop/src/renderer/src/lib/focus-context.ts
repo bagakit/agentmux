@@ -180,7 +180,8 @@ function createFocusProjectionCache() {
   const cache = new Map<string, { group: { key: string; enteredAt: number | null; sequence: number } | null; session: SessionSnapshot; activitySemantic: AgentObservation['semantic']; timeline: AgentTimelineSnapshot | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; lane: AgentFocusLane | null; model: FocusContext | null; laneModel: FocusContext | null }>()
   let previous: Inputs | undefined
   let result: FocusProjection = {contexts: [], laneContexts: [], pmoAttention: []}
-  const select = (input: Inputs): FocusProjection => {
+  const select = (input: Inputs, active = true): FocusProjection => {
+    if (!active) return result
     if (previous && previous.sessions === input.sessions && previous.timelines === input.timelines && previous.agentNames === input.agentNames && previous.config === input.config && previous.scratchTopicSnapshots === input.scratchTopicSnapshots) return result
     const rows: FocusContext[] = []
     const laneRows: FocusContext[] = []
