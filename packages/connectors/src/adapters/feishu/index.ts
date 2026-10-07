@@ -1,21 +1,14 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { Client, WSClient, EventDispatcher, AppType, LoggerLevel, defaultHttpInstance, DefaultCache, type HttpInstance, type HttpRequestOptions, type Logger } from '@larksuiteoapi/node-sdk'
-import { parseConnectionConfig, type ConnectionConfig, type ConnectionObservation, type ConnectionRecord } from '@agentmux/core/connections'
-import type { ConnectionAdapter, ConnectionHost } from '../../connection-host.js'
-import type { DurableIngressHost, IngressAuthenticator, VerifiedIngressEvent } from '../../durable-ingress.js'
+import { parseConnectionConfig, type ConnectionConfig, type ConnectionObservation } from '@agentmux/core/connections'
+import type { ConnectionAdapter } from '../../connection-host.js'
+import type { ConnectionIngressTransport, ConnectionIngressReceiver } from '../../connection-receivers.js'
+import type { IngressAuthenticator, VerifiedIngressEvent } from '../../durable-ingress.js'
 import { feishuFailure, feishuIdentity, readFeishuMessage, projectFeishuMessage } from './message.js'
 import { feishuParentAddressing } from './reply.js'
 
-/** A trusted Host composition port, never populated from RPC or a platform event. */
-export type FeishuAdapterOptions = {
-  connections: Pick<ConnectionHost, 'readConfiguration'>
-  http?: HttpInstance
-}
-export type FeishuReceiver = {
-  observation(): ConnectionObservation
-  close(): void
-}
-type ReceiverState = { record: ConnectionRecord; closed: boolean; botOpenId: string; ws: WSClient | null; observed: boolean }
+export type FeishuAdapterOptions = { http?: HttpInstance }
+type ReceiverState = { config: ConnectionConfig; signal: AbortSignal; closed: boolean; botOpenId: string; ws: WSClient | null; observed: boolean }
 type Witness = { receiver: ReceiverState; raw: string }
 const owners = new Map<string, ReceiverState>()
 const applicationKey = (config: ConnectionConfig) => JSON.stringify([config.application.domain, config.application.appId])
@@ -26,20 +19,23 @@ const safeLogger: Logger = { error: muted, warn: muted, info: muted, debug: mute
 
 export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   readonly adapterId = 'feishu'
+  readonly ingress = this
+  readonly transport: ConnectionIngressTransport = { start: input => this.startReceiver(input) }
   private readonly witnesses = new WeakSet<object>()
   private readonly callback = new AsyncLocalStorage<Witness>()
-  constructor(private readonly options: FeishuAdapterOptions) {}
+  constructor(private readonly options: FeishuAdapterOptions = {}) {}
 
   private configuration(config: ConnectionConfig): void {
     if (config.adapterId !== this.adapterId || !['open.feishu.cn', 'open.larksuite.com'].includes(config.application.domain)) feishuFailure('FEISHU_APPLICATION_INVALID')
     feishuIdentity(config.application.appId)
   }
-  private http(): HttpInstance {
+  private http(signal?: AbortSignal): HttpInstance {
     const transport: HttpInstance = this.options.http ?? defaultHttpInstance as unknown as HttpInstance
     const http = Object.create(transport) as HttpInstance
-    http.request = async <T, R = T, D = unknown>(input: HttpRequestOptions<D>): Promise<R> => {
+    http.request = async <T, R = T, D = unknown>(input: HttpRequestOptions<D> & { signal?: AbortSignal }): Promise<R> => {
       try {
-        const result = await transport.request<T, R, D>(input)
+        if (signal?.aborted || input.signal?.aborted) feishuFailure('FEISHU_SDK_REQUEST_CANCELLED')
+        const result = await transport.request<T, R, D>({ ...input, ...(signal ? { signal } : {}) })
         if (input.url?.endsWith('/callback/ws/endpoint')) {
           const response = result as { code?: unknown; data?: { URL?: unknown } }
           if (response.code === 0) {
@@ -51,17 +47,19 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
         return result
       } catch { return feishuFailure('FEISHU_SDK_REQUEST_FAILED') }
     }
+    // The SDK token manager uses post directly rather than request. Keep that exchange in the same caller lifetime.
+    http.post = <T, R = T, D = unknown>(url: string, data?: D, options?: HttpRequestOptions<D>): Promise<R> => http.request<T, R, D>({ ...options, method: 'POST', url, ...(data === undefined ? {} : { data }) })
     return http
   }
-  private client(config: ConnectionConfig, credential: string): Client {
+  private client(config: ConnectionConfig, credential: string, signal?: AbortSignal): Client {
     this.configuration(config)
     try {
-      return new Client({ appId: config.application.appId, appSecret: credential, domain: `https://${config.application.domain}`, appType: AppType.SelfBuild, httpInstance: this.http(), cache: new DefaultCache(), logger: safeLogger, loggerLevel: LoggerLevel.error })
+      return new Client({ appId: config.application.appId, appSecret: credential, domain: `https://${config.application.domain}`, appType: AppType.SelfBuild, httpInstance: this.http(signal), cache: new DefaultCache(), logger: safeLogger, loggerLevel: LoggerLevel.error })
     } catch { return feishuFailure('FEISHU_CLIENT_UNAVAILABLE') }
   }
   /** Outbound leaves reuse the official authenticated Client; raw SDK errors never escape this call. */
-  async withClient<T>(config: ConnectionConfig, credential: string, call: (client: Client) => Promise<T>): Promise<T> {
-    try { return await call(this.client(config, credential)) }
+  async withClient<T>(config: ConnectionConfig, credential: string, call: (client: Client) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    try { return await call(this.client(config, credential, signal)) }
     catch { return feishuFailure('FEISHU_SDK_REQUEST_FAILED') }
   }
   private async bot(client: Client): Promise<string> {
@@ -76,13 +74,12 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
     return { authentication: { state: 'ready' }, transport: { state: 'unknown', reason: 'not-started' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }
   }
   private current(receiver: ReceiverState): boolean {
-    const current = this.options.connections.readConfiguration(receiver.record.config.connectionId)
-    return !receiver.closed && !!current?.config.enabled && current.revision === receiver.record.revision && sameConfig(current.config, receiver.record.config) && owners.get(applicationKey(receiver.record.config)) === receiver
+    return !receiver.closed && !receiver.signal.aborted && receiver.config.enabled && owners.get(applicationKey(receiver.config)) === receiver
   }
   async verify(config: ConnectionConfig, raw: string, proof?: unknown): Promise<VerifiedIngressEvent> {
     if (!proof || typeof proof !== 'object' || !this.witnesses.has(proof)) feishuFailure('FEISHU_TRANSPORT_PROOF_REQUIRED')
     const witness = proof as Witness, receiver = witness.receiver
-    if (witness.raw !== raw || !sameConfig(receiver.record.config, config) || !this.current(receiver)) feishuFailure('FEISHU_TRANSPORT_PROOF_MISMATCH')
+    if (witness.raw !== raw || !sameConfig(receiver.config, config) || !this.current(receiver)) feishuFailure('FEISHU_TRANSPORT_PROOF_MISMATCH')
     const payload = readFeishuMessage(raw, config.application)
     // Original parent/thread IDs stay in raw. Their presence cannot certify a reply to this application.
     if (!this.current(receiver)) feishuFailure('FEISHU_TRANSPORT_PROOF_MISMATCH')
@@ -105,26 +102,29 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
       const reading = this.withClient(config, credential, async client => {
         const response = await client.request<unknown>({ url: `/open-apis/im/v1/messages/${encodeURIComponent(parentId)}`, method: 'GET', params: { user_id_type: 'open_id' }, signal })
         return signal.aborted ? 'unknown' : feishuParentAddressing(response, config.application, parentId, event.externalConversationId)
-      }).catch(() => 'unknown' as const)
+      }, signal).catch(() => 'unknown' as const)
       return await Promise.race([reading, cancelled])
     } finally { signal.removeEventListener('abort', abort) }
   }
-  async openReceiver(config: ConnectionConfig, credential: string, ingress: Pick<DurableIngressHost, 'receive'>): Promise<FeishuReceiver> {
-    config = parseConnectionConfig(config)
+  private async startReceiver(input: Parameters<ConnectionIngressTransport['start']>[0]): Promise<ConnectionIngressReceiver> {
+    const { credential, signal, receive } = input
+    const config = parseConnectionConfig(input.config)
     this.configuration(config)
-    const current = this.options.connections.readConfiguration(config.connectionId)
-    if (!current?.config.enabled || !sameConfig(current.config, config)) feishuFailure('FEISHU_CONNECTION_REVISED')
+    if (!config.enabled || signal.aborted) feishuFailure('FEISHU_CONNECTION_REVISED')
     const key = applicationKey(config)
     if (owners.has(key)) feishuFailure('FEISHU_RECEIVER_ALREADY_OWNED')
-    const receiver: ReceiverState = { record: structuredClone(current), closed: false, botOpenId: '', ws: null, observed: false }
+    const receiver: ReceiverState = { config, signal, closed: false, botOpenId: '', ws: null, observed: false }
     owners.set(key, receiver)
     const close = () => {
+      if (receiver.closed) return
       receiver.closed = true
+      signal.removeEventListener('abort', close)
       try { receiver.ws?.close({ force: true }) } catch { /* Only this application's transport is released. */ }
       if (owners.get(key) === receiver) owners.delete(key)
     }
+    signal.addEventListener('abort', close, { once: true })
     try {
-      const client = this.client(config, credential)
+      const client = this.client(config, credential, signal)
       receiver.botOpenId = await this.bot(client)
       if (!this.current(receiver)) feishuFailure('FEISHU_CONNECTION_REVISED')
       const dispatcher = new EventDispatcher({ logger: safeLogger, loggerLevel: LoggerLevel.error, cache: new DefaultCache() })
@@ -135,7 +135,7 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
         const payload = readFeishuMessage(witness.raw, config.application)
         // Bot echoes and direct chats are platform scope facts, never inferred from message text.
         if (payload.event.sender.sender_type !== 'user' || payload.event.message.chat_type !== 'group') return
-        await ingress.receive({ connectionId: config.connectionId, raw: witness.raw, transportProof: witness }, () => undefined)
+        await receive({ raw: witness.raw, transportProof: witness }, () => undefined)
         receiver.observed = true
       } })
       const invoke = dispatcher.invoke.bind(dispatcher)
@@ -147,8 +147,9 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
         catch { return feishuFailure('FEISHU_RECEIVE_FAILED') }
         finally { this.witnesses.delete(witness) }
       }
-      receiver.ws = new WSClient({ appId: config.application.appId, appSecret: credential, domain: `https://${config.application.domain}`, httpInstance: this.http(), logger: safeLogger, loggerLevel: LoggerLevel.error })
+      receiver.ws = new WSClient({ appId: config.application.appId, appSecret: credential, domain: `https://${config.application.domain}`, httpInstance: this.http(signal), logger: safeLogger, loggerLevel: LoggerLevel.error })
       await receiver.ws.start({ eventDispatcher: dispatcher })
+      if (!this.current(receiver)) feishuFailure('FEISHU_CONNECTION_REVISED')
       if (receiver.ws.getConnectionStatus().state === 'idle') feishuFailure('FEISHU_SDK_START_UNCONFIRMED')
       return {
         close,
