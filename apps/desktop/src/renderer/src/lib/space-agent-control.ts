@@ -50,7 +50,7 @@ export type SpatialControlPorts = {
   recordRemovedTab?(tabId: string): void
 }
 /** Local UI context, separate from the public spatial request and user prompt. */
-export type SpatialControlOptions = { agentMuxNote?: string; recovery?: SpatialRequestBinding['recovery']; authorize?: () => boolean }
+export type SpatialControlOptions = { agentMuxNote?: string; recovery?: SpatialRequestBinding['recovery']; authorize?: () => boolean; fileOpenIntent?: 'default' | 'source'; fileInputPolicy?: 'preserve' | 'target' }
 
 class SpatialFailure extends Error {
   constructor(readonly issue: AgentMuxSpatialIssue) { super(issue.message) }

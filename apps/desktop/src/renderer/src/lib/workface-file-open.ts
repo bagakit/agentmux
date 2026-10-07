@@ -2,22 +2,26 @@ import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult, AgentMuxS
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
 import { fileWorkbenchIdentity } from './file-workbench-state'
 import type { FileOpenPlacement, FileOpenResult, FileWorkbenchState } from './file-workbench-state'
-import { spatialCatalog, spatialDestination, selectSpatialCatalog, zoneContext, type SpatialWorkbench } from './space-agent-control'
+import { spatialCatalog, spatialDestination, selectSpatialCatalog, zoneContext, type SpatialWorkbench, type SpatialControlOptions } from './space-agent-control'
 import { zoneFileResource } from '../../../shared/zone-file-resource'
 import { awaitDesktopPresentation, captureDesktopInput, desktopInputPreserved } from './desktop-presentation'
 
 export type WorkfaceFileOpenPorts = {
   get(): SpatialWorkbench & FileWorkbenchState
+  navigationSelection(): string
   topics(): Promise<readonly ScratchTopicSnapshot[]>
-  openFile(path: string, groupId: string, location: undefined, workspaceId: string, openAsText: true, placement: FileOpenPlacement): Promise<boolean>
+  openFile(path: string, groupId: string, location: undefined, workspaceId: string, openAsText: boolean, placement: FileOpenPlacement): Promise<boolean>
   closing(tabId: string): boolean
   save(layoutApplied: boolean): Promise<AgentMuxSpatialSave>
 }
 
 /** Resource resolution and the original File owner's same-call receipt stay separate from display selection. */
 export async function executeWorkfaceFileOpen(ports: WorkfaceFileOpenPorts,
-  request: Extract<AgentMuxSpaceControlRequest, { operation: 'open.file' }>
+  request: Extract<AgentMuxSpaceControlRequest, { operation: 'open.file' }>,
+  fileOpenIntent: NonNullable<SpatialControlOptions['fileOpenIntent']> = 'source',
+  inputPolicy: NonNullable<SpatialControlOptions['fileInputPolicy']> = 'preserve'
 ): Promise<Extract<AgentMuxSpaceControlResult, { operation: 'open.file' }>> {
+  const originalNavigation = ports.navigationSelection()
   const report: Extract<AgentMuxSpaceControlResult, { operation: 'open.file' }> = {
     operation: 'open.file', requestedPath: request.path, resource: null,
     placement: { status: 'unconfirmed', tabId: null, regionId: null, locations: [] },
@@ -56,23 +60,28 @@ export async function executeWorkfaceFileOpen(ports: WorkfaceFileOpenPorts,
       return report
     }
     const beforeMember = state.layouts[target.displayWorkspaceId]?.groups.find(group => group.id === target.groupId)?.tabOrder.includes(tabId) ?? false
-    const input = request.focus ? captureDesktopInput(state.tabs) : null
+    const focus = request.focus && ports.navigationSelection() === originalNavigation
+    const input = focus && inputPolicy === 'target' ? null : captureDesktopInput(state.tabs)
     let actual: FileOpenResult | undefined
-    await ports.openFile(mapped.path, target.groupId, undefined, workspace.id, true, {
+    await ports.openFile(mapped.path, target.groupId, undefined, workspace.id, fileOpenIntent === 'source', {
       displayWorkspaceId: target.displayWorkspaceId,
       space: { spaceId: originalContext, zoneId: zone.zoneId }, resource: { hostId: workspace.hostId, path: workspace.path },
-      focus: request.focus, fileOnly: true,
+      focus, inputPolicy, fileOnly: fileOpenIntent === 'source',
       ...(request.tabId && request.regionId && request.split ? { split: { tabId: request.tabId, regionId: request.regionId, direction: request.split } } : {}),
-      ...(request.focus ? { selection: { spaceId: target.spaceId, zoneId: zone.zoneId, workspaceId: target.displayWorkspaceId,
+      ...(focus ? { selection: { spaceId: target.spaceId, zoneId: zone.zoneId, workspaceId: target.displayWorkspaceId,
         groupId: target.groupId, tabId: destinationTabId, regionId, topicId: catalog.spaces.find(space => space.spaceId === target.spaceId)?.topicId ?? null } } : {}),
       onResult: result => { actual = result }
     })
     if (!actual) throw new Error('The original File owner did not confirm a same-call result.')
     report.data = actual.data
-    report.navigation = actual.navigation
+    report.navigation = request.focus && !focus ? 'cancelled' : actual.navigation
     const applied = ports.get(), afterCatalog = spatialCatalog(applied, topics)
     report.placement = { ...actual.placement, locations: actual.placement.regionId ? afterCatalog.locations.filter(location =>
       location.regionId === actual!.placement.regionId && location.tabId === actual!.placement.tabId) : [] }
+    const surface = actual.placement.tabId && actual.placement.regionId
+      ? applied.tabs[actual.placement.tabId]?.regions[actual.placement.regionId] : undefined
+    const bookmarkOpened = fileOpenIntent === 'default' && surface?.kind === 'browser' &&
+      surface.workspaceId === workspace.id && surface.bookmarkOrigin?.path === mapped.path
     const afterMember = applied.layouts[target.displayWorkspaceId]?.groups.find(group => group.id === target.groupId)?.tabOrder.includes(tabId) ?? false
     report.changed = actual.placement.status === 'created' || !beforeMember && afterMember
     if (actual.placement.status === 'created' || actual.placement.status === 'reused') {
@@ -85,15 +94,15 @@ export async function executeWorkfaceFileOpen(ports: WorkfaceFileOpenPorts,
         code: 'INPUT_PRESERVATION_UNCONFIRMED', message: 'The previous input is no longer confirmed eligible in its original presentation.',
         recovery: 'The opened File and applied selection are retained; choose the current input explicitly.' })
     }
-    if (actual.data.kind === 'not-file') {
+    if (actual.data.kind === 'not-file' && !bookmarkOpened) {
       report.outcome = 'refused'
       report.issues.push(issue('read', 'WORKSPACE_PATH_IS_DIRECTORY', actual.data.reason ?? 'The requested path is a directory. No File or Explorer navigation was created.'))
     } else {
       const unconfirmed = actual.placement.status === 'unconfirmed' || actual.placement.status === 'none' || actual.data.kind === 'unconfirmed'
-      const partial = actual.data.kind === 'failed' || actual.navigation === 'cancelled' || actual.navigation === 'unconfirmed' || report.issues.length > 0
+      const partial = actual.data.kind === 'failed' || report.navigation === 'cancelled' || report.navigation === 'unconfirmed' || report.issues.length > 0
       report.outcome = unconfirmed ? report.changed ? 'partial' : 'unknown' : partial ? 'partial' : report.changed ? 'opened' : 'unchanged'
       if (actual.data.kind === 'failed' || unconfirmed) report.issues.push(issue('read', 'FILE_OPEN_UNCONFIRMED', actual.data.reason ?? 'File data or its exact original placement is unconfirmed.'))
-      if (actual.navigation === 'cancelled' || actual.navigation === 'unconfirmed') report.issues.push(issue('navigation', 'NAVIGATION_UNCONFIRMED',
+      if (report.navigation === 'cancelled' || report.navigation === 'unconfirmed') report.issues.push(issue('navigation', 'NAVIGATION_UNCONFIRMED',
         'The original File data is retained; a later navigation or changed target owns the current display.'))
     }
   } catch (error) { report.issues.push(issue('open', 'FILE_OPEN_UNCONFIRMED', error)) }
