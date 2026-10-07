@@ -11,6 +11,8 @@ CLI 先发现实际支持的键，再按精确键修改：
 ```sh
 amux settings inspect
 amux settings inspect notes
+amux settings inspect continuity
+amux settings set continuity.activeRecovery manual
 amux settings inspect goals.defaultView
 amux settings set goals.defaultView board
 ```
@@ -26,6 +28,7 @@ GUI 偏好与 CLI 写入都经过唯一 [Main ConfigOwner](../apps/desktop/src/m
 | My Profile | 本人称呼、头像、协作背景；是否分享给新 Agent。头像为界面资料，分享开关不代表访问隔离。 | inspect / set：`profile.displayName`、`profile.avatar`、`profile.about`、`profile.shareWithAgents` | [UI](../apps/desktop/src/renderer/src/components/settings/modules/profile.tsx)、[字段](../apps/desktop/src/shared/user-profile.ts)、[Main](../apps/desktop/src/main/settings/modules/profile.ts) |
 | Appearance | App 主题身份与明暗、终端主题与字号、Source/Diff 编辑字号及继承选项；Notes 正文另设。 | inspect / set：`appearance.themeId`、`appearance.appAppearance`、`appearance.terminalTheme`、`appearance.terminalFontSize`、`appearance.editorFontSize` | [UI](../apps/desktop/src/renderer/src/components/settings/modules/appearance.tsx)、[Main](../apps/desktop/src/main/settings/modules/appearance.ts) |
 | Notifications | 通知模式和声音。 | inspect / set：`notifications.mode`、`notifications.sound` | [UI](../apps/desktop/src/renderer/src/components/settings/modules/notifications.tsx)、[模式解析](../apps/desktop/src/shared/notification-presentation.ts)、[Main](../apps/desktop/src/main/settings/modules/notifications.ts) |
+| Session continuity | 原会话恢复时机、等待、权威 idle 窗口、确证退出后 resume、同操作复查；独立提醒模式／追加正文和恢复后续行开关／prompt，完整正文与投递副作用预览。保存仅影响新恢复意图。 | `settings inspect continuity`；inspect / set：`continuity.activeRecovery`、`continuity.activeRecoveryDelayMs`、`continuity.confirmedIdleWindowMs`、`continuity.resumeAfterExit`、`continuity.recheckIntervalMs`、`continuity.recheckMaxAttempts`、`continuity.reminderMode`、`continuity.reminderAppend`、`continuity.continuationEnabled`、`continuity.continuationPrompt`。时长键使用毫秒，GUI 使用秒并支持毫秒精度。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/continuity.tsx)、[Core 政策与默认](../packages/core/src/agent-session-continuity.ts)、[Main](../apps/desktop/src/main/settings/modules/continuity.ts)、[行为](design/behavior/settings-and-observation.md#会话连续性设置) |
 | Browser | Agent 页面自动化总开关；查看并忘记应用链接的记住选择。显式启用总开关不替代其他人工批准。 | inspect / set：`browser.agentAutomation`；`settings browser-links ls / forget` 只查看或忘记选择，没有 allow/deny setter。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/browser.tsx)、[scalar](../apps/desktop/src/main/settings/modules/browser.ts)、[链接 owner](../apps/desktop/src/main/settings-browser-control.ts) |
 | Browser：连接与文件管理 | 连接外部浏览器扩展、停止共享准确页面；查看与丢弃保留的上传文件快照。这些是管理动作，不是偏好开关。 | `browser targets` 可发现已明确共享的目标；扩展配对及设置页的文件快照回收为 GUI 操作。 | [外部连接](../apps/desktop/src/renderer/src/components/settings/ExternalBrowserConnections.tsx)、[文件快照](../apps/desktop/src/renderer/src/components/settings/RetainedBrowserUploads.tsx)、[Browser 合同](design/behavior/browser-workface.md) |
 | General | 启动画面是否等待 Agent 可用性检查（下一次启动生效，跳过等待仍在后台检查）；路径显示和复制使用绝对路径还是家目录缩写；本机数据与恢复说明为只读，崩溃日志按钮为诊断动作。 | inspect / set：`startup.skipAgentAvailabilityCheckWait`、`copyPathsAsAbsolute`；支持 `settings inspect startup`；`system crash-log inspect / reveal`。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/general.tsx)、[Main](../apps/desktop/src/main/settings/modules/general.ts) |

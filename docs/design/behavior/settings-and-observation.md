@@ -191,6 +191,14 @@ Status Bar 的资源面板必须能把每个进程关联到项目/工作区、Pr
 
 Provider / Executor 的设置采用上述层级，保留本产品的准确关系：Provider 是协议适配声明，一个 Provider 可被多个 Executor 引用，每个 Executor 是绑定一个 Provider 的独立启动配置，已保存的 Provider 身份不能因导航或分组而改变。Provider 上下文、所属 Executor 列表与当前详情应组成同一配置任务，不把二者机械做成互斥的资源页。全局模板与准确接收 Host 的配置清单分别保留原 owner、身份和保存动作，Host 的 Provider 默认与显式注册来源保持可辨；Provider 分组不把不同范围合并，也不把本机声明当作远端事实。参考界面的同名对象不改变本产品身份、配置范围和原保存语义；目录读取、检查与编辑状态分别表达，沿本节既有草稿、检查与保存合同，不把视觉重组扩大成新的配置或运行时能力。
 
+### 会话连续性设置
+
+Preferences 中的独立 Session continuity 模块编辑全局连续性偏好，侧栏、Overview、搜索和窄窗分类使用同一模块目录。恢复时机、等待、权威 idle 窗口、确证退出后原生 resume、同一操作的复查次数与间隔，以及提醒和恢复后续行分别可编辑；默认值与合法政策由 Core 的 [continuity policy](../../../packages/core/src/agent-session-continuity.ts) 持有，恢复资格与执行语义仍归[Session 恢复](session-recovery.md)，设置页不另判 Run 或 Provider 状态。
+
+提醒支持关闭、完整默认内容、默认内容追加自定义三种模式；追加不能替换默认提醒。续行有独立开关和完整 prompt。页面显示当前草稿的完整有效正文、内置默认／自定义保存来源、作用范围与实际可能发生的投递：提醒与续行仅用于权威确认中断 working 的原生恢复，健康 reattach 与 idle 恢复不自动续行；每项输入有独立回执，可能作为普通 User 平台上下文开启新 turn，不能承诺所有 Provider 都接收原生 system 角色。旧输入结果未知时不重放。
+
+保存只影响下一次准入的新恢复意图，不启动 Agent、不发消息、不修改原草稿或在途已冻结政策和正文。GUI 与 `settings inspect continuity`／已声明 `continuity.*` scalar 的 `settings set` 复用唯一 ConfigOwner，保留首次多字段并发 authored 合并、保存期间后续输入、原字段期望值与冲突；有效默认不回填未编辑字段。具体键和查询入口见[设置目录](../../settings-catalog.md)，不增加任意路径 setter 或第二配置 owner。
+
 ### Prompts 的指令库与编辑工作台
 
 Prompts 应让用户先认出要用的正文、看懂到达方式和适用范围，再进入明确对象的专注编辑；同一页的资源列表与单对象编辑台承载这一流程，搜索、选择和窄窗往返保留全库草稿。当前对象不在筛选结果时继续具名可见，不自动切换、删除或覆盖编辑。新增后立即进入可编辑的新对象；普通设置的导航、搜索和直接访问沿本节原合同。
