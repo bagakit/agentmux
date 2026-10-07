@@ -5,7 +5,7 @@ import { useAppStore } from '../store'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 
 const ThemeStatusInfoIcon = semanticIconComponent('status.info')
-const ThemeLayoutCollapseIcon = semanticIconComponent('layout.collapse')
+const ThemeNavigationCollapseIcon = semanticIconComponent('navigation.up')
 
 
 /** A presentation/read receipt owner. It never clears, retries or reclassifies the supplied facts. */
@@ -113,7 +113,7 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
       {notices.length > 1 ? <span className="service-disclosure__count">{notices.length}</span> : null}
     </button>
     {inbox.unread.length ? <button type="button" className="service-disclosure__close" aria-label={`Collapse service notice: ${heading}`}
-      title="Collapse service notice" onPointerDown={rememberFocus} onClick={collapse}><ThemeLayoutCollapseIcon size={14} /></button> : null}
+      title="Collapse service notice" onPointerDown={rememberFocus} onClick={collapse}><ThemeNavigationCollapseIcon size={14} /></button> : null}
     {inlineActions ? <div className="service-disclosure__inline-actions">{inlineActions}</div> : null}
     {/* Details accompany the original workface and its existing auto-popover. */}
     <div ref={panel} id={id} popover="hint" className="service-disclosure__details" aria-label={heading}
@@ -127,7 +127,7 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
       }}>
       <div className="service-disclosure__heading"><strong>{detailHeading}</strong>
         <button type="button" className="service-disclosure__close" aria-label={`Collapse service details: ${heading}`}
-          title="Collapse service details" onClick={collapse}><ThemeLayoutCollapseIcon size={14} /></button>
+          title="Collapse service details" onClick={collapse}><ThemeNavigationCollapseIcon size={14} /></button>
       </div>
       <div className="service-disclosure__content">
         {children}

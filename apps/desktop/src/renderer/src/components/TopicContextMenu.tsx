@@ -16,7 +16,7 @@ const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
 const ThemeStatusDisabledIcon = semanticIconComponent('status.disabled')
 const ThemeStatusEnabledIcon = semanticIconComponent('status.enabled')
-const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
+const ThemeActionRestoreDefaultsIcon = semanticIconComponent('action.restore-defaults')
 const ThemeActionMoreIcon = semanticIconComponent('action.more')
 
 
@@ -54,7 +54,7 @@ function topicMenuItems(Item: typeof ContextMenu.Item, Separator: typeof Context
     {actions.onToggleWiki ? <Item className="tab-context-menu__item" onSelect={actions.onToggleWiki}>
       {actions.wikiEnabled ? <ThemeStatusDisabledIcon size={14} /> : <ThemeStatusEnabledIcon size={14} />}<span>{actions.wikiEnabled ? 'Disable Topic Wiki' : 'Enable Topic Wiki'}</span>
     </Item> : null}
-    {actions.onResetWiki ? <Item className="tab-context-menu__item" onSelect={actions.onResetWiki}><ThemeActionRotateResetIcon size={14} /><span>Restore default Topic Wiki</span></Item> : null}
+    {actions.onResetWiki ? <Item className="tab-context-menu__item" onSelect={actions.onResetWiki}><ThemeActionRestoreDefaultsIcon size={14} /><span>Restore default Topic Wiki</span></Item> : null}
   </>
 }
 

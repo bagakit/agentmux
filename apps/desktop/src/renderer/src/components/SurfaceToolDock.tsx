@@ -25,7 +25,7 @@ import { SidebarToggleChrome, WindowSidebarLayoutContext } from './TopRowChrome'
 const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
-const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 const ThemeActionCreateAgentIcon = semanticIconComponent('action.create-agent')
 
 
@@ -167,7 +167,7 @@ export function SurfaceToolDock({
         const meta = WORKSPACE_TOOL_META[id]
         // Re-skin the content slot for Scratch without changing its enum id.
         if (id === 'files-branches' && isScratch) {
-          return { id, ...meta, label: contentSlot.label, description: 'Browse the topic wiki and collaborators', icon: ThemeObjectNotebookIcon }
+          return { id, ...meta, label: contentSlot.label, description: 'Browse the topic wiki and collaborators', icon: ThemeObjectTopicIcon }
         }
         return { id, ...meta }
       })

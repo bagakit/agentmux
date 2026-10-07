@@ -15,7 +15,7 @@ import { useGitCommitDetails } from './commit/useGitCommitDetails'
 import { GitDiffCanvas } from './diff/GitDiffCanvas'
 
 const ThemeGitCommitIcon = semanticIconComponent('git.commit')
-const ThemeObjectListIcon = semanticIconComponent('object.list')
+const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
@@ -46,7 +46,7 @@ function CommitView(props: ViewProps) {
   const reference = shared?.history.reference
   return <section className="git-workbench" data-git-workbench-region={surface.regionId} aria-label="Git commit details">
     <Header surface={surface} workspace={workspace}>
-      <button className="small-button" aria-label="View repository history" onClick={() => openHistory(workspace.id, surface.scope, reference)}><ThemeObjectListIcon size={13} /><span>History</span></button>
+      <button className="small-button" aria-label="View repository history" onClick={() => openHistory(workspace.id, surface.scope, reference)}><ThemeObjectHistoryIcon size={13} /><span>History</span></button>
       {surface.selection && <button className="small-button" aria-label="Locate commit in history" onClick={() => openHistory(workspace.id, surface.scope, reference, { ...surface.scope, ...surface.selection! })}>Locate in history</button>}
     </Header>
     <CommitReview {...props} />

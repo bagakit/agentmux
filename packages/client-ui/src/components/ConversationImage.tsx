@@ -71,7 +71,7 @@ export function ConversationImage({
   currentImage.current = image ? loaded : null
   const failure = readFailure?.path === path && readFailure.reader === readImage ? readFailure.message
     : failed?.path === path && failed.reader === readImage ? 'Recorded image could not be decoded.' : null
-  if (!image) return <><span className="md-conversation-image__reference">{text}</span>{failure ? <small className="md-conversation-image__failure" role="status">{failure}<button type="button" className="md-conversation-image__retry" aria-label="Retry image" title="Retry image" onClick={() => setAttempt(value => value + 1)}><SemanticIcon name="action.rotate-reset" size={12} aria-hidden="true" /></button></small> : null}</>
+  if (!image) return <><span className="md-conversation-image__reference">{text}</span>{failure ? <small className="md-conversation-image__failure" role="status">{failure}<button type="button" className="md-conversation-image__retry" aria-label="Retry image" title="Retry image" onClick={() => setAttempt(value => value + 1)}><SemanticIcon name="action.retry" size={12} aria-hidden="true" /></button></small> : null}</>
   const decodeFailed = () => { if (currentImage.current === loaded) setFailed(loaded) }
 
   return (

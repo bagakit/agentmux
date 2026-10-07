@@ -50,7 +50,7 @@ const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionCreateTopicIcon = semanticIconComponent('action.create-topic')
 const ThemeStatusInfoIcon = semanticIconComponent('status.info')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
-const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 const ThemeActionPinIcon = semanticIconComponent('action.pin')
 
 
@@ -301,7 +301,7 @@ export function WorkspaceTopicsPanel({
         </div>
       ) : projected?.length === 0 ? (
         <div className="workspace-topic-state workspace-topic-state--empty">
-          <span className="workspace-topic-state__icon" aria-hidden="true"><ThemeObjectNotebookIcon size={16} /></span>
+          <span className="workspace-topic-state__icon" aria-hidden="true"><ThemeObjectTopicIcon size={16} /></span>
           <span><strong>{category ? 'No Topics in this category' : 'No Topics yet'}</strong><small>Create a Topic to keep its knowledge and discussions together.</small></span>
           <button className="small-button" type="button" disabled={pending !== null} onClick={() => void createTopic()}>
             {pending === 'create' ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionCreateTopicIcon size={12} />}

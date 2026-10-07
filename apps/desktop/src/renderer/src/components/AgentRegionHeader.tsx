@@ -10,7 +10,7 @@ import { useAgentNativeSourceControls, nativeSourceLabel, type AgentNativeSource
 
 const ThemeActionMoreIcon = semanticIconComponent('action.more')
 const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
-const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 
 
@@ -102,7 +102,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
           <ThemeNavigationForwardIcon size={14} /><span>Take over</span>
         </DropdownMenu.Item> : null}
         {onRefreshObservation ? <DropdownMenu.Item className="tab-context-menu__item" disabled={refreshing} onSelect={onRefreshObservation}>
-          <ThemeActionRotateResetIcon size={14} /><span>{refreshing ? 'Refreshing observation…' : 'Refresh observation'}</span>
+          <ThemeActionRefreshIcon size={14} /><span>{refreshing ? 'Refreshing observation…' : 'Refresh observation'}</span>
         </DropdownMenu.Item> : null}
         {onHistory ? <><DropdownMenu.Item className="tab-context-menu__item" onSelect={onHistory}>
           <ThemeObjectHistoryIcon size={14} /><span>Conversation history</span>

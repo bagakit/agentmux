@@ -11,7 +11,7 @@ import { agentProviderLabel } from '../AgentProviderIcon'
 
 const ThemeActionCreateProjectIcon = semanticIconComponent('action.create-project')
 const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
-const ThemeObjectBroadcastIcon = semanticIconComponent('object.broadcast')
+const ThemeObjectHostIcon = semanticIconComponent('object.host')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionStartIcon = semanticIconComponent('action.start')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
@@ -104,7 +104,7 @@ export function WorkspaceSettingsPane({ config, onClose }: {
         <header><p>Choose a folder and a host. You can start an agent now or open the project on its own.</p></header>
         <div className="workspace-composer__fields workspace-composer__fields--project">
           <label className="workspace-composer__wide"><span>Project folder</span><input value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="Project directory" /></label>
-          <label><span>Run on</span><select value={readyHosts.some((host) => host.id === hostId) ? hostId : ''} disabled={readyHosts.length === 0} onChange={(event) => { setHostId(event.target.value); setExecutorId('none') }}><option value="" disabled>{checkingHosts ? 'Checking hosts…' : 'No ready hosts'}</option>{readyHosts.map((host) => <option key={host.id} value={host.id}>{host.label}</option>)}</select><small>{readyHosts.find((host) => host.id === hostId)?.kind === 'ssh' ? <><ThemeObjectBroadcastIcon size={11} /> System SSH · Ready</> : readyHosts.some((host) => host.id === hostId) ? 'This Mac · Ready' : 'Open Hosts settings to fix unavailable machines.'}</small></label>
+          <label><span>Run on</span><select value={readyHosts.some((host) => host.id === hostId) ? hostId : ''} disabled={readyHosts.length === 0} onChange={(event) => { setHostId(event.target.value); setExecutorId('none') }}><option value="" disabled>{checkingHosts ? 'Checking hosts…' : 'No ready hosts'}</option>{readyHosts.map((host) => <option key={host.id} value={host.id}>{host.label}</option>)}</select><small>{readyHosts.find((host) => host.id === hostId)?.kind === 'ssh' ? <><ThemeObjectHostIcon size={11} /> System SSH · Ready</> : readyHosts.some((host) => host.id === hostId) ? 'This Mac · Ready' : 'Open Hosts settings to fix unavailable machines.'}</small></label>
           <label><span>Name <em>optional</em></span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Project name" /></label>
           <label className="workspace-composer__wide"><span>Agent</span><select value={executorId} onChange={(event) => setExecutorId(event.target.value)} ><option value="none">Open without an agent</option>{readyExecutors.map((executor) => <option key={executor.id} value={executor.id}>{executor.label} · {agentProviderLabel(executor.providerId)}</option>)}</select><small>{checking ? 'Detecting agents on this host…' : inventory?.state === 'error' ? 'Host check failed; known configurations are retained.' : `${readyExecutors.length} configurations on this host`}</small></label>
         </div>

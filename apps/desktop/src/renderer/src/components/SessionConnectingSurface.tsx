@@ -9,7 +9,7 @@ import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { SessionRecap } from './SessionRecap'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 
-const ThemeObjectBoundaryIcon = semanticIconComponent('object.boundary')
+const ThemeStatusExecutorUnknownIcon = semanticIconComponent('status.executor-unknown')
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 const ThemeStatusCopiedIcon = semanticIconComponent('status.copied')
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
@@ -69,7 +69,7 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
       {surfaceKind === 'agent' ? <div className="session-connecting__executor">
         {executor
           ? <AgentAvatar providerId={executor.providerId} executorId={request?.executorId} label={executorLabel} appearance={appearance} size={18} />
-          : <ThemeObjectBoundaryIcon size={18} aria-label="Unknown executor" />}
+          : <ThemeStatusExecutorUnknownIcon size={18} aria-label="Unknown executor" />}
         <strong>{executorLabel}</strong>
       </div> : !unknownTerminalCreation ? <div className="session-connecting__executor"><ThemeObjectTerminalIcon size={18} /><strong>Terminal</strong></div> : null}
       {surfaceKind === 'agent' && phase === 'launch' ? <section className="session-connecting__prompt" aria-label="Initial prompt">

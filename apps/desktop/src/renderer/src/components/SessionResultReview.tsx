@@ -8,7 +8,7 @@ import { SessionResultReviewContent } from './SessionResultReviewContent'
 
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
-const ThemeActionDismissIcon = semanticIconComponent('action.dismiss')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 
 /** Header-only entrance. Composer reuses the same body inside its receiver face. */
@@ -59,7 +59,7 @@ export function SessionResultReview({ sessionId, items, origin, visible, surface
               ? previousFocus.current : surface?.querySelector<HTMLElement>('.xterm-helper-textarea, .composer [role="textbox"], .agent-region-header__more')
             collapse(); setDismissed(true)
             if (ownsFocus) target?.focus({ preventScroll: true })
-          }}><ThemeActionDismissIcon size={12} /> Close</button>
+          }}><ThemeActionCloseIcon size={12} /> Close</button>
         </div>} /> : null}
     </aside>
   </span>

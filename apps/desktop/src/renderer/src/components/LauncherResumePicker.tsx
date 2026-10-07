@@ -19,7 +19,8 @@ import { SettingsNavigation } from './SettingsNavigation'
 import { launcherCatalogWarnings, launcherDiscoveryKey, launcherNativeDiscovery, launcherNativeSourceKey, mergeLauncherNativeCatalog } from '../lib/launcher-native-discovery'
 import { launcherPreviewKey, useLauncherResumePreviews } from '../hooks/useLauncherResumePreviews'
 
-const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
+const ThemeActionResumeSessionIcon = semanticIconComponent('action.resume-session')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
@@ -329,7 +330,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
     <Dialog.Trigger asChild>
       <button type="button" className="small-button launcher-resume-trigger" disabled={disabled}
         title="Choose a saved Session from this project or all projects">
-        <ThemeActionRotateResetIcon size={13} aria-hidden="true" /><span>Resume</span><ThemeNavigationDownIcon size={11} aria-hidden="true" />
+        <ThemeActionResumeSessionIcon size={13} aria-hidden="true" /><span>Resume</span><ThemeNavigationDownIcon size={11} aria-hidden="true" />
       </button>
     </Dialog.Trigger>
     <Dialog.Portal container={resolveOverlayContainer()}>
@@ -361,7 +362,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
             {query ? <button type="button" className="icon-button" aria-label="Clear Session search" onClick={() => { changeQuery(''); searchRef.current?.focus() }}><ThemeActionClearIcon size={12} /></button> : null}
           </label>
           <button type="button" className="icon-button" aria-label="Refresh discovery" title="Refresh saved conversations"
-            onClick={() => { setDiscoveryPaused(false); setDiscoveryRetry(value => value + 1); setRecapRetry(value => value + 1) }}><ThemeActionRotateResetIcon size={14} /></button>
+            onClick={() => { setDiscoveryPaused(false); setDiscoveryRetry(value => value + 1); setRecapRetry(value => value + 1) }}><ThemeActionRefreshIcon size={14} /></button>
         </div>
         <div className="launcher-resume__body">
           <div className="launcher-resume__list" ref={setList} id={listId} role="listbox" aria-label="Saved Sessions">
@@ -457,7 +458,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
         <footer className="launcher-resume__footer"><span>{filtered.length} {filtered.length === 1 ? 'Session' : 'Sessions'}{workspace && scope === 'project' ? ` · ${workspace.name}` : ' · all projects'}</span>
           <button type="button" className="primary-button" disabled={!selected || busyId !== null || disabled}
             onClick={() => selected && void resume(selected)}>
-            {busyId ? <ThemeStatusLoadingIcon size={13} className="spin" /> : <ThemeActionRotateResetIcon size={13} />}
+            {busyId ? <ThemeStatusLoadingIcon size={13} className="spin" /> : <ThemeActionResumeSessionIcon size={13} />}
             {busyId ? 'Restoring…' : selectedSession?.status.continuityConflict === 'session-run-changed' ? 'Open current Session' : selected && !selected.workspace && selectedHostConfigured ? 'Open project & resume' : 'Resume Session'}
           </button></footer>
       </Dialog.Content>

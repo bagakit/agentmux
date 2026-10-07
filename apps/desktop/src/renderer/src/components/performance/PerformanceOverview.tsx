@@ -10,7 +10,7 @@ import { ToolkitAgentCard, toolkitAgentCardKey, useToolkitAgentCards, type Toolk
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeObjectProcessorIcon = semanticIconComponent('object.processor')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
-const ThemeObjectSpacesIcon = semanticIconComponent('object.spaces')
+const ThemeObjectRunsIcon = semanticIconComponent('object.runs')
 const ThemeObjectSourceCodeIcon = semanticIconComponent('object.source-code')
 const ThemeActionResumeIcon = semanticIconComponent('action.resume')
 const ThemeActionPauseIcon = semanticIconComponent('action.pause')
@@ -212,7 +212,7 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
       {scope !== 'runtime' ? <>
         {scope === 'app' ? <div className="performance-metrics"><Metric label="CPU" value={cpu(app?.cpuPercent)} hint={`${cpuCoreLabel(app?.cpuPercent, observation?.units.cpuBasis)} · 10s reading peak`} values={trend.map(p => p.appCpuPercent)} color="var(--green)" />
           <Metric label="Resident memory" value={memory(app?.rssKib)} hint="Latest · RSS" values={trend.map(p => p.appRssKib)} color="var(--blue)" /></div>
-          : <><div className="performance-run-summary" data-run-totals><ThemeObjectSpacesIcon size={14} /><span>All tracked Runs</span>
+          : <><div className="performance-run-summary" data-run-totals><ThemeObjectRunsIcon size={14} /><span>All tracked Runs</span>
             <small>{totals ? `${totals.coverage.observedRoots} / ${totals.coverage.trackedRuns} roots observed` : 'Coverage unavailable'}</small></div>
             <div className="performance-metrics" data-run-total-values><Metric label="Total CPU" value={cpu(totals?.cpuPercent)} hint={`${cpuCoreLabel(totals?.cpuPercent, observation?.units.cpuBasis)} · 10s peak of batch sums`} color="var(--green)" />
               <Metric label="Total resident memory" value={memory(totals?.rssKib)} hint="Latest · unique sampled PIDs" color="var(--blue)" /></div>

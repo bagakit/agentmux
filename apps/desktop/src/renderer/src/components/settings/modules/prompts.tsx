@@ -6,7 +6,7 @@ import { useAppStore } from '../../../store'
 import { ShortcutSettingsPane } from '../ShortcutSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 
-const ThemeObjectContextIcon = semanticIconComponent('object.context')
+const ThemeObjectPromptIcon = semanticIconComponent('object.prompt')
 
 
 // An empty list is an authored deletion; never restore defaults based on length.
@@ -21,7 +21,7 @@ export const promptsSettingsModule = {
   group: 'message-tool',
   title: 'Prompts',
   description: 'Keep your everyday instructions close at hand.',
-  icon: ThemeObjectContextIcon,
+  icon: ThemeObjectPromptIcon,
   keywords: 'message tool composer prompt preset shortcut keyword slash command snippet template library review changes summarize progress eli5 custom',
   savedSummary(config) {
     const count = resolveComposerShortcuts(config).length

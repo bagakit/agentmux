@@ -3,9 +3,9 @@ import type { MobilePrimaryWorkface } from './home-preference'
 
 const workfaces = [
   { id: 'goals', label: 'Goals', icon: 'object.goal' },
-  { id: 'topics', label: 'Topics', icon: 'object.note' },
+  { id: 'topics', label: 'Topics', icon: 'object.topic' },
   { id: 'mote', label: 'Mote', icon: 'object.mote' },
-  { id: 'focus', label: 'Focus', icon: 'object.list' },
+  { id: 'focus', label: 'Focus', icon: 'action.focus' },
   { id: 'space', label: 'Space', icon: 'object.spaces' }
 ] as const
 

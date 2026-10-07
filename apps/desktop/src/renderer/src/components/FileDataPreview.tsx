@@ -8,7 +8,7 @@ import { FilePreviewState } from './FilePreviewState'
 import '../styles/file-data-preview.css'
 
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
-const ThemeActionChooseIcon = semanticIconComponent('action.choose')
+const ThemeControlTableHeaderIcon = semanticIconComponent('control.table-header')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 
@@ -73,7 +73,7 @@ function DelimitedContent({ content, delimiter }: { content: string; delimiter: 
         <option value="auto">Auto</option><option value=",">Comma</option><option value=";">Semicolon</option><option value={'\t'}>Tab</option><option value="|">Pipe</option>
       </select></label>
       <label className="file-data-preview__search"><ThemeActionSearchIcon size={12} aria-hidden="true" /><TextInput aria-label="Filter table rows" placeholder="Filter rows" value={query} onChange={event => { setQuery(event.target.value); setPage(0) }} /></label>
-      <button className="small-button" aria-pressed={header} onClick={() => { setHeader(value => !value); setPage(0) }}><ThemeActionChooseIcon size={12} />Header row</button>
+      <button className="small-button" aria-pressed={header} onClick={() => { setHeader(value => !value); setPage(0) }}><ThemeControlTableHeaderIcon size={12} />Header row</button>
     </div>
     <div className="file-data-preview__scroll" tabIndex={0} aria-label="Table content">
       {rows.length ? <table>

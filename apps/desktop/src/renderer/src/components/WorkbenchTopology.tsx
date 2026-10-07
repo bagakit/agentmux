@@ -13,7 +13,8 @@ const ThemeFileCodeIcon = semanticIconComponent('file.code')
 const ThemeGitCompareIcon = semanticIconComponent('git.compare')
 const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
-const ThemeLayoutDockIcon = semanticIconComponent('layout.dock')
+const ThemeObjectRegionIcon = semanticIconComponent('object.region')
+const ThemeObjectTopologyIcon = semanticIconComponent('object.topology')
 const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 export type WorkbenchRegionDetail = RegionGeometry & {
@@ -100,7 +101,7 @@ function WorkbenchRegionMark({ region }: { region: WorkbenchRegionDetail }) {
     case 'git-diff': return <ThemeGitCompareIcon size={14} aria-hidden="true" />
     case 'launcher': return <ThemeObjectLauncherIcon size={14} aria-hidden="true" />
     case 'agent': return <ThemeObjectAgentIcon size={14} aria-hidden="true" />
-    default: return <ThemeLayoutDockIcon size={14} aria-hidden="true" />
+    default: return <ThemeObjectRegionIcon size={14} aria-hidden="true" />
   }
 }
 
@@ -247,7 +248,7 @@ export function WorkbenchTopology({ tabs, onSelectTab, interactive = true, enabl
         : undefined}
     >
       <span className="workbench-topology__inspector-head">
-        <span><ThemeLayoutDockIcon size={13} /><strong>{inspected?.title ?? 'Workbench'}</strong></span>
+        <span><ThemeObjectTopologyIcon size={13} /><strong>{inspected?.title ?? 'Workbench'}</strong></span>
         {inspected?.locationLabel ? <small>{inspected.locationLabel}</small> : null}
       </span>
       {inspected ? <WorkbenchRegionMap regions={inspected.regions} aspectRatio={aspectRatio} highlightedRegionIds={inspected.highlightedRegionIds} className="workbench-topology__inspector-regions" /> : null}

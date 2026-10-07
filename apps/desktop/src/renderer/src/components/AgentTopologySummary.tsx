@@ -3,10 +3,11 @@ import type { SessionSnapshot, AppConfig } from '../../../shared/contracts'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { workbenchSurfaces, type WorkbenchTab } from '../lib/workbench-tabs'
 
-const ThemeLayoutScaleIcon = semanticIconComponent('layout.scale')
-const ThemeLayoutDockIcon = semanticIconComponent('layout.dock')
+const ThemeObjectTopologyIcon = semanticIconComponent('object.topology')
+const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
+const ThemeObjectTabIcon = semanticIconComponent('object.tab')
 const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
-const ThemeLayoutSplitVerticalIcon = semanticIconComponent('layout.split-vertical')
+const ThemeObjectRegionIcon = semanticIconComponent('object.region')
 
 
 export type AgentTopologyRegion = {
@@ -80,15 +81,15 @@ export function AgentTopologySummary({ sessionIds, sessions, tabs, config, class
 }) {
   const projections = projectAgentTopology({ sessionIds, sessions, tabs, config })
   return <div className={`agent-topology-summary ${className}`.trim()} data-agent-topology aria-label="Agent work topology">
-    <header className="agent-topology-summary__header"><ThemeLayoutScaleIcon size={13} /><strong>Agent work topology</strong><span>{projections.reduce((count, projection) => count + projection.tabs.length, 0)} tabs</span></header>
+    <header className="agent-topology-summary__header"><ThemeObjectTopologyIcon size={13} /><strong>Agent work topology</strong><span>{projections.reduce((count, projection) => count + projection.tabs.length, 0)} tabs</span></header>
     {projections.length === 0 ? <p className="agent-topology-summary__empty">No open Topic / Tab / Region facts for the linked Session.</p> : <div className="agent-topology-summary__tree">
       {projections.map((projection) => <section className="agent-topology-summary__topic" key={`${projection.workspaceId}:${projection.topicId}:${projection.branch}`}>
-        <div className="agent-topology-summary__topic-line"><ThemeLayoutDockIcon size={12} /><strong>{projection.topicId}</strong><span><ThemeObjectBranchIcon size={11} /> {projection.branch}</span></div>
+        <div className="agent-topology-summary__topic-line"><ThemeObjectTopicIcon size={12} /><strong>{projection.topicId}</strong><span><ThemeObjectBranchIcon size={11} /> {projection.branch}</span></div>
         {projection.tabs.map((tab) => <section className="agent-topology-summary__tab" key={tab.tabId} data-tab-id={tab.tabId}>
-          <div className="agent-topology-summary__tab-line"><ThemeLayoutDockIcon size={11} /><strong>{tab.tabId}</strong><span>{tab.regions.length} regions</span></div>
+          <div className="agent-topology-summary__tab-line"><ThemeObjectTabIcon size={11} /><strong>{tab.tabId}</strong><span>{tab.regions.length} regions</span></div>
           <div className="agent-topology-summary__regions">
             {tab.regions.map((region) => <div className="agent-topology-summary__region" key={region.regionId} data-region-id={region.regionId}>
-              <ThemeLayoutSplitVerticalIcon size={11} /><span className="agent-topology-summary__region-kind">{region.kind}</span>
+              <ThemeObjectRegionIcon size={11} /><span className="agent-topology-summary__region-kind">{region.kind}</span>
               {region.agentLabel ? <span className="agent-topology-summary__agent">{region.agentLabel}</span> : <span className="agent-topology-summary__agent agent-topology-summary__agent--unknown">No Agent</span>}
               {region.providerId ? <span className="agent-topology-summary__provider">{agentProviderLabel(region.providerId)} · {region.executorId}</span> : null}
               {region.status ? <span className="agent-topology-summary__status">{region.status}</span> : null}

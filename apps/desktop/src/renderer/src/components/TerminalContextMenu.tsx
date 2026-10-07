@@ -17,7 +17,7 @@ const ThemeObjectDocumentIcon = semanticIconComponent('object.document')
 const ThemeActionPasteIcon = semanticIconComponent('action.paste')
 const ThemeActionSelectTextIcon = semanticIconComponent('action.select-text')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
-const ThemeLayoutExpandAllIcon = semanticIconComponent('layout.expand-all')
+const ThemeActionCurrentIcon = semanticIconComponent('action.current')
 const ThemeActionEraseIcon = semanticIconComponent('action.erase')
 
 
@@ -163,7 +163,7 @@ export function TerminalContextMenu({
             <ThemeActionSearchIcon size={14} /><span>Find</span><kbd>{chords.search}</kbd>
           </ContextMenu.Item>
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onScrollToBottom}>
-            <ThemeLayoutExpandAllIcon size={14} /><span>Scroll to bottom</span>
+            <ThemeActionCurrentIcon size={14} /><span>Scroll to bottom</span>
           </ContextMenu.Item>
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onClear}>
             <ThemeActionEraseIcon size={14} /><span>Clear terminal</span><kbd>{chords.clear}</kbd>

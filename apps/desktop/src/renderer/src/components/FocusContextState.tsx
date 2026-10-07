@@ -7,7 +7,7 @@ const ThemeStatusWorkingIcon = semanticIconComponent('status.working')
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 const ThemeStatusDisconnectedIcon = semanticIconComponent('status.disconnected')
-const ThemeActionPauseIcon = semanticIconComponent('action.pause')
+const ThemeStatusIdleIcon = semanticIconComponent('status.idle')
 
 
 /** Shapes express the existing Focus state; they do not classify the Session again. */
@@ -19,6 +19,6 @@ export function FocusContextStateMark({ context }: { context: FocusContext }) {
         : context.runUnobserved ? ['unknown', ThemeStatusUnknownIcon]
           : context.processState === 'interrupted' ? ['interrupted', ThemeStatusWarningIcon]
           : unknown ? ['unknown', ThemeStatusUnknownIcon]
-          : context.processState !== 'running' ? ['recovery', ThemeStatusDisconnectedIcon] : ['idle', ThemeActionPauseIcon]
+          : context.processState !== 'running' ? ['recovery', ThemeStatusDisconnectedIcon] : ['idle', ThemeStatusIdleIcon]
   return <span className="focus-state-mark" data-focus-state-icon={kind} aria-hidden="true"><Icon size={12} strokeWidth={1.8} animation={kind === 'working' ? 'work' : 'none'} /></span>
 }

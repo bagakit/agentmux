@@ -18,7 +18,6 @@ import { noteBacklinks, resolveNoteBlock, type NoteKnowledge, type NoteSource } 
 import { useNoteSourceTitle } from '../lib/note-source-name'
 
 const ThemeObjectLinkIcon = semanticIconComponent('object.link')
-const ThemeActionReplyIcon = semanticIconComponent('action.reply')
 const ThemeObjectHeadingIcon = semanticIconComponent('object.heading')
 const ThemeObjectListIcon = semanticIconComponent('object.list')
 const ThemeActionQuoteIcon = semanticIconComponent('action.quote')
@@ -77,7 +76,7 @@ function NoteReferenceView({ node }: NodeViewProps) {
   return <NodeViewWrapper className={`note-reference note-reference--${reference.mode}`} contentEditable={false} {...noteProvenanceAttributes(node.attrs.provenance)}>
     <div className="note-reference__source"><ThemeObjectLinkIcon size={13} /><span>{reference.mode === 'embed' ? 'Embedded block' : 'Block reference'}</span>
       {resolution.status === 'resolved' ? <button type="button" className="note-text-button" title={`${resolution.source.location.workspaceId} · ${resolution.source.location.path} · ${reference.target.blockId}`} aria-label={`Open original block in ${resolution.source.location.workspaceId} · ${resolution.source.location.path} · ${reference.target.blockId}`}
-        onClick={() => context.onOpen(resolution.source, reference.target.blockId)}>{context.sourceName(resolution.source) ?? resolution.source.location.path}<ThemeActionReplyIcon size={12} /></button> : null}
+        onClick={() => context.onOpen(resolution.source, reference.target.blockId)}>{context.sourceName(resolution.source) ?? resolution.source.location.path}<ThemeObjectLinkIcon size={12} /></button> : null}
     </div>
     {cycle ? <p className="note-knowledge-notice" role="status">This reference is circular. The original reference is preserved.</p>
       : resolution.status !== 'resolved' ? <p className="note-knowledge-notice" role="status">{resolution.message}</p>

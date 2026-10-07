@@ -71,10 +71,10 @@ export function createBrowserPlatform(options: {
       return <span className={`conversation-avatar conversation-avatar--${speaker.role}`} title={name}
         data-speaker-id={speaker.id}><SemanticIcon name={icon} size={15} aria-hidden="true" /></span>
     },
-    renderProjectIcon: project => <SemanticIcon name="object.system" size={12} aria-label={project.name} />,
+    renderProjectIcon: project => <SemanticIcon name="object.project" size={12} aria-label={project.name} />,
     renderProjectLabel: project => <small>{project.name}</small>,
     renderIcon(name, size) {
-      const icon = name === 'working' ? 'status.working' : name === 'failed' ? 'status.failed' : 'status.queued'
+      const icon = name === 'working' ? 'status.working' : name === 'failed' ? 'status.failed' : 'status.neutral'
       return <SemanticIcon name={icon} size={size} aria-hidden="true" />
     }
   }

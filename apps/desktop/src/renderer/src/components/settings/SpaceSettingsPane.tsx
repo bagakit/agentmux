@@ -4,7 +4,7 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraft } from './use-setting-draft'
 import '../../styles/settings-workflows.css'
 
-const ThemeLayoutScaleIcon = semanticIconComponent('layout.scale')
+const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 
@@ -24,7 +24,7 @@ export function SpaceSettingsPane({ density, onSave, onTopics, onProjects }: {
     submitted.finish(await saveState.run(() => onSave(submitted.value, submitted.expected)))
   }
   const destinations = [
-    { id: 'topics', label: 'Topics in Space', description: 'Open your workspace to manage topics and their content.', icon: ThemeLayoutScaleIcon, open: onTopics },
+    { id: 'topics', label: 'Topics in Space', description: 'Open your workspace to manage topics and their content.', icon: ThemeObjectTopicIcon, open: onTopics },
     { id: 'projects', label: 'Projects in Environments', description: 'Manage registered folders and worktrees on each Host.', icon: ThemeObjectFolderOpenIcon, open: onProjects },
   ]
   return <div className="settings-pane-stack">

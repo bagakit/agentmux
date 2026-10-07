@@ -6,10 +6,10 @@ import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useAppStore } from '../store'
 import { InlineAgentLink } from './InlineAgentLink'
 
-const ThemeActionFocusIcon = semanticIconComponent('action.focus')
-const ThemeLayoutDockIcon = semanticIconComponent('layout.dock')
-const ThemeObjectTabsIcon = semanticIconComponent('object.tabs')
-const ThemeLayoutScaleIcon = semanticIconComponent('layout.scale')
+const ThemeObjectRegionIcon = semanticIconComponent('object.region')
+const ThemeObjectTabIcon = semanticIconComponent('object.tab')
+const ThemeObjectSpacesIcon = semanticIconComponent('object.spaces')
+const ThemeObjectZoneIcon = semanticIconComponent('object.zone')
 const ThemeStatusCopiedIcon = semanticIconComponent('status.copied')
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 
@@ -21,7 +21,7 @@ export function InlineObjectLink({ uri, target, label }: ObjectLinkReference) {
   if (target.kind === 'agent') return <InlineAgentLink uri={uri} agentSessionId={target.agentSessionId} {...(label ? {label} : {})} />
   const kind = target.kind === 'region' ? 'Region' : target.kind === 'tab' ? 'Tab' : target.kind === 'space' ? 'Space' : 'Zone'
   const id = target.kind === 'region' ? target.regionId : target.kind === 'tab' ? target.tabId : target.kind === 'space' ? target.spaceId : target.zoneId
-  const Icon = target.kind === 'region' ? ThemeActionFocusIcon : target.kind === 'tab' ? ThemeLayoutDockIcon : target.kind === 'space' ? ThemeObjectTabsIcon : ThemeLayoutScaleIcon
+  const Icon = target.kind === 'region' ? ThemeObjectRegionIcon : target.kind === 'tab' ? ThemeObjectTabIcon : target.kind === 'space' ? ThemeObjectSpacesIcon : ThemeObjectZoneIcon
   return <span className="inline-object-link" data-object-link={uri}>
     <button type="button" className="inline-object-link__open" data-object-link-open={target.kind}
       title={`${kind}: ${id}\n${uri}`} onClick={() => { void api.ui.openObjectLink(uri).catch(useAppStore.getState().reportError) }}>

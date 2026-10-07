@@ -49,7 +49,6 @@ const ThemeLayoutRows2Icon = semanticIconComponent('layout.rows-2')
 const ThemeLayoutRows3Icon = semanticIconComponent('layout.rows-3')
 const ThemeLayoutRows4Icon = semanticIconComponent('layout.rows-4')
 const ThemeObjectFoldersIcon = semanticIconComponent('object.folders')
-const ThemeObjectSpacesIcon = semanticIconComponent('object.spaces')
 
 
 function folderSectionKey(hostId: string): string { return hostId === 'local' ? 'space:folders' : `space:folders:${hostId}` }
@@ -509,7 +508,7 @@ function GroupHeader({
         onClick={onToggle}
       >
         <span className="project-rail-group__identity">
-          <span className="space-disclosure__type project-rail-row__icon"><ThemeObjectSpacesIcon size={13} aria-label="Automatic path group" /></span>
+          <span className="space-disclosure__type project-rail-row__icon"><ThemeObjectFoldersIcon size={13} aria-label="Automatic path group" /></span>
           <span className="project-rail-group__label">{group.label}</span>
           {collapsed && group.groupPath ? (
             <span className="project-rail-group__address">{railGroupAddress(displayPath(group.groupPath, group.hostId))}</span>

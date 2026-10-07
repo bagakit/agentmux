@@ -16,12 +16,13 @@ const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 const ThemeObjectUserIcon = semanticIconComponent('object.user')
 const ThemeActionPanIcon = semanticIconComponent('action.pan')
-const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
+const ThemeActionReturnControlIcon = semanticIconComponent('action.return-control')
+const ThemeActionReplayIcon = semanticIconComponent('action.replay')
 const ThemeActionStopIcon = semanticIconComponent('action.stop')
 const ThemeActionStartIcon = semanticIconComponent('action.start')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
-const ThemeActionPauseIcon = semanticIconComponent('action.pause')
+const ThemeStatusWaitingIcon = semanticIconComponent('status.waiting')
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
 const ThemeStatusFailedIcon = semanticIconComponent('status.failed')
 
@@ -93,7 +94,7 @@ export function BrowserOperationStatus({
             {taskRun && onOpenTaskRun ? <DropdownMenu.Item className="browser-menu__item" aria-label={`Review and continue task v${taskRun.version}`}
               onSelect={() => onOpenTaskRun(taskRun.assetId, taskRun.version)}><ThemeObjectUserIcon size={13} aria-hidden="true" /><span>Review and continue v{taskRun.version}</span></DropdownMenu.Item> : null}
             {canTakeControl && onTakeControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={() => onTakeControl()}><ThemeActionPanIcon size={13} aria-hidden="true" /><span>Take control</span></DropdownMenu.Item> : null}
-            {canReturnControl && onReturnControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={() => onReturnControl()}><ThemeActionRotateResetIcon size={13} aria-hidden="true" /><span>Return to Agent</span></DropdownMenu.Item> : null}
+            {canReturnControl && onReturnControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={() => onReturnControl()}><ThemeActionReturnControlIcon size={13} aria-hidden="true" /><span>Return to Agent</span></DropdownMenu.Item> : null}
             {canStop && onStop ? <DropdownMenu.Item className="browser-menu__item" aria-label="Stop browser operation" onSelect={() => onStop()}><ThemeActionStopIcon size={12} aria-hidden="true" /><span>Stop operation</span></DropdownMenu.Item> : null}
             {onOpenTimeline ? <DropdownMenu.Item className="browser-menu__item" aria-label="Open browser activity timeline" onSelect={() => onOpenTimeline()}><ThemeObjectHistoryIcon size={13} aria-hidden="true" /><span>Activity</span></DropdownMenu.Item> : null}
           </DropdownMenu.Content>
@@ -271,7 +272,7 @@ export function BrowserReplayPreview({
   return (
     <section className="browser-rsi-replay" data-operation-id={plan.operationId} aria-label="Browser replay preview">
       <header className="browser-rsi-replay__header">
-        <span><ThemeActionRotateResetIcon size={14} aria-hidden="true" /><strong>Replay preview</strong><small>{plan.steps.length} {plan.steps.length === 1 ? 'semantic step' : 'semantic steps'}</small></span>
+        <span><ThemeActionReplayIcon size={14} aria-hidden="true" /><strong>Replay preview</strong><small>{plan.steps.length} {plan.steps.length === 1 ? 'semantic step' : 'semantic steps'}</small></span>
         {onClose ? <button type="button" className="browser-rsi-icon-button" aria-label="Close replay preview" title="Close" onClick={onClose}><SemanticIcon name="action.close" size={12} /></button> : null}
       </header>
       <p className="browser-rsi-replay__origin"><code>{plan.url}</code>{blockedCount > 0 ? <span className="browser-rsi-replay__blocked">{blockedCount} needs review</span> : null}</p>
@@ -338,7 +339,7 @@ function replayOutcomeLabel(kind: Exclude<BrowserScriptRunReport['outcome']['kin
 function PhaseGlyph({ phase, current = false }: { phase: BrowserOperationPhase; current?: boolean }) {
   if (phase === 'running') return <SemanticIcon name="status.browser-running" animation={current ? 'execute' : 'none'} size={13} />
   if (phase === 'preparing') return <ThemeStatusLoadingIcon animation={current ? 'spin' : 'none'} size={13} aria-hidden="true" />
-  if (phase === 'waiting') return <ThemeActionPauseIcon size={13} aria-hidden="true" />
+  if (phase === 'waiting') return <ThemeStatusWaitingIcon size={13} aria-hidden="true" />
   if (phase === 'human') return <ThemeObjectUserIcon size={13} aria-hidden="true" />
   if (phase === 'completed') return <ThemeStatusCompletedIcon size={13} aria-hidden="true" />
   if (phase === 'failed') return <ThemeStatusFailedIcon size={13} aria-hidden="true" />

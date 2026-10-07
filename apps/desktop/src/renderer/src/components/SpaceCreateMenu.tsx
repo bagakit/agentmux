@@ -7,7 +7,7 @@ import { resolveOverlayContainer } from './WindowOverlayHost'
 
 const ThemeActionCreateSpaceIcon = semanticIconComponent('action.create-space')
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
-const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 const ThemeObjectLinkIcon = semanticIconComponent('object.link')
 
 
@@ -30,7 +30,7 @@ export function SpaceCreateMenu({ onOpenFolder, onCreateProjectGroup }: { onOpen
             <ThemeObjectFolderOpenIcon size={14} /><span>Open Folder As a Project</span>
           </DropdownMenu.Item>
           <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => void run(() => createTopic())}>
-            <ThemeObjectNotebookIcon size={14} /><span>Create Another Topic</span>
+            <ThemeObjectTopicIcon size={14} /><span>Create Another Topic</span>
           </DropdownMenu.Item>
           <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => void run(() => createTopic('mote'))}>
             <MoteIcon size={14} /><span>Create Mote</span>

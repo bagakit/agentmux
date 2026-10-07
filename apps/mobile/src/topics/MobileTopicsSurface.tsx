@@ -10,7 +10,7 @@ import type { MobileKnowledgeReference } from '../recovery/presentation-route'
 import './topics.css'
 
 const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
-const ThemeObjectTopicIcon = semanticIconComponent('object.notebook')
+const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 
 export type MobileTopicsSurfaceProps = { rpc: TopicsRpc; visible?: boolean; topicId?: string | null; onOpenTopic(topic: KnowledgeTopic): void | Promise<void>;
   client?: AgentMuxHostedClient | null; connected?: boolean;
