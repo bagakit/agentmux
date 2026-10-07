@@ -21,7 +21,7 @@ const config = { version: 9, hosts: [{ id: 'local', kind: 'local' as const, labe
 const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
 const spatial = new AgentMuxSpatialStateStore(path.join(privateRoot, 'spatial.json'))
 const runtime = new RuntimeController(store, localRuntimeConnector)
-const calls: { operation: string; args: any[]; result?: unknown }[] = []
+const calls: { operation: string; args: any[]; result?: unknown; error?: { name: string; message: string; code?: string } }[] = []
 const result: Record<string, any> = { passed: false, phase, pid: process.pid }
 let win: BrowserWindow
 let releaseSpatial: (() => void) | undefined
@@ -51,7 +51,11 @@ ipcMain.handle('native-proof:request', async (_event, operation, ...args) => {
     case 'resize': return runtime.resizeSessionAttachment(win.webContents.id, args[0], args[1], args[2])
     case 'write': return runtime.write(args[0], args[1], args[2])
     case 'paste': return runtime.paste(args[0], args[1], args[2])
-    case 'respond': return runtime.respondInteraction(args[0], args[1])
+    case 'respond': {
+      try { return await observed(() => runtime.respondInteraction(args[0], args[1], args[2])) }
+      catch (error: any) { call.error = { name: error.name, message: error.message, code: error.code }; throw error }
+    }
+    case 'inspect-interaction': return observed(() => runtime.inspectInteraction(args[0], args[1]))
     case 'resolve': return runtime.resolveSession(args[0], config as any)
     case 'refresh': return runtime.refresh(args[0], config as any)
     case 'save-ids': await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify(args[0])); return
@@ -135,8 +139,9 @@ app.whenReady().then(async () => {
       const extraState = () => win.webContents.executeJavaScript(`window.nativeExtraState(${JSON.stringify(extraSession.id)})`)
       await until(`window.nativeExtraState(${JSON.stringify(extraSession.id)}).cards.length === 2`)
       const before = await extraState()
-      await runtime.respondInteraction(extraSession.control, { kind: 'permission', requestId: extraSession.pendingInteraction.id,
-        decision: { outcome: 'selected', optionId: 'allow-once' } })
+      result.otherViewResponse = await runtime.respondInteraction(extraSession.control, { kind: 'permission', requestId: extraSession.pendingInteraction.id,
+        decision: { outcome: 'selected', optionId: 'allow-once' } },
+      { operationId: 'private-extra-permission-response', expectedRequest: extraSession.pendingInteraction })
       await until(`window.nativeExtraState(${JSON.stringify(extraSession.id)}).cards.length === 0 && window.nativeExtraState(${JSON.stringify(extraSession.id)}).session.status.state === "done"`)
       const after = await extraState()
       assert.equal(after.needsYou, before.needsYou - 1)
@@ -163,6 +168,7 @@ app.whenReady().then(async () => {
     result.beforeTyped = (await client().listRuns()).find((run: any) => run.runId === ids.run.runId).acceptedInputBytes
     result.typedAttempt = await win.webContents.executeJavaScript('window.nativeRespond().then(()=>"accepted",error=>String(error))')
     assert.notEqual(result.typedAttempt, 'accepted', 'Unknown native handling cannot approve an old request')
+    assert.equal(calls.findLast(call => call.operation === 'respond')?.error?.code, 'AGENT_INTERACTION_UNCONFIRMED', 'The actual original native uncertainty must reject a well-formed response')
     result.afterTyped = (await client().listRuns()).find((run: any) => run.runId === ids.run.runId).acceptedInputBytes
     assert.equal(result.afterTyped, result.beforeTyped, 'The rejected typed grant must write zero bytes')
     await win.webContents.executeJavaScript('window.nativeReviewHere(); true')
