@@ -49,10 +49,16 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   const binding = bindings.find(item => item.connectionId === connectionId)
   const creatingGroup = mode === 'create' && !binding
   const bindingIntent = relevant.find(intent => intent.method === 'connection.bind' || intent.method === 'connection.binding.relink')
-  const originalLink = relevant.find(intent => intent.method === 'connection.room.link.create')
+  const links = relevant.filter((intent): intent is Extract<ConnectorRoomIntent, { method: 'connection.room.link.create' }> => intent.method === 'connection.room.link.create')
+  // Explicit submitted replacement references choose the head; presentation order is not authority.
+  const replacedLinks = new Set(links.filter(next => links.some(previous => previous.input.operationId === next.replacesOperationId && previous.input.externalConversationId === next.input.externalConversationId)).map(next => next.replacesOperationId))
+  const linkHeads = links.filter(intent => !replacedLinks.has(intent.input.operationId))
+  const originalLink = linkHeads.length === 1 ? linkHeads[0] : undefined
   const restoredGroup = !group && originalLink?.method === 'connection.room.link.create' ? originalLink.input.externalConversationId : group
   const audience = bindingIntent && 'externalConversationId' in bindingIntent.input ? bindingIntent.input.externalConversationId : mode === 'create' && !binding ? created ?? '' : binding && !changingGroup ? binding.externalConversationId : restoredGroup
-  const linkIntent = relevant.find(intent => intent.method === 'connection.room.link.create' && intent.input.externalConversationId === audience)
+  const audienceLinks = links.filter(intent => intent.input.externalConversationId === audience)
+  const audienceHeads = linkHeads.filter(intent => intent.input.externalConversationId === audience)
+  const linkIntent = audienceHeads.length === 1 ? audienceHeads[0] : undefined
   const linkFact = linkIntent ? facts[linkIntent.input.operationId] : null
   const linkOperation = linkFact && 'input' in linkFact && 'externalConversationId' in linkFact.input ? linkFact as RoomLinkOperation : null
   const roomFacts = useConnectorRoomFacts(connection, binding && !changingGroup ? binding.externalConversationId : audience)
@@ -115,9 +121,10 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
       members: members.split('\n').filter(value => value !== '').map(userId => ({ idType: memberType, userId }))
     } }))
   }
-  function createJoinLink() {
-    if (!connection || !audience || linkIntent) return
-    void work(() => execute({ method: 'connection.room.link.create', target, phase: 'not-dispatched', input: { operationId: crypto.randomUUID(), connectionId,
+  function createJoinLink(replacesOperationId?: string) {
+    if (!connection || !audience) return
+    if (replacesOperationId ? linkIntent?.input.operationId !== replacesOperationId || !linkOperation || linkOperation.state !== 'confirmed' && linkOperation.state !== 'refused' : audienceLinks.length > 0) return
+    void work(() => execute({ method: 'connection.room.link.create', target, phase: 'not-dispatched', ...(replacesOperationId ? { replacesOperationId } : {}), input: { operationId: crypto.randomUUID(), connectionId,
       expectedConnectionRevision: connection.revision, externalConversationId: audience } }))
   }
   function bind() {
@@ -184,9 +191,9 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
           {application}
           {binding ? <><section className="agent-connector-fields"><h3>Connected group</h3><p className="agent-connector-group">{binding.externalConversationId}</p><p className="agent-connector-note">{binding.state === 'active' ? 'Sharing on' : 'Sharing paused'}</p><p className="agent-connector-note" aria-label="Group member access">{approvedMembers === null ? 'Member access not confirmed' : approvedMembers === 0 ? 'No members approved' : approvedMembers + (approvedMembers === 1 ? ' member approved' : ' members approved')}</p><button className="small-button" disabled={busy || binding.state === 'paused'} onClick={pause}>Pause sharing</button></section><ConnectorDeliveryDetails key={binding.bindingId + binding.revision} binding={binding} /></> : null}
           {audience ? <ConnectorRoomPeople facts={roomFacts} onSelect={binding && !changingGroup ? (idType, userId) => { setActorType(idType); setActorId(userId); setAccessOpen(true) } : undefined} /> : null}
-          {audience ? <ConnectorRoomJoinLink key={JSON.stringify([connectionId, audience])} submitted={!!linkIntent} operation={linkOperation} pending={busy}
+          {audience && audienceLinks.length && !linkIntent ? <p role="status" className="agent-connector-note">Several original joining requests are kept. Check their receipts below before generating another.</p> : audience ? <ConnectorRoomJoinLink key={JSON.stringify([connectionId, audience, linkIntent?.input.operationId])} submitted={!!linkIntent} operation={linkOperation} pending={busy}
             canContinue={linkIntent?.phase === 'not-dispatched' && !linkOperation}
-            onCreate={createJoinLink} onInspect={() => { if (linkIntent) void work(async () => { await inspect(linkIntent) }) }}
+            onCreate={() => createJoinLink()} onRegenerate={() => { if (linkIntent) createJoinLink(linkIntent.input.operationId) }} onInspect={() => { if (linkIntent) void work(async () => { await inspect(linkIntent) }) }}
             onContinue={() => { if (linkIntent?.phase === 'not-dispatched' && !linkOperation) void work(() => execute(linkIntent, true)) }} /> : null}
           {mode === 'create' && !binding ? <fieldset disabled={busy || !!roomIntent} className="agent-connector-fields" aria-label="New dedicated group">
             <details className="agent-connector-disclosure"><summary>Invite people (optional)</summary><div className="agent-connector-fields">
