@@ -25,6 +25,7 @@
 .agent-connector-person strong { color: var(--text); font-weight: 500; }
 .agent-connector-person small { color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .agent-connector-person > button { flex: none; }
+.agent-connector-link-actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
 .agent-connector-source { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; padding-inline: var(--sp-3); font-size: var(--fs-body); }
 .agent-connector-source__label { flex: none; color: var(--text-3); font-size: var(--fs-meta); }
 .agent-connector-source > strong { min-width: 0; margin-right: auto; font-weight: 500; color: var(--text-2); overflow-wrap: anywhere; }

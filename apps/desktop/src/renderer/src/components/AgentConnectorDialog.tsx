@@ -5,7 +5,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SelectionField } from './SelectionField'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import type { ConnectionGrant, ConnectionRecord, ConnectionDeliveryResultMap, RoomBinding, RoomBindingOperation, RoomBindingTarget, RoomProvisioningOperation } from '@agentmux/core/connections'
+import type { ConnectionGrant, ConnectionRecord, ConnectionDeliveryResultMap, RoomBinding, RoomBindingOperation, RoomBindingTarget, RoomLinkOperation, RoomProvisioningOperation } from '@agentmux/core/connections'
 import type { AgentNativeSourceReference } from './AgentNativeSourceControls'
 import { api } from '../lib/api'
 import { clearConnectorRoomIntent, retainConnectorRoomIntent, useAppStore } from '../store'
@@ -15,13 +15,14 @@ import { SettingsNavigation } from './SettingsNavigation'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { ResolvedAgentAvatar } from './AgentAvatar'
 import { ConnectorRoomPeople, ConnectorRoomSelection, roomName, useConnectorRoomFacts } from './ConnectorRoomSelection'
+import { ConnectorRoomJoinLink } from './ConnectorRoomJoinLink'
 
 const CloseIcon = semanticIconComponent('action.close')
 const AgentIcon = semanticIconComponent('object.agent')
 const GroupIcon = semanticIconComponent('object.conversation')
 const ConnectIcon = semanticIconComponent('navigation.forward')
 
-type Fact = RoomProvisioningOperation | RoomBindingOperation | null
+type Fact = RoomProvisioningOperation | RoomBindingOperation | RoomLinkOperation | null
 export type AgentConnectorTarget = { target: RoomBindingTarget; session: AgentNativeSourceReference; name: string; connectionId?: string
   identity?: Pick<ComponentProps<typeof ResolvedAgentAvatar>, 'providerId' | 'appearance' | 'executorId'> }
 /** A bounded form over original public owners. It retains submitted correlations, never another receipt store. */
@@ -48,7 +49,12 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   const binding = bindings.find(item => item.connectionId === connectionId)
   const creatingGroup = mode === 'create' && !binding
   const bindingIntent = relevant.find(intent => intent.method === 'connection.bind' || intent.method === 'connection.binding.relink')
-  const audience = bindingIntent && 'externalConversationId' in bindingIntent.input ? bindingIntent.input.externalConversationId : mode === 'create' && !binding ? created ?? '' : group
+  const originalLink = relevant.find(intent => intent.method === 'connection.room.link.create')
+  const restoredGroup = !group && originalLink?.method === 'connection.room.link.create' ? originalLink.input.externalConversationId : group
+  const audience = bindingIntent && 'externalConversationId' in bindingIntent.input ? bindingIntent.input.externalConversationId : mode === 'create' && !binding ? created ?? '' : binding && !changingGroup ? binding.externalConversationId : restoredGroup
+  const linkIntent = relevant.find(intent => intent.method === 'connection.room.link.create' && intent.input.externalConversationId === audience)
+  const linkFact = linkIntent ? facts[linkIntent.input.operationId] : null
+  const linkOperation = linkFact && 'input' in linkFact && 'externalConversationId' in linkFact.input ? linkFact as RoomLinkOperation : null
   const roomFacts = useConnectorRoomFacts(connection, binding && !changingGroup ? binding.externalConversationId : audience)
   const knownRoom = roomFacts.room?.room
   const approvedMembers = binding && actors?.bindingId === binding.bindingId && actors.revision === binding.revision
@@ -58,6 +64,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   async function inspect(intent: ConnectorRoomIntent) {
     const value = intent.method === 'connection.room.create'
       ? (await api.connections.call('connection.room.inspect', { operationId: intent.input.operationId })).operation
+      : intent.method === 'connection.room.link.create' ? (await api.connections.call('connection.room.link.inspect', { operationId: intent.input.operationId })).operation
       : (await api.connections.call('connection.binding.inspect', { operationId: intent.input.operationId })).operation
     setFacts(previous => ({ ...previous, [intent.input.operationId]: value }))
     if (value && 'state' in value && value.state === 'applied') { await clearConnectorRoomIntent(intent.input.operationId); invalidateConnectorTarget(target) }
@@ -107,6 +114,11 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
       ...target, operationId: crypto.randomUUID(), connectionId, expectedConnectionRevision: connection.revision, name,
       members: members.split('\n').filter(value => value !== '').map(userId => ({ idType: memberType, userId }))
     } }))
+  }
+  function createJoinLink() {
+    if (!connection || !audience || linkIntent) return
+    void work(() => execute({ method: 'connection.room.link.create', target, phase: 'not-dispatched', input: { operationId: crypto.randomUUID(), connectionId,
+      expectedConnectionRevision: connection.revision, externalConversationId: audience } }))
   }
   function bind() {
     const native = session.nativeHandle
@@ -172,6 +184,8 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
           {application}
           {binding ? <><section className="agent-connector-fields"><h3>Connected group</h3><p className="agent-connector-group">{binding.externalConversationId}</p><p className="agent-connector-note">{binding.state === 'active' ? 'Sharing on' : 'Sharing paused'}</p><p className="agent-connector-note" aria-label="Group member access">{approvedMembers === null ? 'Member access not confirmed' : approvedMembers === 0 ? 'No members approved' : approvedMembers + (approvedMembers === 1 ? ' member approved' : ' members approved')}</p><button className="small-button" disabled={busy || binding.state === 'paused'} onClick={pause}>Pause sharing</button></section><ConnectorDeliveryDetails key={binding.bindingId + binding.revision} binding={binding} /></> : null}
           {audience ? <ConnectorRoomPeople facts={roomFacts} onSelect={binding && !changingGroup ? (idType, userId) => { setActorType(idType); setActorId(userId); setAccessOpen(true) } : undefined} /> : null}
+          {audience ? <ConnectorRoomJoinLink key={JSON.stringify([connectionId, audience])} submitted={!!linkIntent} operation={linkOperation} pending={busy}
+            onCreate={createJoinLink} onInspect={() => { if (linkIntent) void work(async () => { await inspect(linkIntent) }) }} /> : null}
           {mode === 'create' && !binding ? <fieldset disabled={busy || !!roomIntent} className="agent-connector-fields" aria-label="New dedicated group">
             <details className="agent-connector-disclosure"><summary>Invite people (optional)</summary><div className="agent-connector-fields">
               <label className="agent-connector-field">Member ID type<TextInput aria-label="Member ID type" value={frozenRoom?.members[0]?.idType ?? memberType} onChange={event => setMemberType(event.target.value)} placeholder="Exact ID type" /></label>
@@ -180,6 +194,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
             </div></details>
           </fieldset> : null}
           {relevant.map(intent => { const fact = facts[intent.input.operationId], isRoom = fact && 'creation' in fact
+            if (intent.method === 'connection.room.link.create') return intent === linkIntent ? null : <details className="agent-connector-disclosure" key={intent.input.operationId}><summary>Previous join link receipt</summary><div className="agent-connector-fields"><span>{intent.input.externalConversationId}</span><code>{intent.input.operationId}</code><button className="small-button" disabled={busy} onClick={() => void work(async () => { await inspect(intent) })}>Check link status</button></div></details>
             const receipt = <>
               {isRoom ? <><strong>{fact.creation.state === 'created' ? 'Group created' : fact.creation.state === 'not-applied' ? 'Group not created' : fact.creation.state === 'pending' ? 'Group setup pending' : 'Creation not confirmed'}</strong><span>{fact.membership.state === 'not-requested' ? 'No invitations requested.' : fact.membership.state === 'settled' ? fact.membership.results.filter(item => item.state === 'joined').length + ' of ' + fact.membership.results.length + ' invitations confirmed.' : fact.membership.state === 'not-applied' ? 'Invitations were not sent.' : fact.membership.state === 'pending' ? 'Invitations not started.' : 'Invitations not confirmed.'}</span></> : <strong>{fact && 'state' in fact && fact.state === 'refused' ? 'Setup could not finish' : 'Setup not confirmed'}</strong>}
               <button className="small-button" disabled={busy} onClick={() => void work(async () => { await inspect(intent); await refresh() })}>Check status</button>
@@ -187,7 +202,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
               {isRoom && fact.creation.state === 'not-applied' || fact && 'state' in fact && fact.state === 'refused' ? <button className="small-button" disabled={busy} onClick={() => void work(async () => { await clearConnectorRoomIntent(intent.input.operationId); await refresh() })}>Dismiss unsuccessful setup</button> : null}
               <details className="agent-connector-disclosure"><summary>Setup receipt details</summary><div className="agent-connector-fields">
                 <span>Operation</span><code>{intent.input.operationId}</code><span>Host · {target.executionHostId}</span>
-                {isRoom ? <><span>Creation: {fact.creation.state}{fact.creation.state === 'created' ? ' · ' + fact.creation.externalConversationId : fact.creation.state === 'not-applied' ? ' · ' + fact.creation.reason : ''}</span><span>Members: {fact.membership.state}</span>{fact.membership.state === 'settled' ? fact.membership.results.map((item, index) => <span key={index}>{item.member.idType} · {item.member.userId}: {item.state}</span>) : null}</> : <span>{fact && 'state' in fact ? fact.state + (fact.state === 'refused' ? ' · ' + fact.code : '') : 'Result unknown.'}</span>}
+                {isRoom ? <><span>Creation: {fact.creation.state}{fact.creation.state === 'created' ? ' · ' + fact.creation.externalConversationId : fact.creation.state === 'not-applied' ? ' · ' + fact.creation.reason : ''}</span><span>Members: {fact.membership.state}</span>{fact.membership.state === 'settled' ? fact.membership.results.map((item, index) => <span key={index}>{item.member.idType} · {item.member.userId}: {item.state}</span>) : null}</> : <span>{fact && 'state' in fact ? fact.state + (fact.state === 'refused' && 'code' in fact ? ' · ' + fact.code : '') : 'Result unknown.'}</span>}
               </div></details>
             </>
             return binding && isRoom && fact.creation.state === 'created' ? <details className="agent-connector-disclosure" key={intent.input.operationId}><summary>Group setup receipt</summary><div className="agent-connector-receipt">{receipt}</div></details> : <section className="agent-connector-receipt" key={intent.input.operationId} aria-label="Group setup status">{receipt}</section>
