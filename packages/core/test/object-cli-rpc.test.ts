@@ -35,6 +35,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     const stdinByMethod: Record<string, string> = {
       'connection.profile.sync': JSON.stringify({ operationId: 'profile-original', connectionId: 'profile-connection', expectedConnectionRevision: 1, desired: { name: 'Desired name' } }),
       'connection.enrollment.begin': JSON.stringify({ operationId: 'enroll-original', connectionId: 'connection-new', adapterId: 'sample', domain: 'chat.example', label: 'Team' }),
+      'connection.service.configure': JSON.stringify({ operationId: 'service-original', expectedRevision: 0, service: { enabled: false } }),
       'connection.configure': JSON.stringify({ operationId: 'connection-save', expectedRevision: null, connection: { connectionId: 'connection-a', adapterId: 'sample', application: { domain: 'chat.example', appId: 'app-a' }, label: 'Team', enabled: true, credentialRef: 'credential-a' } }),
       'agent.native.history': JSON.stringify({ hostId: 'local', executorId: 'private', source: nativeSource }),
       'agent.native.history.resource': JSON.stringify({ hostId: 'local', executorId: 'private', nativeSource,
