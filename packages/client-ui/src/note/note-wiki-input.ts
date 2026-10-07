@@ -3,12 +3,12 @@ import { closeHistory } from '@tiptap/pm/history'
 import { Plugin } from '@tiptap/pm/state'
 import { Mapping } from '@tiptap/pm/transform'
 import type { NoteInlineLinkAttributes } from '@agentmux/core/note-links'
-import { noteWikiTextTokens } from './note-wikilinks.js'
+import { noteInlineLinkContent, noteInlineQuery, noteWikiTextTokens } from './note-wikilinks.js'
 
 export function closeNoteWikiHistory(editor: Editor): void { editor.view.dispatch(closeHistory(editor.state.tr)) }
 
 /** Only changed textblocks are considered; the canonical writer uses the same token adapter. */
-export function noteWikiInputExtension(created?: (link: NoteInlineLinkAttributes) => void) {
+export function noteWikiInputExtension(created?: (link: NoteInlineLinkAttributes, previousReferenceId?: string) => void) {
   return Extension.create({ name: 'noteWikiInput', addProseMirrorPlugins() {
     const editor = this.editor
     return [new Plugin({
@@ -30,17 +30,39 @@ export function noteWikiInputExtension(created?: (link: NoteInlineLinkAttributes
         })
         if (!maps.length) {
           const selection = state.selection
-          if (selection.$from.parent.isTextblock && selection.$from.parent.type.name !== 'codeBlock') blocks.set(selection.$from.before(), selection.$from.parent)
+          for (let depth = selection.$from.depth; depth > 0; depth--) {
+            const node = selection.$from.node(depth)
+            if (node.isTextblock) { if (node.type.name !== 'codeBlock') blocks.set(selection.$from.before(depth), node); break }
+          }
         }
-        const tokens = [...blocks].flatMap(([pos, node]) => noteWikiTextTokens(node.toJSON().content ?? []).map(token => ({ ...token, from: pos + 1 + token.from, to: pos + 1 + token.to }))).sort((a, b) => b.from - a.from)
-        if (!tokens.length) return null
-        const tr = state.tr.setMeta('noteWikiInput', true), pending: NoteInlineLinkAttributes[] = []
-        for (const token of tokens) {
+        const tokens = [...blocks].flatMap(([pos, node]) => noteWikiTextTokens(node.toJSON().content ?? []).map(token => ({ ...token, from: pos + 1 + token.from, to: pos + 1 + token.to })))
+        const tr = state.tr.setMeta('noteWikiInput', true), pending: { link: NoteInlineLinkAttributes; previousReferenceId?: string }[] = []
+        const edits: { from: number; apply(): void }[] = tokens.map(token => ({ from: token.from, apply() {
           const link = { referenceId: crypto.randomUUID(), text: token.text, target: null }
-          tr.replaceWith(token.from, token.to, state.schema.nodes.noteLink!.create(link, null, state.doc.resolve(token.from).marks()))
-          pending.push(link)
+          tr.replaceWith(token.from, token.to, state.schema.nodeFromJSON({ ...noteInlineLinkContent(link), marks: state.doc.resolve(token.from).marks().map(mark => mark.toJSON()) }))
+          pending.push({ link })
+        } }))
+        for (const [blockPos, block] of blocks) block.descendants((node, offset) => {
+          if (node.type.name !== 'noteLink') return
+          const pos = blockPos + 1 + offset
+          const text = noteInlineQuery(node.textContent)
+          if (text === node.attrs.text) return false
+          edits.push({ from: pos, apply() {
+            if (text === null) tr.replaceWith(pos, pos + node.nodeSize, node.textContent ? state.schema.text(node.textContent, node.marks) : [])
+            else {
+              // A changed query is a new lookup generation, including A -> B -> A. A late
+              // response for the old occurrence cannot reattach its former exact target.
+              const link = { referenceId: crypto.randomUUID(), text, target: null }
+              tr.setNodeMarkup(pos, undefined, link); pending.push({ link, previousReferenceId: node.attrs.referenceId })
+            }
+          } })
+          return false
+        })
+        if (!edits.length) return null
+        for (const edit of edits.sort((a, b) => b.from - a.from)) {
+          edit.apply()
         }
-        if (created) queueMicrotask(() => { if (!editor.isDestroyed) for (const link of pending) created(link) })
+        if (created) queueMicrotask(() => { if (!editor.isDestroyed) for (const entry of pending) created(entry.link, entry.previousReferenceId) })
         return tr
       }
     })]

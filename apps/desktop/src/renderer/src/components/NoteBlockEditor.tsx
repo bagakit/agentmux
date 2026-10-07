@@ -6,11 +6,11 @@ import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEd
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { NOTE_BLOCK_TYPES, NoteBlockReferenceNode, NoteInlineLinkNode, noteContentExtensions, noteIdentityExtensions } from '../../../shared/note-content-schema'
-import { NoteInlineLink, type NoteLinkOpenRequest } from '@agentmux/client-ui/components/NoteInlineLink'
+import { NoteInlineLinkView, type NoteLinkOpenRequest } from '@agentmux/client-ui/components/NoteInlineLink'
 import { noteWikiInputExtension } from '@agentmux/client-ui/note/note-wiki-input'
 import { noteWikiLiteralExtension } from '@agentmux/client-ui/note/note-wiki-view'
 import type { NoteInlineLinkAttributes, NoteLinkTarget } from '@agentmux/core/note-links'
-import { bindNoteWikiLink, noteWikiTextTokens } from '@agentmux/client-ui/note/note-wikilinks'
+import { bindNoteWikiLink, noteInlineLinkContent, noteWikiTextTokens } from '@agentmux/client-ui/note/note-wikilinks'
 import { useNoteWikiCompletion } from './NoteWikiCompletion'
 import { readNoteDocument, serializeNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
 import { noteProvenanceAttributes } from '@agentmux/client-ui/note/note-provenance'
@@ -42,7 +42,7 @@ function referenceExtension() {
 function inlineLinkExtension() { return NoteInlineLinkNode.extend({ addNodeView() { return ReactNodeViewRenderer(InlineLinkView) } }) }
 function InlineLinkView({ node, editor }: NodeViewProps) {
   const context = useContext(ReferenceContext)
-  return <NodeViewWrapper as="span" className="note-inline-link-node" contentEditable={false}><NoteInlineLink link={node.attrs as NoteInlineLinkAttributes} editable={editor.isEditable} onOpen={context?.onOpenLink} /></NodeViewWrapper>
+  return <NoteInlineLinkView node={node} editor={editor} onOpen={context?.onOpenLink} />
 }
 
 /** The canonical content schema plus two maintained identity allocators; read-only views use neither. */
@@ -108,8 +108,8 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   const [selected, setSelected] = useState<string | null>(null), [picker, setPicker] = useState(false), [query, setQuery] = useState('')
   const [, setFoldRevision] = useState(0)
   const folded = useRef(new Set<string>())
-  const wikiHandlers = useRef<{ created(link: NoteInlineLinkAttributes): void; keyDown(event: KeyboardEvent): boolean; open(link: NoteLinkOpenRequest): void }>({ created() {}, keyDown: () => false, open() {} })
-  const extensions = useMemo(() => [...noteEditorExtensions(() => folded.current), noteWikiInputExtension(link => wikiHandlers.current.created(link)), noteWikiLiteralExtension(link => wikiHandlers.current.open(link))], [])
+  const wikiHandlers = useRef<{ created(link: NoteInlineLinkAttributes, previousReferenceId?: string): void; keyDown(event: KeyboardEvent): boolean; open(link: NoteLinkOpenRequest): void }>({ created() {}, keyDown: () => false, open() {} })
+  const extensions = useMemo(() => [...noteEditorExtensions(() => folded.current), noteWikiInputExtension((link, previous) => wikiHandlers.current.created(link, previous)), noteWikiLiteralExtension(link => wikiHandlers.current.open(link))], [])
   const editor = useEditor({ extensions, content: note.content, editorProps: {
     attributes: { class: 'note-block-content', role: 'textbox', 'aria-label': 'Note blocks', 'aria-multiline': 'true' },
     handleKeyDown(view, event) {
@@ -149,7 +149,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
       const token = block.type.name !== 'codeBlock' && noteWikiTextTokens(block.toJSON().content ?? []).find(token => at.start() + token.from === from && at.start() + token.to === to && token.text === link.text)
       if (!token) { props.current.onIssue('The original link text changed. Your draft is kept; choose the current link again.'); return }
       const stored = { referenceId: crypto.randomUUID(), text: link.text, target: null }
-      editor.view.dispatch(editor.state.tr.replaceWith(from, to, editor.schema.nodes.noteLink!.create(stored, null, at.marks())))
+      editor.view.dispatch(editor.state.tr.replaceWith(from, to, editor.schema.nodeFromJSON({ ...noteInlineLinkContent(stored), marks: at.marks().map(mark => mark.toJSON()) })))
       onOpenLink?.(stored); return
     }
     onOpenLink?.(link)

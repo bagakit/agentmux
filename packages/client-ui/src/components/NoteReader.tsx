@@ -4,11 +4,10 @@ import type { NoteProvenanceSnapshot } from '@agentmux/core/note-provenance'
 import type { FileWriteReceipt, FileReadResult } from '@agentmux/core/files'
 import { Node as TiptapNode, type JSONContent } from '@tiptap/core'
 import { noteContentExtensions, NoteBlockReferenceNode, NoteInlineLinkNode, noteIdentityExtensions } from '../note/note-content-schema.js'
-import { NoteInlineLink, type NoteLinkOpenRequest } from './NoteInlineLink.js'
+import { NoteInlineLinkView, type NoteLinkOpenRequest } from './NoteInlineLink.js'
 import { noteWikiLiteralExtension } from '../note/note-wiki-view.js'
 import { noteReadingSelectionExtension } from '../note/note-reading-selection.js'
 import { noteWikiInputExtension } from '../note/note-wiki-input.js'
-import type { NoteInlineLinkAttributes } from '@agentmux/core/note-links'
 import { readNoteDocument, serializeNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../note/note-document.js'
 import { noteKnowledge, parseNoteFile, projectNoteBlocks, resolveNoteBlock, type NoteKnowledge, type NoteFileDocument } from '../note/note-knowledge.js'
 import { acknowledgeNoteWrite, type NoteEditState } from '../note/note-edit-state.js'
@@ -19,7 +18,7 @@ export type { NoteLinkOpenRequest } from './NoteInlineLink.js'
 const Scope = createContext<{ knowledge: NoteKnowledge; trail: string[]; readReference?: ((target: NoteBlockTarget) => void) | undefined; onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined } | null>(null)
 function InlineLink({ node, editor }: NodeViewProps) {
   const scope = useContext(Scope)
-  return <NodeViewWrapper as="span" className="note-inline-link-node" contentEditable={false}><NoteInlineLink link={node.attrs as NoteInlineLinkAttributes} editable={editor.isEditable} onOpen={scope?.onOpenLink} /></NodeViewWrapper>
+  return <NoteInlineLinkView node={node} editor={editor} onOpen={scope?.onOpenLink} />
 }
 function Reference({ node }: NodeViewProps) {
   const scope = useContext(Scope)

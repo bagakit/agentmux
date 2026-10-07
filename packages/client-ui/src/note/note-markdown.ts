@@ -9,6 +9,7 @@ import { readNoteMarkdownHeader, NOTE_MARKDOWN_SCHEMA } from '@agentmux/core/not
 import { parseNoteLinkTarget, scanNoteWikiLinks } from '@agentmux/core/note-links'
 import { NOTE_SCHEMA } from './note-format.js'
 import { noteContentSchema } from './note-content-schema.js'
+import { noteInlineLinkContent, noteWikiQueryForLabel } from './note-wikilinks.js'
 import { validateNoteDocument } from './note-document-validation.js'
 import type { NoteDocument } from './note-document.js'
 
@@ -28,6 +29,12 @@ const target = (url: string) => {
 }
 const comment = (kind: string, value?: string): Md => ({ type: 'html', value: `<!--amux-${kind}${value === undefined ? '' : ':' + value}-->` })
 const marker = (node: Md, kind: string) => node.type === 'html' ? new RegExp('^<!--amux-' + kind + '(?::([^\\r\\n]*))?-->$','u').exec(node.value ?? '') : null
+function occurrence(value: string) {
+  const parts = value.split(';'), referenceId = decode(parts[0] ?? '')
+  if (parts.length === 1) return { referenceId, text: null, target: null }
+  if (parts.length !== 3 || !parts[1]!.startsWith('query=') || !parts[2]!.startsWith('target=')) return fail('A Note link annotation has unsupported fields.')
+  return { referenceId, text: decodeValue(parts[1]!.slice(6)), target: target(parts[2]!.slice(7)) }
+}
 const tags: Record<string, string> = { strong: 'bold', b: 'bold', em: 'italic', i: 'italic', s: 'strike', del: 'strike', u: 'underline', code: 'code' }
 
 function inline(nodes: readonly Md[], body: string, literalWiki = true): JSONContent[] {
@@ -71,7 +78,7 @@ function inline(nodes: readonly Md[], body: string, literalWiki = true): JSONCon
       if (node.url?.startsWith('note:') && ref?.[1]) {
         const children = inline(node.children ?? [], body, false)
         if (children.some(child => child.type !== 'text' || child.marks?.length)) return fail('A bound Note link label must be plain text; apply its marks to the whole link.')
-        emit({ type: 'noteLink', attrs: { referenceId: decode(ref[1]), text: children.map(child => child.text).join(''), target: target(node.url) } }); index++; continue
+        emit(noteInlineLinkContent({ referenceId: decode(ref[1]), text: noteWikiQueryForLabel(children.map(child => child.text).join('')), target: target(node.url) })); index++; continue
       }
       const attrs = { href: node.url ?? '', ...(node.title == null ? {} : { title: node.title }) }
       for (const child of inline(node.children ?? [], body, false)) emit(child, [{ type: 'link', attrs }, ...child.marks ?? []])
@@ -85,7 +92,10 @@ function inline(nodes: readonly Md[], body: string, literalWiki = true): JSONCon
         if (!last || !token || token.to !== last.text!.length || last.marks?.some(mark => mark.type === 'code' || mark.type === 'link' || mark.type === 'noteWikiLiteral')) return fail('An occurrence marker is not attached to its original Note link.')
         const prefix = last.text!.slice(0, token.from), marks = last.marks
         result.pop(); if (prefix) result.push({ ...last, text: prefix })
-        result.push({ type: 'noteLink', attrs: { referenceId: decode(ref[1] ?? ''), text: token.text, target: null }, ...marks ? { marks } : {} }); continue
+        const binding = occurrence(ref[1] ?? '')
+        // The file carries both the exact target and the query that selected it. Editing the
+        // visible source query releases that binding; a rename alone never retargets it.
+        result.push({ ...noteInlineLinkContent({ referenceId: binding.referenceId, text: token.text, target: binding.text === token.text ? binding.target : null }), ...marks ? { marks } : {} }); continue
       }
       const close = /^<\/(strong|b|em|i|s|del|u|code|a)>$/u.exec(node.value ?? '')
       if (close) { if (stack.pop()?.tag !== close[1]) return fail('Inline formatting tags are not balanced.'); continue }
@@ -192,8 +202,8 @@ function inlineMarkdown(nodes: readonly JSONContent[]): Md[] {
     }
     else if (node.type === 'noteLink') {
       const attrs = node.attrs!
-      value = attrs.target === null ? [{ type: 'noteRaw', value: `[[${attrs.text}]]` }] : [{ type: 'link', url: href(attrs.target), children: [{ type: 'text', value: attrs.text }] }]
-      value.push(comment('ref', encode(attrs.referenceId)))
+      value = [{ type: 'noteRaw', value: `[[${attrs.text}]]` }]
+      value.push(comment('ref', encode(attrs.referenceId) + (attrs.target === null ? '' : ';query=' + encode(attrs.text) + ';target=' + href(attrs.target))))
     } else return fail('Unsupported inline Note node: ' + node.type + '.')
     for (const mark of [...node.marks ?? []].reverse()) {
       if (mark.type === 'noteWikiLiteral') continue

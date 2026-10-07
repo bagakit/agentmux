@@ -38,8 +38,9 @@ export function validateNoteDocument(value: unknown, allowUnanchored = false): n
       if (node.type === 'noteLink') {
         const attrs = node.attrs
         if (!record(attrs) || !identity(attrs.referenceId) || references.has(attrs.referenceId) || typeof attrs.text !== 'string' || !attrs.text || /[\0\r\n]/u.test(attrs.text)) throw new Error('An inline Note link identity or text is invalid.')
-        if (attrs.target === null) { if (parseNoteWikiQuery(attrs.text).status !== 'valid') throw new Error('An unbound Note link query is invalid.') }
-        else parseNoteLinkTarget(attrs.target)
+        if (parseNoteWikiQuery(attrs.text).status !== 'valid') throw new Error('The editable Note link query is invalid. The original input is preserved.')
+        if (attrs.target !== null) parseNoteLinkTarget(attrs.target)
+        if (!Array.isArray(node.content) || node.content.some(child => !record(child) || child.type !== 'text' || child.marks !== undefined && (!Array.isArray(child.marks) || child.marks.length)) || node.content.map(child => (child as { text?: string }).text ?? '').join('') !== `[[${attrs.text}]]`) throw new Error('The editable Note link text and its query do not agree. The original input is preserved.')
         references.add(attrs.referenceId)
       }
       if (node.content !== undefined) {

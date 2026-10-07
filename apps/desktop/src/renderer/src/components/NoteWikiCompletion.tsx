@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/core'
 import { closeNoteWikiHistory } from '@agentmux/client-ui/note/note-wiki-input'
+import { noteInlineLinkContent } from '@agentmux/client-ui/note/note-wikilinks'
 import { parseNoteWikiPrefix, type NoteInlineLinkAttributes, type NoteLinkTarget, type NotePageCandidate, type NotebookResolveResult, type NoteWikiQuery } from '@agentmux/core/note-links'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -14,6 +15,7 @@ const escapeQuery = (text: string) => text.replace(/[\\#\[\]]/gu, '\\$&')
 /** A prefix is local to this caret/textblock. It never searches documents or reads a file. */
 export function noteWikiTrigger(editor: Editor): Trigger | null {
   const selection = editor.state.selection
+  if (selection.$from.parent.type.name === 'noteLink') return null
   if (!selection.empty || !selection.$from.parent.isTextblock || selection.$from.parent.type.name === 'codeBlock' || selection.$from.marks().some(mark => mark.type.name === 'code' || mark.type.name === 'link')) return null
   const before = selection.$from.parent.textBetween(0, selection.$from.parentOffset, '\ufffc', '\ufffc')
   const at = before.lastIndexOf('[[')
@@ -31,6 +33,7 @@ export function useNoteWikiCompletion(editor: Editor | null, active: boolean, so
   const [anchor, setAnchor] = useState({ left: 0, top: 0 })
   const current = useRef({ editor, active, trigger, sourceIdentity }); current.current = { editor, active, trigger, sourceIdentity }
   const pending = useRef(new Set<AbortController>())
+  const bindingLookups = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; cancel: AbortController }>())
   const key = trigger ? `${trigger.from}:${trigger.text}` : null
   const visible = active && Boolean(trigger) && dismissed !== key
   useEffect(() => {
@@ -46,7 +49,11 @@ export function useNoteWikiCompletion(editor: Editor | null, active: boolean, so
     editor.on('transaction', update).on('selectionUpdate', update); update()
     return () => { editor.off('transaction', update).off('selectionUpdate', update) }
   }, [editor])
-  useEffect(() => { if (!active) { for (const cancel of pending.current) cancel.abort(); pending.current.clear(); setTrigger(null) } return () => { for (const cancel of pending.current) cancel.abort(); pending.current.clear() } }, [active, sourceIdentity])
+  useEffect(() => {
+    const cancelPending = () => { for (const cancel of pending.current) cancel.abort(); pending.current.clear(); for (const lookup of bindingLookups.current.values()) clearTimeout(lookup.timer); bindingLookups.current.clear() }
+    if (!active) { cancelPending(); setTrigger(null) }
+    return cancelPending
+  }, [active, sourceIdentity])
   useEffect(() => { choose(null); setLookup(null) }, [trigger?.query.page])
   useEffect(() => {
     if (!visible || !trigger) return
@@ -66,16 +73,28 @@ export function useNoteWikiCompletion(editor: Editor | null, active: boolean, so
     // Fragment keystrokes filter the one observed body locally; they do not reread it.
   }, [visible, trigger?.query.page, Boolean(trigger?.query.fragment), chosen?.noteId, retry, sourceIdentity])
 
-  const created = useCallback((link: NoteInlineLinkAttributes) => {
+  const created = useCallback((link: NoteInlineLinkAttributes, previousReferenceId?: string) => {
+    const previous = previousReferenceId ? bindingLookups.current.get(previousReferenceId) : undefined
+    if (previous) { clearTimeout(previous.timer); previous.cancel.abort(); pending.current.delete(previous.cancel); bindingLookups.current.delete(previousReferenceId!) }
     if (!current.current.active || !current.current.editor) return
     const cancel = new AbortController(), originalSource = current.current.sourceIdentity; pending.current.add(cancel)
-    void api.notebooks.resolve({ mode: 'resolve', text: link.text }, { signal: cancel.signal }).then(result => {
-      const editor = current.current.editor
-      if (cancel.signal.aborted || !current.current.active || originalSource !== current.current.sourceIdentity || !editor || editor.isDestroyed || result.mode !== 'resolve' || result.result.status !== 'resolved') return
+    const position = (editor: Editor) => {
       let at: number | null = null
-      editor.state.doc.descendants((node, pos) => { if (node.type.name === 'noteLink' && node.attrs.referenceId === link.referenceId && node.attrs.text === link.text && node.attrs.target === null) { at = pos; return false } })
-      if (at !== null) editor.view.dispatch(editor.state.tr.setNodeMarkup(at, undefined, { ...link, target: result.result.target }).setMeta('addToHistory', false))
-    }).catch(() => { /* The canonical unbound node remains editable and can be retried by opening it. */ }).finally(() => pending.current.delete(cancel))
+      editor.state.doc.descendants((node, pos) => { if (node.type.name === 'noteLink' && node.attrs.referenceId === link.referenceId && node.attrs.text === link.text && node.textContent === `[[${link.text}]]` && node.attrs.target === null) { at = pos; return false } })
+      return at
+    }
+    const release = () => { pending.current.delete(cancel); bindingLookups.current.delete(link.referenceId) }
+    const timer = setTimeout(() => {
+      const editor = current.current.editor
+      if (cancel.signal.aborted || !current.current.active || originalSource !== current.current.sourceIdentity || !editor || editor.isDestroyed || position(editor) === null) { release(); return }
+      void api.notebooks.resolve({ mode: 'resolve', text: link.text }, { signal: cancel.signal }).then(result => {
+        const editor = current.current.editor
+        if (cancel.signal.aborted || !current.current.active || originalSource !== current.current.sourceIdentity || !editor || editor.isDestroyed || result.mode !== 'resolve' || result.result.status !== 'resolved') return
+        const at = position(editor)
+        if (at !== null) editor.view.dispatch(editor.state.tr.setNodeMarkup(at, undefined, { ...link, target: result.result.target }).setMeta('addToHistory', false))
+      }).catch(() => { /* The original query remains editable and can be explicitly retried. */ }).finally(release)
+    }, 100)
+    bindingLookups.current.set(link.referenceId, { cancel, timer })
   }, [])
   const sameTrigger = (held: Trigger, editor: Editor) => {
     const fresh = noteWikiTrigger(editor)
@@ -91,7 +110,7 @@ export function useNoteWikiCompletion(editor: Editor | null, active: boolean, so
       if (cancel.signal.aborted || !current.current.active || originalSource !== current.current.sourceIdentity || editor.isDestroyed || !sameTrigger(held, editor)) return
       if (result.mode !== 'resolve' || result.result.status !== 'resolved') { if (result.mode === 'resolve') { setLookup(result); setIssue(result.result.status === 'resolved' ? null : result.result.message) } return }
       closeNoteWikiHistory(editor)
-      editor.chain().focus().insertContentAt({ from: held.from, to: held.to }, { type: 'noteLink', attrs: { referenceId: crypto.randomUUID(), text, target: result.result.target } }).run()
+      editor.chain().focus().insertContentAt({ from: held.from, to: held.to }, noteInlineLinkContent({ referenceId: crypto.randomUUID(), text, target: result.result.target })).run()
       dismiss(`${held.from}:${held.text}`); setTrigger(null)
     } catch (error) { if (!cancel.signal.aborted) setIssue(presentError(error)) }
     finally { pending.current.delete(cancel); if (!cancel.signal.aborted) setBusy(false) }

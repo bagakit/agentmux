@@ -32,7 +32,7 @@ export const NoteBlockReferenceNode = Node.create({
   renderHTML({ HTMLAttributes }) { return ['div', { ...HTMLAttributes, 'data-note-block-reference': '' }] }
 })
 export const NoteInlineLinkNode = Node.create({
-  name: 'noteLink', group: 'inline', inline: true, atom: true,
+  name: 'noteLink', group: 'inline', inline: true, content: 'text*', marks: '',
   addAttributes() {
     return {
       referenceId: { default: null }, text: { default: '' }, target: { default: null }
@@ -41,8 +41,8 @@ export const NoteInlineLinkNode = Node.create({
   parseHTML() { return [{ tag: 'span[data-note-link]', getAttrs: element => {
     try { return JSON.parse((element as HTMLElement).getAttribute('data-note-link') ?? 'null') } catch { return false }
   } }] },
-  renderHTML({ node }) { return ['span', { 'data-note-link': JSON.stringify(node.attrs) }, `[[${String(node.attrs.text)}]]`] },
-  renderText({ node }) { return `[[${String(node.attrs.text)}]]` }
+  renderHTML({ node }) { return ['span', { 'data-note-link': JSON.stringify(node.attrs) }, 0] },
+  renderText({ node }) { return node.textContent }
 })
 
 /** CommonMark escaping is semantic: a literal wiki label must not become a query. */
