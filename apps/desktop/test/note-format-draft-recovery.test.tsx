@@ -39,7 +39,7 @@ it('actual storage receipt keeps the original workface, draft, selection and unk
   await applyNotesStorageSnapshot({ directory: final.workspacePath, catalogPath: final.workspacePath + '/notebooks.sqlite', operation: null, resourceChanges: [conversion, move], directoryChanges: [] })
   const actual = useAppStore.getState()
   expect(actual.tabs['original-tab']?.regions['original-region']).toMatchObject({ kind: 'file', regionId: 'original-region', workspaceId: final.workspaceId, path: final.path })
-  expect(actual.documents[key]).toMatchObject({ content: markdown, revision: oldRevision, noteConversion: { originalContent: raw, originalRevision: oldRevision, source: from, unconfirmedWrite: unknown.attempted } })
+  expect(actual.documents[key]).toMatchObject({ content: markdown, revision: oldRevision, noteConversion: { originalContent: raw, originalRevision: oldRevision, source: from, wasDirty: true, unconfirmedWrite: unknown.attempted } })
   expect(actual.dirtyDocuments[key]).toBe(true)
   expect(actual.documentIssues[key]).toMatchObject({ kind: 'write-unknown', attempted: { content: unknown.attempted.content, expectedRevision: oldRevision } })
   expect(actual.documentRevealTargets[key]?.noteBlock).toEqual({ noteId: note.noteId, blockId: 'original-block' })
