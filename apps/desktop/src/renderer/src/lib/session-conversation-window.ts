@@ -48,9 +48,20 @@ const RECORD_COUNT = 1200
 const PAGE_BYTES = 12 * 1024 * 1024
 const byteError = 'This original-sequence window and its return positions exceed their byte budget. The displayed records and return path are kept.'
 const positionError = 'The original page range changed. The displayed records and return path are kept; use Current to refresh.'
-const protectedError = 'Move your reading position or clear the selection before changing this window. Your reading position, selected content, records and cursor are kept.'
+// Local DOM reading protection defers this replacement; it is not a source-read failure.
+class ConversationWindowHeld extends Error {}
 const coverageLimit = 'The requested time range exceeds this bounded reading window. Loaded records are kept; scroll earlier to continue.'
 const sourceError = 'Native source changed. The displayed records are kept; explicitly open Current source or Previous source.'
+
+function hasNewerRecords(window: ReadingWindow | null, recent: AgentSessionHistoryPage | null): boolean {
+  if (!window) return false
+  if (window.newerOutside) return true
+  const tail = recent?.items.at(-1)
+  if (!tail || !recent || !sameSource(window.page, recent)) return false
+  const at = window.records.get(tail.id)
+  const retained = at ? window.parts[at.part]!.page.items[at.offset] : undefined
+  return !retained || (retained !== tail && JSON.stringify(retained) !== JSON.stringify(tail))
+}
 
 function handleSource(handle: AgentNativeSourceFacts['nativeHandle']): AgentSessionHistorySource | undefined {
   return handle?.kind === 'provider' ? { providerId: handle.providerId, nativeSessionId: handle.sessionId } : undefined
@@ -228,7 +239,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const key = reading ? JSON.stringify([reading.reference.hostId, reading.reference.agentSessionId, reading.identity]) : ''
   const bindingKey = reading?.nativeSourceFacts ? nativeBindingKey(reading.nativeSourceFacts) : ''
   const live = useRef({ key, bindingKey, reading, recent, currentContext, beforeCommit, coverageDuration }); live.current = { key, bindingKey, reading, recent, currentContext, beforeCommit, coverageDuration }
-  const [state, setState] = useState<{ key: string; window: ReadingWindow | null; loading: boolean; error: string | null }>({ key, window: null, loading: false, error: null })
+  const [state, setState] = useState<{ key: string; window: ReadingWindow | null; loading: boolean; error: string | null; held?: boolean }>({ key, window: null, loading: false, error: null })
   const [captured, setCaptured] = useState<{ key: string; items: AgentTimelineItem[]; error: string | null } | null>(null)
   useEffect(() => {
     if (!reading?.enabled || !reading.readCaptured) return
@@ -338,7 +349,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
         if (!navigation || direction === 'coverage') {
           const prefix = assemble([...parts], [...positions], head, navigation ? before.boundary : null,
             navigation ? before.newerOutside : false, null, positionBytes, start.bindingKey)
-          if (!allowsWindow(prefix, direction, !before ? start.recent ?? undefined : undefined)) throw new Error(protectedError)
+          if (!allowsWindow(prefix, direction, !before ? start.recent ?? undefined : undefined)) throw new ConversationWindowHeld()
           accepted = prefix
           appliedRecent.current = start.recent
           update({ key: start.key, window: prefix, loading: true, error: null })
@@ -359,7 +370,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
       const nextWindow = assemble(parts, positions, head, boundary,
         navigation ? direction === 'coverage' ? before.newerOutside : parts[0]!.index > 0 : false,
         navigation && direction !== 'coverage' ? direction as 'earlier' | 'newer' : null, positionBytes, start.bindingKey)
-      if (!allowsWindow(nextWindow, direction, !before ? start.recent ?? undefined : undefined)) throw new Error(protectedError)
+      if (!allowsWindow(nextWindow, direction, !before ? start.recent ?? undefined : undefined)) throw new ConversationWindowHeld()
       appliedRecent.current = navigation && direction === 'newer' ? null : start.recent
       automaticSeedBlocked.current = false
       if (direction === 'seed' || direction === 'current') coverageDemand.current = true
@@ -370,13 +381,15 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
         const retained = direction === 'seed' || direction === 'current' || direction === 'coverage' ? stateRef.current.window : before
         if ((direction === 'seed' || direction === 'current') && retained && retained !== before)
           retry.current = { direction: 'coverage', source: retained.page.source }
-        update({ key: start.key, window: retained, loading: false, error: presentError(cause) })
+        const held = cause instanceof ConversationWindowHeld
+        if (held && !stateRef.current.error) automaticLatest.current = null
+        update({ key: start.key, window: retained, loading: false, held, error: held ? stateRef.current.error : presentError(cause) })
       }
     } finally {
       if (generation.current === attempt) {
         pending.current = false
         if (live.current.key === start.key && live.current.reading?.enabled && stateRef.current.loading)
-          update({ ...stateRef.current, loading: false, error: sourceError })
+          update({ ...stateRef.current, loading: false, held: false, error: sourceError })
       }
     }
   }
@@ -391,6 +404,8 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     const attempt = automaticLatest.current
     if (!start.reading?.enabled || pending.current || !before || before.parts[0]!.index !== 0
       || before.bindingKey !== start.bindingKey || !start.recent || !sameSource(before.page, start.recent)) return
+    // A live update can commit before the Activity effect consumes its older render.
+    if (!hasNewerRecords(before, start.recent)) return
     if (stateRef.current.error && !attempt?.interrupted) return
     if (attempt?.key === start.key && attempt.bindingKey === start.bindingKey
       && attempt.recent === start.recent && !attempt.interrupted) return
@@ -412,13 +427,13 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
       coverageDemand.current = false
       generation.current++; pending.current = false
       if (stateRef.current.loading) update({ ...stateRef.current, loading: false,
-        error: 'Reading paused while hidden. The displayed records are kept; use Current or Retry.' })
+        held: false, error: 'Reading paused while hidden. The displayed records are kept; use Current or Retry.' })
       return
     }
     if (!stateRef.current.window) void read('seed')
   }, [key, reading?.enabled])
   useEffect(() => {
-    if (page && (window && window.bindingKey !== bindingKey || keepContext)) update({ ...stateRef.current, error: sourceError })
+    if (page && (window && window.bindingKey !== bindingKey || keepContext)) update({ ...stateRef.current, held: false, error: sourceError })
   }, [key, bindingKey, keepContext])
   // Only the original continuous shared page can extend a current tail; sparse presentation facts cannot.
   useEffect(() => {
@@ -428,7 +443,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     if (before.bindingKey !== bindingKey || !sameSource(recent, before.page)) {
       // Explicitly selected previous sources have no live tail to follow.
       if (before.bindingKey !== bindingKey || !matchesSource(before.page.source, handleSource(reading?.nativeSourceFacts?.nativeConfirmation?.previousNativeHandle)))
-        update({ ...stateRef.current, error: reading?.nativeSourceFacts ? sourceError : 'Native source changed. The current window is kept; use Current to refresh.' })
+        update({ ...stateRef.current, held: false, error: reading?.nativeSourceFacts ? sourceError : 'Native source changed. The current window is kept; use Current to refresh.' })
       return
     }
     const tail = before.page.items.at(-1)?.id
@@ -470,9 +485,13 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     }
     try {
       const next = assemble(parts, before.positions, before.head, before.boundary, false, 'newer', before.positionBytes, before.bindingKey)
-      if (!allowsWindow(next, 'live')) throw new Error(protectedError)
-      update({ ...stateRef.current, window: next })
-    } catch (cause) { update({ ...stateRef.current, error: presentError(cause), window: { ...before, newerOutside: true } }) }
+      if (!allowsWindow(next, 'live')) throw new ConversationWindowHeld()
+      update({ ...stateRef.current, held: false, window: next })
+    } catch (cause) {
+      const held = cause instanceof ConversationWindowHeld
+      if (held && !stateRef.current.error) automaticLatest.current = null
+      update({ ...stateRef.current, held, error: held ? stateRef.current.error : presentError(cause), window: { ...before, newerOutside: true } })
+    }
   }, [key, bindingKey, reading?.enabled, recent, state.window, state.loading])
   // Selection creates one demand. Page commits, scrolling and unrelated renders cannot restart it.
   useEffect(() => { coverageDemand.current = true }, [key, coverageDuration])
@@ -482,15 +501,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     if (before.bindingKey !== bindingKey || !needsTimeCoverage(before.page, coverageDuration)) { coverageDemand.current = false; return }
     void read('coverage')
   }, [key, bindingKey, coverageDuration, reading?.enabled, state.window, state.loading])
-  const newerOutside = useMemo(() => {
-    if (!window) return false
-    if (window.newerOutside) return true
-    const currentTail = recent?.items.at(-1)
-    if (!currentTail || !sameSource(window.page, recent!)) return false
-    const at = window.records.get(currentTail.id)
-    const retained = at ? window.parts[at.part]!.page.items[at.offset] : undefined
-    return !retained || (retained !== currentTail && JSON.stringify(retained) !== JSON.stringify(currentTail))
-  }, [window, recent])
+  const newerOutside = useMemo(() => hasNewerRecords(window, recent), [window, recent])
   const currentSource = handleSource(reading?.nativeSourceFacts?.nativeHandle)
   const previousSource = Boolean(page && currentSource && !matchesSource(page.source, currentSource))
   useEffect(() => () => { generation.current++; pending.current = false; coverageDemand.current = false }, [])
@@ -498,6 +509,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     historical: Boolean(window && window.parts[0]!.index > 0) || previousSource || Boolean(window && window.bindingKey !== bindingKey) || Boolean(keepContext),
     hasEarlierNavigation: Boolean(window?.boundary) || previousSource || Boolean(keepContext),
     previousSource, coverageLoading: state.key === key && state.loading && retry.current.direction === 'coverage', loading: state.key === key && state.loading, error: state.key === key ? state.error : null,
+    held: state.key === key && state.held === true,
     loadingEarlier: state.key === key && state.loading && retry.current.direction === 'earlier',
     historyBoundary: window?.boundary?.confirmed && window.records.has(window.boundary.recordId) ? { beforeRecordId: window.boundary.recordId } : null,
     newerOutside, hasNewer: Boolean(window && window.parts[0]!.index > 0), hasMore: Boolean(page?.nextCursor),

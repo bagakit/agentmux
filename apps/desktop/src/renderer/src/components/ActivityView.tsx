@@ -458,6 +458,7 @@ export function ActivityView({
   const edgeRef = useRef({ earlier: false, newer: false })
   const [rulerWindow, setRulerWindow] = useState<RulerWindow>('24h')
   const readingWindow = useSessionConversationWindow(conversationReading, recentNativePage ?? null, (page, intent, currentOriginal, projection) => {
+    if (intent === 'earlier' || intent === 'newer') followRef.current = { ...followRef.current, following: false }
     const keepAnchor = intent === 'earlier' || intent === 'newer' || (intent !== 'current' && !followRef.current.following)
     if (protectsConversationWindow(feedEl, page, keepAnchor, currentOriginal, projection, userMessages)) return false
     anchorRef.current = keepAnchor && feedEl ? captureReadingAnchor(feedEl) : null
@@ -639,6 +640,12 @@ export function ActivityView({
     if (geometry) followRef.current = onScroll(followRef.current, geometry)
     followRef.current = { ...followRef.current, following: true }
     setShowJump(shouldShowJumpToLatest(followRef.current))
+  }
+
+  const returnToLatest = (): void => {
+    if (conversationReading?.opened || readingWindow.historical || readingWindow.hasEarlierNavigation || readingWindow.newerOutside || readingWindow.held || readingWindow.error) {
+      readingWindow.showCurrent()
+    } else jumpToLatest()
   }
 
   const handleReadingWheel = (event: WheelEvent<HTMLDivElement>): void => {
@@ -913,8 +920,8 @@ export function ActivityView({
   const hasNativeRecords = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length > 0
   const hasItems = unifiedItems.length > 0
   // Reading navigation belongs to the message flow; the ruler keeps temporal facts only.
-  const readingEntry = conversationReading && (readingWindow.hasMore || readingWindow.hasEarlierNavigation || readingWindow.historical ||
-    conversationReading.opened || readingWindow.newerOutside || readingWindow.error || readingAction || conversationReading.nativeSourceFacts?.nativeConfirmation) ? (
+  const readingEntry = conversationReading && (readingWindow.hasMore || readingWindow.hasNewer ||
+    conversationReading.opened && conversationReading.onClose || readingAction || conversationReading.nativeSourceFacts?.nativeConfirmation) ? (
     <div ref={earlierRef} className="activity-feed__reading" data-conversation-reading={readingWindow.historical ? 'earlier' : 'current'}>
       <div className="activity-feed__reading-entry">
         {readingWindow.hasMore ? (
@@ -924,11 +931,9 @@ export function ActivityView({
             <span {...(readingWindow.loadingEarlier ? { role: 'status', 'aria-live': 'polite' as const } : {})}>{readingWindow.loadingEarlier ? 'Loading earlier…' : 'Earlier'}</span>
           </button>
         ) : null}
-        {readingWindow.hasEarlierNavigation || conversationReading.opened || readingWindow.newerOutside || readingWindow.error ? (
-          <button type="button" className="activity-feed__reading-action" disabled={!conversationReading.enabled}
-            aria-label="Current" title="Return to latest messages" onClick={readingWindow.showCurrent}>
-            <ThemeActionCurrentIcon size={12} aria-hidden="true" />Current</button>
-        ) : null}
+        {readingWindow.hasNewer ? <button type="button" className="activity-feed__reading-action"
+          disabled={readingWindow.loading && !readingWindow.coverageLoading || !conversationReading.enabled}
+          title="Read the adjacent newer page" onClick={readingWindow.readNewer}>Newer</button> : null}
         {conversationReading.nativeSourceFacts?.nativeConfirmation ? <>
           <span className="activity-feed__reading-status">{readingWindow.previousSource ? 'Previous native source' : 'Current native source'}</span>
           <button type="button" className="activity-feed__reading-action" disabled={!conversationReading.enabled}
@@ -952,6 +957,18 @@ export function ActivityView({
       onReadEarlier: conversationReading ? readingWindow.readEarlier : userMessageRead.onReadEarlier } : undefined} /> : null}
   </>
 
+  const latestControl = conversationReading?.opened || showJump || readingWindow.historical || readingWindow.hasEarlierNavigation || readingWindow.newerOutside || readingWindow.held || readingWindow.error ? (
+    <div className="activity-feed__latest-layer" data-conversation-current-entry>
+      {readingWindow.held ? <span className="activity-feed__latest-held" role="status">保留阅读位置</span> : null}
+      <button type="button" className="activity-feed__jump" data-message-tool-control="jump-to-latest"
+        aria-label="Return to latest messages" disabled={!readingEnabled}
+        title={readingWindow.held ? '原阅读位置和选区已保留，取消选择或移开当前阅读位置后可查看最新消息' : 'Read and follow the latest messages in this conversation'}
+        onMouseDown={event => event.preventDefault()} onClick={returnToLatest}>
+        <ThemeActionCurrentIcon size={12} aria-hidden="true" />最新消息
+      </button>
+    </div>
+  ) : null
+
   // Loading is a sibling overlay: neither scroll height nor card geometry depends on pending work.
   const renderSurface = (content: JSX.Element | ((findTrigger: ReactNode) => JSX.Element)): JSX.Element => {
     const loading = conversationReading?.enabled !== false && (readingWindow.loading && !readingWindow.loadingEarlier || userMessageRead?.loading) ? <div className="activity-feed__loading-layer">
@@ -966,7 +983,7 @@ export function ActivityView({
       followRef.current = { ...followRef.current, following: false }
       if (feedEl) anchorRef.current = captureReadingAnchor(feedEl)
     }}>
-    {typeof content === 'function' ? findTrigger => <>{content(findTrigger)}{loading}</> : <>{content}{loading}</>}
+    {typeof content === 'function' ? findTrigger => <>{content(findTrigger)}{loading}{latestControl}</> : <>{content}{loading}{latestControl}</>}
   </ReadingFind>
   }
 
@@ -1170,11 +1187,6 @@ export function ActivityView({
       /> : null}
       <div className="activity-log" ref={logRef}>{placed.filter(({ entry }) => nativeSupplement(entry)).map(renderPlaced)}</div>
       <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" />
-      {readingWindow.historical || readingWindow.newerOutside ? <div className="activity-feed__read-notice activity-feed__newer-edge" data-conversation-current-entry>
-        <span role="status" aria-live="polite">{readingWindow.error ?? (readingWindow.newerOutside ? 'Current records updated or outside this window.' : 'Viewing earlier records.')} {readingWindow.hasNewer ? '较新记录可向下滚动继续读取' : ''}</span>
-        {readingWindow.hasNewer ? <button type="button" className="small-button" disabled={readingWindow.loading && !readingWindow.coverageLoading || !conversationReading?.enabled} onClick={readingWindow.readNewer}>Newer</button> : null}
-        <button type="button" className="small-button" disabled={!conversationReading?.enabled} onClick={readingWindow.showCurrent}>Show latest messages</button>
-      </div> : null}
       {observations.count > 0 ? <details key={sessionId} ref={observationRef} className="activity-feed__observations"
         open={observationOpen} onToggle={event => {
           if (event.currentTarget === observationRef.current) {
@@ -1197,17 +1209,6 @@ export function ActivityView({
         <div className="activity-log">{placed.filter(({ entry }) => !nativeSupplement(entry)).map(renderPlaced)}</div>
       </details> : null}
       {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator active={activitySemantic === 'active'} /> : null}
-      {showJump && !readingWindow.historical ? (
-        <button
-          type="button"
-          className="activity-feed__jump"
-          data-message-tool-control="jump-to-latest"
-          aria-label="Jump to latest message"
-          onClick={jumpToLatest}
-        >
-          Jump to latest
-        </button>
-      ) : null}
     </div>
   ))
 }
