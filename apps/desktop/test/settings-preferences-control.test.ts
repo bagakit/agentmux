@@ -18,6 +18,9 @@ async function entries(owner: Awaited<ReturnType<typeof configOwnerFixture>>['ow
 
 function alternate(entry: AgentMuxControlSettingEntry) {
   if (entry.kind === 'boolean') return !entry.value
+  if (entry.kind === 'number' && !entry.enum) return entry.value + 1
+  if (entry.kind === 'string' && entry.key.startsWith('continuity.') && !entry.enum) return 'Keep the original conversation.\nRespect its confirmed constraints.'
+  if (entry.kind === 'string' && entry.key.startsWith('browser.startPage.') && !entry.enum) return entry.key.endsWith('.icon') || entry.key.endsWith('.backgroundImage') ? 'https://example.invalid/image.png' : 'A saved browser preference'
   if (entry.kind === 'string' && entry.key.startsWith('profile.') && !entry.enum) return entry.key === 'profile.avatar' ? 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==' : 'A profile value'
   const choice = entry.enum?.find((value) => value !== entry.value)
   expect(choice, `alternate for ${entry.key}`).toBeDefined()
@@ -50,7 +53,10 @@ describe('ordinary preferences through the Main owner', () => {
       await executeSettingsControl({ ...envelope, operation: 'settings.set', key: entry.key, value: String(next) }, f.owner)
       expect(await f.bytes()).toBe(bytes)
       expect(f.publish).toHaveBeenCalledTimes(before + (next === entry.value ? 0 : 1))
-      await expect(executeSettingsControl({ ...envelope, operation: 'settings.set', key: entry.key, value: entry.key === 'profile.about' ? 'x'.repeat(2001) : entry.key === 'profile.displayName' ? 'x'.repeat(81) : 'INVALID' }, f.owner)).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
+      // Continuity text is a complete authored instruction, with no arbitrary length or vocabulary gate.
+      if (!(entry.kind === 'string' && entry.key.startsWith('continuity.') && !entry.enum)) {
+        await expect(executeSettingsControl({ ...envelope, operation: 'settings.set', key: entry.key, value: entry.key === 'profile.about' ? 'x'.repeat(2001) : entry.key === 'profile.displayName' ? 'x'.repeat(81) : entry.key === 'browser.startPage.title' || entry.key === 'browser.startPage.subtitle' ? 'invalid\ncontrol' : 'INVALID' }, f.owner)).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
+      }
       expect(await f.bytes()).toBe(bytes)
       expect(f.publish).toHaveBeenCalledTimes(before + (next === entry.value ? 0 : 1))
       expect(f.owner.current.browser.agentAutomation).toBe(false)
