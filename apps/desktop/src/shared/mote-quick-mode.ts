@@ -1,4 +1,5 @@
-import { parseMoteDefaultConversation, type MoteDefaultConversation, type MoteQuickDefaults } from '@agentmux/core/mote-preferences'
+import { parseMoteDefaultConversation, parseMoteConnectionValues, sameMoteConnectionValues,
+  type MoteConnectionValues, type MoteDefaultConversation, type MoteQuickDefaults } from '@agentmux/core/mote-preferences'
 export type { MoteDefaultConversation, MoteQuickDefaults } from '@agentmux/core/mote-preferences'
 import { Document, isMap, isScalar, parseDocument } from 'yaml'
 
@@ -22,6 +23,43 @@ function frontmatter(content: string) {
   const version = document.get('version', true)
   if (!isScalar(version) || version.value !== 1) return null
   return { document, body: rest.slice(closing.index + closing[0].length), newline: opening[1]!, bom: content.startsWith('\uFEFF') ? '\uFEFF' : '' }
+}
+function serializeFrontmatter(document: Document, original: ReturnType<typeof frontmatter>): string {
+  const newline = original?.newline ?? '\n'
+  return (original?.bom ?? '') + '---' + newline + document.toString({ lineWidth: 0 }).replace(/\n/g, newline) + '---' + newline + (original?.body ?? '')
+}
+export function parseMoteConnectionMode(content: string): { status: 'valid'; values: MoteConnectionValues } | { status: 'unconfirmed'; message: string } {
+  const source = frontmatter(content)
+  if (!source) return { status: 'unconfirmed', message: ISSUE }
+  const defaults = source.document.get('defaults', true)
+  if (source.document.has('defaults') && !isMap(defaults)) return { status: 'unconfirmed', message: ISSUE }
+  if (!isMap(defaults) || !defaults.has('connection')) return { status: 'valid', values: { connection: null } }
+  const connection = defaults.get('connection', true)
+  if (isScalar(connection) && connection.value === null) return { status: 'valid', values: { connection: null } }
+  if (!isMap(connection)) return { status: 'unconfirmed', message: ISSUE }
+  const app = connection.get('application', true)
+  if (!isMap(app)) return { status: 'unconfirmed', message: ISSUE }
+  const scalar = (node: unknown) => isScalar(node) ? node.value : undefined
+  try {
+    return { status: 'valid', values: parseMoteConnectionValues({ connection: { connectionId: scalar(connection.get('connectionId', true)),
+      application: { domain: scalar(app.get('domain', true)), appId: scalar(app.get('appId', true)) } } }) }
+  } catch { return { status: 'unconfirmed', message: ISSUE } }
+}
+/** One field in the original AST; Quick preferences and unknown nodes keep their owner. */
+export function serializeMoteConnectionMode(content: string, values: MoteConnectionValues): string {
+  parseMoteConnectionValues(values)
+  const original = content ? frontmatter(content) : null, parsed = content ? parseMoteConnectionMode(content) : null
+  if (parsed?.status === 'unconfirmed') throw new Error(ISSUE)
+  if (parsed?.status === 'valid' && sameMoteConnectionValues(parsed.values, values)) return content
+  const document = original?.document ?? new Document({ version: 1, defaults: {} })
+  if (!document.has('defaults')) document.set('defaults', {})
+  if (!values.connection) document.deleteIn(['defaults', 'connection'])
+  else {
+    document.setIn(['defaults', 'connection', 'connectionId'], values.connection.connectionId)
+    document.setIn(['defaults', 'connection', 'application', 'domain'], values.connection.application.domain)
+    document.setIn(['defaults', 'connection', 'application', 'appId'], values.connection.application.appId)
+  }
+  return serializeFrontmatter(document, original)
 }
 export function parseMoteQuickMode(content: string): { status: 'valid'; defaults: MoteQuickDefaults } | { status: 'unconfirmed'; message: string } {
   const source = frontmatter(content)
@@ -66,8 +104,7 @@ export function serializeMoteQuickMode(content: string, defaults: MoteQuickDefau
   else document.setIn(['defaults', 'executorId'], defaults.executorId)
   if (!defaults.conversation) document.deleteIn(['defaults', 'conversation'])
   else for (const field of FIELDS) document.setIn(['defaults', 'conversation', field], defaults.conversation[field])
-  const newline = original?.newline ?? '\n'
-  return (original?.bom ?? '') + '---' + newline + document.toString({ lineWidth: 0 }).replace(/\n/g, newline) + '---' + newline + (original?.body ?? '')
+  return serializeFrontmatter(document, original)
 }
 
 export function sameMoteDefaultConversation(a: MoteDefaultConversation | undefined, b: MoteDefaultConversation | undefined): boolean {

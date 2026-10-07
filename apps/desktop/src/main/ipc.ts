@@ -33,6 +33,8 @@ import { FileUploadOwner } from './file-upload-owner.js'
 import { GitPublicControl } from './git-public-control.js'
 import { createNotebookObservationServices } from './notebook-observation-requests.js'
 import { FileReadOwner } from './file-read-owner.js'
+import { MoteConnectionPreferences } from './mote-connection-preferences.js'
+import { registerMotePreferencesIpc } from './mote-preferences-ipc.js'
 import { HtmlFilePreviews } from './html-file-previews.js'
 import { FilePreviewResources } from './file-preview-resources.js'
 import { FileDiagramRenderer } from './file-diagram-renderer.js'
@@ -479,6 +481,7 @@ export async function registerIpc(args: {
   const executeControlOwner = async (
     request: AgentMuxControlRequest, signal?: AbortSignal
   ): Promise<AgentMuxControlResult> => {
+    if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') return moteConnectionPreferences.execute(request, signal)
     if(request.operation==='space.ls' || request.operation==='space.inspect') {
       if(!request.presentation && !('requestId' in request.target)) {
         const state=await spatialState.read()
@@ -789,6 +792,9 @@ export async function registerIpc(args: {
   const noteFileWriter = new NoteFileWriter(files, { state: async () => { await notesStorageReady; return notebookStore.read() }, owner: notebookObservation.owner }, notebookStore)
   const publicFiles = new FileReadOwner({ files: { read: noteFileWriter.read.bind(noteFileWriter), listFiles: files.listFiles.bind(files), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
+  const moteConnectionPreferences = new MoteConnectionPreferences({ files: publicFiles,
+    catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
+    connections: () => connectorServices.connections.list(), quick: (request, signal) => controlBridge.execute(request, signal) })
   handleWithEvent('files:createPublic', async (event, input: import('@agentmux/core').FileCreateParams) => { requireTrustedSender('files:createPublic', event); return publicFiles.create(input, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }) })
   handleWithEvent('files:readPublic', async (event, input: import('@agentmux/core').FileReadParams) => {
     requireTrustedSender('files:readPublic', event)
@@ -1985,6 +1991,7 @@ export async function registerIpc(args: {
     } }
   })
   registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), secrets: connectorServices.secrets })
+  registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   const control = new AgentMuxControlServer({
     connections: connectorServices.connections,
     deliveryAttempts,
