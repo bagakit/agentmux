@@ -53,7 +53,7 @@ async function fixture() {
   expect(message.contentParts[0]).toMatchObject({ kind: 'resource', resourceType: 'text', content: { kind: 'text', encoding: 'json-utf8' } })
   const assertPreserved = async () => {
     expect(useAppStore.getState().agentSteerQueues[sid]).toEqual([originalQueue])
-    expect(await readFile(f.transcript)).toEqual(originalBytes)
+    expect((await readFile(f.transcript)).equals(originalBytes), 'Original native transcript bytes remain exactly equal').toBe(true)
     expect(f.forbidden.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
     for (const control of controls) expect(control).not.toHaveBeenCalled()
     expect(api.continuousProgress.pauseForInput).not.toHaveBeenCalled()
