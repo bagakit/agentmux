@@ -1,8 +1,12 @@
 import { act } from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MobileConversationSurface } from '../src/conversation/MobileConversationSurface'
 import { createBrowserPlatform } from '../src/platform/browser'
-import { deferred, fixture, history, mount, mounted } from './conversation-fixture'
+import { button, click, deferred, editor, fixture, history, mount, mounted, paste } from './conversation-fixture'
+import { createLocalDrafts } from '../src/conversation/local-drafts'
+import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
+import { fixtureEpoch as _historyTailFixtureEpoch } from '../../../test/fixture-values.mjs'
+beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }; vi.useRealTimers() })
 const connected = { state: 'connected' as const, message: 'Connected' }
 describe('original conversation observation recovery', () => {
@@ -55,4 +59,53 @@ describe('original conversation observation recovery', () => {
     expect(f.submit).not.toHaveBeenCalled()
   })
 
+  it('keeps the original older window through a weak connection and hidden surface, while a changed source cannot replace its text', async () => {
+    const f = fixture(), old = { ...history(), nextCursor: null, items: [{ id: 'old-reading', kind: 'assistant-message' as const,
+      contentParts: [{ kind: 'text' as const, text: 'Original older reading stays' }] }] }
+    f.readHistory.mockImplementation(async (_id, options) => options?.cursor ? old : history())
+    const surface = (state: 'connected' | 'disconnected', visible = true) => <MobileConversationSurface client={f.client} agentSessionId="session-original"
+      connection={{ state, message: state }} visible={visible} platform={createBrowserPlatform()} />
+    const view = await mount(surface('connected'))
+    await click(button(view.element, '更早消息'))
+    const row = view.element.querySelector('[data-native-record-id="old-reading"]')
+    expect(row).not.toBeNull()
+    const olderReads = () => f.readHistory.mock.calls.filter(([, options]) => options?.cursor === 'older-opaque').length
+    const before = olderReads()
+    await paste(view.element, 'Original unsent draft')
+    await view.render(surface('disconnected')); await paste(view.element, ' with offline edits')
+    await view.render(surface('connected', false)); await view.render(surface('connected'))
+    expect(view.element.querySelector('[data-native-record-id="old-reading"]')).toBe(row)
+    expect(olderReads()).toBeGreaterThan(before)
+    const foreign = { ...old, source: { ...old.source, nativeSessionId: 'foreign-source' }, items: [{ ...old.items[0]!, id: 'foreign-reading',
+      contentParts: [{ kind: 'text' as const, text: 'A different native source' }] }] }
+    f.readHistory.mockResolvedValue(foreign)
+    const current = { ...f.sessions.get('session-original')!, nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'foreign-source' } }
+    f.sessions.set('session-original', current)
+    await act(async () => f.emit({ type: 'agent-session', session: current }))
+    expect(view.element.textContent).toContain('original reading and drafts are retained')
+    expect(view.element.querySelector('[data-native-record-id="old-reading"]')).toBe(row)
+    expect(view.element.querySelector('[data-native-record-id="foreign-reading"]')).toBeNull()
+    expect(editor(view.element).textContent).toContain('with offline edits')
+    expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
+  })
+
+  it('retains an old phase-only interaction intent as unknown without rebuilding it from the current pending request', async () => {
+    const f = fixture(), local = createLocalDrafts(), value = f.sessions.get('session-original')!
+    const key = JSON.stringify(['session-original', 'run-original', 'phase-only-request'])
+    local.responses.set(key, { phase: 'sending', message: 'Interrupted original answer' }); await local.save()
+    f.sessions.set(value.agentSessionId, { ...value, pendingInteraction: { request: { kind: 'permission', id: 'phase-only-request',
+      agentSessionId: value.agentSessionId, title: 'Current request is not the lost original operation',
+      evidence: { source: 'native-hook', observedAt: _historyTailFixtureEpoch(0, 0, 1), run: value.run }, options: [{ id: 'allow', kind: 'allow-once', label: 'Allow' }] } } })
+    const view = await mount(<MobileConversationSurface client={f.client} agentSessionId={value.agentSessionId} connection={connected} platform={createBrowserPlatform()} />)
+    expect(view.element.textContent).toContain('重启后的原请求答复回执未知')
+    expect(view.element.querySelector('[data-original-response]')).toBeNull()
+    expect(createLocalDrafts().responses.get(key)).toMatchObject({ phase: 'unknown' })
+    expect(createLocalDrafts().responses.get(key)?.original).toBeUndefined()
+    await paste(view.element, 'Healthy ordinary composer remains editable')
+    expect(editor(view.element).textContent).toContain('Healthy ordinary composer')
+    expect(f.respond).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
+  })
+
 })
+// @vitest-environment happy-dom
+import './device-locks'

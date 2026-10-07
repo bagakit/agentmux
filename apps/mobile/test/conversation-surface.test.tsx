@@ -344,6 +344,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     const view = await mount(<MobileConversationSurface {...props(f)} />)
     await click(button(view.element, '原选项'))
     expect(f.respond).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'session-original', expectedRun: { runId: 'run-original' },
+      expectedRequest: value.pendingInteraction.request, operationId: expect.any(String),
       response: { kind: 'permission', requestId: 'request-original', decision: { outcome: 'selected', optionId: 'exact-allow' } } })
     const newer = { ...value, pendingInteraction: { request: { ...value.pendingInteraction.request, id: 'request-new', title: '新请求' } } }
     f.sessions.set(value.agentSessionId, newer)
@@ -423,7 +424,8 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     const options = props(f), view = await mount(<MobileConversationSurface {...options} />)
     await click(button(view.element, '原答复'))
     const saved = JSON.parse(localStorage.getItem(STORAGE)!).conversation
-    expect(saved.responses).toEqual([[JSON.stringify(['session-original', 'run-original', 'request-original']), { phase: 'sending' }]])
+    expect(saved.responses).toEqual([[JSON.stringify(['session-original', 'run-original', 'request-original']), { phase: 'sending',
+      original: { hostId: value.hostId, runtimeId: 'original-runtime', input: f.respond.mock.calls[0]![0] } }]])
     const previous = mounted.pop()!
     await act(async () => previous.root.unmount()); previous.element.remove()
     const restored = await mount(<MobileConversationSurface {...options} />)
