@@ -1,0 +1,8 @@
+.conversation-tool-trace__payload, .log-turn__trace-payload { animation: conversation-detail-enter var(--dur-fast) ease-out; }
+.content-copy[data-copy-state='copied'] > svg { color: var(--green-text); animation: conversation-copy-confirm var(--dur-fast) ease-out; }
+.content-copy[data-copy-state='failed'] > svg { color: var(--red-text); }
+@keyframes conversation-detail-enter { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+@keyframes conversation-copy-confirm { from { opacity: .4; transform: scale(.8); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .conversation-tool-trace__payload, .log-turn__trace-payload, .content-copy[data-copy-state='copied'] > svg { animation: none; }
+}

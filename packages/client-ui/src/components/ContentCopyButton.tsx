@@ -29,7 +29,7 @@ export function ContentCopyButton({ text, identity, label, className = '' }: { t
     if (current()) setCopy({ owner, state: accepted && !failed ? 'copied' : 'failed' })
   }
   if (!copyText) return null
-  return <button type="button" className={`content-copy ${className}`} aria-label={label} aria-disabled={copyState === 'copying' || undefined} aria-busy={copyState === 'copying' || undefined} onClick={() => { void copyContent() }}>
+  return <button type="button" className={`content-copy ${className}`} data-copy-state={copyState} aria-label={label} aria-disabled={copyState === 'copying' || undefined} aria-busy={copyState === 'copying' || undefined} onClick={() => { void copyContent() }}>
     <SemanticIcon name={copyState === 'copied' ? 'action.confirm' : copyState === 'failed' ? 'status.failed' : 'action.copy'} size={13} aria-hidden="true" />
     <span role="status" aria-live="polite">{copyState === 'copying' ? 'Copying…' : copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Retry copy' : 'Copy'}</span>
   </button>
