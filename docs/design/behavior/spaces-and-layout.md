@@ -131,11 +131,15 @@ Focus 默认仍加载完整 Tab；用户明确选择“只看此 Region”时，
 
 功能组与成员导航各有范围：知识分类下选择具体 Topic 是 Zone 选择，中间的 Category 成员目录与右侧当前 Topic 的 Tabs/Regions 各有明确作用域。右侧只消费当前 Topic 的原组成；知识检索、Topic 知识与资料保真实来源和范围，跨分类总览和发现保留在明确的 Topics 知识库入口。对象范围、当前展示位置和资源 Workspace 分别保留，共享 Scratch 资源容器不授予所有内容当前成员身份。
 
+Folder 的内容入口为 **Files + Zones**，原 Branches 区域表达的是 Zone 工作分区导航，不是通用 Git 分支浏览器。Zone 目录从同一空间图的实体与该 Space 的全部绑定派生，包含普通目录、worktree 及保留的未知资源上下文；不能从 Git 引用列表、分支名、当前 HEAD 或 Agent cwd 重新铸造 Zone。选择已有工作分区进入该 Zone 的原 Tabs/Regions，恢复其原工作面和成员偏好，不 checkout、不新建 Session。未绑定 worktree 的分支是创建工作目录的资源候选，不伪装成已经存在的 Zone；显式创建 worktree 仍沿原资源与空间 owner，创建和导航回执各自成立。
+
+Folder 的二级功能组为 Files + Zones、Agents 与 Git。Files + Zones 回答“在哪条工作线上工作”，Agents 回答“哪些 Agent 可继续协作”，Git 回答“准确资源改了什么、版本怎样演进”。切换功能组不切换 Zone 或工作目录，不创建或关闭原 Tab/Region/Session，不抢原输入。分支与 worktree 是 Git 项目下关联的资源事实，不取代 Zone 身份，也不把 Zone 限定为 Git；普通目录无需 Git 探测成功即可选择其 Zone。Git 引用筛选与 Zone 导航是不同意图，不能以历史或比较选择暗中切换工作分区；Git 资源范围、Changes 与完整操作只见[文件与 Git](files-and-git.md#git-源码控制与-pr)。Topic／Mote 继续使用各自原内容入口，不因新增 Folder Git 工具改变对象、布局或共享资源身份。
+
 主区域显示原 Zone 工作面，其内容可在其他位置按 Zone、Tab 或 Region 任一级加载。每次加载使用原实体与完整准确的展示位置引用（displayWorkspaceId/groupId/tabId/regionId），继续同一内容、输入与动作 owner；加载较低层级不带上层多余 chrome，具体边界见[《Zone→Tabs→Regions 的实体与展示绑定》](#zonetabsregions-的实体与展示绑定)。切换功能组本身不新建 Zone、Tab 或 Session，不清草稿；明确创建与文件动作仍由原能力消费用户意图，不把 Space 写成 Zone 的唯一父或为每处加载启动新 Agent。
 
 新增一种 Space 不能重新实现整套 Zone、Tab/Group/Region、分割、焦点、文件动作或恢复；只在底层调用共享组件，却另造一套 Zone 导航、文件树或 Tab 管理，也不满足共同框架约束。对象选择和专属二级内容在上述框架内表达，工作面操作仍沿公共实现。框架确有能力缺口时在公共 owner 补全，不在单类对象造旁路，也不抹去其必要的二级内容。设计与能力补全保原身份、全部合法展示绑定、健康 Session/Run、草稿、焦点和恢复；位置、握手或恢复未确认不拿走已有可用内容，保原工作面与持续服务窗。共同机制仍遵守 Core、ctxmux 与 client 的原分层及相关消费者成本。
 
-- Workspace Tools 位于主工作区左侧，负责 Files + Branches、Agents 和 Browser Favorites。
+- Workspace Tools 位于主工作区左侧，承载上述按对象提供的功能组及原 Browser Favorites；功能选择与 Zone 成员选择分别表达。
 
 - Project Rail 与 Workspace Tools 分别开关，不能共享状态或互相改变布局身份。
 
