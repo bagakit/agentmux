@@ -4,7 +4,7 @@ import type { ConversationItemRef } from '@agentmux/core/conversation'
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
 import { readSessionHistoryTextResource } from '@agentmux/core/session-history-content'
 import { SemanticIcon } from '../theme/icons.js'
-import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { formatClock, formatOffset } from '../lib/conversation-time.js'
 import { useClientUiPlatform } from '../platform.js'
 import { externalSpeakerLabel, conversationAgentReference, speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker.js'
@@ -22,6 +22,7 @@ import { conversationFiles } from '../lib/conversation-files.js'
 import { ConversationFiles } from './ConversationFiles.js'
 import { ConversationQuestionReply } from './ConversationQuestionReply.js'
 import { ConversationMessageDisclosure } from './ConversationMessageDisclosure.js'
+import type { ConversationTraceDisclosure } from '../lib/conversation-trace-disclosure.js'
 
 const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
@@ -79,6 +80,8 @@ export type ConversationMessageProps = {
   onSelectAnnotation?: (selection: ConversationAnnotationSelection) => void
   expandedTraces?: ReadonlySet<string>
   onToggleTrace?: (traceId: string, open: boolean) => void
+  /** One host-owned transient disclosure scope for this exact loaded source. */
+  traceDisclosure?: ConversationTraceDisclosure
 }
 
 export type ConversationReadingProps = Pick<ConversationMessageProps,
@@ -131,7 +134,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
 export function ConversationMessage({
   active = true, compact = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
   speaker: recordedSpeaker, conversationSessionId, itemRef, inputSource, publicContent, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
-  openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
+  openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
   const platform = useClientUiPlatform()
   const completeCopy = useRef<AbortController | null>(null)
@@ -290,15 +293,24 @@ export function ConversationMessage({
 
   useEffect(() => { setSystemContextOpen(false) }, [messageId])
 
-  const occurrenceCounts = new Map<string, number>()
-  function partKey(part: AgentSessionHistoryContentPart): string {
-    if (isStringContent) return 'text'
-    const callId = (part.kind === 'tool-call' || part.kind === 'tool-result') ? (part.callId ?? null) : null
-    const occKey = JSON.stringify([part.kind, callId])
-    const occ = occurrenceCounts.get(occKey) ?? 0
-    occurrenceCounts.set(occKey, occ + 1)
-    return JSON.stringify([part.kind, callId, occ])
-  }
+  const partKeys = useMemo(() => {
+    const occurrences = new Map<string, number>()
+    return parts.map(part => {
+      if (isStringContent) return 'text'
+      const callId = part.kind === 'tool-call' || part.kind === 'tool-result' ? part.callId ?? null : null
+      const occurrenceKey = JSON.stringify([part.kind, callId])
+      const occurrence = occurrences.get(occurrenceKey) ?? 0
+      occurrences.set(occurrenceKey, occurrence + 1)
+      return JSON.stringify([part.kind, callId, occurrence])
+    })
+  }, [content])
+  const traceIds = useMemo(() => parts.flatMap((part, index) => part.kind === 'reasoning' || part.kind === 'tool-call' || part.kind === 'tool-result'
+    ? [traceDisclosureKey(messageId, partKeys[index]!)] : []), [content, messageId, partKeys])
+  const traceIdsKey = JSON.stringify(traceIds)
+  useLayoutEffect(() => { traceDisclosure?.register(readingIdentity, traceIds) }, [traceDisclosure?.register, readingIdentity, traceIdsKey])
+  useLayoutEffect(() => () => traceDisclosure?.register(readingIdentity, null), [traceDisclosure?.register, readingIdentity])
+  const expandedTraces = controlledTraces ?? traceDisclosure?.expandedTraces
+  const onToggleTrace = controlledToggle ?? traceDisclosure?.onToggleTrace
 
   const showOrigin = Boolean(inputOrigin && !isSystemContext && (showInputSource || inputSource?.kind === 'captured' && inputSource.device))
   const hasMetadata = Boolean(described?.project || isDeclaredSender || showOrigin || located ||
@@ -395,7 +407,7 @@ export function ConversationMessage({
             inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
             {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /> : null}
           {parts.map((part, index) => {
-            const key = partKey(part)
+            const key = partKeys[index]!
             return part.kind === 'text' && hasQuestionAnswers && index === firstTextIndex ? <ConversationQuestionReply visible={active} key={key}
               answers={questionAnswers!} originalText={part.text} inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />

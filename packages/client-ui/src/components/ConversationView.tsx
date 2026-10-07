@@ -14,7 +14,7 @@ import { completedNativeReply } from '../lib/conversation-files.js'
 import { conversationItemRef } from '@agentmux/core/conversation'
 
 type ReadingProps = Pick<ConversationMessageProps,
-  'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
+  'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace' | 'traceDisclosure'>
 
 type Props = ReadingProps & {
   questionReplyRoute?: AgentCapabilities['asyncQuestionReply']
