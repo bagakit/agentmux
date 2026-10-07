@@ -1,3 +1,4 @@
+import { ConnectorSharing } from './ConnectorSharing'
 import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-observed-app-store'
 import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
@@ -328,7 +329,7 @@ export function AgentSessionComposer({
     {(mailbox, pending) => (
     <div style={{ display: 'contents' }} onFocusCapture={() => inputHistory.setFocused(true)}
       onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) inputHistory.setFocused(false) }}>
-    <AgentComposer key={sessionId} aboveInput={pending} mailbox={mailbox}
+    <AgentComposer key={sessionId} aboveInput={<>{pending}{session?.kind === 'agent' ? <ConnectorSharing session={session} regionId={mailboxOrigin?.regionId} visible={visible} /> : null}</>} mailbox={mailbox}
       readPastedImage={api.ui.readPastedImage}
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
