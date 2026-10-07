@@ -1,13 +1,15 @@
 import { fixturePath } from '../helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type { OutputChunk, RunEvent } from '@ctxmux/sdk'
 import { AgentProviderRegistry, defineAgentProvider } from '../../src/agent-provider.js'
 import { CLAUDE_HOOK_EVENTS, CLAUDE_HOOKS, createClaudeManagedHookPlan, createClaudeProvider } from '../../src/providers/claude.js'
 import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { USAGE_FINALIZATION_EVENTS } from '../../src/agent-hook-command.js'
+import { agentHasActiveSubagents, releaseSubagentRoster } from '../../src/hook-normalizer.js'
 import { AgentMuxClient } from '../../src/client.js'
 import { agentPromptCondition } from '../../src/agent-prompt-condition.js'
 import { AgentMuxFileAgentSessionStore, normalizeStoredAgentSession } from '../../src/agent-session-store.js'
@@ -15,6 +17,169 @@ import { agentTurnCompletionIdentity, agentTurnEndBoundary } from '../../src/age
 import { defaultAgentMuxHookPort } from '../../src/runtime-paths.js'
 import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
 import type { AgentSemanticState } from '../../src/types.js'
+import {
+  claudeNativeActivityDirectory,
+  claudeNativeActivitySource
+} from '../../src/providers/claude-native-activity.js'
+
+describe('Claude native mod activity', () => {
+  it('installs an actual mod and launches it for new, resumed and forked Runs', () => {
+    const provider = new AgentProviderRegistry().get('claude')
+    const workspacePath = fixturePath('tmp/native-mod-work')
+    const plan = provider.planManagedHooks!({ workspacePath })!
+    const directory = claudeNativeActivityDirectory(workspacePath)
+    const modules = plan.mutations.find(item => item.path === join(directory, 'hooks', 'hooks.json'))!
+    expect(JSON.parse(modules.content)).toEqual({ modules: ['./register.js'] })
+    expect(plan.mutations.find(item => item.path === join(directory, 'hooks', 'register.js'))?.content)
+      .toBe(claudeNativeActivitySource())
+    const base = { workspacePath, args: ['--model', 'test-model'], env: {} }
+    const nativeHandle = { kind: 'provider' as const, providerId: 'claude', sessionId: 'native-original' }
+    for (const launch of [
+      provider.buildLaunch({ ...base, prompt: 'original user prompt' }),
+      provider.buildResumeLaunch({ ...base, nativeHandle, prompt: 'original user prompt' }),
+      provider.buildForkLaunch!({ ...base, nativeHandle, prompt: 'original user prompt' })
+    ]) {
+      expect(launch.args.slice(-2)).toEqual(['--plugin-dir', directory])
+      expect(launch.args).toContain('original user prompt')
+    }
+    expect(provider.buildLaunch({ ...base, prompt: 'prompt', args: ['--', 'literal'] }).args)
+      .toEqual(['--plugin-dir', directory, '--', 'literal', 'prompt'])
+  })
+
+  it('projects native active and idle without declaring success, input readiness or main child completion', () => {
+    const provider = new AgentProviderRegistry().get('claude')
+    const payload = { session_id: 'native-A', sourceId: 'observer-A', sequence: 1, turnId: 'native-turn-A' }
+    const event = (eventName: string, extra: Record<string, unknown> = {}) => provider.normalizeHook({
+      receiptId: `native-${eventName}`, agentSessionId: 'core-A', runId: 'run-A', providerId: 'claude',
+      eventName, payload: { ...payload, ...extra }
+    }, {})
+    expect(event('turn.start').currentActivity).toEqual({ state: 'active', nativeSessionId: 'native-A',
+      sourceId: 'observer-A', sequence: 1, nativeTurnId: 'native-turn-A' })
+    for (const reason of ['answer', 'error', 'refusal', 'aborted']) {
+      const end = event('turn.complete', { reason, isAborted: reason === 'aborted' })
+      expect(end.currentActivity?.state).toBe('idle')
+      expect(end.semanticState).toBe(reason === 'error' ? 'error' : 'unknown')
+      expect(end.lifecycleEvent).toBe(reason === 'error' ? 'turn-end' : null)
+      expect(end.status.detail).toBe(reason === 'error'
+        ? 'Native turn ended in error; the Provider did not supply a structured error code.'
+        : 'turn.complete')
+      expect(end.interaction).toBeUndefined()
+    }
+    expect(event('turn.complete', { agent_id: 'child-A', reason: 'answer', isAborted: false }).currentActivity)
+      .toBeUndefined()
+    expect(event('AgentMuxActivityUnavailable', { reason: 'source-changed' }).currentActivity)
+      .toEqual({ state: 'unknown', nativeSessionId: 'native-A', sourceId: 'observer-A', sequence: 1 })
+    for (const extra of [{ turnId: '' }, { sourceId: '' }, { sequence: -1 }, { sequence: 1.1 }, { sequence: Infinity }]) {
+      expect(event('turn.start', extra).currentActivity).toBeUndefined()
+    }
+    expect(event('turn.complete', { reason: 'answer', isAborted: true }).currentActivity).toBeUndefined()
+    for (const extra of [{ sourceId: '' }, { sequence: -1 }, { turnId: '' }, { isAborted: true }]) {
+      const end = event('turn.complete', { reason: 'error', isAborted: false, ...extra })
+      expect(end.currentActivity).toBeUndefined()
+      expect(end.semanticState).toBe('unknown')
+      expect(end.lifecycleEvent).toBeNull()
+      expect(end.status.detail).toBe('turn.complete')
+    }
+  })
+
+  it('a resumed child keeps its current native turn when the prior turn end arrives late', () => {
+    const provider = new AgentProviderRegistry().get('claude')
+    const runId = 'run-native-child-resume'
+    const child = (eventName: string, turnId: string, sequence: number) => provider.normalizeHook({
+      receiptId: `child-${sequence}`, agentSessionId: 'core-child', runId, providerId: 'claude', eventName,
+      payload: { session_id: 'native-main', agent_id: 'same-child', sourceId: 'same-observer', sequence,
+        turnId, ...(eventName === 'turn.complete' ? { reason: 'answer', isAborted: false } : {}) }
+    }, {})
+    try {
+      child('SubagentStart', 'not-a-native-turn', 1)
+      expect(agentHasActiveSubagents(runId)).toBe(false)
+      child('turn.start', 'old-turn', 2)
+      child('turn.start', 'resumed-turn', 3)
+      expect(agentHasActiveSubagents(runId)).toBe(true)
+      child('turn.complete', 'old-turn', 4)
+      expect(agentHasActiveSubagents(runId)).toBe(true)
+      child('turn.complete', 'resumed-turn', 5)
+      expect(agentHasActiveSubagents(runId)).toBe(false)
+    } finally { releaseSubagentRoster(runId) }
+  })
+
+  it('generated callbacks preserve native results, serialize delivery and freeze their original actor', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agentmux-claude-native-mod-'))
+    const modulePath = join(directory, 'register.mjs')
+    const calls: Array<{ argv: string[]; init: { stdin: string; env: Record<string, string> } }> = []
+    let currentSessionId = 'original-native'
+    let release: (() => void) | undefined
+    const firstDelivery = new Promise<void>(resolve => { release = resolve })
+    let processCalls = 0
+    let failNext = false
+    const api = {
+      env: { get: async () => '1' }, session: { id: async () => currentSessionId },
+      process: { run: async (argv: string[], init: { stdin: string; env: Record<string, string> }) => {
+        calls.push({ argv, init })
+        if (++processCalls === 1) await firstDelivery
+        const stderr = failNext ? 'receipt delivery unconfirmed' : ''
+        failNext = false
+        return { exitCode: 0, stdout: '{}\n', stderr }
+      } },
+      ui: { log: vi.fn(async () => {}) }
+    }
+    type Handler = (client: typeof api, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => unknown
+    const handlers = new Map<string, Handler>()
+    try {
+      await writeFile(modulePath, claudeNativeActivitySource())
+      const module = await import(/* @vite-ignore */ pathToFileURL(modulePath).href) as {
+        register(on: (name: string, handler: Handler) => void): void
+      }
+      module.register((name, handler) => { handlers.set(name, handler); return { catch() {} } })
+      const next = (event: Record<string, unknown>) => ({ original: event })
+      await handlers.get('session.start')!(api, {}, next)
+      const start = { turnId: 'actual-turn-A', text: 'user content' }
+      expect(handlers.get('turn.start')!(api, start, next)).toEqual({ original: start })
+      await vi.waitFor(() => expect(calls).toHaveLength(1))
+      const complete = { turnId: 'actual-turn-A', reason: 'answer', isAborted: false }
+      expect(handlers.get('turn.complete')!(api, complete, next)).toEqual({ original: complete })
+      expect(calls).toHaveLength(1)
+      release!()
+      await vi.waitFor(() => expect(calls).toHaveLength(2))
+      expect(calls.map(call => JSON.parse(call.init.stdin).sequence)).toEqual([1, 2])
+      expect(calls.map(call => JSON.parse(call.init.stdin).turnId)).toEqual(['actual-turn-A', 'actual-turn-A'])
+      expect(calls[0]!.argv.at(-1)).toContain('agentmux-hook.js')
+      expect(calls[0]!.init.env.AGENTMUX_HOOK_PROVIDER).toBe('claude')
+      handlers.get('turn.complete')!(api, { ...complete, agentId: 'child-A' }, next)
+      await vi.waitFor(() => expect(calls).toHaveLength(3))
+      expect(JSON.parse(calls[2]!.init.stdin)).toMatchObject({ hook_event_name: 'turn.complete',
+        agent_id: 'child-A', turnId: 'actual-turn-A', sequence: 3 })
+      failNext = true
+      handlers.get('turn.start')!(api, { turnId: 'actual-turn-B' }, next)
+      await vi.waitFor(() => expect(calls).toHaveLength(4))
+      handlers.get('turn.complete')!(api, { ...complete, turnId: 'actual-turn-B' }, next)
+      await vi.waitFor(() => expect(calls).toHaveLength(5))
+      expect(JSON.parse(calls[4]!.init.stdin)).toMatchObject({ hook_event_name: 'AgentMuxActivityUnavailable',
+        reason: 'delivery-gap', sequence: 5 })
+      handlers.get('turn.start')!(api, { turnId: 'actual-turn-C' }, next)
+      await vi.waitFor(() => expect(calls).toHaveLength(6))
+      expect(JSON.parse(calls[5]!.init.stdin)).toMatchObject({ hook_event_name: 'turn.start',
+        turnId: 'actual-turn-C', sequence: 6 })
+      currentSessionId = 'new-native'
+      const reset = { hook_event_name: 'SessionStart', source: 'clear', session_id: 'new-native' }
+      expect(handlers.get('classic.SessionStart')!(api, reset, next)).toEqual({ original: reset })
+      await vi.waitFor(() => expect(calls).toHaveLength(7))
+      expect(JSON.parse(calls[6]!.init.stdin)).toMatchObject({ hook_event_name: 'AgentMuxActivityUnavailable',
+        session_id: 'original-native', reason: 'source-changed', sequence: 7 })
+      handlers.get('turn.start')!(api, { turnId: 'queued-old-turn' }, next)
+      await vi.waitFor(() => expect(calls).toHaveLength(8))
+      expect(JSON.parse(calls[7]!.init.stdin)).toMatchObject({ hook_event_name: 'AgentMuxActivityUnavailable',
+        session_id: 'original-native', reason: 'source-changed', sequence: 8 })
+      currentSessionId = 'original-native'
+      handlers.get('turn.complete')!(api, { ...complete, agentId: 'child-A' }, next)
+      await vi.waitFor(() => expect(calls).toHaveLength(9))
+      expect(JSON.parse(calls[8]!.init.stdin).hook_event_name).toBe('AgentMuxActivityUnavailable')
+    } finally {
+      release?.()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+})
 
 /**
  * T-006 的 Provider 测试。
@@ -70,7 +235,7 @@ describe('Claude provider', () => {
         ...(tracking?.startEvents ?? []), ...(tracking?.stopEvents ?? []), ...(tracking?.mainStopEvents ?? [])
       ]) referenced.add(eventName)
 
-      const installed = new Set<string>(CLAUDE_HOOK_EVENTS)
+      const installed = new Set<string>([...CLAUDE_HOOK_EVENTS, 'turn.start', 'turn.complete', 'AgentMuxActivityUnavailable'])
       const declaredButNotInstalled = [...referenced].filter((eventName) => !installed.has(eventName))
       expect(declaredButNotInstalled).toEqual([])
     })
@@ -368,6 +533,7 @@ describe('Claude Stop pre-decision observation through built public Core and Fil
           list: async () => [{ id: runId }],
           status: async () => run(),
           recoverableInput,
+          attach: attachTerminal,
           attachTerminal,
           start,
           stop
