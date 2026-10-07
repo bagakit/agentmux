@@ -2,7 +2,7 @@ import { chmod, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from '@agentmux/core'
-import { ConnectionHost, RoomBindingHost, PublicationHost, DurableIngressHost, ConnectionReceivers, createBuiltinConnectionAdapters, type DurableIngressOptions, type PublicationConversationPort, type RoomBindingHostOptions, type ConnectionAdapter } from '@agentmux/connectors'
+import { ConnectionHost, RoomBindingHost, RoomProvisioningHost, PublicationHost, DurableIngressHost, ConnectionReceivers, createBuiltinConnectionAdapters, type DurableIngressOptions, type PublicationConversationPort, type RoomBindingHostOptions, type ConnectionAdapter } from '@agentmux/connectors'
 import type { ConnectionPort } from '@agentmux/core/connections'
 import { DesktopConnectorSecrets, type CredentialEncryption } from './connector-secrets.js'
 
@@ -11,11 +11,12 @@ export type DesktopConnectionServices = {
   secrets: Pick<DesktopConnectorSecrets, 'store' | 'inspect'>
   readonly database: DatabaseSync | null
   readonly bindings: RoomBindingHost | null
+  readonly rooms: RoomProvisioningHost | null
   readonly publication: PublicationHost | null
   readonly ingress: DurableIngressHost | null
   close(): void
 }
-type LiveServices = { database: DatabaseSync; connections: ConnectionHost; secrets: DesktopConnectorSecrets; bindings?: RoomBindingHost; publication?: PublicationHost; ingress?: DurableIngressHost; receivers?: ConnectionReceivers }
+type LiveServices = { database: DatabaseSync; connections: ConnectionHost; secrets: DesktopConnectorSecrets; bindings?: RoomBindingHost; rooms?: RoomProvisioningHost; publication?: PublicationHost; ingress?: DurableIngressHost; receivers?: ConnectionReceivers }
 /** Optional failure stays local. A later exact operation retries storage on the same Host and database. */
 export async function createDesktopConnections(options: { directory: string; encryption: CredentialEncryption; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; ingress?: Pick<DurableIngressOptions, 'core'> }): Promise<DesktopConnectionServices> {
   const adapters = options.adapters ?? createBuiltinConnectionAdapters()
@@ -33,13 +34,15 @@ export async function createDesktopConnections(options: { directory: string; enc
         const connections = new ConnectionHost({ database, secrets, adapters })
         const bindings = options.bindings ? new RoomBindingHost({ ...options.bindings, connections }) : undefined
         if (bindings) connections.bindings = bindings
+        const rooms = options.bindings ? new RoomProvisioningHost({ connections, spatial: options.bindings.spatial }) : undefined
+        if (rooms) connections.rooms = rooms
         publication = bindings && options.publication ? new PublicationHost({ connections, bindings, conversation: options.publication }) : undefined
         if (publication) connections.delivery = publication
         const ingress = bindings && options.ingress ? new DurableIngressHost({ connections, bindings, authenticators: connections.ingressAuthenticators(), core: options.ingress.core }) : undefined
         if (ingress) connections.ingress = ingress
         receivers = ingress ? new ConnectionReceivers(connections, ingress) : undefined
         if (closed) { receivers?.close(); publication?.close(); database.close(); throw new Error('Owner closed while opening.') }
-        return live = { database, connections, secrets, ...(bindings ? { bindings } : {}), ...(publication ? { publication } : {}), ...(ingress ? { ingress } : {}), ...(receivers ? { receivers } : {}) }
+        return live = { database, connections, secrets, ...(bindings ? { bindings } : {}), ...(rooms ? { rooms } : {}), ...(publication ? { publication } : {}), ...(ingress ? { ingress } : {}), ...(receivers ? { receivers } : {}) }
       } catch {
         receivers?.close(); publication?.close()
         try { database?.close() } catch { /* Original Host remains usable; connection storage is unconfirmed. */ }
@@ -52,10 +55,15 @@ export async function createDesktopConnections(options: { directory: string; enc
   await ensure().catch(() => {})
   return {
     get bindings() { return live?.bindings ?? null },
+    get rooms() { return live?.rooms ?? null },
     get publication() { return live?.publication ?? null },
     get ingress() { return live?.ingress ?? null },
     get database() { return live?.database ?? null },
     connections: {
+      ...(options.bindings ? { rooms: {
+        create: async (input, context) => (await ensure()).rooms!.create(input, context),
+        inspect: async input => (await ensure()).rooms!.inspect(input)
+      } satisfies import('@agentmux/core/connections').RoomProvisioningPort } : {}),
       ...(options.bindings ? { bindings: {
         bind: async (input, context) => { const owner = await ensure(); const result = await owner.bindings!.bind(input, context); owner.publication?.refresh(); owner.receivers?.refresh(); return result },
         inspect: async input => (await ensure()).bindings!.inspect(input),
