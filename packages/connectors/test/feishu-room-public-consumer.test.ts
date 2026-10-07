@@ -10,10 +10,14 @@ import { feishuRoomsHttp, type RoomRequest } from './fixtures/feishu-rooms.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
+async function receipt(name: string, value: unknown) {
+  const path = '.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts'; await mkdir(path, { recursive: true })
+  await writeFile(join(path, name + '.json'), JSON.stringify(value, null, 2) + '\n')
+}
 async function fixture(effect?: (request: RoomRequest) => Promise<unknown>) {
   const f = await roomProvisioningFixture(); cleanup.push(() => f.close())
   const platform = feishuRoomsHttp(effect)
-  vi.spyOn(defaultHttpInstance, 'request').mockImplementation(platform.http.request)
+  vi.spyOn(defaultHttpInstance, 'request').mockImplementation(platform.http.request as typeof defaultHttpInstance.request)
   const directory = join(f.root, 'desktop-platform-rooms'), socketPath = join(f.root, 'platform-rooms.sock')
   const open = async () => {
     // Adapters are intentionally omitted: this is the original Desktop default lazy registration.
@@ -84,6 +88,7 @@ it('a lost native creation receipt remains the same unknown attempt after actual
   const blocked = await restored.cli(['room', 'create', '--input', '-'], { ...f.input, operationId: 'replacement-caller-key' })
   expect(blocked.creation).toEqual({ state: 'not-applied', reason: 'existing-operation', originalOperationId: f.input.operationId })
   expect(f.platform.calls).toHaveLength(1); await f.unchanged()
+  await receipt('T-021-feishu-unknown-reopen', { saved, blocked, nativeUuid: f.platform.calls[0]!.params!.uuid, nativeEffects: f.platform.calls.length, originalOwnerReopened: true })
 }, 20_000)
 
 it('actual public RPC cancellation reaches the original SDK request and retains the created room plus confirmed and unknown member results', async () => {
@@ -111,6 +116,7 @@ it('actual public RPC cancellation reaches the original SDK request and retains 
   expect(await f.cli(['room', 'create', '--input', '-'], input)).toEqual(saved)
   expect(await f.cli(['room', 'inspect', '--operation-id', input.operationId])).toEqual({ operation: saved })
   expect(batches).toBe(2); await f.unchanged()
+  await receipt('T-021-feishu-cancelled-members', { saved, confirmedMembers: 50, unconfirmedMembers: 51, memberEffects: batches, originalRpcSignalReachedNativeRequest: nativeSignal.aborted })
 }, 20_000)
 
 it('the direct original Core port preserves a creation cancelled after the native call as one unknown inspect-only attempt', async () => {
@@ -128,4 +134,5 @@ it('the direct original Core port preserves a creation cancelled after the nativ
   expect(await f.cli(['room', 'inspect', '--operation-id', f.input.operationId])).toEqual({ operation: saved })
   expect(await port.create(f.input, { actor: { kind: 'user', id: 'original-local-human' } })).toEqual(saved)
   expect(f.platform.calls).toHaveLength(1); await f.unchanged()
+  await receipt('T-021-feishu-cancelled-creation', { claimed, saved, nativeEffects: f.platform.calls.length, originalCallerSignalReachedNativeRequest: true })
 }, 20_000)
