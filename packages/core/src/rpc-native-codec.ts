@@ -1,4 +1,3 @@
-import { parseConversationLandmarkPage, parseConversationLandmarkQuery, parseConversationLandmarkWritePage, parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { isMoteConnectionMethod, parseMoteConnectionParams, parseMoteConnectionResult } from './mote-connection-codec.js'
 import { parseConversationCheckpointPage, parseConversationChangesPage, parseConversationWatchOpening } from './conversation-changes.js'
 import { parseAgentMuxSearchInput, parseAgentMuxSearchPage } from './search-codec.js'
@@ -433,8 +432,6 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.conversation.checkpoint': return parseConversationCheckpointPage(value, input as import('./conversation.js').ConversationRef)
       case 'agent.conversation.changes': return parseConversationChangesPage(value, input as import('./conversation-changes.js').ConversationChangesInput)
       case 'agent.conversation.watch': return parseConversationWatchOpening(value, input as import('./conversation.js').ConversationRef)
-      case 'agent.conversation.landmark.ls': return parseConversationLandmarkPage(value, parseConversationLandmarkQuery(input))
-      case 'agent.conversation.landmark.apply': return parseConversationLandmarkWritePage(value, parseConversationLandmarkWrite(input))
       case 'agent.conversation.inspect': return parseConversationReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.history': return parseAgentSessionHistoryReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.inspect': case 'whoami': {
