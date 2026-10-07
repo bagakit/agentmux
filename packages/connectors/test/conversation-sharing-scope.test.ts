@@ -7,6 +7,7 @@ import { connectAgentMuxRpc } from '../../core/src/public-rpc-client.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { createPublicationConversationPort } from '../src/core-conversation-port.js'
 import { PublicationStore, publicDelivery, type PublicationBoundary } from '../src/publication-store.js'
+import { ConnectionHost } from '../src/connection-host.js'
 import type { PublicationAdapter } from '../src/publication-adapter.js'
 import { roomBindingFixture, config, core } from './fixtures/room-binding.js'
 
@@ -39,7 +40,7 @@ async function fixture() {
   const sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path } }); cleanup.push(() => sdk.dispose())
   const cli = (args: string[], input?: unknown) => runCompiledObjectCli(['--endpoint', 'unix:' + path, 'connection', ...args],
     objectCliEnvironment(f.root), input === undefined ? '' : JSON.stringify(input))
-  return { ...f, services, dispatch, sdk, cli }
+  return { ...f, services, dispatch, adapter, sdk, cli }
 }
 function result(value: { code: number; stdout: string; stderr: string }) {
   expect(value.code, value.stdout + value.stderr).toBe(0); return JSON.parse(value.stdout).result
@@ -61,7 +62,7 @@ it('public sharing consent keeps the old scope and unknown effect, then explicit
   expect(relink).toMatchObject({ state: 'applied', binding: { bindingId: bound.bindingId, revision: 2, scope: { publication: shared }, sourceCheckpoints: [cut] } })
   expect(f.services.bindings!.publicationAuthority(bound.bindingId, 1).authorized).toBe(false)
   expect(f.services.bindings!.publicationAuthority(bound.bindingId, 2).authorized).toBe(true)
-  await appendFile(f.transcript, row('after-consent', 'assistant') + row('native-unknown-after', 'user'))
+  await appendFile(f.transcript, row('after-consent', 'assistant'))
   await vi.waitFor(() => expect(f.dispatch).toHaveBeenCalledTimes(2), { timeout: 5000 })
   expect(f.dispatch.mock.calls.map(([request]) => request.request.body)).toEqual(['before-consent', 'after-consent'])
   const next = f.services.publication!.store.list(relink.binding)
@@ -89,6 +90,31 @@ it('public codecs refuse coerced consent and actor forgery without changing an e
   expect(f.dispatch).not.toHaveBeenCalled(); await f.unchanged()
 }, 20000)
 
+it('a shared native input gap stays visible through compiled CLI and worker restart without advancing its source cut', async () => {
+  const f = await fixture(), metadata = await readFile(f.storePath)
+  const bound = result(await f.cli(['bind', '--input', '-'], { ...f.input, scope: { ...f.input.scope, publication: shared } })).binding
+  await appendFile(f.transcript, row('qualified-assistant-speech', 'assistant'))
+  await vi.waitFor(() => expect(f.dispatch).toHaveBeenCalledTimes(1), { timeout: 5000 })
+  const store = f.services.publication!.store, initial = bound.sourceCheckpoints[0], frontier = store.checkpoint(bound, initial)
+  await appendFile(f.transcript, row('unqualified-original-input', 'user') + row('later-speech', 'assistant'))
+  await vi.waitFor(() => expect(f.services.publication!.observation(bound.bindingId, 1)).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' }), { timeout: 5000 })
+  const args = ['delivery', 'ls', '--connection', config.connectionId, '--binding', bound.bindingId, '--binding-revision', '1']
+  expect(result(await f.cli(args)).observation).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' })
+  expect(store.checkpoint(bound, initial)).toEqual(frontier)
+  expect(store.list(bound)).toHaveLength(1); expect(f.dispatch).toHaveBeenCalledTimes(1)
+  f.services.publication!.close()
+  const { PublicationHost } = await import('../src/publication-host.js')
+  const connections = new ConnectionHost({ database: f.services.database!, secrets: { resolve: async () => 'private-scope-fixture' },
+    adapters: [{ adapterId: 'sample', publication: f.adapter, test: async () => ({ authentication: { state: 'unknown' }, transport: { state: 'unknown' }, intake: { state: 'unknown' }, delivery: { state: 'unknown' } }) }] })
+  cleanup.push(() => connections.close())
+  const restarted = new PublicationHost({ connections, bindings: f.services.bindings!,
+    conversation: createPublicationConversationPort(() => [{ hostId: 'local', client: f.client }]) })
+  cleanup.push(() => restarted.close())
+  await vi.waitFor(() => expect(restarted.observation(bound.bindingId, 1)).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' }), { timeout: 5000 })
+  expect(restarted.store.checkpoint(bound, initial)).toEqual(frontier); expect(f.dispatch).toHaveBeenCalledTimes(1)
+  expect(await readFile(f.storePath)).toEqual(metadata); expect(f.client.connect).not.toHaveBeenCalled()
+}, 20000)
+
 it('stored legacy pending work keeps its original scope instead of inheriting a broader claim', () => {
   const database = new DatabaseSync(':memory:'); cleanup.push(() => database.close())
   const store = new PublicationStore(database), checkpoint = { agentSessionId: 'agent', source: { providerId: 'claude', nativeSessionId: 'native' }, cursor: 'original-cut' }
@@ -105,4 +131,17 @@ it('stored legacy pending work keeps its original scope instead of inheriting a 
   expect(prepare).not.toHaveBeenCalled(); expect(store.inspect(saved.operationId)).toEqual(legacy)
   expect(store.claimNext(boundary, () => true, adapter)?.operationId).toBe(saved.operationId)
   expect(publicDelivery(store.inspect(saved.operationId)!)).not.toHaveProperty('publicationScope')
+})
+
+it.each(['image', 'file'] as const)('broader sharing retains the original frontier when a complete %s cannot be delivered', kind => {
+  const database = new DatabaseSync(':memory:'); cleanup.push(() => database.close())
+  const store = new PublicationStore(database), checkpoint = { agentSessionId: 'agent', source: { providerId: 'claude', nativeSessionId: 'native' }, cursor: 'before-resource' }
+  const boundary: PublicationBoundary = { bindingId: 'binding', revision: 1, connectionId: 'connection', application: config.application,
+    executionHostId: 'local', agentSessionId: 'agent', externalConversationId: 'room', sourceCheckpoints: [checkpoint], scope: { input: 'mentions-and-replies', publication: shared } }
+  store.checkpoint(boundary, checkpoint)
+  expect(() => store.commitPage(boundary, checkpoint, { hostId: 'local', agentSessionId: 'agent', source: checkpoint.source,
+    items: [{ id: 'original-resource-message', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Original description' },
+      { kind: 'resource', resourceType: kind, reference: 'original-opaque-read-reference' }] }], checkpoint: { ...checkpoint, cursor: 'after-resource' }, more: false }, () => true))
+    .toThrowError(/complete resource delivery/)
+  expect(store.checkpoint(boundary, checkpoint)).toEqual(checkpoint); expect(store.list(boundary)).toEqual([])
 })
