@@ -92,6 +92,51 @@ previous in-memory service observations return to unknown.
 Connection storage failure remains local to the connection service and does not
 stop healthy Agents or replace their Sessions.
 
+## Durable room creation
+
+`RoomProvisioningHost` borrows `ConnectionHost.database`, its configured adapter
+registry and the original Core spatial read port. Attach it as `connections.rooms`;
+Desktop composes this port alongside its original binding owner. The public SDK
+and CLI use the same Host owner:
+
+```sh
+amux connection room create --input room.json
+amux connection room inspect --operation-id create-team-room
+```
+
+The create input freezes `operationId`, `connectionId`,
+`expectedConnectionRevision`, `executionHostId`, `agentSessionId`,
+`regionAnchor`, `name` and `members: [{idType, userId}]`. The configured connection
+supplies its application and adapter identity. Only the transport-approved current
+user or device can administer these operations; JSON cannot declare that authority.
+Creation grants no Binding, history sharing, actor capability or Agent input.
+Choose sharing scope separately through the original `connection bind` operation.
+
+Intent is durable before credential resolution. Each creation or member-addition
+attempt is committed before its adapter call; its receipt is saved separately.
+The adapter receives credentials only through the original Host resolver. A known
+room ID survives partial member failures and any later binding failure. Empty
+membership still retains the exact created room. Inspect only reads saved facts;
+it does not resolve credentials, query by room name, add members or retry an effect.
+After a missing response or owner restart, inspect the original operation. Unknown
+and dispatched attempts remain inspect-only. An exact original explicit create can
+continue a pending phase only when no attempt has been dispatched. A known
+creation non-application allows a new explicit operation; it does not replay the
+old receipt. Member non-application has no implicit retry.
+
+One Connection, execution Host and Session retain their original room claim across
+Regions and operation IDs. Another operation reports that original identity;
+only confirmed creation non-application releases the claim. Configuration or exact
+Region occupant changes refuse the pending effect while preserving local Agents.
+Unrelated spatial changes do not invalidate an otherwise exact target.
+
+`RoomProvisioningAdapter.create` and `addMembers` are independent effect leaves.
+They receive the frozen application, original operation and distinct attempt IDs.
+Creation returns an exact room ID, authoritative non-application or unknown;
+member results must match every original typed member. An adapter must qualify its
+platform key, failure and partial-member semantics against the native contract.
+Controlled adapter tests establish the generic Host boundary only.
+
 ## Room bindings
 
 `RoomBindingHost` borrows a `ConnectionHost`, the original Core spatial read port

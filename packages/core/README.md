@@ -203,6 +203,27 @@ HTTP 默认关闭；启动服务时显式提供 `http: { host, port, token }`，
 
 JSON-RPC `id` 只匹配通信。`operationId` 记录原业务操作；没有完整回执时先查询原操作。订阅断开只释放对应 reader，保持 Agent、Run 与桌面的原观察连接。完整命令、资源与展示分离和远程参数见[公开 CLI 指南](../../docs/guides/agentmux-cli-object-control.md)。
 
+### 外部建群与原操作查询
+
+`@agentmux/core/connections` 导出纯建群类型与严格解析；宿主通过原
+`AgentMuxRpcServiceOptions.connections.rooms` 注入 `RoomProvisioningPort`。
+typed SDK 的 `call('connection.room.create', input)` 与实际 CLI 消费同一 owner：
+
+```sh
+amux connection room create --input room.json
+amux connection room inspect --operation-id create-team-room
+```
+
+输入冻结原 Connection 修订、准确 Host／Session／Region、群名及 typed 成员 ID；
+应用身份来自已配置 Connection，当前 user／device 权限来自可信传输。
+建群、成员加入与原 `connection bind` 分别保留回执，建群本身不授予分享或输入权限。
+未知或已派发的操作只查原 ID，不按群名匹配、不换 ID 重投。
+原 pending 且尚无 attempt 的阶段只允许准确原请求显式继续；inspect 永不施效。
+未注入端口只使本能力不可用，保留原连接与健康 Agent。
+字段与结果以[建群合同](src/room-provisioning-contract.ts)及
+[严格解析](src/room-provisioning-codec.ts)为准；Host 接入见
+[connectors 指南](../connectors/README.md#durable-room-creation)。
+
 ### 外部投递观察与原操作重试
 
 `@agentmux/core/connections` 导出纯 `ConnectionDelivery` 合同与严格解析器。
