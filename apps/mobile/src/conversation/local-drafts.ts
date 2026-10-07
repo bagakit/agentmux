@@ -33,13 +33,13 @@ function restoredMessage(value: PromptAttempt['phase'], interaction = false): st
 }
 
 /** Derived routing only; the original keyed Map remains the device intent owner. */
-class SessionQuestionReplies extends Map<string, MobileQuestionReplyAttempt> {
+class SessionIntents<T> extends Map<string, T> {
   private readonly sessionKeys = new Map<string, Set<string>>()
   private sessionId(key: string): string | undefined {
     try { const parts: unknown = JSON.parse(key); return Array.isArray(parts) && typeof parts[0] === 'string' ? parts[0] : undefined }
     catch { return undefined }
   }
-  override set(key: string, attempt: MobileQuestionReplyAttempt): this {
+  override set(key: string, attempt: T): this {
     const sessionId = this.sessionId(key)
     if (sessionId !== undefined) {
       let keys = this.sessionKeys.get(sessionId)
@@ -55,7 +55,7 @@ class SessionQuestionReplies extends Map<string, MobileQuestionReplyAttempt> {
     return super.delete(key)
   }
   override clear(): void { super.clear(); this.sessionKeys.clear() }
-  *forSession(sessionId: string): IterableIterator<[string, MobileQuestionReplyAttempt]> {
+  *forSession(sessionId: string): IterableIterator<[string, T]> {
     for (const key of this.sessionKeys.get(sessionId) ?? []) {
       const attempt = this.get(key)
       if (attempt) yield [key, attempt]
@@ -65,7 +65,7 @@ class SessionQuestionReplies extends Map<string, MobileQuestionReplyAttempt> {
 
 /** Device-owned drafts and original intent guards only. No credentials, message log or send queue. */
 export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'setItem'>) {
-  const drafts = new Map<string, string>(), attempts = new Map<string, PromptAttempt>(), responses = new Map<string, ResponseAttempt>(), questions = new SessionQuestionReplies(), questionDrafts = new Map<string, AgentSessionHistoryQuestionAnswer[]>()
+  const drafts = new Map<string, string>(), attempts = new Map<string, PromptAttempt>(), responses = new SessionIntents<ResponseAttempt>(), questions = new SessionIntents<MobileQuestionReplyAttempt>(), questionDrafts = new Map<string, AgentSessionHistoryQuestionAnswer[]>()
   const owner = getDeviceWorkface(storage)
   const state = { drafts, attempts, responses, questions, questionDrafts, conflicts: [] as ConversationConflict[], canSave: true, notice: null as string | null, save, exportBackup, recordChanged: false }
   let baseline: DraftRecord = { version: 1, drafts: [], attempts: [], responses: [] }

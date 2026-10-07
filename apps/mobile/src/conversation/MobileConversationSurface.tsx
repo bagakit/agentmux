@@ -699,7 +699,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           onRespond={respond} />
         {responseAttempt && !responseAttempt.original ? <p role="status">{responseAttempt.message}</p> : null}
       </div> : null}
-      {[...responses.current].filter(([, attempt]) => attempt.original?.input.agentSessionId === agentSessionId).map(([key, attempt]) =>
+      {[...responses.current.forSession(agentSessionId ?? '')].filter(([, attempt]) => attempt.original?.input.agentSessionId === agentSessionId).map(([key, attempt]) =>
         <aside key={key} className="mobile-send-status" data-original-response={attempt.original!.input.operationId}>
           <p role="status">{attempt.message}</p>
           <button type="button" onClick={() => { void inspectResponse(key, attempt).catch(() => {}) }}>查询原答复回执</button>
