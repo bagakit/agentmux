@@ -3,7 +3,11 @@ import type { ConnectionApplication, ConnectionGrant } from './connections-contr
 import type { AgentSessionHistorySource } from './types.js'
 
 export type RoomBindingAuthority = { kind: 'user' | 'device'; id: string }
-export type RoomBindingScope = { input: 'mentions-and-replies' | 'all-messages'; publication: 'future-native-user-facing' }
+export type RoomBindingScope = {
+  input: 'mentions-and-replies' | 'all-messages'
+  /** Existing grants retain assistant speech. Broader content requires an explicit new Binding revision and cut. */
+  publication: 'future-native-user-facing' | 'future-shared-conversation'
+}
 export type RoomBindingTarget = { executionHostId: string; agentSessionId: string; regionAnchor: { regionId: string } }
 /** An immutable authorized audience snapshot. A Region is navigation, never an execution route. */
 export type RoomBinding = RoomBindingTarget & {
