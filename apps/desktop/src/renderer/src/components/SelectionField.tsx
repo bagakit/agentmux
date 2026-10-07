@@ -10,9 +10,9 @@ const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 export interface SelectionOption { value: string; label: string; disabled?: boolean; icon?: ReactNode; description?: string }
 
 /** Controlled presentation only. The caller owns options, saved identity and domain actions. */
-export function SelectionField({ id, label, value, options, onValueChange, disabled = false, className = '', menuClassName = '', menuBoundary }: {
+export function SelectionField({ id, label, value, options, onValueChange, disabled = false, className = '', menuClassName = '', menuBoundary, triggerLabel }: {
   id?: string | undefined; label: string; value: string; options: readonly SelectionOption[]
-  onValueChange(value: string): void; disabled?: boolean; className?: string; menuClassName?: string; menuBoundary?: HTMLElement | null
+  onValueChange(value: string): void; disabled?: boolean; className?: string; menuClassName?: string; menuBoundary?: HTMLElement | null; triggerLabel?: string | undefined
 }) {
   const descriptionId = useId(), trigger = useRef<HTMLButtonElement>(null)
   const [layer, setLayer] = useState<'dialog' | 'popover'>('popover')
@@ -23,7 +23,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
     <Menu.Trigger asChild>
       <button ref={trigger} id={id} type="button" className={`selection-field ${className}`} aria-label={label}
         aria-describedby={descriptionId} data-value={value} title={selected ? currentDescription : `${currentLabel}: ${value}`} disabled={disabled}>
-        <span className="selection-field__choice">{selected?.icon ? <span className="selection-field__icon" inert aria-hidden="true">{selected.icon}</span> : null}<span>{currentLabel}</span></span><span id={descriptionId} hidden>{selected ? currentDescription : `${currentLabel}: ${value}`}</span><ThemeNavigationDownIcon size={13} aria-hidden="true" />
+        <span className="selection-field__choice">{selected?.icon ? <span className="selection-field__icon" inert aria-hidden="true">{selected.icon}</span> : null}<span>{triggerLabel ?? currentLabel}</span></span><span id={descriptionId} hidden>{selected ? currentDescription : `${currentLabel}: ${value}`}</span><ThemeNavigationDownIcon size={13} aria-hidden="true" />
       </button>
     </Menu.Trigger>
     <Menu.Portal container={resolveOverlayContainer()}>

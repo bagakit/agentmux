@@ -25,9 +25,11 @@ export function useAgentConnectorMenu(regionId: string, sessionId: string | null
     }).catch(error => { if (generation === read.current) setIssue(presentError(error)) })
   }
   function open(mode: 'create' | 'existing' | 'details') {
-    const session = sessionId ? sessionPresentationById(useAppStore.getState().sessions).get(sessionId) : undefined
+    const current = useAppStore.getState(), session = sessionId ? sessionPresentationById(current.sessions).get(sessionId) : undefined
     if (session?.kind !== 'agent') { setIssue('The original Agent reference is unavailable. Existing input and draft are kept.'); return }
-    const selected = { mode, original: { name: useAppStore.getState().agentNames[session.id] ?? session.label, session,
+    const executorId = session.executorId ?? undefined, appearance = executorId ? current.config?.executors[executorId]?.avatar ?? current.config?.appearance.agentAvatars?.[executorId] : undefined
+    const selected = { mode, original: { name: current.agentNames[session.id] ?? session.label, session,
+      identity: { providerId: session.providerId, executorId, ...(appearance ? { appearance: structuredClone(appearance) } : {}) },
       target: { executionHostId: session.control.hostId, agentSessionId: session.control.agentSessionId, regionAnchor: { regionId } } } }
     if (menuOpen.current) selection.current = selected
     else setDialog(selected)
