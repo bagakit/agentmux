@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Window } from 'happy-dom'
-import type { AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentProviderSessionHistoryObservation, AgentSessionHistoryPage } from '@agentmux/core'
+import type { AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentProviderSessionHistoryObservation, AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
 import { loadAgentSessions } from '../../../packages/core/src/agent-session-store'
 import { AgentMuxHostedRuntimeService } from '../../../packages/core/src/hosted-runtime-service'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
@@ -132,6 +132,81 @@ async function authenticatedFixture(request?: AgentMuxInteractionRequest, retain
     setRecent(value: AgentSessionHistoryPage) { recent = value }, setOlder(value: AgentSessionHistoryPage) { older = value },
     invalidate() { observe?.({ kind: 'invalidated', source }) } }
 }
+
+it('authenticated Mobile keeps captured speech visible beside distinct native records, preserving authors, failures, selection and original reads', async () => {
+  const f = await authenticatedFixture(), sharedBody = 'Repeated original input'
+  const nativePage: AgentSessionHistoryPage = { agentSessionId: sid, source, nextCursor: 'original-unread-page', items: [
+    { id: 'input-duplicated', kind: 'user-message', contentParts: [{ kind: 'text', text: sharedBody }] },
+    { id: 'native-answer', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Native original answer' }] }
+  ] }
+  f.setRecent(nativePage)
+  const items: AgentTimelineItem[] = [
+    { id: 'input-duplicated', agentSessionId: sid, kind: 'user_message', source: 'user', status: 'complete', createdAt: _historyTailFixtureEpoch(0, 0, 1), updatedAt: _historyTailFixtureEpoch(0, 0, 1),
+      title: 'Submitted input', content: sharedBody, authorHuman: true, sourceChannel: 'message-tool', sourceDevice: f.device, publicContent: 'confirmed' },
+    { id: 'input-failed', agentSessionId: sid, kind: 'user_message', source: 'user', status: 'failed', createdAt: _historyTailFixtureEpoch(0, 0, 2), updatedAt: _historyTailFixtureEpoch(0, 0, 2),
+      title: 'Failed input', content: 'Original failed input', authorHuman: true },
+    { id: 'input-unconfirmed', agentSessionId: sid, kind: 'user_message', source: 'user', status: 'streaming', createdAt: _historyTailFixtureEpoch(0, 0, 3), updatedAt: _historyTailFixtureEpoch(0, 0, 3),
+      title: 'Unconfirmed input', content: 'Original unconfirmed input' },
+    { id: 'reply-captured', agentSessionId: sid, kind: 'assistant_message', source: 'native-hook', status: 'complete', createdAt: _historyTailFixtureEpoch(0, 0, 4), updatedAt: _historyTailFixtureEpoch(0, 0, 4),
+      title: 'Observed reply', content: 'Captured original reply', authorAgentSessionId: 'exact-peer-author' }
+  ]
+  for (const item of items) await f.store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item })
+  const reads = vi.spyOn(f.core, 'sessionHistoryPage'), view = await mount(f.surface())
+  const readOptions = () => reads.mock.calls.map(([, options]) => ({ limit: options?.limit, cursor: options?.cursor }))
+  await vi.waitFor(() => expect(view.element.textContent).toContain('Captured original reply'))
+  const record = (id: string) => view.element.querySelector<HTMLElement>(`[data-message-id="${id}"]`)!
+  for (const id of ['captured:input-duplicated', 'captured:input-failed', 'captured:input-unconfirmed', 'reply-captured']) {
+    expect(record(id), id).not.toBeNull()
+    expect(record(id).closest('details:not([open]), [hidden], [inert]'), `${id} is readable without opening another conversation`).toBeNull()
+  }
+  expect(view.element.querySelector('.mobile-conversation__captured')?.tagName).toBe('SECTION')
+  expect(view.element.querySelectorAll('[data-native-record-id="input-duplicated"]')).toHaveLength(1)
+  expect(record('captured:input-duplicated').querySelector('.log-turn__body')!.textContent).toBe(sharedBody)
+  expect(record('captured:input-duplicated').dataset.speakerRole).toBe('human')
+  expect(record('captured:input-duplicated').textContent).toContain('Message Tool')
+  expect(record('captured:input-duplicated').textContent).toContain(f.device.name)
+  expect(record('captured:input-failed').dataset.status).toBe('failed')
+  expect(record('captured:input-failed').textContent).toContain('Failed')
+  expect(record('captured:input-unconfirmed').dataset.status).toBe('unverified')
+  expect(record('captured:input-unconfirmed').textContent).toContain('Unverified')
+  expect(record('reply-captured').dataset.speakerRole).toBe('agent')
+  expect(record('reply-captured').querySelector('.log-turn__sender-id')!.textContent).toContain('exact-peer-author')
+  expect(record('reply-captured').dataset.messageSourceKey).toBe(JSON.stringify([sid, 'captured', 'reply-captured']))
+  expect(readOptions()).toEqual([{ limit: 30, cursor: undefined }])
+  const native = view.element.querySelector('[data-native-record-id="native-answer"] .log-turn__body')!, text = native.querySelector('p')!.firstChild!
+  const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 6); window.getSelection()!.addRange(range)
+  const reply = record('reply-captured'), body = reply.querySelector('.log-turn__body')!
+  await vi.waitFor(() => expect(f.core.providers.get('codex').observeSessionHistory).toHaveBeenCalledTimes(1))
+  await f.store.applyTimelineMutation({ type: 'update', agentSessionId: sid, itemId: 'reply-captured', updatedAt: _historyTailFixtureEpoch(0, 0, 5), content: 'Captured reply grows in place' })
+  await act(async () => f.invalidate())
+  await vi.waitFor(() => expect(body.textContent).toBe('Captured reply grows in place'))
+  expect(record('reply-captured')).toBe(reply); expect(reply.querySelector('.log-turn__body')).toBe(body)
+  expect(view.element.querySelector('[data-native-record-id="native-answer"] .log-turn__body')).toBe(native)
+  expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(range.toString()).toBe('Native')
+  expect(readOptions()).toEqual([{ limit: 30, cursor: undefined }, { limit: 30, cursor: undefined }])
+  expect(button(view.element, '更早消息')).toBeDefined()
+  expect(f.writes).toHaveLength(0); expect(f.submit).not.toHaveBeenCalled(); expect(f.reply).not.toHaveBeenCalled()
+  await f.recordProof('visible-captured-reading', { passed: true, boundary: 'Authenticated HTTP/Hosted/Core/FileStore → actual MobileConversationSurface; controlled Provider history',
+    page: nativePage, timeline: await f.core.sessionTimeline(sid), session: f.client.agentSession(sid), reads: reads.mock.calls.map(call => call[1]),
+    sameBodyNativeAndCapturedRetained: true, originalRange: range.toString(), runtimeWrites: f.writes.length })
+}, 15000)
+
+it('authenticated Mobile keeps captured original speech readable when the native reader is unavailable, without a false empty conversation or input', async () => {
+  const f = await authenticatedFixture()
+  const item: AgentTimelineItem = { id: 'retained-hook-reply', agentSessionId: sid, kind: 'assistant_message', source: 'native-hook',
+    status: 'complete', createdAt: _historyTailFixtureEpoch(0, 0, 1), updatedAt: _historyTailFixtureEpoch(0, 0, 1), title: 'Observed original reply', content: 'Original captured reply remains readable' }
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item })
+  vi.mocked(f.core.providers.get('codex').readSessionHistoryPage!).mockRejectedValue(Object.assign(new Error('Original native reader unavailable'), { code: 'AGENT_SESSION_HISTORY_OBSERVATION_UNSUPPORTED' }))
+  const view = await mount(f.surface())
+  await vi.waitFor(() => expect(view.element.textContent).toContain(item.content))
+  const reply = view.element.querySelector<HTMLElement>('[data-message-id="retained-hook-reply"]')!
+  expect(reply.closest('details:not([open]), [hidden], [inert]')).toBeNull()
+  expect(view.element.querySelector('[data-native-record-id]')).toBeNull()
+  expect(view.element.textContent).toContain('Original native reader unavailable')
+  expect(view.element.textContent).not.toContain('暂无已确认的对话内容')
+  expect(reply.dataset.status).toBe('complete')
+  expect(f.writes).toHaveLength(0); expect(f.submit).not.toHaveBeenCalled(); expect(f.reply).not.toHaveBeenCalled()
+}, 15000)
 
 it('authenticated Hosted preserves ordinary input and the original terminal route without granting an automatic async reply', async () => {
   const f = await authenticatedFixture(), view = await mount(f.surface())

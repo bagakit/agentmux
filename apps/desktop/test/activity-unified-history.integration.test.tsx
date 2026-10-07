@@ -87,9 +87,9 @@ function markerGeometry(viewport: HTMLElement) {
  const entry = viewport.querySelector<HTMLElement>('.activity-feed__reading')!
  expect(entry).not.toBeNull()
  entry.getBoundingClientRect = () => rect(100 - viewport.scrollTop, 40)
- const tail = viewport.querySelector<HTMLElement>('[data-conversation-native-tail]')!
- expect(tail).not.toBeNull()
- tail.getBoundingClientRect = () => rect(100 + viewport.scrollHeight - viewport.scrollTop, 0)
+ for (const tail of viewport.querySelectorAll<HTMLElement>('[data-conversation-native-tail], [data-conversation-reading-tail]')) {
+  tail.getBoundingClientRect = () => rect(100 + viewport.scrollHeight - viewport.scrollTop, 0)
+ }
  return entry
 }
 async function scrollTo(viewport: HTMLElement, top: number) {
@@ -150,15 +150,15 @@ describe('One Activity reading surface over public original-sequence windows', (
   await render(<ActivityView sessionId={sid} items={captured} userMessages={supplements} capability="complete-events" nativeHistoryPage={current}
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
   const feed = container.querySelector<HTMLElement>('.activity-feed')!, entry = feed.querySelector<HTMLElement>('.activity-feed__reading')!
-  const thread = feed.querySelector<HTMLElement>('.conversation-native-thread')!, observations = feed.querySelector<HTMLDetailsElement>('.activity-feed__observations')!
+  const thread = feed.querySelector<HTMLElement>('.conversation-native-thread')!, observations = feed.querySelector<HTMLElement>('.activity-log')!
   const supplement = [...feed.querySelectorAll<HTMLElement>('.log-turn')].find(node => node.dataset.messageSourceKey?.includes('earlier-supplement-source'))!
-  const capturedCards = [...observations.querySelectorAll<HTMLElement>('.log-turn')]
+  const capturedCards = [...observations.querySelectorAll<HTMLElement>('.log-turn')].filter(card => card !== supplement)
   expect(entry).not.toBeNull(); expect(thread).not.toBeNull(); expect(observations).not.toBeNull(); expect(supplement).toBeDefined()
   for (const body of [thread, supplement, observations]) {
    expect(Boolean(entry.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING), 'Earlier must precede every retained record surface').toBe(true)
   }
   expect(Boolean(thread.compareDocumentPosition(supplement) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
-  expect(Boolean(supplement.compareDocumentPosition(observations) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+  expect(feed.querySelector('.activity-feed__observations')).toBeNull()
   expect(capturedCards).toHaveLength(2)
   expect(capturedCards.every(card => card.dataset.compact !== 'true')).toBe(true)
   expect(observations.textContent).toContain(captured[0]!.content); expect(observations.textContent).toContain(captured[1]!.content)
@@ -166,7 +166,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   await click('Earlier')
   expect(feed.querySelector('.conversation-native-thread')).toBe(thread)
   expect(nativeBody.isConnected).toBe(true); expect(supplement.isConnected).toBe(true)
-  expect(feed.querySelector('.activity-feed__observations')).toBe(observations)
+  expect(feed.querySelector('.activity-log')).toBe(observations)
   expect(capturedCards.every(card => card.isConnected)).toBe(true)
   expect(observations.textContent).toContain(captured[0]!.content); expect(observations.textContent).toContain(captured[1]!.content)
  })
@@ -279,30 +279,33 @@ describe('One Activity reading surface over public original-sequence windows', (
   expect(ids().at(-1)).toBe('record-1200'); expect(viewport.scrollTop).toBe(20)
   expect(requests.filter(request => request.cursor !== undefined)).toHaveLength(pageReads)
  })
- it('keeps the latest action and live following at the native tail while expanded captured originals remain readable below it', async () => {
+ it('keeps latest and following at the displayed captured tail, while native paging retains its original boundary', async () => {
   await writeEdgeHistory(1200)
   const captured: AgentTimelineItem[] = [{ id: 'captured-tail-input', agentSessionId: sid, kind: 'user_message', source: 'user',
    title: 'Original captured input', content: 'Complete captured original. '.repeat(500), status: 'complete', createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 1) }]
   await render(<><Reading captured={captured} /><Witness /></>)
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!; markerGeometry(viewport)
   Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 5000 })
-  const tail = viewport.querySelector<HTMLElement>('[data-conversation-native-tail]')!, observations = viewport.querySelector<HTMLDetailsElement>('.activity-feed__observations')!
+  const tail = viewport.querySelector<HTMLElement>('[data-conversation-native-tail]')!, observations = viewport.querySelector<HTMLElement>('.activity-log')!
   expect(tail).not.toBeNull(); let nativeBottom = 1800
   tail.getBoundingClientRect = () => rect(100 + nativeBottom - viewport.scrollTop, 0)
   const original = observations.querySelector('.log-turn__body')!
-  await act(async () => { observations.open = true; observations.dispatchEvent(new Event('toggle')) })
-  await scrollTo(viewport, 4200)
+  const readingTail = viewport.querySelector<HTMLElement>('[data-conversation-reading-tail]')!
+  let readingBottom = 5000
+  readingTail.getBoundingClientRect = () => rect(100 + readingBottom - viewport.scrollTop, 0)
+  await scrollTo(viewport, readingBottom - viewport.clientHeight)
+  await scrollTo(viewport, 1000)
   const jump = container.querySelector<HTMLButtonElement>('[aria-label="Return to latest messages"]')!
   expect(jump).not.toBeNull(); await act(async () => jump.click()); await flush()
-  expect(viewport.scrollTop).toBe(nativeBottom - viewport.clientHeight)
-  expect(observations.open).toBe(true); expect(original.isConnected).toBe(true); expect(original.textContent?.trim() === captured[0]!.content!.trim(), 'The complete captured original stays readable').toBe(true)
+  expect(viewport.scrollTop).toBe(readingBottom - viewport.clientHeight)
+  expect(viewport.querySelector('.activity-feed__observations')).toBeNull(); expect(original.isConnected).toBe(true); expect(original.textContent?.trim() === captured[0]!.content!.trim(), 'The complete captured original stays readable').toBe(true)
   await act(async () => viewport.dispatchEvent(new Event('scroll')))
-  nativeBottom = 1900
+  nativeBottom = 1900; readingBottom = 5100
   await appendFile(transcript, JSON.stringify({ ...record(1200), timestamp: new Date(_hygiene_fixtureTime(-37225600000) + 1200 * 3_600_000).toISOString() }) + '\n')
   await act(async () => observation?.({ source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated', agentSessionId: sid }))
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 80)) }); await flush()
-  expect(ids().at(-1)).toBe('record-1200'); expect(viewport.scrollTop).toBe(nativeBottom - viewport.clientHeight)
-  expect(original.isConnected).toBe(true); expect(observations.open).toBe(true)
+  expect(ids().at(-1)).toBe('record-1200'); expect(viewport.scrollTop).toBe(readingBottom - viewport.clientHeight)
+  expect(original.isConnected).toBe(true); expect(viewport.querySelector('.activity-feed__observations')).toBeNull()
   await act(async () => viewport.dispatchEvent(new Event('scroll')))
   const segment = original.closest<HTMLElement>('[data-segment-key]')!
   expect(segment).not.toBeNull()
@@ -313,8 +316,9 @@ describe('One Activity reading surface over public original-sequence windows', (
   nativeOriginal.getBoundingClientRect = () => rect(100 + nativeBottom - 30 - viewport.scrollTop, 60)
   segment.getBoundingClientRect = () => rect(100 + actualNativeBottom() + currentNoticeHeight() + 30 - viewport.scrollTop, 3000)
   observations.getBoundingClientRect = () => rect(100 + actualNativeBottom() + currentNoticeHeight() - viewport.scrollTop, 3000)
-  await scrollTo(viewport, 1910)
-  await act(async () => original.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 1 })))
+  // The user selects a visible captured body while an older native row is still above it.
+  // A selection, without a wheel target on that body, must qualify its own reading anchor.
+  await scrollTo(viewport, 1850)
   const offset = segment.getBoundingClientRect().top - viewport.getBoundingClientRect().top
   const text = document.createTreeWalker(original, NodeFilter.SHOW_TEXT).nextNode()!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 8); window.getSelection()!.addRange(range)
@@ -323,9 +327,9 @@ describe('One Activity reading surface over public original-sequence windows', (
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 80)) }); await flush()
   expect(ids().at(-1)).toBe('record-1201'); expect(segment.getBoundingClientRect().top - viewport.getBoundingClientRect().top).toBe(offset)
   expect(original.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
-  expect(window.getSelection()!.toString()).toBe('Complete'); expect(viewport.scrollTop).toBe(2010)
+  expect(window.getSelection()!.toString()).toBe('Complete'); expect(viewport.scrollTop).toBe(1950)
  })
- it.each(['scroll', 'Home'] as const)('reads Newer at the real native tail after %s returns from expanded captured originals', async returning => {
+ it.each(['scroll', 'Home'] as const)('reads Newer at the real native tail after %s returns from visible captured originals', async returning => {
   await writeEdgeHistory(2400)
   const captured: AgentTimelineItem[] = [{ id: 'captured-newer-input', agentSessionId: sid, kind: 'user_message', source: 'user',
    title: 'Original captured input', content: 'Captured tail stays available. '.repeat(500), status: 'complete', createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 1) }]
@@ -333,14 +337,13 @@ describe('One Activity reading surface over public original-sequence windows', (
   for (let n = 0; n < 8; n++) await click('Earlier')
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!; markerGeometry(viewport)
   Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 5000 })
-  const tail = viewport.querySelector<HTMLElement>('[data-conversation-native-tail]')!, observations = viewport.querySelector<HTMLDetailsElement>('.activity-feed__observations')!
+  const tail = viewport.querySelector<HTMLElement>('[data-conversation-native-tail]')!, observations = viewport.querySelector<HTMLElement>('.activity-log')!
   const nativeBottom = returning === 'Home' ? 150 : 1800
   expect(tail).not.toBeNull(); tail.getBoundingClientRect = () => rect(100 + nativeBottom - viewport.scrollTop, 0)
   const nativeGroup = [...viewport.querySelectorAll<HTMLElement>('.wf-card--observation > .wf-head[aria-expanded="false"]')].at(-1)!
   expect(nativeGroup).toBeDefined()
   nativeGroup.getBoundingClientRect = () => rect(100 + (returning === 'Home' ? 100 : 1730) - viewport.scrollTop, 40)
   const last = Number(ids().at(-1)!.slice('record-'.length)); expect(last).toBeLessThan(2399)
-  await act(async () => { observations.open = true; observations.dispatchEvent(new Event('toggle')) })
   const original = observations.querySelector('.log-turn__body')!
   const segment = original.closest<HTMLElement>('[data-segment-key]')!
   expect(segment).not.toBeNull()
@@ -359,7 +362,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   await flush()
   expect(requests.length).toBeGreaterThan(start); expect(requests.length).toBeLessThanOrEqual(start + 3)
   expect(Number(ids().at(-1)!.slice('record-'.length))).toBeGreaterThan(last)
-  expect(observations.open).toBe(true); expect(original.isConnected).toBe(true)
+  expect(viewport.querySelector('.activity-feed__observations')).toBeNull(); expect(original.isConnected).toBe(true)
   expect(original.textContent?.trim() === captured[0]!.content!.trim(), 'The complete captured original stays readable').toBe(true)
   const ended = requests.length; await flush(); expect(requests).toHaveLength(ended)
  })
@@ -558,7 +561,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!
   Object.defineProperties(viewport, { clientHeight: { configurable: true, value: 200 }, scrollHeight: { configurable: true, value: 10000 } })
   viewport.getBoundingClientRect = () => rect(100, 200)
-  viewport.querySelector<HTMLElement>('[data-conversation-native-tail]')!.getBoundingClientRect = () => rect(10100 - viewport.scrollTop, 0)
+  for (const tail of viewport.querySelectorAll<HTMLElement>('[data-conversation-native-tail], [data-conversation-reading-tail]')) tail.getBoundingClientRect = () => rect(10100 - viewport.scrollTop, 0)
   await scrollTo(viewport, 9800); await scrollTo(viewport, 500); await flush()
   const before = ids(), body = viewport.querySelector<HTMLElement>('[data-native-record-id="record-353"] .log-turn__body')!
   const beforeReads = requests.filter(request => request.limit === 100).length
@@ -584,7 +587,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   const before = ids(), viewport = container.querySelector<HTMLElement>('.activity-feed')!, body = viewport.querySelector<HTMLElement>('[data-native-record-id="record-353"] .log-turn__body')!
   Object.defineProperties(viewport, { clientHeight: { configurable: true, value: 200 }, scrollHeight: { configurable: true, value: 10000 } })
   viewport.getBoundingClientRect = () => rect(100, 200)
-  viewport.querySelector<HTMLElement>('[data-conversation-native-tail]')!.getBoundingClientRect = () => rect(10100 - viewport.scrollTop, 0)
+  for (const tail of viewport.querySelectorAll<HTMLElement>('[data-conversation-native-tail], [data-conversation-reading-tail]')) tail.getBoundingClientRect = () => rect(10100 - viewport.scrollTop, 0)
   await scrollTo(viewport, 9800)
   const original = vi.mocked(api.sessions.historyPage).getMockImplementation()!
   let failedReads = 0
