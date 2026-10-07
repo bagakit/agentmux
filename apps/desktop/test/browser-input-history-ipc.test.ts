@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { createHash } from 'node:crypto'
@@ -8,24 +9,27 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, BrowserInputHistoryTarget, BrowserInputHistoryScope, BrowserProfileSummary } from '../src/shared/contracts.js'
 
-type TestOwner = { workspaceId: string | null; profileId: string; url: string }
+type TestOwner = { workspaceId: string | null; storage: { mode: 'normal' | 'private'; profileId: string | null }; url: string }
 const bridge = vi.hoisted(() => ({
   root: '', api: null as AgentMuxPreloadApi | null,
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
-  invoke: vi.fn(), owners: new Map<string, TestOwner>(), defaultProfile: '',
+  invoke: vi.fn(), owners: new Map<string, TestOwner>(), defaultProfile: () => '',
   navigate: vi.fn(), manager: null as unknown
 }))
 vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
-  app: { getPath: () => bridge.root || tmpdir() },
+  app: { getPath: () => bridge.root || tmpdir(), getAppPath: () => process.cwd(), isPackaged: false },
   ipcMain: { handle: (channel: string, listener: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => bridge.handlers.set(channel, listener),
-    removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
+    removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn(), removeListener: vi.fn() },
-  webFrame: { getZoomFactor: () => 1 }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, session: {}
+  webFrame: { getZoomFactor: () => 1 }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, session: {}, safeStorage: {}
 }))
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} } }))
-vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
+// Unrelated connector startup must not open the person's durable connection store.
+vi.mock('../src/main/connector-host.js', () => ({ createDesktopConnections: async () => ({
+  connections: { list: async () => [] }, secrets: {}, close: async () => {}
+}) }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 vi.mock('../src/main/browser-view-manager.js', async original => {
   const actual = await original<typeof import('../src/main/browser-view-manager.js')>()
@@ -33,7 +37,7 @@ vi.mock('../src/main/browser-view-manager.js', async original => {
     constructor(...args: ConstructorParameters<typeof actual.BrowserViewManager>) {
       super(...args)
       bridge.manager = this
-      bridge.defaultProfile = args[1].defaultProfileId()
+      bridge.defaultProfile = () => args[1].defaultProfileId()
       // Only the native page substrate is a Source double. The production scope getter below stays real.
       ;(this as unknown as { entries: Map<string, TestOwner> }).entries = bridge.owners
     }
@@ -42,7 +46,7 @@ vi.mock('../src/main/browser-view-manager.js', async original => {
       if (!owner) throw new Error('Unknown test native page')
       bridge.navigate(id, text)
       owner.url = text
-      return { id, profileId: owner.profileId, url: text } as import('../src/shared/contracts.js').BrowserSnapshot
+      return { id, mode: owner.storage.mode, profileId: owner.storage.profileId, url: text } as import('../src/shared/contracts.js').BrowserSnapshot
     }
     dispose() { bridge.owners.clear(); super.dispose() }
   } }
@@ -50,6 +54,7 @@ vi.mock('../src/main/browser-view-manager.js', async original => {
 
 import { AgentMuxMemoryAgentSessionStore } from '@agentmux/core'
 import { RuntimeController } from '../src/main/runtime-controller.js'
+import { ScratchTopics } from '../src/main/scratch-topics.js'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { registerIpc } from '../src/main/ipc.js'
 import '../src/preload/index.js'
@@ -59,7 +64,7 @@ const channels = ['browser:listInputHistory', 'browser:recordInputHistory', 'bro
 afterEach(async () => {
   vi.restoreAllMocks()
   bridge.navigate.mockClear()
-  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true })))
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, maxRetries: 3, retryDelay: 50 })))
 })
 
 async function fixture() {
@@ -73,8 +78,8 @@ async function fixture() {
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] })
   const sender = Object.assign(new EventEmitter(), { id: 732, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
   const dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
-    runtime, configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
-    scratchTopics: {} as never, workspaceFiles: { dispose: async () => {} } as never })
+    runtime, configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never, progressLoops: { subscribe: () => () => {} } as never,
+    scratchTopics: new ScratchTopics(), workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as never })
   const invoke = async (channel: string, values: unknown[], actualSender: unknown = sender) => {
     const handler = bridge.handlers.get(channel)
     expect(handler, `Actual registered channel missing: ${channel}`).toBeTypeOf('function')
@@ -86,15 +91,37 @@ async function fixture() {
   expect(profiles.length).toBeGreaterThan(0)
   const defaultProfile = profiles.find(profile => profile.isDefault)
   expect(defaultProfile).toBeDefined()
-  expect(defaultProfile!.id).toBe(bridge.defaultProfile)
-  bridge.owners.set('history-page', { workspaceId: 'resource-workspace', profileId: defaultProfile!.id, url: 'about:blank' })
+  expect(defaultProfile!.id).toBe(bridge.defaultProfile())
+  bridge.owners.set('history-page', { workspaceId: 'resource-workspace', storage: { mode: 'normal', profileId: defaultProfile!.id }, url: 'about:blank' })
   const target: BrowserInputHistoryTarget = { kind: 'browser', browserId: 'history-page', profileId: defaultProfile!.id }
   const scope: BrowserInputHistoryScope = { workspaceId: 'resource-workspace', profileId: defaultProfile!.id }
   const path = join(root, 'browser-input-history', `${createHash('sha256').update(JSON.stringify([scope.workspaceId, scope.profileId])).digest('hex')}.json`)
-  return { root, config, sender, invoke, api: bridge.api!.browser, target, scope, path, dispose }
+  const complete = async () => {
+    try { await dispose() }
+    catch (error) {
+      if (error instanceof AggregateError) throw new AggregateError(error.errors, error.errors.map(item => `${item.message}: ${item.cause}`).join('\n'))
+      throw error
+    }
+  }
+  return { root, config, sender, invoke, api: bridge.api!.browser, target, scope, path, dispose: complete }
 }
 
 describe('actual preload and registered Main input-history path', () => {
+  it('private input does not read or write persistent history, through actual preload and Main handlers', async () => {
+    const f = await fixture()
+    try {
+      await f.api.recordInputHistory(f.target, 'normal-kept')
+      const before = await readFile(f.path, 'utf8'), files = await readdir(join(f.root, 'browser-input-history'))
+      bridge.owners.set('private-input', { workspaceId: 'resource-workspace', storage: { mode: 'private', profileId: null }, url: 'about:blank' })
+      const target: BrowserInputHistoryTarget = { kind: 'browser', browserId: 'private-input', profileId: null }
+      expect(await f.api.listInputHistory(target)).toEqual({ scope: { workspaceId: 'resource-workspace', profileId: null }, entries: [] })
+      const recorded = await f.api.recordInputHistory(target, 'private-secret-input')
+      expect(await readFile(f.path, 'utf8'), 'private input must not change the real persistent history bytes').toBe(before)
+      expect(recorded).toMatchObject({ entries: [], outcome: 'private' })
+      expect(await readdir(join(f.root, 'browser-input-history'))).toEqual(files)
+      expect((await f.api.listInputHistory(f.target)).entries.map(row => row.text)).toEqual(['normal-kept'])
+    } finally { await f.dispose() }
+  })
   it('round-trips real durable history through the original resource Workspace, not another display location', async () => {
     const f = await fixture()
     try {
@@ -120,7 +147,7 @@ describe('actual preload and registered Main input-history path', () => {
       expect((await f.api.recordInputHistory(launcher, 'before create search')).scope).toEqual(f.scope)
       const profile: BrowserProfileSummary = await f.api.createProfile('Other History Profile')
       expect(profile.id).not.toBe(f.scope.profileId)
-      bridge.owners.get('history-page')!.profileId = profile.id
+      bridge.owners.get('history-page')!.storage.profileId = profile.id
       await expect(f.api.listInputHistory(f.target)).rejects.toThrow('Profile changed')
       const switched = { ...f.target, profileId: profile.id } as BrowserInputHistoryTarget
       const actual = await f.api.recordInputHistory(switched, 'other profile input')
@@ -167,7 +194,7 @@ describe('actual preload and registered Main input-history path', () => {
       await f.api.navigate('history-page', 'normal navigation still allowed')
       expect(bridge.navigate).toHaveBeenCalledExactlyOnceWith('history-page', 'normal navigation still allowed')
       expect(await readFile(f.path)).toEqual(raw)
-      expect(bridge.owners.get('history-page')).toEqual({ ...f.scope, url: 'normal navigation still allowed' })
+      expect(bridge.owners.get('history-page')).toEqual({ workspaceId: f.scope.workspaceId, storage: { mode: 'normal', profileId: f.scope.profileId }, url: 'normal navigation still allowed' })
     } finally { await f.dispose() }
   })
 })
