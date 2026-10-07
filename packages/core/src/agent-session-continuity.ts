@@ -6,6 +6,7 @@ import type {
   AgentMuxRunRef,
   AgentNativeSessionHandle
 } from './types.js'
+import type { AgentPromptInputKey } from './agent-prompt-condition.js'
 import { isAgentActivityStatusSource } from './agent-status-freshness.js'
 
 /** Host-independent policy. Callers persist only authored fields; each admitted operation freezes this complete value. */
@@ -53,6 +54,43 @@ export function resolveAgentContinuityReminder(policy: AgentMuxContinuityPolicy)
 }
 
 export type AgentMuxContinuityPendingReason = 'runtime-unverified' | 'active-manual' | 'active-delay' | 'idle-unknown' | 'not-active' | 'idle-window-expired' | 'resume-disabled' | 'provider-unverified' | 'operation-unconfirmed'
+/** Each selected part shares one physical input and its actual delivery receipt. */
+export type AgentMuxContinuityInputPart = {
+  selected: boolean
+  status: 'not-selected' | 'waiting' | 'dispatching' | 'unknown' | 'accepted' | 'not-applied' | 'superseded'
+  text: string
+  digest: string
+  receiptRef?: AgentPromptInputKey
+}
+export type AgentMuxContinuityPreviousInput = {
+  /** Only the original typed prompt owner is classified; raw historical input is not replayed. */
+  scope: 'typed-prompt'
+  outcome: 'none' | 'unknown' | 'terminal-confirmed' | 'native-admitted' | 'not-applied'
+  key?: AgentPromptInputKey
+}
+export type AgentMuxContinuityInputDelivery = {
+  context: {
+    agentSessionId: string
+    previousRun: AgentMuxRunRef
+    newRun: AgentMuxRunRef
+    nativeTarget: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
+    interruptedWorking: true
+    runEvidence: AgentMuxContinuityOperation['evidence']
+    previousInput: AgentMuxContinuityPreviousInput
+  }
+  key: Extract<AgentPromptInputKey, { kind: 'prompt' }>
+  /** Captured in the same lifecycle commit as the recovered Run. Missing is unknown. */
+  initialInputByte?: number
+  /** Last contiguous, confirmed terminal-protocol ACK; never adopted from the current cursor. */
+  protocolInput?: { operationId: string; startByte: number; endByte: number }
+  dispatchOwner?: string
+  phase: 'waiting' | 'dispatching' | 'unknown' | 'accepted' | 'not-applied' | 'superseded'
+  reason: string
+  observedAt: number
+  reminder: AgentMuxContinuityInputPart
+  continuation: AgentMuxContinuityInputPart
+  receipt?: { key: AgentPromptInputKey; status: 'terminal-confirmed' | 'native-admitted' | 'not-applied' | 'unknown'; observedAt: number }
+}
 export type AgentMuxContinuityOperation = {
   operationId: string
   agentSessionId: string
@@ -73,6 +111,8 @@ export type AgentMuxContinuityOperation = {
   error?: string
   /** New inputs, independent of old drafts and unknown earlier input; actual delivery has its own owner. */
   recoveryInputs?: { reminder: string; continuation: string }
+  previousInput?: AgentMuxContinuityPreviousInput
+  recoveryDelivery?: AgentMuxContinuityInputDelivery
 }
 
 export function normalizeAgentContinuityOperation(value: unknown): AgentMuxContinuityOperation {
@@ -86,6 +126,17 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
     !op.evidence || typeof op.evidence.kind !== 'string' || op.newRun && typeof op.newRun.runId !== 'string' ||
     op.nativeTarget && (op.nativeTarget.kind !== 'provider' || typeof op.nativeTarget.providerId !== 'string' || typeof op.nativeTarget.sessionId !== 'string') ||
     op.recoveryInputs && (typeof op.recoveryInputs.reminder !== 'string' || typeof op.recoveryInputs.continuation !== 'string')) throw new TypeError('Invalid continuity operation.')
+  const delivery = op.recoveryDelivery
+  if (delivery && (!delivery.context || delivery.context.agentSessionId !== op.agentSessionId || delivery.context.newRun?.runId !== op.newRun?.runId ||
+    delivery.context.previousRun?.runId !== op.previousRun.runId || delivery.context.interruptedWorking !== true ||
+    !delivery.context.nativeTarget || !delivery.context.runEvidence || !delivery.context.previousInput || !delivery.key || delivery.key.kind !== 'prompt' || delivery.key.agentSessionId !== op.agentSessionId ||
+    delivery.key.expectedRun?.runId !== op.newRun?.runId || typeof delivery.key.submissionId !== 'string' ||
+    !['waiting', 'dispatching', 'unknown', 'accepted', 'not-applied', 'superseded'].includes(delivery.phase) ||
+    typeof delivery.reason !== 'string' || !Number.isSafeInteger(delivery.observedAt) || delivery.observedAt < 0 ||
+    delivery.initialInputByte !== undefined && (!Number.isSafeInteger(delivery.initialInputByte) || delivery.initialInputByte < 0) ||
+    [delivery.reminder, delivery.continuation].some(part => !part || typeof part.selected !== 'boolean' || typeof part.text !== 'string' ||
+      typeof part.digest !== 'string' || !['not-selected', 'waiting', 'dispatching', 'unknown', 'accepted', 'not-applied', 'superseded'].includes(part.status) || part.receiptRef && JSON.stringify(part.receiptRef) !== JSON.stringify(delivery.key)) ||
+    delivery.receipt && JSON.stringify(delivery.receipt.key) !== JSON.stringify(delivery.key))) throw new TypeError('Invalid continuity input delivery.')
   return { ...structuredClone(op), policy: normalizeAgentContinuityPolicy(op.policy) }
 }
 

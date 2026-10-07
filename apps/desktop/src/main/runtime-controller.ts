@@ -323,6 +323,7 @@ function projectSession(
       ...(semanticFacts ? { semanticStatus: structuredClone(semanticFacts) } : {}),
       ...(subject.agentSession.currentActivity ? { currentActivity: structuredClone(subject.agentSession.currentActivity) } : {}),
       ...(subject.agentSession.continuity ? { continuity: structuredClone(subject.agentSession.continuity) } : {}),
+      ...(subject.agentSession.continuityOperations ? { continuityOperations: structuredClone(subject.agentSession.continuityOperations) } : {}),
       hostId: subject.hostId,
       workspacePath: subject.workspacePath,
       label: agentFallbackLabel(config, subject),
@@ -935,6 +936,7 @@ export class RuntimeController {
           capabilities: capabilitiesFor(session.providerId),
           ...(session.semanticStatus ? { semanticStatus: structuredClone(session.semanticStatus) } : {}),
           ...(session.continuity ? { continuity: structuredClone(session.continuity) } : {}),
+          ...(session.continuityOperations ? { continuityOperations: structuredClone(session.continuityOperations) } : {}),
           ...(session.terminalCapability
             ? { terminalCapability: structuredClone(session.terminalCapability) }
             : {}),

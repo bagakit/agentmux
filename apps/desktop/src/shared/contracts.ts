@@ -1055,6 +1055,7 @@ export type SessionSnapshot = SessionSnapshotBase & (
       /** Live Core activity observation; it never represents task completion. */
       currentActivity?: AgentMuxAgentSession['currentActivity']
       continuity?: AgentMuxAgentSession['continuity']
+      continuityOperations?: AgentMuxAgentSession['continuityOperations']
       /** Core-owned terminal capability fact; absent means no active degradation marker. */
       terminalCapability?: AgentTerminalCapabilityState
       terminalPromptDelivery?: AgentTerminalPromptDeliveryState
@@ -1197,6 +1198,7 @@ export type AgentSessionRecoveryCandidate = {
   /** Core's last native semantic state; missing entry time remains unknown. */
   semanticStatus?: AgentStatus
   continuity?: AgentMuxAgentSession['continuity']
+  continuityOperations?: AgentMuxAgentSession['continuityOperations']
   terminalCapability?: AgentTerminalCapabilityState
   label: string
   createdAt: number

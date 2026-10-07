@@ -1,3 +1,4 @@
+import { AgentSessionContinuityInputs, createContinuityInputDelivery } from './agent-session-continuity-input.js'
 import { missingExecutableCause } from './executable-diagnostics.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { parseConversationCheckpoint, parseConversationChangesPage, type ConversationCheckpoint, type ConversationChangesPage } from './conversation-changes.js'
@@ -89,7 +90,7 @@ import { advanceDelivery, type AgentThread } from './agent-message.js'
 import type { AgentMuxExecutorProbeResult } from './control.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from './agent-prompt-budget.js'
-import { agentPromptCondition, agentPromptInputId, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey,
+import { agentPromptCondition, agentPromptInputId, agentPromptNotApplied, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey,
   type AgentPromptAdmissionIntent, type AgentPromptInputKey, type AgentPromptCondition } from './agent-prompt-condition.js'
 import { agentTurnEndEvidence, cloneSession, sameRun } from './agent-session-identity.js'
 import { invalidateAgentIdleEvidence, transitionAgentSemanticStatus } from './agent-semantic-state.js'
@@ -878,6 +879,8 @@ export class AgentMuxClient {
   private readonly inputWaitingRecipients = new Map<string, { pending: Promise<void>; again: boolean }>()
   private inputWaitingDisposed = false
   private readonly inputWaitingUnsubscribe: () => void
+  private readonly continuityInputs: AgentSessionContinuityInputs
+  private readonly continuityInputsUnsubscribe: () => void
   private readonly publisher = new AgentMuxClientEventPublisher()
   private readonly acp: AgentMuxAcpBridge
   private readonly hookServer: AgentHookServer
@@ -1130,6 +1133,30 @@ export class AgentMuxClient {
       updateExactAgentSession: (agentSessionId, expectedRun, update, futureIntentId, author) =>
         this.updateExactAgentSession(agentSessionId, expectedRun, update, futureIntentId, author)
     })
+    this.continuityInputs = new AgentSessionContinuityInputs({ providers: this.providers,
+      read: id => this.registry.get(id),
+      status: async session => { const run = await this.kernel.status(session.run.runId); this.assertAgentRun(session, run); return run },
+      update: async (id, operationId, update) => {
+        const current = this.registry.get(id)
+        const next = await this.updateExactAgentSession(id, current.run, value => {
+          const operation = value.continuityOperations?.[operationId]
+          if (!operation?.recoveryDelivery) throw new AgentMuxError('Original continuity input plan is unavailable.', 'CONTINUITY_INPUT_UNCONFIRMED')
+          const receipt = structuredClone(operation)
+          update(receipt.recoveryDelivery!)
+          return { ...value, updatedAt: Math.max(value.updatedAt + 1, Date.now()), continuityOperations: { ...value.continuityOperations, [operationId]: receipt },
+            ...(value.continuity?.operationId === operationId ? { continuity: receipt } : {}) }
+        })
+        this.publishSession(next)
+      },
+      inspect: key => this.inspectAgentPromptSubmission(key),
+      submit: (input, context) => this.submitAgentPrompt(input, context),
+      failed: (id, error) => this.publisher.publish({ type: 'agent-error', agentSessionId: id, code: 'CONTINUITY_INPUT_UNCONFIRMED',
+        message: `Recovery input observation is unconfirmed. The original plan and healthy Agent remain available. Inspect or recover the same Session to rejoin. ${error instanceof Error ? error.message : String(error)}`,
+        evidence: { source: 'agentmux', observedAt: Date.now() } })
+    })
+    this.continuityInputsUnsubscribe = this.publisher.onStatusEvent(event => {
+      if (event.type === 'agent-session') this.continuityInputs.observe(this.registry.get(event.session.agentSessionId))
+    })
   }
 
   async connect(): Promise<void> {
@@ -1336,6 +1363,7 @@ export class AgentMuxClient {
       if (!this.kernel.isConnected()) throw new AgentMuxError('Connection changed during recovery observation.', 'CTXMUX_DISCONNECTED')
       this.connectionNeedsObservation = false
       this.connectionHealthySince = Date.now()
+      this.continuityInputs.restore(this.registry.list())
       for (const session of this.registry.list()) {
         if (runs.some(run => run.runId === session.run.runId && run.state.type === 'running')) {
           this.queueNativeIdentityCapture(session)
@@ -1862,6 +1890,8 @@ export class AgentMuxClient {
   }
 
   async dispose(): Promise<void> {
+    await this.continuityInputs.dispose()
+    this.continuityInputsUnsubscribe()
     for (const timer of this.agentContinuityTimers.values()) clearTimeout(timer)
     this.agentContinuityTimers.clear()
     this.inputWaitingDisposed = true
@@ -4538,6 +4568,7 @@ export class AgentMuxClient {
     this.agentContinuityTails.set(input.agentSessionId, tail)
     try {
       await operation
+      if (result.kind === 'resumed' || result.kind === 'reattachable') this.continuityInputs.track(this.registry.get(input.agentSessionId))
       return result
     } finally {
       if (this.agentContinuityTails.get(input.agentSessionId) === tail) {
@@ -4853,6 +4884,8 @@ export class AgentMuxClient {
       }
       if (continuity?.operationId === input.operationId && continuity.kind === 'starting') {
         next.continuity = { ...continuity, kind: 'resumed', newRun: { ...next.run }, observedAt: Date.now() }
+        const recoveryDelivery = createContinuityInputDelivery(next.continuity, run.acceptedInputBytes ?? undefined)
+        if (recoveryDelivery) next.continuity.recoveryDelivery = recoveryDelivery
         next.continuityOperations = { ...previous?.continuityOperations, [input.operationId]: next.continuity }
       }
       delete next.observedNativeHandle
@@ -5044,6 +5077,8 @@ export class AgentMuxClient {
       'terminalOutputChannel', 'semanticStatus', 'pendingInteraction'] as const) delete next[key]
     if (prepared.continuity) {
       next.continuity = { ...prepared.continuity, kind: 'resumed', newRun: { ...next.run }, observedAt: Date.now() }
+      const recoveryDelivery = createContinuityInputDelivery(next.continuity)
+      if (recoveryDelivery) next.continuity.recoveryDelivery = recoveryDelivery
       delete next.continuity.nextActionAt
       next.continuityOperations = { ...prepared.continuityOperations, [prepared.continuity.operationId]: next.continuity }
     }
@@ -5114,7 +5149,10 @@ export class AgentMuxClient {
       if (current) {
         try {
           current = await this.registry.update(current.agentSessionId, current.run, value => ({ ...value,
-            continuity: structuredClone(receipt), continuityOperations: { ...value.continuityOperations, [receipt.operationId]: structuredClone(receipt) } }))
+            continuity: { ...structuredClone(receipt), ...(value.continuityOperations?.[receipt.operationId]?.recoveryDelivery
+              ? { recoveryDelivery: value.continuityOperations[receipt.operationId]!.recoveryDelivery! } : {}) },
+            continuityOperations: { ...value.continuityOperations, [receipt.operationId]: { ...structuredClone(receipt),
+              ...(value.continuityOperations?.[receipt.operationId]?.recoveryDelivery ? { recoveryDelivery: value.continuityOperations[receipt.operationId]!.recoveryDelivery! } : {}) } } }))
           this.publishSession(current)
         } catch (error) {
           receipt.error = `Continuity receipt persistence is unconfirmed. ${error instanceof Error ? error.message : String(error)}`
@@ -5122,6 +5160,7 @@ export class AgentMuxClient {
             message: receipt.error, evidence: { source: 'agentmux', run: input.expectedRun, observedAt: now } })
         }
       }
+      if (current?.continuityOperations?.[receipt.operationId]?.recoveryDelivery) receipt.recoveryDelivery = structuredClone(current.continuityOperations[receipt.operationId]!.recoveryDelivery!)
       this.scheduleAgentContinuity(input, receipt)
       return { ...result, ...((result.kind === 'resumed' || result.kind === 'reattachable') && current ? { session: this.projectSession(current) } : {}), continuity: structuredClone(receipt) }
     }
@@ -5216,6 +5255,10 @@ export class AgentMuxClient {
     }
     receipt.kind = 'starting'; receipt.reason = admission?.kind === 'resume' ? admission.reason : 'explicit-request'; receipt.evidence = evidence
     receipt.nativeTarget = structuredClone(decision.nativeHandle)
+    const oldInput = current?.promptCompletionAdmission
+    receipt.previousInput = { scope: 'typed-prompt', outcome: !oldInput ? 'none' : current && agentPromptNotApplied(current) ? 'not-applied'
+      : oldInput.acknowledged ? oldInput.transport === 'native' ? oldInput.native.outcome === 'admitted' ? 'native-admitted' : 'unknown' : 'terminal-confirmed' : 'unknown',
+      ...(oldInput?.inputKey ? { key: structuredClone(oldInput.inputKey) } : {}) }
     receipt.interruptedWorking = admission?.kind === 'resume' && admission.interruptedWorking
     receipt.recoveryInputs = { reminder: receipt.trigger !== 'input' && admission?.kind === 'resume' && admission.interruptedWorking ? resolveAgentContinuityReminder(policy) : '',
       continuation: receipt.trigger !== 'input' && admission?.kind === 'resume' && admission.interruptedWorking && policy.continuationEnabled ? policy.continuationPrompt : '' }
@@ -7738,6 +7781,12 @@ export class AgentMuxClient {
       // are not a semantic answer and must not settle or approve that request.
       // This lane already read the current Run. Another public Client may have
       // accepted input since our last ACK; that local cursor cannot start new bytes.
+      if (source === 'user') {
+        try { await this.continuityInputs.userInput(session.agentSessionId, session.run.runId) }
+        catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+          code: 'CONTINUITY_INPUT_UNCONFIRMED', message: `Automatic recovery input priority persistence is unconfirmed. Your terminal input remains available. ${error instanceof Error ? error.message : String(error)}`,
+          evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } }) }
+      }
       const expectedByte = run.acceptedInputBytes
       if (expectedByte === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
@@ -7800,6 +7849,14 @@ export class AgentMuxClient {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
       this.agentInputCursors.set(session.agentSessionId, result.run.acceptedInputBytes)
+      if (source === 'terminal-protocol' && result.run.runId === session.run.runId && result.run.pid === run.pid &&
+          result.appliedByteRange.startByte === expectedByte && result.appliedByteRange.endByte === expectedByte + Buffer.byteLength(data) &&
+          result.run.acceptedInputBytes === result.appliedByteRange.endByte) {
+        try { await this.continuityInputs.protocolAccepted(session.agentSessionId, session.run.runId, operationId, result.appliedByteRange) }
+        catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+          code: 'CONTINUITY_INPUT_UNCONFIRMED', message: `Terminal protocol input succeeded, but recovery input boundary persistence is unconfirmed. Ordinary input remains available. ${error instanceof Error ? error.message : String(error)}`,
+          evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } }) }
+      }
       // Raw bytes may edit a draft or control the terminal. Their ACK cannot revoke
       // a native task state. Semantic submission owns completion consumption;
       // Provider events own task transitions, independently of this input receipt.
