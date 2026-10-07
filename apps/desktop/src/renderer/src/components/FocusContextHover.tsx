@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { FocusContextIdentity } from '../lib/focus-context-identity'
 import { WorkbenchTabGlyph } from './WorkbenchTopology'
@@ -22,10 +22,11 @@ import { FocusContextStateMark } from './FocusContextState'
 // One transient reading surface, with no identity data or retained registry.
 let dismissCurrentPreview: (() => void) | null = null
 
-/** Only complete, budget-sized prose is parsed. A clipped excerpt stays literal. */
+/** Full held text stays readable; only bounded complete prose enters Markdown parsing. */
 function ReadingBody({ reading }: { reading: { text: string; truncated: boolean } }) {
-  return <div className="focus-context-hover__prose" data-reading-format={reading.truncated ? 'excerpt' : 'markdown'}>
-    {reading.truncated ? <p>{reading.text}</p> : <AgentMarkdown content={reading.text} readOnly />}
+  const literal = reading.truncated || reading.text.length > 8000
+  return <div className="focus-context-hover__prose" data-reading-format={reading.truncated ? 'excerpt' : literal ? 'plain' : 'markdown'}>
+    {literal ? <p>{reading.text}</p> : <AgentMarkdown content={reading.text} readOnly />}
   </div>
 }
 
@@ -58,7 +59,7 @@ function FocusContextInputs({ context }: { context: FocusContext }) {
     {messages.length ? <ol>{messages.map(message => {
       const raw = message.content.trim()
       const body = parseAgentMuxMessagePrefix(raw)?.body.trim() || raw
-      const reading = { text: body ? clampStep(body.slice(0, 1000), 'head', 360) : 'Non-text input', truncated: body.length > 360 }
+      const reading = { text: body || 'Non-text input', truncated: false }
       const recorded = message.recordedAt !== undefined && Number.isFinite(message.recordedAt) ? new Date(message.recordedAt) : null
       const date = recorded && Number.isFinite(recorded.getTime()) ? recorded : null
       const time = date ? date.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Time unknown'
@@ -105,12 +106,12 @@ export function useFocusContextHover(context: FocusContext, requested: boolean, 
   const anchor = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null)
   const intent = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const readingFocus = useRef(false)
   const restoringFocus = useRef(false)
   const [open, setOpen] = useState(false)
   const id = useId()
-  const scope = JSON.stringify([context.id, context.runId, context.name, context.state, context.detail,
-    context.recap, context.workspacePath, context.originAddress])
   const close = useCallback((): void => {
+    readingFocus.current = false
     clearTimeout(intent.current); clearTimeout(departure.current)
     if (dismissCurrentPreview === close) dismissCurrentPreview = null
     setOpen(false)
@@ -119,10 +120,11 @@ export function useFocusContextHover(context: FocusContext, requested: boolean, 
   function show() {
     clearTimeout(intent.current); keepOpen()
     // This guards a transient tooltip only, never the original Agent or card action.
-    if (!enabled || !anchor.current?.isConnected || anchor.current.closest('[inert]') || document.visibilityState === 'hidden') return
+    if (!enabled || !anchor.current?.isConnected || anchor.current.closest('[inert]') || document.visibilityState === 'hidden') return false
     if (dismissCurrentPreview !== close) dismissCurrentPreview?.()
     dismissCurrentPreview = close
     setOpen(true)
+    return true
   }
   function showSoon() { clearTimeout(intent.current); keepOpen(); if (enabled) intent.current = setTimeout(show, 180) }
   function hideSoon() {
@@ -138,7 +140,9 @@ export function useFocusContextHover(context: FocusContext, requested: boolean, 
     // intentional focus or hover should still disclose the current card.
     queueMicrotask(() => { restoringFocus.current = false })
   }
-  useLayoutEffect(() => { close() }, [scope, enabled, close])
+  useLayoutEffect(() => { close() }, [context.id, context.hostId, context.runId, context.name, context.state, context.detail,
+    context.recap?.text, context.recap?.source, context.recap?.origin, context.recap?.reading?.text,
+    context.recap?.reading?.truncated, context.workspacePath, context.originAddress, enabled, close])
   useLayoutEffect(() => () => {
     clearTimeout(intent.current); clearTimeout(departure.current)
     if (dismissCurrentPreview === close) dismissCurrentPreview = null
@@ -149,9 +153,15 @@ export function useFocusContextHover(context: FocusContext, requested: boolean, 
     const surface = panel.current
     const update = async () => {
       const { x, y } = await computePosition(anchor.current!, surface, {
-        strategy: 'fixed', placement: 'bottom-start', middleware: [offset(8), flip({ padding: 10 }), shift({ padding: 10 })]
+        strategy: 'fixed', placement: 'bottom-start', middleware: [offset(8), flip({ padding: 10 }), shift({ padding: 10, crossAxis: true })]
       })
-      if (current) Object.assign(surface.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
+      if (current) {
+        Object.assign(surface.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
+        if (readingFocus.current) {
+          readingFocus.current = false
+          if (document.activeElement === anchor.current && !anchor.current?.closest('[inert]')) surface.focus({ preventScroll: true })
+        }
+      }
     }
     const stop = autoUpdate(anchor.current, surface, () => { void update() })
     return () => { current = false; stop() }
@@ -186,7 +196,7 @@ export function useFocusContextHover(context: FocusContext, requested: boolean, 
   const serviceVisible = !context.detailIsRecap && context.detailKind === 'service'
   const activitySupplement = !context.detailIsRecap && !serviceVisible && Boolean(context.recap)
   const preview = open && host ? createPortal(<div ref={panel} id={id} className="focus-context-hover" role="region"
-    data-state="open" aria-label={`Full context for ${context.name}`} style={{ visibility: 'hidden' }}
+    data-state="open" aria-label={`Full context for ${context.name}`} tabIndex={0} style={{ visibility: 'hidden' }}
     onPointerEnter={keepOpen} onPointerLeave={hideSoon} onFocus={keepOpen} onBlur={event => {
       if (event.relatedTarget instanceof Node && (panel.current?.contains(event.relatedTarget) || anchor.current?.contains(event.relatedTarget))) return
       hideSoon()
@@ -211,5 +221,10 @@ export function useFocusContextHover(context: FocusContext, requested: boolean, 
     <footer title={location} aria-label={location}><strong>{context.workspaceName}</strong><span>{path}</span></footer>
   </div>, host) : null
   return { anchor, describedBy: open ? id : undefined, preview, close, suppressRestoredFocus,
-    triggerEvents: { onPointerEnter: showSoon, onPointerLeave: hideSoon, onFocus: () => { if (!restoringFocus.current) show() }, onBlur: hideSoon, onPointerDown: close } }
+    triggerEvents: { 'aria-keyshortcuts': enabled ? 'ArrowDown' : undefined, onPointerEnter: showSoon, onPointerLeave: hideSoon, onFocus: () => { if (!restoringFocus.current) show() }, onBlur: hideSoon, onPointerDown: close, onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+      if (event.key !== 'ArrowDown' || !enabled) return
+      if (panel.current?.isConnected && panel.current.style.visibility === 'visible') {
+        event.preventDefault(); keepOpen(); panel.current.focus({ preventScroll: true })
+      } else if (show()) { event.preventDefault(); readingFocus.current = true }
+    } } }
 }

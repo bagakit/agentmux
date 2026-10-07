@@ -1,7 +1,6 @@
 import type { AgentNativeSessionCandidate, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { sessionUserMessageText } from '@agentmux/core/session-user-messages'
-import { clampStep } from '@agentmux/client-ui/activity-step-summary'
 import type { AgentSessionRecoveryCandidate, AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { resolveAgentName } from './display-name'
@@ -19,7 +18,7 @@ function excerpt(text: string | undefined): Pick<LauncherRecap, 'text' | 'displa
   const reading = parsedBody || text!.trim()
   const body = reading.replace(/\s+/gu, ' ').trim()
   return { text: clamp(value), ...(body && body !== value ? { displayText: clamp(body) } : {}),
-    reading: { text: clampStep(reading.slice(0, 1000), 'head', 800), truncated: reading.length > 800 } }
+    reading: { text: reading, truncated: false } }
 }
 
 /** A recap is a labelled excerpt of observed conversation, never an invented summary. */
