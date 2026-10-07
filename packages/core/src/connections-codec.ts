@@ -1,4 +1,6 @@
 import { CONNECTION_SERVICE_RPC_METHODS, isConnectionServiceMethod, parseConnectionServiceParams, parseConnectionServiceResult } from './connection-service-codec.js'
+import { parseConnectionConfig, parseConnectionRecord } from './connection-record-codec.js'
+export { parseConnectionConfig, parseConnectionRecord, parseConnectionObservation } from './connection-record-codec.js'
 import { CONNECTION_PROFILE_RPC_METHODS, isConnectionProfileMethod, parseConnectionProfileParams, parseConnectionProfileResult } from './connection-profile-codec.js'
 import { CONNECTION_ENROLLMENT_RPC_METHODS, isConnectionEnrollmentMethod, parseConnectionEnrollmentParams, parseConnectionEnrollmentResult } from './connection-enrollment-codec.js'
 import { CONNECTION_DELIVERY_RPC_METHODS, isConnectionDeliveryMethod, parseConnectionDeliveryParams, parseConnectionDeliveryResult } from './connection-delivery-codec.js'
@@ -7,7 +9,7 @@ import { ROOM_BINDING_RPC_METHODS, isRoomBindingMethod, parseRoomBindingParams, 
 import { ROOM_PROVISIONING_RPC_METHODS, isRoomProvisioningMethod, parseRoomProvisioningParams, parseRoomProvisioningResult } from './room-provisioning-codec.js'
 import { ROOM_DISCOVERY_RPC_METHODS, isRoomDiscoveryMethod, parseRoomDiscoveryParams, parseRoomDiscoveryResult } from './room-discovery-codec.js'
 import { AgentMuxError } from './errors.js'
-import type { ConnectionConfig, ConnectionMethod, ConnectionObservation, ConnectionOperation, ConnectionParamsMap, ConnectionRecord, ConnectionResultMap } from './connections-contract.js'
+import type { ConnectionMethod, ConnectionOperation, ConnectionParamsMap, ConnectionResultMap } from './connections-contract.js'
 
 export const CONNECTION_RPC_METHODS = { ...CONNECTION_SERVICE_RPC_METHODS, ...CONNECTION_PROFILE_RPC_METHODS, ...CONNECTION_ENROLLMENT_RPC_METHODS, ...ROOM_DISCOVERY_RPC_METHODS, ...ROOM_PROVISIONING_RPC_METHODS, ...ROOM_BINDING_RPC_METHODS, ...CONNECTION_DELIVERY_RPC_METHODS, ...INGRESS_RPC_METHODS, 'connection.ls': 'long', 'connection.inspect': 'long', 'connection.configure': 'long', 'connection.test': 'long' } as const
 export const isConnectionMethod = (value: unknown): value is ConnectionMethod => typeof value === 'string' && Object.hasOwn(CONNECTION_RPC_METHODS, value)
@@ -21,25 +23,6 @@ function object(value: unknown, fields: string[]): Record<string, unknown> {
 function text(value: unknown): string { if (typeof value !== 'string' || !value.trim() || /[\0\r\n]/u.test(value)) fail(); return value as string }
 function identity(value: unknown): string { const result = text(value); if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(result)) fail(); return result }
 function revision(value: unknown): number { if (!Number.isSafeInteger(value) || (value as number) < 1) fail(); return value as number }
-export function parseConnectionConfig(value: unknown): ConnectionConfig {
-  const p = object(value, ['connectionId', 'adapterId', 'application', 'label', 'enabled', 'credentialRef'])
-  const app = object(p.application, ['domain', 'appId']), domain = text(app.domain)
-  if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain) || typeof p.enabled !== 'boolean') fail()
-  return { connectionId: identity(p.connectionId), adapterId: identity(p.adapterId), application: { domain, appId: identity(app.appId) }, label: text(p.label), enabled: p.enabled as boolean, credentialRef: identity(p.credentialRef) }
-}
-export function parseConnectionObservation(value: unknown): ConnectionObservation {
-  const p = object(value, ['authentication', 'transport', 'intake', 'delivery'])
-  const stage = (value: unknown) => {
-    const s = object(value, ['state', 'reason'])
-    if (!['unknown', 'ready', 'unavailable', 'disabled'].includes(s.state as string) || s.reason !== undefined && !['not-tested', 'credential-missing', 'adapter-unavailable', 'check-failed', 'not-started'].includes(s.reason as string)) fail()
-    return { state: s.state, ...(s.reason === undefined ? {} : { reason: s.reason }) } as ConnectionObservation['authentication']
-  }
-  return { authentication: stage(p.authentication), transport: stage(p.transport), intake: stage(p.intake), delivery: stage(p.delivery) }
-}
-export function parseConnectionRecord(value: unknown): ConnectionRecord {
-  const p = object(value, ['config', 'revision', 'observation'])
-  return { config: parseConnectionConfig(p.config), revision: revision(p.revision), observation: parseConnectionObservation(p.observation) }
-}
 function operation(value: unknown): ConnectionOperation {
   const p = object(value, ['operationId', 'status', 'connection'])
   if (p.status !== 'configured') fail()

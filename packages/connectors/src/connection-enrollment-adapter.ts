@@ -5,7 +5,7 @@ export interface EnrollmentSecrets extends WritableSecretPort {
   assertAvailable(): void | Promise<void>
   inspect(operationId: string): Promise<{ credentialRef: string } | null>
 }
-export type EnrollmentAdapterInput = Readonly<{ operationId: string; connectionId: string; attemptId: string; domain: string; label: string }>
+export type EnrollmentAdapterInput = Readonly<{ operationId: string; connectionId: string; attemptId: string; domain: string; label: string; preset?: Readonly<{ name: string; description?: string }> }>
 export type EnrollmentChallengeReceipt = {
   kind: 'pending'
   verificationUrl: string
