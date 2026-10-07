@@ -31,7 +31,7 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
 
   private configuration(config: ConnectionConfig): void {
     if (config.adapterId !== this.adapterId || !['open.feishu.cn', 'open.larksuite.com'].includes(config.application.domain)) feishuFailure('FEISHU_APPLICATION_INVALID')
-    if (!/^cli_[0-9a-fA-F]{16}$/u.test(config.application.appId)) feishuFailure('FEISHU_APPLICATION_INVALID')
+    feishuIdentity(config.application.appId)
   }
   private http(): HttpInstance {
     const transport: HttpInstance = this.options.http ?? defaultHttpInstance as unknown as HttpInstance
@@ -127,6 +127,7 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
       }
       receiver.ws = new WSClient({ appId: config.application.appId, appSecret: credential, domain: `https://${config.application.domain}`, httpInstance: this.http(), logger: safeLogger, loggerLevel: LoggerLevel.error })
       await receiver.ws.start({ eventDispatcher: dispatcher })
+      if (receiver.ws.getConnectionStatus().state === 'idle') feishuFailure('FEISHU_SDK_START_UNCONFIRMED')
       return {
         close,
         observation: () => {
