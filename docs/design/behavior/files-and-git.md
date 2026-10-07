@@ -16,7 +16,7 @@
 
 ## Explorer 与 Editor
 
-- 用户要求「完整重新设计 Explorer」：当前项目标题与 Explorer 标题合并以节省空间，项目路径去重，名称双击就能编辑，不再依赖行右侧老式 Edit／Delete；同时检查其他交互。文件树的共用项目头在收起后仍可读、可展开；文件、Branches、Changes 与新增 Git History 共享准确的 Selected Worktree／Host 上下文，不因整理 chrome 改变原选择、Tab／Region、草稿、执行焦点、布局或健康 Run。路径表示唯一沿[《路径显示与复制》](spaces-and-layout.md#路径显示与复制)，视觉与液态玻璃约束唯一见密度文档[《Explorer 与快捷输入区》](../presentation/files-and-git.md#explorer-与-editor-的共用头和列表)。
+- 用户要求「完整重新设计 Explorer」：当前项目标题与 Explorer 标题合并以节省空间，项目路径去重，名称双击就能编辑，不再依赖行右侧老式 Edit／Delete；同时检查其他交互。文件树的共用项目头在收起后仍可读、可展开；Files + Zones 的工作分区选择沿[《Space 的统一工作面框架》](spaces-and-layout.md#space-的统一工作面框架)，文件与 Git 查询／操作各自保留适用的准确 Host、资源 Workspace／worktree、仓库与引用范围，共用 chrome 不把 Zone 导航和 Git 引用选择混为一事，也不改变原选择、Tab／Region、草稿、执行焦点、布局或健康 Run。路径表示唯一沿[《路径显示与复制》](spaces-and-layout.md#路径显示与复制)，视觉与液态玻璃约束唯一见密度文档[《Explorer 与快捷输入区》](../presentation/files-and-git.md#explorer-与-editor-的共用头和列表)。
 - 名称单击选择、双击进入既有行内 Rename；文件图标／名称外的明确打开命中区与 Enter 打开文件，目录 disclosure 展开／收起，F2 和键盘／右键菜单继续可达。双击名称不能顺带重复打开、展开或启动拖拽；范围／切换多选仍只改选择，拖拽沿原单项 Move。移除名称右侧重复 Edit／Delete 动作，Rename／Delete 留在同一菜单与键盘入口；删除仍有准确对象与后果确认。改名开始即选中文件名主体，保留末尾扩展名；目录和无末尾扩展名文件（含 .env 这类单点前缀文件）选中全名，长名称从开头可读。行内名称编辑由可复用的通用输入控件承载选择、IME、Enter／Escape、失焦及等待／错误反馈，业务调用者继续持有准确对象、draft、提交与取消意图；Reusable 参考面提供实际可操作的同组件示例。Enter 与紧随的失焦只提交一次，组字确认不提交，等待中不重复写入；失败保留草稿，在仍属当前编辑意图时保留或返回输入焦点，新作用域／新意图不被旧失败抢回。通用控件不持有文件路径解析或写入，磁盘成功与原路径投影事务边界不变。
 
 - Explorer 以 Selected Worktree 为根，使用层级目录、文件夹优先排序、多选、键盘导航、Reveal、刷新和受 Workspace Root 约束的文件操作。Move 当前明确为单项操作：Pointer drag 在开始时收敛到被拖动项；Context Menu/`Shift+F10` 使用 `Move This Item to` 子菜单，并在执行时收敛到该项，不用多选外观暗示尚未实现的批量移动。
@@ -63,6 +63,14 @@
 - **扇出 v1 不自动合并胜者，不加入通用逐行批注**。扇出的状态比较与留一路、拆其余保持现有责任；已提交的两条分支差异复用下面 Git 源码控制的比较入口，不另建 Git owner 或 Review 系统。
 
 ## Git 源码控制与 PR
+
+Space 的 Git 工具与 Files + Zones／Agents 平级，在原侧栏内提供 Changes、History 与 Branches。Files + Zones 不再嵌套 Git 的三向切换；Branch/worktree 创建管理、比较、同步与完整源码控制保留在 Git 资源操作面，不因入口重排删除原能力。公共发现与导航继续使用同一 Space／Zone 身份，Git 查询与打开沿原 typed RPC／CLI／宿主 owner，不另建 Git 或 Zone 注册表。
+
+文件树与 Changes 的文件动作沿准确 Zone、资源及显示绑定抵达原对象；普通打开保留原格式默认动作，显式源码／Diff 不与普通打开混同。用户明确点击的目标输入意图由原 caret owner 承接，不能据此把公开文件导航的 focus 当作 caret 授权；公开导航与保输入合同只见[公共控制](public-control.md#agent-通过-cli-打开文件与控制原工作面)。异步发现或读取期间的后来导航、输入与原资源分别保留，不以同路径、首位置或迟到回执把工作面拉回旧 Zone。
+
+**Changes 的对象是准确 worktree，而不是选中的引用。** 默认消费所选 Zone 明确绑定的资源 Workspace／Host／目录，显示实际目录和当前 checkout 分支；Zone 的展示 Workspace 不能冒充执行资源。无明确 Zone 时使用该 Folder 原已确认的工作目录；已明确 Zone 但其资源未知时持续说明未知与恢复动作，不暗用项目主目录或其他 worktree 执行写入。文件树旁可显示同一资源的轻量改动摘要并直达 Git Changes，完整 Staged／Changes、stage／unstage／discard／commit／PR 动作只由原组件和事务 owner 执行。摘要未知不冒充零改动，也不关闭原文件与 Agent 工作面。
+
+History 与 Branches 的引用选择只表达原仓库内的查询／比较范围，不自动改变当前 Zone、Changes 目标、checkout、索引、执行 cwd 或 Agent 生命周期。Zone 显式切换后，Changes 与文件根转到该 Zone 的准确资源；旧资源的迟到结果不覆盖新目标，正在输入的提交说明按资源隔离保留，不跨 worktree 复用或丢弃。功能组切换与 Explorer 折叠保留同一资源的草稿和历史阅读范围；隐藏的 Git 面停止不相关读取，不为全部 Zone 轮询 Git，也不因无关 Session 输出重新建目录或读取历史。Git 不可用或普通非 Git 目录的说明留在 Git 工具中，不成为 Zone 导航前置。
 
 History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 提交历史的密度、分支颜色与连线》](../presentation/files-and-git.md#explorer-提交历史的密度分支颜色与连线)，每行图宽与标签适配见[《Git History 行内图宽与标签》](../presentation/files-and-git.md#git-history-行内图宽与标签)。收敛提交行只改变呈现，真实 Git 分支身份、固定分页、全部 parent 与未读边界仍沿本节；不能改变选中引用、已读历史、原 Workspace/Tab/Region、草稿或健康 Run。
 

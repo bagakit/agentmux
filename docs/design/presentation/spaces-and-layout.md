@@ -36,6 +36,8 @@ Settings 覆盖当前背景绑定时的原生 Browser 局部可见性与实体�
 
 框架职责、功能组、原内容复用与保护边界唯一见交互 SSOT[《Space 的统一工作面框架》](../behavior/spaces-and-layout.md#space-的统一工作面框架)。视觉按一级 Space 对象树、顶部二级功能切换与主区域的原 Zone 工作面建立清楚层级；二级功能切换与原 Tab 页签各有可辨作用域，类型差异沿同一控件和密度语言表达，不叠重复标题或额外导航层。
 
+Folder 的工具切换以 Files + Zones、Agents、Git 表达不同功能，沿原紧凑图标／液态选中面、tooltip 与完整可访问名称，不另加导航栏。Files + Zones 的 Zone 目录使用一处明确标题和连续 Selector 行，选中表示当前工作分区，Branch 与路径为识别信息，不再在该目录上方铺 Changes／History／Branches 切换或全仓库分支计数。普通目录与保留的未知 Zone 都有原位置和可读说明；空 Zone 不冒充没有 Git。文件上下文中的改动入口保持单行、安静且标明范围，不常驻展开第二份 Changes 列表。具体 Git 工具与范围呈现见[Git 工作面与渐进详情](files-and-git.md#git-工作面与渐进详情)。
+
 正常与窄窗都让树中当前位置、当前功能组和原正文动作可读可达；Zone、Tab、Region 不同加载层级沿原公共 chrome 呈现，低层级不套上层多余工具带。已有正文的未知与恢复说明留在原服务窗并让已可用的原内容仍可见可操作，无可见正文时沿[空工作面的默认呈现](#空工作面的默认呈现)。不以卡片墙、另造文件面板或专属 Tab 排布来包装一种 Space。具体身份、绑定与加载行为不在本页重复定义。
 
 ### Space 与 Focus 全局工作面
@@ -179,7 +181,7 @@ Chat 使用原 Tab，既有 Group 沿原工作面分组；Thread 使用原 Agent
 - Projects 与 Workspace tools 两个固定开关位于 macOS 红绿灯之后，只用 active treatment 表达开合，不翻转图标方向。
 - Session 顶层 Tabbar 是最上方的工作面平面：单 Pane 时与窗口顶行合并为 36px；分屏时由左上方首个 Pane 的 Tabbar 承载一次必要的窗口 chrome，其余 Pane 直接从同一顶边开始使用 31px Tabbar，不再给没有 Tab 的全局 chrome 行预留 36px。
 - Tool Dock header 与相邻顶行对齐。非交互品牌标记不进入功能按钮组。
-- Space tools 的工具图标已经表达当前选择，不在活动栏尾部再重复一份 `Files + Branches` 或 `Agents` 标题；图标的选中 treatment、tooltip 与可访问名称保留完整身份。该行右端只放当前工具的明确创建动作：Agents 使用可读 `+` 和完整可访问名，Files 沿现有 New File / New Folder 控件；不增一条通用创建栏。上下文行说明当前目录或工作线，不重复工具名称，长绝对路径进入 tooltip，不靠多层标题消耗树的可视高度。Browser 管理沿同一紧凑控件语言在当前内容旁可达，不为工具入口另叠标题或强制切换 Survey；入口归属只引用交互合同。创建作用域与失败恢复见交互合同[《Folder 与项目树》](../behavior/spaces-and-layout.md#folder-与项目树)。
+- Space tools 的工具图标已经表达当前选择，不在活动栏尾部再重复一份 `Files + Zones`、`Agents` 或 `Git` 标题；图标的选中 treatment、tooltip 与可访问名称保留完整身份。该行右端只放当前工具的明确创建动作：Agents 使用可读 `+` 和完整可访问名，Files 沿现有 New File / New Folder 控件；不增一条通用创建栏。上下文行说明当前目录或工作线，不重复工具名称，长绝对路径进入 tooltip，不靠多层标题消耗树的可视高度。Browser 管理沿同一紧凑控件语言在当前内容旁可达，不为工具入口另叠标题或强制切换 Survey；入口归属只引用交互合同。创建作用域与失败恢复见交互合同[《Folder 与项目树》](../behavior/spaces-and-layout.md#folder-与项目树)。
 - Tab DOM 始终保留在自己的 Pane owner 下；顶行合并不得改变 DnD、split 或 focus 的状态归属。
 - Workspace/Project 切换不以卸载 DOM 换取密度：非当前 Workbench 使用隐藏与停工状态保留 xterm/TUI attachment，回访时不出现 `Restoring terminal…` 或二次 loading；只有 Region/Workbench 真正关闭才销毁实例。窗口重启后的布局与 Session 恢复约束归交互合同，见 [`agentmux-desktop-interaction.md`](../agentmux-desktop-interaction.md)。
 - 资源密度采用有限 hot-retain：活动与近期使用的重资源 surface 保持 warm，长期隐藏或超过预算的 surface 才允许 cold-park；跨 Workspace 隐藏的 Workbench 仍保持 warm，避免项目切换制造二次 replay。具体保活/重建约束归交互合同，见 [`agentmux-desktop-interaction.md`](../agentmux-desktop-interaction.md)；本层只要求内存回收不能靠额外常驻缓存、不能让隐藏 surface 继续执行高频工作，并以同场景 owner count 与 working-set before/after 证明收益。
