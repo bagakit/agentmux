@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import '../../mobile/test/device-locks'
 import '../../mobile/test/mobile-lan-crypto.setup'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { act } from 'react'
