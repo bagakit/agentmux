@@ -234,6 +234,10 @@
       "types": "./dist/goal-delegation.d.ts",
       "import": "./dist/goal-delegation.js"
     },
+    "./goal-responsibility": {
+      "types": "./dist/goal-responsibility.d.ts",
+      "import": "./dist/goal-responsibility.js"
+    },
     "./conversation": {
       "types": "./dist/conversation.d.ts",
       "import": "./dist/conversation.js"
