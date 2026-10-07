@@ -6,6 +6,7 @@
  */
 @import './tokens.css';
 @import '@agentmux/client-ui/styles/theme-transition.css';
+@import '@agentmux/client-ui/styles/semantic-icons.css';
 @import './base.css';
 @import '@agentmux/client-ui/input/styles.css';
 @import './chrome.css';
