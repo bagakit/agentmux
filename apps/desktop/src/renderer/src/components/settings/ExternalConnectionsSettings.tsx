@@ -4,6 +4,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionConfigureInput, ConnectionObservation, ConnectionRecord, ConnectionStage } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
+import { BotEnrollmentPane, useBotEnrollment } from './BotEnrollmentPane'
 
 const LinkIcon = semanticIconComponent('action.open-external')
 const CheckIcon = semanticIconComponent('status.completed')
@@ -32,18 +33,22 @@ function ConnectionDiagnostics({ record }: { record: ConnectionRecord }) {
 
 export function ExternalConnectionsSettings({ active }: { active: boolean }) {
   const [records, setRecords] = useState<ConnectionRecord[]>([]), [issue, setIssue] = useState(''), [busy, setBusy] = useState(false)
-  const [view, setView] = useState<'loading' | 'library' | 'new' | 'saved' | 'edit'>('loading')
+  const [view, setView] = useState<'loading' | 'library' | 'enrollment' | 'new' | 'saved' | 'edit'>('loading')
   const [saveNotice, setSaveNotice] = useState(''), [checking, setChecking] = useState<string | null>(null), [checks, setChecks] = useState<Record<string, { revision: number; text: string }>>({})
   const [selected, setSelected] = useState<ConnectionRecord | null>(null), [label, setLabel] = useState(''), [appId, setAppId] = useState(''), [domain, setDomain] = useState('open.feishu.cn'), [secret, setSecret] = useState(''), [enabled, setEnabled] = useState(true)
   const [saveAbsent, setSaveAbsent] = useState(false)
-  const pending = useRef<ConnectionConfigureInput | null>(null), generation = useRef(0), writing = useRef(false)
+  const enrollment = useBotEnrollment(active)
+  const pending = useRef<ConnectionConfigureInput | null>(null), generation = useRef(0), reading = useRef(0), writing = useRef(false)
   const read = async (epoch = generation.current) => {
+    const request = ++reading.current
     try {
       const result = await api.connections.call('connection.ls', {})
-      if (epoch === generation.current) { setRecords(result.connections); setView(current => current === 'loading' ? result.connections.length ? 'library' : 'new' : current) }
-    } catch (error) { if (epoch === generation.current) setIssue(presentError(error)) }
+      if (epoch === generation.current && request === reading.current) { setRecords(result.connections); setView(current => current === 'loading' ? result.connections.length ? 'library' : 'enrollment' : current) }
+    } catch (error) { if (epoch === generation.current && request === reading.current) setIssue(presentError(error)) }
   }
   useEffect(() => { const epoch = ++generation.current; if (active) void read(epoch); return () => { generation.current++ } }, [active])
+  const enrolled = enrollment.operation?.configured
+  useEffect(() => { if (active && enrolled) void read() }, [active, enrolled])
   const edit = (record: ConnectionRecord | null) => {
     if (pending.current) { setIssue('Check this save before changing the application.'); return }
     setSelected(record); setLabel(record?.config.label ?? ''); setAppId(record?.config.application.appId ?? ''); setDomain(record?.config.application.domain ?? 'open.feishu.cn'); setEnabled(record?.config.enabled ?? true); setSecret(''); setIssue(''); setSaveNotice(''); setView(record ? 'edit' : 'new')
@@ -115,23 +120,25 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
     try { await api.ui.openExternal(`https://${domain}/app`) }
     catch (error) { setIssue(presentError(error)) }
   }
+  const existing = () => { if (selected && !pending.current) edit(null); else setView('new') }
   const current = selected && (records.find(record => record.config.connectionId === selected.config.connectionId) ?? selected)
   const editing = view === 'new' || view === 'edit', dirty = !selected || label !== selected.config.label || enabled !== selected.config.enabled || !!secret
   const feedback = current && checks[current.config.connectionId]?.revision === current.revision ? checks[current.config.connectionId]!.text : ''
   if (!active) return null
   return <div className="settings-pane-stack connector-onboarding" data-connector-settings>
     {view === 'loading' ? <p className="settings-group-note" role="status">Reading saved applications… <button type="button" className="small-button" onClick={() => void read()}>Refresh</button></p> : null}
+    {view === 'enrollment' ? <BotEnrollmentPane enrollment={enrollment} onExisting={existing} onSaved={record => saved(record, 'Application saved.')} /> : null}
     {view === 'library' ? <section className="connector-library" aria-label="Saved chat applications">
-      <div className="settings-pane-toolbar"><strong>Bot applications</strong><button className="small-button" onClick={() => void read()}>Refresh</button><button className="primary-button" onClick={() => edit(null)}>Connect an application</button></div>
+      <div className="settings-pane-toolbar"><strong>Bot applications</strong><button className="small-button" onClick={() => void read()}>Refresh</button><button data-enrollment-new className="primary-button" onClick={() => setView('enrollment')}>Add a bot</button><button data-enrollment-existing className="small-button" onClick={existing}>Connect an existing bot</button></div>
       <p className="settings-group-note">Choose an application to check or change its connection. Groups are connected from each Agent’s menu.</p>
       {records.map(record => <article className="connector-record" key={record.config.connectionId} data-connection={record.config.connectionId}>
         <button className="connector-record__open" onClick={() => { edit(record); setView('saved') }}><span className="connector-record__mark"><GroupIcon size={18} /></span><span><strong className="connector-record__name">{record.config.label}</strong><small>{platform(record.config.application.domain)} · {connectionSummary(record)}</small></span><span className="connector-record__action">View connection</span></button>
       </article>)}
     </section> : null}
     {editing || view === 'saved' && current ? <section className="connector-setup" data-connection-editor>
-      {records.length > 0 && !pending.current ? <button type="button" className="connector-back small-button" onClick={() => { setView('library'); setIssue('') }}>All applications</button> : null}
+      {!pending.current ? <button type="button" className="connector-back small-button" onClick={() => { setView(records.length ? 'library' : 'enrollment'); setIssue('') }}>{records.length ? 'All applications' : 'Bot setup'}</button> : null}
       {editing ? <>
-        <header className="connector-setup__heading"><span className="connector-setup__mark"><GroupIcon size={22} /></span><div><h3 className="connector-editor-title">{selected ? 'Edit application' : 'Connect your bot'}</h3><p>{selected ? 'Changes apply to this saved application.' : 'Use a Feishu or Lark bot for your Agents’ group conversations.'}</p></div></header>
+        <header className="connector-setup__heading"><span className="connector-setup__mark"><GroupIcon size={22} /></span><div><h3 className="connector-editor-title">{selected ? 'Edit application' : 'Connect an existing bot'}</h3><p>{selected ? 'Changes apply to this saved application.' : 'Use a Feishu or Lark bot for your Agents’ group conversations.'}</p></div></header>
         {!selected ? <ol className="connector-steps" aria-label="Application setup"><li aria-current="step"><span>1</span>App credentials</li><li><span>2</span>Check connection</li><li><span>3</span>Connect a group</li></ol> : null}
         {!selected ? <div className="connector-credentials-source"><div><strong>Get these from your bot application</strong><p>Open the developer console → Credentials & Basic Info.<br />Copy the App ID and App Secret into the fields below.</p><details className="connector-first-bot"><summary>Don’t have a bot yet?</summary><p>Create a custom app in the console and add the Bot capability. Then return here with its credentials.</p></details></div><button type="button" className="small-button" onClick={() => void openConsole()}>Open {platform(domain)} console <LinkIcon size={12} /></button></div> : null}
         <div className="connector-setup__fields">
