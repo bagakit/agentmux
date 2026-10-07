@@ -33,8 +33,9 @@ export type RoomProvisioningOperation = {
   membership: RoomMembershipState
 }
 export type RoomProvisioningInspectInput = { operationId: string }
+export type RoomProvisioningCallContext = RoomBindingCallContext & { signal?: AbortSignal }
 export interface RoomProvisioningPort {
-  create(input: RoomCreateInput, context: RoomBindingCallContext): Promise<RoomProvisioningOperation>
+  create(input: RoomCreateInput, context: RoomProvisioningCallContext): Promise<RoomProvisioningOperation>
   /** Reads durable original facts only. It never creates, adds members or binds. */
   inspect(input: RoomProvisioningInspectInput): Promise<{ operation: RoomProvisioningOperation | null }>
 }

@@ -396,7 +396,7 @@ export class AgentMuxRpcService {
       const administration = { actor: { kind: context.principal.kind as 'user' | 'device', id: context.principal.id }, assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.() } }
       if (isRoomProvisioningMethod(method)) {
         if (!owner.rooms) throw new AgentMuxError('Room creation is not enabled on this Host. Existing Agents and connections remain available.', 'CONTROL_UNAVAILABLE')
-        const result = method === 'connection.room.create' ? await owner.rooms.create(parseRoomProvisioningParams(method, params), administration)
+        const result = method === 'connection.room.create' ? await owner.rooms.create(parseRoomProvisioningParams(method, params), { ...administration, ...(context.signal ? { signal: context.signal } : {}) })
           : await owner.rooms.inspect(parseRoomProvisioningParams(method, params))
         return parseConnectionResult(method, result, input) as AgentMuxRpcResult<M>
       }
