@@ -69,7 +69,7 @@ export class ConnectionReceivers {
   private async start(lane: Lane, transport: ConnectionIngressTransport): Promise<void> {
     lane.opening = true
     try {
-      const credential = await this.connections.resolveIngressCredential(lane.record.config.connectionId)
+      const credential = await this.connections.resolveCredential(lane.record.config.connectionId)
       if (!credential) { lane.failed = 'credential-missing'; return }
       if (!this.current(lane)) return
       const receiver = await transport.start({ config: structuredClone(lane.record.config), credential,
