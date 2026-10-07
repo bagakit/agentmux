@@ -151,7 +151,7 @@ it('keeps recorded streaming, recorded running and unknown observations static w
       <RecordedToolRow observation={{ id: 'original-unknown-record', title: 'Original unknown', source: 'native-transcript', persistentSource: true }} className="original-record-row" icon={<SemanticIcon name="object.tools" />} />
     </section>
   </>)
-  expect(presets(dom.container.querySelector('[data-current-workflow]')!)).toEqual(['work', 'spin'])
+  expect(presets(dom.container.querySelector('[data-current-workflow]')!)).toEqual(['work', 'orbit'])
   const recorded = dom.container.querySelector('[data-recorded-workflow]')!
   expect(recorded.querySelector('[data-semantic-icon="status.streaming"]')).not.toBeNull()
   expect(recorded.textContent).toContain('Recorded running'); expect(recorded.textContent).toContain('Status not recorded')
