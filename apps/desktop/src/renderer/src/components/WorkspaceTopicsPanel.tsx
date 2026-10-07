@@ -184,9 +184,9 @@ export function WorkspaceTopicsPanel({
     }
   }
 
-  const selectTopicTab = useCallback(async (nextTopicId: string, tabId: string): Promise<void> => {
+  const selectTopicTab = useCallback(async (nextTopicId: string, tabId: string, groupId?: string): Promise<void> => {
     try {
-      await openScratchTopic(nextTopicId, workspace.id, { tabId })
+      await openScratchTopic(nextTopicId, workspace.id, { tabId, ...(groupId === undefined ? {} : { groupId }) })
     } catch (cause) {
       setError(presentError(cause))
     }
