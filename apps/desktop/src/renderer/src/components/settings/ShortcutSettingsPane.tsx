@@ -59,11 +59,16 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
     ...(scope.kind === 'provider' ? [scope.providerId] : [])])]
   const visible = drafts.filter((candidate) => scopeIncludes(scope, candidate) && [candidate.label, candidate.keyword, candidate.body, providerName(candidate), ...(candidate.states ?? [])]
     .join(' ').toLowerCase().includes(normalizedQuery))
+  const keywordCounts = new Map<string, number>()
+  for (const candidate of drafts) {
+    const keyword = candidate.keyword.trim()
+    keywordCounts.set(keyword, (keywordCounts.get(keyword) ?? 0) + 1)
+  }
   const problems = drafts.flatMap((candidate) => {
     const keyword = candidate.keyword.trim()
     const errors: Array<{ id: string; field: 'Keyword' | 'Prompt'; message: string }> = []
     if (!keyword) errors.push({ id: candidate.id, field: 'Keyword', message: 'Add a keyword to reach this prompt.' })
-    else if (drafts.some((other) => other.id !== candidate.id && other.keyword.trim() === keyword)) {
+    else if (keywordCounts.get(keyword)! > 1) {
       errors.push({ id: candidate.id, field: 'Keyword', message: `“${keyword}” is already used by another prompt.` })
     }
     if (candidate.reactionIcon && !isPromptReactionCode(keyword)) errors.push({ id: candidate.id, field: 'Keyword',
@@ -71,7 +76,13 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
     if (!candidate.body.trim()) errors.push({ id: candidate.id, field: 'Prompt', message: 'Write the instruction this prompt will use.' })
     return errors
   })
-  const errors = problems.filter((problem) => problem.id === selectedId)
+  const problemsById = new Map<string, typeof problems>()
+  for (const problem of problems) {
+    const existing = problemsById.get(problem.id)
+    if (existing) existing.push(problem)
+    else problemsById.set(problem.id, [problem])
+  }
+  const errors = selectedId === null ? [] : problemsById.get(selectedId) ?? []
   const selectedChanged = prompt && !configValuesEqual(prompt, Object.hasOwn(resource.expected, prompt.id) ? resource.expected[prompt.id] : undefined)
   const promptStatus = errors.length ? 'invalid' : selectedChanged ? 'unsaved' : 'saved'
   const changedCount = drafts.filter((candidate) => !configValuesEqual(candidate, Object.hasOwn(resource.expected, candidate.id) ? resource.expected[candidate.id] : undefined)).length
@@ -186,7 +197,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
           <div ref={library} className="prompt-library__items">
             <LiquidSelectionSurface selected={selectedId} active={active} targetAttribute="data-prompt-id" />
             {visible.map((candidate) => {
-              const status = problems.some(problem => problem.id === candidate.id) ? 'invalid' :
+              const status = problemsById.has(candidate.id) ? 'invalid' :
                 !configValuesEqual(candidate, Object.hasOwn(resource.expected, candidate.id) ? resource.expected[candidate.id] : undefined) ? 'unsaved' : undefined
               return (
               <button type="button" className="prompt-library__item" key={candidate.id} data-prompt-id={candidate.id} aria-pressed={selectedId === candidate.id} onClick={() => open(candidate.id)}>
@@ -235,7 +246,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
           </div>
         </section> : <div className="prompt-editor__empty">Choose a prompt to edit its instruction and where it appears.</div>}
       </div>
-      {problems.length ? <div className="prompt-validation" role="status"><strong>Check {new Set(problems.map((problem) => problem.id)).size} {new Set(problems.map((problem) => problem.id)).size === 1 ? 'prompt' : 'prompts'} before saving</strong>{problems.map((problem) => <button type="button" key={`${problem.id}-${problem.field}`} onClick={() => open(problem.id)}>{promptName(resource.value[problem.id]!)} · {problem.field}: {problem.message}</button>)}</div> : null}
+      {problems.length ? <div className="prompt-validation" role="status"><strong>Check {problemsById.size} {problemsById.size === 1 ? 'prompt' : 'prompts'} before saving</strong>{problems.map((problem) => <button type="button" key={`${problem.id}-${problem.field}`} onClick={() => open(problem.id)}>{promptName(resource.value[problem.id]!)} · {problem.field}: {problem.message}</button>)}</div> : null}
       {recentDelete ? <div className="prompt-pending-delete" role="status"><span>Recently removed “{promptName(recentDelete.prompt)}”.</span><button type="button" className="small-button" onClick={undoDelete}>Undo</button></div> : null}
       <footer className="prompt-save-footer">
         <p className="prompt-save-summary" role="status">Save prompts updates the whole library. {changedCount} changed · {deletedCount} pending {deletedCount === 1 ? 'deletion' : 'deletions'}.</p>

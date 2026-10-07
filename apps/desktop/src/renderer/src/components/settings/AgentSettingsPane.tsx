@@ -102,10 +102,9 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   onSave: (executors: Record<string, AgentExecutorConfig>, expected: Record<string, AgentExecutorConfig>) => Promise<void>
 }) {
   const providerCatalog = useAppStore((state) => state.providerCatalog)
-  const detections = useAppStore((state) => active ? state.executorDetections : NO_DETECTIONS)
   const detectExecutors = useAppStore((state) => state.detectExecutors)
   const initialHost = config.hosts.find(host => host.kind === 'local')?.id ?? 'local'
-  const [filter, setFilter] = useState({ query: '', snapshot: [] as string[] })
+  const [filter, setFilter] = useState({ query: '', snapshot: new Set<string>() })
   const [selectedId, setSelectedId] = useState<string | null>(() => executorId ?? Object.keys(config.executors)[0] ?? null)
   const [providerId, setProviderId] = useState<string | null>(null)
   const [view, setView] = useState<'library' | 'editor'>('library')
@@ -122,6 +121,31 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   const resource = useResourceDrafts(Object.fromEntries(Object.entries(config.executors).map(([id, executor]) =>
     [id, toDraft(executor)])))
   const drafts = resource.value, setDrafts = resource.setValue
+  const detectionKeys = useRef<string[]>([])
+  const nextDetectionKeys = Object.keys(drafts).map(id => executorDetectionKey(hostId, id))
+  if (nextDetectionKeys.length !== detectionKeys.current.length || nextDetectionKeys.some((key, index) => key !== detectionKeys.current[index])) {
+    detectionKeys.current = nextDetectionKeys
+  }
+  const relevantDetectionKeys = detectionKeys.current
+  const selectDetections = useMemo(() => {
+    let source: typeof NO_DETECTIONS | undefined
+    let selected = NO_DETECTIONS
+    return (state: ReturnType<typeof useAppStore.getState>) => {
+      if (!active || scope !== 'templates') return NO_DETECTIONS
+      if (source === state.executorDetections) return selected
+      source = state.executorDetections
+      let next = selected
+      for (const key of relevantDetectionKeys) {
+        if (source[key] === selected[key]) continue
+        if (next === selected) next = { ...selected }
+        if (source[key]) next[key] = source[key]
+        else delete next[key]
+      }
+      selected = next
+      return selected
+    }
+  }, [active, scope, relevantDetectionKeys])
+  const detections = useAppStore(selectDetections)
   const saveState = useSettingsSave()
   const { saving } = saveState
   const dirty = resource.dirty
@@ -144,12 +168,12 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   function filterExecutors(query: string): void {
     // Search chooses a stable set of editors. Renaming a found executor must not hide it mid-input.
     const normalized = query.trim().toLowerCase()
-    setFilter({ query, snapshot: executors.filter(({ id, draft }) =>
+    setFilter({ query, snapshot: new Set(executors.filter(({ id, draft }) =>
       `${id} ${draft.label} ${draft.providerId} ${agentProviderLabel(draft.providerId)} ${draft.command}`
         .toLowerCase().includes(normalized)
-    ).map(({ id }) => id) })
+    ).map(({ id }) => id)) })
   }
-  const matches = (id: string) => !filter.query.trim() || filter.snapshot.includes(id)
+  const matches = (id: string) => !filter.query.trim() || filter.snapshot.has(id)
   const inProvider = (candidate: string) => providerId === null || candidate === providerId
   const scopedExecutors = executors.filter(({ draft }) => inProvider(draft.providerId))
   const visibleExecutors = scopedExecutors.filter(({ id }) => matches(id))
@@ -181,7 +205,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
 
   function selectProvider(next: string | null): void {
     setProviderId(next)
-    setFilter({ query: '', snapshot: [] })
+    setFilter({ query: '', snapshot: new Set<string>() })
     const current = drafts[selectedId ?? '']
     if (!current || (next !== null && current.providerId !== next)) {
       setSelectedId(executors.find(({ draft }) => next === null || draft.providerId === next)?.id ?? null)
@@ -203,7 +227,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     setProviderId(drafts[targetId]?.providerId ?? config.executors[targetId]?.providerId ?? null)
     setView('editor')
     setScope('templates')
-    setFilter({ query: '', snapshot: [] })
+    setFilter({ query: '', snapshot: new Set<string>() })
     setPendingEdit({ id: targetId, select: false })
   }, [active, executorId, navigationRequest])
 
@@ -229,7 +253,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     setDrafts((current) => Object.fromEntries(Object.entries(current).filter(([candidate]) => candidate !== id)))
     const next = scopedExecutors.find((executor) => executor.id !== id)?.id ?? null
     setSelectedId(next)
-    setFilter({ query: '', snapshot: [] })
+    setFilter({ query: '', snapshot: new Set<string>() })
     setReturnFocus({ id: next })
     setView('library')
   }
@@ -267,7 +291,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
       delete records[id]
       return records
     })
-    setFilter({ query: '', snapshot: [] })
+    setFilter({ query: '', snapshot: new Set<string>() })
     setSelectedId(nextId)
     setProviderId(providerId)
     setView('editor')
@@ -325,7 +349,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
       label: `${provider.label} ${Object.keys(current).length + 1}`, providerId: provider.id,
       command: provider.executable, args: '', env: '{}', injectAgentMuxGuide: true
     } }))
-    setFilter({ query: '', snapshot: [] })
+    setFilter({ query: '', snapshot: new Set<string>() })
     setSelectedId(id)
     setProviderId(provider.id)
     setView('editor')
@@ -362,7 +386,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
           }))} />
         <div ref={editor} className="settings-resource-editor">
           <button className="small-button settings-resource-back" onClick={() => { setView('library'); setReturnFocus({ id: selectedId }) }}><ThemeNavigationBackIcon size={13} />All executors</button>
-          {selectedId && !visibleExecutors.some(({ id }) => id === selectedId) && drafts[selectedId] ? <p className="settings-filter-notice">This executor is outside your search. <button type="button" onClick={() => setFilter({ query: '', snapshot: [] })}>Show in list</button></p> : null}
+          {selectedId && !visibleExecutors.some(({ id }) => id === selectedId) && drafts[selectedId] ? <p className="settings-filter-notice">This executor is outside your search. <button type="button" onClick={() => setFilter({ query: '', snapshot: new Set<string>() })}>Show in list</button></p> : null}
         {executors.filter(({ id }) => id === selectedId).map(({ id, draft, detection }) => {
           const status = statusCopy(detection)
           // Effective appearance is a projection; the editable baseline remains the Executor DTO.
