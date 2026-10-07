@@ -14,11 +14,23 @@ for (let index = 0; index < args.length; index++) {
   else if (args[index] === '--mutations') mutations = true
   else throw new Error('Unsupported image annotation proof option: ' + args[index])
 }
-assert.ok(['boundary', 'editing', 'documents'].includes(slice), 'Use --slice boundary|editing|documents')
+assert.ok(['boundary', 'editing', 'documents', 'text-preservation'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation')
 const adapter = 'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx'
 const component = 'apps/desktop/src/renderer/src/components/image-annotation/'
 const host = 'apps/desktop/src/renderer/src/components/browser-screenshot/'
 const specifications = {
+  'text-preservation': {
+    tests: ['apps/desktop/test/image-annotation-text-preservation.test.tsx'],
+    mutations: [{ label: 'text-commit-truncated', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'const text = value', replace: 'const text = value.trim().slice(0, 500)',
+      test: 'apps/desktop/test/image-annotation-text-preservation.test.tsx',
+      consumer: 'keeps explicit long text and note edits complete and Undoable without character caps', failure: /explicit text edit remains exact/ },
+    { label: 'selected-note-output-truncated', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'let shapes = selectedNote ? documentState.shapes.map(shape => shape.id === selectedNote.id ? { ...selectedNote, note: noteDraft } : shape) : documentState.shapes',
+      replace: 'let shapes = selectedNote ? documentState.shapes.map(shape => shape.id === selectedNote.id ? { ...selectedNote, note: noteDraft.trim().slice(0, 1000) } : shape) : documentState.shapes',
+      test: 'apps/desktop/test/image-annotation-text-preservation.test.tsx',
+      consumer: 'preserves the selected original note through real file save and context output', failure: /selected original note output remains exact/ }]
+  },
   boundary: {
     tests: ['workface.test.tsx', 'native-overlay.test.tsx', 'toolbar.test.tsx', 'model.test.ts', 'compose.test.ts', 'context.test.ts']
       .map(name => 'apps/desktop/test/browser-screenshot-' + name),
