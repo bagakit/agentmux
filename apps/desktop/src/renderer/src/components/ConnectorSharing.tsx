@@ -3,6 +3,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { RoomBinding } from '@agentmux/core/connections'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
+import { useAppStore } from '../store'
 import { observeConnectorTarget } from '../lib/connector-room-intent'
 import { AgentConnectorDialog, type AgentConnectorTarget } from './AgentConnectorDialog'
 
@@ -24,13 +25,43 @@ export function ConnectorSharing({ session, regionId, visible }: { session: Extr
   const current = read?.identity === identity ? read : null
   if (!current?.bindings.length && !current?.issue) return null
   return <div className="connector-sharing" aria-label="Group sharing before sending">
-    {current?.bindings.map(binding => <button type="button" className="connector-sharing__group" key={binding.bindingId} title={binding.application.domain + ' · ' + binding.application.appId}
-      aria-label={`${current.issue ? 'Last known group' : binding.state === 'active' ? 'Shared group' : 'Sharing paused'} ${binding.externalConversationId}; ${binding.application.domain}; ${binding.application.appId}`}
-      onClick={event => { returned.current = event.currentTarget; setDialog({ name: session.label, session, connectionId: binding.connectionId, target: { ...target, regionAnchor: { regionId: regionId ?? binding.regionAnchor.regionId } } }) }}>
-      {current.issue ? 'Last known group' : binding.state === 'active' ? 'Shared group' : 'Sharing paused'} · {binding.externalConversationId}
-    </button>)}
+    {current?.bindings.map(binding => <ConnectorSharingAudience key={binding.bindingId} binding={binding} unconfirmed={!!current.issue} onSelect={trigger => {
+      const store = useAppStore.getState(), executorId = session.executorId ?? undefined
+      const appearance = executorId ? store.config?.executors[executorId]?.avatar ?? store.config?.appearance.agentAvatars?.[executorId] : undefined
+      returned.current = trigger; setDialog({ name: store.agentNames[session.id] ?? session.label, session, connectionId: binding.connectionId,
+        identity: { providerId: session.providerId, executorId, ...(appearance ? { appearance: structuredClone(appearance) } : {}) },
+        target: { ...target, regionAnchor: { regionId: regionId ?? binding.regionAnchor.regionId } } })
+    }} />)}
     {current?.issue ? <span role="status">Sharing status unconfirmed · {current.issue}</span> : null}
     {dialog ? <AgentConnectorDialog original={dialog} mode="details" onClose={() => setDialog(null)} returnFocus={() => returned.current} /> : null}
   </div>
+}
+
+/** A visible audience has one bounded name read, never another Binding or directory store. */
+function ConnectorSharingAudience({ binding, unconfirmed, onSelect }: { binding: RoomBinding; unconfirmed: boolean; onSelect(trigger: HTMLElement): void }) {
+  const identity = JSON.stringify([binding.connectionId, binding.application, binding.externalConversationId])
+  const [name, setName] = useState<{ identity: string; value: string } | null>(null)
+  const [issue, setIssue] = useState('')
+  useEffect(() => {
+    let live = true
+    void (async () => {
+      const { connection } = await api.connections.call('connection.inspect', { connectionId: binding.connectionId })
+      if (!live) return
+      if (!connection || connection.config.application.domain !== binding.application.domain || connection.config.application.appId !== binding.application.appId) { setIssue('Group name unavailable'); return }
+      const result = await api.connections.call('connection.room.get', { connectionId: binding.connectionId, expectedConnectionRevision: connection.revision, externalConversationId: binding.externalConversationId })
+      if (live) {
+        const observed = result.observation.state === 'ready' && result.room?.externalConversationId === binding.externalConversationId
+        if (observed && result.room?.name) setName({ identity, value: result.room.name })
+        setIssue(result.observation.state !== 'ready' ? 'Group name unconfirmed' : result.room?.name && observed ? '' : 'Group name unavailable')
+      }
+    })().catch(() => { if (live) setIssue('Group name unconfirmed') })
+    return () => { live = false }
+  }, [identity, binding.revision])
+  const label = name?.identity === identity ? name.value : binding.externalConversationId
+  const status = unconfirmed ? 'Last known group' : binding.state === 'active' ? 'Shared group' : 'Sharing paused'
+  return <button type="button" className="connector-sharing__group" title={binding.externalConversationId + ' · ' + binding.application.domain + ' · ' + binding.application.appId}
+    aria-label={`${status} ${label}; ${binding.externalConversationId}; ${binding.application.domain}; ${binding.application.appId}`} onClick={event => onSelect(event.currentTarget)}>
+    {status} · {label}{issue ? <span className="connector-sharing__metadata" role="status"> · {issue}</span> : null}
+  </button>
 }
 
