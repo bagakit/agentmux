@@ -1,3 +1,4 @@
+import { parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { parseMoteConnectionParams } from './mote-connection-codec.js'
 import { parseConversationChangesInput } from './conversation-changes.js'
 import { parseAgentMuxSearchInput } from './search-codec.js'
@@ -262,6 +263,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.inspect', '(--session ID|--run ID|--provider-native ID --provider ID|--acp-native ID --adapter ID)', 'Inspect the service routeHostId, original Core identity and Desktop display facts separately.',
     { '--session': 'data', '--run': 'data', '--provider-native': 'data', '--provider': 'data', '--acp-native': 'data', '--adapter': 'data' }, f => ({ target: inspectTarget(f) }),
     'status.session.semanticStatus.failure carries code, message, recovery, nativeTurnId and available nativeCode/httpStatusCode. Failed turns retain their original healthy Run; observation errors are reported separately.'),
+  command('agent.conversation.landmark.ls', '--host ID --session ID [--operation-id ID]', 'List user-named exact record references and the original metadata operation without reading bodies or operating a Run.',
+    { '--host': 'data', '--session': 'data', ...OP }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true), ...(f.values.has('--operation-id') ? operation(f) : {}) }),
+    'A saved point is a reference, not proof the record is currently available. Keep hostId, agentSessionId and the complete source identity. Use the original conversation reader to inspect records; an offline Host does not delete points.'),
+  command('agent.conversation.landmark.apply', '--input FILE|-', 'Create, rename or remove one original named reading point with a durable metadata receipt.',
+    { '--input': 'data' }, async f => parseConversationLandmarkWrite(await readControlJsonInput(value(f, '--input', true)!, 'Reading point')),
+    'JSON requires hostId, agentSessionId, expectedRevision, operationId and change. create supplies point {id,name,reference}; rename supplies id/name; remove supplies id. The reference carries the exact original Host/Session and native provider/nativeSession/record or captured record source. Keep the original operationId and intent after an unknown receipt; list with that operationId before retrying. A revision conflict requires a refreshed list and an explicit new intent. This changes navigation metadata only and never sends input, starts a Run or guesses a chapter.'),
   command('agent.conversation.checkpoint', '--host ID --session ID', 'Cut the original durable source without exporting previous records.',
     { '--host': 'data', '--session': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true) })),
   command('agent.conversation.changes', '--input FILE|-', 'Resume bounded original changes from a saved source checkpoint.',

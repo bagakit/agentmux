@@ -214,6 +214,8 @@ type NativeParams = MoteConnectionParamsMap & GoalDelegationParamsMap & MoteAvat
   'agent.conversation.changes': import('./conversation-changes.js').ConversationChangesInput
   'agent.conversation.watch': import('./conversation.js').ConversationRef
   'agent.conversation.inspect': import('./session-history-reader.js').AgentSessionHistoryReadInput
+  'agent.conversation.landmark.ls': import('./conversation-landmarks.js').ConversationLandmarkQuery
+  'agent.conversation.landmark.apply': import('./conversation-landmarks.js').ConversationLandmarkWrite
   'agent.history': import('./session-history-reader.js').AgentSessionHistoryReadInput
   'agent.reopen': Parameters<AgentMuxClient['reopenAgent']>[0]
   'agent.reopen.check': Parameters<AgentMuxClient['reconcileAgentReopen']>[0]
@@ -279,6 +281,8 @@ type NativeResult = MoteConnectionResultMap & GoalDelegationResultMap & MoteAvat
   'agent.conversation.changes': import('./conversation-changes.js').ConversationChangesPage
   'agent.conversation.watch': import('./conversation-changes.js').ConversationWatchOpening
   'agent.conversation.inspect': import('./conversation.js').AgentConversationReadPage
+  'agent.conversation.landmark.ls': import('./conversation-landmarks.js').ConversationLandmarkPage
+  'agent.conversation.landmark.apply': import('./conversation-landmarks.js').ConversationLandmarkPage
   'agent.history': import('./session-history-reader.js').AgentSessionHistoryReadPage
   'agent.reopen': { session: Awaited<ReturnType<AgentMuxClient['reopenAgent']>> }
   'agent.reopen.check': { session: Awaited<ReturnType<AgentMuxClient['reconcileAgentReopen']>> }
@@ -343,6 +347,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'settings.appearance.watch': 'long',
   'notebook.ls': 'short', 'notebook.inspect': 'long', 'notebook.graph': 'long', 'notebook.resolve': 'long', 'notebook.apply': 'long',
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
+  'agent.conversation.landmark.ls': 'short', 'agent.conversation.landmark.apply': 'long',
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',
   'agent.input.inspect': 'short', 'agent.input.stop': 'short', 'agent.input.rejoin': 'long', 'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
