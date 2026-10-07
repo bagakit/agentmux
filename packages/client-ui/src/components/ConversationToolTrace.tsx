@@ -1,4 +1,4 @@
-import { ContentCopyButton } from './ContentCopyButton.js'
+import { ConversationToolPayload } from './ConversationToolPayload.js'
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 import { SemanticIcon } from '../theme/icons.js'
 import { memo, useId, useMemo, useState } from 'react'
@@ -23,6 +23,7 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
   const open = expanded ?? localOpen
   const panelId = useId()
   const identity = useMemo(() => ({}), [part, traceId, copyIdentity])
+  const sourceIdentity = useMemo(() => ({}), [traceId, copyIdentity, traceId === undefined && copyIdentity === undefined ? part : undefined])
   const isCall = part.kind === 'tool-call'
   const text = isCall ? part.input : part.output
   const failed = part.kind === 'tool-result' && part.failed === true
@@ -44,11 +45,8 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
         <SemanticIcon name="navigation.disclosure" className="conversation-tool-trace__chevron" size={12} aria-hidden="true" />
       </button>
       {open ? <div id={panelId} className="conversation-tool-trace__payload">
-        <div className="conversation-detail-actions">
-        {part.callId ? <span className="conversation-tool-trace__identity">Call <code>{part.callId}</code></span> : null}
-        {text.length > 0 ? <ContentCopyButton text={text} identity={identity} label={isCall ? 'Copy tool input' : 'Copy tool output'} /> : null}
-        </div>
-        <pre>{text}</pre>
+        <ConversationToolPayload text={text} identity={identity} sourceIdentity={sourceIdentity} {...(part.callId ? { callId: part.callId } : {})}
+          copyLabel={isCall ? 'Copy tool input' : 'Copy tool output'} />
       </div> : null}
     </div>
   )

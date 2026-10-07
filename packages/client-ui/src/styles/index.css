@@ -15,6 +15,7 @@
 @import './conversation-image.css';
 @import './conversation-input-details.css';
 @import './conversation-tool-trace.css';
+@import './conversation-tool-payload.css';
 @import './conversation-native-thread.css';
 @import './conversation-metrics.css';
 @import './conversation-avatar.css';

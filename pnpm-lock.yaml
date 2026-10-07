@@ -383,6 +383,9 @@ importers:
       highlight.js:
         specifier: 11.12.0
         version: 11.12.0
+      jsonc-parser:
+        specifier: 3.3.1
+        version: 3.3.1
       katex:
         specifier: 0.19.0
         version: 0.19.0
