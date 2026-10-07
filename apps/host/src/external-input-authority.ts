@@ -9,10 +9,17 @@ export function createDesktopExternalInputAuthority(options: { desktopSocketPath
       rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: options.desktopSocketPath } })
       const result = await rpc.call('connection.ingress.authority', { operationId: intent.operationId })
       const original = result.ingress, input = original?.input
-      if (result.authority !== 'current' || !original || !input || input.hostId !== options.executionHostId || input.agentSessionId !== intent.agentSessionId ||
+      if (!original || !input || input.hostId !== options.executionHostId || input.agentSessionId !== intent.agentSessionId ||
         input.expectedRun.runId !== intent.expectedRun.runId || input.operationId !== intent.operationId || input.messageId !== intent.messageId || original.body !== intent.body ||
         JSON.stringify(parseAgentExternalMessageAuthor(input.author)) !== JSON.stringify(parseAgentExternalMessageAuthor(author))) throw unavailable()
-    } catch { throw unavailable() }
+      if (result.authority !== 'current') {
+        if (result.code === 'INGRESS_SERVICE_DISABLED' || result.code === 'INGRESS_SERVICE_UNCONFIRMED') throw new AgentMuxError('The original Connector service cannot authorize this external input. Retain its original waiting reference; restore service policy and explicitly rejoin. Local Agent input remains available.', result.code)
+        throw unavailable()
+      }
+    } catch (error) {
+      if (error instanceof AgentMuxError && (error.code === 'INGRESS_SERVICE_DISABLED' || error.code === 'INGRESS_SERVICE_UNCONFIRMED')) throw error
+      throw unavailable()
+    }
     finally { try { await rpc?.dispose() } catch { /* Releasing this read cannot replace its safe authority outcome. */ } }
   } }
 }

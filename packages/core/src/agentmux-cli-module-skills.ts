@@ -93,6 +93,11 @@ ${SPATIAL_GUIDE}`
 receipts. Begin with connection ls/inspect; configuration, a successful test, an enabled
 binding, ingress and actual outgoing delivery are distinct facts. Keep the exact connection,
 binding and source identities rather than matching human labels or assuming transport trust.
+connection service get reads the complete Connector policy on the current endpoint. Service
+configure disables or enables new automatic traffic without rewriting application enabled values.
+Retain the exact operationId, expectedRevision and service input after an unknown configure reply;
+service inspect reads that receipt, while get reports current policy and cannot acknowledge it.
+Management, original receipts and healthy local Agent input remain available while service is off.
 
 Configure or bind only within the user's authorized target. Inspect current values before
 changing them; use the current help's exact input and operation identities. A grant is an

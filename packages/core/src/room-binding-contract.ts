@@ -54,7 +54,7 @@ export interface RoomBindingsPort {
 export type RoomPublicationAuthority = {
   binding: RoomBinding | null
   authorized: boolean
-  reason?: 'missing' | 'binding-revised' | 'paused' | 'connection-disabled' | 'publication-not-granted'
+  reason?: 'missing' | 'binding-revised' | 'paused' | 'connection-disabled' | 'publication-not-granted' | 'service-disabled'
 }
 /** Synchronous reads can join the original connector database transaction. They never query a Region occupant. */
 export interface RoomBindingReadPort {

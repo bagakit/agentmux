@@ -99,9 +99,14 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     this.database.prepare('UPDATE connection_ingress_message SET record_json=? WHERE ingress_id=?').run(JSON.stringify(value), value.ingressId)
     return value
   }
+  private assertService(): void {
+    try { this.options.connections.assertServiceEnabled() }
+    catch (error) { fail(error instanceof AgentMuxError && error.code === 'CONNECTION_SERVICE_DISABLED' ? 'INGRESS_SERVICE_DISABLED' : 'INGRESS_SERVICE_UNCONFIRMED') }
+  }
   /** Authenticate, retain the complete original event, then ACK. ACK certifies persistence alone. */
   async receive(input: { connectionId: string; raw: string; transportProof?: unknown }, acknowledge: () => void | Promise<void>): Promise<{ ingress: ConnectionIngressRecord; duplicate: 'event' | 'message' | null }> {
     input = { ...input }
+    this.assertService()
     const connection = this.options.connections.readConfiguration(input.connectionId)
     if (!connection?.config.enabled) fail('INGRESS_CONNECTION_UNAVAILABLE')
     const authenticator = this.authenticators.get(connection.config.adapterId)
@@ -111,6 +116,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     catch { return fail('INGRESS_AUTHENTICATION_FAILED') }
     if (event.actor && !equal(event.actor.application, connection.config.application)) fail('INGRESS_ISSUER_MISMATCH')
     const saved = this.transaction(() => {
+      this.assertService()
       const current = this.options.connections.readConfiguration(input.connectionId)
       if (!current?.config.enabled || current.revision !== connection.revision) fail('INGRESS_CONNECTION_REVISED')
       const { domain, appId } = current.config.application, encoded = JSON.stringify(event)
@@ -146,6 +152,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     return this.options.bindings.listActive({ connectionId: record.connectionId }).find(binding => equal(binding.application, record.application) && binding.externalConversationId === record.externalConversationId) ?? null
   }
   private authorize(record: ConnectionIngressMessage, expected?: ConnectionIngressRecord['input'], allowPendingReply = false) {
+    this.assertService()
     const connection = this.options.connections.readConfiguration(record.connectionId), binding = this.binding(record)
     if (!connection?.config.enabled || !equal(connection.config.application, record.application)) fail('INGRESS_CONNECTION_UNAVAILABLE')
     if (!binding) fail('INGRESS_BINDING_UNAVAILABLE')
@@ -179,6 +186,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
           const credential = await this.options.connections.resolveCredential(record.connectionId)
           if (controller.signal.aborted) return unknown
           if (!credential) return { replyToMessageId, state: 'unavailable', reason: 'credential-missing' }
+          this.assertService()
           const selection = await authenticator.qualifyReply!(structuredClone(connection.config), structuredClone(event), raw, credential, controller.signal)
           return !controller.signal.aborted && (selection === 'reply' || selection === 'message') ? { replyToMessageId, state: 'confirmed', selection } : unknown
         }
@@ -222,6 +230,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       }
     }
     catch (error) {
+      if (error instanceof AgentMuxError && ['INGRESS_SERVICE_DISABLED', 'INGRESS_SERVICE_UNCONFIRMED'].includes(error.code)) return await this.inspect({ ingressId })
       if (!(error instanceof AgentMuxError) || error.code === 'INGRESS_STORAGE_UNCONFIRMED') throw error
       this.transaction(() => { const current = this.read(ingressId)!; if (current.state === 'received') this.write({ ...current, state: 'refused', code: error.code }) })
       return await this.inspect({ ingressId })
@@ -272,7 +281,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     } catch (error) {
       const code: ConnectionIngressAuthorityCode = error instanceof AgentMuxError && CONNECTION_INGRESS_AUTHORITY_CODES.includes(error.code as never)
         ? error.code as ConnectionIngressAuthorityCode : 'INGRESS_STORAGE_UNCONFIRMED'
-      return { ingress, authority: code === 'INGRESS_STORAGE_UNCONFIRMED' || code === 'INGRESS_ADDRESSING_UNCONFIRMED' ? 'unavailable' : 'refused', code }
+      return { ingress, authority: code === 'INGRESS_STORAGE_UNCONFIRMED' || code === 'INGRESS_SERVICE_UNCONFIRMED' || code === 'INGRESS_ADDRESSING_UNCONFIRMED' ? 'unavailable' : 'refused', code }
     }
   }
   /** Explicitly rejoin a positively saved original Core wait; unknown effects are read only. */

@@ -31,6 +31,12 @@ export class ConnectionReceivers {
   }
   refresh(): void {
     if (this.closed) return
+    try {
+      if (!this.connections.readService().enabled) {
+        for (const lane of this.lanes.values()) this.release(lane)
+        this.lanes.clear(); return
+      }
+    } catch { return } // Policy unknown retains existing lanes; each new admission still reads the original owner.
     this.dirty = true
     if (this.reading) return
     this.reading = true; this.dirty = false
@@ -63,6 +69,7 @@ export class ConnectionReceivers {
   }
   private current(lane: Lane): boolean {
     if (this.closed || lane.abort.signal.aborted) return false
+    this.connections.assertServiceEnabled()
     const current = this.connections.readConfiguration(lane.record.config.connectionId)
     return current?.config.enabled === true && current.revision === lane.record.revision
   }
@@ -75,6 +82,7 @@ export class ConnectionReceivers {
       const receiver = await transport.start({ config: structuredClone(lane.record.config), credential,
         signal: lane.abort.signal,
         receive: async (input, acknowledge) => {
+          this.connections.assertServiceEnabled()
           if (!this.current(lane)) throw new AgentMuxError('This original connection receiver is no longer current. Existing Agents are retained.', 'INGRESS_CONNECTION_REVISED')
           const accepted = await this.ingress.receive({ connectionId: lane.record.config.connectionId, raw: input.raw,
             ...(input.transportProof === undefined ? {} : { transportProof: input.transportProof }) }, acknowledge)
@@ -83,8 +91,12 @@ export class ConnectionReceivers {
           return accepted
         }
       })
-      if (!this.current(lane)) { receiver.close(); return }
-      lane.receiver = receiver; delete lane.failed
+      try {
+        if (!this.current(lane)) return
+        lane.receiver = receiver; delete lane.failed
+      } finally {
+        if (lane.receiver !== receiver) receiver.close()
+      }
     } catch { if (!lane.abort.signal.aborted) lane.failed = 'check-failed' }
     finally { lane.opening = false }
   }
