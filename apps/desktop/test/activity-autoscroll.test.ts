@@ -92,11 +92,9 @@ describe('onScroll — separating a user gesture from content growth', () => {
 })
 
 describe('onContentChange — both ways new content arrives', () => {
-  const geometry = atBottom(1000)
-
   it('scrolls to bottom when a new item is appended while following', () => {
     const state: FollowState = { following: true, lastScrollTop: 600, lastSignature: sig(3, 'c', 10) }
-    const decision = onContentChange(state, sig(4, 'd', 5), geometry)
+    const decision = onContentChange(state, sig(4, 'd', 5))
     expect(decision.scrollToBottom).toBe(true)
   })
 
@@ -104,30 +102,30 @@ describe('onContentChange — both ways new content arrives', () => {
     // The most common case: one assistant turn lengthening token by token. Same id, same count, more
     // characters. A version that only checks itemCount misses this entirely.
     const state: FollowState = { following: true, lastScrollTop: 600, lastSignature: sig(3, 'c', 10) }
-    const decision = onContentChange(state, sig(3, 'c', 42), geometry)
+    const decision = onContentChange(state, sig(3, 'c', 42))
     expect(decision.scrollToBottom).toBe(true)
   })
 
   it('does NOT scroll when the tail is unchanged', () => {
     // An unrelated re-render with an identical tail must never yank the viewport.
     const state: FollowState = { following: true, lastScrollTop: 600, lastSignature: sig(3, 'c', 10) }
-    const decision = onContentChange(state, sig(3, 'c', 10), geometry)
+    const decision = onContentChange(state, sig(3, 'c', 10))
     expect(decision.scrollToBottom).toBe(false)
   })
 
   it('does NOT scroll when detached, even as content pours in', () => {
     // A reader who scrolled up keeps their place; growth must not drag them back down.
     const state: FollowState = { following: false, lastScrollTop: 100, lastSignature: sig(3, 'c', 10) }
-    const decision = onContentChange(state, sig(3, 'c', 99), geometry)
+    const decision = onContentChange(state, sig(3, 'c', 99))
     expect(decision.scrollToBottom).toBe(false)
   })
 
   it('carries the new signature forward so the next change is measured against it', () => {
     const state: FollowState = { following: true, lastScrollTop: 600, lastSignature: sig(3, 'c', 10) }
-    const decision = onContentChange(state, sig(3, 'c', 42), geometry)
+    const decision = onContentChange(state, sig(3, 'c', 42))
     expect(decision.state.lastSignature).toEqual(sig(3, 'c', 42))
     // And a second identical change against the advanced baseline is now a no-op.
-    expect(onContentChange(decision.state, sig(3, 'c', 42), geometry).scrollToBottom).toBe(false)
+    expect(onContentChange(decision.state, sig(3, 'c', 42)).scrollToBottom).toBe(false)
   })
 })
 
@@ -146,6 +144,6 @@ describe('initFollowState', () => {
     const state = initFollowState()
     expect(state.following).toBe(true)
     // First content of any kind against the empty baseline reads as new and pins.
-    expect(onContentChange(state, sig(1, 'a', 4), atBottom(1000)).scrollToBottom).toBe(true)
+    expect(onContentChange(state, sig(1, 'a', 4)).scrollToBottom).toBe(true)
   })
 })
