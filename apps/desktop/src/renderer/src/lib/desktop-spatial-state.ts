@@ -11,6 +11,10 @@ const regionKey = (id: string) => 'region:' + id;
 const zoneKey = (id: string) => 'zone:' + id;
 const json = (value: unknown): SpatialJson => JSON.parse(JSON.stringify(value)) as SpatialJson;
 export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[], previous: AgentMuxSpatialGraph | null = null, removed: ReadonlySet<string> = new Set()): AgentMuxSpatialGraph {
+  const closingWorkspaces = new Set(state.config?.workspaces.filter(workspace => workspace.closeout).map(workspace => workspace.id));
+  // Explicit entity removal retires the original Zone, but its resource must reach
+  // closeWorktreeGraph once so public Files retain their exact original owner.
+  const closingZones = new Set(previous?.zones.filter(zone => closingWorkspaces.has(zone.workspaceId)).map(zone => zone.zoneId));
   const categories = [...new Map([...(previous ? categoriesFromSpatial(previous) : []), ...(state.topicCategories ?? [])].map(category => [category.spaceId, category])).values()];
   const catalog = spatialCatalog({ ...state, topicCategories: categories }, topics);
   const { locations: _, ...facts } = catalog;
@@ -48,7 +52,7 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
     for (const field of ['spaces', 'zones', 'tabs', 'regions'] as const) {
       const key = { spaces: 'spaceId', zones: 'zoneId', tabs: 'tabId', regions: 'regionId' }[field];
       const known = new Set(facts[field].map(v => String((v as unknown as Record<string, unknown>)[key])));
-      const retained = previous[field].filter(v => { const id = String((v as unknown as Record<string, unknown>)[key]); return !known.has(id) && !removed.has(id) && !(field === 'regions' && removed.has((v as AgentMuxSpatialGraph['regions'][number]).tabId)); });
+      const retained = previous[field].filter(v => { const id = String((v as unknown as Record<string, unknown>)[key]); return !known.has(id) && (!removed.has(id) || field === 'zones' && closingZones.has(id)) && !(field === 'regions' && removed.has((v as AgentMuxSpatialGraph['regions'][number]).tabId)); });
       (facts as unknown as Record<string, unknown>)[field] = [...facts[field], ...retained];
     }
     for (const fact of facts.regions) {
@@ -66,7 +70,7 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
       if ((!knownSpaces.has(binding.spaceId) || !knownZones.has(binding.zoneId)) && !keys.has(JSON.stringify(binding)))
         facts.bindings.push(binding);
     for (const [id, data] of Object.entries(previous.resources))
-      if (!Object.hasOwn(resources, id) && (!removed.has(id.slice(id.indexOf(':') + 1)) || id.startsWith('zone:') && data && typeof data === 'object' && !Array.isArray(data) && typeof data.closeoutTargetWorkspaceId === 'string') && !previous.regions.some(r => regionKey(r.regionId) === id && removed.has(r.tabId)))
+      if (!Object.hasOwn(resources, id) && (!removed.has(id.slice(id.indexOf(':') + 1)) || id.startsWith('zone:') && closingZones.has(id.slice(5)) || id.startsWith('zone:') && data && typeof data === 'object' && !Array.isArray(data) && typeof data.closeoutTargetWorkspaceId === 'string') && !previous.regions.some(r => regionKey(r.regionId) === id && removed.has(r.tabId)))
         resources[id] = data;
     for (const [id, layout] of Object.entries(previous.tabLayouts))
       if (!Object.hasOwn(tabLayouts, id) && !removed.has(id))
