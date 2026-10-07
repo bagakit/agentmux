@@ -19,6 +19,13 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
       qualifyReply: async (config, event, raw, credential, signal) => (await feishu()).qualifyReply(config, event, raw, credential, signal)
     },
     transport: { start: async input => (await feishu()).transport.start(input) },
+    roomDiscovery: {
+      list: async (input, credential, signal) => (await feishu()).roomDiscovery.list(input, credential, signal),
+      search: async (input, credential, signal) => (await feishu()).roomDiscovery.search(input, credential, signal),
+      get: async (input, credential, signal) => (await feishu()).roomDiscovery.get(input, credential, signal),
+      members: async (input, credential, signal) => (await feishu()).roomDiscovery.members(input, credential, signal),
+      createLink: async (input, credential, signal) => (await feishu()).roomDiscovery.createLink(input, credential, signal)
+    },
     rooms: {
       create: async (input, credential, signal) => (await feishu()).rooms.create(input, credential, signal),
       addMembers: async (input, credential, signal) => (await feishu()).rooms.addMembers(input, credential, signal)
