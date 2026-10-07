@@ -1,5 +1,5 @@
 .message-tool-prefixes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); margin-block: var(--sp-4); }
-.message-tool-prefixes label { display: grid; gap: var(--sp-2); min-width: 0; color: var(--text-2); font-size: var(--fs-body); }
+.message-tool-prefixes label { display: grid; align-content: start; gap: var(--sp-2); min-width: 0; color: var(--text-2); font-size: var(--fs-body); }
 .message-tool-prefixes input { width: 100%; min-width: 0; font-family: var(--font-mono); }
 .message-tool-prefixes small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .message-tool-keywords { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-body); color: var(--text-2); }
