@@ -93,8 +93,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   directoryIssue?: string | null
   viewTargets?: WorkbenchViewTargets
 } = {}) {
+  const surfaceVisible = useAppStore(state => state.mainSurface === 'agents')
+  const visible = hostVisible && surfaceVisible
   const contextSelector = useMemo(createFocusProjectionSelector, [])
-  const {contexts: executionRows, laneContexts, pmoAttention} = useAppStore(useShallow(contextSelector))
+  const {contexts: executionRows, laneContexts, pmoAttention} = useAppStore(useShallow(state => contextSelector(state, visible)))
   const moteIdentity = useAppStore(useShallow(state => {
     const session = state.sessions.find(item => item.id === pmoAttention[0])
     const workspace = session && workspaceForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
@@ -125,8 +127,6 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     for (const entry of executionHistory) if (entry.identity?.kind === 'agent' && state.timelines[entry.sessionId]) held[entry.sessionId] = state.timelines[entry.sessionId]!
     return held
   }))
-  const surfaceVisible = useAppStore(state => state.mainSurface === 'agents')
-  const visible = hostVisible && surfaceVisible
   const cardPresentation = useMemo(() => ({ active: visible, retainedRegionId: null }), [visible])
   const catalogue = useFocusHistorySources(visible)
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
@@ -151,6 +151,8 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const historySearch = useFocusHistorySearch(query, visible)
   const [project, setProject] = useState('all')
   const [bucketFilter, setBucketFilter] = useState<FocusBucket | 'all'>('all')
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  useEffect(() => { if (!visible) setFiltersOpen(false) }, [visible])
   const [requestId, setRequestId] = useState<string | null>(null)
   const [historyWindowRequest, setHistoryWindowRequest] = useState<{ at: number; sequence: number }>()
   const [workspaceRatio, setWorkspaceRatio] = useState(0.618)
@@ -165,6 +167,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const resizingFocusRef = useRef(false)
   const adjustWorkspaceRatio = (next: number) => setWorkspaceRatio(Math.min(0.76, Math.max(0.38, next)))
   useEffect(() => {
+    if (!visible) return
     const onPointerMove = (event: PointerEvent) => {
       if (!resizingFocusRef.current || !focusLayoutRef.current) return
       const rect = focusLayoutRef.current.getBoundingClientRect()
@@ -176,9 +179,9 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     window.addEventListener('pointerup', stop)
     window.addEventListener('pointercancel', stop)
     window.addEventListener('blur', stop)
-    return () => { window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); window.removeEventListener('blur', stop) }
-  }, [])
-  const { facts, errors: hierarchyErrors, refresh: refreshHierarchy } = useFocusHierarchy(laneContexts, config)
+    return () => { stop(); window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); window.removeEventListener('blur', stop) }
+  }, [visible])
+  const { facts, errors: hierarchyErrors, refresh: refreshHierarchy } = useFocusHierarchy(laneContexts, config, visible)
   const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs, Date.now(), topicSnapshots), [laneContexts, config, facts, tabs, topicSnapshots])
   const boardRowsRef = useRef<HTMLDivElement>(null)
   const orderedLanes = useFocusProjectOrder(allLanes, visible, boardRowsRef)
@@ -297,13 +300,13 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       })
     }</FocusLaneGroups> : null}</>
   }
-  return <section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" style={{ '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)` } as CSSProperties}>
-    <FocusToolbar selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
+  return <section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" hidden={!surfaceVisible} inert={!visible} aria-hidden={!surfaceVisible} style={{ display: surfaceVisible ? undefined : 'none', '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)` } as CSSProperties}>
+    <FocusToolbar active={visible} selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
       <div className={`focus-filters${isMacPlatform() ? ' focus-filters--mac' : ''}`}>
         <div className="global-board-toolbar__controls">
           <label className="global-board-search"><ThemeActionSearchIcon size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search text, IDs or amux links" title="Filter names, activity, paths and original object IDs or links. Enter searches case-sensitive text in retained conversations." onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); historySearch.start() } }} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <button type="button" className="small-button focus-search-history-trigger" aria-label="Search retained conversation text" title="Search retained conversation text · Enter" disabled={!query.trim()} onClick={() => historySearch.start()}><ThemeActionSearchIcon size={13} /><span>History</span></button>
-          <FilterMenu.Root>
+          <FilterMenu.Root open={visible && filtersOpen} onOpenChange={setFiltersOpen}>
             <FilterMenu.Trigger asChild><button type="button" className="focus-filter-trigger" aria-label="Focus filters" aria-description={filterSummary} title={filterSummary} data-active={filterCount > 0 ? 'true' : undefined}>
               <ThemeActionFilterIcon size={14} aria-hidden="true" /><span className="focus-filter-trigger__summary">{filterSummary}</span>{filterCount ? <span className="focus-filter-trigger__count" aria-hidden="true">{filterCount}</span> : null}
             </button></FilterMenu.Trigger>
@@ -339,7 +342,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         const ref = location.reference, layout = layouts[ref.displayWorkspaceId], index = layout ? groupIds(layout.root).indexOf(ref.groupId) : -1
         return `${config?.workspaces.find(workspace => workspace.id === ref.displayWorkspaceId)?.name ?? ref.displayWorkspaceId} · ${index >= 0 ? `Group ${index + 1}` : ref.groupId}`
       }} onSelect={location => onSelectLocation ? onSelectLocation(location.reference) : location.sessionId ? focusExecutionSession(location.sessionId, location.reference) : useAppStore.getState().reportError(new Error('The original location is kept. Its navigation is not confirmed in this view.'))} />
-      {visible ? <FocusHistorySearch search={historySearch} /> : null}
+      <FocusHistorySearch search={historySearch} active={visible} />
       {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => {
         const id = pmoAttention[0]!
         const current = useAppStore.getState()
@@ -434,7 +437,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     </aside></> : null}
     </div>
     <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} currentContext={currentContext} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} onReveal={revealFocusRecord} historyWindowRequest={historyWindowRequest} catalogue={catalogue} visible={visible} />
-    {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onReturnFocus={() => {
+    {visible && requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onReturnFocus={() => {
       if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus()
     }} onSessionChange={focusExecutionSession} /> : null}
   </section>

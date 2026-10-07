@@ -3,6 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { FocusContext } from '../lib/focus-context'
 import { AgentAvatar } from './AgentAvatar'
 import { FocusContextStateMark } from './FocusContextState'
+import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
@@ -12,9 +13,10 @@ const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
 export function AgentContextContent({ context, metadata, identity, presentation = 'row' }: {
   context: FocusContext; metadata?: ReactNode; identity?: ReactNode; presentation?: 'row' | 'card'
 }) {
+  const active = useWorkbenchPresentationActive()
   const recap = context.bucket !== 'attention' && context.state !== 'disconnected' && context.processState === 'running' && !context.runUnobserved ? context.recap : null
   const showActivity = context.detailKind === 'service' && !context.detailIsRecap
-  const avatar = identity ?? <span className="focus-context__avatar focus-context__avatar--compact-content" inert aria-hidden="true">{context.kind === 'agent' ? <AgentAvatar sessionId={context.id} executorId={context.executorId} label={context.name} state={context.state} providerId={context.providerId ?? undefined} size={18} visible={false} /> : <ThemeObjectTerminalIcon size={16} />}</span>
+  const avatar = identity ?? <span className="focus-context__avatar focus-context__avatar--compact-content" inert aria-hidden="true">{context.kind === 'agent' ? <AgentAvatar sessionId={active ? context.id : undefined} executorId={context.executorId} label={context.name} state={context.state} providerId={context.providerId ?? undefined} size={18} visible={false} /> : <ThemeObjectTerminalIcon size={16} />}</span>
   return <>
     {presentation === 'row' ? avatar : null}
     <span className="focus-context__copy">

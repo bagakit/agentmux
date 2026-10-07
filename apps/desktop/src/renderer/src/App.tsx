@@ -141,6 +141,8 @@ function DesktopApp() {
   const recallVisible = mainSurface === 'recall' && !settingsOpen
   const surveyVisible = mainSurface === 'survey' && !settingsOpen
   const focusVisible = mainSurface === 'agents' && !settingsOpen
+  const [focusVisited, setFocusVisited] = useState(false)
+  useEffect(() => { if (mainSurface === 'agents') setFocusVisited(true) }, [mainSurface])
   const surveyBindings = useAppStore(state => state.spaceZoneBindings)
   const surveyTopicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
   const surveySessionIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
@@ -212,23 +214,20 @@ function DesktopApp() {
     setFocusView(useAppStore.getState().focusExecutionSession(id, reference) ? 'tab' : 'unconfirmed')
   }, [])
   useEffect(() => { setFocusView(value => value === 'closed' || value === 'unconfirmed' ? 'tab' : value) }, [workbenchSpaceSelection])
-  useEffect(() => { setFocusView(value => value === 'unconfirmed' ? 'tab' : value) }, [mainSurface])
   const focusRegionOnly = focusView === 'region'
   // The exact main choice survives closing only its Focus presentation.
-  const mainFocus = useMemo(() => mainSurface === 'agents'
-    ? mainFocusPresentation(workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly ? 'region' : 'tab')
-    : { projection: null, issue: null, references: [] },
-  [mainSurface, workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly])
-  const focusPresentation = useMemo(() => mainSurface === 'agents' && focusView !== 'closed'
+  const mainFocus = useMemo(() => mainFocusPresentation(workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly ? 'region' : 'tab'),
+  [workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly])
+  const focusPresentation = useMemo(() => focusView !== 'closed'
     ? focusView === 'unconfirmed'
       ? executionFocusPresentation(agentFocus.execution, tabs, surveyCatalog, reference => selectFocusContext(agentFocus.execution.sessionId!, reference))
       : mainFocus
     : { projection: null, issue: null, references: [] },
-  [mainSurface, focusView, mainFocus, agentFocus.execution, tabs, surveyCatalog, selectFocusContext])
+  [focusView, mainFocus, agentFocus.execution, tabs, surveyCatalog, selectFocusContext])
   const timelineCurrentReference = useMemo(() => focusTimelineCurrentReference(workbenchSpaceSelection,
     workbenchSpaceSelection ? layouts[workbenchSpaceSelection.workspaceId] : undefined, tabs, surveyCatalog),
   [workbenchSpaceSelection, layouts, tabs, surveyCatalog])
-  const focusProjection = focusPresentation.projection
+  const focusProjection = mainSurface === 'agents' ? focusPresentation.projection : null
   const focusTab = focusProjection?.selection.length === 1 ? tabs[focusProjection.selection[0]!.tabId] : null
   const surveyOccurrence = useRef<WorkbenchProjectionSelection | null>(null)
   const selectSurveyReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
@@ -587,7 +586,7 @@ function DesktopApp() {
               {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface onSelectReference={selectSurveyReference} visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} viewTargets={viewTargets}
                 /> : null}
               {recallVisited || mainSurface === 'recall' ? <GlobalRecallSurface onSelectReference={selectRecallReference} visible={recallVisible} catalog={surveyCatalog} projection={recallProjection} selection={recallCurrentSelection} viewTargets={viewTargets} /> : null}
-              {mainSurface === 'agents' ? <GlobalFocusSurface visible={focusVisible} workspaceOpen={focusView !== 'closed' && Boolean(workbenchSpaceSelection || focusView === 'unconfirmed')} onCloseWorkspace={() => setFocusView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} currentReference={timelineCurrentReference} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
+              {mainSurface === 'agents' || focusVisited ? <GlobalFocusSurface visible={focusVisible} workspaceOpen={focusView !== 'closed' && Boolean(workbenchSpaceSelection || focusView === 'unconfirmed')} onCloseWorkspace={() => setFocusView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} currentReference={timelineCurrentReference} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {config && mountedWorkspaces.length > 0 ? (
                 <div

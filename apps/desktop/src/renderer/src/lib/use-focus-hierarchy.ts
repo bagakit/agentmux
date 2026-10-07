@@ -11,7 +11,7 @@ import type { FocusContext } from './focus-context'
 
 type Snapshot = { id: string; topics?: readonly ScratchTopicSnapshot[]; branches?: WorkspaceBranchesSnapshot; error?: string }
 /** Query only represented workspaces; unchanged scopes reuse their requests across unrelated updates. */
-export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConfig | null) {
+export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConfig | null, active = true) {
   const [facts, setFacts] = useState<FocusHierarchyFacts>(EMPTY_FOCUS_HIERARCHY)
   const scopes = useMemo(() => {
     const scopes = new Map<string, NonNullable<AppConfig>['workspaces'][number]>()
@@ -26,20 +26,22 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
     return [...scopes.values()]
   }, [rows, config, facts])
   const scratchScope = scopes.find(scope => isScratchWorkspaceId(scope.id))
-  const { topics: scratchTopics, error: scratchError } = useScratchTopics(scratchScope?.id ?? null)
-  const revisions = useAppStore(useShallow(state => scopes.map(workspace => state.workspaceFileRevisions[workspace.id] ?? 0)))
+  const { topics: scratchTopics, error: scratchError } = useScratchTopics(scratchScope?.id ?? null, active)
+  const revisions = useAppStore(useShallow(state => active ? scopes.map(workspace => state.workspaceFileRevisions[workspace.id] ?? 0) : []))
   const signature = JSON.stringify(scopes.map((scope, index) => [scope.id, scope.path, scope.branch, revisions[index]]))
   const requests = useRef(new Map<string, Promise<Snapshot>>())
   const failedRequests = useRef(new Set<string>())
   const [retrySequence, retry] = useState(0)
   const [errors, setErrors] = useState<string[]>([])
   const refresh = useCallback(() => {
+    if (!active) return
     for (const key of failedRequests.current) requests.current.delete(key)
     failedRequests.current.clear()
     if (scratchScope && scratchError) void useAppStore.getState().refreshScratchTopics(scratchScope.id, true)
     retry(value => value + 1)
-  }, [scratchScope?.id, scratchError])
+  }, [active, scratchScope?.id, scratchError])
   useEffect(() => {
+    if (!active) return
     let attached = true
     const jobs = scopes.map((scope, index) => {
       if (isScratchWorkspaceId(scope.id)) return Promise.resolve<Snapshot>({ id: scope.id,
@@ -75,6 +77,6 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
     })
     return () => { attached = false }
     // Immutable signature includes each owned scope and its revision; byte/state changes don't query again.
-  }, [signature, scratchTopics, scratchError, retrySequence])
+  }, [active, signature, scratchTopics, scratchError, retrySequence])
   return { facts, errors, refresh }
 }

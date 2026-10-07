@@ -35,25 +35,25 @@ const ThemeActionMoreIcon = semanticIconComponent('action.more')
 const ThemeLayoutCloseRightIcon = semanticIconComponent('layout.close-right')
 
 
-export function FocusToolbar({ children, selectedId, selected, tab, reference, onReview, onCloseWorkspace, regionOnly, onToggleRegion }: {
-  children: ReactNode; selectedId: string | null; selected: FocusContext | undefined; tab: WorkbenchTab | null; reference?: WorkbenchProjectionSelection | undefined; onReview(): void; onCloseWorkspace(): void; regionOnly?: boolean | undefined; onToggleRegion?: (() => void) | undefined
+export function FocusToolbar({ active = true, children, selectedId, selected, tab, reference, onReview, onCloseWorkspace, regionOnly, onToggleRegion }: {
+  active?: boolean; children: ReactNode; selectedId: string | null; selected: FocusContext | undefined; tab: WorkbenchTab | null; reference?: WorkbenchProjectionSelection | undefined; onReview(): void; onCloseWorkspace(): void; regionOnly?: boolean | undefined; onToggleRegion?: (() => void) | undefined
 }) {
   return <header className="focus-toolbar">
     <div className="focus-toolbar__filters">{children}</div>
-    {(tab || selectedId) ? <FocusToolbarContext key={JSON.stringify([selectedId, tab?.id])} selectedId={selectedId} selected={selected} tab={tab} reference={reference} onReview={onReview} onCloseWorkspace={onCloseWorkspace} regionOnly={regionOnly} onToggleRegion={onToggleRegion} /> : null}
+    {(tab || selectedId) ? <FocusToolbarContext active={active} key={JSON.stringify([selectedId, tab?.id])} selectedId={selectedId} selected={selected} tab={tab} reference={reference} onReview={onReview} onCloseWorkspace={onCloseWorkspace} regionOnly={regionOnly} onToggleRegion={onToggleRegion} /> : null}
   </header>
 }
-function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, onCloseWorkspace, regionOnly, onToggleRegion }: {
-  selectedId: string | null; selected: FocusContext | undefined; tab: WorkbenchTab | null; reference?: WorkbenchProjectionSelection | undefined; onReview(): void; onCloseWorkspace(): void; regionOnly?: boolean | undefined; onToggleRegion?: (() => void) | undefined
+function FocusToolbarContext({ active, selectedId, selected, tab, reference, onReview, onCloseWorkspace, regionOnly, onToggleRegion }: {
+  active: boolean; selectedId: string | null; selected: FocusContext | undefined; tab: WorkbenchTab | null; reference?: WorkbenchProjectionSelection | undefined; onReview(): void; onCloseWorkspace(): void; regionOnly?: boolean | undefined; onToggleRegion?: (() => void) | undefined
 }) {
   const renameTab = useAppStore(state => state.renameTab)
-  const stop = useFocusStopAgent()
+  const stop = useFocusStopAgent(active)
   const sessions = useWorkbenchTabSessions(tab ?? undefined)
   const sessionNameMetadata = useWorkbenchTabNameMetadata(tab ?? undefined)
   const agentNames = useAppStore(useShallow(state => recordForWorkbenchTab(state.agentNames, tab ?? undefined)))
   const timelines = useAppStore(useShallow(state => recordForWorkbenchTab(state.timelines, tab ?? undefined)))
   const [floating, setFloating] = usePmoTeamsTopicFloatingState()
-  const { topics, error: directoryError } = useScratchTopics(SCRATCH_WORKSPACE_ID)
+  const { topics, error: directoryError } = useScratchTopics(SCRATCH_WORKSPACE_ID, active)
   const scratch = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID))
   const icons = useAppStore(state => state.spaceObjectIcons)
   const motes = useMemo(() => scratchMoteTopics(topics ?? []), [topics])
@@ -70,6 +70,8 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const [draft, setDraft] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [contextOpen, setContextOpen] = useState(false), [chatOpen, setChatOpen] = useState(false)
+  useEffect(() => { if (!active) { setMenuOpen(false); setContextOpen(false); setChatOpen(false) } }, [active])
   const renameRef = useRef<HTMLInputElement>(null)
   const expectedNameRevision = useRef({ revision: 0 }), savingName = useRef(false), editGeneration = useRef(0)
   useEffect(() => () => { ++editGeneration.current; expectedNameRevision.current = { revision: 0 } }, [tab?.id])
@@ -82,12 +84,14 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
   const activeSurface = reference && tab?.regions[reference.regionId]
   const statusLabel = selected?.stateLabel ?? (activeSurface ? activeSurface.kind[0]!.toUpperCase() + activeSurface.kind.slice(1) : originalTerminal ? 'Terminal' : 'Recovery unknown')
   useEffect(() => {
+    if (!active) return
     if (draft !== null) { renameRef.current?.focus(); renameRef.current?.select() }
     else if (renameCancelledRef.current) { renameCancelledRef.current = false; identityRef.current?.focus() }
   }, [draft === null])
   function closeMenuFocus(event: Event) {
     // Selected actions and outside interaction keep their own destination.
     event.preventDefault()
+    if (!active) return
     const origin = menuEscapeReturnRef.current
     menuEscapeReturnRef.current = null
     origin?.focus()
@@ -161,19 +165,20 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
     ...(selectedId && activeSurface?.kind === 'agent' ? [{ key: 'stop', label: 'Stop Agent', icon: ThemeActionStopIcon, run: () => stop.requestStop(selectedId, selected?.name ?? name, menuOriginRef.current) }] : []),
   ]
   return <div className="focus-toolbar__context">
-    {draft !== null ? <TextInput ref={renameRef} className="focus-toolbar__rename" aria-label="Rename Tab" value={draft} onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onBlur={commitRename} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); commitRename() } if (event.key === 'Escape') { event.preventDefault(); renameCancelledRef.current = true; ++editGeneration.current; setDraft(null) } }} /> : <ContextMenu.Root modal={false}>
+    {draft !== null ? <TextInput ref={renameRef} className="focus-toolbar__rename" aria-label="Rename Tab" value={draft} onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onBlur={() => { if (active) void commitRename() }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); commitRename() } if (event.key === 'Escape') { event.preventDefault(); renameCancelledRef.current = true; ++editGeneration.current; setDraft(null) } }} /> : <ContextMenu.Root modal={false} open={active && contextOpen} onOpenChange={setContextOpen}>
       <ContextMenu.Trigger asChild onContextMenu={() => { menuOriginRef.current = identityRef.current }}><button ref={identityRef} type="button" className="focus-toolbar__identity" aria-label={`Focus context: ${name}`} title={`${name} · ${statusLabel} · Right-click for Focus actions`} onKeyDown={event => { if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') { event.preventDefault(); menuOriginRef.current = event.currentTarget; setMenuOpen(true) } }}><strong>{name}</strong><small>{statusLabel}</small></button></ContextMenu.Trigger>
       <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><ContextMenu.Content className="tab-context-menu" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = identityRef.current }} onCloseAutoFocus={closeMenuFocus}>{actions.map(action => <ContextMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></ContextMenu.Item>)}</ContextMenu.Content></ContextMenu.Portal>
     </ContextMenu.Root>}
     <button type="button" className="focus-toolbar__action" aria-label="View in Space" title={`View in Space · ${name}`} onClick={viewInSpace}><ThemeActionOpenExternalIcon size={14} aria-hidden="true" /><span>Space</span></button>
     <div className="focus-toolbar__chat">
       <button type="button" className="focus-toolbar__action" aria-label="Chat about this tab with Mote" aria-description={`Recipient: ${recipientLabel}${recipientIssue ? ' · ' + recipientIssue : ''}`} title={`Chat about this tab with ${recipientLabel} · ${name}${recipientIssue ? '\n' + recipientIssue : ''}`} disabled={discussionPending} aria-busy={discussionPending} onClick={() => { void chatAboutTab() }}><ThemeObjectConversationIcon size={14} aria-hidden="true" /><span>{discussionPending ? 'Preparing…' : 'Chat'}</span></button>
-      <DropdownMenu.Root modal={false}>
+      <DropdownMenu.Root modal={false} open={active && chatOpen} onOpenChange={setChatOpen}>
         <DropdownMenu.Trigger asChild><button type="button" className="focus-toolbar__mote-choice" aria-label="Choose Chat Mote" aria-description={`${recipientLabel}${topicId ? ' · ' + topicId : ''}${recipientIssue ? ' · ' + recipientIssue : ''}`} title={`${recipientLabel}${topicId ? ' · ' + topicId : ''}${recipientIssue ? '\n' + recipientIssue : ''}`} data-focus-chat-topic={topicId}>
           <SpaceObjectIcon kind="mote" name={recipientName} manualIcon={recipientIcon ? icons[recipientIcon.key] ?? null : null} avatarWorkspaceId={recipientIcon?.avatarTarget?.workspaceId} avatarTopicId={recipientIcon?.avatarTarget?.topicId} avatarObjectKey={recipientIcon?.key} />
           <span className="focus-toolbar__mote-name">{recipientName}</span>{recipientIssue ? <ThemeStatusWarningIcon size={12} className="focus-toolbar__mote-warning" aria-hidden="true" /> : null}<ThemeNavigationDownIcon size={11} aria-hidden="true" />
         </button></DropdownMenu.Trigger>
         <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu focus-chat-mote-menu" align="end" collisionPadding={8} onCloseAutoFocus={event => {
+          if (!active) { event.preventDefault(); return }
           const focused = document.activeElement
           if (focused instanceof HTMLElement && focused.isConnected && focused !== document.body && !focused.closest('[hidden], [inert]') && event.target instanceof HTMLElement && !event.target.contains(focused)) event.preventDefault()
         }}>
@@ -194,11 +199,11 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
       </DropdownMenu.Root>
     </div>
     {selected?.actionable ? <button type="button" className="focus-toolbar__review" aria-label="Review request" title="Review request" onClick={onReview}><ThemeObjectInboxIcon size={12} /><span>Review</span></button> : null}
-    <DropdownMenu.Root modal={false} open={menuOpen} onOpenChange={setMenuOpen}>
+    <DropdownMenu.Root modal={false} open={active && menuOpen} onOpenChange={setMenuOpen}>
       <DropdownMenu.Trigger asChild><button type="button" className="icon-button focus-toolbar__view-menu" aria-label="Focus context actions" title={`Focus view actions · ${name}`} onPointerEnter={event => { if (!menuOpen && event.pointerType === 'mouse' && event.buttons === 0) menuOriginRef.current = null }} onPointerDown={event => { menuOriginRef.current = event.currentTarget }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') menuOriginRef.current = event.currentTarget }}><ThemeActionMoreIcon size={14} /></button></DropdownMenu.Trigger>
       <DropdownMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><DropdownMenu.Content className="tab-context-menu" align="end" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = menuOriginRef.current }} onCloseAutoFocus={closeMenuFocus}>{actions.map(action => <DropdownMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></DropdownMenu.Item>)}</DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root>
     <button type="button" className="icon-button" aria-label="Close Focus workspace" title="Collapse Focus workspace" onClick={onCloseWorkspace}><ThemeLayoutCloseRightIcon size={14} /></button>
-    {stop.dialog}
+    {active ? stop.dialog : null}
   </div>
 }
