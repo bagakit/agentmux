@@ -169,7 +169,8 @@
 .connector-setup__fields .settings-field > span small { color: var(--text-3); font-size: var(--fs-meta); margin-left: var(--sp-2); }
 .connector-setup__fields .settings-field > input, .connector-setup__fields select { min-width: 0; width: 100%; }
 .connector-setup__fields .connector-platform { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
-.connector-setup__fields .connector-platform select { width: auto; }
+.connector-setup__fields .connector-platform select { width: auto; padding: var(--sp-3) var(--sp-4); color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; font: var(--fs-body)/1.5 var(--font-sans); }
+.connector-setup__fields .connector-platform select:focus-visible { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
 .connector-setup__fields .settings-group-note { margin: 0; }
 .connector-optional { border-top: 1px solid var(--line-soft); padding-top: var(--sp-4); }
 .connector-optional > summary, .connector-diagnostics > summary, .connector-setup-help > summary { color: var(--text-3); font-size: var(--fs-meta); cursor: pointer; }
