@@ -11,6 +11,11 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
   })
   const adapter: ConnectionAdapter = {
     adapterId: 'feishu',
+    enrollment: {
+      domains: [{ domain: 'open.feishu.cn', label: 'Feishu' }, { domain: 'open.larksuite.com', label: 'Lark' }],
+      begin: async (input, signal) => (await feishu()).enrollment.begin(input, signal),
+      poll: async (input, signal) => (await feishu()).enrollment.poll(input, signal)
+    },
     publication: new FeishuPublicationAdapter({ withClient: async (config, credential, call, signal) => (await feishu()).withClient(config, credential, call, signal) }),
     test: async (config, credential) => (await feishu()).test(config, credential),
     ingress: {
