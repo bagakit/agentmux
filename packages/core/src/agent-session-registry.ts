@@ -307,6 +307,10 @@ export class AgentMuxAgentSessionRegistry {
     return reservation
   }
 
+  async prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession) {
+    return await this.store.prepareResume(reservation, session)
+  }
+
   async prepareReopen(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, session: AgentMuxStoredAgentSession) {
     return await this.store.prepareReopen(reservation, session)
   }

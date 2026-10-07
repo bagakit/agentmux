@@ -555,6 +555,8 @@ export type AppConfig = {
   focus?: import('./focus-preferences').FocusPreferences
   notes?: import('./notes-preferences').NotesPreferences
   goals?: import('./goals-preferences').GoalsPreferences
+  /** Authored continuity preferences; Core resolves defaults when a new recovery intent is admitted. */
+  continuity?: Partial<import('@agentmux/core').AgentMuxContinuityPolicy>
   /** Next-startup preference; absence waits for Agent availability without back-filling. */
   startup?: { skipAgentAvailabilityCheckWait?: boolean }
   // Optional so the field can land without a version bump or a migration: `ConfigStore.get` fills the
@@ -1045,6 +1047,7 @@ export type SessionSnapshot = SessionSnapshotBase & (
       agentSessionUpdatedAt: number
       /** Durable native semantic fact, independent of the current Run's display status. */
       semanticStatus?: AgentStatus
+      continuity?: AgentMuxAgentSession['continuity']
       /** Core-owned terminal capability fact; absent means no active degradation marker. */
       terminalCapability?: AgentTerminalCapabilityState
       terminalPromptDelivery?: AgentTerminalPromptDeliveryState
@@ -1186,6 +1189,7 @@ export type AgentSessionRecoveryCandidate = {
   capabilities: AgentCapabilities
   /** Core's last native semantic state; missing entry time remains unknown. */
   semanticStatus?: AgentStatus
+  continuity?: AgentMuxAgentSession['continuity']
   terminalCapability?: AgentTerminalCapabilityState
   label: string
   createdAt: number
@@ -1219,7 +1223,7 @@ export type SessionReplayResult = Pick<SessionAttachResult, 'replay' | 'gap'>
 export type SessionRecoveryResult =
   | { kind: 'terminal-restarted'; session: SessionSnapshot }
   | { kind: 'reattachable' | 'resumed'; session: SessionSnapshot; advisory?: string }
-  | Extract<AgentMuxAgentContinuityResult, { kind: 'unavailable' | 'retired' | 'conflict' }>
+  | Extract<AgentMuxAgentContinuityResult, { kind: 'unavailable' | 'retired' | 'conflict' | 'pending' }>
 
 export type HostCheckResult = {
   input: HostConfig
@@ -1894,7 +1898,7 @@ export type AgentMuxDesktopApi = {
     // Transport loss remains an error and never authorizes resume.
     // Returns the Core continuity disposition; the renderer rebinds only an attached/resumed
     // Agent or a newly restarted raw Terminal.
-    recover(session: SessionControl, workspacePath?: string, operationId?: string): Promise<SessionRecoveryResult>
+    recover(session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride'>): Promise<SessionRecoveryResult>
     stop(session: SessionControl): Promise<void>
     /** With control: this exact host/Run's terminal bytes and resize. Without: semantic/membership. */
     onEvent(listener: (event: RuntimeEvent) => void, control?: SessionControl): () => void

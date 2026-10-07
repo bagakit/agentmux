@@ -141,6 +141,8 @@ import {
 } from './agent-session-registry.js'
 import {
   decideAgentSessionContinuity,
+  agentContinuityAdmission, normalizeAgentContinuityPolicy, resolveAgentContinuityReminder,
+  type AgentMuxContinuityOperation,
   type AgentMuxAgentContinuityInput,
   type AgentMuxAgentContinuityResult
 } from './agent-session-continuity.js'
@@ -916,6 +918,7 @@ export class AgentMuxClient {
     renderObservations: Set<AgentInputObservation>
   }>()
   private readonly agentContinuityTails = new Map<string, Promise<void>>()
+  private readonly agentContinuityTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly providerReads = new Set<AbortController>()
   /** Consumer-owned read-only resources; never occupy Provider page slots or Run lifecycle locks. */
   private readonly historyObservationControllers = new Map<string, Set<NativeHistoryObservationResource>>()
@@ -1852,6 +1855,8 @@ export class AgentMuxClient {
   }
 
   async dispose(): Promise<void> {
+    for (const timer of this.agentContinuityTimers.values()) clearTimeout(timer)
+    this.agentContinuityTimers.clear()
     this.inputWaitingDisposed = true
     this.inputWaitingUnsubscribe()
     for (const value of this.inputWaitingContexts.values()) value.controller.abort()
@@ -4657,6 +4662,7 @@ export class AgentMuxClient {
   ): Promise<AgentMuxAgentSession> {
     this.requireConnected()
     const previous = reopening ? undefined : this.requireAgentSession(input.agentSessionId)
+    const continuity = previous?.continuity
     if (expectedRun && previous && !sameRun(previous.run, expectedRun)) {
       throw new AgentMuxError('Agent Session changed before native resume.', 'STALE_AGENT_SESSION')
     }
@@ -4789,6 +4795,12 @@ export class AgentMuxClient {
             evidence: { source: 'agentmux', run: { ...current.run }, observedAt: Date.now() } })
           return null
         }) : null
+      if (reservation.kind === 'resume' && continuity?.operationId === input.operationId) {
+        reservation = await this.registry.prepareResume(reservation, { ...current,
+          hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
+          capabilityHash: hashAgentCapability(invocationCapability) })
+        this.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding)
+      }
       launchAttempted = true
       const run = await this.kernel.start({
         operationKey: lifecycleOperationId,
@@ -4807,7 +4819,7 @@ export class AgentMuxClient {
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
       }).catch(error => {
-        if (reopening && !(error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied')) {
+        if ((reopening || continuity?.operationId === input.operationId) && !(error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied')) {
           // A lost start ACK may already own a Run. Keep the one reservation until authoritative reconciliation.
           preserveUnconfirmedRun = true
           throw new AgentMuxError(`Continue start is unconfirmed. Read the original Session; no operation was resent. ${error instanceof Error ? error.message : String(error)}`,
@@ -4829,6 +4841,10 @@ export class AgentMuxClient {
         updatedAt: Math.max(current.updatedAt + 1, nativeBindingObservedAt),
         nativeHandle: structuredClone(current.nativeHandle),
         nativeBinding: { source: 'semantic-resume-target', run: runRef(run.runId), observedAt: nativeBindingObservedAt }
+      }
+      if (continuity?.operationId === input.operationId && continuity.kind === 'starting') {
+        next.continuity = { ...continuity, kind: 'resumed', newRun: { ...next.run }, observedAt: Date.now() }
+        next.continuityOperations = { ...previous?.continuityOperations, [input.operationId]: next.continuity }
       }
       delete next.observedNativeHandle
       delete next.nativeSourceObservation
@@ -4875,13 +4891,13 @@ export class AgentMuxClient {
         readySession = await this.ensureTerminalHandshakeOrDegrade(
           retirement ? this.registry.get(current.agentSessionId) : readySession, run)
       } catch (error) {
-        if (reopening) {
+        if (reopening || continuity?.operationId === input.operationId) {
           const recoveredCommit = !persisted
           if (!persisted) {
             try {
               const canonical = (await this.store.readMetadata(current.agentSessionId))
-              if (canonical?.run.runId === run.runId && canonical.reopenedFrom && canonical.reopenedFrom.observedAt === retirement!.observedAt &&
-                canonical.reopenedFrom.run.runId === retirement!.run.runId) {
+              if (canonical?.run.runId === run.runId && (reopening ? canonical.reopenedFrom && canonical.reopenedFrom.observedAt === retirement!.observedAt &&
+                canonical.reopenedFrom.run.runId === retirement!.run.runId : canonical.continuity?.operationId === input.operationId && canonical.continuity.newRun?.runId === run.runId)) {
                 await this.registry.load('local')
                 persisted = this.registry.get(current.agentSessionId)
               }
@@ -5002,151 +5018,223 @@ export class AgentMuxClient {
     }
   }
 
-  private async performAgentContinuity(
-    input: AgentMuxAgentContinuityInput
-  ): Promise<AgentMuxAgentContinuityResult> {
+  private async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>,
+    runs: readonly CtxmuxAdapterRun[]): Promise<AgentMuxStoredAgentSession | null> {
+    const prepared = reservation.preparedSession
+    const candidates = runs.filter(run => run.lifecycleOperationId === reservation.operationId)
+    if (!prepared || candidates.length !== 1) return null
+    const run = candidates[0]!
+    if (run.runId === reservation.expectedRun.runId || run.workspacePath !== prepared.workspacePath) {
+      throw new AgentMuxError('Original resume Run does not match the prepared target.', 'AGENT_SESSION_RUN_MISMATCH')
+    }
+    const next: AgentMuxStoredAgentSession = { ...prepared, run: runRef(run.runId),
+      retiredRuns: [...prepared.retiredRuns, prepared.run], updatedAt: Math.max(Date.now(), prepared.updatedAt + 1),
+      nativeBinding: { source: 'semantic-resume-target', run: runRef(run.runId), observedAt: Date.now() } }
+    for (const key of ['observedNativeHandle', 'nativeSourceObservation', 'nativePromptPredecessor', 'hookReceipt', 'terminalHandshake',
+      'terminalCapability', 'terminalPromptReadiness', 'promptCompletionAdmission', 'terminalPromptSubmission', 'terminalPromptDelivery',
+      'terminalOutputChannel', 'semanticStatus', 'pendingInteraction'] as const) delete next[key]
+    if (prepared.continuity) {
+      next.continuity = { ...prepared.continuity, kind: 'resumed', newRun: { ...next.run }, observedAt: Date.now() }
+      delete next.continuity.nextActionAt
+      next.continuityOperations = { ...prepared.continuityOperations, [prepared.continuity.operationId]: next.continuity }
+    }
+    try { await this.registry.commitLifecycle(reservation, next) }
+    catch (error) {
+      const canonical = await this.store.readMetadata(prepared.agentSessionId)
+      if (canonical?.run.runId !== run.runId || canonical.continuity?.operationId !== prepared.continuity?.operationId) throw error
+      await this.registry.load('local')
+    }
+    await this.restoreReopenObservation(this.registry.get(next.agentSessionId), run, reservation.operationId)
+    return this.registry.get(next.agentSessionId)
+  }
+
+  private scheduleAgentContinuity(input: AgentMuxAgentContinuityInput, receipt: AgentMuxContinuityOperation): void {
+    const key = JSON.stringify([input.agentSessionId, input.operationId])
+    const old = this.agentContinuityTimers.get(key)
+    if (old) clearTimeout(old)
+    this.agentContinuityTimers.delete(key)
+    if (receipt.nextActionAt === undefined) return
+    // Node's timer is signed 32-bit; long valid policy delays are observed in slices.
+    const timer = setTimeout(() => {
+      this.agentContinuityTimers.delete(key)
+      try {
+        const current = this.registry.get(input.agentSessionId)
+        if (!sameRun(current.run, input.expectedRun) || current.continuity?.operationId !== input.operationId) return
+      } catch { return }
+      void this.ensureAgentContinuity(input).catch(error => {
+        this.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId,
+          code: 'AGENT_CONTINUITY_RECHECK_UNCONFIRMED', message: String(error),
+          evidence: { source: 'agentmux', run: input.expectedRun, observedAt: Date.now() } })
+      })
+    }, Math.min(0x7fffffff, Math.max(0, receipt.nextActionAt - Date.now())))
+    timer.unref?.()
+    this.agentContinuityTimers.set(key, timer)
+  }
+
+  private async performAgentContinuity(input: AgentMuxAgentContinuityInput): Promise<AgentMuxAgentContinuityResult> {
     let current: AgentMuxStoredAgentSession | null = null
-    try {
-      current = this.registry.get(input.agentSessionId)
-    } catch (error) {
-      if (!(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION') throw error
+    try { current = this.registry.get(input.agentSessionId) }
+    catch (error) { if (!(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION') throw error }
+    // A restarted observer rejoins the admitted automatic intent rather than recomposing its policy or delay.
+    if (current?.continuity && !current.continuityOperations?.[input.operationId] &&
+      input.trigger && !['manual', 'input'].includes(input.trigger) &&
+      (current.continuity.kind === 'starting' || ['active-delay', 'operation-unconfirmed'].includes(current.continuity.reason) ||
+        ['runtime-unverified', 'provider-unverified'].includes(current.continuity.reason) && current.continuity.nextActionAt !== undefined) &&
+      sameRun(current.continuity.previousRun, input.expectedRun)) {
+      input = { ...input, operationId: current.continuity.operationId }
     }
-
-    if (current && !sameRun(current.run, input.expectedRun)) {
-      return {
-        kind: 'conflict',
-        agentSessionId: input.agentSessionId,
-        previousRun: { ...input.expectedRun },
-        currentRun: { ...current.run },
-        reason: 'session-run-changed',
-        evidence: { kind: 'agent-session-store' }
+    const prior = current?.continuityOperations?.[input.operationId]
+    if (prior && !sameRun(prior.previousRun, input.expectedRun)) {
+      throw new AgentMuxError('A continuity operation must retain its original Run.', 'CONTINUITY_OPERATION_MISMATCH')
+    }
+    const now = Date.now(), policy = prior?.policy ?? normalizeAgentContinuityPolicy(input.policy)
+    const receipt: AgentMuxContinuityOperation = prior ? structuredClone(prior) : {
+      operationId: input.operationId, agentSessionId: input.agentSessionId, trigger: input.trigger ?? 'manual',
+      ...(input.timingOverride ? { timingOverride: input.timingOverride } : {}), policy,
+      previousRun: { ...input.expectedRun }, admittedAt: now, observedAt: now, rechecks: 0,
+      kind: 'pending', reason: 'runtime-unverified', evidence: { kind: 'run-unknown', observedAt: now, message: 'Not yet observed.' }
+    }
+    receipt.observedAt = now
+    delete receipt.nextActionAt
+    const record = async (result: AgentMuxAgentContinuityResult, reason?: string): Promise<AgentMuxAgentContinuityResult> => {
+      receipt.kind = result.kind
+      receipt.reason = reason ?? ('reason' in result ? result.reason : result.kind)
+      receipt.evidence = result.evidence.kind === 'provider-native' ? result.evidence.previousRun : result.evidence
+      if (result.kind === 'resumed') receipt.newRun = { ...result.run }
+      if (result.kind === 'pending' && result.nextActionAt !== undefined) receipt.nextActionAt = result.nextActionAt
+      if (current) {
+        try {
+          current = await this.registry.update(current.agentSessionId, current.run, value => ({ ...value,
+            continuity: structuredClone(receipt), continuityOperations: { ...value.continuityOperations, [receipt.operationId]: structuredClone(receipt) } }))
+          this.publishSession(current)
+        } catch (error) {
+          receipt.error = `Continuity receipt persistence is unconfirmed. ${error instanceof Error ? error.message : String(error)}`
+          this.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_CONTINUITY_RECEIPT_UNCONFIRMED',
+            message: receipt.error, evidence: { source: 'agentmux', run: input.expectedRun, observedAt: now } })
+        }
       }
+      this.scheduleAgentContinuity(input, receipt)
+      return { ...result, ...((result.kind === 'resumed' || result.kind === 'reattachable') && current ? { session: this.projectSession(current) } : {}), continuity: structuredClone(receipt) }
     }
-
+    const pending = (reason: import('./agent-session-continuity.js').AgentMuxContinuityPendingReason,
+      evidence: import('./agent-session-continuity.js').AgentMuxAgentContinuityRunEvidence, nextActionAt?: number) => record({
+        kind: 'pending', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun }, reason, evidence,
+        ...(nextActionAt === undefined ? {} : { nextActionAt }) })
+    if (current && !sameRun(current.run, input.expectedRun)) {
+      if (prior?.newRun && sameRun(prior.newRun, current.run) && prior.kind === 'resumed') {
+        return record({ kind: 'resumed', session: this.projectSession(current), previousRun: { ...input.expectedRun }, run: { ...current.run },
+          evidence: { kind: 'provider-native', providerId: current.providerId,
+            nativeSessionId: current.nativeHandle?.sessionId ?? '', previousRun: prior.evidence as import('./agent-session-continuity.js').AgentMuxAgentContinuityRunEvidence } }, prior.reason)
+      }
+      return record({ kind: 'conflict', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun },
+        currentRun: { ...current.run }, reason: 'session-run-changed', evidence: { kind: 'agent-session-store' } })
+    }
     let run: AgentMuxRun | null = null
     if (current) {
-      try {
-        const observed = await this.kernel.status(current.run.runId)
-        this.assertAgentRun(current, observed)
-        run = this.projectRun(observed, current)
-      } catch (error) {
-        if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') throw error
+      try { const observed = await this.kernel.status(current.run.runId); this.assertAgentRun(current, observed); run = this.projectRun(observed, current) }
+      catch (error) {
+        if (error instanceof AgentMuxError && error.code === 'AGENT_SESSION_RUN_MISMATCH') return record({
+          kind: 'conflict', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun },
+          reason: 'session-run-changed', evidence: { kind: 'agent-session-store' } })
+        if (!(error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found')) {
+          if (prior) receipt.rechecks++
+          const next = receipt.rechecks < policy.recheckMaxAttempts ? now + policy.recheckIntervalMs : undefined
+          return pending('runtime-unverified', { kind: 'run-unknown', observedAt: now, message: error instanceof Error ? error.message : String(error) }, next)
+        }
       }
     }
-
+    const evidence = run?.state === 'running' ? { kind: 'run-running' as const, observedAt: run.observedAt }
+      : run ? { kind: 'run-ended' as const, state: run.state as 'exited' | 'interrupted', observedAt: run.observedAt }
+      : { kind: 'run-missing' as const, observedAt: now }
+    const retirement = this.registry.retiredAgentSession(input.agentSessionId, input.expectedRun)
     const catalog = current ? this.providers.get(current.providerId).catalog : null
-    // A Session can be absent here after an explicit stop while its retirement record still proves
-    // that this exact identity was intentionally retired.  Preserve that record's Host when feeding
-    // the continuity decision; hard-coding `local` makes a remote retirement look like an unrelated
-    // unknown Session and loses the only honest terminal classification.
-    const retirement = this.registry.retiredAgentSession(
-      input.agentSessionId,
-      input.expectedRun
-    )
+    let admission: ReturnType<typeof agentContinuityAdmission> | undefined
+    if (current && run?.state !== 'running') {
+      // A prior start with no receipt is observation-only. Never dispatch another start or old input.
+      if (prior?.kind === 'starting' || prior?.reason === 'operation-unconfirmed') {
+        const lifecycleId = agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId)
+        try {
+          const reservation = await this.store.loadResumeCorrelation(input.agentSessionId, lifecycleId)
+          if (reservation?.preparedSession) {
+            const recovered = await this.completePreparedResume(reservation, await this.kernel.list())
+            if (recovered) { current = this.registry.get(input.agentSessionId); return record({ kind: 'resumed', session: this.projectSession(current),
+              previousRun: { ...input.expectedRun }, run: { ...current.run }, evidence: { kind: 'provider-native', providerId: current.providerId,
+                nativeSessionId: current.nativeHandle!.sessionId, previousRun: evidence } }, recovered.continuity?.reason ?? prior.reason) }
+          }
+        } catch (error) { receipt.error = error instanceof Error ? error.message : String(error) }
+        if (prior) receipt.rechecks++
+        return pending('operation-unconfirmed', evidence,
+          receipt.rechecks < policy.recheckMaxAttempts ? now + policy.recheckIntervalMs : undefined)
+      }
+      admission = agentContinuityAdmission({ session: this.projectSession(current), trigger: receipt.trigger, policy,
+        admittedAt: receipt.admittedAt, now, ...(receipt.timingOverride ? { timingOverride: receipt.timingOverride } : {}) })
+      if (admission.kind === 'pending') return pending(admission.reason, evidence, admission.nextActionAt)
+    }
     const handle = current?.nativeHandle
     const canProbe = run?.state !== 'running' && catalog?.resumeStrategy.kind === 'provider-native' &&
-      handle?.kind === 'provider' &&
-      handle.providerId === current?.providerId &&
+      handle?.kind === 'provider' && handle.providerId === current?.providerId &&
       (catalog.resumeStrategy.locator !== 'transcript-path' || Boolean(handle.transcriptPath))
-    if (canProbe && current) input = await this.sessionExecutorOptions(current, input)
-    const capability = canProbe
-      ? await this.probeAgent(current!.providerId, input.commandOverride)
-      : null
-    const decision = decideAgentSessionContinuity({
-      agentSessionId: input.agentSessionId,
-      hostId: current?.hostId ?? retirement?.hostId ?? 'local',
-      expectedRun: input.expectedRun,
-      observedAt: Date.now(),
-      session: current ? this.projectSession(current) : null,
-      retirement: retirement ? structuredClone(retirement) : null,
-      run,
-      catalog,
-      capability
-    })
+    let capability: AgentCapabilitySnapshot | null = null
+    if (canProbe && current) {
+      try {
+        input = await this.sessionExecutorOptions(current, input)
+        capability = await this.probeAgent(current.providerId, input.commandOverride)
+      } catch (error) {
+        receipt.error = error instanceof Error ? error.message : String(error)
+        if (prior) receipt.rechecks++
+        return pending('provider-unverified', evidence, receipt.rechecks < policy.recheckMaxAttempts ? now + policy.recheckIntervalMs : undefined)
+      }
+    }
+    const decision = decideAgentSessionContinuity({ agentSessionId: input.agentSessionId,
+      hostId: current?.hostId ?? retirement?.hostId ?? 'local', expectedRun: input.expectedRun, observedAt: now,
+      session: current ? this.projectSession(current) : null, retirement: retirement ? structuredClone(retirement) : null,
+      run, catalog, capability })
     if (decision.kind === 'reattachable' && current && input.env !== undefined) {
-      await this.ensureManagedHooks(
-        this.providers.get(current.providerId),
-        current.workspacePath,
-        current.agentSessionId,
-        input.env,
-        this.hookBindings.get(current.run.runId)?.endpoint
-      )
-    }
-    if (decision.kind !== 'resume') return decision
-
-    try {
-      await this.requireHookIngressOwner()
-    } catch (error) {
-      if (error instanceof AgentMuxError && error.code === 'HOOK_INGRESS_BUSY') {
-        return {
-          kind: 'conflict',
-          agentSessionId: input.agentSessionId,
-          previousRun: { ...input.expectedRun },
-          reason: 'lifecycle-busy',
-          evidence: { kind: 'hook-ingress-owner' }
-        }
+      try { await this.ensureManagedHooks(this.providers.get(current.providerId), current.workspacePath, current.agentSessionId,
+        input.env, this.hookBindings.get(current.run.runId)?.endpoint) }
+      catch (error) {
+        receipt.error = `Managed Hook restoration is unconfirmed. The original running Agent remains available. ${error instanceof Error ? error.message : String(error)}`
+        this.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_CONTINUITY_HOOK_UNCONFIRMED',
+          message: receipt.error, evidence: { source: 'agentmux', run: input.expectedRun, observedAt: now } })
       }
+    }
+    if (decision.kind !== 'resume') return record(decision)
+    try { await this.requireHookIngressOwner() }
+    catch (error) {
+      if (error instanceof AgentMuxError && error.code === 'HOOK_INGRESS_BUSY') return record({ kind: 'conflict', agentSessionId: input.agentSessionId,
+        previousRun: { ...input.expectedRun }, reason: 'lifecycle-busy', evidence: { kind: 'hook-ingress-owner' } })
       throw error
     }
-
+    receipt.kind = 'starting'; receipt.reason = admission?.kind === 'resume' ? admission.reason : 'explicit-request'; receipt.evidence = evidence
+    receipt.nativeTarget = structuredClone(decision.nativeHandle)
+    receipt.interruptedWorking = admission?.kind === 'resume' && admission.interruptedWorking
+    receipt.recoveryInputs = { reminder: receipt.trigger !== 'input' && admission?.kind === 'resume' && admission.interruptedWorking ? resolveAgentContinuityReminder(policy) : '',
+      continuation: receipt.trigger !== 'input' && admission?.kind === 'resume' && admission.interruptedWorking && policy.continuationEnabled ? policy.continuationPrompt : '' }
+    // Persist admission before the first irreversible start. This does not acquire a lifecycle lease.
+    current = await this.registry.update(input.agentSessionId, input.expectedRun, value => ({ ...value,
+      continuity: structuredClone(receipt), continuityOperations: { ...value.continuityOperations, [receipt.operationId]: structuredClone(receipt) } }))
     try {
-      const session = await this.resumeAgentRun({
-        agentSessionId: input.agentSessionId,
-        operationId: input.operationId,
-        ...(input.args === undefined ? {} : { args: input.args }),
-        ...(input.env === undefined ? {} : { env: input.env }),
+      const session = await this.resumeAgentRun({ agentSessionId: input.agentSessionId, operationId: input.operationId,
+        ...(input.args === undefined ? {} : { args: input.args }), ...(input.env === undefined ? {} : { env: input.env }),
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride }),
-        ...(input.cols === undefined ? {} : { cols: input.cols }),
-        ...(input.rows === undefined ? {} : { rows: input.rows })
+        ...(input.cols === undefined ? {} : { cols: input.cols }), ...(input.rows === undefined ? {} : { rows: input.rows })
       }, input.expectedRun, capability ?? undefined)
-      return {
-        kind: 'resumed',
-        session,
-        previousRun: { ...input.expectedRun },
-        run: { ...session.run },
-        evidence: {
-          kind: 'provider-native',
-          providerId: decision.nativeHandle.providerId,
-          nativeSessionId: decision.nativeHandle.sessionId,
-          previousRun: decision.evidence
-        }
-      }
+      current = this.registry.get(input.agentSessionId)
+      return record({ kind: 'resumed', session, previousRun: { ...input.expectedRun }, run: { ...session.run },
+        evidence: { kind: 'provider-native', providerId: decision.nativeHandle.providerId,
+          nativeSessionId: decision.nativeHandle.sessionId, previousRun: decision.evidence } }, receipt.reason)
     } catch (error) {
-      if (
-        error instanceof AgentMuxError &&
-        (
-          error.code === 'AGENT_SESSION_BUSY' ||
-          error.code === 'STALE_AGENT_SESSION' ||
-          error.code === 'UNKNOWN_AGENT_SESSION'
-        )
-      ) {
+      if (error instanceof AgentMuxError && ['AGENT_SESSION_BUSY', 'STALE_AGENT_SESSION', 'UNKNOWN_AGENT_SESSION'].includes(error.code)) {
         if (error.code !== 'AGENT_SESSION_BUSY') await this.registry.load('local')
-        const retired = this.registry.retiredAgentSession(
-          input.agentSessionId,
-          input.expectedRun
-        )
-        if (retired) {
-          return {
-            kind: 'retired',
-            agentSessionId: input.agentSessionId,
-            previousRun: { ...input.expectedRun },
-            evidence: { kind: 'user-retired', observedAt: retired.observedAt }
-          }
-        }
-        let latest: AgentMuxStoredAgentSession | null = null
-        try {
-          latest = this.registry.get(input.agentSessionId)
-        } catch {}
-        return {
-          kind: 'conflict',
-          agentSessionId: input.agentSessionId,
-          previousRun: { ...input.expectedRun },
-          ...(latest ? { currentRun: { ...latest.run } } : {}),
-          reason: 'lifecycle-busy',
-          evidence: { kind: 'agent-session-store' }
-        }
+        const retired = this.registry.retiredAgentSession(input.agentSessionId, input.expectedRun)
+        if (retired) return record({ kind: 'retired', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun },
+          evidence: { kind: 'user-retired', observedAt: retired.observedAt } })
+        return record({ kind: 'conflict', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun },
+          reason: 'lifecycle-busy', evidence: { kind: 'agent-session-store' } })
       }
-      throw error
+      receipt.error = error instanceof Error ? error.message : String(error)
+      try { current = this.registry.get(input.agentSessionId) } catch {}
+      return pending('operation-unconfirmed', evidence, policy.recheckMaxAttempts > 0 ? now + policy.recheckIntervalMs : undefined)
     }
   }
 
@@ -6326,6 +6414,12 @@ export class AgentMuxClient {
         catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,
           code: 'AGENT_REOPEN_UNCONFIRMED', message: error instanceof Error ? error.message : String(error),
           evidence: { source: 'agentmux', observedAt: Date.now() } }) }
+        continue
+      }
+      if (reservation.kind === 'resume' && reservation.preparedSession) {
+        try { await this.completePreparedResume(reservation, runs) }
+        catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,
+          code: 'AGENT_CONTINUITY_UNCONFIRMED', message: String(error), evidence: { source: 'agentmux', observedAt: Date.now() } }) }
         continue
       }
       if (reservation.kind === 'stop') {
