@@ -20,7 +20,7 @@ export function AgentContextContent({ context, metadata, identity, headingAccess
   return <>
     {presentation === 'row' ? avatar : null}
     <span className="focus-context__copy">
-      <span className="focus-context__identity">{presentation === 'card' ? avatar : null}<strong>{context.name}</strong>{headingAccessory}<span className="focus-context__state" title={context.stateLabel} aria-hidden="true"><FocusContextStateMark context={context} /><small>{context.stateLabel}</small></span>{metadata}</span>
+      <span className="focus-context__identity">{presentation === 'card' ? avatar : null}<strong>{context.name}</strong>{metadata}{headingAccessory}<span className="focus-context__state" title={context.stateLabel} aria-hidden="true"><FocusContextStateMark context={context} /><small>{context.stateLabel}</small></span></span>
       <span className={`focus-context__detail${recap ? ' focus-context__detail--recap' : ''}${showActivity ? ' focus-context__detail--service' : ''}`}>
         {recap ? <><span className="focus-context__recap" title={`${recap.source} (${recap.origin})`}>{presentation === 'row' ? <ThemeObjectConversationIcon size={10} aria-hidden="true" /> : null}<span>{recap.displayText ?? recap.text}</span></span>{showActivity ? <span className="focus-context__activity">{context.detail}</span> : null}</> : context.detail}
       </span>

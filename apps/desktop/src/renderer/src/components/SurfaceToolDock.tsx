@@ -1,7 +1,12 @@
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
-import { AgentContextContent } from './AgentContextContent'
+import { WorkspaceAgentRow } from './WorkspaceAgentRow'
+import { createFocusContextIdentitySelector, focusContextIdentityKey } from '../lib/focus-context-identity'
+import { createFocusGoalLinksSelector, focusGoalCardKey } from '../lib/focus-goal-links'
+import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
+import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
+import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { useShallow } from 'zustand/react/shallow'
-import { agentContextForSession, FOCUS_BUCKETS, groupFocusContexts, focusNeutralGroupSummary, type FocusBucket } from '../lib/focus-context'
+import { createWorkspaceAgentContextsSelector, FOCUS_BUCKETS, groupFocusContexts, focusNeutralGroupSummary, type FocusBucket } from '../lib/focus-context'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useContext, useMemo } from 'react'
 import type {
@@ -15,11 +20,10 @@ import {
   workspaceAgentSessions,
   type WorkspaceTool
 } from '../lib/surface-tool-dock'
-import { CONTEXT_PRESSURE_HINT, contextPressure, contextUsedPercent } from '../lib/agent-usage'
-import { useAppStore } from '../store'
+import { contextUsedPercent } from '../lib/agent-usage'
+import { agentRegionExecution, useAppStore } from '../store'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { WorkspaceFilesTool } from './WorkspaceFilesTool'
-import { scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
 import { SidebarToggleChrome, WindowSidebarLayoutContext } from './TopRowChrome'
 
 const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
@@ -57,8 +61,18 @@ export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
   const timelines = useAppStore(useShallow(state => Object.fromEntries(scoped.map(session => [session.id, state.timelines[session.id]]))))
   const names = useAppStore(useShallow(state => Object.fromEntries(scoped.map(session => [session.id, state.agentNames[session.id]]))))
   const percentById = useMemo(() => Object.fromEntries(scoped.map(session => [session.id, contextUsedPercent(session.turnUsage?.context)])), [scoped])
-  const groups = useMemo(() => groupFocusContexts(scoped.map(session => agentContextForSession(session, timelines[session.id], names[session.id], workspace,
-    scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics))).sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))), [scoped, timelines, names, workspace, topics])
+  const contextSelector = useMemo(createWorkspaceAgentContextsSelector, [])
+  const projected = useMemo(() => contextSelector(scoped, timelines, names, workspace, topics), [contextSelector, scoped, timelines, names, workspace, topics])
+  const groups = useMemo(() => groupFocusContexts([...projected].sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))), [projected])
+  const active = useWorkbenchPresentationActive()
+  const goalSelector = useMemo(createFocusGoalLinksSelector, [])
+  const goalLinks = useAppStore(state => goalSelector(state, active))
+  const config = useAppStore(state => state.config), tabs = useAppStore(state => state.tabs), layouts = useAppStore(state => state.layouts)
+  const catalog = useAppStore(workbenchSelectionCatalog), identitySelector = useMemo(createFocusContextIdentitySelector, [])
+  const contexts = useMemo(() => FOCUS_BUCKETS.flatMap(bucket => groups[bucket]), [groups])
+  const identityTabs = workbenchNavigationTabs(tabs)
+  const identities = useMemo(() => identitySelector(catalog, identityTabs, contexts, config, layouts, agentRegionExecution),
+    [identitySelector, catalog, identityTabs, contexts, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts])
   const openFocus = useAppStore(state => state.setMainSurface)
   const count = scoped.length
 
@@ -88,38 +102,9 @@ export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
                 <strong>{label}</strong><em>{contexts.length}</em>
               </header>
               <div>
-                {contexts.map((context) => {
-                  // Preserve the existing usage thresholds and hints, including Idle Agents.
-                  const percent = percentById[context.id] ?? null
-                  const pressure = contextPressure(percent)
-                  return (
-                  <button
-                    type="button"
-                    className="workspace-agent-row focus-context"
-                    key={context.id}
-                    data-session-id={context.id} data-state={context.state} data-bucket={context.bucket}
-                    title={`${context.name} · ${context.stateLabel}\n${context.detail}\n${context.lastActivityAt === null ? 'Activity time unknown' : `Last active ${new Date(context.lastActivityAt).toLocaleString()}`}\nOpen in Space`}
-                    aria-label={`${context.name} · ${context.stateLabel} · Open in Space`}
-                    onClick={() => onOpen(context.id)}
-                  >
-                    <AgentContextContent context={context} metadata={<span className="workspace-agent-row__metadata">
-                        {/* 够上门槛才出现，且文案说的是下一步不是颜色名——沿用花名册那枚 data-pressure
-                            标记（CSS 在 agent-panels.css），逻辑层不出现颜色。缺席即正常。 */}
-                        {pressure ? (
-                          <span
-                            className="agent-roster__pressure"
-                            data-pressure={pressure}
-                            title={`Context window ${percent}% full — ${CONTEXT_PRESSURE_HINT[pressure]}`}
-                          >
-                            {percent}%
-                          </span>
-                        ) : null}
-                      {context.lastActivityAt === null ? <span title="Activity time unknown">—</span> : <time dateTime={new Date(context.lastActivityAt).toISOString()} title={`Last active ${new Date(context.lastActivityAt).toLocaleString()}`}>{new Date(context.lastActivityAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time>}
-                    </span>} />
-                    <ThemeActionOpenExternalIcon className="focus-context__open" size={11} aria-hidden="true" />
-                  </button>
-                  )
-                })}
+                {contexts.map(context => <WorkspaceAgentRow key={context.id} context={context} onOpen={onOpen}
+                  percent={percentById[context.id] ?? null} goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))}
+                  identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} />)}
               </div>
             </section>
           )

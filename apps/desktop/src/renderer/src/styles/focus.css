@@ -517,3 +517,22 @@
 .focus-goal__item small { display: block; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .focus-goal__roles { display: grid; gap: 4px; color: var(--text-2); font-size: var(--fs-micro); }
 .focus-goal__roles[data-goal-roles='unconfirmed'] { padding-top: 4px; border-top: 1px solid var(--line); color: var(--text-3); }
+
+/* The shared Agent disclosure keeps supplementary facts below an intentional summary. */
+.agent-information-details { margin: 8px 0; color: var(--text-2); font-size: var(--fs-meta); }
+.agent-information-details > details { padding: 5px 0; border-bottom: 1px solid var(--line); }
+.agent-information-details > details > summary { cursor: pointer; color: var(--text-2); }
+.agent-information-details > details > summary > span { margin-left: 5px; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.agent-information-details > details[open] > summary { margin-bottom: 8px; }
+.agent-information-details h3, .agent-information-details h4 { margin: 8px 0 4px; font-size: var(--fs-meta); font-weight: 600; color: var(--text); }
+.agent-information-details p { color: var(--text-3); font-size: var(--fs-micro); }
+.agent-information-details ul { padding: 0; margin: 4px 0; list-style: none; }
+.agent-information-details li { padding: 5px 0; min-width: 0; overflow-wrap: anywhere; }
+.agent-information-details li + li { border-top: 1px solid var(--line); }
+.agent-information-details li > small { display: block; color: var(--text-3); font-size: var(--fs-micro); margin-top: 3px; }
+.agent-information-details li > button { padding: 0; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); overflow-wrap: anywhere; }
+.agent-information-details li > button:hover { text-decoration-color: currentColor; }
+.agent-information-details li > button:focus-visible { outline: 1px solid var(--green); outline-offset: 2px; }
+.agent-information-details .agent-usage-details__section { margin-top: 8px; padding-top: 6px; }
+.agent-information-details .agent-usage-details__observed { margin-top: 8px; }
+.workspace-agent-card > .focus-goal__trigger { top: var(--sp-2); }

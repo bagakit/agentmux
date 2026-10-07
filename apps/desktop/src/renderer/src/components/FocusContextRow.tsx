@@ -3,10 +3,9 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { FocusContext } from '../lib/focus-context'
 import { FocusContextMenu } from './FocusContextMenu'
-import { useFocusContextHover } from './FocusContextHover'
+import { useAgentInformationPreview } from './AgentInformationPreview'
 import { currentDisplayNameRevision, useAppStore } from '../store'
 import { AgentContextContent } from './AgentContextContent'
-import { WorkbenchTopology } from './WorkbenchTopology'
 import type { FocusContextIdentity } from '../lib/focus-context-identity'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { FocusGoalLinks, FocusGoalMark } from './FocusGoalLinks'
@@ -23,7 +22,7 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
   const input = useRef<HTMLInputElement>(null), cancelled = useRef(false)
   const expectedNameRevision = useRef({ revision: 0 }), saving = useRef(false), editGeneration = useRef(0)
   useEffect(() => () => { ++editGeneration.current; expectedNameRevision.current = { revision: 0 } }, [context.id])
-  const hover = useFocusContextHover(context, !menuOpen && !goalOpen && draft === null, identity)
+  const hover = useAgentInformationPreview(context, !menuOpen && !goalOpen && draft === null, identity, goalLinks)
   const goalDisclosure = useCallback((open: boolean) => { hover.close(); setGoalOpen(open) }, [hover.close])
   useEffect(() => {
     if (!active) return
@@ -54,13 +53,8 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
         if (event.key === 'Escape') { event.preventDefault(); cancelled.current = true; ++editGeneration.current; setDraft(null) }
       }} />
   </div>
-  const position = identity?.tabs.some(tab => tab.regions.length > 1) ? <span className="focus-context__position"
-    aria-label={`${identity.occurrenceCount} confirmed ${identity.occurrenceCount === 1 ? 'position' : 'positions'}`}
-    onPointerEnter={hover.close} onPointerLeave={event => {
-      if (event.relatedTarget instanceof Node && hover.anchor.current?.contains(event.relatedTarget)) hover.triggerEvents.onPointerEnter()
-    }}><WorkbenchTopology tabs={identity.tabs} interactive={false} enabled={active && !menuOpen && !goalOpen && draft === null && !hover.describedBy} /></span> : undefined
   const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel} · ${description}`} aria-description={context.originAddress} aria-describedby={hover.describedBy} {...hover.triggerEvents} onClick={() => { hover.close(); onSelect(context.id) }} onContextMenu={hover.close}>
-    <AgentContextContent context={context} identity={position} presentation="card" headingAccessory={goalLinks ? <span className="focus-goal__space" aria-hidden="true"><FocusGoalMark links={goalLinks} /></span> : undefined} />
+    <AgentContextContent context={context} identity={hover.position} presentation="card" headingAccessory={goalLinks ? <span className="focus-goal__space" aria-hidden="true"><FocusGoalMark links={goalLinks} /></span> : undefined} />
   </button>
   const main = context.kind === 'agent' ? <FocusContextMenu open={active && menuOpen} context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={() => { hover.close(); ++editGeneration.current; expectedNameRevision.current = { revision: currentDisplayNameRevision('agent-session', context.id) }; setDraft(context.name) }}>{card}</FocusContextMenu> : card
   return <><div className="focus-context-card">{main}{goalLinks ? <FocusGoalLinks links={goalLinks} onOpenChange={goalDisclosure} /> : null}</div>{hover.preview}</>
