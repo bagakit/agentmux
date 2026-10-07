@@ -19,6 +19,7 @@ import type { ComposerSemanticReference } from '../lib/composer-semantic-referen
 export type ComposerSuggestion = { text: string; description: string; group?: string }
 
 export type AgentComposerProps = {
+  active?: boolean
   value: string
   readPastedImage?: ReadPastedImage
   disabled: boolean
@@ -58,6 +59,7 @@ export type AgentComposerProps = {
 }
 
 export function AgentComposer({
+  active = true,
   value,
   readPastedImage,
   disabled,
@@ -163,6 +165,7 @@ export function AgentComposer({
     <div ref={composerRef} className="composer" data-agent-composer="true">
       {/* The maintained editor owns composition, selection and undo; the host owns the draft. */}
       <InlineComposer
+        active={active}
         aria-label="Message Agent"
         {...(insertionRef ? { insertionRef } : {})}
         disabled={disabled}
