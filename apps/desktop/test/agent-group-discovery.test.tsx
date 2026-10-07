@@ -81,6 +81,27 @@ it('an unavailable directory preserves the explicit exact-ID path and healthy or
   await f.original.unchanged()
 }, 25_000)
 
+it('returning to the same exact group starts a new reading occurrence and ignores its earlier late member page', async () => {
+  const originalNative = native; let originalReads = 0, release!: (value: unknown) => void
+  const late = new Promise<unknown>(resolve => { release = resolve })
+  native = async request => {
+    if (request.url?.endsWith('/oc_original/members')) {
+      if (++originalReads === 1) return await late
+      return { code: 0, data: { items: [{ member_id_type: 'open_id', member_id: 'ou_current', name: 'Current person' }], has_more: false } }
+    }
+    return await originalNative(request)
+  }
+  await f.mount(); await f.menu('Bind existing group chat'); await chooseGroup('oc_original')
+  await vi.waitFor(() => expect(originalReads).toBe(1))
+  await chooseGroup('oc_other'); await ready('Original person')
+  await chooseGroup('oc_original'); await ready('Current person')
+  release({ code: 0, data: { items: [{ member_id_type: 'open_id', member_id: 'ou_old', name: 'Earlier person' }], has_more: false } })
+  await vi.waitFor(async () => { await act(async () => {}); expect(f.calls.filter(call => call.method === 'connection.room.members' && call.result && (call.input as { externalConversationId: string }).externalConversationId === 'oc_original')).toHaveLength(2) })
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Current person')
+  expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('Earlier person')
+  expect(f.calls.some(call => call.method === 'connection.grant')).toBe(false); await f.original.unchanged()
+}, 25_000)
+
 it('an explicit join link freezes the original intent before the SDK effect and remains distinct from membership, Binding and chat permission', async () => {
   const originalNative = native
   let claimed = false
