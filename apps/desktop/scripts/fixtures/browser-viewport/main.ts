@@ -49,7 +49,9 @@ async function clickUi(selector: string, name: string) {
 }
 async function choose(mode: BrowserViewport, narrow = false) {
   const title = mode[0].toUpperCase() + mode.slice(1), trigger = narrow ? 'More browser tools' : 'Viewport'
-  app.focus({ steal: true }); window.focus(); original.webContents.focus()
+  app.focus({ steal: true }); window.focus()
+  await until('the native application window is active before page focus', async () => window.isFocused())
+  original.webContents.focus()
   await until('the original native page really owns focus before choosing ' + mode, async () => original.webContents.isFocused())
   const before = await uiFacts(), callStart = receipt.calls.length, publicationStart = receipt.publications.length
   const previousLayers = new Set(window.contentView.children.filter(view => view !== original && view !== sibling && 'webContents' in view)
