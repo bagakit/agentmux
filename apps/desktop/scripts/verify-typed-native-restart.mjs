@@ -64,7 +64,7 @@ try {
     plugins: [{ name: 'typed-native-client-ui-inputs', enforce: 'pre',
       async load(id) { await recordClientUiInput(id) },
       async transform(_code, id) { await recordClientUiInput(id) } }],
-    define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"', __TERMINAL_WHEEL_UMD_URL__: '"unused"' },
+    define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"', __TERMINAL_WHEEL_UMD_URL__: '"unused"' }, worker: { format: 'es' },
     resolve: { alias: [{ find: /^@xterm\/xterm$/, replacement: path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts') }] },
     build: { target: 'esnext', outDir: path.join(privateRoot, 'renderer'), emptyOutDir: true } })
   await build({ configFile: false, root: fixture, logLevel: 'error', ssr: { noExternal: true },
