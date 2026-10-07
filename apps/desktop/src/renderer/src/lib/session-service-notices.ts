@@ -6,6 +6,25 @@ import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, nativeSe
 import type { ServiceNoticeItem } from './use-service-notices'
 import { observeAgentSession, activityObservationPresentation } from './agent-observation'
 
+const NO_QUEUE: readonly AgentSteerQueueEntry[] = Object.freeze([])
+
+/** Presentation only: reuse an unchanged object's projection, never its input authority. */
+export function createSessionServiceNoticeSelector(): typeof sessionServiceNotices {
+  const cache = new WeakMap<SessionSnapshot, { facts: readonly unknown[]; notices: ServiceNoticeItem[] }>()
+  return (session, queue = NO_QUEUE, sendingId, nativeService = session?.nativeService, observationAvailable = true) => {
+    if (!session) return sessionServiceNotices(session, queue, sendingId, nativeService, observationAvailable)
+    // The original observation owner also depends on time. Crossing its freshness
+    // boundary must invalidate a retained projection even without a new Session.
+    const reason = session.kind === 'agent' ? observeAgentSession(session, Date.now()).reason : undefined
+    const facts = [queue, sendingId, nativeService, observationAvailable, reason]
+    const known = cache.get(session)
+    if (known && facts.every((fact, index) => fact === known.facts[index])) return known.notices
+    const notices = sessionServiceNotices(session, queue, sendingId, nativeService, observationAvailable)
+    cache.set(session, { facts, notices })
+    return notices
+  }
+}
+
 /** Both inboxes project the same current owners; reading a notice never settles its cause. */
 export function sessionServiceNotices(session: SessionSnapshot | undefined, queue: readonly AgentSteerQueueEntry[] = [], sendingId?: string,
   nativeService = session?.nativeService,

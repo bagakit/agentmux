@@ -16,7 +16,7 @@ import { topicIdForSession } from '../lib/workbench-tabs'
 import { scratchMoteTopics, scratchTopicKind, scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
-import { recordForWorkbenchTab, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
+import { useWorkbenchTabRecord, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import { currentDisplayNameRevision, useAppStore } from '../store'
 import { resolveOverlayContainer } from './WindowOverlayHost'
@@ -50,8 +50,8 @@ function FocusToolbarContext({ active, selectedId, selected, tab, reference, onR
   const stop = useFocusStopAgent(active)
   const sessions = useWorkbenchTabSessions(tab ?? undefined)
   const sessionNameMetadata = useWorkbenchTabNameMetadata(tab ?? undefined)
-  const agentNames = useAppStore(useShallow(state => recordForWorkbenchTab(state.agentNames, tab ?? undefined)))
-  const timelines = useAppStore(useShallow(state => recordForWorkbenchTab(state.timelines, tab ?? undefined)))
+  const agentNames = useWorkbenchTabRecord('agentNames', tab ?? undefined)
+  const timelines = useWorkbenchTabRecord('timelines', tab ?? undefined)
   const [floating, setFloating] = usePmoTeamsTopicFloatingState()
   const { topics, error: directoryError } = useScratchTopics(SCRATCH_WORKSPACE_ID, active)
   const scratch = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID))

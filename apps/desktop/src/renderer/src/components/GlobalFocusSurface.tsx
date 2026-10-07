@@ -36,7 +36,7 @@ import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { topicIdForSession, workspaceForSession, type WorkbenchTab } from '../lib/workbench-tabs'
-import { recordForWorkbenchTab, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
+import { useWorkbenchTabRecord, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
@@ -70,8 +70,8 @@ function FocusLocationChoice({ reference, tab, workspaceName, groupIndex, region
 }) {
   const sessions = useWorkbenchTabSessions(tab)
   const sessionNameMetadata = useWorkbenchTabNameMetadata(tab)
-  const names = useAppStore(useShallow(state => recordForWorkbenchTab(state.agentNames, tab)))
-  const timelines = useAppStore(useShallow(state => recordForWorkbenchTab(state.timelines, tab)))
+  const names = useWorkbenchTabRecord('agentNames', tab)
+  const timelines = useWorkbenchTabRecord('timelines', tab)
   return <button type="button" className="small-button focus-location-choice" onClick={onSelect}
     title={`${reference.displayWorkspaceId} / ${reference.groupId} / ${reference.tabId} / ${reference.regionId}`}>
     <strong>{tab ? workbenchTabDisplayName(tab, sessions, names, timelines, sessionNameMetadata) : 'Original work surface'}</strong>

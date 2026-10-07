@@ -7,8 +7,7 @@ import { firstPromptFromTimeline, topicIdForSession, workspaceForSession } from 
 import type { AgentTimelineSnapshot } from '../../../shared/contracts'
 import type { SessionViewMode } from './session-state'
 
-let indexedSessions: readonly SessionSnapshot[] | undefined
-let index: ReadonlyMap<string, SessionSnapshot> = new Map()
+const sessionIndexes = new WeakMap<readonly SessionSnapshot[], ReadonlyMap<string, SessionSnapshot>>()
 let indexedAgentSessions: readonly SessionSnapshot[] | undefined
 let agentIndex: ReadonlyMap<string, readonly Extract<SessionSnapshot, { kind: 'agent' }>[]> = new Map()
 let indexedPathSessions: readonly SessionSnapshot[] | undefined
@@ -17,10 +16,8 @@ const NO_SESSIONS: readonly SessionSnapshot[] = []
 
 /** Shared lookup over the immutable Store projection; references remain owned by the Store. */
 export function sessionPresentationById(sessions: readonly SessionSnapshot[]): ReadonlyMap<string, SessionSnapshot> {
-  if (sessions !== indexedSessions) {
-    index = new Map(sessions.map(session => [session.id, session]))
-    indexedSessions = sessions
-  }
+  let index = sessionIndexes.get(sessions)
+  if (!index) { index = new Map(sessions.map(session => [session.id, session])); sessionIndexes.set(sessions, index) }
   return index
 }
 

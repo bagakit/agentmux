@@ -5,7 +5,7 @@ import { useAppStore } from '../store'
 import { createPmoTeamsTopicTargetSelector, pmoTeamsTopicFloatingTargetTopicId, pmoTeamsTopicFloatingAgentIssue, type PmoTeamsTopicFloatingState } from './pmo-teams-topic-floating'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { sessionStatusLabel } from './session-presentation'
-import { recordForWorkbenchTab, useWorkbenchTabSessions } from './workbench-session-subscriptions'
+import { useWorkbenchTabRecord, useWorkbenchTabSessions } from './workbench-session-subscriptions'
 import { workbenchTabDisplayName } from './workbench-tab-presentation'
 import { assertUnreachableSurface } from './workbench-surface-kinds'
 import type { WorkbenchSurface } from './workbench-tabs'
@@ -45,8 +45,8 @@ export function usePmoTeamsTopicTarget(floating: PmoTeamsTopicFloatingState) {
     return candidate?.workspaceId === SCRATCH_WORKSPACE_ID && candidate.topicId === topicId ? candidate : undefined
   })
   const sessions = useWorkbenchTabSessions(tab)
-  const names = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
-  const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
+  const names = useWorkbenchTabRecord('agentNames', tab)
+  const timelines = useWorkbenchTabRecord('timelines', tab)
   // Unlike activeWorkbenchSurface, a missing active Region must stay unknown;
   // it cannot borrow the title Region's Agent status.
   const reference = floating.reference
