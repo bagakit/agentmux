@@ -1,3 +1,4 @@
+import { configValuesEqual } from '../../../../shared/config-edit'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENT_AVATAR_BADGE_IDS, AGENT_AVATAR_BADGE_LABELS } from '../../../../shared/contracts'
 import { AgentAvatar } from '../AgentAvatar'
@@ -26,6 +27,7 @@ const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 const ThemeStatusFailedIcon = semanticIconComponent('status.failed')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeActionCreateExecutorIcon = semanticIconComponent('action.create-executor')
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeStatusUnrestrictedIcon = semanticIconComponent('status.unrestricted')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
@@ -103,7 +105,8 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   const initialHost = config.hosts.find(host => host.kind === 'local')?.id ?? 'local'
   const [filter, setFilter] = useState({ query: '', snapshot: [] as string[] })
   const [selectedId, setSelectedId] = useState<string | null>(() => executorId ?? Object.keys(config.executors)[0] ?? null)
-  const [providersOpen, setProvidersOpen] = useState(false)
+  const [providerId, setProviderId] = useState<string | null>(null)
+  const [view, setView] = useState<'library' | 'editor'>('library')
   const [catalogRead, setCatalogRead] = useState<{ state: 'idle' | 'loading' | 'ready' | 'error'; error?: string }>({ state: 'idle' })
   const catalogPending = useRef(false)
   const mounted = useRef(true)
@@ -145,7 +148,9 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     ).map(({ id }) => id) })
   }
   const matches = (id: string) => !filter.query.trim() || filter.snapshot.includes(id)
-  const matchCount = executors.filter(({ id }) => matches(id)).length
+  const inProvider = (candidate: string) => providerId === null || candidate === providerId
+  const scopedExecutors = executors.filter(({ draft }) => inProvider(draft.providerId))
+  const visibleExecutors = scopedExecutors.filter(({ id }) => matches(id))
 
   useEffect(() => {
     mounted.current = true
@@ -168,15 +173,18 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     }
   }
 
-  function openProviders(): void {
-    setProvidersOpen(true)
-    if (providerCatalog.length === 0 && catalogRead.state === 'idle') void refreshProviders()
-  }
+  useEffect(() => {
+    if (active && scope === 'templates' && providerCatalog.length === 0 && catalogRead.state === 'idle') void refreshProviders()
+  }, [active, scope, providerCatalog.length, catalogRead.state])
 
-  function closeProviders(): void {
-    setProvidersOpen(false)
-    if (selectedId) setPendingEdit({ id: selectedId, select: false })
-    else setReturnFocus({ id: selectedId })
+  function selectProvider(next: string | null): void {
+    setProviderId(next)
+    setFilter({ query: '', snapshot: [] })
+    const current = drafts[selectedId ?? '']
+    if (!current || (next !== null && current.providerId !== next)) {
+      setSelectedId(executors.find(({ draft }) => next === null || draft.providerId === next)?.id ?? null)
+    }
+    setView('library')
   }
 
   useEffect(() => {
@@ -190,7 +198,8 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     if (!active || !targetId || consumedNavigation.current === request) return
     consumedNavigation.current = request
     setSelectedId(targetId)
-    setProvidersOpen(false)
+    setProviderId(drafts[targetId]?.providerId ?? config.executors[targetId]?.providerId ?? null)
+    setView('editor')
     setScope('templates')
     setFilter({ query: '', snapshot: [] })
     setPendingEdit({ id: targetId, select: false })
@@ -210,15 +219,17 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
 
   function selectExecutor(id: string): void {
     setSelectedId(id)
+    setView('editor')
     setPendingEdit({ id, select: false })
   }
 
   function removeExecutor(id: string): void {
     setDrafts((current) => Object.fromEntries(Object.entries(current).filter(([candidate]) => candidate !== id)))
-    const next = executors.find((executor) => executor.id !== id)?.id ?? null
+    const next = scopedExecutors.find((executor) => executor.id !== id)?.id ?? null
     setSelectedId(next)
     setFilter({ query: '', snapshot: [] })
     setReturnFocus({ id: next })
+    setView('library')
   }
 
   function updateAvatar(id: string, patch: AgentAvatarAppearance | undefined) {
@@ -256,6 +267,8 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     })
     setFilter({ query: '', snapshot: [] })
     setSelectedId(nextId)
+    setProviderId(providerId)
+    setView('editor')
     setPendingEdit({ id: nextId, select: false, field: 'provider' })
   }
 
@@ -302,8 +315,8 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     })
   }
 
-  function addExecutor(provider = providerCatalog[0]): void {
-    if (!provider) { openProviders(); return }
+  function addExecutor(provider = providerId === null ? providerCatalog[0] : providerCatalog.find(entry => entry.id === providerId)): void {
+    if (!provider) { void refreshProviders(); return }
     setScope('templates')
     const id = createExecutorId()
     setDrafts((current) => ({ ...current, [id]: {
@@ -312,7 +325,8 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     } }))
     setFilter({ query: '', snapshot: [] })
     setSelectedId(id)
-    setProvidersOpen(false)
+    setProviderId(provider.id)
+    setView('editor')
     setPendingEdit({ id, select: true })
   }
 
@@ -323,33 +337,30 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   }, {})
   return (
     <div className="settings-agent-pane">
-      <div className="settings-agent-navigation" role="group" aria-label="Agent configuration">
-        <button type="button" aria-pressed={!providersOpen} onClick={closeProviders}>Executors</button>
-        <button type="button" className="settings-providers-toggle" aria-pressed={providersOpen} onClick={openProviders}>Providers</button>
+      <div className="settings-pane-toolbar settings-agent-toolbar">
+        {scopeControl}
+        <span className="settings-resource-count">{scope === 'templates' ? `${executors.length} global templates` : null}</span>
       </div>
-      {providersOpen ? <div className="settings-agent-body">
-        <ProviderCatalogPane entries={providerCatalog} read={catalogRead} saving={saving} executorCounts={executorCounts}
-          onRefresh={() => void refreshProviders()} onCreate={addExecutor} />
-      </div> : null}
-      <div className="settings-agent-body" hidden={providersOpen}>
-        <div className="settings-pane-toolbar settings-agent-toolbar">
-          {scopeControl}
-          <span className="settings-resource-count">{scope === 'templates' ? `${filter.query.trim() ? `${matchCount} of ` : ''}${executors.length} ${executors.length === 1 ? 'executor' : 'executors'}` : null}</span>
-          {scope === 'templates' ? <>
+      <div className="settings-agent-body" hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && scope === 'host'} /></div>
+      <div hidden={scope !== 'templates'} className="settings-agent-templates">
+        <ProviderCatalogPane entries={providerCatalog} read={catalogRead} executorCounts={executorCounts}
+          selectedId={providerId} onSelect={selectProvider} onRefresh={() => void refreshProviders()} />
+        <div className="settings-resource-workbench settings-executor-detail-layout" data-resource-view={view}>
+          <div className="settings-pane-toolbar settings-executor-toolbar">
+            <strong>Executors <span>{visibleExecutors.length}{filter.query.trim() ? ` of ${scopedExecutors.length}` : ''}</span></strong>
             <button className="icon-button" aria-label="Refresh saved executor availability" title="Refresh saved commands" disabled={checking} onClick={() => void detectExecutors(hostId)}>{checking ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionRefreshIcon size={14} />}</button>
             <button className="small-button" disabled={saving} onClick={() => addExecutor()}><ThemeActionCreateExecutorIcon size={13} /> Add executor</button>
-          </> : null}
-        </div>
-        <div hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && !providersOpen && scope === 'host'} /></div>
-        {!providersOpen ? <div hidden={scope !== 'templates'} className="settings-agent-templates">
-          <div className="settings-resource-workbench settings-executor-detail-layout">
-        <SettingsResourceLibrary label="Executors" layout="horizontal" selectedId={selectedId} query={filter.query} onQuery={filterExecutors} onSelect={selectExecutor} focusRequest={returnFocus}
-          items={executors.filter(({ id }) => matches(id)).map(({ id, draft, detection }) => ({
-            id, name: draft.label, detail: `${agentProviderLabel(draft.providerId)} · ${id}`,
-            mark: <AgentAvatar providerId={draft.providerId} executorId={id} label={draft.label} appearance={draft.avatar ?? (config.appearance.agentAvatars && Object.hasOwn(config.appearance.agentAvatars, id) ? config.appearance.agentAvatars[id] : undefined) ?? {}} size={22} />,
-            status: <span className={`settings-resource-row__check check-pill--${detection?.state ?? 'idle'}`} role="img" aria-label={statusCopy(detection).label} title={statusCopy(detection).label}>{statusCopy(detection).icon}</span>
+          </div>
+          <div className="settings-resource-split">
+        <SettingsResourceLibrary label="Executors" selectedId={selectedId} query={filter.query} onQuery={filterExecutors} onSelect={selectExecutor} focusRequest={returnFocus}
+          items={visibleExecutors.map(({ id, draft, detection }) => ({
+            id, name: draft.label, detail: draft.command,
+            mark: <AgentAvatar providerId={draft.providerId} executorId={id} label={draft.label} appearance={draft.avatar ?? (config.appearance.agentAvatars && Object.hasOwn(config.appearance.agentAvatars, id) ? config.appearance.agentAvatars[id] : undefined) ?? {}} size={20} />,
+            status: <>{!configValuesEqual(drafts[id], resource.expected[id]) ? <span className="settings-dirty-dot" title="Unsaved changes" /> : null}<span className={`settings-resource-row__check check-pill--${detection?.state ?? 'idle'}`} role="img" aria-label={statusCopy(detection).label} title={statusCopy(detection).label}>{statusCopy(detection).icon}</span></>,
           }))} />
         <div ref={editor} className="settings-resource-editor">
+          <button className="small-button settings-resource-back" onClick={() => { setView('library'); setReturnFocus({ id: selectedId }) }}><ThemeNavigationBackIcon size={13} />All executors</button>
+          {selectedId && !visibleExecutors.some(({ id }) => id === selectedId) && drafts[selectedId] ? <p className="settings-filter-notice">This executor is outside your search. <button type="button" onClick={() => setFilter({ query: '', snapshot: [] })}>Show in list</button></p> : null}
         {executors.filter(({ id }) => id === selectedId).map(({ id, draft, detection }) => {
           const status = statusCopy(detection)
           // Effective appearance is a projection; the editable baseline remains the Executor DTO.
@@ -367,7 +378,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
                 {detection?.detail ? <p className="settings-inline-error">{detection.detail}</p> : null}
                 <label><span>Name</span><TextInput data-executor-name value={draft.label} onChange={(event) => update(id, { label: event.target.value })} /></label>
                 {Object.hasOwn(resource.expected, id) ? <dl className="settings-executor-identity"><div><dt>Provider</dt><dd>{agentProviderLabel(draft.providerId)}</dd></div><div><dt>Executor ID</dt><dd><code>{id}</code></dd></div></dl> :
-                  <label><span>Provider</span><select data-executor-provider disabled={saving} value={draft.providerId} onChange={(event) => chooseProvider(id, event.target.value)}>{providerCatalog.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>}
+                  <label><span>Provider</span><select data-executor-provider disabled={saving} value={draft.providerId} onChange={(event) => chooseProvider(id, event.target.value)}>{!providerCatalog.some(provider => provider.id === draft.providerId) ? <option value={draft.providerId}>{agentProviderLabel(draft.providerId)} · current draft</option> : null}{providerCatalog.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>}
                 <label><span>Command</span><TextInput value={draft.command} onChange={(event) => update(id, { command: event.target.value })} /></label>
                 <p className="settings-group-note">Used for new local sessions. Save a changed command before checking availability.</p>
                 <div className="agent-avatar-settings__row">
@@ -392,14 +403,14 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
             </section>
           )
         })}
-          {!executors.some(({ id }) => id === selectedId) ? <div className="settings-resource-editor__empty" tabIndex={-1} role="status"><ThemeObjectAgentIcon size={28} aria-hidden="true" /><strong>{selectedId ? 'Executor unavailable' : 'Your agent configurations'}</strong><p>{selectedId ? 'This executor is no longer in the configuration. Select another, or add a new one.' : 'Choose an executor to edit its identity and launch configuration.'}</p></div> : null}
+          {!executors.some(({ id }) => id === selectedId) ? <div className="settings-resource-editor__empty" tabIndex={-1} role="status"><ThemeObjectAgentIcon size={28} aria-hidden="true" /><strong>{selectedId ? 'Executor unavailable' : scopedExecutors.length ? 'Choose an executor' : 'No executors for this provider'}</strong><p>{selectedId ? 'This executor is no longer in the configuration. Select another, or add a new one.' : 'Create a launch configuration with its own command, arguments and appearance.'}</p>{!selectedId ? <button className="small-button" disabled={saving} onClick={() => addExecutor()}>Add executor</button> : null}</div> : null}
           {executors.some(({ draft }) => withYoloArgs(draft.providerId, []) !== null) ? <details className="settings-bulk-actions"><summary>Launch actions <ThemeNavigationDownIcon size={13} /></summary><div className="settings-launch-action"><span>Skip permission prompts for all Claude and Codex executors on future launches.</span><button className="small-button" disabled={saving} onClick={() => void enableYolo()}><ThemeStatusUnrestrictedIcon size={13} /> Enable YOLO for Claude &amp; Codex</button></div></details> : null}
         </div>
           </div>
-        </div> : null}
-      </div>
-      <div className="settings-agent-save" hidden={!providersOpen && scope !== 'templates'}>
-        <SettingsSaveBar save={saveState} dirty={dirty} label="Save executors" onSave={() => void saveDrafts(() => drafts)} />
+          </div>
+        </div>
+      <div className="settings-agent-save" hidden={scope !== 'templates'}>
+        <SettingsSaveBar save={saveState} dirty={dirty} label="Save all executors" onSave={() => void saveDrafts(() => drafts)} />
       </div>
     </div>
   )

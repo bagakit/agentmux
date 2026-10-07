@@ -1,71 +1,51 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useState } from 'react'
 import type { AgentCatalogEntry } from '@agentmux/core'
-import { AgentProviderIcon } from '../AgentProviderIcon'
+import { AgentProviderIcon, agentProviderLabel } from '../AgentProviderIcon'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
-const ThemeActionCreateExecutorIcon = semanticIconComponent('action.create-executor')
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 
-/** Adapter declarations are distinct from saved launch configurations and availability. */
-export function ProviderCatalogPane({ entries, read, saving, executorCounts, onRefresh, onCreate }: {
+/** Provider context groups global templates; it never changes their saved adapter identity. */
+export function ProviderCatalogPane({ entries, read, executorCounts, selectedId, onSelect, onRefresh }: {
   entries: readonly AgentCatalogEntry[]
   read: { state: 'idle' | 'loading' | 'ready' | 'error'; error?: string }
-  saving: boolean
   executorCounts: Readonly<Record<string, number>>
+  selectedId: string | null
+  onSelect: (id: string | null) => void
   onRefresh: () => void
-  onCreate: (provider: AgentCatalogEntry) => void
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [query, setQuery] = useState('')
-  const provider = entries.find(entry => entry.id === selectedId) ?? entries[0]
+  const provider = entries.find(entry => entry.id === selectedId)
+  const ids = [...new Set([...entries.map(entry => entry.id), ...Object.keys(executorCounts)])]
   const loading = read.state === 'loading'
   return <section className="settings-provider-catalog" aria-label="Provider catalog">
     <header className="settings-provider-catalog__header">
-      <p>Providers adapt agent CLIs. Executors hold your launch configuration.</p>
-      <span className="settings-resource-count">{entries.length || read.state === 'ready' ? `${entries.length} providers` : loading ? 'Loading providers...' : 'Provider catalog'}</span>
-      <button type="button" className="small-button" disabled={loading} onClick={onRefresh}>
+      <strong>Provider</strong>
+      <span>Choose an adapter, then configure its executors.</span>
+      <button type="button" className="icon-button" disabled={loading} aria-label={read.state === 'error' ? 'Retry providers' : 'Refresh providers'} title={read.state === 'error' ? 'Retry providers' : 'Refresh providers'} onClick={onRefresh}>
         {loading ? <ThemeStatusLoadingIcon className="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
-        {loading ? 'Loading providers...' : read.state === 'error' ? 'Retry providers' : 'Refresh providers'}
       </button>
     </header>
-    {read.state === 'error' ? <div className="settings-provider-catalog__notice" role="alert"><strong>Provider lookup failed</strong><p>{read.error}</p><small>Your saved executors and drafts are unchanged.{entries.length ? ' The last received providers remain below.' : ' Retry to load provider choices.'}</small></div> : null}
-    {entries.length === 0 && read.state !== 'error' ? <div className="settings-provider-catalog__empty" role="status">
-      <strong>{loading ? 'Loading provider choices' : read.state === 'ready' ? 'No providers registered' : 'Provider choices unavailable'}</strong>
-      <p>{read.state === 'ready' ? 'The connected service returned an empty provider catalog.' : 'New executors need a confirmed provider. You can continue editing your saved executors.'}</p>
-    </div> : entries.length > 0 ? <>
-      <SettingsResourceLibrary label="Providers" layout="horizontal" selectedId={provider?.id ?? null} onSelect={setSelectedId}
-        query={query} onQuery={setQuery} focusRequest={null}
-        items={entries.filter(entry => `${entry.label} ${entry.id} ${entry.executable}`.toLowerCase().includes(query.trim().toLowerCase())).map(entry => ({
-          id: entry.id, name: entry.label, detail: entry.executable,
-          mark: <AgentProviderIcon providerId={entry.id} size={22} />,
-          status: <span title="Executor templates">{executorCounts[entry.id] ?? 0}</span>
-        }))} />
-      {provider ? <article className="settings-provider-detail" data-provider-entry={provider.id}>
-        <header className="settings-resource-editor__header">
-          <AgentProviderIcon providerId={provider.id} size={32} />
-          <span className="settings-provider-detail__name"><strong>{provider.label}</strong><small>CLI adapter</small></span>
-          <button type="button" className="small-button" disabled={saving} aria-label={`Create executor with ${provider.label}`} onClick={() => onCreate(provider)}><ThemeActionCreateExecutorIcon size={14} />Create executor</button>
-        </header>
-        <section className="settings-provider-detail__section">
-          <h4>Adapter</h4>
-          <dl className="settings-executor-identity">
-            <div><dt>Provider ID</dt><dd><code>{provider.id}</code></dd></div>
-            <div><dt>Default command</dt><dd><code>{provider.executable}</code></dd></div>
-            <div><dt>Executor templates</dt><dd>{executorCounts[provider.id] ?? 0}</dd></div>
-          </dl>
-        </section>
-        <section className="settings-provider-detail__section">
-          <h4>Capabilities</h4>
-          <dl className="settings-executor-identity">
-            <div><dt>Conversation</dt><dd>{provider.capabilities.timeline === 'unavailable' ? 'Terminal conversation' : provider.capabilities.timeline === 'streaming' ? 'Live conversation' : 'Conversation history'}</dd></div>
-            <div><dt>Permissions</dt><dd>{provider.capabilities.permission === 'respond' ? 'Permission responses' : provider.capabilities.permission === 'observe' ? 'Permission observation' : 'CLI permissions'}</dd></div>
-            <div><dt>Session recovery</dt><dd>{provider.capabilities.providerResume ? 'Native resume' : 'No native resume'}</dd></div>
-          </dl>
-          <p className="settings-group-note">Declared adapter capabilities. Command availability is checked separately in each environment.</p>
-        </section>
-      </article> : null}
-    </> : null}
+    <SettingsResourceLibrary label="Providers" layout="horizontal" selectedId={selectedId === null ? 'providers:all' : `provider:${selectedId}`}
+      onSelect={id => onSelect(id === 'providers:all' ? null : id.slice('provider:'.length))} focusRequest={null}
+      items={[
+        { id: 'providers:all', name: 'All providers', detail: 'All global executor templates', mark: <ThemeObjectAgentIcon size={16} />, status: <span>{Object.values(executorCounts).reduce((sum, count) => sum + count, 0)}</span> },
+        ...ids.map(id => ({ id: `provider:${id}`, name: entries.find(entry => entry.id === id)?.label ?? agentProviderLabel(id), detail: id,
+          mark: <AgentProviderIcon providerId={id} size={18} />, status: <span>{executorCounts[id] ?? 0}</span> }))
+      ]} />
+    {read.state === 'error' ? <div className="settings-provider-catalog__notice" role="alert"><strong>Provider lookup failed</strong><p>{read.error}</p><small>Your saved executors and drafts are unchanged.{entries.length ? ' The last received providers remain available.' : ' Retry to load provider choices.'}</small></div> : null}
+    {!entries.length && read.state !== 'error' ? <p className="settings-provider-catalog__empty" role="status"><strong>{loading ? 'Loading provider choices' : read.state === 'ready' ? 'No providers registered' : 'Provider choices unavailable'}</strong> · {read.state === 'ready' ? 'The connected service returned an empty provider catalog.' : 'You can continue editing saved executors.'}</p> : null}
+    {selectedId !== null && !provider && entries.length ? <p className="settings-provider-catalog__empty" role="status">This saved Provider is absent from the current catalog. Existing executors remain editable; refresh the catalog before creating another.</p> : null}
+    {provider ? <details className="settings-provider-metadata" data-provider-entry={provider.id}>
+      <summary>About {provider.label}<code>{provider.executable}</code></summary>
+      <dl className="settings-executor-identity">
+        <div><dt>Provider ID</dt><dd><code>{provider.id}</code></dd></div>
+        <div><dt>Conversation</dt><dd>{provider.capabilities.timeline === 'unavailable' ? 'Terminal conversation' : provider.capabilities.timeline === 'streaming' ? 'Live conversation' : 'Conversation history'}</dd></div>
+        <div><dt>Permissions</dt><dd>{provider.capabilities.permission === 'respond' ? 'Permission responses' : provider.capabilities.permission === 'observe' ? 'Permission observation' : 'CLI permissions'}</dd></div>
+        <div><dt>Session recovery</dt><dd>{provider.capabilities.providerResume ? 'Native resume' : 'No native resume'}</dd></div>
+      </dl>
+      <p>Declared adapter capabilities. Command availability is checked separately in each environment.</p>
+    </details> : null}
   </section>
 }

@@ -9,13 +9,13 @@ const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 type ResourceRow = { id: string; name: string; detail: string; mark: ReactNode; status?: ReactNode }
 
 /** A compact selector only. Drafts and resource operations stay in the owning pane. */
-export function SettingsResourceLibrary({ label, items, selectedId, onSelect, query, onQuery, focusRequest, layout = 'list' }: {
+export function SettingsResourceLibrary({ label, items, selectedId, onSelect, query = '', onQuery, focusRequest, layout = 'list' }: {
   label: string
   items: ResourceRow[]
   selectedId: string | null
   onSelect: (id: string) => void
-  query: string
-  onQuery: (query: string) => void
+  query?: string
+  onQuery?: (query: string) => void
   focusRequest: { id: string | null } | null
   layout?: 'list' | 'horizontal'
 }) {
@@ -47,9 +47,9 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
   const tabId = items.some((item) => item.id === focusedId) ? focusedId : items.some((item) => item.id === selectedId) ? selectedId : items[0]?.id
   return (
     <aside className={`settings-resource-library${layout === 'horizontal' ? ' settings-resource-library--horizontal' : ''}`}>
-      <label className="settings-resource-search"><ThemeActionSearchIcon size={14} aria-hidden="true" />
+      {onQuery ? <label className="settings-resource-search"><ThemeActionSearchIcon size={14} aria-hidden="true" />
         <TextInput ref={search} type="search" aria-label={`Filter ${label.toLowerCase()}`} placeholder={`Find ${label.toLowerCase()}…`} value={query} onChange={(event) => onQuery(event.target.value)} />
-      </label>
+      </label> : null}
       <div ref={list} className="settings-resource-library__list" role="listbox" aria-label={label} aria-orientation={layout === 'horizontal' ? 'horizontal' : 'vertical'}>
         {items.map((item, index) => <button type="button" key={item.id} role="option" aria-selected={selectedId === item.id}
           tabIndex={tabId === item.id ? 0 : -1} data-resource-row={item.id} title={`${item.name}\n${item.detail}`} className="settings-resource-row"
