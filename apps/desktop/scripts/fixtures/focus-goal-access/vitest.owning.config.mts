@@ -7,7 +7,8 @@ import shared from '../workbench-identity/vitest.owning.config.mts'
 const root = resolve(import.meta.dirname, '../../../../..')
 const mutations = {
   goalHost: ['apps/desktop/src/renderer/src/lib/focus-goal-links.ts', 'exact = qualified.rows.get(demandRelationKey(subject.hostId, subject.agentSessionId))', "exact = qualified.rows.get(demandRelationKey('local', subject.agentSessionId))"],
-  goalConsumer: ['apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx', 'goalLinks={goalLinks.get(context.id)}', 'goalLinks={undefined}'],
+  goalConsumer: ['apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx', 'goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))}', 'goalLinks={undefined}'],
+  goalCardHost: ['apps/desktop/src/renderer/src/lib/focus-goal-links.ts', 'JSON.stringify([hostId, presentationId])', 'presentationId'],
   goalUnknown: ['apps/desktop/src/renderer/src/components/FocusGoalLinks.tsx', '!links.confirmedCount ? <span className="focus-goal__unknown"', 'false ? <span className="focus-goal__unknown"'],
   goalRoles: ['apps/desktop/src/renderer/src/lib/focus-goal-links.ts', 'held ? { ...held, unconfirmedRoles: roles }', 'held ? held'],
   goalCount: ['apps/desktop/src/renderer/src/lib/focus-goal-links.ts', 'confirmedCount: confirmed.length', 'confirmedCount: confirmed.reduce((count, goal) => count + goal.roles.length, 0)'],
