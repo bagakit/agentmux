@@ -105,7 +105,7 @@ it('the actual name and receiver survive the existing view switch and explicit R
   await act(async()=>toggle!.click());expect(left().querySelector('.agent-region-header strong')!.textContent).toBe(names[0]);expect(toggle!.getAttribute('aria-label')).toBe('Show Terminal')
   const terminalToggle=left().querySelector<HTMLButtonElement>('.composer-tool--view-toggle');expect(terminalToggle).not.toBeNull()
   await act(async()=>terminalToggle!.click());await openAgentHistory(left())
-  expect(left().querySelector('[aria-label="Conversation history"]')).not.toBeNull()
+  expect(left().querySelector('[aria-label="Return to Terminal"]')).not.toBeNull()
   expect(left().querySelectorAll('.agent-region-header')).toHaveLength(1)
   expect(left().querySelector('.agent-region-header strong')!.textContent).toBe(names[0])
   expect(left().querySelector('.composer-agent-identity [aria-label]')!.getAttribute('aria-label')).toContain(names[0]!)
