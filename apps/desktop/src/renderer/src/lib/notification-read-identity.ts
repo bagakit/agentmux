@@ -26,7 +26,8 @@ function tuple(value: unknown, length: number): unknown[] | undefined {
 }
 function fingerprint(value: string): Fingerprint | undefined {
   const parsed = tuple(value, 3)
-  return parsed && (parsed[0] === null || typeof parsed[0] === 'string') && nonempty(parsed[1])
+  return parsed && (parsed[0] === null || typeof parsed[0] === 'string') &&
+    (parsed[1] === 'indeterminate' || parsed[1] === 'process-degraded')
     ? parsed as Fingerprint : undefined
 }
 function normalizedFingerprint(value: string, item: Fingerprint | undefined): string {
@@ -88,6 +89,8 @@ export function normalizeNotificationReadReceipts(receipts: unknown): ReadReceip
     const retained = new Map<string, string>()
     for (const [id, value] of Object.entries(values)) {
       if (typeof value !== 'string') continue
+      // Mailbox receipts belong to their message reader, even when their bytes resemble a service tuple.
+      if (scope.startsWith('mail:')) { retained.set(id, value); continue }
       if (scope === 'global:events') {
         if (compact(id) && value === 'read') events.set(id, 'read')
         else if (value === id) {
