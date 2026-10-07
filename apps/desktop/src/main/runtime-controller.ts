@@ -1911,7 +1911,7 @@ export class RuntimeController {
     const host = this.hosts.get(loop.hostId)
     if (!host) throw new AgentMuxError('Continuous progress target host is unavailable.', 'UNKNOWN_AGENT_SESSION')
     const status = await observeProgressRead(signal, () => host.client.statusAgent(loop.agentSessionId))
-    if (status.session.hostId !== loop.hostId || status.session.providerId !== loop.providerId ||
+    if (status.session.agentSessionId !== loop.agentSessionId || status.session.providerId !== loop.providerId ||
         status.session.workspacePath !== loop.workspacePath) {
       throw new AgentMuxError('Continuous progress target identity changed. Review this loop before resuming.', 'STALE_AGENT_SESSION')
     }
