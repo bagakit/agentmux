@@ -681,6 +681,9 @@ asking the user to copy credentials. **Connect an existing bot** keeps the
 original credential-entry path. Opening Settings only reads local progress;
 checking platform confirmation is an explicit action on the original setup.
 Closing and reopening keeps that setup available, including earlier entries.
+To create a separate bot, expand **Create another bot** and choose
+**Start a separate setup**. Earlier requests remain available even if their
+results are unknown; a pending request does not block another explicit setup.
 After the application is saved, **View connection** opens its original details;
 the Agent menu separately creates or connects its group.
 
