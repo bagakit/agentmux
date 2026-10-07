@@ -81,6 +81,7 @@ export class ObjectCliProbe {
 export function objectCliSeed(method: string, input: string): string[] {
   const ids = { agent: 'SID', region: 'R', zone: 'Z', space: 'S', goal: 'G' }
   const fixed: Record<string, string[]> = {
+    'connection.profile.get': ['--connection', 'profile-connection', '--revision', '1'], 'connection.profile.sync': ['--input', '-'], 'connection.profile.advance': ['--operation-id', 'profile-original'], 'connection.profile.inspect': ['--operation-id', 'profile-original'], 'connection.profile.ls': ['--connection', 'profile-connection'],
     'connection.enrollment.begin': ['--input', '-'], 'connection.enrollment.advance': ['--operation-id', 'enroll-original'], 'connection.enrollment.inspect': ['--operation-id', 'enroll-original'], 'connection.enrollment.ls': [],
     'connection.ls': [], 'connection.inspect': ['--connection', 'connection-a'], 'connection.configure': ['--input', '-'], 'connection.test': ['--connection', 'connection-a'],
     'agent.interaction.respond': ['--input', '-'],
