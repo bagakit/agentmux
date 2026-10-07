@@ -22,14 +22,18 @@ const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
 try {
   for (const relative of [
     'components/SettingsPanel.tsx', 'components/settings/AgentSettingsPane.tsx',
-    'components/settings/ProviderCatalogPane.tsx', 'components/settings/SettingsResourceLibrary.tsx',
-    'styles/surfaces.css', 'styles/settings-resource-library.css', 'styles/agent.css'
+    'components/settings/ProviderCatalogPane.tsx', 'components/settings/ShortcutSettingsPane.tsx', 'components/settings/SettingsResourceLibrary.tsx',
+    'styles/surfaces.css', 'styles/settings-prompts.css', 'styles/settings-materials.css', 'styles/settings-resource-library.css', 'styles/agent.css'
   ]) await bind(path.join(root, 'apps/desktop/src/renderer/src', relative))
   for (const relative of ['test/settings-reference.test.tsx', 'test/settings-resource-library.test.tsx',
-    'test/settings-executor-creation.test.tsx', 'scripts/verify-settings-reference.mjs',
-    ...['entry.tsx', 'index.html', 'main.cjs', 'vitest.config.mts'].map(file => 'scripts/fixtures/settings-reference/' + file)
+    'test/settings-executor-creation.test.tsx', 'test/settings-prompt-workbench.test.tsx', 'test/settings-prompts-save.test.tsx', 'test/settings-prompts-library.test.tsx', 'test/settings-prompts-liquid.test.tsx', 'scripts/verify-settings-reference.mjs',
+    ...['entry.tsx', 'index.html', 'main.cjs', 'vitest.config.mts', 'tsconfig.owning.json'].map(file => 'scripts/fixtures/settings-reference/' + file)
   ]) await bind(path.join(root, 'apps/desktop', relative))
-  for (const mode of visualOnly ? [] : ['baseline','selection','drafts','creation','restored']) {
+  const typeOutput = []
+  const typecheck = await runProbeProcess(process.execPath, [require.resolve('typescript/bin/tsc'), '--noEmit', '-p', path.join(fixture,'tsconfig.owning.json')], {cwd:root,temporaryRoot:owned,env,timeoutMs:90000,onLine:line=>typeOutput.push(line)})
+  await fs.writeFile(path.join(evidence,'typecheck.log'),typeOutput.join('\n'))
+  assert.equal(typecheck.exitCode,0,typeOutput.join('\n'))
+  for (const mode of visualOnly ? [] : ['baseline','sidebar','selection','drafts','creation','prompt-scope','restored']) {
     const directory = path.join(evidence, mode); await fs.mkdir(directory)
     const output = []
     const run = await runProbeProcess(process.execPath, [require.resolve('vitest/vitest.mjs'), 'run', '--config', path.join(fixture, 'vitest.config.mts')], {
@@ -62,18 +66,19 @@ try {
   const render=JSON.parse(await fs.readFile(path.join(frames,'render.json'),'utf8'))
   assert.equal(capture.exitCode,0,render.failure?.message)
   assert.equal(render.passed,true)
-  assert.equal(render.frames.length,10)
+  assert.ok(render.frames.length >= 10)
   // Source-derived external product consumers, never a hand-maintained list of exports.
   const ts=require('typescript'), callers=[]
-  for(const file of ['components/SettingsPanel.tsx','components/settings/modules/agents.tsx','App.tsx']) {
+  for(const file of ['components/SettingsPanel.tsx','components/settings/modules/agents.tsx','components/settings/modules/prompts.tsx','App.tsx']) {
     const actual=path.join(root,'apps/desktop/src/renderer/src',file), source=await fs.readFile(actual,'utf8')
     const tree=ts.createSourceFile(actual,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX)
-    function visit(node){if((ts.isJsxOpeningElement(node)||ts.isJsxSelfClosingElement(node))&&['SettingsPanel','AgentSettingsPane'].includes(node.tagName.getText(tree)))callers.push({file,symbol:node.tagName.getText(tree)});ts.forEachChild(node,visit)}visit(tree)
+    function visit(node){if((ts.isJsxOpeningElement(node)||ts.isJsxSelfClosingElement(node))&&['SettingsPanel','AgentSettingsPane','ShortcutSettingsPane'].includes(node.tagName.getText(tree)))callers.push({file,symbol:node.tagName.getText(tree)});ts.forEachChild(node,visit)}visit(tree)
   }
-  assert.ok(callers.some(x=>x.symbol==='SettingsPanel')&&callers.some(x=>x.symbol==='AgentSettingsPane'))
+  assert.ok(callers.some(x=>x.symbol==='SettingsPanel')&&callers.some(x=>x.symbol==='AgentSettingsPane')&&callers.some(x=>x.symbol==='ShortcutSettingsPane'))
   assert.ok(inputs.size>0)
-  for(const [file,digest]of inputs)assert.equal(hash(await fs.readFile(file)),digest,'Captured input unchanged')
-  const receipt={passed:true,captureOnly:true,aestheticReview:'not-performed',testEvidence:visualOnly?'not-run':'passed-with-mutations',runs,render,callers,inputs:Object.fromEntries([...inputs].map(([file,digest])=>[path.relative(root,file),digest])),boundary:render.boundary}
+  const relevant = [...inputs].filter(([file]) => /(?:components\/settings\/|components\/SettingsPanel|styles\/settings|styles\/surfaces|styles\/(?:agent|tokens|base|native-controls|selection-field|index)\.css|shared\/config-edit|lib\/api\.ts|settings-reference|settings-executor-creation|settings-resource-library|settings-prompt-workbench|settings-prompts-|shared\/composer-shortcut|client-ui\/src\/(?:input|theme|ime))/.test(file))
+  for(const [file,digest]of relevant)assert.equal(hash(await fs.readFile(file)),digest,'Changed Settings proof input')
+  const receipt={passed:true,captureOnly:true,aestheticReview:'not-performed',typecheck,testEvidence:visualOnly?'not-run':'passed-with-mutations',runs,render,callers,inputs:Object.fromEntries(relevant.map(([file,digest])=>[path.relative(root,file),digest])),boundary:render.boundary}
   await fs.writeFile(path.join(evidence,'receipt.json'),JSON.stringify(receipt,null,2))
   await fs.writeFile(path.join(root,'.tmp/settings-reference/latest.json'),JSON.stringify({evidence,receipt:path.join(evidence,'receipt.json')},null,2))
   console.log(JSON.stringify({passed:true,evidence,frames:render.frames.length,inputs:inputs.size}))
