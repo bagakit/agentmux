@@ -21,6 +21,7 @@ import { conversationMessageSourceKey } from '../lib/conversation-message-locati
 import { conversationFiles } from '../lib/conversation-files.js'
 import { ConversationFiles } from './ConversationFiles.js'
 import { ConversationQuestionReply } from './ConversationQuestionReply.js'
+import { ConversationMessageDisclosure } from './ConversationMessageDisclosure.js'
 
 const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
@@ -135,6 +136,15 @@ export function ConversationMessage({
   const parts: readonly AgentSessionHistoryContentPart[] = isStringContent
     ? [{ kind: 'text', text: content }]
     : content
+  const recordSourceKey = conversationMessageSourceKey(itemRef?.agentSessionId ?? conversationSessionId, itemRef?.source ?? inputSource)
+    ?? JSON.stringify([conversationSessionId, nativeResourceRecord?.source.providerId, nativeResourceRecord?.source.nativeSessionId, nativeResourceRecord?.recordId, nativeResourceRecord?.turnId])
+  const readingIdentity = useMemo(() => ({}), [messageId, recordSourceKey])
+  // Eligibility is an original author fact; display's unknown -> You mapping is insufficient.
+  const humanText = recordedSpeaker?.role === 'human' ? parts.filter(part => part.kind === 'text').map(part => part.text).join('\n\n') : ''
+  const discloseHuman = humanText.length > 1200 || humanText.split('\n').length > 12
+  const discloseBody = (body: ReactNode) => discloseHuman
+    ? <ConversationMessageDisclosure key={JSON.stringify([messageId, recordSourceKey, humanText])} preview={humanText.slice(0, 160).trimEnd()} reveal={located}>{body}</ConversationMessageDisclosure>
+    : body
   const hasQuestionAnswers = Boolean(questionAnswers?.length)
   const firstTextIndex = parts.findIndex(part => part.kind === 'text')
   const hasContent = hasQuestionAnswers || parts.some(partHasRenderableContent)
@@ -368,7 +378,7 @@ export function ConversationMessage({
         {prefix && prefix.sourceLabel.length > 0 && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
         {prefix?.packet && (!isDeclaredSender || !agentReference) ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
       </div> : null}
-      {hasContent && (!isSystemContext || systemContextOpen) ? (
+      {hasContent && (!isSystemContext || systemContextOpen) ? discloseBody(
         <div ref={bodyRef} id={isSystemContext ? systemContentId : undefined} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
           {hasQuestionAnswers && firstTextIndex < 0 ? <ConversationQuestionReply answers={questionAnswers!}
@@ -402,6 +412,7 @@ export function ConversationMessage({
               {...(openHttpLink ? { openHttpLink } : {})}
             />}</div> : part.kind === 'tool-call' || part.kind === 'tool-result' ? (
               <ConversationToolTrace key={key} part={part} workspaceRoot={workspaceRoot}
+                copyIdentity={readingIdentity}
                 traceId={traceDisclosureKey(messageId, key)}
                 {...(expandedTraces ? { expanded: expandedTraces.has(traceDisclosureKey(messageId, key)) } : {})}
                 {...(onToggleTrace ? { onToggle: (open) => onToggleTrace(traceDisclosureKey(messageId, key), open) } : {})} />
@@ -409,6 +420,7 @@ export function ConversationMessage({
               <ConversationReasoningTrace
                 key={key}
                 part={part}
+                copyIdentity={readingIdentity}
                 workspaceRoot={workspaceRoot}
                 homeDir={homeDir}
                 traceId={traceDisclosureKey(messageId, key)}
