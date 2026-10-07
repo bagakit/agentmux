@@ -93,24 +93,13 @@ export async function connectedClient(pending?: AgentMuxInteractionRequest, prov
     return { run: runProjection(cursor), appliedByteRange: { startByte: operation.expectedByte, endByte: cursor } }
   }
   ;(client as unknown as { connected: boolean }).connected = true
-  // Explicit synthetic native target contribution for lifecycle units only.
-  const provider = client.providers.get(providerId)
-  provider.prepareInteractionResponse = async (context, request, response) => ({
-    plan: provider.planInteractionResponse(request, response),
-    target: { agentSessionId: context.agentSessionId, run: context.run, requestId: request.id,
-      nativeToolCallId: request.nativeToolCallId!, nativeSourceId: 'lifecycle-synthetic-source', inputByte: context.inputByte,
-      frame: { run: context.run, outputThroughByte: 0, geometryRevision: 0, evidenceGeneration: 0 } },
-    inspectCurrentTarget: () => true, verifyCurrentTarget: async () => true
-  })
-  ;(client as unknown as { screenEvidence: { currentCompleteFrame: () => unknown } }).screenEvidence.currentCompleteFrame = () => ({
-    snapshot: { cols: 80, rows: 24, cursor: { row: 0, column: 0 }, lines: [] }, outputThroughByte: 0, geometryRevision: 0, evidenceGeneration: 0 })
   return { client, writes, store, state }
 }
 
 /** Real Core Hook completion owner, synthetic authenticated envelope in this unit fixture. */
 export async function completeNativeRequest(client: AgentMuxClient): Promise<void> {
   const request = client.agentSession(AGENT_SESSION_ID).pendingInteraction!.request
-  await (client as unknown as { acceptHookEvent(envelope: import('../src/types.js').NativeHookEnvelope, signal: AbortSignal): Promise<void> }).acceptHookEvent({
+  await (client as unknown as { acceptHookEvent(envelope: import('../../src/types.js').NativeHookEnvelope, signal: AbortSignal): Promise<void> }).acceptHookEvent({
     receiptId: 'lifecycle-completed-' + request.id, agentSessionId: AGENT_SESSION_ID,
     providerId: client.agentSession(AGENT_SESSION_ID).providerId, runId: RUN_ID,
     payload: { session_id: client.agentSession(AGENT_SESSION_ID).nativeHandle?.sessionId, hook_event_name: 'PostToolUse', tool_name: request.kind === 'question' ? 'request_user_input' : 'exec_command',

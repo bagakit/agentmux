@@ -104,7 +104,6 @@ async function targetFixture(options: { providerId?: 'claude' | 'codex'; targetO
   const provider = f.client.providers.get('claude')
   const page = vi.fn(provider.readSessionHistoryPage!.bind(provider))
   const observe = vi.fn(provider.observeSessionHistory!.bind(provider))
-  const prepare = vi.fn<NonNullable<typeof provider.prepareSessionQuestionReply>>(async _context => { throw new Error('Exact question reader reached') })
   const record = vi.fn<NonNullable<typeof provider.readSessionHistoryRecord>>(async _context => { throw new Error('Exact resource reader reached') })
   const resume = vi.fn<typeof provider.buildResumeLaunch>(_context => { throw new Error('Exact resume planner reached') })
   const executors = new AgentMuxHostExecutorOwner({ path: join(f.root, 'executors.json'), runtimeId: 'target-runtime',
@@ -115,7 +114,7 @@ async function targetFixture(options: { providerId?: 'claude' | 'codex'; targetO
   const resolve = vi.spyOn(executors, 'resolve')
   const core = new AgentMuxClient({ store: f.store, hostExecutorOwner: executors,
     providers: [{ ...provider, readSessionHistoryPage: page, observeSessionHistory: observe,
-      prepareSessionQuestionReply: prepare, readSessionHistoryRecord: record, buildResumeLaunch: resume }] })
+      readSessionHistoryRecord: record, buildResumeLaunch: resume }] })
   closes.push(() => core.dispose())
   const inner = core as unknown as { connected: boolean; registry: { load(hostId: string): Promise<void> }; kernel: Record<string, unknown> }
   await inner.registry.load('local'); inner.connected = true
@@ -124,7 +123,7 @@ async function targetFixture(options: { providerId?: 'claude' | 'codex'; targetO
     program: '/bin/sh', args: [], pid: 99, state: { type: 'exited', code: 0 }, latestOutputBytes: 0, firstAvailableByte: 0,
     acceptedInputBytes: 0, nativeService: null, cols: 80, rows: 24 }), start, stop })
   vi.spyOn(core, 'probeAgent').mockResolvedValue({ providerId: 'claude', installed: true, executable: '/bin/sh', capabilities: provider.catalog.capabilities })
-  return { ...f, stored, core, inner, executors, resolve, resolveExecutor, page, observe, prepare, record, resume, start, stop }
+  return { ...f, stored, core, inner, executors, resolve, resolveExecutor, page, observe, record, resume, start, stop }
 }
 function targetInvocation(value: unknown) {
   expect(value).toMatchObject({ command: '/bin/sh', args: ['target-only'], env: { TARGET_SECRET: 'private-target-value' } })
@@ -144,9 +143,8 @@ it('target Core resolves private wrapper configuration for actual retained pages
   await expect(f.core.sessionHistoryResource(id, resource)).rejects.toThrow('Exact resource reader reached')
   targetInvocation(f.record.mock.calls[0]![0])
   expect(f.resolve).toHaveBeenCalledTimes(3)
-  await expect(f.core.replySessionQuestion({ ...question, agentSessionId: id, expectedRun: f.stored.run })).rejects.toThrow('Exact question reader reached')
-  targetInvocation(f.prepare.mock.calls[0]![0])
-  expect(f.resolve).toHaveBeenCalledTimes(4)
+  await expect(f.core.replySessionQuestion({ ...question, agentSessionId: id, expectedRun: f.stored.run })).rejects.toMatchObject({ code: 'AGENT_QUESTION_REPLY_UNSUPPORTED' })
+  expect(f.resolve).toHaveBeenCalledTimes(3)
   expect(f.start).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
   expect((await f.store.readMetadata(id))?.nativeHandle).toEqual(f.stored.nativeHandle)
 })
@@ -186,8 +184,7 @@ it('active target-owned history resolves its authoritative private configuration
   targetInvocation(f.observe.mock.calls[0]![0])
   await expect(f.core.sessionHistoryResource(id, { ...resource, ...options })).rejects.toThrow('Exact resource reader reached')
   targetInvocation(f.record.mock.calls[0]![0])
-  await expect(f.core.replySessionQuestion({ ...question, ...options, agentSessionId: id, expectedRun: f.stored.run })).rejects.toThrow('Exact question reader reached')
-  targetInvocation(f.prepare.mock.calls[0]![0])
+  await expect(f.core.replySessionQuestion({ ...question, ...options, agentSessionId: id, expectedRun: f.stored.run })).rejects.toMatchObject({ code: 'AGENT_QUESTION_REPLY_UNSUPPORTED' })
   expect(f.start).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
 })
 

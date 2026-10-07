@@ -110,7 +110,7 @@ it('exact Main question registration forwards only after original trusted sender
     outcome: 'submitted'
   });
   expect(h.runtime.replyQuestion).toHaveBeenCalledExactlyOnceWith(control, input, h.config);
-  expect(h.pause).toHaveBeenCalledExactlyOnceWith(control, 'Paused for your question reply.');
+  expect(h.pause).not.toHaveBeenCalled();
 });
 it('an untrusted sender cannot reply or pause healthy progress through the new handler', async () => {
   const h = registeredReply({});

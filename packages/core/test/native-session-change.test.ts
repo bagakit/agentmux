@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
-import { AgentProviderRegistry, type AgentProvider, type AgentProviderPromptExecutionContext } from '../src/agent-provider.js'
+import { AgentProviderRegistry, type AgentProvider } from '../src/agent-provider.js'
 import { AgentTerminalScreen } from '../src/agent-terminal-screen.js'
 import type { AgentScreenEvidenceStore } from '../src/screen-evidence.js'
 import { AgentMuxFileAgentSessionStore, AgentMuxSessionDurabilityError, loadAgentSessions } from '../src/agent-session-store.js'
@@ -18,7 +18,7 @@ import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
-import type { AgentMuxNativeSessionConfirmationInput, AgentMuxStoredAgentSession, AgentTerminalScreenSnapshot, NativeHookEnvelope } from '../src/types.js'
+import type { AgentMuxNativeSessionConfirmationInput, AgentMuxStoredAgentSession, NativeHookEnvelope } from '../src/types.js'
 
 const SID = 'private-current-conversation', RUN = 'same-private-run', OLD = 'previous-main', NEW = 'current-main'
 const cleanups: Array<() => Promise<void>> = []
@@ -48,33 +48,7 @@ async function fixture(providerId: 'codex' | 'claude' = 'codex', mode: 'main' | 
   // Keep their real discovery/history owners; qualify this fixture's exact source and frame.
   const screen = new AgentTerminalScreen(240, 4)
   cleanups.push(async () => screen.dispose())
-  const verifyInteractionTarget = vi.fn(async (context: AgentProviderPromptExecutionContext) => {
-    context.signal?.throwIfAborted()
-    if (context.processId !== holder.pid || context.workspacePath !== root || context.nativeSourceId !== NEW ||
-        context.nativeHandle?.kind !== 'provider' || context.nativeHandle.providerId !== providerId || context.nativeHandle.sessionId !== NEW ||
-        context.nativeHandle.transcriptPath !== currentPath) return false
-    const witness = await nativeProvider.discoverNativeSession!({ processId: holder.pid!, command: process.execPath,
-      args: [], env: {}, workspacePath: root, signal: context.signal ?? new AbortController().signal })
-    if (!witness || witness.handle.providerId !== context.nativeHandle.providerId || witness.handle.sessionId !== NEW ||
-        witness.handle.transcriptPath !== currentPath) return false
-    await witness.assertCurrent()
-    return true
-  })
-  const prepareInteractionResponse = vi.fn<NonNullable<AgentProvider['prepareInteractionResponse']>>(async (context, request, answer) => {
-    expect(context.agentSessionId).toBe(SID); expect(context.run).toEqual({ runId: RUN })
-    expect(request.kind).toBe('permission'); expect(request.nativeToolCallId).toBe(`tool-${NEW}`)
-    expect(request.evidence.run).toEqual({ runId: RUN })
-    expect(answer).toEqual({ kind: 'permission', requestId: request.id, decision: { outcome: 'selected', optionId: 'allow-once' } })
-    expect(request.kind === 'permission' && request.options.some(option => option.id === 'allow-once')).toBe(true)
-    const targetText = `echo_permission ${SID} ${RUN} ${request.id} ${request.nativeToolCallId} allow-once`
-    const inspectCurrentTarget = (snapshot: AgentTerminalScreenSnapshot) => snapshot.lines.some(line => line.text.trimEnd() === targetText)
-    if (!await verifyInteractionTarget({ ...context, nativeSourceId: NEW })) return null
-    const frame = await context.observeTarget(inspectCurrentTarget)
-    return { plan: nativeProvider.planInteractionResponse(request, answer), target: {
-      agentSessionId: SID, run: { runId: RUN }, requestId: request.id, nativeToolCallId: request.nativeToolCallId!,
-      nativeSourceId: NEW, inputByte: context.inputByte, frame }, inspectCurrentTarget, verifyCurrentTarget: verifyInteractionTarget }
-  })
-  const provider: AgentProvider = { ...nativeProvider, prepareInteractionResponse }
+  const provider: AgentProvider = { ...nativeProvider }
   const store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
   const response = { kind: 'permission' as const, requestId: 'previous-permission', decision: { outcome: 'selected' as const, optionId: 'allow-once' } }
   const original: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: SID, providerId, executorId: providerId,
@@ -149,7 +123,6 @@ async function fixture(providerId: 'codex' | 'claude' = 'codex', mode: 'main' | 
     for (const control of controls) expect(control).not.toHaveBeenCalled() })
   const switchToOld = async () => { const ready = once(holder.stdout!, 'data'); holder.stdin!.write('@fixture:open:' + oldPath + '\n'); expect(String((await ready)[0])).toContain('switched') }
   return { root, oldPath, currentPath, client, store, kernel, status, input, holder, original, run, events, hook, confirmation, rpc, server, switchToOld,
-    prepareInteractionResponse, verifyInteractionTarget,
     cli: (value: unknown) => runCompiledObjectCli(['agent', 'native', 'confirm', '--input', '-'], objectCliEnvironment(root, { AGENTMUX_RPC_ENDPOINT: `unix:${server.path}` }), JSON.stringify(value)) }
 }
 
@@ -165,7 +138,6 @@ it.each(['codex', 'claude'] as const)('publishes witnessed %s source change, pre
   await expect(f.client.respondAgentInteraction(withInteractionOperation(f.client, { agentSessionId: SID, expectedRun: { runId: RUN }, response: f.original.pendingInteraction!.response!.value })))
     .rejects.toMatchObject({ code: 'AGENT_INTERACTION_SOURCE_CHANGED' })
   expect(f.input).not.toHaveBeenCalled()
-  expect(f.prepareInteractionResponse).not.toHaveBeenCalled()
   await Reflect.get(f.client, 'recoverPendingInteractionResponses').call(f.client, [f.run])
   expect(f.input).not.toHaveBeenCalled()
   await f.client.writeAgent({ agentSessionId: SID, expectedRun: { runId: RUN }, source: 'user', data: 'x' })
@@ -216,14 +188,10 @@ it.each(['codex', 'claude'] as const)('publishes witnessed %s source change, pre
   expect(f.client.agentSession(SID).pendingInteraction?.request.nativeToolCallId).toBe(`tool-${NEW}`)
   expect(f.client.agentSession(SID).nativeHandle?.sessionId).toBe(NEW)
   const active = f.client.agentSession(SID).pendingInteraction!.request
-  await f.client.respondAgentInteraction(withInteractionOperation(f.client, { agentSessionId: SID, expectedRun: { runId: RUN },
-    response: { kind: 'permission', requestId: active.id, decision: { outcome: 'selected', optionId: 'allow-once' } } }))
-  expect(f.input).toHaveBeenCalledTimes(2)
-  expect(f.prepareInteractionResponse).toHaveBeenCalledOnce()
-  expect(f.verifyInteractionTarget).toHaveBeenCalledTimes(3)
-  expect(f.input.mock.calls[1]![0]).toBe(RUN)
-  expect(f.input.mock.calls[1]![1]).toMatchObject({ data: new AgentProviderRegistry().get(provider).planInteractionResponse(active,
-    { kind: 'permission', requestId: active.id, decision: { outcome: 'selected', optionId: 'allow-once' } }).data })
+  await expect(f.client.respondAgentInteraction(withInteractionOperation(f.client, { agentSessionId: SID, expectedRun: { runId: RUN },
+    response: { kind: 'permission', requestId: active.id, decision: { outcome: 'selected', optionId: 'allow-once' } } })))
+    .rejects.toMatchObject({ code: 'AGENT_INTERACTION_UNCONFIRMED' })
+  expect(f.input).toHaveBeenCalledTimes(1)
   if (provider === 'claude') {
     const old = await f.client.sessionHistoryPage(SID, { nativeSource: 'previous' })
     const current = await f.client.sessionHistoryPage(SID)
@@ -364,7 +332,6 @@ it.each(['unknown', 'changed'] as const)('recovers %s to the exact same retained
   expect(restored.pendingInteraction!.response).toEqual(operation); expect(restored.terminalPromptReadiness).toEqual(readiness)
   expect(restored.nativeBinding?.source).toBe('semantic-resume-target')
   expect(restored.run).toEqual(f.original.run); expect(f.holder.pid).toBe(f.run.pid)
-  await expect(Reflect.get(f.client, 'assertNativeInteractionSource').call(f.client, restored)).resolves.toBeUndefined()
   await f.client.writeAgent({ agentSessionId: SID, expectedRun: restored.run, source: 'user', data: 'x' })
   expect(f.input).toHaveBeenCalledOnce()
 })
