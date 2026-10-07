@@ -16,7 +16,7 @@ export type WorktreeCloseoutReceipt = {
   targetWorkspaceId: string
   movedTabIds: string[]
   workface: 'moved' | 'pending'
-  cleanup: 'pending' | 'removed'
+  cleanup: 'pending' | 'removed' | 'kept'
   reason: string | null
 }
 export type GitParameterMap = {
@@ -183,8 +183,9 @@ export function parseGitResult<M extends GitMethod>(method: M, value: unknown, p
     array(p.movedTabIds, code, item => identity(item, code))
     if (p.workspaceId !== params.workspaceId || p.workspaceId === p.targetWorkspaceId ||
         new Set(p.movedTabIds as string[]).size !== (p.movedTabIds as string[]).length ||
-        !['moved', 'pending'].includes(String(p.workface)) || !['pending', 'removed'].includes(String(p.cleanup)) ||
-        p.workface === 'pending' && p.cleanup === 'removed') invalid('Worktree closeout does not match the original resource, workface or cleanup state.', code)
+        !['moved', 'pending'].includes(String(p.workface)) || !['pending', 'removed', 'kept'].includes(String(p.cleanup)) ||
+        p.workface === 'pending' && p.cleanup !== 'pending' || p.cleanup === 'kept' && p.reason === null)
+      invalid('Worktree closeout does not match the original resource, workface or cleanup state.', code)
     if (p.reason !== null) text(p.reason, code)
   } else if (method === 'git.diff') {
     rpcRecord(p, ['path', 'old', 'new', 'binary', 'change'], code)

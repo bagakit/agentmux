@@ -178,8 +178,10 @@ the returned pagination/snapshot facts through each read and presentation reques
 Use git worktree close for product closeout after integrating the work. It gathers the
 original Tabs into the same project's default workspace while retaining Session/Run and
 execution cwd. workface moved confirms the saved display move; pending keeps its unfinished
-responsibility visible. Read cleanup separately: pending means the directory and cleanup responsibility
-remain; removed confirms directory cleanup. Keep the original operation ID and exact Host/path
+responsibility visible. Read cleanup separately: pending retains unfinished cleanup responsibility;
+inspect its reason for the actual directory state. removed confirms directory deletion. kept ends cleanup after Git registration has ended
+and execution/file references are gone, preserving remaining user evidence with an explicit reason.
+Keep the original operation ID and exact Host/path
 when recovering an unknown result. Discarding Git changes never authorizes stopping a healthy
 Agent or deleting its cwd.
 
