@@ -13,7 +13,7 @@ export const WorkspaceAgentRow = memo(function WorkspaceAgentRow({ context, iden
   percent: number | null; onOpen(id: string): void
 }) {
   const [goalOpen, setGoalOpen] = useState(false)
-  const preview = useAgentInformationPreview(context, !goalOpen, identity, goalLinks)
+  const preview = useAgentInformationPreview(context, !goalOpen, identity, goalLinks, () => onOpen(context.id))
   const disclosure = useCallback((open: boolean) => { preview.close(); setGoalOpen(open) }, [preview.close])
   const pressure = contextPressure(percent)
   const metadata = <span className="workspace-agent-row__metadata">
@@ -28,5 +28,5 @@ export const WorkspaceAgentRow = memo(function WorkspaceAgentRow({ context, iden
         headingAccessory={goalLinks ? <span className="focus-goal__space" aria-hidden="true"><FocusGoalMark links={goalLinks} /></span> : undefined} />
     </button>
     {goalLinks ? <FocusGoalLinks links={goalLinks} onOpenChange={disclosure} /> : null}
-  </div>{preview.preview}</>
+  </div></>
 })

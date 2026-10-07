@@ -22,7 +22,7 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
   const input = useRef<HTMLInputElement>(null), cancelled = useRef(false)
   const expectedNameRevision = useRef({ revision: 0 }), saving = useRef(false), editGeneration = useRef(0)
   useEffect(() => () => { ++editGeneration.current; expectedNameRevision.current = { revision: 0 } }, [context.id])
-  const hover = useAgentInformationPreview(context, !menuOpen && !goalOpen && draft === null, identity, goalLinks)
+  const hover = useAgentInformationPreview(context, !menuOpen && !goalOpen && draft === null, identity, goalLinks, () => onSelect(context.id))
   const goalDisclosure = useCallback((open: boolean) => { hover.close(); setGoalOpen(open) }, [hover.close])
   useEffect(() => {
     if (!active) return
@@ -57,5 +57,5 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
     <AgentContextContent context={context} identity={hover.position} presentation="card" headingAccessory={goalLinks ? <span className="focus-goal__space" aria-hidden="true"><FocusGoalMark links={goalLinks} /></span> : undefined} />
   </button>
   const main = context.kind === 'agent' ? <FocusContextMenu open={active && menuOpen} context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={() => { hover.close(); ++editGeneration.current; expectedNameRevision.current = { revision: currentDisplayNameRevision('agent-session', context.id) }; setDraft(context.name) }}>{card}</FocusContextMenu> : card
-  return <><div className="focus-context-card">{main}{goalLinks ? <FocusGoalLinks links={goalLinks} onOpenChange={goalDisclosure} /> : null}</div>{hover.preview}</>
+  return <><div className="focus-context-card">{main}{goalLinks ? <FocusGoalLinks links={goalLinks} onOpenChange={goalDisclosure} /> : null}</div></>
 })

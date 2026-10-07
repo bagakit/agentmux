@@ -18,6 +18,7 @@ import { GlobalSystemNotices } from './components/GlobalSystemNotices'
 import { ToolkitStatusBar } from './components/toolkit/ToolkitStatusBar'
 import { WindowUtilityBar } from './components/WindowUtilityBar'
 import { WindowOverlayHost } from './components/WindowOverlayHost'
+import { AgentInformationPreviewHost } from './components/AgentInformationPreview'
 import { QuickSwitcher } from './components/QuickSwitcher'
 import { isEditableChordTarget, windowShortcutHandlers } from './lib/workbench-shortcuts'
 import { routeWindowShortcut } from './lib/shortcut-registry'
@@ -658,7 +659,7 @@ function DesktopApp() {
         return original?.navigation === fileNavigationSelection(useAppStore.getState()) ? original.element : null
       }} />
       </div>
-      <WindowOverlayHost />
+      <WindowOverlayHost><AgentInformationPreviewHost /></WindowOverlayHost>
       </RendererResourceOwners>
     </ExecutorIdentityContext.Provider>
     </WindowSidebarLayoutContext.Provider>
