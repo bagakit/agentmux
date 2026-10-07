@@ -70,7 +70,7 @@ it('retains the full unknown save across dialog close, Profile remount and workb
   await f.app.remount(); await f.open()
   await waitText('The previous save is still unconfirmed')
   expect(dialog().textContent).toContain(input.operationId)
-  expect(dialog().querySelector<HTMLButtonElement>('.primary')!.disabled).toBe(true)
+  expect([...dialog().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Use this bot')!.disabled).toBe(true)
   await f.button('Check current choice')
   expect((await f.cliRead()).values).toEqual({ connection: ref('a') })
   expect(dialog().textContent).toContain('Reading the current choice does not confirm that save')
