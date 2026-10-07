@@ -59,7 +59,7 @@ it('the actual SDK callback joins original durable intake, Core queue, mounted M
   expect(JSON.stringify(result)).not.toContain('fixture-credential'); expect(JSON.stringify(result)).not.toContain('transportProof')
   expect((await f.client.readAgentSessions()).map(session => session.agentSessionId)).toEqual([f.input.agentSessionId])
   expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.attach).not.toHaveBeenCalled()
-  const evidence = resolve('.bagakit/evidence/feishu-adapter')
+  const evidence = resolve('.bagakit/evidence/feishu-join')
   await mkdir(evidence, { recursive: true })
   await writeFile(join(evidence, 'actual-call-chain.json'), JSON.stringify({
     transport: 'Pinned SDK with controlled HTTP and WebSocket I/O; no real platform credentials or live Run',
@@ -71,4 +71,65 @@ it('the actual SDK callback joins original durable intake, Core queue, mounted M
     originalCoreInput: { operationId: input.operationId, messageId: input.messageId, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, author: input.author, body: original!.envelope.body },
     originalDesktop: { consumer: 'mounted SessionMailbox', speaker: read.detail.dataset.speakerRole, recordId: recorded.id, author: recorded.authorExternal, copiedCompleteBody: true }
   }, null, 2) + '\n')
+}, 20_000)
+
+it('a saved SDK parent stays unknown until its exact application author is readable, then uses the same original intake and Core queue', async () => {
+  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
+  const f = await ingressFixture(true, feishuConfig, { resolve: async () => 'fixture-credential' }); cleanup.push(() => f.close())
+  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
+  const transport = feishuSdkTransport(), adapter = new FeishuAdapter({ connections: f.connections, http: transport.http })
+  const ingress = new DurableIngressHost({ ...f.options, authenticators: [adapter] }); f.connections.ingress = ingress
+  const receiver = await adapter.openReceiver(feishuConfig, 'fixture-credential', ingress); cleanup.push(() => receiver.close())
+  await vi.waitFor(() => expect(receiver.observation().transport.state).toBe('ready'))
+  const payload = feishuPayload({ parent_id: 'original-bot-parent', mentions: [], content: JSON.stringify({ text: 'Reply in the existing Session\n完整原文' }) })
+  const request = transport.request.getMockImplementation()!
+  let readable = false
+  transport.request.mockImplementation(async input => {
+    if (!input.url?.endsWith('/messages/original-bot-parent')) return request(input)
+    if (!readable) throw new Error('Private original lookup is unavailable')
+    return { code: 0, data: { items: [{ message_id: 'original-bot-parent', chat_id: 'original-room', deleted: false, sender: { id: feishuConfig.application.appId, id_type: 'app_id', sender_type: 'app' } }] } }
+  })
+  await transport.receive(payload)
+  expect(transport.request.mock.calls.some(([input]) => input.url?.includes('/messages/'))).toBe(false)
+  expect(transport.ack()).toEqual([{ code: 200 }])
+  const [saved] = (await ingress.list({ connectionId: feishuConfig.connectionId })).ingresses
+  const unknown = await ingress.dispatch(saved!.ingressId)
+  expect(unknown.ingress).toMatchObject({ state: 'received', body: JSON.parse(payload.event.message.content).text, addressing: { state: 'unknown', reason: 'reply-unconfirmed', replyToMessageId: 'original-bot-parent' } })
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'feishu-parent.sock'), connections: f.connections, coreClients: f.coreClients })
+  await server.start(); cleanup.push(() => server.stop())
+  const env = objectCliEnvironment(f.root), cli = () => runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'connection', 'ingress', 'inspect', '--ingress', saved!.ingressId], env)
+  const observed = await cli()
+  expect(observed.code, observed.stderr).toBe(0)
+  expect(JSON.parse(observed.stdout).result).toMatchObject({ ingress: unknown.ingress, inputReceipt: null, observation: 'not-started' })
+  readable = true
+  const resumed = await ingress.dispatch(saved!.ingressId), input = resumed.ingress!.input!
+  expect(resumed.ingress).toMatchObject({ ingressId: saved!.ingressId, state: 'claimed', addressing: { state: 'confirmed', selection: 'reply', replyToMessageId: 'original-bot-parent' } })
+  expect(input.agentSessionId).toBe(f.input.agentSessionId); expect(input.expectedRun).toEqual(f.session.run)
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
+  const original = await new core.DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath()).readByOperationId(input.operationId)
+  expect(original!.envelope.body).toBe(JSON.parse(payload.event.message.content).text)
+  expect(original!.envelope.sender).toEqual(input.author)
+  await transport.receive(payload)
+  expect((await ingress.list({ connectionId: feishuConfig.connectionId })).ingresses).toHaveLength(1)
+  expect((await ingress.inspect({ ingressId: saved!.ingressId })).ingress!.input).toEqual(input)
+  expect(f.inner.kernel.input).toHaveBeenCalledOnce()
+  const row = f.connections.database.prepare('SELECT event_json,raw_payload FROM connection_ingress_event').get()!
+  expect(JSON.parse(String(row.event_json))).toMatchObject({ selection: 'message', replyToMessageId: 'original-bot-parent' })
+  expect(JSON.parse(String(row.raw_payload))).toEqual(payload)
+  const final = await cli()
+  expect(final.code, final.stderr).toBe(0)
+  expect(JSON.parse(final.stdout).result.ingress.input).toEqual(input)
+  expect(JSON.stringify(JSON.parse(final.stdout))).not.toContain('fixture-credential')
+  const readParent = transport.request.getMockImplementation()!
+  transport.request.mockImplementation(async request => request.url?.endsWith('/messages/foreign-app-parent')
+    ? { code: 0, data: { items: [{ message_id: 'foreign-app-parent', chat_id: 'original-room', sender: { id: 'another-application', id_type: 'app_id', sender_type: 'app' } }] } }
+    : readParent(request))
+  const foreign = feishuPayload({ message_id: 'foreign-parent-message', parent_id: 'foreign-app-parent', mentions: [] })
+  foreign.header.event_id = 'foreign-parent-event'
+  await transport.receive(foreign)
+  const other = (await ingress.list({ connectionId: feishuConfig.connectionId })).ingresses.find(record => record.externalMessageId === 'foreign-parent-message')!
+  expect((await ingress.dispatch(other.ingressId)).ingress).toMatchObject({ state: 'refused', code: 'INGRESS_INPUT_OUTSIDE_SCOPE', addressing: { state: 'confirmed', selection: 'message' } })
+  expect(f.inner.kernel.input).toHaveBeenCalledOnce()
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 20_000)

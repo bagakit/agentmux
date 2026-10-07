@@ -3,13 +3,13 @@ import { join } from 'node:path'
 import { writeFile } from 'node:fs/promises'
 import * as core from '../../../core/dist/index.js'
 import { rpcOwnerFixture } from '../../../core/test/helpers/public-rpc-owner.js'
-import { DurableIngressHost, ConnectionHost, RoomBindingHost, type VerifiedIngressEvent } from '../../dist/index.js'
+import { DurableIngressHost, ConnectionHost, RoomBindingHost, type VerifiedIngressEvent, type SecretPort } from '../../dist/index.js'
 import { createWorkspaceLayout } from '../../../core/src/spatial-layout.js'
 import { config as defaultConfig, context } from './room-binding.js'
 import type { ConnectionConfig } from '@agentmux/core/connections'
 
 /** One compiled Core/Store/Provider and original binding. Runtime byte I/O uses the existing deterministic port. */
-export async function ingressFixture(running = false, config: ConnectionConfig = defaultConfig) {
+export async function ingressFixture(running = false, config: ConnectionConfig = defaultConfig, secrets: SecretPort = { resolve: async () => null }) {
   const h = await rpcOwnerFixture(['original-agent'], core, root => ({ providerId: 'claude', executorId: 'claude', nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'ingress-native', transcriptPath: join(root, 'native.jsonl') } }))
   const transcript = join(h.root, 'native.jsonl')
   await writeFile(transcript, JSON.stringify({ type: 'user', sessionId: 'ingress-native', uuid: 'native-before-binding', message: { role: 'user', content: 'Existing original work' } }) + '\n')
@@ -28,7 +28,7 @@ export async function ingressFixture(running = false, config: ConnectionConfig =
     bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { resource: createWorkspaceLayout('group', ['tab']) },
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'original-region' }, activeRegionId: 'original-region' } }, resources: {}
   } })
-  const connections = new ConnectionHost({ databasePath: join(h.root, 'connections.sqlite'), secrets: { resolve: async () => null } })
+  const connections = new ConnectionHost({ databasePath: join(h.root, 'connections.sqlite'), secrets })
   await connections.configure({ operationId: 'configure-ingress', expectedRevision: null, connection: config })
   const bindings = new RoomBindingHost({ connections, spatial, checkpoint: async ref => ({ ...ref, checkpoint: await h.client.conversationCheckpoint(ref.agentSessionId) }) }); connections.bindings = bindings
   const input = { operationId: 'bind-ingress', bindingId: 'original-binding', connectionId: config.connectionId, expectedConnectionRevision: 1, executionHostId: 'local', agentSessionId: 'original-agent', regionAnchor: { regionId: 'original-region' }, externalConversationId: 'original-room', scope: { input: 'mentions-and-replies' as const, publication: 'future-native-user-facing' as const }, expectedSource: { providerId: 'claude', nativeSessionId: 'ingress-native' } }

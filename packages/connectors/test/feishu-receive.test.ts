@@ -93,6 +93,75 @@ it('keeps ACK pending while the original durable handler is pending', async () =
   expect(f.transport.ack()).toEqual([{ code: 200 }])
 })
 
+it.each([
+  { message_type: 'image', content: JSON.stringify({ image_key: 'original-image-key', untouched: 'complete attachment metadata' }) },
+  { message_type: 'text', content: 'unrecognized text encoding' },
+  { message_type: 'text', content: { original: ['unrecognized', 'content shape'] } }
+])('retains authenticated unsupported content before ACK without fabricating text', async format => {
+  const f = await fixture(), payload = feishuPayload(format)
+  await f.transport.receive(payload)
+  expect(f.transport.ack()).toEqual([{ code: 200 }])
+  const [record] = (await f.ingress.list({ connectionId: feishuConfig.connectionId })).ingresses
+  expect(record).toMatchObject({ body: '', state: 'refused', code: 'INGRESS_CONTENT_UNSUPPORTED' })
+  const row = f.database.prepare('SELECT event_json,raw_payload FROM connection_ingress_event').get()!
+  expect(JSON.parse(String(row.raw_payload))).toEqual(payload)
+  expect(JSON.parse(String(row.event_json))).toMatchObject({ body: '', unsupportedContent: true })
+  expect((await f.ingress.dispatch(record!.ingressId)).ingress).toEqual(record)
+})
+
+it.each([
+  ['own-app', { id: feishuConfig.application.appId, id_type: 'app_id', sender_type: 'app' }, 'reply'],
+  ['other-app', { id: 'another-application', id_type: 'app_id', sender_type: 'app' }, 'message'],
+  ['human', { id: 'original-user', id_type: 'open_id', sender_type: 'user' }, 'message'],
+  ['unknown-id-type', { id: feishuConfig.application.appId, id_type: 'unknown', sender_type: 'app' }, 'unknown'],
+  ['display-name', { id: 'another-application', id_type: 'app_id', sender_type: 'app', sender_name: feishuConfig.application.appId }, 'message'],
+  ['missing-author', {}, 'unknown']
+] as const)('qualifies the exact SDK parent machine author: %s', async (_kind, sender, expected) => {
+  const f = await fixture(), payload = feishuPayload({ parent_id: 'original-parent', mentions: [] })
+  await f.transport.receive(payload)
+  const row = f.database.prepare('SELECT event_json,raw_payload FROM connection_ingress_event').get()!
+  const event = JSON.parse(String(row.event_json)), request = f.transport.request.getMockImplementation()!
+  expect(event).toMatchObject({ replyToMessageId: 'original-parent', selection: 'message' })
+  f.transport.request.mockImplementation(async input => input.url?.endsWith('/messages/original-parent') ? { code: 0, data: { items: [{ message_id: 'original-parent', chat_id: 'original-room', deleted: false, sender }] } } : request(input))
+  const signal = new AbortController().signal
+  expect(await f.adapter.qualifyReply(feishuConfig, event, String(row.raw_payload), 'fixture-credential', signal)).toBe(expected)
+  expect(f.transport.request.mock.calls.find(([input]) => input.url?.endsWith('/messages/original-parent'))![0]).toMatchObject({ method: 'GET', params: { user_id_type: 'open_id' }, signal })
+  expect(f.transport.ack()).toEqual([{ code: 200 }])
+})
+
+it.each(['wrong-message', 'wrong-chat', 'deleted', 'duplicate', 'network'] as const)('keeps %s parent observations unknown', async kind => {
+  const f = await fixture(), payload = feishuPayload({ parent_id: 'original-parent', mentions: [] })
+  await f.transport.receive(payload)
+  const row = f.database.prepare('SELECT event_json,raw_payload FROM connection_ingress_event').get()!
+  const parent = { message_id: kind === 'wrong-message' ? 'another-message' : 'original-parent', chat_id: kind === 'wrong-chat' ? 'another-room' : 'original-room', deleted: kind === 'deleted', sender: { id: feishuConfig.application.appId, id_type: 'app_id', sender_type: 'app' } }
+  const request = f.transport.request.getMockImplementation()!
+  f.transport.request.mockImplementation(async input => {
+    if (!input.url?.endsWith('/messages/original-parent')) return request(input)
+    if (kind === 'network') throw new Error('Private original parent failure')
+    return { code: 0, data: { items: kind === 'duplicate' ? [parent, { ...parent, sender: { ...parent.sender, id: 'different-app' } }] : [parent] } }
+  })
+  expect(await f.adapter.qualifyReply(feishuConfig, JSON.parse(String(row.event_json)), String(row.raw_payload), 'fixture-credential', new AbortController().signal)).toBe('unknown')
+  expect((await f.ingress.list({ connectionId: feishuConfig.connectionId })).ingresses[0]!.state).toBe('received')
+})
+
+it('cancels only the parent read observation and ignores its late SDK result', async () => {
+  const f = await fixture(), payload = feishuPayload({ parent_id: 'original-parent', mentions: [] })
+  await f.transport.receive(payload)
+  const row = f.database.prepare('SELECT event_json,raw_payload FROM connection_ingress_event').get()!
+  let finish!: (value: unknown) => void
+  const request = f.transport.request.getMockImplementation()!
+  f.transport.request.mockImplementation(async input => input.url?.endsWith('/messages/original-parent') ? await new Promise(resolve => { finish = resolve }) : request(input))
+  const abort = new AbortController(), reading = f.adapter.qualifyReply(feishuConfig, JSON.parse(String(row.event_json)), String(row.raw_payload), 'fixture-credential', abort.signal)
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+  abort.abort(); expect(await reading).toBe('unknown')
+  finish({ code: 0, data: { items: [{ message_id: 'original-parent', chat_id: 'original-room', sender: { id: feishuConfig.application.appId, id_type: 'app_id', sender_type: 'app' } }] } })
+  await Promise.resolve(); await Promise.resolve()
+  expect((await f.ingress.list({ connectionId: feishuConfig.connectionId })).ingresses[0]!.state).toBe('received')
+  const before = f.transport.request.mock.calls.length
+  expect(await f.adapter.qualifyReply(feishuConfig, JSON.parse(String(row.event_json)), String(row.raw_payload), 'fixture-credential', abort.signal)).toBe('unknown')
+  expect(f.transport.request).toHaveBeenCalledTimes(before)
+})
+
 it('keeps exactly one issuer/app receiver and releases only that receiver for explicit reopening', async () => {
   const f = await fixture(), alias = { ...feishuConfig, connectionId: 'same-app-alias' }
   await f.connections.configure({ operationId: 'configure-alias', expectedRevision: null, connection: alias })
