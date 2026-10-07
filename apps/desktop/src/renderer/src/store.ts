@@ -1,5 +1,6 @@
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { restoredConnectorRoomIntents, type ConnectorRoomIntent } from './lib/connector-room-intent'
+import { restoredMoteConnectionSaveIntents, type MoteConnectionSaveIntent } from './lib/mote-connection-save-intent'
 import { defaultNoteCanvasLayout, mergeNoteCanvasLayout, noteCanvasScopeKey, restoreNoteCanvasLayouts, type NoteCanvasLayout, type NoteCanvasScope } from './lib/note-canvas-state'
 import { projectInputReceipt as retainInputReceipt } from '@agentmux/client-ui/input-receipt-projection'
 import { restoredQuestionReplies, type DesktopQuestionReplies, type DesktopQuestionReplyAttempt, type DesktopQuestionDrafts } from './lib/conversation-question-intent'
@@ -778,6 +779,7 @@ type AppState = {
   hostChecks: Record<string, HostCheckState>
   browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
   connectorRoomIntents: Record<string, ConnectorRoomIntent>
+  moteConnectionSaveIntents: Record<string, MoteConnectionSaveIntent>
   agentComposerDrafts: Record<string, string>
   agentComposerHistory: Record<string, readonly string[]>
   agentComposerHistoryNavigation: Record<string, Omit<HistoryState, 'entries'> & { entries?: readonly string[] }>
@@ -2712,6 +2714,7 @@ type PersistedAppState = {
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   connectorRoomIntents?: Record<string, ConnectorRoomIntent>
+  moteConnectionSaveIntents?: Record<string, MoteConnectionSaveIntent>
   agentComposerDrafts?: Record<string, string>
   agentComposerHistory?: Record<string, readonly string[]>
   launcherNameDrafts?: Record<string, LauncherNames>
@@ -2955,6 +2958,7 @@ function selectPersistedInputs(state: AppState) {
     goalAgentCreationDrafts: state.goalAgentCreationDrafts,
     retainedSpatialFocus: state.retainedSpatialFocus,
     connectorRoomIntents: state.connectorRoomIntents,
+    moteConnectionSaveIntents: state.moteConnectionSaveIntents,
     agentComposerDrafts: state.agentComposerDrafts,
     agentComposerHistory: state.agentComposerHistory,
     launcherNameDrafts: state.launcherNameDrafts,
@@ -3298,6 +3302,19 @@ export async function retainConnectorRoomIntent(intent: ConnectorRoomIntent): Pr
 }
 export async function clearConnectorRoomIntent(operationId: string): Promise<void> {
   useAppStore.setState(state => { const connectorRoomIntents = { ...state.connectorRoomIntents }; delete connectorRoomIntents[operationId]; return { connectorRoomIntents } })
+  await saveWorkbenchSelection(false)
+}
+/** Retain the exact submitted file input; this is neither a preference nor an effect journal. */
+export async function retainMoteConnectionSaveIntent(intent: MoteConnectionSaveIntent): Promise<AgentMuxSpatialSave> {
+  const parsed = restoredMoteConnectionSaveIntents({ [intent.input.operationId]: intent })[intent.input.operationId]
+  if (!parsed) throw new Error('The exact original Mote preference input is required.')
+  const previous = useAppStore.getState().moteConnectionSaveIntents[intent.input.operationId]
+  if (previous && JSON.stringify(previous.input) !== JSON.stringify(parsed.input)) throw new Error('The original Mote save input cannot be replaced.')
+  useAppStore.setState(state => ({ moteConnectionSaveIntents: { ...state.moteConnectionSaveIntents, [parsed.input.operationId]: parsed } }))
+  return await saveWorkbenchSelection(false)
+}
+export async function clearMoteConnectionSaveIntent(operationId: string): Promise<void> {
+  useAppStore.setState(state => { const moteConnectionSaveIntents = { ...state.moteConnectionSaveIntents }; delete moteConnectionSaveIntents[operationId]; return { moteConnectionSaveIntents } })
   await saveWorkbenchSelection(false)
 }
 /** Retain the chosen Goal and original operation before dispatch; this never creates or sends. */
@@ -3758,6 +3775,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   goalAgentSelectionDrafts: {},
   goalAgentCreationDrafts: {},
   connectorRoomIntents: {},
+  moteConnectionSaveIntents: {},
   retainedSpatialFocus: null,
   config: null,
   providerCatalog: [],
@@ -10798,7 +10816,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
-    return { ...state, connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState

@@ -1,4 +1,5 @@
 import { MoteQuickMode } from './MoteQuickMode'
+import { MoteConnectionIdentity } from './MoteConnectionIdentity'
 import { MOTE_QUICK_MODE_PATH } from '../../../shared/mote-quick-mode'
 import { TOPIC_AGENT_INSTRUCTIONS_PATH, MOTE_MEMORY_PATH } from '../../../shared/topic-agent-instructions'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -161,6 +162,7 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
       <div className="mote-details__profile">{profile}</div>
       <MoteBehaviorSummary scope={scope} active={active} onEdit={() => { behaviorInvoker.current = document.activeElement as HTMLElement; setBehaviorOpen(true) }} onOpenPath={onOpenPath} />
       <MoteQuickMode scope={scope} reference={reference} onOpenPath={onOpenPath} active={active} />
+      <MoteConnectionIdentity key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.topic.id])} scope={scope} active={active} />
       <MoteCurrentWork scope={scope} reference={reference} active={active} />
       {behaviorOpen ? <MoteBehaviorDialog scope={scope} reference={reference} onOpenPath={onOpenPath}
         onClose={() => setBehaviorOpen(false)} returnFocus={() => behaviorInvoker.current?.isConnected ? behaviorInvoker.current : null} /> : null}
