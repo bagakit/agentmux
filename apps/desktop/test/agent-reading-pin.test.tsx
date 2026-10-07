@@ -1,0 +1,129 @@
+// @vitest-environment happy-dom
+import { act, createElement } from 'react'
+import { beforeEach, expect, it, vi } from 'vitest'
+import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { useAppStore } from '../src/renderer/src/store'
+import { api } from '../src/renderer/src/lib/api'
+import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
+import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
+import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
+vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span') }))
+const dom = composerDOM({ agentInformation: true }), agent = composerSession('pinned-agent'), neighbor = composerSession('neighbor-agent')
+const workspace = composerConfig.workspaces[0]!, onOpen = vi.fn(), dispose = vi.fn()
+const timeline = { agentSessionId: agent.id, revision: 1, items: [{ id: 'held-reply', agentSessionId: agent.id, kind: 'assistant_message' as const, source: 'native-hook' as const, title: 'Reply', status: 'complete' as const, content: 'Original **reply**.\n\nComplete held tail.', createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1) }] }
+const context = (session = agent) => agentContextForSession(session, session.id === agent.id ? timeline : undefined, session.id, workspace, null)
+const panel = () => document.querySelector<HTMLElement>('.agent-information-reader')!
+const row = (id = agent.id) => dom.container.querySelector<HTMLButtonElement>(`.workspace-agent-row[data-session-id="${id}"]`)!
+const native = (text = 'Original observed input') => ({ agentSessionId: agent.id, source: { providerId: 'codex', nativeSessionId: 'original-source' }, nextCursor: null,
+  items: [{ id: 'original-input', kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text }], startedAt: _historyFixtureEpoch(0, 0, 1) }] })
+async function scene(origin = true, active = true) {
+  await dom.render(<WorkbenchPresentationContext.Provider value={{ active, retainedRegionId: null }}>
+    {origin ? <WorkspaceAgentRow key={agent.id} context={context()} percent={null} onOpen={onOpen} /> : null}
+    <WorkspaceAgentRow key={neighbor.id} context={context(neighbor)} percent={null} onOpen={onOpen} />
+  </WorkbenchPresentationContext.Provider>)
+}
+async function open() { await scene(); await act(async () => row().focus()); expect(panel()).not.toBeNull() }
+async function pin() { await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__pin')!.click()) }
+async function ready() { await act(async () => vi.waitFor(() => expect(panel().querySelector('[data-hover-input-id]')?.textContent).toContain('Original observed input'))) }
+beforeEach(() => {
+  useAppStore.setState({ sessions: [agent, neighbor], timelines: { [agent.id]: timeline }, agentNames: {}, demands: {}, mainSurface: 'agents' })
+  onOpen.mockClear(); dispose.mockClear()
+  vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(native())
+  vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async control => ({ agentSessionId: control.agentSessionId, source: { providerId: 'codex', nativeSessionId: 'original-source' }, dispose }))
+  vi.spyOn(api.sessions, 'dispatches').mockResolvedValue({ hostId: 'local', participantSessionId: agent.id, nextSourceMessageId: null, dispatches: [] })
+})
+
+it('keeps the same pinned reader through origin removal while neighbor hover and original navigation remain independent', async () => {
+  await open(); await ready()
+  const original = panel(), reading = original.querySelector<HTMLElement>('.agent-information-reader__reading')!, reply = original.querySelector('.focus-context-hover__recap p')!
+  const range = document.createRange(); range.selectNodeContents(reply); window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
+  const selected = window.getSelection()!.toString(); reading.scrollTop = 97
+  await pin(); expect(panel()).toBe(original); expect(panel().getAttribute('data-pinned')).toBe('true')
+  expect(panel().querySelector('.agent-information-reader__pin')?.getAttribute('aria-pressed')).toBe('true')
+  expect(panel().querySelectorAll('.agent-information-reader__footer')).toHaveLength(1)
+  await scene(false, false); expect(row(agent.id)).toBeNull(); expect(panel()).toBe(original)
+  await act(async () => row(neighbor.id).focus()); expect(panel()).toBe(original)
+  await act(async () => row(neighbor.id).click()); expect(onOpen).toHaveBeenCalledExactlyOnceWith(neighbor.id)
+  expect(panel()).toBe(original); expect(reading.scrollTop).toBe(97); expect(panel().querySelector('.focus-context-hover__recap p')).toBe(reply)
+  expect(window.getSelection()!.toString()).toBe(selected); expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
+  await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__close')!.click())
+  expect(panel()).toBeNull(); expect(document.activeElement).toBe(row(neighbor.id))
+})
+
+it('lets the original in-flight input finish once after pin and then releases its observation without remounting', async () => {
+  let resolve!: (value: ReturnType<typeof native>) => void
+  vi.mocked(api.sessions.historyPage).mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  await open(); const original = panel(), inputRegion = original.querySelector('.focus-context-hover__inputs')!
+  await pin(); expect(panel()).toBe(original)
+  await act(async () => resolve(native())); await ready()
+  expect(panel().querySelector('.focus-context-hover__inputs')).toBe(inputRegion)
+  expect(dispose).toHaveBeenCalledTimes(1); expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
+  await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__facts')!.click())
+  await act(async () => panel().querySelector<HTMLButtonElement>('[aria-label="Back to original content"]')!.click())
+  await pin(); expect(panel()).toBe(original); expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
+})
+
+it.each(['source', 'run', 'control-host', 'removed'] as const)('retains original observed input and reply when the pinned %s scope changes', async change => {
+  await open(); await ready(); await pin()
+  const original = panel(), input = original.querySelector('[data-hover-input-id]')!, reply = original.querySelector('.focus-context-hover__recap p')!
+  const replacement = change === 'run' ? { ...agent, control: { ...agent.control, run: { runId: 'replacement-run' } } }
+    : change === 'control-host' ? { ...agent, control: { ...agent.control, hostId: 'other-host' } }
+      : { ...agent, nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'new-source' } }
+  const before = vi.mocked(api.sessions.historyPage).mock.calls.length
+  await act(async () => useAppStore.setState({ sessions: change === 'removed' ? [neighbor] : [replacement, neighbor] }))
+  expect(panel()).toBe(original); expect(original.textContent).toContain('Original Run or source is no longer confirmed')
+  expect(original.querySelector('[data-hover-input-id]')).toBe(input); expect(input.textContent).toContain('Original observed input')
+  expect(original.querySelector('.focus-context-hover__recap p')).toBe(reply); expect(reply.textContent).toContain('Original reply')
+  expect(api.sessions.historyPage).toHaveBeenCalledTimes(before); expect(onOpen).not.toHaveBeenCalled()
+})
+
+it('keeps already selected captured inputs while the original native batch is pending and later captured requests arrive', async () => {
+  const captured = [1, 2, 3].map(index => ({ ...timeline.items[0]!, id: 'captured-' + index, kind: 'user_message' as const, source: 'user' as const, content: 'Original captured input ' + index, createdAt: index, updatedAt: index }))
+  await act(async () => useAppStore.setState({ timelines: { [agent.id]: { ...timeline, revision: 4, items: [...captured, timeline.items[0]!] } } }))
+  let resolve!: (value: ReturnType<typeof native>) => void
+  vi.mocked(api.sessions.historyPage).mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  await open()
+  const inputs = [...panel().querySelectorAll('[data-hover-input-id]')]
+  expect(inputs).toHaveLength(3)
+  const original = inputs[0]!, range = document.createRange(); range.selectNodeContents(original.querySelector('p')!)
+  window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range); const selected = window.getSelection()!.toString()
+  await pin()
+  await act(async () => useAppStore.setState({ timelines: { [agent.id]: { ...timeline, revision: 5, items: [...captured, { ...captured[0]!, id: 'later-captured', content: 'LATER CAPTURED REQUEST', createdAt: _historyFixtureEpoch(0, 0, 5), updatedAt: _historyFixtureEpoch(0, 0, 5) }, timeline.items[0]!] } } }))
+  expect([...panel().querySelectorAll('[data-hover-input-id]')]).toEqual(inputs)
+  expect(window.getSelection()!.toString()).toBe(selected); expect(panel().textContent).not.toContain('LATER CAPTURED REQUEST')
+  await act(async () => resolve(native()))
+  expect([...panel().querySelectorAll('[data-hover-input-id]')]).toEqual(inputs); expect(window.getSelection()!.toString()).toBe(selected)
+  expect(api.sessions.historyPage).toHaveBeenCalledTimes(1); expect(dispose).toHaveBeenCalledTimes(1)
+})
+
+it('ignores a late old-source input instead of attaching it to a pinned replacement Run', async () => {
+  let resolve!: (value: ReturnType<typeof native>) => void
+  vi.mocked(api.sessions.historyPage).mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  await open(); await pin()
+  await act(async () => useAppStore.setState({ sessions: [{ ...agent, control: { ...agent.control, run: { runId: 'replacement-run' } } }, neighbor] }))
+  await act(async () => resolve(native('LATE OLD SOURCE MUST NOT ARRIVE')))
+  expect(panel().textContent).not.toContain('LATE OLD SOURCE MUST NOT ARRIVE'); expect(panel().textContent).toContain('Complete held tail')
+  expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
+})
+
+it('pauses an invisible pinned window and resumes only its original source without reopening closed content', async () => {
+  let visibility = 'visible'
+  vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility as DocumentVisibilityState)
+  let resolve!: (value: ReturnType<typeof native>) => void
+  vi.mocked(api.sessions.historyPage).mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  await open(); await pin(); const original = panel()
+  await act(async () => { visibility = 'hidden'; document.dispatchEvent(new Event('visibilitychange')) })
+  expect(panel()).toBe(original); expect(original.hidden).toBe(true); expect(dispose).toHaveBeenCalledTimes(1)
+  await act(async () => resolve(native('INVISIBLE LATE INPUT')))
+  expect(original.textContent).not.toContain('INVISIBLE LATE INPUT')
+  const count = vi.mocked(api.sessions.historyPage).mock.calls.length
+  await act(async () => useAppStore.setState({ sessions: [agent, { ...neighbor, latestOutputBytes: 40 }] }))
+  expect(api.sessions.historyPage).toHaveBeenCalledTimes(count)
+  await act(async () => { visibility = 'visible'; document.dispatchEvent(new Event('visibilitychange')) })
+  expect(panel()).toBe(original); expect(original.hidden).toBe(false)
+  await ready(); await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__close')!.click())
+  await act(async () => { visibility = 'hidden'; document.dispatchEvent(new Event('visibilitychange')); visibility = 'visible'; document.dispatchEvent(new Event('visibilitychange')) })
+  expect(panel()).toBeNull()
+})

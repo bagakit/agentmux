@@ -292,6 +292,37 @@ describe('actual App Focus residency', () => {
     await act(async () => { window.dispatchEvent(new PointerEvent('pointermove', { clientY: -300 })); window.dispatchEvent(new PointerEvent('pointerup')) })
     expect(useAppStore.getState().focusTimelineHeight).toBe(previous)
   })
+  it('App keeps pinned original reading while exact Space navigation and later terminal input continue', async () => {
+    await focus()
+    await act(async () => container.querySelector<HTMLButtonElement>('.focus-context[data-session-id="source-agent"]')!.focus())
+    const panel = document.querySelector<HTMLElement>('.agent-information-reader')!, body = panel.querySelector('.agent-information-reader__reading')!
+    const paragraph = body.querySelector('.focus-context-hover__recap p')!, range = document.createRange(); range.selectNodeContents(paragraph)
+    window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
+    const selected = window.getSelection()!.toString()
+    await act(async () => panel.querySelector<HTMLButtonElement>('.agent-information-reader__pin')!.click())
+    await control({ kind: 'space', regionId: 'target-region' }, 'target')
+    expect(useAppStore.getState().mainSurface).toBe('workbench')
+    expect(useAppStore.getState().workbenchSpaceSelection?.regionId).toBe('target-region')
+    expect(document.querySelector('.agent-information-reader')).toBe(panel); expect(panel.querySelector('.agent-information-reader__reading')).toBe(body)
+    expect(window.getSelection()!.toString()).toBe(selected); expect(paragraph.textContent).toContain(reply.content)
+    const input = document.activeElement
+    expect(input?.closest('[data-workbench-region-id]')?.getAttribute('data-workbench-region-id')).toBe('target-region')
+    await act(async () => panel.querySelector<HTMLButtonElement>('.agent-information-reader__close')!.click())
+    expect(document.querySelector('.agent-information-reader')).toBeNull(); expect(document.activeElement).toBe(input)
+    expect(useAppStore.getState().agentComposerDrafts[source.id]).toBe('Unsent original draft')
+  })
+  it('App keeps an empty pinned reading and announces the first observed reply without replacing it', async () => {
+    await control({ kind: 'surface', surface: 'focus' })
+    await act(async () => useAppStore.setState({ timelines: {} }))
+    await act(async () => container.querySelector<HTMLButtonElement>('.focus-context[data-session-id="source-agent"]')!.focus())
+    const panel = document.querySelector<HTMLElement>('.agent-information-reader')!, body = panel.querySelector('.agent-information-reader__reading')!
+    expect(body.querySelector('.focus-context-hover__recap')).toBeNull()
+    await act(async () => panel.querySelector<HTMLButtonElement>('.agent-information-reader__pin')!.click())
+    await act(async () => useAppStore.setState({ timelines: { [source.id]: { agentSessionId: source.id, revision: 1, items: [reply] } } }))
+    expect(document.querySelector('.agent-information-reader')).toBe(panel); expect(panel.querySelector('.agent-information-reader__reading')).toBe(body)
+    expect(body.textContent).toContain('Card content changed'); expect(body.textContent).not.toContain(reply.content)
+    expect(body.querySelector('.focus-context-hover__recap')).toBeNull()
+  })
   it('App owns the original Agent reading tree outside the Focus row and preserves metadata return', async () => {
     await focus()
     const card = container.querySelector<HTMLButtonElement>('.focus-context[data-session-id="source-agent"]')!
