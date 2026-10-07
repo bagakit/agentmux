@@ -8,6 +8,7 @@
   pointer-events: none;
   transform-origin: center;
   will-change: transform;
+  --icon-motion-iterations: infinite;
 }
 .semantic-icon-motion > .semantic-icon { flex: none; }
 /* Inherit through the SVG use shadow tree; the owning host can pause each instance. */
@@ -21,9 +22,26 @@
   animation-play-state: inherit;
 }
 .semantic-icon-motion[data-icon-animation="work"] { --icon-writing-animation: semantic-icon-work-pen; }
-.semantic-icon-motion[data-icon-animation="stream"] { animation: semantic-icon-stream 1.6s ease-in-out infinite; }
-.semantic-icon-motion[data-icon-animation="execute"] { animation: semantic-icon-execute 2s ease-in-out infinite; }
+.semantic-icon-motion[data-icon-animation="stream"] { --icon-stream-animation: semantic-icon-stream-caret; }
+.semantic-icon-motion[data-icon-animation="execute"] { --icon-execute-animation: semantic-icon-execute-arrow; }
+.semantic-icon-motion[data-icon-animation="orbit"] { --icon-orbit-animation: semantic-icon-orbit-arc; }
 .semantic-icon-motion[data-icon-animation="spin"] { animation: semantic-icon-spin 1s linear infinite; }
+[data-semantic-icon-part="stream-caret"] { animation: var(--icon-stream-animation, none) 1.8s ease-in-out infinite; }
+[data-semantic-icon-part="execution-arrow"] { animation: var(--icon-execute-animation, none) 2s ease-in-out infinite; }
+[data-semantic-icon-part="progress-arc"] { animation: var(--icon-orbit-animation, none) 1.6s linear infinite; transform-origin: 12px 12px; }
+.semantic-icon-motion[data-icon-animation="feedback"] {
+  --icon-motion-iterations: 1;
+  --icon-feedback-pen: semantic-icon-edit-once;
+  --icon-feedback-mark: semantic-icon-mark-once;
+  --icon-feedback-forward: semantic-icon-forward-once;
+  --icon-feedback-down: semantic-icon-down-once;
+  --icon-feedback-trace: semantic-icon-trace-once;
+}
+[data-semantic-icon-part="demonstration-pen"] { animation: var(--icon-feedback-pen, none) .8s ease-in-out; transform-origin: 13px 19px; }
+[data-semantic-icon-part="feedback-mark"] { animation: var(--icon-feedback-mark, none) .64s ease-out; transform-box: fill-box; transform-origin: center; }
+[data-semantic-icon-part="feedback-forward"] { animation: var(--icon-feedback-forward, none) .72s ease-in-out; }
+[data-semantic-icon-part="feedback-down"] { animation: var(--icon-feedback-down, none) .72s ease-in-out; }
+[data-semantic-icon-part="feedback-trace"] { animation: var(--icon-feedback-trace, none) .8s ease-out; }
 /* Only registered sand parts receive these instance selectors; custom drawings stay whole. */
 .semantic-icon-motion[data-icon-animation="wait"] {
   --icon-hourglass-frame-animation: semantic-icon-hourglass-turn;
@@ -47,6 +65,8 @@
   animation-name: var(--icon-hourglass-grain-animation, none), var(--icon-hourglass-flow-animation, none);
   animation-duration: .48s, 4.8s;
 }
+/* Every authored part uses the same stop policy, including future registered parts. */
+[data-semantic-icon-part] { animation-iteration-count: var(--icon-motion-iterations, infinite); animation-play-state: inherit; }
 @keyframes semantic-icon-hourglass-turn {
   0%, 78% { transform: rotate(0); }
   78% { animation-timing-function: cubic-bezier(.4, 0, .2, 1); }
@@ -75,17 +95,24 @@
   54% { transform: translate(.25px, -1.25px) rotate(-9deg); }
   66% { transform: translate(-.8px, -1px) rotate(-7deg); }
 }
-@keyframes semantic-icon-stream {
-  0%, 100% { transform: translateY(0); }
-  30% { transform: translateY(-1px); }
-  60% { transform: translateY(.5px); }
+@keyframes semantic-icon-stream-caret {
+  0%, 12%, 100% { transform: translateX(0); }
+  36% { transform: translateX(.8px); }
+  62%, 78% { transform: translateX(1.6px); }
 }
-@keyframes semantic-icon-execute {
-  0%, 55%, 100% { transform: translateX(0) rotate(0); }
-  18% { transform: translateX(.7px) rotate(4deg); }
-  36% { transform: translateX(-.5px) rotate(-3deg); }
+@keyframes semantic-icon-execute-arrow {
+  0%, 15%, 75%, 100% { transform: translateX(0); }
+  34% { transform: translateX(.75px); }
+  50% { transform: translateX(.25px); }
+  62% { transform: translateX(.75px); }
 }
+@keyframes semantic-icon-orbit-arc { to { transform: rotate(360deg); } }
+@keyframes semantic-icon-edit-once { 0%, 100% { transform: none; } 25% { transform: translate(-.4px, .2px) rotate(-2deg); } 48% { transform: translate(.4px, -.1px) rotate(-3deg); } 72% { transform: translate(.2px, -.6px) rotate(-6deg); } }
+@keyframes semantic-icon-mark-once { 0%, 100% { transform: scale(1); } 42% { transform: scale(1.09); } 68% { transform: scale(.98); } }
+@keyframes semantic-icon-forward-once { 0%, 100% { stroke-dasharray: 1; stroke-dashoffset: 0; } 30% { stroke-dasharray: 1; stroke-dashoffset: .64; } }
+@keyframes semantic-icon-down-once { 0%, 100% { stroke-dasharray: 1; stroke-dashoffset: 0; } 30% { stroke-dasharray: 1; stroke-dashoffset: .64; } }
+@keyframes semantic-icon-trace-once { 0%, 100% { stroke-dasharray: 1; stroke-dashoffset: 0; } 30% { stroke-dasharray: 1; stroke-dashoffset: .18; } }
 @keyframes semantic-icon-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .semantic-icon-motion[data-icon-animation] { --icon-writing-animation: none; --icon-hourglass-frame-animation: none; --icon-hourglass-upper-animation: none; --icon-hourglass-lower-animation: none; --icon-hourglass-grain-animation: none; --icon-hourglass-flow-animation: none; animation: none; will-change: auto; }
+  .semantic-icon-motion[data-icon-animation] { --icon-motion-iterations: 0; animation: none; will-change: auto; }
 }
