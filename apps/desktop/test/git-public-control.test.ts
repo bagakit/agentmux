@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { AgentMuxControlServer, connectAgentMuxRpc, LocalExecutionHost } from '@agentmux/core'
+import { AgentMuxControlServer, AgentMuxError, connectAgentMuxRpc, LocalExecutionHost, type WorktreeCloseoutParams } from '@agentmux/core'
 import type { AppConfig } from '../src/shared/contracts.js'
 import { GitService } from '../src/main/git-service.js'
 import { GitPublicControl } from '../src/main/git-public-control.js'
@@ -35,6 +35,43 @@ async function cli(args: string[]) {
   }
 }
 const cliTarget = () => ['--workspace', 'original', '--host', 'local', '--workspace-path', repo]
+
+describe('worktree closeout public owner', () => {
+  it('keeps exact resource admission and source-free operation readback at the closeout owner', async () => {
+    const original = { id: 'source', hostId: 'local', path: join(tmpdir(), 'source-resource'), name: 'Source', kind: 'worktree' as const }
+    let current = { workspaces: [original] } as AppConfig
+    const receipt = { workspaceId: 'source', targetWorkspaceId: 'default', movedTabIds: ['retained-tab'], workface: 'moved' as const, cleanup: 'removed' as const, reason: null }
+    let mutations = 0
+    const closeWorktree = vi.fn(async (input: WorktreeCloseoutParams) => {
+      if (input.workspaceId !== original.id || input.expectedResource.hostId !== original.hostId || input.expectedResource.workspacePath !== original.path)
+        throw new AgentMuxError('The original closeout resource changed.', 'GIT_RESOURCE_MISMATCH')
+      if (current.workspaces.length) { mutations++; current = { ...current, workspaces: [] } }
+      return receipt
+    })
+    const closeOwner = new GitPublicControl({ config: () => current, git: {} as GitService, closeWorktree })
+    const params = { workspaceId: original.id, expectedResource: { hostId: original.hostId, workspacePath: original.path }, operationId: 'close-source' }
+    await expect(closeOwner.call('git.worktree.close', { ...params, expectedResource: { ...params.expectedResource, hostId: 'other' } })).rejects.toMatchObject({ code: 'GIT_RESOURCE_MISMATCH' })
+    expect(mutations).toBe(0)
+    await expect(closeOwner.call('git.worktree.close', params)).resolves.toEqual(receipt)
+    expect(current.workspaces).toEqual([])
+    await expect(closeOwner.call('git.worktree.close', params)).resolves.toEqual(receipt)
+    expect(mutations).toBe(1)
+    expect(closeWorktree).toHaveBeenLastCalledWith(params)
+    const unavailable = new GitPublicControl({ config: () => ({ ...current, workspaces: [original] }), git: {} as GitService })
+    await expect(unavailable.call('git.worktree.close', params)).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+  })
+  it('rejects malformed mutation receipts without replacing the original operation identity', async () => {
+    const workspace = { id: 'source', hostId: 'local', path: join(tmpdir(), 'source-resource'), name: 'Source', kind: 'worktree' as const }
+    const closeWorktree = vi.fn(async () => ({ workspaceId: 'different', targetWorkspaceId: 'default', movedTabIds: [], workface: 'pending' as const, cleanup: 'pending' as const, reason: null }))
+    const closeOwner = new GitPublicControl({ config: () => ({ workspaces: [workspace] }) as AppConfig, git: {} as GitService, closeWorktree })
+    const params = { workspaceId: workspace.id, expectedResource: { hostId: workspace.hostId, workspacePath: workspace.path }, operationId: 'original-closeout' }
+    await expect(closeOwner.call('git.worktree.close', params)).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+    expect(closeWorktree).toHaveBeenCalledExactlyOnceWith(params)
+    const controller = new AbortController(); controller.abort()
+    await expect(closeOwner.call('git.worktree.close', params, { signal: controller.signal })).rejects.toThrow()
+    expect(closeWorktree).toHaveBeenCalledTimes(1)
+  })
+})
 
 beforeAll(async () => {
   root = await realpath(await mkdtemp(join(tmpdir(), 'amx-git-public-')))
