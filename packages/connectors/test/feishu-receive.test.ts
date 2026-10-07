@@ -182,7 +182,7 @@ it('a late SDK token response cannot start the cancelled parent read', async () 
   let finish!: (value: unknown) => void
   const request = f.transport.request.getMockImplementation()!
   f.transport.request.mockImplementation(async input => input.url?.includes('/auth/v3/') ? await new Promise(resolve => { finish = resolve }) : request(input))
-  const abort = new AbortController(), reading = f.adapter.qualifyReply(feishuConfig, JSON.parse(String(row.event_json)), String(row.raw_payload), 'fixture-credential', abort.signal)
+  const abort = new AbortController(), reading = f.adapter.qualifyReply(feishuConfig, JSON.parse(String(row.event_json)), String(row.raw_payload), 'rotated-fixture-credential', abort.signal)
   await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
   expect(f.transport.request.mock.calls.at(-1)![0]).toMatchObject({ signal: abort.signal })
   abort.abort(); expect(await reading).toBe('unknown')
