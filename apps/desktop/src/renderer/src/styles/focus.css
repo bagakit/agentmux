@@ -150,7 +150,6 @@
 .focus-context-hover__activity-details > p { margin-top: 4px; }
 .focus-context-hover__recap { margin-top: 6px; }
 .focus-context-hover__recap > small { display: block; margin-bottom: 4px; color: var(--text-3); font-size: var(--fs-meta); }
-.focus-context-hover__recap > .focus-context-hover__prose { max-height: 180px; overflow: auto; overscroll-behavior: contain; }
 .focus-context-hover__prose .md { gap: 6px; }
 .focus-context-hover__prose .md-code { font-size: inherit; }
 .focus-context-hover__prose .md-block-code { margin: 0; padding: 6px; font-size: var(--fs-meta); }
