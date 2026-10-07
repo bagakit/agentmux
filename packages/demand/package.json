@@ -38,6 +38,10 @@
     "./delegations": {
       "types": "./dist/src/delegations.d.ts",
       "import": "./dist/src/delegations.js"
+    },
+    "./relations": {
+      "types": "./dist/src/relations.d.ts",
+      "import": "./dist/src/relations.js"
     }
   },
   "bin": {
