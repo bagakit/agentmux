@@ -16,10 +16,11 @@ import { composerConfig, composerDOM, composerSession } from '../helpers/compose
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../../packages/core/test/helpers/object-cli-rpc.js'
 import { feishuConfig } from '../../../../packages/connectors/test/fixtures/feishu.js'
+import { createPublicationConversationPort } from '../../../../packages/connectors/src/core-conversation-port.js'
 import { defaultHttpInstance, type RoomReadWire } from '../../../../packages/connectors/test/fixtures/room-discovery.js'
 
 /** Production Renderer, IPC, public Core and Desktop Host; only encryption/adapter/terminal leaves are controlled. */
-export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown> } = {}) {
+export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown>; publication?: boolean } = {}) {
   const dom = composerDOM(), settings = vi.fn()
   let original: Awaited<ReturnType<typeof roomProvisioningFixture>>, services: Awaited<ReturnType<typeof createDesktopConnections>>
   let server: InstanceType<typeof core.AgentMuxControlServer>, calls: { method: ConnectionMethod; input: unknown; result?: unknown }[]
@@ -42,7 +43,8 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     })
     vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
     services = await createDesktopConnections({ directory: join(original.root, 'ui-connections'), ...(options.platform ? {} : { adapters: [original.adapter] }), bindings: { spatial: original.spatial, checkpoint: original.checkpoint },
-      encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() } })
+      encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
+      ...(options.publication ? { publication: createPublicationConversationPort(() => [{ hostId: 'local', client: original.client }]) } : {}) })
     const secret = await services.secrets.store({ operationId: 'ui-credential', secret: 'controlled-host-credential' })
     await services.connections.configure({ operationId: 'ui-configure', expectedRevision: null, connection: { ...connectionConfig, credentialRef: secret.credentialRef } })
     const socketPath = join(original.root, 'ui.sock')
