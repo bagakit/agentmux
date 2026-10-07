@@ -15,6 +15,7 @@ export interface WritableSecretPort extends SecretPort {
 export interface ConnectionAdapter {
   readonly adapterId: string
   readonly publication?: import('./publication-adapter.js').PublicationAdapter
+  readonly rooms?: import('./room-provisioning-adapter.js').RoomProvisioningAdapter
   readonly ingress?: import('./durable-ingress.js').IngressAuthenticator
   readonly transport?: import('./connection-receivers.js').ConnectionIngressTransport
   /** Return facts from the original adapter protocol; no implicit send or Agent execution. */
@@ -28,6 +29,7 @@ function unavailable(reason: 'credential-missing' | 'adapter-unavailable' | 'che
 }
 /** Optional original Host owner. Configuration and its operation receipt commit in one SQLite transaction. */
 export class ConnectionHost implements ConnectionPort {
+  rooms?: import('@agentmux/core/connections').RoomProvisioningPort
   bindings?: import('@agentmux/core/connections').RoomBindingsPort
   delivery?: import('@agentmux/core/connections').ConnectionDeliveryPort
   ingress?: import('@agentmux/core/connections').ConnectionIngressReadPort
@@ -122,6 +124,10 @@ export class ConnectionHost implements ConnectionPort {
     if (!current) throw new AgentMuxError('The exact connection is unknown.', 'UNKNOWN_CONNECTION')
     if (current.revision === record.revision) this.observations.set(input.connectionId, { revision: record.revision, value: observation })
     return current.revision === record.revision ? this.safe(() => this.read(input.connectionId))! : current
+  }
+  roomAdapter(connectionId: string): import('./room-provisioning-adapter.js').RoomProvisioningAdapter | null {
+    const config = this.readConfiguration(connectionId)?.config
+    return config?.enabled ? this.adapters.get(config.adapterId)?.rooms ?? null : null
   }
   publicationAdapter(connectionId: string): import('./publication-adapter.js').PublicationAdapter | null {
     const config = this.readConfiguration(connectionId)?.config
