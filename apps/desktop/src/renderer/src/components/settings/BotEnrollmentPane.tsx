@@ -108,14 +108,14 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved }: {
   const history: Array<{ input: ConnectionEnrollmentBeginInput; operation: ConnectionEnrollmentOperation | null }> = enrollment.operations.map(item => ({ input: item, operation: item }))
   if (submitted && !submittedResult) history.unshift({ input: submitted, operation: null })
   const preparing = !!current && !operation && busy === selectedId
-  const title = preparing ? 'Preparing your bot setup' : saved ? 'Application saved' : operation?.authorization === 'pending' ? 'Scan to connect your bot' : operation?.authorization === 'authorized' ? 'Finish connecting your bot' : current ? 'Your bot setup' : 'Connect your bot'
+  const title = preparing ? 'Preparing your bot setup' : saved ? 'Application saved' : operation?.authorization === 'pending' ? 'Scan to connect your bot' : operation?.authorization === 'authorized' ? 'Finish connecting your bot' : current ? 'Your bot setup' : unfinished ? 'Resume your bot setup' : 'Connect your bot'
   const summary = preparing ? 'Preparing a secure confirmation for this setup. You can leave and return to its original result.' : saved ? 'Your application is saved. Its live connection and group access are checked separately.'
     : operation?.authorization === 'pending' ? `Scan with ${issuerLabel} and confirm the bot’s creation there. Then check the confirmation here.`
     : operation?.authorization === 'denied' ? 'The platform did not approve this setup. Its original result is kept below.'
     : operation?.authorization === 'expired' ? 'The platform confirmation has expired. This does not confirm whether an application was created.'
     : operation?.authorization === 'authorized' ? 'The application was created. Continue this same setup to finish saving it on this environment.'
     : current ? 'The result is not confirmed. Check the original result or continue its local recovery without creating another bot.'
-    : ''
+    : unfinished ? 'Resume the same bot setup to check or finish its original result.' : ''
   useEffect(() => { openAttempt.current++; setOpenIssue(''); return () => { openAttempt.current++ } }, [selectedId, operation?.challenge?.verificationUrl])
   const openConfirmation = async () => {
     if (!operation?.challenge) return
@@ -128,8 +128,10 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved }: {
     {current ? <button className="connector-back small-button" onClick={() => { enrollment.select(null); void enrollment.read() }}>All bot setups</button> : null}
     <header className="connector-setup__heading"><span className="connector-setup__mark"><BotIcon size={22} /></span><div><h3 className="connector-editor-title">{title}</h3>{summary ? <p>{summary}</p> : null}</div></header>
     {!current ? <>
+      {unfinished ? <p className="connector-enrollment__identity"><strong>{submitted!.label}</strong><span>{enrollment.capabilities.find(item => item.adapterId === submitted!.adapterId && item.domain === submitted!.domain)?.label ?? submitted!.domain}</span></p> : <>
       {available.length > 1 ? <SelectionField label="Bot creation platform" value={selectedIssuer ? issuerKey(selectedIssuer) : issuer} options={available.map(item => ({ value: issuerKey(item), label: item.label }))} onValueChange={setIssuer} /> : selectedIssuer ? <p className="settings-group-note">Create with {selectedIssuer.label}. Confirmation stays with your platform.</p> : <p role="status" className="settings-group-note">{!enrollment.loaded ? 'Reading bot setup options…' : 'Scan setup is not available here. You can still connect an existing bot.'}</p>}
       <details className="connector-optional"><summary>Name in AgentMux</summary><label className="settings-field"><span>Bot name <small>Optional</small></span><TextInput aria-label="New bot name" value={label} onChange={event => setLabel(event.target.value)} placeholder="Your bot’s name here" /></label></details>
+      </>}
       <div className="connector-editor-actions">{unfinished ? <button data-enrollment-resume className="primary-button" onClick={() => enrollment.select(submitted!.operationId)}>Resume this setup</button> : selectedIssuer ? <button data-enrollment-create className="primary-button" disabled={!!busy} onClick={() => void enrollment.begin(selectedIssuer, label)}>Create and connect a bot</button> : <button className="small-button" onClick={() => void enrollment.read()}>Check setup options</button>}<button data-enrollment-existing className="small-button" onClick={onExisting}>Connect an existing bot</button></div>
     </> : <>
       <p className={`connector-enrollment__identity${saved ? ' connector-connection-state' : ''}`} role={saved ? 'status' : undefined}><strong>{current.label}</strong><span>{issuerLabel}</span></p>
