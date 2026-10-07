@@ -497,6 +497,32 @@ export function lifecycleNotification(records: readonly NotificationEvent[], own
   return projectNotifications(records).owners.get(lifecycleFeedbackOwnerKey(owner))
 }
 
+/** An exact owner settlement releases only the reading facts for the same current record. */
+function settleNotificationRecords(state: Pick<AppState, 'notificationEvents' | 'noticeReadReceipts'>,
+  records: readonly NotificationEvent[]): Partial<Pick<AppState, 'notificationEvents' | 'noticeReadReceipts'>> {
+  if (!records.length) return {}
+  const requested = new Set(records), settled = new Set<NotificationEvent>(), retained: NotificationEvent[] = []
+  for (const record of state.notificationEvents) {
+    if (requested.has(record)) settled.add(record)
+    else retained.push(record)
+  }
+  if (!settled.size) return {}
+  const receipts = { ...state.noticeReadReceipts }
+  function release(scope: string, id: string, fingerprint: string) {
+    if (receipts[scope]?.[id] !== fingerprint) return
+    const retained = { ...receipts[scope] }
+    delete retained[id]
+    if (Object.keys(retained).length) receipts[scope] = retained
+    else delete receipts[scope]
+  }
+  for (const record of settled) {
+    release('global:events', record.id, 'read')
+    if (record.context?.lifecycle) release(`local:lifecycle:${notificationSourceOwner(record.context)}`, 'lifecycle',
+      JSON.stringify([null, 'indeterminate', record.id]))
+  }
+  return { notificationEvents: retained, noticeReadReceipts: receipts }
+}
+
 function nativeIdentityNoticeResolved(sessions: readonly SessionSnapshot[], notice: ErrorNoticeContext | null | undefined): boolean {
   const subject = notice?.subject
   if (notice?.cause !== 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' || subject?.kind !== 'agent') return false
@@ -510,16 +536,15 @@ function nativeIdentityNoticeResolved(sessions: readonly SessionSnapshot[], noti
   return true
 }
 
-function resolvedNativeIdentityNotices(state: Pick<AppState, 'sessions' | 'notificationEvents'>, observed?: SessionControl):
-  Partial<Pick<AppState, 'notificationEvents'>> {
+function resolvedNativeIdentityNotices(state: Pick<AppState, 'sessions' | 'notificationEvents' | 'noticeReadReceipts'>, observed?: SessionControl):
+  Partial<Pick<AppState, 'notificationEvents' | 'noticeReadReceipts'>> {
   const projection = projectNotifications(state.notificationEvents)
   const owner = observed?.kind === 'agent' ? notificationSourceOwner({ kind: 'indeterminate',
     cause: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', subject: observed }) : undefined
   const record = owner ? projection.owners.get(owner) : undefined
   const candidates = observed ? (record ? [record] : [])
     : projection.current.filter(item => item.context?.cause === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
-  const resolved = new Set(candidates.filter(item => nativeIdentityNoticeResolved(state.sessions, item.context)))
-  return resolved.size ? { notificationEvents: state.notificationEvents.filter(item => !resolved.has(item)) } : {}
+  return settleNotificationRecords(state, candidates.filter(item => nativeIdentityNoticeResolved(state.sessions, item.context)))
 }
 
 // Persistent user intent uses one operation ID across retries and restarts. Run binding prevents
@@ -8444,7 +8469,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         .catch(error => get().reportWorkbenchSaveFailure(error))
       if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
       if (priorFailure && get().notificationEvents.includes(priorFailure)) {
-        set(current => ({ notificationEvents: current.notificationEvents.filter(item => item !== priorFailure) }))
+        set(current => settleNotificationRecords(current, [priorFailure]))
       }
     } catch (error) {
       const ownerFailure = error as { controlFailure?: import('@agentmux/core').AgentMuxControlFailure } | null
@@ -10186,7 +10211,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
         set((state) => removeSessionProjection(state, sessionId))
         if (priorFailure && get().notificationEvents.includes(priorFailure)) {
-          set(state => ({ notificationEvents: state.notificationEvents.filter(item => item !== priorFailure) }))
+          set(state => settleNotificationRecords(state, [priorFailure]))
         }
         return
       }
@@ -10230,7 +10255,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ) {
         set((state) => ({ ...projectRecoveredSession(state, sessionId, session), ...(options?.preserveView ? { agentFocus: state.agentFocus } : {}) }))
         if (priorFailure && get().notificationEvents.includes(priorFailure)) {
-          set(state => ({ notificationEvents: state.notificationEvents.filter(item => item !== priorFailure) }))
+          set(state => settleNotificationRecords(state, [priorFailure]))
         }
         if ((recovery.kind === 'reattachable' || recovery.kind === 'resumed') && recovery.advisory &&
           get().sessions.some(item => item.id === sessionId && sessionOwnsControl(item, session.control)))
