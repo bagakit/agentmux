@@ -53,7 +53,7 @@ import { noteBlockSelectionKey, restoreNoteBlockSelections, type NoteBlockPresen
 import { noteKnowledge, parseNoteFile } from './lib/note-knowledge'
 import { warmLauncherId, warmTerminalForLauncher, type WarmTerminalCreation } from './lib/warm-terminal-preview'
 import { NOTE_FILE_EXTENSION, newNoteDocument, readNoteDocument, serializeNoteDocument } from '../../shared/note-document'
-import { noteCreationTarget, noteCreationDisplayWorkspace, noteCreationResourceMatches, noteFilePlacement, type NoteCreationReceipt } from './lib/note-creation'
+import { noteCreationTitle, noteCreationTarget, noteCreationDisplayWorkspace, noteCreationResourceMatches, noteFilePlacement, type NoteCreationReceipt } from './lib/note-creation'
 import type { NoteBlockTarget } from '../../shared/note-document'
 import type { FileOpenPlacement, FileOpenResult, ConfirmedExistingFileSpace } from './lib/file-workbench-state'
 import type { EditorRegionMode } from './lib/file-region-presentation'
@@ -3522,7 +3522,7 @@ export async function registerCreatedNote(receipt: NoteCreationReceipt): Promise
       const catalog = await refreshNotebookLibrary(), page = catalog.pages[receipt.noteId]
       if (page && page.resource.hostId === receipt.target.hostId && page.resource.workspaceId === receipt.target.workspaceId && page.resource.workspacePath === receipt.target.workspacePath && page.resource.path === receipt.path) return { ...receipt, notebookRegistered: true, notebookIssue: undefined }
     }
-    await changeNotebook({ kind: 'register', noteId: receipt.noteId, title: receipt.draft.trim().split('\n')[0]?.slice(0, 100) || 'Untitled note',
+    await changeNotebook({ kind: 'register', noteId: receipt.noteId, title: noteCreationTitle(receipt.draft),
       resource: { hostId: receipt.target.hostId, workspaceId: receipt.target.workspaceId, workspacePath: receipt.target.workspacePath, path: receipt.path },
       ...(receipt.target.zoneId ? { workface: { zoneId: receipt.target.zoneId, workspaceId: receipt.target.workspaceId } } : {}), ...receipt.notebook }, 'note-register:' + receipt.intentId)
     return { ...receipt, notebookRegistered: true, notebookIssue: undefined }
@@ -8196,7 +8196,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       projection.entity.kind === 'zone' && projection.entity.zoneId === target.zoneId && target.zoneId) {
       get().setSurveyZoneCollected(target.zoneId, true)
     }
-    const content = serializeNoteDocument(newNoteDocument(draft, noteId, blockId))
+    const content = serializeNoteDocument(newNoteDocument(draft, noteId, blockId, noteCreationTitle(draft)))
     publish()
     const named = await createNoteWithAvailableName(new Date(receipt.createdAt), async name => {
       if (!noteCreationResourceMatches(get().config, target)) return { status: 'error', code: 'NOTE_RESOURCE_CHANGED', message: 'The original Note resource is no longer confirmed. Its draft and target are retained; no further write was issued.' }

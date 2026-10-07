@@ -6,11 +6,17 @@ import { WORKSPACE_FILE_MAX_BYTES } from '../shared/workspace-file-bytes.js'
 import type { WorkspaceFiles } from './workspace-files.js'
 import { matchingNoteLinkBlocks, normalizeNoteLinkName, parseNotebookResolveParams, parseNotebookResolveResult, parseNoteWikiQuery, type NoteLinkTarget, type NotebookResolveParams, type NotebookResolveResult } from '@agentmux/core/note-links'
 import type { PendingNoteWikiLink } from '@agentmux/client-ui/note/note-wikilinks'
+import type { NoteCorpusParams, NoteCorpusResult } from '@agentmux/core'
+import { readNoteCorpus } from './note-corpus-reader.js'
 import type { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 
 /** Exact durable resources, including closed pages, through the original Files owner. */
 export class NotebookObservationOwner implements NotebookObservationPort {
-  constructor(private readonly ports: { workspace(id: string): WorkspaceRecord | undefined; files: Pick<WorkspaceFiles, 'read'>; metadata?: Pick<AgentMuxNotebookStore, 'readProvenance'> }) {}
+  constructor(private readonly ports: { workspace(id: string): WorkspaceRecord | undefined; files: Pick<WorkspaceFiles, 'read'> & Partial<Pick<WorkspaceFiles, 'readDirectory'>>; metadata?: Pick<AgentMuxNotebookStore, 'readProvenance'> }) {}
+  /** Explicit projection of original files; never a catalog recovery or registration. */
+  scan(params: NoteCorpusParams, options?: { signal?: AbortSignal }): Promise<NoteCorpusResult> {
+    return readNoteCorpus(this.ports, params, options)
+  }
   private async read(page: NotebookPage, options?: { maxBytes?: number; signal?: AbortSignal }): Promise<{ observation: NoteContentObservation; document?: NoteFileDocument }> {
     const base = { noteId: page.noteId, resource: structuredClone(page.resource) }, original = page.resource
     const workspace = this.ports.workspace(original.workspaceId)

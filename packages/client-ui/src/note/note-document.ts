@@ -7,7 +7,7 @@ export { NOTE_SCHEMA, NOTE_FILE_EXTENSION } from './note-format.js'
 
 export type NoteBlockTarget = { noteId: string; blockId: string }
 export type NoteBlockReference = { referenceId: string; target: NoteBlockTarget; mode: 'reference' | 'embed' }
-export type NoteDocument = { schema: typeof NOTE_SCHEMA; noteId: string; content: JSONContent }
+export type NoteDocument = { schema: typeof NOTE_SCHEMA; noteId: string; title?: string; content: JSONContent }
 export type NoteDocumentRead = { status: 'valid'; note: NoteDocument; unanchoredBlockCount: number } | { status: 'invalid'; raw: string; message: string }
 export { serializeNoteDocument } from './note-markdown.js'
 import { parseNoteMarkdown } from './note-markdown.js'
@@ -20,11 +20,11 @@ export function readNoteDocument(raw: string): NoteDocumentRead {
 }
 
 /** IDs are supplied once by the creating owner; candidate names never determine content identity. */
-export function newNoteDocument(draft: string, noteId: string, blockId: string): NoteDocument {
+export function newNoteDocument(draft: string, noteId: string, blockId: string, title?: string): NoteDocument {
   const content: JSONContent[] = []
   for (const [index, text] of draft.split(/\r?\n/).entries()) {
     if (index) content.push({ type: 'hardBreak' })
     if (text) content.push({ type: 'text', text })
   }
-  return { schema: NOTE_SCHEMA, noteId, content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId }, ...(content.length ? { content } : {}) }] } }
+  return { schema: NOTE_SCHEMA, noteId, ...(title === undefined ? {} : { title }), content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId }, ...(content.length ? { content } : {}) }] } }
 }

@@ -30,6 +30,10 @@
       "types": "./dist/note-provenance.d.ts",
       "import": "./dist/note-provenance.js"
     },
+    "./note-title": {
+      "types": "./dist/note-title.d.ts",
+      "import": "./dist/note-title.js"
+    },
     "./note-format": {
       "types": "./dist/note-format.d.ts",
       "import": "./dist/note-format.js"

@@ -1,3 +1,4 @@
+import { parseNoteTitleProjection } from './note-title.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { sha256 } from '@noble/hashes/sha2.js'
@@ -36,7 +37,7 @@ export type FileWriteContext = { actor?: import('./notebook-catalog.js').Noteboo
 export type NoteWriteAttribution = { status: 'recorded' } | { status: 'unconfirmed'; reason: string }
 export type NoteWriteConflict = { reason: 'overlap' | 'identity' | 'invalid-structure'; baseContent: string; currentContent: string; proposedContent: string }
 export type FileWriteReceipt =
-  ( { status: 'written'; revision: string; content?: string; noteAttribution?: NoteWriteAttribution; noteProvenance?: NoteProvenanceSnapshot }
+  ( { status: 'written'; revision: string; content?: string; noteAttribution?: NoteWriteAttribution; noteProvenance?: NoteProvenanceSnapshot; noteTitleProjection?: import('./note-title.js').NoteTitleProjection }
   | { status: 'conflict'; observedRevision: string | null; noteConflict?: NoteWriteConflict; noteConflictUnavailable?: string }
   | { status: 'error' | 'unknown'; code: string; message: string }) & { noteHistory?: import('./note-history.js').NoteHistoryReceipt }
 export type FileWriteResult = { resource: FileReadResource | null; result: FileWriteReceipt }
@@ -240,7 +241,7 @@ export function parseFileCreateParams(value: unknown): FileCreateParams {
 }
 function parseFileMutationResult(value: unknown, params: FileWriteParams | FileCreateParams): FileWriteResult {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['resource', 'result'], code), r = rpcRecord(p.result, undefined, code)
-  const keys = r.status === 'written' ? ['status', 'revision', 'content', 'noteAttribution', 'noteProvenance'] : r.status === 'conflict' ? ['status', 'observedRevision', 'noteConflict', 'noteConflictUnavailable']
+  const keys = r.status === 'written' ? ['status', 'revision', 'content', 'noteAttribution', 'noteProvenance', 'noteTitleProjection'] : r.status === 'conflict' ? ['status', 'observedRevision', 'noteConflict', 'noteConflictUnavailable']
     : r.status === 'error' || r.status === 'unknown' ? ['status', 'code', 'message'] : null
   if (!keys) invalid('The original File write status is invalid.', code)
   rpcRecord(r, [...keys, 'noteHistory'], code)
@@ -266,6 +267,14 @@ function parseFileMutationResult(value: unknown, params: FileWriteParams | FileC
     if (r.noteAttribution !== undefined) {
       const attribution = rpcRecord(r.noteAttribution, ['status', 'reason'], code)
       if (attribution.status !== 'recorded' && attribution.status !== 'unconfirmed' || attribution.status === 'recorded' && attribution.reason !== undefined || attribution.status === 'unconfirmed' && (typeof attribution.reason !== 'string' || !attribution.reason)) invalid('The Note write attribution is unconfirmed.', code)
+    }
+    if (r.noteTitleProjection !== undefined) {
+      let projection: import('./note-title.js').NoteTitleProjection
+      try { projection = parseNoteTitleProjection(r.noteTitleProjection) } catch { return invalid('The original Note title projection receipt is malformed.', code) }
+      const saved = readNoteMarkdownHeader((r.content as string | undefined) ?? params.content)
+      if (saved.status !== 'valid' || saved.noteId !== projection.noteId) invalid('The title projection belongs to another original Note identity.', code)
+      const original = p.resource as FileReadResource
+      if (noteProvenanceResourceKey(projection.resource) !== noteProvenanceResourceKey({ hostId: original.hostId, workspaceId: original.workspaceId, workspacePath: original.workspacePath, path: original.path })) invalid('The title projection belongs to another original file write.', code)
     }
     if (r.noteProvenance !== undefined) validateFileNoteProvenance(r.noteProvenance, r.revision, p.resource as FileReadResource, (r.content as string | undefined) ?? params.content)
   }

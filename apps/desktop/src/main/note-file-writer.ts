@@ -13,6 +13,8 @@ import type { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 import type { NoteProvenanceSnapshot, NoteBlockProvenance } from '@agentmux/core/note-provenance'
 import { noteProvenanceResourceKey } from '@agentmux/core/note-provenance'
 import { NOTE_HISTORY_BATCH_WINDOW_MS, noteHistoryRevision, type NoteHistoryRecord, type NoteHistoryReceipt, type NoteHistoryQuery } from '@agentmux/core/note-history'
+import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
+import type { NoteTitleProjection } from '@agentmux/core/note-title'
 import { mergeNoteTextInWorker } from '@agentmux/core/note-merge-node'
 
 const resourceOf = (workspace: WorkspaceRecord, path: string) => ({ hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path })
@@ -48,7 +50,7 @@ function replacesEditedBlock(base: NoteDocument, current: NoteDocument, proposed
 export class NoteFileWriter {
   constructor(private readonly files: Pick<WorkspaceFiles, 'read' | 'write'>,
     private readonly links?: { state(): Promise<NotebookState>; owner: NotebookObservationOwner },
-    private readonly metadata?: Pick<AgentMuxNotebookStore, 'readProvenance' | 'recordProvenance'> & Partial<Pick<AgentMuxNotebookStore, 'readHistory' | 'recordHistory' | 'readHistoryOperation'>>) {}
+    private readonly metadata?: Pick<AgentMuxNotebookStore, 'readProvenance' | 'recordProvenance'> & Partial<Pick<AgentMuxNotebookStore, 'readHistory' | 'recordHistory' | 'readHistoryOperation' | 'read' | 'refreshFileTitle'>>) {}
   async history(workspace: WorkspaceRecord, input: Omit<NoteHistoryQuery, 'resource'> & { path: string }) {
     if (!this.metadata?.readHistory) throw new Error('The original Note history owner is unavailable. Original files remain available.')
     const { path, ...query } = input
@@ -124,7 +126,7 @@ export class NoteFileWriter {
     let baseline: Extract<WorkspaceFileReadResult, { status: 'read' }> | undefined
     let baselineObservation: WorkspaceFileReadResult | undefined, baselineIssue: string | undefined
     if (input.expectedRevision !== null) {
-      try { baselineObservation = await this.read(workspace, input.path); if (baselineObservation.status === 'read') baseline = baselineObservation }
+      try { baselineObservation = await this.read(workspace, input.path); if (baselineObservation.status === 'read') { if (baselineObservation.document.path === input.path) baseline = baselineObservation; else baselineObservation = { status: 'error', code: 'NOTE_READ_TARGET_MISMATCH', message: 'The original reader returned another file path.' } } }
       catch (error) { baselineIssue = error instanceof Error ? error.message : String(error) }
     }
     if (enhanced) {
@@ -148,6 +150,16 @@ export class NoteFileWriter {
     }
     if (candidate.status !== 'valid') reason = 'This source is not a valid Note. Its file bytes were saved without confirmed block attribution.'
     else {
+      if (candidate.note.title === undefined) {
+        try {
+          const original = baseline && readNoteMarkdownHeader(baseline.document.content)
+          if (original?.status === 'valid' && original.noteId === candidate.note.noteId && original.title !== undefined) candidate = { ...candidate, note: { ...candidate.note, title: original.title } }
+          else if (input.expectedRevision === null || original?.status === 'valid' && original.noteId === candidate.note.noteId && original.title === undefined) {
+            const state = await (this.links?.state() ?? this.metadata?.read?.()), page = state?.pages[candidate.note.noteId]
+            if (page && noteProvenanceResourceKey(page.resource) === noteProvenanceResourceKey(resourceOf(workspace, input.path))) candidate = { ...candidate, note: { ...candidate.note, title: page.title } }
+          }
+        } catch { /* Saving remains available; a missing confirmed title stays explicit in the file projection. */ }
+      }
       let before = null
       if (input.expectedRevision !== null) {
         try {
@@ -162,7 +174,7 @@ export class NoteFileWriter {
       const confirmedBaseline = input.expectedRevision === null || before?.noteId === candidate.note.noteId
       if (before && before.noteId !== candidate.note.noteId) reason = 'The original Note identity changed; block attribution is unconfirmed.'
       // Compare the original schema's canonical nodes so editor-added default attributes are not edits.
-      const normalized = (note: typeof candidate.note) => ({ ...note, content: noteContentSchema.nodeFromJSON(note.content).toJSON() })
+      const normalized = (note: NoteDocument) => ({ ...note, content: noteContentSchema.nodeFromJSON(note.content).toJSON() })
       const identified = normalized(candidate.note)
       const identify = (node: typeof identified.content) => {
         if (NOTE_BLOCK_TYPES.some(type => type === node.type) && node.attrs?.blockId == null) node.attrs = { ...node.attrs, blockId: randomUUID() }
@@ -234,7 +246,13 @@ export class NoteFileWriter {
         if (status === 'committed' && provenance) { noteProvenance = { ...provenance, status: 'recorded' }; reason = bodyReason }
       } catch (error) { noteHistory = { status: 'unconfirmed', eventId: journal.eventId, batchId: journal.batchId, reason: error instanceof Error ? error.message : String(error) } }
     }
-    return result.status === 'written' ? { ...result, ...(enhanced || content !== input.content ? { content } : {}), noteHistory,
+    let noteTitleProjection: NoteTitleProjection | undefined
+    if (result.status === 'written' && candidate.status === 'valid' && this.metadata?.refreshFileTitle) {
+      const resource = resourceOf(workspace, input.path)
+      try { noteTitleProjection = await this.metadata.refreshFileTitle(candidate.note.noteId, resource) }
+      catch (error) { noteTitleProjection = { status: 'unconfirmed', noteId: candidate.note.noteId, resource, code: 'catalog-unavailable', message: error instanceof Error ? error.message : String(error) } }
+    }
+    return result.status === 'written' ? { ...result, ...(enhanced || content !== input.content ? { content } : {}), noteHistory, ...(noteTitleProjection ? { noteTitleProjection } : {}),
       ...(noteProvenance ? { noteProvenance } : {}), noteAttribution: reason ? { status: 'unconfirmed', reason } : { status: 'recorded' } } : { ...result, noteHistory }
   }
 }

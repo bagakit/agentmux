@@ -3,6 +3,7 @@ import { parseMoteConnectionParams } from './mote-connection-codec.js'
 import { parseConversationChangesInput } from './conversation-changes.js'
 import { parseAgentMuxSearchInput } from './search-codec.js'
 import { parseConnectionParams } from './connections-codec.js'
+import { parseNoteCorpusParams } from './note-corpus.js'
 import { parseNotebookObservationParams } from './notebook-observation.js'
 import { parseNotebookResolveParams, scanNoteWikiLinks } from './note-links.js'
 import { parseMoteAvatarWriteParams } from './mote-avatar-write.js'
@@ -176,6 +177,9 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 /** Actual executable registration. Help, skill and playbooks enumerate this same source. */
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   ...Object.values(AGENTMUX_SCHEDULE_CLI_COMMANDS),
+  command('notebook.scan', '--workspace ID --path DIR [--max-files N] [--max-directories N] [--max-bytes N] [--query TEXT [--limit N]]', 'Rebuild a read-only outline/reference/fulltext projection from exact original Markdown files, without an App index. Never writes source, catalog, authors or history; partial scope is explicit.',
+    { '--workspace':'data','--path':'data','--max-files':'value','--max-directories':'value','--max-bytes':'value','--query':'data','--limit':'value' }, f => parseNoteCorpusParams({ workspaceId:id(f,'--workspace'),path:value(f,'--path',true),
+      ...Object.fromEntries([['--max-files','maxFiles'],['--max-directories','maxDirectories'],['--max-bytes','maxBytes'],['--limit','limit']].filter(([flag])=>f.values.has(flag!)).map(([flag,key])=>[key,Number(value(f,flag!))])),...(f.values.has('--query')?{query:value(f,'--query',true)}:{}) })),
   empty('notebook.ls', 'Read the durable Notebook and Note directory without opening an App or a page.'),
   command('notebook.resolve', '(--query TEXT [--limit N]|--link "[[Page #heading-or-block]]" [--note ID] [--block ID] [--max-bytes N])', 'Search page candidates without reading bodies, or confirm one wiki query through its exact original file. This observation never saves or creates a Note.',
     { '--query': 'data', '--limit': 'value', '--link': 'data', '--note': 'data', '--block': 'data', '--max-bytes': 'value' }, f => {

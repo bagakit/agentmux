@@ -7,6 +7,7 @@ const identity = (value: unknown): value is string => typeof value === 'string' 
 
 export function validateNoteDocument(value: unknown, allowUnanchored = false): number {
     if (!record(value) || value.schema !== NOTE_SCHEMA || !identity(value.noteId) || !record(value.content) || value.content.type !== 'doc') throw new Error('The Note schema or identity is missing or unsupported.')
+    if (value.title !== undefined && (typeof value.title !== 'string' || !value.title.trim() || /[\0\r\n]/u.test(value.title))) throw new Error('The Note title must be nonempty single-line text.')
     const blocks = new Set<string>(), references = new Set<string>(); let unanchored = 0
     const visit = (node: unknown): void => {
       if (!record(node) || !identity(node.type)) throw new Error('The Note contains an invalid content node.')

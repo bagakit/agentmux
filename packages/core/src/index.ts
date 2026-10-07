@@ -110,6 +110,9 @@ export * from './mote-avatar-series.js'
 export * from './mote-avatar-write.js'
 
 export * from './notebook-observation.js'
+export * from './note-corpus.js'
+export * from './note-title.js'
+export { observeRead } from './observation-read.js'
 export * from './note-links.js'
 
 export * from './conversation.js'

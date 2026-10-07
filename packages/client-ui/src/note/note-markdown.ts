@@ -187,7 +187,7 @@ export function parseNoteMarkdown(raw: string): NoteDocument {
   const header = readNoteMarkdownHeader(raw)
   if (header.status !== 'valid') throw new Error(header.message)
   const tree = parser.parse(header.body) as unknown as Md
-  return { schema: NOTE_SCHEMA, noteId: header.noteId, content: { type: 'doc', content: blocks(tree.children ?? [], header.body) } }
+  return { schema: NOTE_SCHEMA, noteId: header.noteId, ...(header.title === undefined ? {} : { title: header.title }), content: { type: 'doc', content: blocks(tree.children ?? [], header.body) } }
 }
 
 function inlineMarkdown(nodes: readonly JSONContent[]): Md[] {
@@ -274,5 +274,5 @@ export function serializeNoteDocument(note: NoteDocument): string {
     },
   } } as StringifyOptions).use(remarkGfm).use(remarkDirective)
   const body = compiler.stringify(tree as never)
-  return `---\nschema: ${NOTE_MARKDOWN_SCHEMA}\nnote-id: ${JSON.stringify(note.noteId)}\n---\n\n${body}`
+  return `---\nschema: ${NOTE_MARKDOWN_SCHEMA}\nnote-id: ${JSON.stringify(note.noteId)}\n${note.title === undefined ? '' : `title: ${JSON.stringify(note.title)}\n`}---\n\n${body}`
 }

@@ -29,6 +29,8 @@ import { parseConnectionOffer } from '@agentmux/relay/offer'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { parseNotebookGraph, parseNoteContentObservation, parseNotebookObservationParams } from './notebook-observation.js'
+import { parseNoteTitleInspection } from './note-title.js'
+import { parseNoteCorpusParams, parseNoteCorpusResult } from './note-corpus.js'
 import { parseNotebookResolveParams, parseNotebookResolveResult } from './note-links.js'
 import { inspectNotebook, notebookFingerprint, parseNotebookState } from './notebook-catalog.js'
 import { isTopicMethod, parseTopicParams, parseTopicResult } from './public-rpc-topics.js'
@@ -592,10 +594,11 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'notebook.inspect': {
-        record(p, ['state', 'notebook', 'pages', 'trail', 'recordedOperation', 'storageOperation', 'resourceChanges', 'conversionIssues', 'content'])
+        record(p, ['state', 'notebook', 'pages', 'trail', 'recordedOperation', 'storageOperation', 'resourceChanges', 'conversionIssues', 'content', 'titleOperation'])
         const state = parseNotebookState(p.state)
-        const { storageOperation, resourceChanges, conversionIssues, content, ...knowledge } = p
+        const { storageOperation, resourceChanges, conversionIssues, content, titleOperation, ...knowledge } = p
         const observationInput = parseNotebookObservationParams(input, true)
+        if (titleOperation !== undefined) { if (!observationInput.operationId) fail(); try { parseNoteTitleInspection(titleOperation, observationInput.operationId!) } catch { fail() } }
         if (observationInput.content === true) { const body = parseNoteContentObservation(content); const page = state.pages[observationInput.noteId!]; if (!page || body.noteId !== page.noteId || notebookFingerprint(body.resource) !== notebookFingerprint(page.resource)) fail() }
         else if (content !== undefined) fail()
         if (notebookFingerprint(knowledge) !== notebookFingerprint(inspectNotebook(state, input))) fail()
@@ -629,6 +632,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
 
+      case 'notebook.scan': { parseNoteCorpusResult(p, parseNoteCorpusParams(input)); break }
       case 'notebook.graph': { parseNotebookGraph(p, parseNotebookObservationParams(input)); break }
       case 'notebook.resolve': { parseNotebookResolveResult(p, parseNotebookResolveParams(input)); break }
 
