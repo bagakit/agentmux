@@ -1116,6 +1116,9 @@ export type AgentNativePromptInputPlan = Readonly<{
 )>
 
 export type AgentMuxAgentSession = {
+  /** Core-owned current decision and exact original operation receipts. */
+  continuity?: import('./agent-session-continuity.js').AgentMuxContinuityOperation
+  continuityOperations?: Record<string, import('./agent-session-continuity.js').AgentMuxContinuityOperation>
   kind: 'agent'
   agentSessionId: string
   providerId: AgentProviderId

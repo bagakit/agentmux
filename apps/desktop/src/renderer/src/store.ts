@@ -179,7 +179,7 @@ import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentat
 import type { ServiceNoticeKind } from './lib/service-window-notice'
 import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
 import { beginMoteStartupRecovery, cancelMoteSessionRecovery, deferScratchConversationRecovery, recoverMoteConversationAtStartup, recoverScratchConversationsAtStartup } from './lib/mote-session-recovery'
-import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from './lib/idle-agent-restore-policy'
+import { agentContinuityDetail } from './lib/continuity-presentation'
 import { publishWorkbenchTabRemoved } from './lib/workbench-tab-removal'
 import { reseatActiveWorkspaceId, adoptedConfig } from './lib/active-workspace-reseat'
 import { gitBridge, ghBridge, type GitBridge } from './lib/git-bridge'
@@ -1313,7 +1313,7 @@ type AppState = {
   refreshSession(sessionId: string): Promise<SessionSnapshot | undefined>
   reopenRetiredSession(source: AgentSessionHistoryDescriptor, operationId?: string, observeOnly?: boolean): Promise<SessionSnapshot | undefined>
   resumeNativeSession(input: import('../../shared/contracts').AgentLaunchInput, source: import('@agentmux/core').AgentNativeSessionCandidate, capabilities: AgentCapabilities, reveal?: () => boolean, retry?: boolean): Promise<SessionSnapshot | undefined>
-  recoverSession(sessionId: string, operationId?: string, options?: { preserveView?: boolean; stillCurrent?: () => boolean }): Promise<SessionSnapshot | undefined>
+  recoverSession(sessionId: string, operationId?: string, options?: { preserveView?: boolean; stillCurrent?: () => boolean; trigger?: import('@agentmux/core').AgentMuxContinuityTrigger; timingOverride?: 'startup' | 'on-open' }): Promise<SessionSnapshot | undefined>
   stopSession(sessionId: string): Promise<void>
   canonicalizeAgentLaunch(result: AgentLaunchResult): Promise<AgentLaunchResult | null>
   resyncTimeline(sessionId: string, options?: { observationOnly?: boolean }): Promise<void>
@@ -1630,6 +1630,7 @@ export function recoveryCandidateSession(
     capabilities: candidate.capabilities,
     agentSessionUpdatedAt: candidate.updatedAt,
     ...(candidate.semanticStatus ? { semanticStatus: structuredClone(candidate.semanticStatus) } : {}),
+    ...(candidate.continuity ? { continuity: structuredClone(candidate.continuity) } : {}),
     ...(candidate.terminalCapability
       ? { terminalCapability: structuredClone(candidate.terminalCapability) }
       : {}),
@@ -2290,7 +2291,7 @@ function dispatchStartupRecovery(session: Extract<SessionSnapshot, { kind: 'agen
   if (startupRecoveryReaders.has(key)) return
   const generation = sessionObservationGeneration
   const current = () => generation === sessionObservationGeneration
-  const job = mote ? recoverMoteConversationAtStartup(session) : useAppStore.getState().recoverSession(session.id, undefined, { stillCurrent: current })
+  const job = mote ? recoverMoteConversationAtStartup(session) : useAppStore.getState().recoverSession(session.id, undefined, { stillCurrent: current, trigger: 'startup' })
   startupRecoveryReaders.set(key, job)
   void job.catch(error => { if (current()) useAppStore.getState().reportError(error, { kind: 'indeterminate', subject: session.control,
     summary: 'Restoring this original Session failed. Other Sessions remain available.' }) })
@@ -2453,14 +2454,8 @@ function startSessionMembershipResync(
           projected = reduceTerminalMembershipSnapshot(projected, snapshot)
           for (const candidate of startupCandidates) {
             if (projected.sessions.some((session) => session.id === candidate.agentSessionId)) continue
-            const decision = agentStartupRecoveryDecision({
-              runState: 'missing',
-              ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
-              canonical: !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId),
-              now: Date.now()
-            })
             projected = { ...projected, sessions: [...projected.sessions, recoveryCandidateSession(candidate, {
-              kind: 'pending', detail: agentStartupRecoveryDetail(decision)
+              kind: 'pending', detail: agentContinuityDetail(candidate.continuity)
             })] }
           }
           for (const pending of events) {
@@ -2542,13 +2537,7 @@ function startSessionMembershipResync(
             dispatchStartupRecovery(current, true)
             continue
           }
-          const decision = agentStartupRecoveryDecision({
-            runState: current.processState,
-            ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
-            canonical: !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId),
-            now: Date.now()
-          })
-          if (decision.kind !== 'resume') continue
+          if (runtimeSnapshotHostUnavailable(snapshot, candidate.hostId)) continue
           attemptedStartupRecovery.add(candidate.agentSessionId)
           if (current.kind === 'agent') dispatchStartupRecovery(current, false)
         }
@@ -9843,7 +9832,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           }
           // Only a fresh explicitly selected manual producer enters the original Core
           // intake. Queue-only Enter and old exact/unknown records keep their contract.
-          if (entry.freshComposerIntent && entry.execution === 'immediate' && entry.promptCondition === null && !session.pendingInteraction) {
+          if (entry.freshComposerIntent && entry.execution === 'immediate' && entry.promptCondition === null && session.processState === 'running' && !session.pendingInteraction) {
             drain.explicitSteers.delete(entry.operationId)
             try {
               if (await get().sendQueuedAgentSteer(sessionId, entry.operationId) === 'submitted') drain.submitted.add(entry.operationId)
@@ -9902,7 +9891,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                   return { ...item, status: 'restoring' }
                 }) } }))
               deliveryAttempt.stage = 'session-recovery'
-              const recovered = await get().recoverSession(sessionId, entry.operationId)
+              const recovered = await get().recoverSession(sessionId, entry.operationId, { trigger: 'input' })
               if (!recovered || recovered.kind !== 'agent' || recovered.processState !== 'running') {
                 throw new Error(get().sessions.find(item => item.id === sessionId)?.status.detail ??
                   'Session restoration did not produce a running Agent. Your message is kept.')
@@ -9917,6 +9906,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                     item.operationId === entry.operationId && item.runId === undefined
                       ? { ...item, runId: recovered.control.run.runId } : item) } }
               })
+              // The recovered Run gives this same new manual intent its typed input binding.
+              // Re-enter its original owner; do not route it through the old exact queue submission.
+              if (entry.freshComposerIntent && entry.execution === 'immediate') {
+                set(current => {
+                  if (current.agentSteerInFlight[sessionId] !== entry.operationId) return current
+                  const agentSteerInFlight = { ...current.agentSteerInFlight }, agentSteerInFlightPhase = { ...current.agentSteerInFlightPhase }
+                  delete agentSteerInFlight[sessionId]; delete agentSteerInFlightPhase[sessionId]
+                  return { agentSteerInFlight, agentSteerInFlightPhase }
+                })
+                continue
+              }
             }
             let pending = get().agentSteerQueues[sessionId]?.find(item => item.operationId === entry.operationId)
             if (!pending) return
@@ -10364,7 +10364,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     try {
       let recovery: SessionRecoveryResult
       try {
-        recovery = await api.sessions.recover(current.control, current.workspacePath, operationId)
+        recovery = await api.sessions.recover(current.control, current.workspacePath, operationId ?? crypto.randomUUID(), {
+          trigger: options?.trigger ?? 'manual', ...(options?.timingOverride ? { timingOverride: options.timingOverride } : {}) })
       } catch (error) {
         // A lost continuity reply is not permission to launch again. First read canonical facts.
         if (!operationId || current.kind !== 'agent') throw error
@@ -10376,6 +10377,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (current.kind === 'agent' && 'agentSessionId' in recovery &&
         (recovery.agentSessionId !== current.control.agentSessionId || recovery.previousRun.runId !== current.control.run.runId))
         throw new Error('Recovery response belongs to another Agent Session or Run. The original conversation is kept.')
+      if (recovery.kind === 'pending') {
+        set(state => ({ sessions: state.sessions.map(session => session.id === sessionId && session.kind === 'agent' && sessionOwnsControl(session, current.control)
+          ? { ...session, ...(recovery.continuity ? { continuity: recovery.continuity } : {}), status: { ...session.status, detail: agentContinuityDetail(recovery.continuity) } } : session) }))
+        return
+      }
       if (recovery.kind === 'retired') {
         if (options?.preserveView) {
           get().reportError(new Error('The original Session is retired. Its Mote conversation and history are kept; choose another default conversation in Profile.'), { kind: 'indeterminate', subject: current.control })

@@ -60,7 +60,7 @@ import { useWorkbenchBrowserPresentation, workbenchSessionStageHostId, type Work
 import { agentDisplayName } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { moteConversationIdentity, useMoteConversationOwner } from '../lib/mote-conversation-identity'
-import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from '../lib/idle-agent-restore-policy'
+import { agentContinuityDetail } from '../lib/continuity-presentation'
 import { projectConversationRecords, type ConversationItemRef } from '@agentmux/core/conversation'
 import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
@@ -292,14 +292,8 @@ export function SessionPane({
   const pendingAgentRestore = session?.kind === 'agent' && session.processState !== 'running'
   const terminalLifetime = useRef({ sourceKey: activitySourceKey, opened: false })
   if (terminalLifetime.current.sourceKey !== activitySourceKey) terminalLifetime.current = { sourceKey: activitySourceKey, opened: false }
-  const startupDecision = session?.kind === 'agent' ? agentStartupRecoveryDecision({
-    runState: session.processState,
-    ...(session.semanticStatus ? { semanticStatus: session.semanticStatus } : {}),
-    canonical: !runtimeHostUnavailable,
-    now: Date.now()
-  }) : undefined
-  const inlineHistory = pendingAgentRestore && startupDecision?.kind === 'pending' &&
-    startupDecision.reason === 'idle-over-day'
+  const startupDecision = session?.kind === 'agent' ? session.continuity : undefined
+  const inlineHistory = pendingAgentRestore && startupDecision?.reason === 'idle-window-expired'
   const incomingReveal = useAppStore(state => {
     const intent = state.conversationRevealIntent
     return intent?.itemRef.agentSessionId === sessionId && intent.itemRef.hostId === executionHostId ? intent : null
@@ -930,7 +924,7 @@ export function SessionPane({
   )
   const pendingRestoreDetail = pendingAgentRestore && startupDecision ? continuityNotice?.reason ?? (recoveryCandidate
     ? session.status.detail
-    : agentStartupRecoveryDetail(startupDecision)) : undefined
+    : agentContinuityDetail(startupDecision)) : undefined
   const hasAgentComposer = projectionPolicy.allowsRecovery && surfaceKind === 'agent' && session.kind === 'agent'
   const activityShown = historyOpen || inlineHistory || viewMode !== 'terminal' && !pendingAgentRestore
   const conversationReading = session.kind === 'agent' ? {

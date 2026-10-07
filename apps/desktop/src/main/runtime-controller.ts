@@ -321,6 +321,7 @@ function projectSession(
         : {}),
       capabilities: capabilitiesFor(subject.providerId),
       ...(semanticFacts ? { semanticStatus: structuredClone(semanticFacts) } : {}),
+      ...(subject.agentSession.continuity ? { continuity: structuredClone(subject.agentSession.continuity) } : {}),
       hostId: subject.hostId,
       workspacePath: subject.workspacePath,
       label: agentFallbackLabel(config, subject),
@@ -932,6 +933,7 @@ export class RuntimeController {
           ...(session.nativeHandle ? { nativeSessionId: session.nativeHandle.sessionId } : {}),
           capabilities: capabilitiesFor(session.providerId),
           ...(session.semanticStatus ? { semanticStatus: structuredClone(session.semanticStatus) } : {}),
+          ...(session.continuity ? { continuity: structuredClone(session.continuity) } : {}),
           ...(session.terminalCapability
             ? { terminalCapability: structuredClone(session.terminalCapability) }
             : {}),
@@ -2116,11 +2118,12 @@ export class RuntimeController {
     control: SessionControl,
     config: AppConfig,
     workspacePath?: string,
-    operationId: string = randomUUID()
+    operationId: string = randomUUID(),
+    request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride'>
   ): Promise<SessionRecoveryResult> {
     return await this.trackHostLifecycleOperation(
       control.hostId,
-      async () => await this.performRecovery(control, config, workspacePath, operationId)
+      async () => await this.performRecovery(control, config, workspacePath, operationId, request)
     )
   }
 
@@ -2128,7 +2131,8 @@ export class RuntimeController {
     control: SessionControl,
     config: AppConfig,
     workspacePath: string | undefined,
-    operationId: string
+    operationId: string,
+    request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride'>
   ): Promise<SessionRecoveryResult> {
     const client = await this.connectedClient(control.hostId)
     if (control.kind === 'terminal') {
@@ -2162,7 +2166,7 @@ export class RuntimeController {
       const result = await client.ensureAgentContinuity({
         agentSessionId: control.agentSessionId,
         expectedRun: control.run,
-        operationId
+        operationId, ...request, ...(config.continuity ? { policy: config.continuity } : {})
       })
       if (result.kind === 'reattachable' || result.kind === 'resumed') {
         throw new Error('Core returned live continuity without a current Agent Session.')
@@ -2191,7 +2195,7 @@ export class RuntimeController {
     const result = await client.ensureAgentContinuity({
       agentSessionId: control.agentSessionId,
       expectedRun: control.run,
-      operationId,
+      operationId, ...request, ...(config.continuity ? { policy: config.continuity } : {}),
       ...executor,
       ...(executor.env && scratchTopicId ? { env: { ...executor.env, AGENTMUX_WIKI_DIR: stored.workspacePath } } : {})
     })

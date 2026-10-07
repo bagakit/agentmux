@@ -10,7 +10,6 @@ import { useAppStore } from '../store'
 import { moteDefaultConversation } from './mote-quick-preferences'
 import { scratchTopicKind, scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { sessionPresentationById } from './session-presentation'
-import { agentStartupRecoveryDecision } from './idle-agent-restore-policy'
 
 type State = ReturnType<typeof useAppStore.getState>
 type Agent = Extract<SessionSnapshot, { kind: 'agent' }>
@@ -104,7 +103,7 @@ export function moteSessionStartupMode(state: State, session: Agent): MoteRecove
   }
   return fixed ?? (unknown ? 'pending' : 'ordinary')
 }
-async function recoverOriginal(session: Agent, current: () => boolean): Promise<boolean> {
+async function recoverOriginal(session: Agent, current: () => boolean, trigger: 'startup' | 'mote-startup' | 'mote-open', timingOverride?: 'startup' | 'on-open'): Promise<boolean> {
   if (!current() || session.processState === 'running' || !hostAvailable(useAppStore.getState(), session.control.hostId)) return false
   const key = identity(session), guard: Guard = { cancelled: false, current }
   const listeners = entries.get(key) ?? new Set(); listeners.add(guard); entries.set(key, listeners)
@@ -116,7 +115,7 @@ async function recoverOriginal(session: Agent, current: () => boolean): Promise<
     created.job = Promise.resolve().then(() => {
       if (!admitted()) return
       created.dispatched = true
-      return useAppStore.getState().recoverSession(session.id, crypto.randomUUID(), { preserveView: true, stillCurrent: admitted })
+      return useAppStore.getState().recoverSession(session.id, crypto.randomUUID(), { preserveView: true, stillCurrent: admitted, trigger, ...(timingOverride ? { timingOverride } : {}) })
     }).finally(() => { if (recovering.get(key) === created) recovering.delete(key) })
     recovering.set(key, created); flight = created
   }
@@ -143,7 +142,7 @@ export async function recoverMoteConversationAtStartup(session: Agent): Promise<
   const scope = startup, state = useAppStore.getState(), key = identity(session)
   if (!scope?.captured || scope.stopped.has(key) || scope.attempted.has(key)) return
   const mode = moteSessionStartupMode(state, session)
-  if (mode !== 'startup' && (mode !== 'ordinary' || agentStartupRecoveryDecision({ runState: session.processState, canonical: hostAvailable(state, session.control.hostId), ...(session.semanticStatus ? { semanticStatus: session.semanticStatus } : {}), now: Date.now() }).kind !== 'resume')) return
+  if (mode !== 'startup' && mode !== 'ordinary') return
   const eligible = () => {
     const next = useAppStore.getState(), live = sessionPresentationById(next.sessions).get(session.id)
     if (startup !== scope || scope.stopped.has(key) || live?.kind !== 'agent' || identity(live) !== key || moteSessionStartupMode(next, live) !== mode) return false
@@ -153,7 +152,7 @@ export async function recoverMoteConversationAtStartup(session: Agent): Promise<
   }
   if (!eligible()) return
   scope.attempted.add(key)
-  if (!await recoverOriginal(session, eligible)) scope.attempted.delete(key)
+  if (!await recoverOriginal(session, eligible, mode === 'ordinary' ? 'startup' : 'mote-startup', mode === 'ordinary' ? undefined : 'startup')) scope.attempted.delete(key)
 }
 /** Called after the original workface and initial fresh directory cut are published. */
 export async function recoverScratchConversationsAtStartup(): Promise<void> {
@@ -194,7 +193,7 @@ export function useMoteConversationRecovery(topic: ScratchTopicSnapshot | undefi
       const now = useAppStore.getState(), currentTopic = confirmedTopic(now, workspaceId, topic.id)
       const current = currentTopic && moteDefaultConversation(now, currentTopic, workspaceId)
       return !intent.cancelled && entry.current?.intent === intent && !now.loading && Boolean(current?.conversation && !current.issue && currentTopic && sameSetting(held, currentTopic))
-    }).then(dispatched => { if (!dispatched && intent.attempted === attempt) delete intent.attempted })
+    }, 'mote-open', moteRecoveryTiming(held)).then(dispatched => { if (!dispatched && intent.attempted === attempt) delete intent.attempted })
   }, [opened, topic, workspaceId, raw, facts])
   useLayoutEffect(() => () => { if (entry.current) { entry.current.intent.cancelled = true; entry.current.intent.release(); entry.current = null } }, [])
 }

@@ -799,6 +799,7 @@ export function projectRuntimeEvent(
       ...(core.session.semanticStatus
         ? { semanticStatus: structuredClone(core.session.semanticStatus) }
         : {}),
+      ...(core.session.continuity ? { continuity: structuredClone(core.session.continuity) } : {}),
       ...(core.session.terminalCapability
         ? { terminalCapability: structuredClone(core.session.terminalCapability) }
         : {}),

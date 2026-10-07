@@ -1,3 +1,4 @@
+import { normalizeAgentContinuityOperation } from './agent-session-continuity.js'
 import { MAX_STORED_TEXT_BYTES, parsePromptSubmissionRecord, normalizePromptCompletionAdmission, terminalPromptSubmission, terminalPromptReadinessSource } from './prompt-submission-record.js'
 export { parsePromptSubmissionRecord, normalizePromptCompletionAdmission } from './prompt-submission-record.js'
 import { normalizeOperationDevice } from './operation-device.js'
@@ -104,7 +105,7 @@ export type AgentMuxPreparedCreation = Pick<AgentMuxStoredAgentSession,
 
 export type AgentMuxLifecycleReservation = AgentMuxLifecycleReservationBase & (
   | { kind: 'create'; preparedCreation?: AgentMuxPreparedCreation; ownerReleased?: true; expectedRun?: never; stopOperation?: never }
-  | { kind: 'resume'; expectedRun: AgentMuxRunRef; stopOperation?: never }
+  | { kind: 'resume'; expectedRun: AgentMuxRunRef; preparedSession?: AgentMuxStoredAgentSession; stopOperation?: never }
   | { kind: 'reopen'; expectedRetirement: AgentMuxRetiredAgentSession; callerOperationId?: string; preparedSession?: AgentMuxStoredAgentSession; ownerReleased?: true; expectedRun?: never; stopOperation?: never }
   | {
       kind: 'stop'
@@ -172,6 +173,8 @@ export type AgentMuxAgentSessionStore = {
   reserveLifecycle(reservation: AgentMuxLifecycleReservation): Promise<void>
   prepareCreate(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, seed: AgentMuxPreparedCreation): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }>>
   claimCreate(agentSessionId: string, operationId: string, intentDigest: string, claim: AgentMuxLifecycleClaim): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | null>
+  loadResumeCorrelation(agentSessionId: string, operationId: string): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> | null>
+  prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>>
   prepareReopen(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, session: AgentMuxStoredAgentSession): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>>
   releaseReopenOwner(ownerId: string): Promise<void>
   claimReopen(agentSessionId: string, operationId: string, expectedRetiredAt: number, claim: AgentMuxLifecycleClaim): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }> | null>
@@ -398,7 +401,11 @@ function lifecycleReservation(value: unknown): AgentMuxLifecycleReservation {
     if (preparedCreation?.agentSessionId !== undefined && preparedCreation.agentSessionId !== base.agentSessionId) throw new AgentMuxError('Prepared creation names another Session.', 'INVALID_AGENT_SESSION_STORE')
     return { ...base, kind: 'create', ...(preparedCreation ? { preparedCreation } : {}), ...(source.ownerReleased ? { ownerReleased: true as const } : {}) }
   }
-  if (source.kind === 'resume') return { ...base, kind: 'resume', expectedRun: expectedRun! }
+  if (source.kind === 'resume') {
+    const preparedSession = source.preparedSession === undefined ? undefined : normalizeStoredAgentSession(source.preparedSession)
+    if (preparedSession && (preparedSession.agentSessionId !== base.agentSessionId || preparedSession.run.runId !== expectedRun!.runId)) throw new AgentMuxError('Prepared resume target mismatch.', 'INVALID_AGENT_SESSION_STORE')
+    return { ...base, kind: 'resume', expectedRun: expectedRun!, ...(preparedSession ? { preparedSession } : {}) }
+  }
   return { ...base, kind: 'stop', expectedRun: expectedRun!, stopOperation: stopOperation! }
 }
 
@@ -1315,6 +1322,12 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
   const priorRuns = retiredRuns(source.retiredRuns, currentRun)
   const session: AgentMuxAgentSession = {
     kind: 'agent',
+    ...(source.continuity === undefined ? {} : { continuity: normalizeAgentContinuityOperation(source.continuity) }),
+    ...(source.continuityOperations === undefined ? {} : { continuityOperations: Object.fromEntries(Object.entries(record(source.continuityOperations, 'continuity operations')).map(([id, value]) => {
+      const operation = normalizeAgentContinuityOperation(value)
+      if (operation.operationId !== id || operation.agentSessionId !== source.agentSessionId) throw new AgentMuxError('Continuity operation target mismatch.', 'INVALID_AGENT_SESSION_STORE')
+      return [id, operation]
+    })) }),
     agentSessionId: string(source.agentSessionId, 'agentSessionId'),
     providerId: string(source.providerId, 'providerId'),
     executorId: string(source.executorId, 'executorId'),
@@ -1865,6 +1878,13 @@ function claimedCreateReservation(current: AgentMuxLifecycleReservation | undefi
   return { ...retained, ownerId: claim.ownerId, ownerPid: claim.ownerPid, expiresAt: claim.expiresAt }
 }
 
+function preparedResumeReservation(current: AgentMuxLifecycleReservation | undefined,
+  expected: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession): Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> {
+  if (!current || current.kind !== 'resume' || !sameReservationOwner(current, expected)) throw new AgentMuxError('Resume reservation changed before preparation.', 'STALE_AGENT_SESSION')
+  if (current.preparedSession && !sameSession(current.preparedSession, session)) throw new AgentMuxError('Original resume preparation is immutable.', 'STALE_AGENT_SESSION')
+  return lifecycleReservation({ ...current, preparedSession: session }) as Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>
+}
+
 function preparedReopenReservation(current: AgentMuxLifecycleReservation | undefined,
   requested: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, session: AgentMuxStoredAgentSession
 ): Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }> {
@@ -2143,6 +2163,17 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       this.retiredAgentSessions
     )
     this.reservations.set(reservation.agentSessionId, structuredClone(reservation))
+  }
+
+  async loadResumeCorrelation(agentSessionId: string, operationId: string) {
+    const reservation = this.reservations.get(agentSessionId)
+    return reservation?.kind === 'resume' && reservation.operationId === operationId ? structuredClone(reservation) : null
+  }
+  async prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession) {
+    const next = preparedResumeReservation(this.reservations.get(reservation.agentSessionId), reservation, session)
+    assertReservationPrecondition(next, [...this.sessions.values()], this.retiredAgentSessions)
+    this.reservations.set(next.agentSessionId, structuredClone(next))
+    return structuredClone(next)
   }
 
   async prepareReopen(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, session: AgentMuxStoredAgentSession): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>> {
@@ -2740,6 +2771,28 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         reservations: [...document.reservations, reservation]
       })
     })
+  }
+
+  async loadResumeCorrelation(agentSessionId: string, operationId: string) {
+    await this.tail
+    return await this.withReadDatabase(db => {
+      const row = db.prepare('SELECT json FROM reservations WHERE id=?').get(agentSessionId)
+      const reservation = row ? lifecycleReservation(JSON.parse(String(row.json))) : null
+      return reservation?.kind === 'resume' && reservation.operationId === operationId ? structuredClone(reservation) : null
+    }, document => {
+      const reservation = document.reservations.find(item => item.agentSessionId === agentSessionId)
+      return reservation?.kind === 'resume' && reservation.operationId === operationId ? structuredClone(reservation) : null
+    })
+  }
+  async prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession) {
+    let next!: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>
+    await this.enqueue(async () => {
+      const document = await this.read()
+      next = preparedResumeReservation(document.reservations.find(item => item.agentSessionId === reservation.agentSessionId), reservation, session)
+      assertReservationPrecondition(next, document.sessions, document.retiredAgentSessions)
+      await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === next.agentSessionId ? next : item) })
+    })
+    return structuredClone(next)
   }
 
   async prepareReopen(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, session: AgentMuxStoredAgentSession): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>> {

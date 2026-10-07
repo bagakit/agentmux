@@ -18,6 +18,10 @@
       "types": "./dist/note-history.d.ts",
       "import": "./dist/note-history.js"
     },
+    "./agent-session-continuity": {
+      "types": "./dist/agent-session-continuity.d.ts",
+      "import": "./dist/agent-session-continuity.js"
+    },
     "./note-provenance": {
       "types": "./dist/note-provenance.d.ts",
       "import": "./dist/note-provenance.js"
