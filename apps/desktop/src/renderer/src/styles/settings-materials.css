@@ -14,6 +14,7 @@
 .settings-sidebar nav > button {
   transition: background-color var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast);
 }
+.settings-sidebar nav > .liquid-selection { border: 0; background: var(--surface-2); box-shadow: var(--hl); }
 .settings-sidebar nav > button.selected {
   background: transparent;
   box-shadow: none;
