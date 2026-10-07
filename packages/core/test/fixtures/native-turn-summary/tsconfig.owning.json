@@ -1,0 +1,5 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": { "composite": false, "incremental": false, "noEmit": true },
+  "include": ["../../native-turn-summary.test.ts", "../../agent-usage-transcript.test.ts", "../../agent-usage-capability.test.ts"]
+}
