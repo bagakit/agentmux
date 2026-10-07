@@ -22,10 +22,12 @@ export function useBotEnrollment(active: boolean) {
   const [next, setNext] = useState<string | null>(null), [loaded, setLoaded] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [issuer, setIssuer] = useState(''), [label, setLabel] = useState('')
-  const [submitted, setSubmitted] = useState<ConnectionEnrollmentBeginInput | null>(null)
+  const [submissions, setSubmissions] = useState<ConnectionEnrollmentBeginInput[]>([])
+  const [submittedId, setSubmittedId] = useState<string | null>(null)
+  const submitted = submissions.find(item => item.operationId === submittedId) ?? operations.find(item => item.operationId === submittedId) ?? null
   const [issue, setIssue] = useState(''), [pendingWrites, setPendingWrites] = useState<string[]>([])
   const selection = useRef<string | null>(null), selectionEpoch = useRef(0)
-  const epoch = useRef(0), listRead = useRef(0), writing = useRef(new Set<string>()), creating = useRef(false)
+  const epoch = useRef(0), listRead = useRef(0), writing = useRef(new Set<string>()), draft = useRef(0), creating = useRef<number | null>(null)
   const busy = selectedId && pendingWrites.includes(selectedId) ? selectedId : null
   const startWrite = (operationId: string) => {
     if (writing.current.has(operationId)) return false
@@ -33,6 +35,7 @@ export function useBotEnrollment(active: boolean) {
   }
   const finishWrite = (operationId: string) => { writing.current.delete(operationId); setPendingWrites([...writing.current]) }
   const accept = (operation: ConnectionEnrollmentOperation) => {
+    setSubmissions(previous => previous.filter(item => item.operationId !== operation.operationId))
     setOperations(previous => {
       const known = previous.find(item => item.operationId === operation.operationId)
       if (known && known.revision >= operation.revision) return previous
@@ -56,15 +59,16 @@ export function useBotEnrollment(active: boolean) {
     return () => { epoch.current++; listRead.current++ }
   }, [active])
   const begin = async (issuer: ConnectionEnrollmentCapability, label: string) => {
-    if (creating.current || issuer.availability !== 'available') return
+    const intent = draft.current
+    if (creating.current === intent || issuer.availability !== 'available') return
     const input: ConnectionEnrollmentBeginInput = { operationId: crypto.randomUUID(), connectionId: crypto.randomUUID(), adapterId: issuer.adapterId, domain: issuer.domain, label: label.trim() || `${issuer.label} bot` }
     const current = epoch.current, occurrence = ++selectionEpoch.current
-    creating.current = true; startWrite(input.operationId); setSubmitted(input); selection.current = input.operationId; setSelectedId(input.operationId); setIssue('')
+    creating.current = intent; startWrite(input.operationId); setSubmissions(previous => [...previous, input]); setSubmittedId(input.operationId); selection.current = input.operationId; setSelectedId(input.operationId); setIssue('')
     try {
       const result = await api.connections.call('connection.enrollment.begin', input)
       if (current === epoch.current) accept(result)
     } catch (error) { if (current === epoch.current && selection.current === input.operationId && occurrence === selectionEpoch.current) setIssue(`The creation result is not confirmed. Keep this setup and check its original result. ${presentError(error)}`) }
-    finally { creating.current = false; finishWrite(input.operationId) }
+    finally { if (creating.current === intent) creating.current = null; finishWrite(input.operationId) }
   }
   const inspect = async () => {
     if (!selectedId) return
@@ -92,8 +96,9 @@ export function useBotEnrollment(active: boolean) {
     } catch (error) { if (current === epoch.current && selection.current === operationId && occurrence === selectionEpoch.current) setIssue(`This setup is not confirmed yet. Check or continue this same setup. ${presentError(error)}`) }
     finally { finishWrite(operationId) }
   }
-  return { operations, capabilities, next, loaded, selectedId, submitted, issue, busy, issuer, setIssuer, label, setLabel, read, begin, inspect, advance,
-    select(operationId: string | null) { selectionEpoch.current++; selection.current = operationId; setSelectedId(operationId); setIssue('') },
+  return { operations, capabilities, next, loaded, selectedId, submitted, submissions, issue, busy, issuer, setIssuer, label, setLabel, read, begin, inspect, advance,
+    select(operationId: string | null) { if (!operationId) draft.current++; selectionEpoch.current++; selection.current = operationId; setSelectedId(operationId); if (operationId) setSubmittedId(operationId); setIssue('') },
+    startAnother() { draft.current++; selectionEpoch.current++; selection.current = null; setSelectedId(null); setSubmittedId(null); setLabel(''); setIssue('') },
     operation: operations.find(item => item.operationId === selectedId) ?? null }
 }
 
@@ -111,7 +116,7 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved }: {
   const submittedResult = submitted && enrollment.operations.find(item => item.operationId === submitted.operationId)
   const unfinished = submitted && (!submittedResult || !submittedResult.configured && !['denied', 'expired'].includes(submittedResult.authorization))
   const history: Array<{ input: ConnectionEnrollmentBeginInput; operation: ConnectionEnrollmentOperation | null }> = enrollment.operations.map(item => ({ input: item, operation: item }))
-  if (submitted && !submittedResult) history.unshift({ input: submitted, operation: null })
+  for (const input of enrollment.submissions) if (!enrollment.operations.some(item => item.operationId === input.operationId)) history.unshift({ input, operation: null })
   const preparing = !!current && !operation && busy === selectedId
   const title = preparing ? 'Preparing your bot setup' : saved ? 'Application saved' : operation?.authorization === 'pending' ? 'Scan to connect your bot' : operation?.authorization === 'authorized' ? 'Finish connecting your bot' : current ? 'Your bot setup' : unfinished ? 'Resume your bot setup' : 'Connect your bot'
   const summary = preparing ? 'Preparing a secure confirmation for this setup. You can leave and return to its original result.' : saved ? 'Your application is saved. Its live connection and group access are checked separately.'
@@ -153,6 +158,7 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved }: {
     </>}
     {openIssue ? <p role="status" className="connector-issue">{openIssue}</p> : null}
     {enrollment.issue ? <p role="status" className="connector-issue">{enrollment.issue}</p> : null}
+    {!current && unfinished ? <details data-enrollment-separate className="connector-optional"><summary>Create another bot</summary><p className="settings-group-note">Start a separate setup. Your original bot setup stays available below.</p><button data-enrollment-start-another className="small-button" onClick={() => enrollment.startAnother()}>Start a separate setup</button></details> : null}
     {!current && history.length ? <details className="connector-enrollment__history"><summary>Previous bot setups</summary>{history.map(({ input: item, operation: receipt }) => <button key={item.operationId} data-enrollment-select={item.operationId} className="connector-enrollment__previous" onClick={() => enrollment.select(item.operationId)}><strong>{item.label}</strong><span>{receipt ? receipt.configured ? 'Saved' : receipt.authorization === 'pending' ? 'Waiting for confirmation' : receipt.authorization === 'authorized' ? 'Application created · setup incomplete' : receipt.authorization === 'unknown' ? 'Result not confirmed' : receipt.authorization : 'Result not confirmed'}</span></button>)}</details> : null}
     {!current && enrollment.next ? <button data-enrollment-more className="small-button connector-back" onClick={() => void enrollment.read(enrollment.next!)}>Load earlier setups</button> : null}
   </section>
