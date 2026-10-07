@@ -1,3 +1,4 @@
+const { fixtureEpoch: _newTailFixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -10,6 +11,7 @@ import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystem
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 import { loginShellEnvironmentWarning } from '@agentmux/core'
 import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
+import { composerConfig } from './helpers/composer-dom-fixture'
 
 const initial = useAppStore.getState()
 const environmentWarning = loginShellEnvironmentWarning({ ok: true, shell: '/bin/zsh', mode: 'login' })!
@@ -18,6 +20,7 @@ let root: Root
 let dispose: (() => void) | undefined
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 beforeEach(() => {
+  vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig)
   useAppStore.setState({ ...initial, loading: false, environmentWarning, noticeReadReceipts: {} }, true)
   element = document.createElement('div')
   document.body.append(element)
@@ -42,7 +45,6 @@ async function toggle(state: 'open' | 'closed') {
 }
 async function initializeSnapshot(warning: string | null) {
   const config = await api.config.get()
-  vi.spyOn(api.config, 'get').mockResolvedValue(config)
   vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [], ...(warning ? { environmentWarning: warning } : {}) })
   await act(async () => { dispose = await useAppStore.getState().initialize() })
@@ -54,7 +56,7 @@ describe('global shell environment notice', () => {
     const config = await initializeSnapshot(environmentWarning)
     await render()
     expect(useAppStore.getState().loading).toBe(false)
-    expect(trigger().textContent).toBe('1')
+    expect(trigger().textContent, element.textContent ?? '').toBe('1')
     expect(trigger().disabled).toBe(false)
     expect(trigger().getAttribute('aria-expanded')).toBe('false')
     expect(trigger().getAttribute('data-unread')).toBe('true')
@@ -145,7 +147,8 @@ describe('global shell environment notice', () => {
 const displaced: SessionSnapshot = {
   id: 'unplaced', kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local',
   workspacePath: _hygiene_fixturePath("repo"), label: 'Builder', createdAt: 1, updatedAt: 1, processState: 'running',
-  latestOutputBytes: 0, status: { state: 'running', source: 'run-process', observedAt: 1 },
+  latestOutputBytes: 0, status: { state: 'done', source: 'native-hook', observedAt: _newTailFixtureEpoch(0, 0, 1) },
+  semanticStatus: { state: 'done', source: 'native-hook', observedAt: _newTailFixtureEpoch(0, 0, 1), stateEnteredAt: _newTailFixtureEpoch(0, 0, 1) },
   capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
   control: { kind: 'agent', hostId: 'local', agentSessionId: 'unplaced', run: { runId: 'unplaced-run' } }
 }
@@ -155,7 +158,7 @@ describe('one global system inbox', () => {
     useAppStore.setState({ runtimeOwnershipWarnings: ['studio'], sessions: [displaced], displacedAgentSessionIds: [displaced.id], tabs: {} })
     await render()
     expect(element.querySelectorAll('.global-system-notices__trigger')).toHaveLength(1)
-    expect(trigger().textContent).toBe('3')
+    expect(trigger().textContent, element.textContent ?? '').toBe('3')
     expect(details().querySelectorAll('.service-window')).toHaveLength(3)
     expect(details().textContent).toContain('Give it a place')
     expect(details().textContent).toContain('Runtime launch record is unavailable')
@@ -199,7 +202,8 @@ describe('one global system inbox', () => {
     await act(async () => useAppStore.setState({ runtimeOwnershipWarnings: ['studio'], environmentWarning }))
     expect(useAppStore.getState().noticeReadReceipts).toEqual(saved.noticeReadReceipts)
     await act(async () => useAppStore.setState({ sessions: [displaced] }))
-    expect(trigger().textContent).toBe('3')
+    expect(trigger().textContent).toBe('')
+    expect(trigger().getAttribute('aria-label')).toContain('0 unread, 3 current')
     expect(trigger().getAttribute('data-unread')).toBe('false')
     await act(async () => useAppStore.setState({ runtimeOwnershipWarnings: ['different-host'] }))
     expect(trigger().getAttribute('data-unread')).toBe('true')
@@ -212,8 +216,8 @@ describe('one global system inbox', () => {
     expect(trigger().disabled).toBe(false)
     expect(trigger().textContent).toBe('')
     expect(details().textContent).toContain('Waiting for Runtime status.')
-    await act(async () => useAppStore.setState({ environmentWarning: null, runtimeOwnershipWarnings: [] }))
-    expect(details().textContent).toContain('No current system notices.')
+    await act(async () => useAppStore.setState({ environmentWarning: null, runtimeOwnershipWarnings: [], runtimeEndpointWarnings: [] }))
+    expect(details().textContent).toContain('No system notifications.')
     expect(details().querySelector('.service-window')).toBeNull()
   })
 })
