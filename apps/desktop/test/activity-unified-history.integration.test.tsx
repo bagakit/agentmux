@@ -1158,7 +1158,7 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true, opened: true }} />))
   expect(container.querySelector('[role="slider"]')).toBeNull()
   const status = container.querySelector('.activity-feed__reading-status')!
-  expect(status.textContent).toContain('Reading records'); expect(status.querySelector('svg.wf-streaming-glyph')).not.toBeNull()
+  expect(status.textContent).toContain('Reading records'); expect(status.querySelector('[data-icon-animation="spin"] [data-semantic-icon="status.loading"]')).not.toBeNull()
   expect(requests).toEqual([{ limit: 100 }])
   await act(async () => release(await client.sessionHistoryPage(sid, { limit: 100 }))); await flush()
   expect(ids()).toHaveLength(300); expect(requests).toHaveLength(3)

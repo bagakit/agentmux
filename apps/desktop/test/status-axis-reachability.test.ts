@@ -11,7 +11,7 @@ import { allStyleRules, allStyles } from './helpers/styles.js'
 // 恰好被赋色一次、四个色相各归属哪些态），本文件**不重复它**，只补它没覆盖的四条轴：
 //
 //   PIP    —— needs-you 那枚 `?` 角标。共享状态点那道缝（`.status--<state> .status__dot::after`）。
-//   PULSE  —— 「在跑」那颗点的脉动动画（`.status--<state> .status__dot { animation }`）。
+//   STATIC —— 原生状态点不按状态名自动播放；当前活动由语义图标实例显式表达。
 //   SHAPE  —— 点的填充形态：默认实心 vs 掉线态的空心环（`background: transparent`）。
 //   CONTOUR—— Provider alpha轮廓读共享墨色；状态点绝对定位在一个角上，不能重新画矩形状态框。
 //
@@ -124,43 +124,15 @@ describe('状态规则族的可达性：新态/新判定不能静默落地', () 
     ).toEqual([...NEEDS_YOU].sort())
   })
 
-  /**
-   * PULSE —— 「在跑」那颗点的脉动。
-   *
-   * 不是每个态都脉动（那是错的：脉动=正在忙、别打扰），所以不按词表全集判。判三件真事：
-   *   1. 至少有一个态在脉动——删掉脉动（`animation: none` 或删声明体）会让这条红，那颗「在跑」的心跳
-   *      就不会静默消失。`.agent-status-bar` 那条 `animation: none` 是**抑制**（常驻 chrome 不脉动），
-   *      取值为 none 被排除，不会被误当成一次脉动。
-   *   2. 会脉动的态与 needs-you **不相交**：一颗脉动的点说「我在忙」，与「等你」语义相反；把某个态翻成
-   *      needs-you 又让它脉动，这条立刻红。这是 PULSE 与 SSOT 的挂钩，且不手抄任何状态名。
-   *   3. 动画名指向一条**真实定义**的 `@keyframes`：`animation: ghost …` 指向不存在的关键帧等于没有动画
-   *      （静默失效），所以要求引用的关键帧在表里定义过。
-   */
-  it('PULSE：有态在脉动、且脉动的态与 needs-you 不相交、且动画名有真实关键帧', () => {
-    const definedKeyframes = new Set(
-      [...allStyles().matchAll(/@keyframes\s+([\w-]+)/gu)].map((match) => match[1]!)
-    )
-    expect(definedKeyframes.size, '一个 @keyframes 都没扫到——关键帧可达性判据会退化').toBeGreaterThan(0)
-
-    const pulseStates = new Set<string>()
-    const referencedKeyframes: string[] = []
-    for (const rule of rules) {
-      if (!/\.status__dot(?![\w-])/u.test(rule.selector)) continue
+  /** Native masks carry recorded state; animation needs an explicit current instance. */
+  it('native state masks are static records; semantic icon instances explicitly own live motion', () => {
+    const dotRules = rules.filter(rule => /\.status__dot(?![\w-])/u.test(rule.selector))
+    expect(dotRules.length).toBeGreaterThan(0)
+    expect(dotRules.some(rule => rule.selector.includes('.status--working'))).toBe(true)
+    for (const rule of dotRules) {
       const animation = declValue(rule.body, 'animation') ?? declValue(rule.body, 'animation-name')
-      if (!animation || animation === 'none') continue
-      const named = animation.split(/\s+/u).filter((token) => definedKeyframes.has(token))
-      referencedKeyframes.push(...named)
-      // 只有真的引用了某条已定义关键帧，才算「这颗点会动」；引用不存在的名字＝静默失效，不计入。
-      if (named.length === 0) continue
-      for (const member of rule.members) for (const state of statesIn(member)) pulseStates.add(state)
+      expect(animation === undefined || animation === 'none', rule.selector).toBe(true)
     }
-
-    expect(pulseStates.size, '没有任何状态点在脉动——「在跑」的心跳被删掉了').toBeGreaterThan(0)
-    expect(referencedKeyframes.length, '脉动规则没有引用任何已定义关键帧＝静默失效').toBeGreaterThan(0)
-    expect(
-      [...pulseStates].filter((state) => isNeedsYouState(state)),
-      '一个 needs-you 态在脉动：脉动说「在忙别打扰」，与「等你」相反，两者不能同一枚点'
-    ).toEqual([])
   })
 
   /**

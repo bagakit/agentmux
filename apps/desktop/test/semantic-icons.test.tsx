@@ -10,8 +10,8 @@ describe('desktop semantic adapter consumes the shared owner', () => {
     const failed = renderToStaticMarkup(createElement(WorkflowSemanticIcon, { status: 'failed' }))
     expect(running).toContain(semanticIconHref('object.workflow'))
     expect(failed).toContain(semanticIconHref('status.failed'))
-    expect(running).toMatch(/class="[^"]*\bspin\b/u)
-    expect(failed).not.toMatch(/class="[^"]*\bspin\b/u)
+    expect(running).toContain('data-icon-animation="spin"')
+    expect(failed).not.toContain('data-icon-animation=')
   })
 
   it('uses a non-empty shared vocabulary with real drawable defaults', () => {
