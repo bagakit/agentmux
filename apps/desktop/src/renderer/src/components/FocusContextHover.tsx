@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { FocusContextIdentity } from '../lib/focus-context-identity'
-import { WorkbenchRegionMap } from './WorkbenchTopology'
+import { WorkbenchTabGlyph } from './WorkbenchTopology'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import { useShallow } from 'zustand/react/shallow'
 import { createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
@@ -75,7 +75,7 @@ function FocusContextInputs({ context }: { context: FocusContext }) {
 }
 
 /** The clock belongs only to this open header; held prose and input readers do not tick. */
-function FocusContextStateSummary({ context }: { context: FocusContext }) {
+function FocusContextStateSummary({ context, explanationVisible }: { context: FocusContext; explanationVisible: boolean }) {
   const session = useAppStore(state => state.sessions.find(session => session.id === context.id && session.hostId === context.hostId && session.control.run.runId === context.runId))
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
@@ -90,7 +90,7 @@ function FocusContextStateSummary({ context }: { context: FocusContext }) {
     : lastActive !== undefined ? `Last active ${elapsedShort(now - lastActive)} ago` : 'Activity time unknown'
   const duration = enteredAt !== undefined && context.bucket === 'attention' ? `${context.state === 'error' ? 'For' : 'Waiting'} ${time}` : time
   return <span className="focus-context-hover__state" aria-label={`${context.stateLabel} · ${duration}`} data-state-time={enteredAt !== undefined ? 'duration' : lastActive !== undefined ? 'last-active' : 'unknown'}>
-    <span className="focus-context-hover__state-label"><FocusContextStateMark context={context} />{context.stateLabel}</span>
+    <span className="focus-context-hover__state-label" title={context.stateLabel}><FocusContextStateMark context={context} />{!explanationVisible ? context.stateLabel : null}</span>
     <span className="focus-context-hover__state-time">{duration}</span>
   </span>
 }
@@ -125,7 +125,13 @@ export function useFocusContextHover(context: FocusContext, requested: boolean, 
     setOpen(true)
   }
   function showSoon() { clearTimeout(intent.current); keepOpen(); if (enabled) intent.current = setTimeout(show, 180) }
-  function hideSoon() { clearTimeout(intent.current); keepOpen(); departure.current = setTimeout(close, 160) }
+  function hideSoon() {
+    clearTimeout(intent.current); keepOpen()
+    departure.current = setTimeout(() => {
+      if (panel.current?.contains(document.activeElement) || anchor.current?.contains(document.activeElement)) return
+      close()
+    }, 160)
+  }
   function suppressRestoredFocus() {
     restoringFocus.current = true
     // Radix restores its trigger synchronously after closeAutoFocus. A later
@@ -152,7 +158,15 @@ export function useFocusContextHover(context: FocusContext, requested: boolean, 
   }, [open])
   useLayoutEffect(() => {
     if (!enabled) return
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') close() }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      const ownsFocus = panel.current?.contains(document.activeElement)
+      close()
+      if (ownsFocus && anchor.current?.isConnected && !anchor.current.closest('[inert]')) {
+        event.preventDefault()
+        suppressRestoredFocus(); anchor.current.focus({ preventScroll: true })
+      }
+    }
     const hide = () => { if (document.visibilityState === 'hidden') close() }
     const outside = (event: Event) => { if (!panel.current?.contains(event.target as Node)) close() }
     document.addEventListener('keydown', escape)
@@ -169,21 +183,28 @@ export function useFocusContextHover(context: FocusContext, requested: boolean, 
     }
   }, [enabled, close])
   const host = open ? getWindowOverlayHost() : null
-  const preview = open && host ? createPortal(<div ref={panel} id={id} className="focus-context-hover" role="tooltip"
+  const serviceVisible = !context.detailIsRecap && context.detailKind === 'service'
+  const activitySupplement = !context.detailIsRecap && !serviceVisible && Boolean(context.recap)
+  const preview = open && host ? createPortal(<div ref={panel} id={id} className="focus-context-hover" role="region"
     data-state="open" aria-label={`Full context for ${context.name}`} style={{ visibility: 'hidden' }}
-    onPointerEnter={keepOpen} onPointerLeave={hideSoon}>
-    <header><strong>{context.name}</strong><FocusContextStateSummary context={context} /></header>
-    {!context.detailIsRecap ? <p className="focus-context-hover__activity">{context.detail}</p> : null}
+    onPointerEnter={keepOpen} onPointerLeave={hideSoon} onFocus={keepOpen} onBlur={event => {
+      if (event.relatedTarget instanceof Node && (panel.current?.contains(event.relatedTarget) || anchor.current?.contains(event.relatedTarget))) return
+      hideSoon()
+    }}>
+    <header><strong title={context.name}>{context.name}</strong><FocusContextStateSummary context={context} explanationVisible={serviceVisible} /></header>
+    {!context.detailIsRecap && !activitySupplement ? <p className="focus-context-hover__activity">{context.detail}</p> : null}
     {context.recap ? <section className="focus-context-hover__recap">
       <small title={`${context.recap.source} · ${context.recap.origin} · ${context.recap.text}`}>{context.recap.source === 'Last assistant message' ? 'Latest reply' : 'Latest input'}{(context.recap.reading?.truncated ?? true) ? ' · Excerpt' : ''}</small>
       <ReadingBody reading={context.recap.reading ?? { text: context.recap.text, truncated: true }} />
     </section> : null}
-    {identity ? <section className="focus-context-hover__workbench" aria-label="Original workbench positions">
-      <small>{identity.occurrenceCount} confirmed {identity.occurrenceCount === 1 ? 'position' : 'positions'}</small>
+    {activitySupplement ? <details className="focus-context-hover__activity-details"><summary>Activity details</summary><p>{context.detail}</p></details> : null}
+    {identity ? <section className="focus-context-hover__workbench" aria-label={`${identity.occurrenceCount} confirmed ${identity.occurrenceCount === 1 ? 'position' : 'positions'}`}>
       {identity.tabs.map(tab => <section key={tab.occurrenceKey ?? tab.tabId} data-focus-occurrence-key={tab.occurrenceKey}>
-        <strong>{tab.title}</strong>
-        {tab.locationLabel ? <small className="focus-context-hover__position-label">{tab.locationLabel}</small> : null}
-        <WorkbenchRegionMap regions={tab.regions} highlightedRegionIds={tab.highlightedRegionIds} aspectRatio={16 / 10} className="workbench-topology__inspector-regions" />
+        <span className="focus-context-hover__position-glyph" title={tab.title}><WorkbenchTabGlyph tab={tab} /></span>
+        <span className="focus-context-hover__position-copy" title={[tab.title, tab.locationLabel].filter(Boolean).join('\n')}>
+          {tab.title !== context.name ? <strong>{tab.title}</strong> : null}
+          <small className="focus-context-hover__position-label">{tab.locationLabel ?? 'Original position'} · {tab.regions.length} {tab.regions.length === 1 ? 'Region' : 'Regions'}</small>
+        </span>
       </section>)}
     </section> : null}
     {context.kind === 'agent' ? <FocusContextInputs key={`${context.hostId}:${context.id}:${context.runId}`} context={context} /> : null}
