@@ -19,6 +19,7 @@ overrides:
 # force for every real registry dependency.
 minimumReleaseAgeExclude:
   - '@ctxmux/sdk'
+  - '@larksuiteoapi/node-sdk@1.76.0'
 
 patchedDependencies:
   '@xterm/xterm@6.1.0-beta.303': patches/@xterm__xterm@6.1.0-beta.303.patch
