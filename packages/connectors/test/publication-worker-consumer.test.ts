@@ -1,11 +1,11 @@
-import { appendFile, readFile, rename, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
 import { ConnectionHost } from '../src/connection-host.js'
 import { createPublicationConversationPort } from '../src/core-conversation-port.js'
 import type { PublicationAdapter } from '../src/publication-adapter.js'
-import type { PublicationReceipt } from '../src/publication-store.js'
+import type { PublicationReceipt, PublicationMapping } from '../src/publication-store.js'
 import { config, roomBindingFixture, core } from './fixtures/room-binding.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 
@@ -15,15 +15,15 @@ const row = (id: string, text = 'Same original reply', content?: unknown[]) => J
   type: 'assistant', message: { role: 'assistant', content: content ?? [{ type: 'text', text }] } }) + '\n'
 async function fixture(effect?: PublicationAdapter['dispatch']) {
   const original = await roomBindingFixture(); cleanup.push(() => original.close())
-  const dispatched: Array<{ request: Parameters<PublicationAdapter['dispatch']>[0]; target: Parameters<PublicationAdapter['dispatch']>[1] }> = []
+  const dispatched: Array<{ request: Parameters<PublicationAdapter['dispatch']>[0]; target: Parameters<PublicationAdapter['dispatch']>[1]; mapping?: Readonly<PublicationMapping> }> = []
   const adapter: PublicationAdapter = { adapterId: 'sample', renderVersion: 'speech-v1', supportedRenderVersions: ['speech-v1'], fragmentBytes: 8_192,
     prepare: operation => ({ adapterId: 'sample', renderVersion: 'speech-v1', requestKey: operation.operationId,
       request: { method: operation.effect === 'withdraw' ? 'DELETE' : operation.mapping ? 'PATCH' : 'POST', path: '/messages', contentType: 'application/json',
         body: JSON.stringify({ room: operation.target.externalConversationId, text: operation.payload.text, mapping: operation.mapping }) } }),
-    dispatch: async (request, target, credential, signal) => {
+    dispatch: async (request, target, credential, signal, mapping) => {
       expect(credential).toBe('original-private-credential')
-      dispatched.push({ request: structuredClone(request), target: structuredClone(target) })
-      return effect ? await effect(request, target, credential, signal) : { state: 'confirmed', mapping: JSON.parse(request.request.body!).mapping ?? { messageId: 'message-' + request.requestKey } }
+      dispatched.push({ request: structuredClone(request), target: structuredClone(target), ...(mapping ? { mapping: structuredClone(mapping) } : {}) })
+      return effect ? await effect(request, target, credential, signal, mapping) : { state: 'confirmed', mapping: JSON.parse(request.request.body!).mapping ?? { messageId: 'message-' + request.requestKey } }
     } }
   const conversation = createPublicationConversationPort(() => [{ hostId: 'local', client: original.client }])
   const services = await createDesktopConnections({ directory: join(original.root, 'desktop-publication'),
@@ -192,3 +192,42 @@ it('closing while current human authorization is pending retains the original no
   expect(f.services.publication!.store.inspect(original.operationId)).toEqual(original)
   expect(f.dispatched).toHaveLength(1)
 }, 15_000)
+
+it('original worker passes durable message and thread mapping to update, inspect and withdrawal independently of wire bytes', async () => {
+  const mapping = { messageId: 'original-platform-message', threadId: 'original-platform-thread' }
+  const f = await fixture(async (request, _target, _credential, _signal, original) => {
+    if (request.request.method === 'POST') { expect(original).toBeUndefined(); return { state: 'confirmed', mapping } }
+    expect(original).toEqual(mapping)
+    return request.request.method === 'DELETE' ? { state: 'confirmed', mapping: original! } : { state: 'unknown', reason: 'effect-unconfirmed' }
+  })
+  const metadata = await readFile(f.storePath), inspections: Array<Readonly<PublicationMapping> | undefined> = []
+  let readable = false
+  f.adapter.inspect = async (_request, _target, _credential, _signal, original) => {
+    inspections.push(original)
+    expect(original).toEqual(mapping)
+    return readable ? { state: 'confirmed', mapping: original! } : null
+  }
+  await appendFile(f.transcript, row('mapped-speech', 'Original speech'))
+  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[0]?.state).toBe('confirmed'))
+  await appendFile(f.transcript, row('mapped-speech', 'Updated speech'))
+  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[1]?.state).toBe('unknown'))
+  expect(f.dispatched[1]?.mapping).toEqual(mapping)
+  await vi.waitFor(() => expect(inspections).toContainEqual(mapping))
+  readable = true; f.services.publication!.refresh()
+  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[1]?.state).toBe('confirmed'))
+  await appendFile(f.transcript, row('mapped-speech', '', [{ type: 'thinking', thinking: 'Retained private source' }]))
+  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[2]?.state).toBe('confirmed'))
+  expect(f.dispatched.map(value => value.request.request.method)).toEqual(['POST', 'PATCH', 'DELETE'])
+  expect(f.dispatched[2]?.mapping).toEqual(mapping)
+  const operation = f.services.publication!.store.list(f.binding)[2]!
+  const publicReceipt = await f.cli(['inspect', '--operation-id', operation.operationId])
+  expect(publicReceipt.delivery.mapping).toEqual(mapping)
+  expect(await readFile(f.storePath)).toEqual(metadata)
+  expect(f.client.connect).not.toHaveBeenCalled()
+  const evidence = join('.bagakit', 'evidence', 'feishu-publication'); await mkdir(evidence, { recursive: true })
+  await writeFile(join(evidence, 'mapping-call-chain.json'), JSON.stringify({
+    scope: 'Original Desktop publication worker and Core native reader with controlled generic platform I/O; no live platform claim',
+    dispatches: f.dispatched, inspections, publicCall: { method: 'connection.delivery.inspect', params: { operationId: operation.operationId }, result: publicReceipt },
+    originalMapping: mapping, originalSourceAndSessionRetained: true
+  }, null, 2) + '\n')
+}, 20_000)
