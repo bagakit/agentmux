@@ -1,11 +1,11 @@
 import { parseConnectionParams, parseRoomBindingTarget, type ConnectionParamsMap, type RoomBindingTarget } from '@agentmux/core/connections'
 
-type Effect = 'connection.room.create' | 'connection.bind' | 'connection.binding.relink' | 'connection.binding.pause' | 'connection.grant'
+type Effect = 'connection.room.create' | 'connection.room.link.create' | 'connection.bind' | 'connection.binding.relink' | 'connection.binding.pause' | 'connection.grant'
 /** Submitted UI correlation only. Original effects and receipts remain with their Core/Host owners. */
 export type ConnectorRoomIntent = { [M in Effect]: {
   target: RoomBindingTarget; method: M; input: ConnectionParamsMap[M]; phase: 'not-dispatched' | 'may-have-dispatched'
 } }[Effect]
-const effects: readonly string[] = ['connection.room.create', 'connection.bind', 'connection.binding.relink', 'connection.binding.pause', 'connection.grant']
+const effects: readonly string[] = ['connection.room.create', 'connection.room.link.create', 'connection.bind', 'connection.binding.relink', 'connection.binding.pause', 'connection.grant']
 export const sameConnectorTarget = (a: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>, b: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>) => a.executionHostId === b.executionHostId && a.agentSessionId === b.agentSessionId
 export function restoredConnectorRoomIntents(value: unknown): Record<string, ConnectorRoomIntent> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
