@@ -10,3 +10,6 @@ export type * from './room-discovery-contract.js'
 export * from './room-discovery-codec.js'
 export type * from './connection-delivery-contract.js'
 export * from './connection-delivery-codec.js'
+
+export type * from './connection-enrollment-contract.js'
+export * from './connection-enrollment-codec.js'
