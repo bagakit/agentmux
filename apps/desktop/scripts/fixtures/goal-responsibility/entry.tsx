@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { parseAmuxObjectLink } from '@agentmux/core/sharing'
+import { deriveObjectId } from '@agentmux/core/object-id'
 import type { GoalDelegationResult } from '@agentmux/core/goal-delegation'
 import type { Demand } from '@agentmux/demand'
 import { App } from '../../../src/renderer/src/App'
@@ -44,7 +45,7 @@ const calls: Call[] = saved?.calls ?? []
 const initial = useAppStore.getState()
 const workerId = snapshotById(source.journey.initialSnapshotId).delegation.responsibility!.executions[0]!.execution.agentSessionId
 const supervisorId = snapshotById(source.journey.initialSnapshotId).delegation.responsibility!.supervisor.agentSessionId
-const topicId = 'goal-responsibility-preview'
+const topicId = deriveObjectId('goal-responsibility-visual-mote', source.sourceSha256)
 const scratch = { id: SCRATCH_WORKSPACE_ID, name: '责任巡查', hostId: current.sessions[0]!.hostId,
   path: source.privateRoot + '/mote-preview', kind: 'folder' as const }
 const topicPath = scratchTopicDirectoryName(topicId)
@@ -58,7 +59,7 @@ let tab = { ...createWorkbenchTab('goal-responsibility-preview-tab', { kind: 'ag
   workspaceId: scratch.id, sessionId: workerId }, '原执行与管理'), topicId }
 if (supervisorId && supervisorId !== workerId && current.sessions.some(session => session.id === supervisorId)) {
   // A vertical split keeps both original identities readable at the narrow desktop width.
-  tab = { ...addWorkbenchRegion(tab, primaryRegion, 'below', { kind: 'agent', phase: 'attached',
+  tab = { ...addWorkbenchRegion(tab, primaryRegion, 'down', { kind: 'agent', phase: 'attached',
     regionId: 'goal-responsibility-manager-region', workspaceId: scratch.id, sessionId: supervisorId }), topicId }
 }
 const firstWorkbench = projectPersistedWorkbench({ tabs: { [tab.id]: tab },
