@@ -52,7 +52,7 @@ export function serializeMoteConnectionMode(content: string, values: MoteConnect
   if (parsed?.status === 'unconfirmed') throw new Error(ISSUE)
   if (parsed?.status === 'valid' && sameMoteConnectionValues(parsed.values, values)) return content
   const document = original?.document ?? new Document({ version: 1, defaults: {} })
-  if (!document.has('defaults')) document.set('defaults', {})
+  if (!document.has('defaults')) document.set('defaults', document.createNode({}))
   if (!values.connection) document.deleteIn(['defaults', 'connection'])
   else {
     document.setIn(['defaults', 'connection', 'connectionId'], values.connection.connectionId)
