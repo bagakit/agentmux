@@ -14,8 +14,10 @@ const aliases = Object.entries(pkg.exports).flatMap(([name, value]) => {
 const mutation = process.env.AGENTMUX_TURN_SUMMARY_MUTATION
 const mutations: Record<string, [string, string, string]> = {
   'drop-metrics': ['packages/client-ui/src/lib/conversation-metrics.ts', 'const metrics = item.metrics', 'const metrics = undefined'],
-  'sum-cumulative': ['packages/client-ui/src/lib/conversation-metrics.ts', 'metrics: { ...previous?.observation.metrics, ...metrics },',
-    'metrics: { ...previous?.observation.metrics, ...metrics, ...(metrics.usage ? { usage: { ...metrics.usage, outputTokens: (previous?.observation.metrics.usage?.outputTokens ?? 0) + (metrics.usage.outputTokens ?? 0) } } : {}) },'],
+  'sum-cumulative': ['packages/client-ui/src/lib/conversation-metrics.ts', 'metrics: { ...previous?.metrics, ...metrics },',
+    'metrics: { ...previous?.metrics, ...metrics, ...(metrics.usage ? { usage: { ...metrics.usage, outputTokens: (previous?.metrics.usage?.outputTokens ?? 0) + (metrics.usage.outputTokens ?? 0) } } : {}) },'],
+  'copy-prior-records': ['packages/client-ui/src/lib/conversation-metrics.ts', 'const recordIds = previous?.recordIds ?? []\n      recordIds.push(item.id)',
+    'const recordIds = [...previous?.recordIds ?? [], item.id]'],
   'forget-read-body': ['packages/client-ui/src/components/WorkflowObservation.tsx', 'expanded || readOnce ? children : null', 'expanded ? children : null'],
   'unstable-record-wrapper': ['packages/client-ui/src/components/ConversationRecordSequence.tsx', 'renderRecord: (item, wrapBody) => renderOne(item, wrapBody, false, !summary)', 'renderRecord: summary ? renderRecord : (item, wrapBody) => renderOne(item, wrapBody, false)'],
   'hide-recorded-failure': ['packages/client-ui/src/components/NativeProcessObservation.tsx', "const status = recordedStepStatus ?? (metrics?.metrics.status === 'completed' ? 'complete' : metrics?.metrics.status)", "const status = metrics?.metrics.status === 'completed' ? 'complete' : metrics?.metrics.status ?? recordedStepStatus"],
