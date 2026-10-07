@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { fixtureEpoch as _newTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WorkspaceFiles } from '../src/main/workspace-files'
@@ -69,7 +69,11 @@ it('external plain-text edits keep the known creator and do not claim an old Age
 })
 it('returns written body and an honest recoverable attribution after SQLite recording fails', async () => {
   const f = await fixture()
-  vi.spyOn(f.store, 'recordProvenance').mockRejectedValueOnce(new Error('Metadata disk confirmation unavailable'))
+  // Deny the actual SQLite write, including the history journal's attribution port.
+  // Failing just the old provenance method leaves the new durable history port healthy.
+  await f.store.apply({ expectedRevision: 0, operationId: 'initialize-metadata', change: { kind: 'register', noteId: f.note.noteId, title: 'Original', resource: f.resource } }, human)
+  await chmod(f.store.path, 0o400)
+  cleanups.push(() => chmod(f.store.path, 0o600))
   const result = await f.writer.write(f.workspace, { path: f.path, content: serializeNoteDocument(f.note), expectedRevision: null }, { actor })
   expect(result).toMatchObject({ status: 'written', noteAttribution: { status: 'unconfirmed' }, noteProvenance: { status: 'unconfirmed' } })
   if (result.status !== 'written') throw Error('The saved body must remain available')

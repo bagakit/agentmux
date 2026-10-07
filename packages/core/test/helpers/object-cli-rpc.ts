@@ -1,3 +1,4 @@
+import { fixturePath as _historyFixturePath } from "./fixture-values.js"
 import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
@@ -117,6 +118,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'space.bind': ['--zone', ids.zone, '--space', ids.space], 'space.unbind': ['--zone', ids.zone, '--space', ids.space],
     'space.focus': ['--region', ids.region], 'space.promote': ['--region', ids.region], 'space.arrange': ['--tab', 'TAB', '--balance'],
     'file.open': ['--path', '--help', '--zone', ids.zone], 'file.view': ['--region', ids.region],
+    'file.history': ['--zone', ids.zone, '--path', 'saved.note.md', '--note', 'NOTE', '--resource', JSON.stringify({ hostId: 'local', workspaceId: 'W', workspacePath: _historyFixturePath("fixture"), zoneId: ids.zone, zonePath: _historyFixturePath("fixture"), path: 'saved.note.md' })],
     'file.format': ['--region', ids.region], 'file.build': ['--region', ids.region],
     'file.build.inspect': ['--region', ids.region, '--build', 'BUILD'], 'file.build.cancel': ['--region', ids.region, '--build', 'BUILD'],
     'terminal.open': ['--in-region', ids.region], 'browser.open': ['--url', 'https://example.org', '--in-region', ids.region],

@@ -53,7 +53,7 @@ it('attributes real create/edit by stable block identity and preserves authors o
   expect(provenance(disk, 1)).toMatchObject({ created: first.created, lastEdited: { actor: human } })
   expect(disk.noteId).toBe(original.noteId)
   expect(disk.content.content!.map(block => block.attrs!.blockId)).toEqual(['second', 'first'])
-  expect(await files.read(workspace, path)).toMatchObject({ status: 'read', document: { content: changed.content, revision: changed.revision } })
+  expect(await files.read(workspace, path)).toMatchObject({ status: 'read', document: { content: changed.content ?? raw(next), revision: changed.revision } })
   const conflict = await writer.write(workspace, { path, content: raw(original), expectedRevision: created.revision }, { actor })
   expect(conflict.status).toBe('conflict'); expect(await readAttributed(writer,workspace,path)).toEqual(disk)
 })
@@ -162,7 +162,7 @@ it('real executable CLI creates/edits the original Note through its authenticate
       import {readFileSync} from 'node:fs';
       const {AgentMuxNotebookStore}=await import(process.argv[2]);
       const {fileUploadRevision}=await import(process.argv[3]);
-      const content=readFileSync(process.argv[1],'utf8'),resource=JSON.parse(process.argv[5]);
+      const content=readFileSync(process.argv[1],'utf8'),mapping=JSON.parse(process.argv[5]),resource={hostId:mapping.hostId,workspaceId:mapping.workspaceId,workspacePath:mapping.workspacePath,path:mapping.path};
       const metadata=await new AgentMuxNotebookStore(process.argv[4]).readProvenance({noteId:'cli-note',resource,revision:fileUploadRevision(new TextEncoder().encode(content)),blockIds:['cli-block']});
       process.stdout.write(JSON.stringify({content,metadata}));`, join(workspace.path,path),new URL('../../../packages/core/dist/notebook-store.js',import.meta.url).href,new URL('../../../packages/core/dist/public-rpc-files.js',import.meta.url).href,join(workspace.path,'notebooks.sqlite'),JSON.stringify(observed.resource)])
     const childSnapshot=JSON.parse(childRead.stdout),restored = parsed(childSnapshot.content,childSnapshot.metadata)
