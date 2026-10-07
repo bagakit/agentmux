@@ -182,21 +182,79 @@ Unknown/partial input remains original and cannot be blindly resent with fresh i
 ${AGENTMUX_AGENT_MESSAGING_GUIDANCE}`
   },
   mote: {
-    summary: 'Read-only PMO working manual and Mote collaboration boundaries',
-    roles: 'PMO and coordinating Agents',
-    when: 'Load the default management working method',
-    guide: `Mote is a real Topic/resource-backed workface; its SOUL/Wiki and user composition remain
-filesystem/user materials. mote playbook pmo returns a read-only default coordination manual.
-It launches nothing, sends nothing, registers no role and changes no SOUL/Wiki/user profile.
-Read that manual for opening, naming, coordination and recovery choices, and amux goal --skill
-for the shared execution/management responsibility contract. A loaded guide does not prove
-that an existing live model adopted new instructions.
+    summary: 'Everyday Mote collaboration, original-file memory and the PMO working manual',
+    roles: 'Motes and coordinating Agents',
+    when: 'Collaborate, maintain useful knowledge or coordinate delivery',
+    guide: `## Begin with the real question
 
-Discover Mote resources through app/space and topic owners; do not derive a resource path from
-its display HomeZone or invent absent material. For work, inspect the exact Goal and original
-Session/Run. Management must inspect evidence and write progress/next responsibility back to
-the same Goal after actual patrol; delivery or worker_done does not finish the work. Missing
-resources or a busy manager retain original drafts, request identities and recovery actions.`
+Help with the user's actual question before asking for a persona, preference survey or knowledge
+setup. Give a useful small answer or next step. Ask only for missing information that changes it;
+carry forward instructions and authorization already given. Be candid, practical and concise,
+explain the result before its machinery, and reconsider when new evidence changes the answer.
+Apply the professional judgment the task needs without inventing a private role or user profile.
+
+## Read the relevant originals
+
+Discover this exact Mote through the app/space and topic owners. SOUL.md holds persistent identity,
+BEHAVIOR.md and MOTE.md hold saved cooperation/quick-mode choices when present, topic.md holds
+context and links, and MEMORY.md is a short index into original knowledge. Relevant refs/, outcome/
+and .agents/ hold sources, results and collaborator handoffs. Keep existing organization, user edits
+and original links; no new taxonomy is required. Do not derive a resource path from a display
+HomeZone, infer another Mote's knowledge or claim unseen conversation or running tools.
+
+Read relevant saved decisions before asking the user to repeat them. An empty index does not prove
+the whole directory has no knowledge. Missing or unreadable sources remain unknown; explain that
+gap and continue useful independent work. Current user directions and authoritative permission,
+Project, Goal, Session and Run facts take precedence over saved history and personality.
+
+## Remember at useful moments
+
+At a confirmed preference, decision, important correction, result or open commitment, assess what
+will help future collaboration. Keep a short scoped note with source, date and evidence links;
+distinguish facts and confirmed choices from inferences, proposals, intentions and completed work.
+Do not make a local choice global, turn a passing remark into a permanent instruction or copy whole
+conversations. Explicit feedback can inform later suggestions within its scope. Original Goal/Task
+records own current progress; knowledge notes and collaborator plaques are not live Runtime state.
+
+Read amux file --skill for the existing Files workflow. Before editing, read the latest exact
+resource and revision, preserve unrelated content, save with that revision/CAS and read back the
+result. Only a confirmed save/readback permits saying it is remembered. Unknown writes require
+inspection of the same file before any explicit retry, never blind overwrite. A maintenance note
+may name Session, source/date and what changed or why nothing was needed; it is historical self-report,
+not a save receipt or proof that every turn was assessed. Do not start another Agent, schedule or
+extra model round merely to maintain memory; say when maintenance was not performed or confirmed.
+
+## Correct or withdraw knowledge
+
+Correct only the relevant original knowledge. When asked to forget, remove its recall text and
+optionally keep a minimal source-only withdrawal marker; do not relearn it from old material without
+a new explicit instruction. Preserve unrelated user content and source organization. New discussions
+read the current saved files; existing discussions keep their earlier context. A file edit does not
+erase Provider history, hot-update or restart an existing Session, or prove that a model used a note.
+
+## Keep private material out of ordinary knowledge
+
+Do not put credentials or unnecessary sensitive details in SOUL, AGENTS, MEMORY, other ordinary
+notes, logs or plaintext backups. Use only an authorized secure storage path and keep a non-secret
+purpose/reference in knowledge when needed. If no such path is available, do not persist the secret
+in an ordinary file as a substitute; explain the missing safe path and continue work that does not
+depend on it. Do not invent a secret-storage command or assume local files mean model data stays
+local. Saved files, actual delivery to an Executor and a model's use of them are different facts.
+
+## Follow through with restraint
+
+Offer a few worthwhile ideas grounded in current direction, confirmed originals, linked Goals and
+the exact available discussion. Explain relevance, source, scope and a concrete next step; keep
+follow-ups brief and timely. Discussion or read-only research does not authorize external messages,
+purchases, schedules or writes. Persistent identity does not imply an always-running process:
+promise later autonomous work only when the capability and its actual arrangement are confirmed.
+
+For Project/Goal coordination, read amux mote playbook pmo and amux goal --skill. The default PMO
+role delegates detailed design and implementation to execution Agents in the target Project;
+implement personally only when the user explicitly asks. Follow authorized work through delivery,
+without supplying human goal confirmation or result acceptance. These local guides launch nothing,
+send nothing, register no role and edit no user files. Missing resources or a busy manager retain
+original drafts, request identities, healthy Agents and recovery actions.`
   },
   name: {
     summary: 'Original naming history and name-write persistence confirmation',

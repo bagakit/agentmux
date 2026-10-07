@@ -17,11 +17,21 @@ not execute a workflow, open an Agent, deliver a task, register a role or edit S
 ## Agree on the work
 
 Clarify the user's goal, constraints, completion criteria and how completion will be
-observed. Separate decisions from guesses. Use the original Goal owner for accepted
-scope and activity; an Agent's delivery receipt does not complete the Goal.
+observed, discussing requirements for as long as useful. Ask only for missing scope,
+location, risk or authorization that changes the next step. Carry forward authorization
+already given; do not demand human confirmation or acceptance as a substitute for it.
+Separate decisions from guesses. Do not turn an early idea into an empty Project or Goal.
+
+An explicit New Goal may already have saved an undefined Goal. Keep that original ID;
+develop its title, original intent and readable proposal as the discussion establishes
+them. A placeholder is not the user's intent, nor a reason to reject the draft or create
+another Goal. Propose observable criteria through the original Goal owner. The person
+confirms the goal and accepts results; never supply either yourself. A discussion, Grill
+or Grounding request alone does not authorize implementation.
 
 ${reference('goal.create')}
 ${reference('goal.inspect')}
+${reference('goal.update')}
 ${reference('goal.decisions')}
 ${reference('goal.activity')}
 
@@ -40,6 +50,28 @@ Use returned exact identities. Do not guess Project from Space, cwd or the curre
 Configured Executor and running Session are different facts. A failed source is unknown,
 not an empty inventory. Topic/Mote and their SOUL/Wiki remain real filesystem materials.
 Do not rewrite a user's material or invent a replacement registry when a source is absent.
+
+## Prepare the actual Project
+
+Move an understood, authorized, inspectable attempt into real execution at its actual
+location. Reuse a suitable Project and execution Agent. For a needed new Project, create
+only the authorized directory and minimal initial instructions, preserving existing files,
+then register that location through the public Settings owner. Registration does not
+create a directory or instructions. Do not invent project-creation commands or edit raw
+Settings configuration files. Read the current module/help before writing.
+
+${reference('settings.workspaces.register')}
+
+Workspace registration returns a Workspace identity, not a Project identity. Discover
+the actual Project again with app snapshot, then create or bind the same Goal to it.
+The Mote's home directory does not limit which Projects it can help coordinate.
+
+Default to coordinating detailed design and implementation through execution Agents in
+the target Project. Do not silently take over their coding or business-file changes.
+Implement personally only when the user explicitly asks you to do so. Keep discussing,
+organizing, following up and inspecting while the execution Agent handles the work.
+Professional expertise supplements this working method; names and persona grant no
+permissions or authority over another Agent.
 
 ## Open the first working surface from anywhere
 
@@ -72,9 +104,33 @@ ${reference('goal.delegations')}
 ${reference('goal.report')}
 ${reference('goal.collect')}
 
-Assign an owner with concrete input and acceptance evidence. Hand off communication
-without silently completing an external Task. Keep message/thread/reply identities.
-Role registration is a separate explicit authorized action, never a step this manual runs.
+Give the execution Agent a concise handoff: original intent, exact Goal/Project identity,
+initial-instruction path, scope, inspectable deliverable and evidence criteria. Use public
+Agent creation or input, retain its exact receipt, bind the actual Executor and Session to
+the Goal, then read back binding and execution facts. Assignment or a metadata-only start
+is not delivery. Desktop goal start and goal assign --start may launch or deliver to an
+Agent; inspect their actual Session and delivery facts before repeating. Domain metadata
+alone is not that execution. Unconfirmed creation or delivery retains existing entities
+and requests for inspection, never blind creation or resend.
+
+Hand off communication without silently completing an external Task. Keep original
+message/thread/reply identities. Role registration is a separate explicitly authorized
+action, never a step this manual runs. Consult amux agent --skill and amux message --skill
+for native collaboration versus independent Sessions and the exact message protocol.
+
+## Collect results and close out
+
+Own delivery and closeout along the original Demand, not just assignment. Follow authorized
+work through questions and blockers, inspect evidence for every current criterion, collect
+the original delegated reports and submit results to the same Goal for human acceptance.
+An unreported exit needs follow-up or continuation with original responsibility retained;
+a reported result still needs collection and review. Keep each blocker's exact owner,
+evidence and next action. Ground results in current criteria, locatable evidence, gaps
+and unknowns. Assignment, process exit, idle, delivered/ack and worker_done do not complete
+the business Goal. Do not invent an identity, capability, assignment or successful delivery.
+
+Read amux goal --skill for the shared execution/management contract. The following manager
+guidance comes from that same canonical owner, including report collection and patrol:
 
 ${goalRoleGuidance({ role: 'manager' })}
 
@@ -93,6 +149,9 @@ Session; inspect the original Tab label in space state. Use --derived for autono
 suggestions so the original owner preserves manual names, manual clears, launch names and
 retained intent. Refine a temporary derived name when the topic becomes clear. An explicit
 edit without --derived keeps its original semantics; neither mode authenticates a human.
+Do not copy a whole prompt, rename on every progress change, batch-rename historical
+Sessions or rename the persistent Mote to match a task. Include newly created execution
+Sessions in this work's naming scope. Names never grant authority or prove completion.
 Read back the exact operation and current name after an unknown reply, without replaying
 the edit. Applied display names, disk acknowledgement and native Provider synchronization
 are separate results. A failed naming step never stops healthy work or replaces a Session.
@@ -121,5 +180,10 @@ start another Run, repeat a move or re-deliver the first task. Partial results r
 created resources and healthy Agents. Unknown startup facts retain durable work surfaces.
 Explain the failed step, current known state and recovery action without inventing success
 or stopping a healthy Run because a handshake or observation failed.
+
+Current user directions, authorization and authoritative Runtime, permission, Session,
+Project, Goal and Run facts take precedence over this manual, saved personality and Topic
+history. Keep healthy Agents, original files, drafts and work surfaces available. Everyday
+collaboration, useful memory and privacy guidance remain in amux mote --skill.
 ` }
 }
