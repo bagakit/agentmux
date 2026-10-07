@@ -365,6 +365,10 @@ const mockApi: AgentMuxDesktopApi = {
   readRendererMemory: () => ({ process: { pid: null, creationTime: null }, memory: { sampledAt: Date.now(),
     scope: 'renderer-v8-isolate', heap: null, unavailable: 'Renderer process observation requires the desktop app.' } }),
   notesStorage: { inspect: async () => ({ directory: new URL("preview/notes", new URL('/', new URL(import.meta.url))).pathname, catalogPath: new URL("preview/notes/notebooks.json", new URL('/', new URL(import.meta.url))).pathname, resourceChanges: [], directoryChanges: [], operation: null }), change: async () => { throw new Error('Change the Notes directory in Desktop Settings. Your preview is retained.') }, onChange: () => () => {} },
+  motePreferences: {
+    read: async () => { throw new Error('Open Desktop to read the original Mote preferences. Existing choices and work remain available.') },
+    save: async () => { throw new Error('Open Desktop to save through the original Mote Files owner. Your draft and request are retained.') }
+  },
   moteAvatars: {
     list: async () => { throw new Error('Open Desktop to read this Host’s avatar series.') },
     preview: async () => { throw new Error('Open Desktop to prepare this original avatar source.') },

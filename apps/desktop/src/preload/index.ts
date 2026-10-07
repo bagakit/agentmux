@@ -259,6 +259,10 @@ const api: AgentMuxPreloadApi = {
     openSystem: (workspaceId: string, path: string) => ipcRenderer.invoke('files:openSystem', workspaceId, path),
     reveal: (workspaceId: string, path: string) => ipcRenderer.invoke('files:reveal', workspaceId, path)
   },
+  motePreferences: {
+    read: params => ipcRenderer.invoke('motePreferences:read', params),
+    save: params => ipcRenderer.invoke('motePreferences:save', params)
+  },
   moteAvatars: {
     list: () => ipcRenderer.invoke('moteAvatars:list'),
     preview: params => ipcRenderer.invoke('moteAvatars:preview', params),

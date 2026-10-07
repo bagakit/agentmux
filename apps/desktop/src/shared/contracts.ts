@@ -1678,6 +1678,10 @@ export type AgentMuxDesktopApi = {
     openSystem(workspaceId: string, path: string): Promise<void>
     reveal(workspaceId: string, path: string): Promise<void>
   }
+  motePreferences: {
+    read(params: import('@agentmux/core/mote-preferences').MotePreferencesReadInput): Promise<import('@agentmux/core/mote-preferences').MotePreferencesReadResult>
+    save(params: import('@agentmux/core/mote-preferences').MotePreferencesSaveParams): Promise<import('@agentmux/core/mote-preferences').MotePreferencesSaveResult>
+  }
   moteAvatars: {
     list(): Promise<import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesCatalog>
     preview(params: import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesPreviewParams): Promise<import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesPrepared>
