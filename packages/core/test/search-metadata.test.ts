@@ -53,4 +53,19 @@ describe('Core original-object metadata search', () => {
     Object.defineProperty(input, 'catalog', { get() { throw Error('Empty query must not traverse unrelated spatial facts') } })
     expect(searchAgentMuxMetadata('', input).sessions).toHaveLength(3)
   })
+
+  it('keeps unknown execution positions searchable without assigning their identities to a lone Session candidate', () => {
+    const input = facts()
+    input.sessions = input.sessions.filter(session => session.hostId === 'host-a')
+    input.catalog.regions[0]!.execution = null
+    const query = formatAmuxObjectLink({ kind: 'region', regionId: 'OriginalRegion' })
+    const result = searchAgentMuxMetadata(query, input)
+    expect(result.locations.map(location => location.reference.groupId)).toEqual(['GroupOne', 'GroupTwo'])
+    expect(result.sessions).toEqual([])
+    expect(searchAgentMuxMetadata('CaseAgent', input).sessions).toEqual([{ hostId: 'host-a', agentSessionId: 'CaseAgent', kind: 'agent' }])
+    input.catalog.regions[0]!.execution = { hostId: 'host-b', cwd: 'original-resource' }
+    expect(searchAgentMuxMetadata(query, input).sessions).toEqual([])
+    input.catalog.regions[0]!.execution = { hostId: 'host-a', cwd: 'original-resource' }
+    expect(searchAgentMuxMetadata(query, input).sessions).toEqual([{ hostId: 'host-a', agentSessionId: 'CaseAgent', kind: 'agent' }])
+  })
 })

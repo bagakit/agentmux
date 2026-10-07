@@ -51,6 +51,14 @@ async function refreshCoreGraph(hostId?: string) {
   await initializeSpatialControlFixture()
 }
 async function mount() { await dom.render(<ExecutorIdentityContext.Provider value={{ config: useAppStore.getState().config }}><GlobalFocusSurface /></ExecutorIdentityContext.Provider>) }
+async function query(value: string) {
+  const input = dom.container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
+  expect(input).not.toBeNull()
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
 async function pointer(node: Element, type: 'pointerover' | 'pointerout', relatedTarget: Element | null = null) {
   await act(async () => node.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'mouse', buttons: 0, relatedTarget })))
 }
@@ -68,6 +76,20 @@ beforeEach(async () => {
 })
 
 describe('mounted Focus consumes original workbench identity', () => {
+  it.each(['local', 'other-host', ''])('matches spatial search identities only at the confirmed execution Host %s', async host => {
+    await refreshCoreGraph(host); await mount()
+    const before = useAppStore.getState(), reads = vi.spyOn(api.sessions, 'readHistory')
+    await query('amux://region/subject-region')
+    expect(Boolean(card())).toBe(host === 'local')
+    expect(dom.container.querySelectorAll('.focus-search-locations button')).toHaveLength(1)
+    expect(dom.container.querySelector('.focus-search-locations')?.textContent).toContain('subject-region')
+    await query(agent.id)
+    expect(card()).not.toBeNull()
+    expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
+    expect(useAppStore.getState().tabs).toBe(before.tabs)
+    expect(reads).not.toHaveBeenCalled()
+  })
+
   it('keeps fixed state, exact subject geometry and the full-width original result in separate rows', async () => {
     expect(agentRegionExecution({ ...reference, agentSessionId: agent.id })?.hostId).toBe('local')
     await mount()
@@ -247,6 +269,8 @@ describe('mounted Focus consumes original workbench identity', () => {
       viewport: 'responsive', error: null, driving: false, appLinkPrompt: null })
     useAppStore.setState({ tabs: { [tab.id]: tab, [browser.id]: browser }, layouts: { [workspace.id]: createWorkspaceLayout(reference.groupId, [tab.id, browser.id]) } })
     await refreshCoreGraph(); await mount()
+    await query('amux://region/subject-region')
+    expect(card()).not.toBeNull()
     const executions = vi.spyOn(store, 'agentRegionExecution'), count = commits[agent.id]
     await act(async () => useAppStore.setState(state => ({ tabs: { ...state.tabs, [browser.id]: { ...browser, regions: { ...browser.regions,
       'unrelated-browser-region': { ...browser.regions['unrelated-browser-region']!, title: 'Later page', navigationId: 'later-navigation' } as typeof browser.regions[string] } } } })))
