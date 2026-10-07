@@ -1,5 +1,6 @@
 import { lazy, useEffect, useState } from 'react'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
+import { ReadingFind } from '@agentmux/client-ui/components/ReadingFind'
 import type { WorkspaceSourcePreview } from '../../../../shared/workspace-file-format'
 import { ImageContent } from '../FilePreviewPane'
 import { WorkspaceImage } from '../WorkspaceImage'
@@ -56,9 +57,10 @@ export function SourceFilePreview(props: SourceFilePreviewProps) {
     case 'excalidraw': return <ExcalidrawFilePreview content={content} path={path} visible={visible} />
     case 'vega': case 'vega-lite': return <VegaFilePreview content={content} path={path} workspaceId={workspaceId} visible={visible} mode={kind} />
     case 'latex': case 'typst': return <BuildFilePreview regionId={props.regionId} kind={kind} path={path} visible={visible} />
-    case 'markdown': return <AgentMarkdown documentMode outline className="file-markdown-preview" content={content} workspaceRoot={workspaceRoot} sourcePath={path}
+    case 'markdown': return <ReadingFind source={JSON.stringify([workspaceId, path])} active={visible} label="loaded Markdown preview"
+      bodySelector=".file-markdown-preview" scrollSelector=".file-markdown-preview"><AgentMarkdown documentMode outline className="file-markdown-preview" content={content} workspaceRoot={workspaceRoot} sourcePath={path}
       renderWorkspaceImage={(image, alt, linked) => <WorkspaceImage key={`${workspaceId}:${image}`} workspaceId={workspaceId} path={image} alt={alt} linked={Boolean(linked)} openFile={() => openReference(image)} />}
-      openWorkspaceFile={openReference} openHttpLink={openHttpLink} />
+      openWorkspaceFile={openReference} openHttpLink={openHttpLink} /></ReadingFind>
     case 'note': return null // Note's editable block owner stays with FileSurfaceView.
     default: { const exhaustive: never = kind; return exhaustive }
   }

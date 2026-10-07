@@ -76,14 +76,15 @@
 @import './activity.css';
 @import '@agentmux/client-ui/styles/conversation-message.css';
 @import '@agentmux/client-ui/styles/conversation-message-disclosure.css';
+@import '@agentmux/client-ui/styles/reading-find.css';
 @import '@agentmux/client-ui/styles/conversation-resource-text.css';
 @import '@agentmux/client-ui/styles/conversation-reactions.css';
 @import '@agentmux/client-ui/styles/markdown.css';
 @import '@agentmux/client-ui/styles/conversation-image.css';
 @import '@agentmux/client-ui/styles/conversation-input-details.css';
 @import '@agentmux/client-ui/styles/conversation-tool-trace.css';
-@import '@agentmux/client-ui/styles/conversation-tool-payload.css';
 @import '@agentmux/client-ui/styles/content-copy.css';
+@import '@agentmux/client-ui/styles/conversation-tool-payload.css';
 @import '@agentmux/client-ui/styles/conversation-trace-feedback.css';
 @import '@agentmux/client-ui/styles/conversation-native-thread.css';
 @import '@agentmux/client-ui/styles/conversation-metrics.css';
