@@ -4,6 +4,12 @@ be reached; do not read or write an alternative configuration. Settings inspect 
 it exposes the supported subset, not the entire client configuration. Saving configuration
 does not launch an Agent or certify Agent health. No Runtime is started or connected for help.
 
+settings inspect startup discovers startup-screen preferences. The default waits for the
+Agent availability check alongside the other startup checks. To finish the screen sooner,
+settings set startup.skipAgentAvailabilityCheckWait true keeps that check running in the
+background. false restores waiting. This preference applies on the next startup; it does
+not skip the check, disable an Agent or certify that an Agent is available.
+
 Use settings inspect notes or settings inspect goals to discover reading and starting-view
 preferences, including their legal values and defaults. For example, settings set notes.fontSize 16
 adjusts note body text; settings set goals.defaultView board applies to newly opened Goals views.
