@@ -58,7 +58,7 @@ function WaitingActivity({ surface }: { surface: RefObject<HTMLElement | null> }
     }
   }, [surface])
   return <span className="full-page-loading__waiting" data-waiting-visible={visible} aria-live="off">
-    <ThemeStatusWaitingIcon ref={activity} className="full-page-loading__activity" size={18} aria-hidden="true" />
+    <ThemeStatusWaitingIcon ref={activity} animation={visible ? 'wait' : 'none'} className="full-page-loading__activity" size={18} aria-hidden="true" />
     <span>{seconds >= 15 ? 'Still waiting' : 'Waiting'}</span>
     <span className="full-page-loading__elapsed" aria-label="Time waiting in this view">{seconds}s</span>
   </span>

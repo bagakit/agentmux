@@ -10,14 +10,70 @@
   will-change: transform;
 }
 .semantic-icon-motion > .semantic-icon { flex: none; }
-.semantic-icon-motion[data-icon-animation="work"] { animation: semantic-icon-work 1.8s ease-in-out infinite; }
+/* Inherit through the SVG use shadow tree; the owning host can pause each instance. */
+.semantic-icon-motion > .semantic-icon,
+.semantic-icon > use,
+[data-semantic-icon-sprite] symbol { animation-play-state: inherit; }
+[data-semantic-icon-part="writing-pen"] {
+  transform-box: view-box;
+  transform-origin: 10px 18px;
+  animation: var(--icon-writing-animation, none) 2.4s ease-in-out infinite;
+  animation-play-state: inherit;
+}
+.semantic-icon-motion[data-icon-animation="work"] { --icon-writing-animation: semantic-icon-work-pen; }
 .semantic-icon-motion[data-icon-animation="stream"] { animation: semantic-icon-stream 1.6s ease-in-out infinite; }
 .semantic-icon-motion[data-icon-animation="execute"] { animation: semantic-icon-execute 2s ease-in-out infinite; }
 .semantic-icon-motion[data-icon-animation="spin"] { animation: semantic-icon-spin 1s linear infinite; }
-@keyframes semantic-icon-work {
-  0%, 50%, 100% { transform: translate(0, 0) rotate(0); }
-  12%, 36% { transform: translate(.65px, -.35px) rotate(-5deg); }
-  24% { transform: translate(-.45px, .3px) rotate(3deg); }
+/* Only registered sand parts receive these instance selectors; custom drawings stay whole. */
+.semantic-icon-motion[data-icon-animation="wait"] {
+  --icon-hourglass-frame-animation: semantic-icon-hourglass-turn;
+  --icon-hourglass-upper-animation: semantic-icon-hourglass-drain;
+  --icon-hourglass-lower-animation: semantic-icon-hourglass-fill;
+  --icon-hourglass-grain-animation: semantic-icon-hourglass-fall;
+  --icon-hourglass-flow-animation: semantic-icon-hourglass-flow;
+}
+[data-semantic-icon-part^="hourglass-"] {
+  transform-box: view-box;
+  transform-origin: 12px 12px;
+  animation-duration: 4.8s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-play-state: inherit;
+}
+[data-semantic-icon-part="hourglass-frame"] { animation-name: var(--icon-hourglass-frame-animation, none); }
+[data-semantic-icon-part="hourglass-upper"] { animation-name: var(--icon-hourglass-upper-animation, none); }
+[data-semantic-icon-part="hourglass-lower"] { animation-name: var(--icon-hourglass-lower-animation, none); }
+[data-semantic-icon-part="hourglass-grain"] {
+  animation-name: var(--icon-hourglass-grain-animation, none), var(--icon-hourglass-flow-animation, none);
+  animation-duration: .48s, 4.8s;
+}
+@keyframes semantic-icon-hourglass-turn {
+  0%, 78% { transform: rotate(0); }
+  78% { animation-timing-function: cubic-bezier(.4, 0, .2, 1); }
+  94%, 100% { transform: rotate(180deg); }
+}
+@keyframes semantic-icon-hourglass-drain {
+  0%, 5% { transform: rotate(0) scaleY(1); }
+  68%, 78% { transform: rotate(0) scaleY(0); }
+  94%, 100% { transform: rotate(180deg) scaleY(0); }
+}
+@keyframes semantic-icon-hourglass-fill {
+  0%, 5% { transform: rotate(0) translateY(6px) scaleY(0) translateY(-6px); }
+  68%, 78% { transform: rotate(0) translateY(6px) scaleY(1) translateY(-6px); }
+  78% { animation-timing-function: cubic-bezier(.4, 0, .2, 1); }
+  94%, 100% { transform: rotate(180deg) translateY(6px) scaleY(1) translateY(-6px); }
+}
+@keyframes semantic-icon-hourglass-fall { from { transform: translateY(-.4px); } to { transform: translateY(2.8px); } }
+@keyframes semantic-icon-hourglass-flow { 0%, 4%, 68%, 100% { opacity: 0; } 5%, 65% { opacity: 1; } }
+@keyframes semantic-icon-work-pen {
+  0%, 8%, 78%, 100% { transform: translate(0, 0) rotate(0); }
+  14% { transform: translate(.7px, -.2px) rotate(-3deg); }
+  22% { transform: translate(-.8px, .5px) rotate(2deg); }
+  30% { transform: translate(.9px, -.1px) rotate(-4deg); }
+  38% { transform: translate(-.5px, .7px) rotate(1deg); }
+  46% { transform: translate(.8px, .1px) rotate(-2deg); }
+  54% { transform: translate(.25px, -1.25px) rotate(-9deg); }
+  66% { transform: translate(-.8px, -1px) rotate(-7deg); }
 }
 @keyframes semantic-icon-stream {
   0%, 100% { transform: translateY(0); }
@@ -31,5 +87,5 @@
 }
 @keyframes semantic-icon-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .semantic-icon-motion[data-icon-animation] { animation: none; will-change: auto; }
+  .semantic-icon-motion[data-icon-animation] { --icon-writing-animation: none; --icon-hourglass-frame-animation: none; --icon-hourglass-upper-animation: none; --icon-hourglass-lower-animation: none; --icon-hourglass-grain-animation: none; --icon-hourglass-flow-animation: none; animation: none; will-change: auto; }
 }
