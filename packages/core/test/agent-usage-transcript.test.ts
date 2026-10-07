@@ -1,3 +1,4 @@
+import { fixtureEpoch as _newTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixtureClock, fixtureDay, fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
@@ -70,17 +71,17 @@ const CODEX_ROLLOUT = [
 ].join('\n') + '\n'
 
 describe('native usage extraction from provider transcripts', () => {
-  it('reads the real claude assistant record usage as this turn tokens', () => {
+  it('reads the real claude assistant record usage as response tokens', () => {
     const usage = extractTurnUsage(CLAUDE, CLAUDE_TRANSCRIPT, 1234)
     // 分子逐字来自 Provider：input/output 就是 claude 自报的 2 / 5；total 取 in+out（claude 不给单一 total）。
-    expect(usage).toEqual({ inputTokens: 2, outputTokens: 5, totalTokens: 7, observedAt: 1234 })
+    expect(usage).toEqual({ scope: 'response', inputTokens: 2, outputTokens: 5, totalTokens: 7, observedAt: _newTailFixtureEpoch(0, 0, 1234) })
   })
 
-  it('reads codex last_token_usage (this turn) — never the session total', () => {
+  it('reads codex last_token_usage (one response) — never the session total', () => {
     const usage = extractTurnUsage(CODEX, CODEX_ROLLOUT, 5678)
-    // 必须取 last_token_usage（本 turn 增量），不是 total_token_usage（会话累计）。若抽错字段，
+    // 必须取 last_token_usage（最后一次响应），不是 total_token_usage（会话累计）。若抽错字段，
     // 下面这三个数会变成 999999/888888/1888887——断言会红。codex 自报单一 total 就用它报的。
-    expect(usage).toEqual({ inputTokens: 61008, outputTokens: 3381, totalTokens: 67039, observedAt: 5678 })
+    expect(usage).toEqual({ scope: 'response', inputTokens: 61008, outputTokens: 3381, totalTokens: 67039, observedAt: _newTailFixtureEpoch(0, 0, 5678) })
     // 而且 total 必须是**它报的那个**，不是我们自己加的：fixture 里 61008+3381=64389 ≠ 67039，
     // 差额就是 reasoning_output_tokens。这一行把「谁算的」单独钉住——不写它的话，只要哪天有人
     // 把 fixture 改回三数自洽，`total ?? input + output` 换成 `input + output` 又会静默全绿。
@@ -93,7 +94,7 @@ describe('native usage extraction from provider transcripts', () => {
   // 把 tailLines 里的 `tail.push(line)` 改成 `tail.unshift(line)`（收集成旧在前），本文件 10 条全绿。
   //
   // 真实的带工具调用的 turn 尾部一定有多条：claude 每条 type:"assistant" 记录写一次 message.usage
-  // （用了工具就有好几条），codex 每次 API 请求写一次 token_count。最后那条才是本 turn 收敛后的累计值。
+  // （用了工具就有好几条），codex 每次 API 请求写一次 token_count。最后那条仅覆盖最后一次响应，不能声称整轮累计。
   // 方向翻掉之后「上一回合」的 token 徽标与 in/out/total 提示，对每个用了工具的 turn 都显示更早、更小的
   // 中间值——静默低报，且与正确值在界面上无从分辨。
   //
@@ -115,6 +116,7 @@ describe('native usage extraction from provider transcripts', () => {
     // 前提自检：整段远短于 64 行，所以行数裁剪不参与——发红只可能因为方向错了。
     expect(claudeMultiRecord.split('\n').length).toBeLessThan(64)
     expect(extractTurnUsage(CLAUDE, claudeMultiRecord, 7)).toEqual({
+      scope: 'response',
       inputTokens: 100, outputTokens: 200, totalTokens: 300, observedAt: 7
     })
 
@@ -132,6 +134,7 @@ describe('native usage extraction from provider transcripts', () => {
     ].join('\n') + '\n'
     expect(codexMultiRecord.split('\n').length).toBeLessThan(64)
     expect(extractTurnUsage(CODEX, codexMultiRecord, 8)).toEqual({
+      scope: 'response',
       inputTokens: 110, outputTokens: 220, totalTokens: 330, observedAt: 8
     })
   })
@@ -159,7 +162,7 @@ describe('native usage extraction from provider transcripts', () => {
       }
     }) + '\n'
     const usage = extractTurnUsage(CODEX, legacy, 99)
-    expect(usage).toEqual({ inputTokens: 700, outputTokens: 42, totalTokens: 742, observedAt: 99 })
+    expect(usage).toEqual({ scope: 'response', inputTokens: 700, outputTokens: 42, totalTokens: 742, observedAt: _newTailFixtureEpoch(0, 0, 99) })
     // 这一侧的判据是「有个数」而不只是「等于 742」：删掉 fallback 时得到的是 undefined，
     // 而 undefined 会顺着可选字段一路静默走远，所以先把「在场且有限」单独钉住。
     expect(Number.isFinite(usage?.totalTokens)).toBe(true)
@@ -190,7 +193,7 @@ describe('native usage extraction from provider transcripts', () => {
       const path = join(dir, 'transcript.jsonl')
       await writeFile(path, `${filler}\n${CLAUDE_TRANSCRIPT}`)
       const usage = await readTurnUsageFromTranscript(CLAUDE, path, 42)
-      expect(usage).toEqual({ inputTokens: 2, outputTokens: 5, totalTokens: 7, observedAt: 42 })
+      expect(usage).toEqual({ scope: 'response', inputTokens: 2, outputTokens: 5, totalTokens: 7, observedAt: _newTailFixtureEpoch(0, 0, 42) })
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
