@@ -146,6 +146,10 @@ type SearchCallContext = AgentMuxSearchReadContext & { rpc: AgentMuxRpcCallConte
 const NATIVE_FIELDS = {
   'goal.delegation.prepare': ['goalId', 'intent', 'materials'], 'goal.delegation.bind': ['goalId', 'intent'], 'goal.delegate': ['goalId', 'intent', 'materials'],
   'goal.report': ['goalId', 'operationId', 'report'], 'goal.collect': ['goalId', 'operationId', 'collection'], 'goal.delegations': ['goalId'],
+  'goal.progress': ['goalId', 'progress'],
+  'goal.patrol': ['goalId', 'operationId'],
+  'goal.patrol.continue': ['goalId', 'patrolOperationId', 'operationId', 'expectedRunId'],
+  'goal.patrol.report': ['goalId', 'patrolOperationId', 'report'],
   'settings.appearance.watch': [],
   'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId','content','maxBytes'], 'notebook.graph': ['notebookId','noteId','maxBytes'], 'notebook.resolve': ['mode','query','limit','text','select','maxBytes'], 'notebook.apply': ['expectedRevision','operationId','change'],
   'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval','removedProjectGroupIds'],

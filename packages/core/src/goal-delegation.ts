@@ -1,10 +1,12 @@
+import { parseDemandPatrols, parseDemandPatrolReportInput, type DemandPatrol, type DemandPatrolReportInput } from '@agentmux/demand'
+import { parseGoalPatrolObservations, type GoalPatrolObservation } from './goal-patrol.js'
 import { type GoalDelegationMethod } from './goal-delegation-methods.js'
 export { GOAL_DELEGATION_METHODS, isGoalDelegationMethod, type GoalDelegationMethod } from './goal-delegation-methods.js'
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { parseDemandDispatches, type DemandDispatch, type GoalStartObservation } from '@agentmux/demand'
 import { parseFileReadParams, type FileReadParams } from './public-rpc-files.js'
 import { parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, validateDemandDelegationReport } from '@agentmux/demand/delegations'
-import { parseGrounding } from '@agentmux/demand/goals'
+import { parseAlignment, parseGrounding } from '@agentmux/demand/goals'
 import type { DemandDelegation, DemandDelegationIntent, DemandDelegationReportInput, DemandDelegationCollectionInput } from '@agentmux/demand/delegations'
 import type { DemandGrounding } from '@agentmux/demand/goals'
 import { parseRpcNativeResult } from './rpc-native-codec.js'
@@ -12,6 +14,8 @@ import type { AgentMuxRun } from './types.js'
 import type { DurableAgentMuxMessage } from './agent-global-message-queue.js'
 import type { DispatchObservation } from './agent-handoff.js'
 import { AgentMuxError } from './errors.js'
+import { demandExecutionReferences, parseDemandProgressInput, parseDemandProgressUpdates, type DemandProgress, type DemandProgressInput } from '@agentmux/demand'
+import { parseGoalResponsibility, type GoalResponsibilityObservation } from './goal-responsibility.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 
 /** Goal owns business intent and reports; this port never owns a message queue. */
@@ -22,9 +26,13 @@ export type GoalDelegationParamsMap = {
   'goal.report': { goalId: string; operationId: string; report: DemandDelegationReportInput }
   'goal.collect': { goalId: string; operationId: string; collection: DemandDelegationCollectionInput }
   'goal.delegations': { goalId: string }
+  'goal.progress': { goalId: string; progress: DemandProgressInput }
+  'goal.patrol': { goalId: string; operationId: string }
+  'goal.patrol.continue': { goalId: string; patrolOperationId: string; operationId: string; expectedRunId: string }
+  'goal.patrol.report': { goalId: string; patrolOperationId: string; report: DemandPatrolReportInput }
 }
 export type GoalDelegationObservation = { operationId: string; communication?: DispatchObservation & { hostId: string }; workerRun?: Pick<AgentMuxRun, 'runId' | 'state'>; unknown?: string; recoverableReport?: DemandDelegationReportInput; attention?: { state: 'prepared' | 'confirmed' | 'unknown'; reason: string } }
-export type GoalDelegationResult = { goalId: string; goalUpdatedAt: number; delegations: DemandDelegation[]; grounding?: DemandGrounding; diskDurability: 'confirmed'; observations?: GoalDelegationObservation[]; dispatches?: DemandDispatch[]; startObservations?: GoalStartObservation[] }
+export type GoalDelegationResult = { goalId: string; goalUpdatedAt: number; delegations: DemandDelegation[]; grounding?: DemandGrounding; diskDurability: 'confirmed'; observations?: GoalDelegationObservation[]; dispatches?: DemandDispatch[]; startObservations?: GoalStartObservation[]; progressUpdates?: DemandProgress[]; responsibility?: GoalResponsibilityObservation; patrols?: DemandPatrol[]; patrolObservations?: GoalPatrolObservation[]; goalState?: { status: import('@agentmux/demand').DemandStatus; supervisorSessionId: string | null; alignment?: import('@agentmux/demand').DemandAlignment } }
 export type GoalDelegationResultMap = { [M in GoalDelegationMethod]: GoalDelegationResult }
 /** Supplied after transport/Core caller admission, never from an editable business payload. */
 export type GoalDelegationAuthority = { actor: { kind: 'agent' | 'user' | 'device'; id: string }; hostId?: string; runId?: string }
@@ -42,19 +50,34 @@ function id(value: unknown): string {
   return value
 }
 export function parseGoalDelegationParams<M extends GoalDelegationMethod>(method: M, value: unknown): GoalDelegationParamsMap[M] {
+  if (method === 'goal.patrol' || method === 'goal.patrol.continue' || method === 'goal.patrol.report') {
+    const p = record(value, method === 'goal.patrol' ? ['goalId', 'operationId'] : method === 'goal.patrol.continue' ? ['goalId', 'patrolOperationId', 'operationId', 'expectedRunId'] : ['goalId', 'patrolOperationId', 'report'])
+    return { goalId: id(p.goalId), ...(method === 'goal.patrol.report' ? { patrolOperationId: id(p.patrolOperationId), report: parseDemandPatrolReportInput(p.report) }
+      : { operationId: id(p.operationId), ...(method === 'goal.patrol.continue' ? { patrolOperationId: id(p.patrolOperationId), expectedRunId: id(p.expectedRunId) } : {}) }) } as GoalDelegationParamsMap[M]
+  }
   const prepares = method === 'goal.delegation.prepare' || method === 'goal.delegate' || method === 'goal.delegation.bind'
-  const p = record(value, prepares ? method === 'goal.delegation.bind' ? ['goalId', 'intent'] : ['goalId', 'intent', 'materials'] : method === 'goal.report' ? ['goalId', 'operationId', 'report'] : method === 'goal.collect' ? ['goalId', 'operationId', 'collection'] : ['goalId'])
+  const p = record(value, prepares ? method === 'goal.delegation.bind' ? ['goalId', 'intent'] : ['goalId', 'intent', 'materials'] : method === 'goal.report' ? ['goalId', 'operationId', 'report'] : method === 'goal.collect' ? ['goalId', 'operationId', 'collection'] : method === 'goal.progress' ? ['goalId', 'progress'] : ['goalId'])
   return { goalId: id(p.goalId), ...(prepares ? { intent: parseDemandDelegationIntent(p.intent),
     ...(p.materials === undefined ? {} : { materials: Array.isArray(p.materials) ? p.materials.map(parseFileReadParams) : (() => { throw new AgentMuxError('Original materials must be exact File requests.', 'INVALID_CONTROL_REQUEST') })() }) }
+    : method === 'goal.progress' ? { progress: parseDemandProgressInput(p.progress) }
     : method === 'goal.report' ? { operationId: id(p.operationId), report: parseDemandDelegationReportInput(p.report) }
     : method === 'goal.collect' ? { operationId: id(p.operationId), collection: parseDemandDelegationCollectionInput(p.collection) } : {}) } as GoalDelegationParamsMap[M]
 }
 export function parseGoalDelegationResult(value: unknown, input: { goalId: string }): GoalDelegationResult {
-  const p = record(value, ['goalId', 'goalUpdatedAt', 'delegations', 'grounding', 'diskDurability', 'observations', 'dispatches', 'startObservations'])
+  const p = record(value, ['goalId', 'goalUpdatedAt', 'delegations', 'grounding', 'diskDurability', 'observations', 'dispatches', 'startObservations', 'progressUpdates', 'responsibility', 'patrols', 'patrolObservations', 'goalState'])
   if (p.goalId !== input.goalId || p.diskDurability !== 'confirmed' || typeof p.goalUpdatedAt !== 'number' || !Number.isSafeInteger(p.goalUpdatedAt) || p.goalUpdatedAt <= 0) throw new AgentMuxError('The Goal delegation read belongs to another object or is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
+  const goalState = p.goalState === undefined ? undefined : (() => {
+    const state = record(p.goalState, ['status', 'supervisorSessionId', 'alignment'])
+    if (!['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'].includes(String(state.status))) throw new AgentMuxError('Invalid original Goal business state.', 'CONTROL_PROTOCOL_ERROR')
+    return { status: state.status as import('@agentmux/demand').DemandStatus, supervisorSessionId: state.supervisorSessionId === null ? null : id(state.supervisorSessionId), ...(state.alignment === undefined ? {} : { alignment: parseAlignment(state.alignment) }) }
+  })()
+  const patrols = p.patrols === undefined ? undefined : parseDemandPatrols(p.patrols)
+  const patrolObservations = p.patrolObservations === undefined ? undefined : parseGoalPatrolObservations(p.patrolObservations, (patrols ?? []).map(p => p.operationId))
   const delegations = parseDemandDelegations(p.delegations)
   const dispatches = p.dispatches === undefined ? undefined : parseDemandDispatches(p.dispatches)
   const startObservations = p.startObservations === undefined ? undefined : parseGoalStartObservations(p.startObservations, dispatches ?? [], p.grounding)
+  const progressUpdates = p.progressUpdates === undefined ? undefined : parseDemandProgressUpdates(p.progressUpdates)
+  const responsibility = p.responsibility === undefined ? undefined : parseGoalResponsibility(p.responsibility, demandExecutionReferences({ ...(dispatches ? { dispatches } : {}), delegations }))
   const observations = p.observations === undefined ? undefined : (() => {
     if (!Array.isArray(p.observations)) throw new AgentMuxError('Delegation observations must refer to original intents.', 'CONTROL_PROTOCOL_ERROR')
     const seen = new Set<string>()
@@ -91,6 +114,8 @@ export function parseGoalDelegationResult(value: unknown, input: { goalId: strin
   })()
   return { goalId: input.goalId, goalUpdatedAt: p.goalUpdatedAt as number, delegations, diskDurability: 'confirmed',
     ...(dispatches ? { dispatches } : {}), ...(startObservations ? { startObservations } : {}),
+    ...(goalState ? { goalState } : {}), ...(patrols ? { patrols } : {}), ...(patrolObservations ? { patrolObservations } : {}),
+    ...(progressUpdates ? { progressUpdates } : {}), ...(responsibility ? { responsibility } : {}),
     ...(p.grounding === undefined ? {} : { grounding: parseGrounding(p.grounding) }), ...(observations === undefined ? {} : { observations }) }
 }
 

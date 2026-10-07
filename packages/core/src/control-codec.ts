@@ -1,5 +1,6 @@
+import { parseDemandPatrols } from '@agentmux/demand'
 import { parseDemandDelegations } from '@agentmux/demand/delegations'
-import { parseDemandDispatches } from '@agentmux/demand'
+import { parseDemandDispatches, parseDemandProgressUpdates } from '@agentmux/demand'
 import { parseDemandParticipations, parseDemandCreationOrigin } from '@agentmux/demand/goals'
 import { parseDemandContentReferences } from '@agentmux/demand'
 import { parseGoalContinuationLoop } from './continuous-progress-scheduler.js'
@@ -878,7 +879,7 @@ function parseDemand(value: unknown): AgentMuxDemand {
   const supervisorSessionId = source.supervisorSessionId === null ? null : id(source.supervisorSessionId, 'Control Goal Supervisor is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (new Set(assigneeSessionIds).size !== assigneeSessionIds.length || assigneeSessionIds.some(id => !sessionIds.includes(id)) || supervisorSessionId !== null && !assigneeSessionIds.includes(supervisorSessionId)) throw new AgentMuxError('Control Goal collaboration relations are inconsistent.', 'CONTROL_PROTOCOL_ERROR')
   let participations: AgentMuxDemand['participations'], creationOrigin: AgentMuxDemand['creationOrigin']
-  let goalFacts: Pick<AgentMuxDemand, 'alignment' | 'grounding' | 'dispatches' | 'delegations'> = {}
+  let goalFacts: Pick<AgentMuxDemand, 'alignment' | 'grounding' | 'dispatches' | 'delegations' | 'progressUpdates' | 'patrols'> = {}
   try {
     participations = parseDemandParticipations(source.participations)
     creationOrigin = source.creationOrigin === undefined ? undefined : parseDemandCreationOrigin(source.creationOrigin)
@@ -886,6 +887,8 @@ function parseDemand(value: unknown): AgentMuxDemand {
     goalFacts = {
       ...(source.delegations === undefined ? {} : { delegations: parseDemandDelegations(source.delegations) }),
       ...(source.dispatches === undefined ? {} : { dispatches: parseDemandDispatches(source.dispatches) }),
+      ...(source.progressUpdates === undefined ? {} : { progressUpdates: parseDemandProgressUpdates(source.progressUpdates) }),
+      ...(source.patrols === undefined ? {} : { patrols: parseDemandPatrols(source.patrols) }),
       ...(source.alignment === undefined ? {} : { alignment: parseAlignment(source.alignment) }),
       ...(source.grounding === undefined ? {} : { grounding: parseGrounding(source.grounding) })
     }

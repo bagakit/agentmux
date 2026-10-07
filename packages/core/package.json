@@ -254,6 +254,10 @@
       "types": "./dist/connections.d.ts",
       "import": "./dist/connections.js"
     },
+    "./goal-patrol": {
+      "types": "./dist/goal-patrol.d.ts",
+      "import": "./dist/goal-patrol.js"
+    },
     "./goal-role-guidance": {
       "types": "./dist/goal-role-guidance.d.ts",
       "import": "./dist/goal-role-guidance.js"
