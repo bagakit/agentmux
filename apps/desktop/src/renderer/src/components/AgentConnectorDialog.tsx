@@ -13,7 +13,7 @@ import { SettingsNavigation } from './SettingsNavigation'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
 type Fact = RoomProvisioningOperation | RoomBindingOperation | null
-export type AgentConnectorTarget = { target: RoomBindingTarget; session: AgentNativeSourceReference; name: string }
+export type AgentConnectorTarget = { target: RoomBindingTarget; session: AgentNativeSourceReference; name: string; connectionId?: string }
 /** A bounded form over original public owners. It retains submitted correlations, never another receipt store. */
 export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   original: AgentConnectorTarget; mode: 'create' | 'existing' | 'details'; onClose(): void; returnFocus(): HTMLElement | null
@@ -21,7 +21,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   const { target, session } = original, identity = JSON.stringify(target)
   const mote = useContext(MoteWorkfaceContext), settings = useContext(SettingsNavigation)
   const [connections, setConnections] = useState<ConnectionRecord[]>([]), [bindings, setBindings] = useState<RoomBinding[]>([])
-  const [connectionId, setConnectionId] = useState(''), [name, setName] = useState(original.name + ' · AgentMux')
+  const [connectionId, setConnectionId] = useState(original.connectionId ?? ''), [name, setName] = useState(original.name + ' · AgentMux')
   const [group, setGroup] = useState(''), [members, setMembers] = useState(''), [memberType, setMemberType] = useState('')
   const [scope, setScope] = useState<'mentions-and-replies' | 'all-messages'>('mentions-and-replies'), [confirmed, setConfirmed] = useState(false)
   const [actorId, setActorId] = useState(''), [actorType, setActorType] = useState(''), [actorInput, setActorInput] = useState(false), [actorAnswer, setActorAnswer] = useState(false)

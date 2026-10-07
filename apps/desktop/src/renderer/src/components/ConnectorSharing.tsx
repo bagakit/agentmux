@@ -24,8 +24,9 @@ export function ConnectorSharing({ session, regionId, visible }: { session: Extr
   const current = read?.identity === identity ? read : null
   if (!current?.bindings.length && !current?.issue) return null
   return <div className="connector-sharing" aria-label="Group sharing before sending">
-    {current?.bindings.map(binding => <button type="button" className="connector-sharing__group" key={binding.bindingId}
-      onClick={event => { returned.current = event.currentTarget; setDialog({ name: session.label, session, target: { ...target, regionAnchor: { regionId: regionId ?? binding.regionAnchor.regionId } } }) }}>
+    {current?.bindings.map(binding => <button type="button" className="connector-sharing__group" key={binding.bindingId} title={binding.application.domain + ' · ' + binding.application.appId}
+      aria-label={`${current.issue ? 'Last known group' : binding.state === 'active' ? 'Shared group' : 'Sharing paused'} ${binding.externalConversationId}; ${binding.application.domain}; ${binding.application.appId}`}
+      onClick={event => { returned.current = event.currentTarget; setDialog({ name: session.label, session, connectionId: binding.connectionId, target: { ...target, regionAnchor: { regionId: regionId ?? binding.regionAnchor.regionId } } }) }}>
       {current.issue ? 'Last known group' : binding.state === 'active' ? 'Shared group' : 'Sharing paused'} · {binding.externalConversationId}
     </button>)}
     {current?.issue ? <span role="status">Sharing status unconfirmed · {current.issue}</span> : null}
