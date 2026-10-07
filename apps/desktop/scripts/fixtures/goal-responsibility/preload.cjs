@@ -1,0 +1,6 @@
+const { contextBridge } = require('electron')
+const fs = require('node:fs')
+const sourceArgument = process.argv.find(value => value.startsWith('--goal-responsibility-source='))
+if (!sourceArgument) throw new Error('The private Renderer requires its exact recorded source.')
+const input = JSON.parse(fs.readFileSync(sourceArgument.slice('--goal-responsibility-source='.length), 'utf8'))
+contextBridge.exposeInMainWorld('goalResponsibilitySource', input)
