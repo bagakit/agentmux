@@ -1,3 +1,4 @@
+import { topicPublicCopy } from '../shared/scratch-topics.js'
 import { MOTE_QUICK_MODE_PATH, parseMoteQuickMode, type MoteQuickMode } from '../shared/mote-quick-mode.js'
 import { directoryIdentity } from '../shared/space-addresses.js'
 import { constants, lstat, mkdir, open, readdir, realpath, stat, unlink } from 'node:fs/promises'
@@ -217,13 +218,8 @@ function renamedTopicContent(content: string, title: string): string {
 }
 
 function topicCopy(content: string): { title: string; summary: string } {
-  const lines = content.split(/\r?\n/)
-  const title = lines.find((line) => /^#\s+\S/.test(line))?.replace(/^#\s+/, '').trim() || 'Untitled Topic'
-  const summary = lines.find((line) => {
-    const value = line.trim()
-    return Boolean(value && !value.startsWith('#'))
-  })?.trim() ?? ''
-  return { title, summary }
+  const copy = topicPublicCopy(content)
+  return { title: copy.title ?? 'Untitled Topic', summary: copy.summary }
 }
 
 function collaborator(fileName: string) {
