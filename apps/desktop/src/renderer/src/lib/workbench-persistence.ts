@@ -609,7 +609,7 @@ export function restorePersistedWorkbench(input: {
   if (!input.persisted) {
     return {
       tabs: {},
-      layouts: Object.fromEntries(input.config.workspaces.map((workspace) => [
+      layouts: Object.fromEntries(input.config.workspaces.filter(workspace => !workspace.closeout).map((workspace) => [
         workspace.id,
         createWorkspaceLayout(input.createTabGroupId())
       ])),
@@ -642,7 +642,7 @@ export function restorePersistedWorkbench(input: {
     })
   )
   const layouts: Record<string, WorkspaceLayout> = {}
-  const workspaceIds = new Set([...input.config.workspaces.map(workspace => workspace.id), ...Object.values(tabs).map(tab => tab.workspaceId), ...Object.keys(input.persisted.layouts)])
+  const workspaceIds = new Set([...input.config.workspaces.filter(workspace => !workspace.closeout).map(workspace => workspace.id), ...Object.values(tabs).map(tab => tab.workspaceId), ...Object.keys(input.persisted.layouts)])
   for (const workspaceId of workspaceIds) {
     // Preserve every live entity reference in this exact durable display layout. Zero occurrences
     // are intentional after unbinding; resource membership never invents a new placement.

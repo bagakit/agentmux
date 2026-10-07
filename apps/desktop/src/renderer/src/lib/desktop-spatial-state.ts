@@ -66,7 +66,7 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
       if ((!knownSpaces.has(binding.spaceId) || !knownZones.has(binding.zoneId)) && !keys.has(JSON.stringify(binding)))
         facts.bindings.push(binding);
     for (const [id, data] of Object.entries(previous.resources))
-      if (!Object.hasOwn(resources, id) && !removed.has(id.slice(id.indexOf(':') + 1)) && !previous.regions.some(r => regionKey(r.regionId) === id && removed.has(r.tabId)))
+      if (!Object.hasOwn(resources, id) && (!removed.has(id.slice(id.indexOf(':') + 1)) || id.startsWith('zone:') && data && typeof data === 'object' && !Array.isArray(data) && typeof data.closeoutTargetWorkspaceId === 'string') && !previous.regions.some(r => regionKey(r.regionId) === id && removed.has(r.tabId)))
         resources[id] = data;
     for (const [id, layout] of Object.entries(previous.tabLayouts))
       if (!Object.hasOwn(tabLayouts, id) && !removed.has(id))

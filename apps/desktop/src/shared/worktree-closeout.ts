@@ -54,9 +54,14 @@ export function closeWorktreeGraph(
     }
     delete graph.layouts[source.id]
   }
+  for (const zone of graph.zones) {
+    if (!oldZones.has(zone.zoneId)) continue
+    const origin = graph.resources['zone:' + zone.zoneId]
+    graph.resources['zone:' + zone.zoneId] = { ...(origin && typeof origin === 'object' && !Array.isArray(origin) ? origin : {}),
+      originalZone: JSON.parse(JSON.stringify(zone)), closeoutTargetWorkspaceId: target.id }
+  }
   graph.zones = graph.zones.filter(zone => !oldZones.has(zone.zoneId))
   graph.bindings = graph.bindings.filter(binding => !oldZones.has(binding.zoneId))
-  for (const id of oldZones) delete graph.resources['zone:' + id]
   return { graph, movedTabIds }
 }
 
