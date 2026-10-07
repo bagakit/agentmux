@@ -6,6 +6,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
@@ -78,8 +80,8 @@ it('uses real Workflow observations between speeches without inventing agent tot
   await show()
   const cards = host.querySelectorAll('.wf-card--observation')
   expect(cards.length).toBe(2)
-  expect(cards[0]?.querySelector('.log-fold__steps')?.textContent).toBe('3 steps')
-  expect(cards[1]?.querySelector('.log-fold__steps')?.textContent).toBe('5 steps')
+  expect(cards[0]?.querySelector('.log-fold__steps')?.textContent).toBe('3 步')
+  expect(cards[1]?.querySelector('.log-fold__steps')?.textContent).toBe('5 步')
   expect(host.querySelector('.wf-progress')).toBeNull()
   expect(host.querySelector('[data-workflow-id]')).toBeNull()
   expect(host.textContent).not.toMatch(/tokens|第 1 次/u)
@@ -226,13 +228,15 @@ it('keeps the expanded target and its body under its native identity after a sta
   expect([...element.querySelectorAll('.wf-agent__button')].at(-1)).toBe(first)
 })
 
-it('formats a multi-day recorded span with dates instead of identical clocks', async () => {
+it('formats a multi-day recorded span in the noncompact observation without calling it execution duration', async () => {
   const records = current.items.filter(item => item.id === 'collab-call' || item.id === 'agent-activity')
   expect(records.length).toBe(2)
   const start = new Date(_hygiene_fixtureYear - 1, 2, 1, 1, 30, 0).getTime()
-  await show({ ...current, items: records.map((item, index) => ({
+  const page = { ...current, items: records.map((item, index) => ({
     ...item, startedAt: start + index * 48 * 60 * 60 * 1000
-  })) })
+  })) }
+  await act(async () => root.render(<ConversationView page={page} sessionId={page.agentSessionId}
+    renderProcess={props => <NativeProcessObservation {...props} />} />))
   const time = host.querySelector('.wf-card--observation .log-fold__time')!
   expect(time.textContent).toContain(_hygiene_fixtureCivil(3, 1, -1))
   expect(time.textContent).toContain(_hygiene_fixtureCivil(3, 3, -1))
