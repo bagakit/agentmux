@@ -35,12 +35,15 @@ it('existing reply-only consent is not expanded by opening details and a broader
   expect((await f.cli(['binding', 'inspect', '--binding', original.bindingId])).binding.scope.publication).toBe('future-native-user-facing')
   const change = [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Change connected group')!
   await act(async () => change.querySelector('summary')!.click())
-  await consent(); await select('Group sharing content', 'future-shared-conversation')
+  await consent(); await ready('Reconnect to start sharing from now.')
+  expect([...document.querySelectorAll<HTMLButtonElement>('footer button')].find(node => node.textContent === 'Reconnect group')?.disabled).toBe(false)
+  expect(f.calls.filter(call => call.method === 'connection.binding.relink')).toHaveLength(0)
+  await select('Group sharing content', 'future-shared-conversation')
   expect(document.querySelector<HTMLInputElement>('.agent-connector-check input')!.checked).toBe(false)
-  expect([...document.querySelectorAll<HTMLButtonElement>('footer button')].find(node => node.textContent === 'Change group')?.disabled).toBe(true)
+  expect([...document.querySelectorAll<HTMLButtonElement>('footer button')].find(node => node.textContent === 'Save sharing')?.disabled).toBe(true)
   for (const text of ['human messages', 'Terminal input', 'questions, answers and resources', 'may not sync yet', 'Earlier history is not published', 'existing private context']) await ready(text)
   expect(f.calls.filter(call => call.method === 'connection.binding.relink')).toHaveLength(0)
-  await consent(); await f.button('Change group'); await ready('New conversation content')
+  await consent(); await f.button('Save sharing'); await ready('New conversation content')
   const next = (await f.cli(['binding', 'inspect', '--binding', original.bindingId])).binding
   expect(next).toMatchObject({ bindingId: original.bindingId, revision: 2, externalConversationId: 'oc_shared', scope: { publication: 'future-shared-conversation' } })
   expect((await f.cli(['binding', 'inspect', '--binding', original.bindingId, '--revision', '1'])).binding.scope.publication).toBe('future-native-user-facing')
