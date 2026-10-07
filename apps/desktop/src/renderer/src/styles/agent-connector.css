@@ -68,3 +68,4 @@
 .agent-connector-status span { color: var(--text-3); font-size: var(--fs-meta); }
 .agent-connector-status > p { flex-basis: 100%; }
 .agent-connector-pairing__group > strong, .agent-connector-room-choice > .selection-field { font-size: var(--fs-title); }
+.connector-sharing__metadata { color: var(--text-3); }
