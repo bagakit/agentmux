@@ -102,6 +102,27 @@ block inline PM UTF16 offset，不是 Markdown 字节位置。它不是跨文件
 可信作者来自原写入调用边界，查询不能自报 actor。历史不可用或未确认不能返回“已确认空历史”。
 该只读入口不执行恢复或撤销；协同产品要求及其交付边界见[人和 Agent 协同编辑](../design/behavior/knowledge-workflows.md#note-中-agent-与人的协同编辑)。
 
+## 精确基线的并发提交
+
+普通 `file.write` 保持原 revision CAS。Note 可同时传 `baseContent` 与 `operationId`；CLI 为
+`amux file write ... --base FILE --operation-id ID < proposed.md`。基线必须是原读取的完整 UTF-8 正文，
+摘要与 `expectedRevision` 一致，不能用当前文件或编辑后的草稿替代。原 Host 在既有 NotesStorage 锁内确认操作与当前文件，
+合并成功后仍由原 Files CAS 防止外部写入竞争，不增加另一条保存队列。
+
+两向差异由 [JsDiff 的 Myers 实现](https://github.com/kpdecker/jsdiff) 计算；
+[node-diff3](https://github.com/bhousel/node-diff3) 持有三向区域与重叠判定，仓库 patch 提供两向 differ 注入，并以等价迭代避免大区域越过 JavaScript 调用参数栈限。
+精确行缓冲保留换行和空白，不做模糊补丁。Host 的 CPU 合并经 Core Worker 执行，避免阻塞主事件循环；
+一侧删除／替换基线稳定块 ID、另一侧修改该原块内容或稳定父级时保持身份冲突，不能把旧块的修改移植给替换后的块。
+
+成功的增强提交返回 canonical `content`、revision 与同一历史事件 ID。操作指纹绑定原资源、Note、基线、原提交字节和可信 actor；
+同 ID 的已提交重试只读回原回执，不能再覆盖后来正文。已确认未应用的操作不再执行；`prepared`／`unconfirmed` 不凭正文匹配猜完成。
+增强提交必须先确认持久准备；普通 CAS 在历史记账失败时仍沿原可用能力保存。
+
+重叠、身份或结构冲突保留基线／当前／提议三份正文。三份正文连同真实 RPC request ID 超出原帧容量时，
+回执仍保已确认的 conflict、revision、历史状态和事件 ID，以 `noteConflictUnavailable` 明确本次正文传输不可用；
+可分开读取同一原文件及可用的选定历史事件。当前正文读取失败是 `NOTE_BASELINE_UNAVAILABLE`，不是已确认内容冲突；
+合并 Worker 不可用也保未知、原文件和输入，不盲写或换 ID 自动重放。
+
 ## 存量转换与恢复
 
 原 `.note.json` 和 JSON 目录只作显式一次转换输入。原 NotesStorage journal 配合
