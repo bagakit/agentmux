@@ -121,7 +121,7 @@ block inline PM UTF16 offset，不是 Markdown 字节位置。它不是跨文件
 
 [历史模型](../../packages/core/src/note-history.ts) 的 `eventId` 区分每次编辑；`revision` 仍是正文摘要。
 相同字节再次写入、A → B → A 不能复用旧事件或把旧作者当成本次操作者。事件保留原 Note、准确资源、前后 revision、
-可确认的 parent、可信 actor、时间及操作类型。`resource` 随已确认的目录搬迁更新查询归属，`originalResource` 保原事件地址。
+可确认的 parent、可信 actor、时间及操作类型。`resource` 随已确认的文件／目录搬迁更新查询归属，`originalResource` 保原事件地址。
 连续同一操作者的活动可归为同一 `batchId`，聚合不删除底层事件。
 
 原 SQLite 数据库以压缩、按摘要去重的内容保存历史，以事件序列索引准确 Note／资源；时间线查询只读取请求窗口的元数据。
@@ -135,6 +135,27 @@ block inline PM UTF16 offset，不是 Markdown 字节位置。它不是跨文件
 仅本次内容读取明确不可用，同一事件的元数据及普通正文读写继续可用，不截断持久历史或改变公共帧上限。
 可信作者来自原写入调用边界，查询不能自报 actor。历史不可用或未确认不能返回“已确认空历史”。
 该只读入口不执行恢复或撤销；协同产品要求及其交付边界见[人和 Agent 协同编辑](../design/behavior/knowledge-workflows.md#note-中-agent-与人的协同编辑)。
+
+## 整篇恢复与批次撤销
+
+`file.restore`／`amux file restore` 选择同一准确 Note／资源的已提交 `eventId`，将该事件的 **after 内容**恢复为新版本。
+它要求准确当前 `expectedRevision` 与新的 `operationId`；保所选历史原始字节，包括 BOM、换行及未受富文本 schema 支持的原文，
+不重新规范化、绑定链接或分配身份。整篇恢复有意替换完整已保存正文；原版本和后来版本仍在历史中。
+
+`file.undo`／`amux file undo` 选择 `batchId` 与已观察的 `batchLastEventId`，由原 owner 索引读取完整成员，
+不能把一页时间线当成完整活动。批次必须是同一可信作者、连续且均已提交的普通编辑；尾部变化需要重新选择。
+撤销以批次末尾为共同基线，将批次前内容与当前正文作精确逆向合并，保留后来不冲突的编辑；
+重叠、块身份或合并后结构冲突保原三份正文与 `not-applied`，不写盘。已确认创建批次的逆操作是清空正文，
+保原 Note ID、当前标题、目录和永久引用；它不是删页。
+
+两种动作均经原 Host 的可重入 lease、历史准备及 Files CAS，生成独立 `restore`／`undo` 事件与明确 `source`，
+不并入普通编辑批次。原创建者由事件及准确原 revision 的可信作者记录恢复，最近编辑者是本次操作者；
+parent 未知不丢弃独立已知创建者。GUI 和 CLI 共享原权限、可信 actor 和回执，调用者不能自报作者。
+同 operation 的已提交重试只回原回执，不覆盖后来正文；已拒绝保持终局，未确认不凭当前字节追认或重放。
+
+已写成的 Note 内容和元数据若与真实 RPC request ID 一同超过原帧容量，仍保 `written`、revision、原历史事件及 replay 状态，
+以 `contentUnavailable` 明确本次 canonical 内容传输不可用，不截断持久正文或扩大帧上限。该回执不带伪造的 canonical 内容或正文归因／标题投影；
+消费者保原操作及后来草稿，读取同一准确原文件和 revision 对账，不能用提交草稿充作已经确认的保存正文。
 
 ## 精确基线的并发提交
 
