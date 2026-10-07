@@ -54,10 +54,22 @@ function one<T extends string>(v: unknown, choices: readonly T[]): T {
   return v as T
 }
 const ref = (v: unknown) => parseMoteConnectionValues({ connection: v }).connection!
+function target(value: unknown) {
+  const parsed = parseMotePreferencesTarget(value)
+  return {
+    spaceId: parsed.spaceId,
+    zoneId: parsed.zoneId,
+    expectedResource: {
+      hostId: parsed.expectedResource.hostId,
+      workspaceId: parsed.expectedResource.workspaceId,
+      workspacePath: parsed.expectedResource.workspacePath
+    }
+  }
+}
 export function parseMoteConnectionSource(v: unknown): MoteConnectionSource {
   const p = obj(v, ['target', 'expectedTopicRevision', 'expectedAvatarRevision'])
   return {
-    target: parseMotePreferencesTarget(p.target),
+    target: target(p.target),
     expectedTopicRevision: revision(p.expectedTopicRevision),
     expectedAvatarRevision: p.expectedAvatarRevision === null ? null : revision(p.expectedAvatarRevision)
   }
@@ -66,7 +78,7 @@ export function parseMoteConnectionParams<M extends MoteConnectionMethod>(m: M, 
   if (m === 'space.mote.connection.ls') {
     const p = obj(v, ['target', 'cursor', 'limit'])
     return {
-      target: parseMotePreferencesTarget(p.target),
+      target: target(p.target),
       ...(p.cursor === undefined ? {} : { cursor: text(p.cursor) }),
       ...(p.limit === undefined ? {} : { limit: integer(p.limit, 100) })
     } as MoteConnectionParamsMap[M]
@@ -247,7 +259,12 @@ export function parseMoteConnectionResult<M extends MoteConnectionMethod>(
       (request.avatar === 'include-saved') !== (operation.snapshot.avatarSha256 !== null)
     )
       fail()
-    if ('adapterId' in request && operation.enrollment && (operation.enrollment.adapterId !== request.adapterId || operation.enrollment.domain !== request.domain)) fail()
+    if (
+      'adapterId' in request &&
+      operation.enrollment &&
+      (operation.enrollment.adapterId !== request.adapterId || operation.enrollment.domain !== request.domain)
+    )
+      fail()
     if (
       'connection' in request &&
       (!sameMoteConnectionValues({ connection: request.connection }, { connection: operation.connection }) ||
