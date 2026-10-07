@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { withYoloArgs, yoloArgsForProvider } from '../src/renderer/src/lib/executors.js'
+import { withYoloArgs, yoloArgsForProvider } from '../src/agent-launch-option.js'
 describe('one-click YOLO provider posture', () => {
   it('uses explicit Claude and Codex args', () => {
     expect(yoloArgsForProvider('claude')).toEqual(['--dangerously-skip-permissions'])
