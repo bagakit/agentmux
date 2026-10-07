@@ -832,7 +832,6 @@ export function ActivityView({
       const height = Math.ceil(ruler?.getBoundingClientRect().height ?? 0)
       if (height === headerHeight) return
       headerHeight = height
-      ruler?.closest<HTMLElement>('.activity-feed-frame')?.style.setProperty('--activity-reading-top', `${height + 8}px`)
       observer?.disconnect()
       const current = new IntersectionObserver(entries => {
         if (!active || observer !== current) return
@@ -919,6 +918,12 @@ export function ActivityView({
   const hasUserMessages = Boolean(userMessages && userMessages.length > 0)
   const hasNativeRecords = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length > 0
   const hasItems = unifiedItems.length > 0
+  const readPending = readingEnabled && Boolean(readingWindow.loading || userMessageRead?.loading)
+  const emptyReadStatus = readPending && !readingWindow.loadingEarlier && ruler.items.length === 0 ? (
+    <div className="activity-feed__empty-reading" role="status" aria-live="polite">
+      <SemanticIcon name="status.loading" animation="spin" size={12} />Reading records…
+    </div>
+  ) : null
   // Reading navigation belongs to the message flow; the ruler keeps temporal facts only.
   const readingEntry = conversationReading && (readingWindow.hasMore || readingWindow.hasNewer ||
     conversationReading.opened && conversationReading.onClose || readingAction || conversationReading.nativeSourceFacts?.nativeConfirmation) ? (
@@ -969,13 +974,7 @@ export function ActivityView({
     </div>
   ) : null
 
-  // Loading is a sibling overlay: neither scroll height nor card geometry depends on pending work.
   const renderSurface = (content: JSX.Element | ((findTrigger: ReactNode) => JSX.Element)): JSX.Element => {
-    const loading = conversationReading?.enabled !== false && (readingWindow.loading && !readingWindow.loadingEarlier || userMessageRead?.loading) ? <div className="activity-feed__loading-layer">
-      <span role="status" aria-live="polite" className="activity-feed__reading-status">
-        <SemanticIcon name="status.loading" animation="spin" size={12} />Reading records…
-      </span>
-    </div> : null
     return <ReadingFind className="activity-feed-frame"
     active={readingEnabled} source={JSON.stringify([executionHostId, sessionId, conversationReading?.identity])}
     label="loaded conversation" bodySelector=".log-turn__body, .log-row__prose, .log-row__payload, .log-row__output, .log-diff__body" scrollSelector=".activity-feed"
@@ -983,7 +982,7 @@ export function ActivityView({
       followRef.current = { ...followRef.current, following: false }
       if (feedEl) anchorRef.current = captureReadingAnchor(feedEl)
     }}>
-    {typeof content === 'function' ? findTrigger => <>{content(findTrigger)}{loading}{latestControl}</> : <>{content}{loading}{latestControl}</>}
+    {typeof content === 'function' ? findTrigger => <>{content(findTrigger)}{latestControl}</> : <>{content}{latestControl}</>}
   </ReadingFind>
   }
 
@@ -994,6 +993,7 @@ export function ActivityView({
         {readNotice}
         {readingEntry}
         {fileReferenceNotice}
+        {emptyReadStatus}
         <div className="activity-feed__empty">
           This executor does not provide structured activity. Terminal remains available.
         </div>
@@ -1007,7 +1007,8 @@ export function ActivityView({
         {readNotice}
         {readingEntry}
         {fileReferenceNotice}
-        {!userMessageRead?.loading && !userMessageRead?.error ? <div className="activity-feed__empty">
+        {emptyReadStatus}
+        {!readPending && !readingWindow.error && !userMessageRead?.error ? <div className="activity-feed__empty">
           {userMessageRead?.hasMore ? 'No inputs in the recent conversation window.' : 'No structured activity yet. Terminal remains available.'}
         </div> : null}
       </div>
@@ -1022,6 +1023,7 @@ export function ActivityView({
         {readNotice}
         {readingEntry}
         {fileReferenceNotice}
+        {emptyReadStatus}
         <WorkingIndicator active={activitySemantic === 'active'} />
       </div>
     )
@@ -1135,7 +1137,8 @@ export function ActivityView({
         scale={scale}
         selectedIndex={rulerSelectedIndex < 0 ? null : rulerSelectedIndex}
         band={band}
-        {...(conversationReading ? { reading: { loading: readingWindow.loading, hasMore: readingWindow.hasMore } } : {})}
+        {...(conversationReading ? { reading: { hasMore: readingWindow.hasMore } } : {})}
+        pending={readPending && !readingWindow.loadingEarlier}
         recentFraction={ruler.recentFraction}
         activity={activity.segments}
         controls={close => <><ConversationRulerControls window={rulerWindow} onWindow={setRulerWindow}
@@ -1151,7 +1154,7 @@ export function ActivityView({
               onSelect={index => selectRulerRecord(ruler.items[index]!)} onPeek={onPeek} onPeekEnd={onPeekEnd} />
           ) : null
         }
-      /> : <div className="reading-find__floating-trigger">{findTrigger}</div>}
+      /> : <><div className="reading-find__floating-trigger">{findTrigger}</div>{emptyReadStatus}</>}
       {readingEntry}
       {nativeHistoryPage ? <ConversationView
         page={nativeHistoryPage}
