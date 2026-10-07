@@ -18,22 +18,19 @@
 
 /* Settings / Sidebar / Pane 内容模型。 */
 /* Settings shares the app's content grid row. The original footer owns the other row. */
-.settings-page { position: absolute; z-index: 90; grid-column: 1 / -1; grid-row: 1 / 2; inset: 0; display: grid; grid-template-columns: 208px minmax(0, 1fr); color: var(--text); background: var(--surface-0); }
+.settings-page { position: absolute; z-index: 90; grid-column: 1 / -1; grid-row: 1 / 2; inset: 0; display: grid; grid-template-columns: 232px minmax(0, 1fr); color: var(--text); background: var(--surface-0); }
 .settings-page[hidden] { display: none; }
 .settings-sidebar { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding-top: 34px; border-right: 1px solid var(--line-soft); background: var(--surface-1); }
-.settings-sidebar > header { display: flex; align-items: center; padding: var(--sp-6) var(--sp-5); }
-.settings-sidebar__brand { display: flex; align-items: center; gap: var(--sp-3); }
-.settings-sidebar__brand > span { display: grid; gap: var(--sp-1); }
-.settings-sidebar__brand strong { color: var(--text); font-size: var(--fs-title); letter-spacing: -.02em; }
-.settings-sidebar__brand small { color: var(--text-3); font-size: var(--fs-micro); }
+.settings-sidebar > header { display: flex; align-items: center; padding: var(--sp-4) var(--sp-4) var(--sp-5); }
+.settings-back { display: inline-flex; align-items: center; gap: var(--sp-3); min-height: 34px; padding: var(--sp-2) var(--sp-3); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; font-size: var(--fs-body); cursor: pointer; }
+.settings-back:hover { color: var(--text); background: var(--surface-2); }
+.settings-nav-separator { height: var(--sp-4); }
 .settings-search { position: relative; display: flex; align-items: center; margin: 0 var(--sp-4); height: 34px; }
 .settings-search > svg { position: absolute; left: var(--sp-3); color: var(--text-3); pointer-events: none; }
 .settings-search input { width: 100%; height: 100%; padding: var(--sp-3) 28px var(--sp-3) 30px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-0); font-size: var(--fs-body); }
 .settings-search input:focus { border-color: var(--focus-line); }
 .settings-search button { position: absolute; right: var(--sp-3); display: flex; padding: var(--sp-1); border: 0; color: var(--text-3); background: transparent; cursor: pointer; }
 .settings-sidebar nav { margin-top: var(--sp-4); min-height: 0; flex: 1; padding: var(--sp-4); overflow: auto; }
-.settings-sidebar nav > p { margin: var(--sp-2) var(--sp-3) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; }
-.settings-sidebar nav > p:not(:first-child) { margin-top: var(--sp-6); }
 .settings-sidebar nav > button { width: 100%; min-height: 34px; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: var(--sp-3); padding: var(--sp-3); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; text-align: left; cursor: pointer; }
 .settings-sidebar nav > button:hover { color: var(--text); background: var(--surface-2); }
 .settings-sidebar nav > button.selected { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
@@ -181,11 +178,9 @@
 @media (max-width: 560px) {
   .settings-page { display: flex; flex-direction: column; overflow: hidden; }
   .settings-sidebar { flex: 0 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-3); padding: 34px var(--sp-4) var(--sp-4); border-right: 0; border-bottom: 1px solid var(--line-soft); }
-  .settings-sidebar > header { grid-column: 1 / -1; padding: var(--sp-3) 0 0; }
-  .settings-sidebar__brand > span { display: flex; align-items: baseline; gap: var(--sp-3); }
+  .settings-sidebar > header { grid-column: 1 / -1; padding: 0; }
   .settings-sidebar nav { display: none; }
   .settings-section-picker { display: flex; width: auto; white-space: nowrap; }
-  .settings-sidebar__brand .brand-icon { width: 24px; height: 24px; }
   .settings-search { height: 32px; margin: 0; }
   .settings-content { min-height: 0; flex: 1 1 auto; padding-top: 0; }
   .settings-content__header { position: relative; top: auto; padding: var(--sp-5) var(--sp-4); }

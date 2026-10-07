@@ -9,7 +9,7 @@ const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 type ResourceRow = { id: string; name: string; detail: string; mark: ReactNode; status?: ReactNode }
 
 /** A compact selector only. Drafts and resource operations stay in the owning pane. */
-export function SettingsResourceLibrary({ label, items, selectedId, onSelect, query, onQuery, focusRequest }: {
+export function SettingsResourceLibrary({ label, items, selectedId, onSelect, query, onQuery, focusRequest, layout = 'list' }: {
   label: string
   items: ResourceRow[]
   selectedId: string | null
@@ -17,11 +17,24 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
   query: string
   onQuery: (query: string) => void
   focusRequest: { id: string | null } | null
+  layout?: 'list' | 'horizontal'
 }) {
   const list = useRef<HTMLDivElement>(null)
   const search = useRef<HTMLInputElement>(null)
   const [focusedId, setFocusedId] = useState(selectedId)
   useEffect(() => setFocusedId(selectedId), [selectedId])
+  useEffect(() => {
+    if (layout !== 'horizontal') return
+    const reveal = () => {
+      const row = [...(list.current?.querySelectorAll<HTMLButtonElement>('[data-resource-row]') ?? [])]
+        .find((element) => element.dataset.resourceRow === selectedId)
+      row?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    }
+    reveal()
+    const observer = new ResizeObserver(reveal)
+    observer.observe(list.current!)
+    return () => observer.disconnect()
+  }, [layout, selectedId])
   useEffect(() => {
     if (!focusRequest) return
     const row = [...(list.current?.querySelectorAll<HTMLButtonElement>('[data-resource-row]') ?? [])]
@@ -33,16 +46,18 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
   }, [focusRequest])
   const tabId = items.some((item) => item.id === focusedId) ? focusedId : items.some((item) => item.id === selectedId) ? selectedId : items[0]?.id
   return (
-    <aside className="settings-resource-library">
+    <aside className={`settings-resource-library${layout === 'horizontal' ? ' settings-resource-library--horizontal' : ''}`}>
       <label className="settings-resource-search"><ThemeActionSearchIcon size={14} aria-hidden="true" />
         <TextInput ref={search} type="search" aria-label={`Filter ${label.toLowerCase()}`} placeholder={`Find ${label.toLowerCase()}…`} value={query} onChange={(event) => onQuery(event.target.value)} />
       </label>
-      <div ref={list} className="settings-resource-library__list" role="listbox" aria-label={label}>
+      <div ref={list} className="settings-resource-library__list" role="listbox" aria-label={label} aria-orientation={layout === 'horizontal' ? 'horizontal' : 'vertical'}>
         {items.map((item, index) => <button type="button" key={item.id} role="option" aria-selected={selectedId === item.id}
-          tabIndex={tabId === item.id ? 0 : -1} data-resource-row={item.id} title={item.name} className="settings-resource-row"
+          tabIndex={tabId === item.id ? 0 : -1} data-resource-row={item.id} title={`${item.name}\n${item.detail}`} className="settings-resource-row"
           onFocus={() => setFocusedId(item.id)} onClick={() => onSelect(item.id)} onKeyDown={(event) => {
             let next: number
             switch (event.key) {
+              case 'ArrowRight': if (layout !== 'horizontal') return; next = Math.min(index + 1, items.length - 1); break
+              case 'ArrowLeft': if (layout !== 'horizontal') return; next = Math.max(index - 1, 0); break
               case 'ArrowDown': next = Math.min(index + 1, items.length - 1); break
               case 'ArrowUp': next = Math.max(index - 1, 0); break
               case 'Home': next = 0; break
@@ -50,7 +65,6 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
               default: return
             }
             event.preventDefault()
-            const target = items[next]!
             list.current?.querySelectorAll<HTMLButtonElement>('[data-resource-row]')[next]?.focus()
           }}>
           <span className="settings-resource-row__mark">{item.mark}</span>
