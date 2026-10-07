@@ -1,6 +1,6 @@
 import type { IpcMainInvokeEvent } from 'electron'
 import { connectAgentMuxRpc, type AgentMuxRpcParams, type AgentMuxRpcResult } from '@agentmux/core'
-import type { ConnectionMethod } from '@agentmux/core/connections'
+import { isConnectionMethod, type ConnectionMethod } from '@agentmux/core/connections'
 import type { DesktopConnectorSecrets } from './connector-secrets.js'
 
 export type ConnectorIpcChannel = 'connections:call' | 'connections:storeCredential' | 'connections:inspectCredential'
@@ -14,7 +14,7 @@ export function registerConnectorIpc(options: {
 }): void {
   options.handleWithEvent('connections:call', async (event, method: ConnectionMethod, params: unknown) => {
     options.assertTrusted('connections:call', event)
-    if (!['connection.ls', 'connection.inspect', 'connection.configure', 'connection.test'].includes(method)) throw new Error('Unsupported connection operation.')
+    if (!isConnectionMethod(method)) throw new Error('Unsupported connection operation.')
     const client = await (options.connect ?? connectAgentMuxRpc)({ endpoint: { transport: 'unix', path: options.socketPath } })
     try { return await client.call(method, params as AgentMuxRpcParams<ConnectionMethod>) as AgentMuxRpcResult<ConnectionMethod> }
     finally { await client.dispose() }
