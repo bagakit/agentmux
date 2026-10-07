@@ -2,7 +2,8 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Poin
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentTurnUsage } from '@agentmux/core'
-import { agentUsageScopeLabel, contextUsedPercent, formatTokenCount } from '../lib/agent-usage'
+import { contextUsedPercent, formatTokenCount } from '../lib/agent-usage'
+import { AgentUsageDetails } from './AgentUsageDetails'
 import { useAppStore } from '../store'
 
 const ThemeObjectPerformanceIcon = semanticIconComponent('object.performance')
@@ -114,23 +115,7 @@ export function AgentContextUsage({ usage, source, visible = true }: { usage?: A
           else { cancelClose(); preview.current = false }
           setOpened(event.newState === 'open' ? owner : null)
         } }}>
-        <h3>Context window</h3>
-        {known && usage ? (
-          <>
-            <strong>{used}% used</strong> <span>({remaining}% remaining)</span>
-            <p>{formatTokenCount(context.usedTokens)} of {formatTokenCount(context.capacityTokens)} tokens · {formatTokenCount(Math.max(0, context.capacityTokens - context.usedTokens))} remaining</p>
-            <p>Native observation, unsent draft excluded. The Provider may compact at its own threshold,
-              which AgentMux does not guess. Last observed {new Date(usage.observedAt).toLocaleString()}.</p>
-          </>
-        ) : (
-          <p>Unavailable — this Agent has not reported used tokens and capacity, so the compression
-            threshold is unknown. This is a native reading, never an estimate from lifetime billing.</p>
-        )}
-        {usage ? <div className="composer__context-turn"><h3>{agentUsageScopeLabel(usage)}</h3><dl>
-          <div><dt>Input</dt><dd>{formatTokenCount(usage.inputTokens)}</dd></div>
-          <div><dt>Output</dt><dd>{formatTokenCount(usage.outputTokens)}</dd></div>
-          <div><dt>Total</dt><dd>{formatTokenCount(usage.totalTokens)}</dd></div>
-        </dl><p>Native usage report, separate from the context window observation.</p></div> : null}
+        <AgentUsageDetails usage={usage} />
       </div>
     </>
   )
