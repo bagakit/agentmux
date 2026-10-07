@@ -424,3 +424,66 @@ The SDK protocol samples and original Core/CLI/Mailbox consumer tests use
 controlled network ports. They do not certify real application credentials,
 platform subscription permissions, a live group, generic Host startup composition
 or final platform end-to-end delivery.
+
+## Feishu publication
+
+The built-in Feishu delegate also exposes the original `PublicationAdapter`.
+The original Desktop `PublicationHost` selects future native public speech,
+commits its Outbox and calls this leaf automatically. Publication requires no
+model send tool, duplicate queue or adapter-local message cache. Receiver,
+parent reads and publication reuse the same official Client for the exact
+connection, application and credential.
+
+`feishu-post-group-v1` renders plain text nodes in a localized post. The original
+text, including quotes, Unicode and apparent mention markup, remains text with
+`un_escape: false`; the renderer creates no mention, card action or answer
+control. Typed question prompts and option labels are informational text until
+a separate authorized interaction owner supplies an exact action reference.
+The current publication intent has no exact reply target, so this version uses
+explicit group addressing and never infers which input caused a reply.
+[Message content schema](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/im-v1/message/create_json.md)
+
+A create request uses `chat_id` addressing and a stable SHA-256 operation key
+encoded in 43 base64url characters. The official create contract permits a
+UUID of up to 50 characters with a one-hour deduplication window. An unknown
+create without a platform message ID has no supported UUID lookup: inspection
+performs no request, and expiry never authorizes another create or a new key.
+An authoritative non-application uses the original Host's explicit same-operation
+retry. Rate limiting, missing targets and platform failure do not trigger a
+thread-to-group fallback.
+[Create message](https://open.feishu.cn/document/server-docs/im-v1/message/create.md)
+
+The Host fragments complete source text on Unicode boundaries with a conservative
+4 KiB UTF-8 fragment budget. The leaf also checks the final, double-encoded HTTP
+body against the platform's 30 KiB post limit, including target and envelope
+fields. An oversized request is rejected during preparation before any platform
+effect; the original pending operation and service diagnostic remain available.
+Source text is never silently clipped. Axios receives the exact frozen request
+body through `transformRequest`, preserving the durable bytes despite the SDK's
+object-merging request implementation.
+
+An update uses the original durable message ID with PUT. A withdrawal uses DELETE
+for that same message. Both receive the original read-only mapping; an omitted
+thread in a successful acknowledgement preserves its known original value.
+Explicitly contradictory message, chat, application or thread facts remain
+unknown rather than replacing the mapping. Read-only reconciliation fetches the
+exact original message and checks its application sender, chat, thread and native
+post content, or confirmed deletion. Missing fields and failed reads do not
+invent successful effects.
+[Update message](https://open.feishu.cn/document/server-docs/im-v1/message/update.md),
+[Delete message](https://open.feishu.cn/document/server-docs/im-v1/message/delete.md),
+[Read message](https://open.feishu.cn/document/server-docs/im-v1/message/get.md)
+
+Public `connection.delivery.ls` and `connection.delivery.inspect` retain each
+source revision, fragment ordinal, operation and platform mapping through the
+existing Host. Connection-wide Settings observations and a confirmed delivery to
+one exact Binding have different scopes; one confirmed message cannot certify
+other groups. An unknown external effect blocks only its original publication
+lane. Subsequent authenticated inputs and the original Core Session remain
+available.
+
+The publication contract tests use the actual pinned SDK and Axios serialization
+against a loopback HTTP server. The default Desktop Host tests consume original
+SDK callbacks, Core history, Mailbox, Settings and compiled public CLI receipts.
+These controlled ports prove the product call chain and exact bytes; they do not
+certify live credentials, platform permissions or delivery to a real group.
