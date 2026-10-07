@@ -7,7 +7,7 @@ import { api } from './api'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import { useAppStore } from '../store'
 import { nativeBindingKey } from '../../../shared/agent-native-source'
-import { sessionPresentationById } from './session-presentation'
+import { agentSessionPresentationIndex } from './session-presentation'
 
 export type AgentSessionControlInput = AgentSessionControl
 
@@ -377,9 +377,17 @@ export function useSessionUserMessages(
   const enabled = options?.enabled ?? true
   const isAgent = control?.kind === 'agent'
   const bindingKey = useAppStore(state => {
-    const session = control ? sessionPresentationById(state.sessions).get(control.agentSessionId) : undefined
-    return session?.kind === 'agent' && session.control.hostId === control?.hostId && session.control.run.runId === control?.run.runId
-      ? nativeBindingKey(session) : ''
+    if (!control) return ''
+    const sessions = agentSessionPresentationIndex(state.sessions).get(control.agentSessionId)
+    let binding: string | undefined
+    for (const session of sessions ?? []) {
+      if (session.control.hostId !== control.hostId || session.control.agentSessionId !== control.agentSessionId || session.control.run.runId !== control.run.runId) continue
+      const key = nativeBindingKey(session)
+      // Multiple presentations may confirm the same source, never conflicting epochs.
+      if (binding !== undefined && binding !== key) return ''
+      binding = key
+    }
+    return binding ?? ''
   })
   const sessionKey = isAgent && control ? `${makeSessionControlKey(control)}:${bindingKey}` : ''
   const active = Boolean(enabled && sessionKey)
