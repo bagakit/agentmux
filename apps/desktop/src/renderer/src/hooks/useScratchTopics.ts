@@ -9,6 +9,7 @@ import { useAppStore } from '../store'
 export function useScratchTopics(workspaceId: string | null, active = true): {
   topics: readonly ScratchTopicSnapshot[] | null
   error: string | null
+  reading: boolean
 } {
   const workspace = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === workspaceId))
   const revision = useAppStore(state => active && workspaceId ? state.workspaceFileRevisions[workspaceId] ?? 0 : null)
@@ -18,5 +19,5 @@ export function useScratchTopics(workspaceId: string | null, active = true): {
   useEffect(() => {
     if (active && workspaceId && scope) void refresh(workspaceId)
   }, [active, workspaceId, scope, revision, refresh])
-  return snapshot?.scope === scope ? { topics: snapshot.topics, error: snapshot.error } : { topics: null, error: null }
+  return snapshot?.scope === scope ? { topics: snapshot.topics, error: snapshot.error, reading: active && snapshot.reading } : { topics: null, error: null, reading: false }
 }

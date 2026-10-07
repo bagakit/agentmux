@@ -8,6 +8,7 @@ import { ClientDeliveryDiagnostics, startDeliveryAttempt, type DeliveryAttemptSe
 import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDetails'
 import { initFollowState, onContentChange, onScroll, shouldShowJumpToLatest } from '@agentmux/client-ui/activity-autoscroll'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionRequestTarget } from '@agentmux/core/agent-interaction-state'
+import { currentAgentSemanticStatus } from '@agentmux/core/agent-status'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -132,6 +133,11 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const attachmentControls = useRef<MobileAttachmentControls>(null)
   const insertion = useRef<ComposerInsertionHandle>(null)
   const available = Boolean(client && agentSessionId && reading.session && connection.state === 'connected' && !reading.disconnected)
+  const currentActivity = connection.state === 'connected' && reading.activity?.semantic === 'active'
+  const retainedActivity = currentAgentSemanticStatus(reading.session?.semanticStatus)
+  const workingObservedAt = currentActivity ? reading.activity?.observedAt
+    : reading.activity?.lastKnownActivity?.state === 'working' ? reading.activity.lastKnownActivity.observedAt
+      : retainedActivity?.state === 'working' ? retainedActivity.observedAt : undefined
   const setDraft = (value: string, key = draftKey) => { drafts.current.set(key, value); void local.save().then(() => { if (mounted.current) redraw(value => value + 1) }); redraw(value => value + 1) }
   const confirmPrompt = (key: string, original: PromptAttempt, message = 'Core 已确认输入。') => {
     if (!mounted.current || attempts.current.get(key) !== original) return
@@ -665,7 +671,8 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           if (reading.olderWindow || reading.newerAvailable) void reading.refresh()
           else if (feed.current) feed.current.scrollTop = feed.current.scrollHeight
         }}>{reading.newerAvailable ? '有新回复 · 回到最新' : '回到最新'}</button>}
-        {session?.semanticStatus?.state === 'working' ? <p className="mobile-active-state" role="status"><SemanticIcon name="status.presence-working" size={5} />正在执行</p> : null}
+        {workingObservedAt !== undefined ? <p className="mobile-active-state" role="status" data-activity-current={currentActivity}
+          title={`最后观察：${new Date(workingObservedAt).toLocaleString()}`}><SemanticIcon name="status.presence-working" size={5} />{currentActivity ? '正在执行' : '最近观察：执行中'}</p> : null}
         {reading.page && agentSessionId ? <>
           <ConversationView page={reading.page} questionAnswerContext={reading.answerContext} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
             renderProcess={props => <NativeProcessObservation {...props} compact />}
