@@ -2,40 +2,56 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
+import { AgentMuxError } from '../src/errors.js'
+import { composeAgentPrompt } from '../src/agent-outbound-message.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
-async function fixture(options: { trigger?: 'startup' | 'mote-startup' | 'input'; reminder?: boolean; continuation?: boolean; handshake?: boolean; ready?: boolean } = {}) {
-  const h = await rpcOwnerFixture(['recipient'], undefined, () => ({ nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-original' } }))
-  const inner = h.client as any, provider = h.client.providers.get('codex')
+async function fixture(options: { providerId?: 'codex' | 'claude' | 'gemini'; nativeObservation?: 'changed' | 'unknown' | 'ambiguous'; loseInputAck?: boolean; newUserBeforeAutomatic?: boolean; renderObservationUnavailable?: boolean; trigger?: 'startup' | 'mote-startup' | 'input'; reminder?: boolean; continuation?: boolean; handshake?: boolean; ready?: boolean } = {}) {
+  const providerId = options.providerId ?? 'codex'
+  const h = await rpcOwnerFixture(['recipient'], undefined, () => ({ providerId, executorId: providerId, nativeHandle: { kind: 'provider', providerId, sessionId: 'native-original' } }))
+  const inner = h.client as any, provider = h.client.providers.get(providerId)
   const status = inner.kernel.status.bind(inner.kernel), input = inner.kernel.input
-  let ready = options.ready !== false, handshakeBytes = 0
+  let ready = options.ready !== false, handshakeBytes = 0, loseInputAck = options.loseInputAck === true
   inner.kernel.status = vi.fn(async (id: string) => ({ ...await status(id),
     acceptedInputBytes: (await status(id)).acceptedInputBytes + handshakeBytes,
     state: id === 'run-recipient' ? { type: 'exited', code: 0, signal: null } : { type: 'running' } }))
   inner.kernel.start = vi.fn(async () => ({ ...h.run('recovered-run'), acceptedInputBytes: 0 }))
   inner.kernel.input = vi.fn(async (id: string, operation: any) => {
     const result = await input(id, { ...operation, expectedByte: operation.expectedByte - handshakeBytes })
+    if (loseInputAck) { loseInputAck = false; throw new Error('Original input ACK lost after applying its exact bytes') }
     return { ...result, appliedByteRange: { startByte: result.appliedByteRange.startByte + handshakeBytes, endByte: result.appliedByteRange.endByte + handshakeBytes },
       run: { ...result.run, acceptedInputBytes: result.run.acceptedInputBytes + handshakeBytes } }
   })
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = () => ({ bindingId: 'binding'.padEnd(43, 'D'),
     endpoint: { url: 'http://127.0.0.1:0', token: 'endpoint'.padEnd(43, 'C') }, bindRun: async () => {}, close: async () => {} })
-  inner.probeAgent = async () => ({ providerId: 'codex', executable: 'codex', installed: true, capabilities: provider.catalog.capabilities })
+  inner.probeAgent = async () => ({ providerId, executable: providerId, installed: true, capabilities: provider.catalog.capabilities })
   inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxStoredAgentSession) => {
+    if (options.nativeObservation) await inner.registry.update('recipient', session.run, (current: AgentMuxStoredAgentSession) => {
+      const observedAt = Math.max(current.updatedAt + 1, Date.now())
+      return { ...current, updatedAt: observedAt,
+        ...(options.nativeObservation === 'changed' ? { observedNativeHandle: { kind: 'provider', providerId, sessionId: 'confirmed-foreign-native' } } : {}),
+        nativeSourceObservation: { state: options.nativeObservation!, run: session.run, observedAt, reason: 'private-exact-source-observation' } }
+    })
+    if (options.newUserBeforeAutomatic) await h.client.submitAgentPrompt({ agentSessionId: 'recipient', expectedRun: session.run, afterSubmissionId: null,
+      operationId: 'new-human-before-automatic', prompt: 'New original human task.' })
     if (!options.handshake) return session
     handshakeBytes = 5
     return await inner.registry.update('recipient', session.run, (current: AgentMuxStoredAgentSession) => ({ ...current,
       terminalHandshake: { operationId: 'original-handshake', run: session.run, inputByteRange: { startByte: 0, endByte: 5 }, acknowledged: true } }))
   }
-  vi.spyOn(provider, 'planPromptInput').mockImplementation(prompt => ({ kind: 'single-phase', data: prompt + '\r' }))
-  vi.spyOn(provider, 'readPromptExecutionEvidence').mockImplementation(async () => ready ? { state: 'idle', id: 'native-idle', sourceId: 'native-file-original' } : null)
-  vi.spyOn(provider, 'verifyPromptExecutionTransport').mockResolvedValue(true)
-  vi.spyOn(inner.screenEvidence, 'wait').mockResolvedValue(1)
+  if (providerId === 'codex') {
+    vi.spyOn(provider, 'planPromptInput').mockImplementation(prompt => ({ kind: 'single-phase', data: prompt + '\r' }))
+    vi.spyOn(provider, 'readPromptExecutionEvidence').mockImplementation(async () => ready ? { state: 'idle', id: 'native-idle', sourceId: 'native-file-original' } : null)
+    vi.spyOn(provider, 'verifyPromptExecutionTransport').mockResolvedValue(true)
+  }
+  const screen = vi.spyOn(inner.screenEvidence, 'wait')
+  if (options.renderObservationUnavailable) screen.mockRejectedValue(new AgentMuxError('Private screen observation unavailable', 'AGENT_PROMPT_RENDER_TIMEOUT'))
+  else screen.mockResolvedValue(1)
   await inner.registry.update('recipient', { runId: 'run-recipient' }, (session: AgentMuxStoredAgentSession) => ({ ...session,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: _historyFixtureEpoch(0, 0, 1) } }))
   const original = { agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' }, operationId: 'original-continuity', trigger: options.trigger ?? 'startup',
@@ -63,6 +79,90 @@ async function anotherOwner(h: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe('original continuity combined input consumer', () => {
+  it.each(['claude', 'gemini'] as const)('retains the public first-prompt owner without optional native probes (%s)', async providerId => {
+    const h = await fixture({ providerId })
+    try {
+      expect(h.provider.readPromptExecutionEvidence).toBeUndefined()
+      expect(h.provider.verifyPromptExecutionTransport).toBeUndefined()
+      await h.settle()
+      const delivery = h.delivery(), record = await h.client.inspectAgentPromptSubmission(delivery.key)
+      const prompt = composeAgentPrompt(delivery.continuation.text, delivery.reminder.text).text
+      const originalPlan = h.provider.planPromptInput(prompt)
+      expect(originalPlan.kind).toBe(providerId === 'claude' ? 'render-then-submit' : 'single-phase')
+      expect(record?.admission).toMatchObject({ inputKey: delivery.key, acknowledged: true,
+        intent: { prompt, plan: originalPlan, execution: 'default', admissionIntent: { kind: 'exact-condition', condition: { expectedRun: delivery.key.expectedRun, afterSubmissionId: null } },
+          message: { userContent: delivery.continuation.text, systemContext: delivery.reminder.text } } })
+      expect(record?.admission?.intent?.message?.authorHuman).toBeUndefined()
+      expect(delivery.receipt).toMatchObject({ key: delivery.key, status: 'terminal-confirmed' })
+      for (const part of [delivery.reminder, delivery.continuation]) expect(part).toMatchObject({ status: 'accepted', receiptRef: delivery.key })
+      const actualBytes = h.input.mock.calls.map((call: any[]) => call[1].data)
+      expect(actualBytes).toEqual(originalPlan.kind === 'single-phase' ? [originalPlan.data] : [originalPlan.payload, originalPlan.submit])
+      expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+    } finally { await h.close() }
+  })
+
+  it('keeps the original Claude rendering service window while its supported input completes', async () => {
+    const h = await fixture({ providerId: 'claude', renderObservationUnavailable: true })
+    try {
+      await h.settle()
+      const original = await h.client.inspectAgentPromptSubmission(h.delivery().key)
+      expect(original?.terminalPromptSubmission).toMatchObject({ payload: { acknowledged: true }, submit: { acknowledged: true } })
+      expect(h.client.agentSession('recipient').terminalPromptDelivery?.reason).toBe('prompt-render-timeout')
+      expect(h.input).toHaveBeenCalledTimes(2); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+    } finally { await h.close() }
+  })
+
+  it.each(['claude', 'gemini'] as const)('does not replay an unknown input through the generic public owner (%s)', async providerId => {
+    const h = await fixture({ providerId, loseInputAck: true })
+    try {
+      await expect.poll(() => h.delivery().phase).toBe('unknown')
+      const frozen = structuredClone(h.delivery()), original = await h.client.inspectAgentPromptSubmission(frozen.key)
+      expect(original?.admission?.acknowledged).not.toBe(true)
+      const submitted = vi.spyOn(h.client, 'submitAgentPrompt')
+      await h.wake(); await h.wake()
+      await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+      expect(submitted).not.toHaveBeenCalled(); expect(h.input).toHaveBeenCalledTimes(1)
+      expect(h.delivery().key).toEqual(frozen.key)
+    } finally { await h.close() }
+  })
+
+  it.each(['claude', 'gemini'] as const)('keeps a real new human prompt ahead of generic automatic recovery (%s)', async providerId => {
+    const h = await fixture({ providerId, newUserBeforeAutomatic: true })
+    try {
+      await expect.poll(() => h.delivery().phase).toBe('superseded')
+      expect(await h.client.inspectAgentPromptSubmission(h.delivery().key)).toBeNull()
+      const human = await h.client.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: 'recipient', expectedRun: { runId: 'recovered-run' }, submissionId: 'new-human-before-automatic' })
+      expect(human?.admission).toMatchObject({ acknowledged: true, intent: { message: { userContent: 'New original human task.' } } })
+      expect(h.input).toHaveBeenCalledTimes(providerId === 'claude' ? 2 : 1)
+    } finally { await h.close() }
+  })
+
+  it.each(['claude', 'gemini'] as const)('rejects a confirmed foreign process source while retaining the original native handle (%s)', async providerId => {
+    const h = await fixture({ providerId, nativeObservation: 'changed' })
+    try {
+      expect(h.client.agentSession('recipient')).toMatchObject({ nativeSourceObservation: { state: 'changed' } })
+      await expect.poll(() => h.delivery().phase).toBe('superseded')
+      expect(h.client.agentSession('recipient')).toMatchObject({ nativeHandle: { sessionId: 'native-original' },
+        observedNativeHandle: { sessionId: 'confirmed-foreign-native' }, nativeSourceObservation: { state: 'changed', run: { runId: 'recovered-run' } } })
+      expect(await h.client.inspectAgentPromptSubmission(h.delivery().key)).toBeNull(); expect(h.input).not.toHaveBeenCalled()
+      await h.client.writeAgent({ agentSessionId: 'recipient', expectedRun: { runId: 'recovered-run' }, source: 'user', data: 'ordinary input remains available' })
+      expect(h.input).toHaveBeenCalledTimes(1); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+    } finally { await h.close() }
+  })
+
+  it.each(['unknown', 'ambiguous'] as const)('keeps an explicitly %s source observation from revoking the original first-prompt contract', async nativeObservation => {
+    const h = await fixture({ providerId: 'claude', nativeObservation })
+    try {
+      expect(h.client.agentSession('recipient')).toMatchObject({ nativeSourceObservation: { state: nativeObservation } })
+      await h.settle()
+      expect(h.delivery().receipt?.status).toBe('terminal-confirmed')
+      expect(h.input).toHaveBeenCalledTimes(2)
+      expect(h.client.agentSession('recipient').nativeSourceObservation?.state).toBe(nativeObservation)
+      await h.client.writeAgent({ agentSessionId: 'recipient', expectedRun: { runId: 'recovered-run' }, source: 'user', data: 'ordinary input remains available' })
+      expect(h.input).toHaveBeenCalledTimes(3); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+    } finally { await h.close() }
+  })
+
   it.each(['startup', 'mote-startup'] as const)('delivers frozen selected parts once through the real original prompt owner (%s)', async trigger => {
     const h = await fixture({ trigger })
     try {
@@ -283,6 +383,19 @@ describe('original continuity combined input consumer', () => {
       await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
       expect(h.delivery().phase).toBe('waiting'); expect(h.input).not.toHaveBeenCalled()
       await h.client.writeAgent({ agentSessionId: 'recipient', expectedRun: { runId: 'recovered-run' }, source: 'user', data: 'ordinary working turn input' })
+      expect(h.input).toHaveBeenCalledTimes(1); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+    } finally { await h.close() }
+  })
+
+  it('preserves a declared negative native transport result without revoking ordinary input', async () => {
+    const h = await fixture({ ready: false })
+    try {
+      await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+      vi.mocked(h.provider.verifyPromptExecutionTransport!).mockResolvedValue(false)
+      h.setReady(true); await h.wake()
+      await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+      expect(h.delivery().phase).toBe('waiting'); expect(h.input).not.toHaveBeenCalled()
+      await h.client.writeAgent({ agentSessionId: 'recipient', expectedRun: { runId: 'recovered-run' }, source: 'user', data: 'ordinary input remains available' })
       expect(h.input).toHaveBeenCalledTimes(1); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
     } finally { await h.close() }
   })

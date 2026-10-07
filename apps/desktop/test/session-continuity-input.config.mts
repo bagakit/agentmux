@@ -5,6 +5,8 @@ const root = resolve(import.meta.dirname, '../../..')
 const inputOwner = 'packages/core/src/agent-session-continuity-input.ts'
 const mutations: Record<string, { file?: string; before: string; after: string }> = {
   'selected-body': { before: 'continuation: part(inputs.continuation)', after: "continuation: part('Changed continuation body')" },
+  'optional-native-gate': { before: 'const evidence = provider.readPromptExecutionEvidence',
+    after: "if (!provider.readPromptExecutionEvidence || !provider.verifyPromptExecutionTransport) throw new AgentMuxError('Required optional probes', 'CONTINUITY_INPUT_UNCONFIRMED')\n      const evidence = provider.readPromptExecutionEvidence" },
   'input-trigger': { file: 'packages/core/src/client.ts',
     before: "receipt.recoveryInputs = { reminder: receipt.trigger !== 'input' && admission?.kind === 'resume'",
     after: "receipt.recoveryInputs = { reminder: admission?.kind === 'resume'" },
@@ -20,6 +22,10 @@ const mutations: Record<string, { file?: string; before: string; after: string }
   'handshake-credit': { before: '? handshake.inputByteRange.endByte : start', after: '? start : start' },
   'new-user-priority': { before: 'if (session.promptCompletionAdmission !== undefined) throw new AgentMuxError', after: 'if (false) throw new AgentMuxError' },
   'native-target': { before: '!isDeepStrictEqual(session.nativeHandle, operation.nativeTarget)', after: 'false' },
+  'native-transport': { before: 'provider.verifyPromptExecutionTransport && !await', after: 'false && !await' },
+  'observed-foreign-source': { before: "if (source?.run.runId === session.run.runId && source.state === 'changed' || observed &&\n      (observed.kind !== 'provider' || observed.providerId !== operation.nativeTarget.providerId || observed.sessionId !== operation.nativeTarget.sessionId)) {", after: 'if (false) {' },
+  'observer-unknown-gate': { before: 'const phase = operation.recoveryDelivery?.phase',
+    after: "if (source?.run.runId === session.run.runId && source.state !== 'changed') throw new AgentMuxError('Required source observation', 'CONTINUITY_INPUT_UNCONFIRMED')\n    const phase = operation.recoveryDelivery?.phase" },
   'native-idle': { before: "evidence.state === 'working'", after: 'false' },
   'dispose-observer': { before: 'this.controller.abort(); this.operations.clear();', after: 'this.operations.clear();' },
   'live-projection': { file: 'apps/desktop/src/renderer/src/lib/session-state.ts',
