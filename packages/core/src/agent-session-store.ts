@@ -2,6 +2,7 @@ import { MAX_STORED_TEXT_BYTES, parsePromptSubmissionRecord, normalizePromptComp
 export { parsePromptSubmissionRecord, normalizePromptCompletionAdmission } from './prompt-submission-record.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
+import { observeRead } from './observation-read.js'
 import { parseAgentForkSource } from './agent-fork.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import { assertCurrentAgentCapabilityBinding, type AgentCapabilityBinding } from './agent-capability.js'
@@ -46,6 +47,7 @@ import type {
   AgentNativeSessionConfirmationReceipt,
   AgentSessionHistoryMetadata,
   AgentSessionHistoryDescriptor,
+  AgentSessionHistorySourcesOptions,
   AgentStatus,
   AgentTerminalCapabilityState,
   AgentTerminalPromptDeliveryState,
@@ -133,14 +135,14 @@ export type AgentMuxAgentSessionStore = {
   confirmDurability(agentSessionId: string, expectedRun: AgentMuxRunRef, expectedSession: AgentMuxStoredAgentSession): Promise<void>
   /** Explicit current Session facts; cumulative original input records are read by their exact location. */
   load(): Promise<readonly unknown[]>
-  loadMetadata(): Promise<readonly AgentMuxStoredAgentSession[]>
+  loadMetadata(signal?: AbortSignal): Promise<readonly AgentMuxStoredAgentSession[]>
   readMetadata(agentSessionId: string): Promise<AgentMuxStoredAgentSession | null>
   /** Exact original claim; history is never loaded into ordinary Session metadata. */
   readPromptAdmission(agentSessionId: string, run: AgentMuxRunRef, submissionId: string): Promise<AgentPromptSubmissionRecord | null>
   /** Original outcome CAS. A late receipt cannot move the latest projection back. */
   settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void>
   /** Resolve one original active/retired source and its reopen correlation, without catalog discovery. */
-  readHistorySource(agentSessionId: string): Promise<AgentSessionHistoryDescriptor | null>
+  readHistorySource(agentSessionId: string, signal?: AbortSignal): Promise<AgentSessionHistoryDescriptor | null>
   readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null>
   listFuturePromptIntents(agentSessionId: string, options?: { afterIntentId?: string; limit?: number }): Promise<AgentMuxFuturePromptPage>
   /**
@@ -152,9 +154,9 @@ export type AgentMuxAgentSessionStore = {
   compareAndSwapMetadata(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
     signal?: AbortSignal, future?: AgentMuxSessionFutureChange, author?: Readonly<AgentCapabilityBinding>): Promise<void>
   loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]>
-  loadRetiredAgentSessions(): Promise<readonly AgentMuxRetiredAgentSession[]>
+  loadRetiredAgentSessions(signal?: AbortSignal): Promise<readonly AgentMuxRetiredAgentSession[]>
   /** Read only the original pending reopen correlation, including unavailable correlations. */
-  loadReopenCorrelations(): Promise<readonly { expectedRetirement: AgentMuxRetiredAgentSession; operationId?: string }[]>
+  loadReopenCorrelations(signal?: AbortSignal): Promise<readonly { expectedRetirement: AgentMuxRetiredAgentSession; operationId?: string }[]>
   /** Recover an existing creation identity by its caller operation, including no-Run reservations. */
   loadCreationSessionId(createOperationId: string): Promise<string | null>
   /** Original no-Run creation correlation; reading never starts a process or replays input. */
@@ -1700,8 +1702,11 @@ export async function loadAgentSessions(
   return normalizeAgentSessions(await store.load())
 }
 
-export async function loadAgentSessionMetadata(store: AgentMuxAgentSessionStore): Promise<AgentMuxStoredAgentSession[]> {
-  return normalizeAgentSessions(await store.loadMetadata())
+export async function loadAgentSessionMetadata(store: AgentMuxAgentSessionStore, signal?: AbortSignal): Promise<AgentMuxStoredAgentSession[]> {
+  signal?.throwIfAborted()
+  const values = await store.loadMetadata(signal)
+  signal?.throwIfAborted()
+  return normalizeAgentSessions(values)
 }
 
 export function agentLifecycleOperationIdentity(kind: 'create' | 'resume' | 'stop' | 'reopen', agentSessionId: string, requestedOperationId: string): string {
@@ -1726,9 +1731,22 @@ function reopenCorrelations(reservations: readonly AgentMuxLifecycleReservation[
 }
 
 /** One bounded catalogue, derived from the existing durable Store. */
-export async function loadSessionHistorySources(store: AgentMuxAgentSessionStore): Promise<AgentSessionHistoryDescriptor[]> {
-  const [sessions, retired, correlations] = await Promise.all([loadAgentSessionMetadata(store), store.loadRetiredAgentSessions(), store.loadReopenCorrelations()])
-  return sessionHistorySources(sessions, retired, correlations)
+export async function loadSessionHistorySources(store: AgentMuxAgentSessionStore, options: AgentSessionHistorySourcesOptions = {}): Promise<AgentSessionHistoryDescriptor[]> {
+  if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => !['agentSessionId', 'signal'].includes(key)) ||
+    options.agentSessionId !== undefined && (typeof options.agentSessionId !== 'string' || !options.agentSessionId || /[\0\r\n]/u.test(options.agentSessionId)) ||
+    options.signal !== undefined && !(options.signal instanceof AbortSignal)) throw new AgentMuxError('Source observation requires an exact optional Session selector and AbortSignal.', 'INVALID_AGENT_SESSION_HISTORY_OPTIONS')
+  const { signal, agentSessionId } = options
+  signal?.throwIfAborted()
+  return await observeRead((async () => {
+    if (agentSessionId !== undefined) {
+      const source = await store.readHistorySource(agentSessionId, signal)
+      signal?.throwIfAborted()
+      return source ? [source] : []
+    }
+    const [sessions, retired, correlations] = await Promise.all([loadAgentSessionMetadata(store, signal), store.loadRetiredAgentSessions(signal), store.loadReopenCorrelations(signal)])
+    signal?.throwIfAborted()
+    return sessionHistorySources(sessions, retired, correlations)
+  })(), signal)
 }
 
 function sessionHistorySources(
@@ -1991,14 +2009,16 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     return [...this.sessions.values()].map((session) => structuredClone(session))
   }
 
-  async loadMetadata(): Promise<readonly AgentMuxStoredAgentSession[]> {
+  async loadMetadata(signal?: AbortSignal): Promise<readonly AgentMuxStoredAgentSession[]> {
+    signal?.throwIfAborted()
     return [...this.sessions.values()].map(session => structuredClone(agentSessionMetadata(session)))
   }
   async readMetadata(agentSessionId: string): Promise<AgentMuxStoredAgentSession | null> {
     const value = this.sessions.get(agentSessionId)
     return value ? structuredClone(agentSessionMetadata(value)) : null
   }
-  async readHistorySource(agentSessionId: string): Promise<AgentSessionHistoryDescriptor | null> {
+  async readHistorySource(agentSessionId: string, signal?: AbortSignal): Promise<AgentSessionHistoryDescriptor | null> {
+    signal?.throwIfAborted()
     const active = this.sessions.get(agentSessionId)
     const retired = active ? undefined : this.retiredAgentSessions.find(session => session.agentSessionId === agentSessionId)
     const reservation = this.reservations.get(agentSessionId)
@@ -2055,11 +2075,13 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     return this.retiredRuns.map((run) => ({ ...run }))
   }
 
-  async loadRetiredAgentSessions(): Promise<readonly AgentMuxRetiredAgentSession[]> {
+  async loadRetiredAgentSessions(signal?: AbortSignal): Promise<readonly AgentMuxRetiredAgentSession[]> {
+    signal?.throwIfAborted()
     return structuredClone(this.retiredAgentSessions)
   }
 
-  async loadReopenCorrelations() {
+  async loadReopenCorrelations(signal?: AbortSignal) {
+    signal?.throwIfAborted()
     return reopenCorrelations([...this.reservations.values()])
   }
 
@@ -2515,9 +2537,9 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     } finally { await release?.() }
   }
 
-  async loadMetadata(): Promise<readonly AgentMuxStoredAgentSession[]> {
-    await this.tail
-    return await this.withReadDatabase(db => this.sessionCatalog(db), document => document.sessions.map(agentSessionMetadata))
+  async loadMetadata(signal?: AbortSignal): Promise<readonly AgentMuxStoredAgentSession[]> {
+    await observeRead(this.tail, signal)
+    return await this.withReadDatabase(db => this.sessionCatalog(db), document => document.sessions.map(agentSessionMetadata), signal)
   }
 
   async readMetadata(agentSessionId: string): Promise<AgentMuxStoredAgentSession | null> {
@@ -2571,8 +2593,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     }, signal)
   }
 
-  async readHistorySource(agentSessionId: string): Promise<AgentSessionHistoryDescriptor | null> {
-    await this.tail
+  async readHistorySource(agentSessionId: string, signal?: AbortSignal): Promise<AgentSessionHistoryDescriptor | null> {
+    await observeRead(this.tail, signal)
     return await this.withReadDatabase(db => {
       const active = this.sessionMetadata(db, agentSessionId)
       if (active) return sessionHistorySources([active], [], [])[0]!
@@ -2585,7 +2607,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       document.sessions.filter(session => session.agentSessionId === agentSessionId),
       document.retiredAgentSessions.filter(session => session.agentSessionId === agentSessionId),
       reopenCorrelations(document.reservations.filter(reservation => reservation.agentSessionId === agentSessionId))
-    )[0] ?? null)
+    )[0] ?? null, signal)
   }
 
   async readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null> {
@@ -2623,16 +2645,16 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       .map(row => runRef(JSON.parse(String(row.json)))), document => document.retiredRuns)
   }
 
-  async loadRetiredAgentSessions(): Promise<readonly AgentMuxRetiredAgentSession[]> {
-    await this.tail
+  async loadRetiredAgentSessions(signal?: AbortSignal): Promise<readonly AgentMuxRetiredAgentSession[]> {
+    await observeRead(this.tail, signal)
     return await this.withReadDatabase(db => db.prepare('SELECT json FROM retired_sessions ORDER BY rowid').all()
-      .map(row => retiredAgentSession(JSON.parse(String(row.json)))), document => structuredClone(document.retiredAgentSessions))
+      .map(row => retiredAgentSession(JSON.parse(String(row.json)))), document => structuredClone(document.retiredAgentSessions), signal)
   }
 
-  async loadReopenCorrelations() {
-    await this.tail
+  async loadReopenCorrelations(signal?: AbortSignal) {
+    await observeRead(this.tail, signal)
     return await this.withReadDatabase(db => reopenCorrelations(db.prepare("SELECT json FROM reservations WHERE json_extract(json,'$.kind')='reopen'").all()
-      .map(row => lifecycleReservation(JSON.parse(String(row.json))))), document => reopenCorrelations(document.reservations))
+      .map(row => lifecycleReservation(JSON.parse(String(row.json))))), document => reopenCorrelations(document.reservations), signal)
   }
 
   async loadCreationSessionId(createOperationId: string): Promise<string | null> {
@@ -2965,30 +2987,40 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   private async withReadDatabase<T>(read: (db: DatabaseSync) => T,
-    rescue: (document: AgentSessionStoreDocument) => T): Promise<T> {
+    rescue: (document: AgentSessionStoreDocument) => T, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted()
     if (this.database) return read(this.database)
     let db: DatabaseSync | null = null
     let failure: unknown
     try {
       db = await readCurrentSessionDatabase(this.path)
+      signal?.throwIfAborted()
       if (!db) {
         let raw: Buffer | undefined
-        try { raw = await readFile(this.path) } catch (error) {
+        try { raw = await readFile(this.path, signal ? { signal } : undefined) } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
         }
         if (raw) {
+          signal?.throwIfAborted()
           try { this.strictOriginalDocument(raw) } catch {
             // Damaged original bytes remain the original rescue source. A partial salvage is
             // readable, observable and never published as a successful physical conversion.
-            return rescue(await this.parseStoreDocument(raw))
+            const document = await this.parseStoreDocument(raw)
+            signal?.throwIfAborted()
+            return rescue(document)
           }
         }
-        await this.enqueue(async () => {})
+        signal?.throwIfAborted()
+        await this.enqueue(async () => {}, signal)
         db = await readCurrentSessionDatabase(this.path)
+        signal?.throwIfAborted()
         if (!db) throw new AgentMuxError('Session persistence identity is unconfirmed; retry the original read.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
       }
       db.exec('BEGIN'); const result = read(db); db.exec('COMMIT'); return result
-    } catch (error) { failure = sessionStorageFailure(error, 'read'); throw failure }
+    } catch (error) {
+      failure = signal?.aborted ? signal.reason : sessionStorageFailure(error, 'read')
+      throw failure
+    }
     finally {
       try { db?.close() } catch (error) {
         if (failure !== undefined) throw sessionStorageFailure(failure, 'read', [error])

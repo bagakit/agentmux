@@ -3,6 +3,7 @@ import { sanitizeInputObservationArguments } from './performance-diagnostics.js'
 import { parseControlEndpointState } from './control-endpoint-state.js'
 import { randomClientRequestId } from './client-request-id.js'
 import { AgentMuxError } from './errors.js'
+import { observeRead } from './observation-read.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import type { AgentMuxClientEvent, AgentMuxClientEventListener, AgentMuxClientEventListenerOptions, AgentMuxAgentSession, AgentMuxRunAttachment, AgentMuxRunRef,
   AgentSessionHistoryObservation, AgentSessionHistoryObservationHandle, AgentSessionHistoryObservationOptions } from './types.js'
@@ -159,6 +160,9 @@ export async function connectHostedAgentMux(options: {
   const invoke = async (method: AgentMuxHostedMethod, args: unknown[]): Promise<unknown> => {
     args = sanitizeInputObservationArguments(method, args)
     if (disposed) throw new AgentMuxError('Hosted consumer is disposed.', 'CONTROL_CANCELLED')
+    const sourceSignal = method === 'sessionHistorySources' ? (args[0] as Parameters<AgentMuxHostedClient['sessionHistorySources']>[0])?.signal : undefined
+    if (sourceSignal !== undefined && !isAbortSignal(sourceSignal)) throw new AgentMuxError('Source observation requires an AbortSignal.', 'INVALID_AGENT_SESSION_HISTORY_OPTIONS')
+    sourceSignal?.throwIfAborted()
     if (method === 'sessionHistoryResource') {
       const request = parseSessionHistoryResourceOptions(args[1])
       args = [args[0], { ...request, source: { ...request.source },
@@ -166,8 +170,13 @@ export async function connectHostedAgentMux(options: {
     }
     if (method === 'clientPerformanceDiagnostics') {
       if (!stream || !bootstrap) throw new AgentMuxError('Performance owner is not connected.', 'CONTROL_UNAVAILABLE')
-    } else await connectControl(method === 'connectRuntime')
+    } else await observeRead(connectControl(method === 'connectRuntime'), sourceSignal)
     let signal: AbortSignal | undefined, wireArgs = args
+    if (method === 'sessionHistorySources' && args[0]) {
+      const { signal: cancellation, ...scope } = args[0] as NonNullable<Parameters<AgentMuxHostedClient['sessionHistorySources']>[0]>
+      if (isAbortSignal(cancellation)) signal = cancellation
+      wireArgs = [scope, ...args.slice(1)]
+    }
     if (method === 'clientPerformanceDiagnostics') {
       const options = args[0] as { signal?: AbortSignal } | undefined
       if (isAbortSignal(options?.signal)) { signal = options.signal; wireArgs = [] }
