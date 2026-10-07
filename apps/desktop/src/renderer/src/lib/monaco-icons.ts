@@ -5,8 +5,8 @@ import { observeResolvedTheme, type ResolvedTheme } from '@agentmux/client-ui/th
 /** Monaco's registered machine icon identities, not translated labels or business state. */
 export const MONACO_SEMANTIC_ICONS = {
   close: 'action.close', 'widget-close': 'action.close', 'color-picker-close': 'action.close',
-  account: 'object.user', gear: 'object.tools', tools: 'object.tools', wrench: 'object.tools', loading: 'status.loading',
-  'stop-circle': 'action.stop', 'bell-slash': 'status.paused',
+  account: 'object.user', gear: 'object.settings', tools: 'object.tools', wrench: 'object.tools', loading: 'status.loading',
+  'stop-circle': 'action.stop', 'bell-slash': 'editor.snooze-suggestions',
   'split-horizontal': 'layout.split-right', 'split-vertical': 'layout.split-down',
   'expand-all': 'editor.unfold', 'collapse-all': 'editor.fold', 'surround-with': 'editor.surround',
   'compare-changes': 'editor.diff-view', 'arrow-swap': 'editor.diff-swap', map: 'editor.diff-unchanged', move: 'editor.diff-view',
@@ -31,7 +31,7 @@ export const MONACO_SEMANTIC_ICONS = {
   'gutter-lightbulb': 'editor.code-action', 'gutter-lightbulb-auto-fix': 'editor.code-action',
   'gutter-lightbulb-sparkle': 'editor.code-action', 'gutter-lightbulb-aifix-auto-fix': 'editor.code-action',
   'gutter-lightbulb-sparkle-filled': 'editor.code-action', lightbulb: 'editor.code-action', 'lightbulb-autofix': 'editor.code-action',
-  'hover-increase-verbosity': 'action.create', 'hover-decrease-verbosity': 'editor.diff-removed',
+  'hover-increase-verbosity': 'editor.increase-verbosity', 'hover-decrease-verbosity': 'editor.decrease-verbosity',
   'diff-insert': 'editor.diff-added', 'diff-review-insert': 'editor.diff-added',
   'diff-remove': 'editor.diff-removed', 'diff-review-remove': 'editor.diff-removed', 'diff-review-close': 'action.close',
   add: 'editor.diff-added', remove: 'editor.diff-removed', discard: 'editor.diff-revert',
