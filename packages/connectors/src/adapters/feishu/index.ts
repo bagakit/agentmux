@@ -8,10 +8,12 @@ import { feishuFailure, feishuIdentity, readFeishuMessage, projectFeishuMessage 
 import { feishuParentAddressing } from './reply.js'
 
 export type FeishuAdapterOptions = { http?: HttpInstance }
+/** Only original application identity is needed by the SDK; Host authorization stays outside the leaf. */
+export type FeishuClientScope = Pick<ConnectionConfig, 'connectionId' | 'application'>
 type ReceiverState = { config: ConnectionConfig; signal: AbortSignal; closed: boolean; botOpenId: string; ws: WSClient | null; observed: boolean }
 type Witness = { receiver: ReceiverState; raw: string }
 const owners = new Map<string, ReceiverState>()
-const applicationKey = (config: ConnectionConfig) => JSON.stringify([config.application.domain, config.application.appId])
+const applicationKey = (config: Pick<ConnectionConfig, 'application'>) => JSON.stringify([config.application.domain, config.application.appId])
 const sameConfig = (left: ConnectionConfig, right: ConnectionConfig) => JSON.stringify(parseConnectionConfig(left)) === JSON.stringify(parseConnectionConfig(right))
 const muted = () => undefined
 // SDK logs can include credentials, connection tickets and complete platform bodies. No SDK argument leaves this sink.
@@ -23,17 +25,24 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   readonly transport: ConnectionIngressTransport = { start: input => this.startReceiver(input) }
   private readonly witnesses = new WeakSet<object>()
   private readonly callback = new AsyncLocalStorage<Witness>()
+  private readonly requests = new AsyncLocalStorage<AbortSignal | undefined>()
+  private readonly clients = new Map<string, { application: string; credential: string; client: Client }>()
   constructor(private readonly options: FeishuAdapterOptions = {}) {}
 
-  private configuration(config: ConnectionConfig): void {
-    if (config.adapterId !== this.adapterId || !['open.feishu.cn', 'open.larksuite.com'].includes(config.application.domain)) feishuFailure('FEISHU_APPLICATION_INVALID')
+  private application(config: FeishuClientScope): void {
+    if (!['open.feishu.cn', 'open.larksuite.com'].includes(config.application.domain)) feishuFailure('FEISHU_APPLICATION_INVALID')
     feishuIdentity(config.application.appId)
   }
-  private http(signal?: AbortSignal): HttpInstance {
+  private configuration(config: ConnectionConfig): void {
+    if (config.adapterId !== this.adapterId) feishuFailure('FEISHU_APPLICATION_INVALID')
+    this.application(config)
+  }
+  private http(receiverSignal?: AbortSignal): HttpInstance {
     const transport: HttpInstance = this.options.http ?? defaultHttpInstance as unknown as HttpInstance
     const http = Object.create(transport) as HttpInstance
     http.request = async <T, R = T, D = unknown>(input: HttpRequestOptions<D> & { signal?: AbortSignal }): Promise<R> => {
       try {
+        const signal = receiverSignal ?? this.requests.getStore()
         if (signal?.aborted || input.signal?.aborted) feishuFailure('FEISHU_SDK_REQUEST_CANCELLED')
         const result = await transport.request<T, R, D>({ ...input, ...(signal ? { signal } : {}) })
         if (input.url?.endsWith('/callback/ws/endpoint')) {
@@ -51,15 +60,19 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
     http.post = <T, R = T, D = unknown>(url: string, data?: D, options?: HttpRequestOptions<D>): Promise<R> => http.request<T, R, D>({ ...options, method: 'POST', url, ...(data === undefined ? {} : { data }) })
     return http
   }
-  private client(config: ConnectionConfig, credential: string, signal?: AbortSignal): Client {
-    this.configuration(config)
+  private client(config: FeishuClientScope, credential: string): Client {
+    this.application(config)
+    const application = applicationKey(config), cached = this.clients.get(config.connectionId)
+    if (cached?.application === application && cached.credential === credential) return cached.client
     try {
-      return new Client({ appId: config.application.appId, appSecret: credential, domain: `https://${config.application.domain}`, appType: AppType.SelfBuild, httpInstance: this.http(signal), cache: new DefaultCache(), logger: safeLogger, loggerLevel: LoggerLevel.error })
+      const client = new Client({ appId: config.application.appId, appSecret: credential, domain: `https://${config.application.domain}`, appType: AppType.SelfBuild, httpInstance: this.http(), cache: new DefaultCache(), logger: safeLogger, loggerLevel: LoggerLevel.error })
+      this.clients.set(config.connectionId, { application, credential, client })
+      return client
     } catch { return feishuFailure('FEISHU_CLIENT_UNAVAILABLE') }
   }
   /** Outbound leaves reuse the official authenticated Client; raw SDK errors never escape this call. */
-  async withClient<T>(config: ConnectionConfig, credential: string, call: (client: Client) => Promise<T>, signal?: AbortSignal): Promise<T> {
-    try { return await call(this.client(config, credential, signal)) }
+  async withClient<T>(config: FeishuClientScope, credential: string, call: (client: Client) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    try { return await this.requests.run(signal, () => call(this.client(config, credential))) }
     catch { return feishuFailure('FEISHU_SDK_REQUEST_FAILED') }
   }
   private async bot(client: Client): Promise<string> {
@@ -70,7 +83,8 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
     } catch { return feishuFailure('FEISHU_AUTHENTICATION_UNCONFIRMED') }
   }
   async test(config: ConnectionConfig, credential: string): Promise<ConnectionObservation> {
-    await this.bot(this.client(config, credential))
+    this.configuration(config)
+    await this.withClient(config, credential, client => this.bot(client))
     return { authentication: { state: 'ready' }, transport: { state: 'unknown', reason: 'not-started' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }
   }
   private current(receiver: ReceiverState): boolean {
@@ -124,8 +138,7 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
     }
     signal.addEventListener('abort', close, { once: true })
     try {
-      const client = this.client(config, credential, signal)
-      receiver.botOpenId = await this.bot(client)
+      receiver.botOpenId = await this.withClient(config, credential, client => this.bot(client), signal)
       if (!this.current(receiver)) feishuFailure('FEISHU_CONNECTION_REVISED')
       const dispatcher = new EventDispatcher({ logger: safeLogger, loggerLevel: LoggerLevel.error, cache: new DefaultCache() })
       dispatcher.unregister('app_ticket')
