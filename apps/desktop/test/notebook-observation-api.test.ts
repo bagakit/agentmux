@@ -13,6 +13,7 @@ import { assertSenderTrusted, senderTrust, type PrivilegedChannel } from '../src
 import { createPreloadNotebookObservation } from '../src/preload/notebook-observation'
 import { createRendererNotebookObservation } from '../src/renderer/src/lib/notebook-observation-api'
 import { noteContentMatchesGraph, type NotebookObservationPreloadApi } from '../src/shared/notebook-observation'
+import { NoteTitleFileWriter } from '../src/main/note-title-file-writer'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
@@ -23,7 +24,8 @@ function deferred<T>() { let resolve!:(value:T)=>void; const promise=new Promise
 const body=(id:string,extra:import('@tiptap/core').JSONContent[]=[])=>serializeNoteDocument({schema:'agentmux.note.v1',noteId:id,content:{type:'doc',content:[{type:'paragraph',attrs:{blockId:id+'-block'},content:[{type:'text',text:id}]},...extra]}})
 async function fixture() {
   const root=await realpath(await mkdtemp(join(tmpdir(),'amx-note-gui-')));roots.push(root)
-  const workspace:WorkspaceRecord={id:'notes',hostId:'local',path:root,name:'Notes',kind:'folder'}, files=new WorkspaceFiles(()=>({kind:'local'} as ExecutionHost)),store=new AgentMuxNotebookStore(join(root,'notebooks.json'))
+  const workspace:WorkspaceRecord={id:'notes',hostId:'local',path:root,name:'Notes',kind:'folder'}, files=new WorkspaceFiles(()=>({kind:'local'} as ExecutionHost)),store=new AgentMuxNotebookStore(join(root,'notebooks.json'),undefined,{title:{inspect:id=>titleWriter.inspect(id),write:intent=>titleWriter.write(workspace,intent),current:(id,resource)=>titleWriter.current(workspace,id,resource)}})
+  const titleWriter=new NoteTitleFileWriter(files,store)
   for(const id of ['target','source']) {
     await writeFile(join(root,id+'.note.md'),body(id,id==='source'?[{type:'blockReference',attrs:{blockId:'ref-block',referenceId:'ref-one',mode:'reference',target:{noteId:'target',blockId:'target-block'}}}]:[]))
     await store.apply({expectedRevision:(await store.read()).revision,operationId:'register-'+id,change:{kind:'register',noteId:id,title:'Original '+id,resource:{hostId:'local',workspaceId:workspace.id,workspacePath:root,path:id+'.note.md'}}},{kind:'user',id:'test-user'})
