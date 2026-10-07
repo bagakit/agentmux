@@ -1,6 +1,6 @@
 # Native duration and usage summary
 
-Owning behavior: [native turn summaries](../../../../../docs/design/behavior/conversation-input.md#原生回合摘要与过程披露); [presentation](../../../../../docs/design/presentation/conversation-input.md#原生回合摘要).
+Owning behavior: [native turn summaries](../../../../../docs/design/behavior/conversation-mode.md#原生回合摘要与过程披露); [presentation](../../../../../docs/design/presentation/conversation-mode.md#原生回合摘要).
 
 Run `node apps/desktop/scripts/capture-native-turn-summary.mjs --evidence <local-evidence-directory>`.
 
