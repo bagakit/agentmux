@@ -1,4 +1,5 @@
 import { createElement as h } from 'react'
+import { mountThemeRuntime } from '@agentmux/client-ui/theme'
 import { createClientUiRoot } from '../../../test/helpers/client-ui-render'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
@@ -8,6 +9,7 @@ import '../../../src/renderer/src/styles/index.css'
 const seed = await (await fetch('./public-scene-seed.json')).json()
 if (seed.schema !== 'agentmux.activity-certainty-public-scene-seed.v1' || seed.rows.length !== 4) throw new Error('Exact public four-state seed required')
 const config = await api.config.get(), snapshot = await api.sessions.snapshot()
+mountThemeRuntime(window, config.appearance)
 const base = snapshot.sessions.find(session => session.kind === 'agent')
 if (!base || !config.workspaces[0]) throw new Error('Maintained preview presentation shape missing')
 const { semanticStatus: _previous, pendingInteraction: _pending, ...presentationBase } = base
