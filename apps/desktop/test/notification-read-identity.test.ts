@@ -106,7 +106,7 @@ describe('hydrated read receipt normalization', () => {
     expect(normalizeNotificationReadReceipts(input)).toEqual({
       'global:workflow': { current: fingerprint(hash(native()), 'another-occurrence') },
       'global:sessions': { [launch]: fingerprint(hash(cause), null, 'process-degraded') },
-      [local]: { lifecycle: fingerprint(hash(cause), null, 'agent-broken') }
+      [local]: { lifecycle: input[local]!.lifecycle }
     })
     expect(normalizeNotificationReadReceipts({ 'global:workflow': { current: fingerprint(native(), null, 'process-degraded') } }))
       .toEqual({ 'global:workflow': { current: fingerprint(hash(native()), null, 'process-degraded') } })
@@ -122,6 +122,17 @@ describe('hydrated read receipt normalization', () => {
       'global:workbench-save': { original: fingerprint(hash(JSON.stringify(details)), 'operation-a') }, unrelated: input.unrelated })
     expect(normalizeNotificationReadReceipts(normalized)).toEqual(normalized)
     expect(normalized['global:events']).toBeUndefined()
+  })
+
+  it('preserves mailbox read ownership even when a mail receipt resembles a service fingerprint', () => {
+    const mail = { original: JSON.stringify(['assistant', 'message-a', reason]),
+      'service-shaped': fingerprint(JSON.stringify(['resume', reason]), JSON.stringify(['host-a', 'session-a', 'run-a'])) }
+    const unrelated = { receipt: JSON.stringify([null, 'another-kind', reason]) }
+    const normalized = normalizeNotificationReadReceipts({ 'mail:session-a': mail, unrelated })
+    expect(normalized).toEqual({ 'mail:session-a': mail, unrelated })
+    expect(normalizeNotificationReadReceipts(normalized)).toEqual(normalized)
+    expect(normalized['global:events']).toBeUndefined()
+    expect(normalized[`local:lifecycle:${owner()}`]).toBeUndefined()
   })
 
   it('moves each exact launch and recovery global read to its original owner', () => {
