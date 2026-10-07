@@ -1,4 +1,4 @@
 {
   "extends": "../../../tsconfig.renderer.json",
-  "include": ["../../../src/renderer/**/*.ts", "../../../src/renderer/**/*.tsx", "../../../src/shared/**/*.ts", "../../../test/desktop-focus-navigation.test.tsx", "../../../test/focus-surface-residency.test.tsx", "../../../../../packages/client-ui/test/conversation-reading-activity.test.tsx", "./vitest.owning.config.mts"]
+  "include": ["../../../src/renderer/**/*.ts", "../../../src/renderer/**/*.tsx", "../../../src/shared/**/*.ts", "../../../test/desktop-focus-navigation.test.tsx", "../../../test/focus-surface-residency.test.tsx", "../../../test/focus-goal-relations.test.tsx", "../../../../../packages/client-ui/test/conversation-reading-activity.test.tsx", "./vitest.owning.config.mts"]
 }
