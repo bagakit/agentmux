@@ -50,6 +50,15 @@
 .composer-menu__hint { padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); }
 .composer-menu__item > span { min-width: 0; }
 .composer-menu__item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); max-width: 32ch; }
+.composer-menu--search { display: flex; flex-direction: column; width: 320px; min-width: 0; max-width: min(90vw, var(--radix-dropdown-menu-content-available-width)); max-height: min(50vh, 360px, var(--radix-dropdown-menu-content-available-height)); overflow: hidden; }
+.composer-menu__search { display: flex; flex: 0 0 auto; align-items: center; gap: var(--sp-2); padding: var(--sp-2); border-bottom: 1px solid var(--line-soft); }
+.composer-menu__search input { flex: 1; min-width: 0; width: 0; min-height: 28px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-0); font: inherit; font-size: var(--fs-body); }
+.composer-menu__search input:focus-visible, .composer-menu__clear:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.composer-menu__clear { display: inline-flex; flex: 0 0 28px; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); cursor: pointer; }
+.composer-menu__clear:hover { color: var(--text); background: var(--surface-2); }
+.composer-menu__results { min-height: 0; overflow: auto; }
+.composer-menu--search .composer-menu__item > span, .composer-menu--search .composer-menu__item small { max-width: none; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+@media (pointer: coarse) { .composer-menu--search .composer-menu__item, .composer-menu__search input { min-height: 44px; } .composer-menu__clear { flex-basis: 44px; width: 44px; height: 44px; } }
 /* 候选浮层。有边界且内部滚动（density SSOT DEN:480「菜单有边界和内部滚动」）：候选来源现在是
    Provider 原生命令 ∪ 用户自己的 prompt，条数由配置决定而没有上限，不封顶就会把输入框和底部操作
    顶出视口——而那两个正是用户此刻要看的。上限沿用同文件 .composer-menu 那条（min(50vh, 360px)），
