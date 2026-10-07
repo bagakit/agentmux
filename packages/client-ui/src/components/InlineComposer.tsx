@@ -190,6 +190,8 @@ export function composerExtensions(
 }
 
 export type InlineComposerProps = {
+  /** Defer a never-presented editor; once presented its document and history stay mounted. */
+  active?: boolean
   autoFocus?: boolean
   readPastedImage?: ReadPastedImage
   value: string
@@ -208,6 +210,27 @@ export type InlineComposerProps = {
 }
 
 export function InlineComposer(props: InlineComposerProps) {
+  const active = props.active ?? true
+  const [presented, setPresented] = useState(active)
+  useLayoutEffect(() => { if (active) setPresented(true) }, [active])
+  return active || presented ? <PresentedInlineComposer {...props} /> : <UnpresentedInlineComposer {...props} />
+}
+
+function unavailableEditor(): Error & { code: string } {
+  return Object.assign(new Error('The message editor is unavailable. The saved draft was not changed.'), { code: 'COMPOSER_EDITOR_UNAVAILABLE' })
+}
+
+function UnpresentedInlineComposer(props: InlineComposerProps) {
+  useImperativeHandle(props.insertionRef, () => ({
+    replace: () => { throw unavailableEditor() },
+    insert: async () => { throw unavailableEditor() }
+  }), [])
+  return <div className="composer__editor" data-placeholder={props.placeholder} data-disabled={props.disabled} data-empty={props.value.length === 0 ? 'true' : 'false'}>
+    {props.value ? <span className="composer__editor-fallback">{props.value}</span> : null}
+  </div>
+}
+
+function PresentedInlineComposer(props: InlineComposerProps) {
   const platform = useClientUiPlatform()
   const draftContent = useMemo(() => draftDocument(props.value), [props.value])
   const imageReferences = useMemo(() => {
@@ -268,6 +291,9 @@ export function InlineComposer(props: InlineComposerProps) {
   })
   editorRef.current = editor
   useEffect(() => {
+    if (editor && !editor.isDestroyed) editor.setEditable(!props.disabled, false)
+  }, [editor, props.disabled])
+  useEffect(() => {
     if (!editor || editor.isDestroyed || props.disabled) return
     return platform.bindComposerFocus(editor.view.dom, () => {
       if (editor.isDestroyed || !editor.isEditable) return false
@@ -278,7 +304,7 @@ export function InlineComposer(props: InlineComposerProps) {
   }, [editor, props.disabled, platform])
   useImperativeHandle(props.insertionRef, () => ({
     replace: (value) => {
-      if (!editor || editor.isDestroyed || !editor.view.dom.isConnected) throw Object.assign(new Error('The message editor is unavailable. The saved draft was not changed.'), { code: 'COMPOSER_EDITOR_UNAVAILABLE' })
+      if (!editor || editor.isDestroyed || !editor.view.dom.isConnected) throw unavailableEditor()
       replaceComposerDraft(editor, draftDocument(value))
     },
     insert: async (resolve, options) => {
