@@ -357,7 +357,12 @@ fails explicitly, including through a different alias or adapter instance.
 The registered ingress delegates both private proof verification and deferred
 reply qualification to the same leaf instance.
 `withClient` provides an exception-safe official Client call for other adapter
-leaves without introducing an outbound queue or send policy.
+leaves without introducing an outbound queue or send policy. The exact connection,
+application and credential reuse one official Client and its own SDK token cache;
+credential or application rotation replaces that instance. Each call carries its
+own request signal, independent of another caller or the receiver's lifetime.
+The Client scope contains original connection and application identity alone;
+publication does not invent configuration fields or treat cache reuse as authority.
 
 The private dispatcher captures the complete original SDK callback object before
 SDK flattening. Its JSON representation retains all header, event, extension,
