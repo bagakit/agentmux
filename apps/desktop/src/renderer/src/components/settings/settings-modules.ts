@@ -18,12 +18,14 @@ import { goalsSettingsModule } from './modules/goals'
 import { moteSettingsModule } from './modules/mote'
 import { surveySettingsModule } from './modules/survey'
 import { notesSettingsModule } from './modules/notes'
+import { continuitySettingsModule } from './modules/continuity'
 
 /** The only Renderer composition point. Registration preserves order within each group. */
 export const settingsModules = [
   profileSettingsModule,
   appearanceSettingsModule,
   notificationsSettingsModule,
+  continuitySettingsModule,
   browserSettingsModule,
   generalSettingsModule,
   keyboardShortcutsSettingsModule,

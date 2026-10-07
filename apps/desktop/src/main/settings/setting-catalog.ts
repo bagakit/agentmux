@@ -7,6 +7,7 @@ import { profileSettings } from './modules/profile.js'
 import { focusSettings } from './modules/focus.js'
 import { goalsSettings } from './modules/goals.js'
 import { notesSettings } from './modules/notes.js'
+import { continuitySettings } from './modules/continuity.js'
 
 /** The only Main scalar composition point; the existing ConfigOwner performs every write. */
 export const scalarSettings = [
@@ -14,6 +15,7 @@ export const scalarSettings = [
   ...focusSettings,
   ...goalsSettings,
   ...notesSettings,
+  ...continuitySettings,
   ...appearanceSettings,
   ...generalSettings,
   ...notificationsSettings,

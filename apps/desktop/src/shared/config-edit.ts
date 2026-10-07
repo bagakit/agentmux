@@ -1,4 +1,5 @@
 import { DEFAULT_THEME_ID } from '@agentmux/client-ui/theme'
+import { normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-continuity'
 import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, PROJECT_RAIL_DENSITY_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT, MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, type AppConfig, type GoalsCommonActionsConfig } from './contracts'
 import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './notification-presentation'
 import { DEFAULT_PERFORMANCE_PREFERENCES, DEFAULT_MOBILE_CONNECTION_PREFERENCES } from './toolkit-preferences'
@@ -20,6 +21,8 @@ export function configValuesEqual(a: unknown, b: unknown): boolean {
 }
 
 function effective(path: string, value: unknown): unknown {
+  if (path === 'continuity') return normalizeAgentContinuityPolicy(value as Partial<AgentMuxContinuityPolicy> | undefined)
+  if (path.startsWith('continuity.')) return value ?? normalizeAgentContinuityPolicy()[path.slice('continuity.'.length) as keyof AgentMuxContinuityPolicy]
   if (path === 'browser.startPage') return resolveBrowserStartPage(value as Partial<BrowserStartPageConfig> | undefined)
   if (path.startsWith('browser.startPage.')) return value ?? resolveBrowserStartPage()[path.slice('browser.startPage.'.length) as keyof BrowserStartPageConfig]
   if (path === 'profile') return resolveUserProfile(value as Partial<UserProfile> | undefined)
@@ -71,7 +74,7 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
     if (configValuesEqual(effective(path, expected), effective(path, requested))) return actual
     if (configValuesEqual(effective(path, actual), effective(path, requested))) return actual
     // Optional domains still merge authored fields/identities after a concurrent first edit.
-    if (path === 'notes' || path === 'goals' || path === 'startup' || path === 'browser.startPage') {
+    if (path === 'notes' || path === 'goals' || path === 'startup' || path === 'continuity' || path === 'browser.startPage') {
       // Compare effective defaults without persisting fields the user did not edit.
       actual = actual ?? {}; expected = effective(path, expected); requested = effective(path, requested)
     } else if (path === 'profile' || path === 'focus' || path === 'goalsCommonActions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
