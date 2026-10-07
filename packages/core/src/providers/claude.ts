@@ -2,6 +2,12 @@ import { inspectHookDisableSetting } from './shared.js'
 import { listClaudeNativeSessions, assertClaudeNativeResumeSource } from './claude-native-catalog.js'
 import { readClaudeSessionHistoryPage, readClaudeSessionHistoryRecord, readClaudeConversationChanges } from './claude-native-history.js'
 import { discoverClaudeNativeSession } from './claude-native-session.js'
+import {
+  claudeNativeActivity,
+  claudeNativeActivityMutations,
+  claudeNativeTurnIdentity,
+  withClaudeNativeActivity
+} from './claude-native-activity.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import { isAbsolute } from 'node:path'
 import { join, resolve } from 'node:path'
@@ -50,6 +56,8 @@ export const CLAUDE_HOOK_EVENTS = [
 ] as const
 
 export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
+  currentActivity: claudeNativeActivity,
+  nativeTurnIdKeys: ['turnId'],
   nativeSessionTransition: (eventName, payload) => eventName === 'SessionStart' &&
     ['startup', 'resume', 'clear', 'compact', 'fork'].includes(String(payload.source)),
   // 事件名随负载到达：Claude 一族的 stdin 负载带 `hook_event_name`（这也是 claude/codex 的配置都不带
@@ -59,6 +67,11 @@ export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
     (typeof payload.agent_id === 'string' && payload.agent_id.length > 0) ||
     (typeof payload.agentId === 'string' && payload.agentId.length > 0),
   rules: [
+    // Native mods observe the actual runner end; activity is independent of task completion.
+    { events: ['turn.start'], state: 'working', lifecycleEvent: 'turn-start' },
+    { events: ['turn.complete'], state: 'error', lifecycleEvent: 'turn-end',
+      matches: payload => payload.reason === 'error' && claudeNativeActivity('turn.complete', payload)?.state === 'idle' },
+    { events: ['turn.complete', 'AgentMuxActivityUnavailable'], state: 'unknown', lifecycleEvent: null },
     { events: ['PermissionRequest'], state: 'waiting' },
     { events: ['PreToolUse'], toolNames: ['askuserquestion'], state: 'waiting' },
     // Stop 与 SubagentStop 是 Claude Code 的决策前回调（可被其它 hook 否决或追加 context 继续），
@@ -70,8 +83,11 @@ export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
     { events: ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PreCompact'], state: 'working' }
   ],
   subagentTracking: {
-    startEvents: ['SubagentStart'],
-    stopEvents: [],
+    startEvents: ['turn.start'],
+    stopEvents: ['turn.complete'],
+    // Child IDs survive resume. Only this exact native turn can settle the existing roster entry.
+    matches: (_eventName, payload) => typeof payload.agent_id === 'string' && payload.agent_id.length > 0,
+    turnIdentity: claudeNativeTurnIdentity,
     mainStopEvents: ['StopFailure'],
     idKeys: ['agent_id', 'agentId']
   },
@@ -113,12 +129,12 @@ export function createClaudeManagedHookPlan(workspacePath: string): AgentManaged
       content: `${JSON.stringify({ hooks }, null, 2)}\n`,
       mode: 0o600,
       merge: { kind: 'json-managed-events' }
-    }]
+    }, ...claudeNativeActivityMutations(workspace)]
   }
 }
 
 export function createClaudeProvider(defineAgentProvider: ProviderFactory): AgentProvider {
-  return defineAgentProvider({
+  const provider = defineAgentProvider({
     planManagedHooks: ({ workspacePath }) => createClaudeManagedHookPlan(workspacePath),
     readSessionHistoryPage: readClaudeSessionHistoryPage,
     readSessionHistoryRecord: readClaudeSessionHistoryRecord,
@@ -170,4 +186,28 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
       '--resume', sessionId, ...args, ...(prompt ? [prompt] : [])
     ]
   })
+  return {
+    ...provider,
+    normalizeHook(envelope, context) {
+      const normalized = provider.normalizeHook(envelope, context)
+      if (normalized.eventName === 'turn.complete' && normalized.semanticState === 'error' &&
+        normalized.currentActivity?.state === 'idle') {
+        return { ...normalized, status: { ...normalized.status,
+          detail: 'Native turn ended in error; the Provider did not supply a structured error code.' } }
+      }
+      return normalized
+    },
+    buildLaunch(context) {
+      const launch = provider.buildLaunch(context)
+      return { ...launch, args: withClaudeNativeActivity(launch.args, context.workspacePath) }
+    },
+    buildResumeLaunch(context) {
+      const launch = provider.buildResumeLaunch(context)
+      return { ...launch, args: withClaudeNativeActivity(launch.args, context.workspacePath) }
+    },
+    ...(provider.buildForkLaunch ? { buildForkLaunch(context: Parameters<NonNullable<AgentProvider['buildForkLaunch']>>[0]) {
+      const launch = provider.buildForkLaunch!(context)
+      return { ...launch, args: withClaudeNativeActivity(launch.args, context.workspacePath) }
+    } } : {})
+  }
 }
