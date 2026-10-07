@@ -1,6 +1,7 @@
 import { SEMANTIC_ICON_IDS, type SemanticIconId, type IconShape } from './icon-catalog.js'
 import { iconShapes } from './icon-assets.js'
 import { themeColorSchema, type ThemeValue } from './schema.js'
+import { SEMANTIC_ICON_PEN, type SemanticIconPresentation } from './icon-presentation.js'
 
 /** CSS and native widgets consume these semantic masks while retaining their original DOM state. */
 const NATIVE_ICON_PROJECTIONS = {
@@ -89,7 +90,10 @@ export function removeIconSprite(document: Document): void {
   sprites.delete(document)
 }
 
-export function createSemanticIconElement(name: SemanticIconId, document: Document, options: { size?: number; className?: string } = {}): SVGSVGElement {
+type NativeIconOptions = SemanticIconPresentation & { className?: string }
+export function createSemanticIconElement(name: SemanticIconId, document: Document, options?: NativeIconOptions & { animation?: 'none' }): SVGSVGElement
+export function createSemanticIconElement(name: SemanticIconId, document: Document, options: NativeIconOptions): SVGSVGElement | HTMLSpanElement
+export function createSemanticIconElement(name: SemanticIconId, document: Document, options: NativeIconOptions = {}): SVGSVGElement | HTMLSpanElement {
   const element = document.createElementNS(SVG_NS, 'svg')
   const size = options.size ?? 14
   element.setAttribute('width', String(size))
@@ -103,13 +107,19 @@ export function createSemanticIconElement(name: SemanticIconId, document: Docume
   element.setAttribute('class', ['semantic-icon', options.className].filter(Boolean).join(' '))
   element.style.pointerEvents = 'none'
   element.style.overflow = 'hidden'
-  element.style.strokeWidth = 'var(--icon-stroke-width, 1.75)'
-  element.style.strokeLinecap = 'var(--icon-linecap, round)' as 'round'
-  element.style.strokeLinejoin = 'var(--icon-linejoin, round)' as 'round'
+  if (options.color !== undefined) element.style.color = options.color
+  element.style.strokeWidth = String(options.strokeWidth ?? SEMANTIC_ICON_PEN.strokeWidth)
+  element.style.strokeLinecap = options.strokeLinecap ?? SEMANTIC_ICON_PEN.strokeLinecap as 'round'
+  element.style.strokeLinejoin = options.strokeLinejoin ?? SEMANTIC_ICON_PEN.strokeLinejoin as 'round'
   const use = document.createElementNS(SVG_NS, 'use')
   use.setAttribute('href', semanticIconHref(name))
   element.append(use)
-  return element
+  if (!options.animation || options.animation === 'none') return element
+  const carrier = document.createElement('span')
+  carrier.className = 'semantic-icon-motion'
+  carrier.dataset.iconAnimation = options.animation
+  carrier.append(element)
+  return carrier
 }
 
 function attributes(attributes: Readonly<Record<string, string>>): string {

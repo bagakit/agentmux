@@ -2,6 +2,7 @@
 @import '../input/input.css';
 @import './theme-transition.css';
 @import './native-controls.css';
+@import './semantic-icons.css';
 @import './workflow-status.css';
 @import './interaction.css';
 @import './composer.css';

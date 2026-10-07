@@ -1,0 +1,35 @@
+/* One local HTML composition box; semantics and live-state eligibility belong to callers. */
+.semantic-icon-motion {
+  display: inline-flex;
+  flex: none;
+  vertical-align: middle;
+  line-height: 0;
+  contain: layout paint;
+  pointer-events: none;
+  transform-origin: center;
+  will-change: transform;
+}
+.semantic-icon-motion > .semantic-icon { flex: none; }
+.semantic-icon-motion[data-icon-animation="work"] { animation: semantic-icon-work 1.8s ease-in-out infinite; }
+.semantic-icon-motion[data-icon-animation="stream"] { animation: semantic-icon-stream 1.6s ease-in-out infinite; }
+.semantic-icon-motion[data-icon-animation="execute"] { animation: semantic-icon-execute 2s ease-in-out infinite; }
+.semantic-icon-motion[data-icon-animation="spin"] { animation: semantic-icon-spin 1s linear infinite; }
+@keyframes semantic-icon-work {
+  0%, 50%, 100% { transform: translate(0, 0) rotate(0); }
+  12%, 36% { transform: translate(.65px, -.35px) rotate(-5deg); }
+  24% { transform: translate(-.45px, .3px) rotate(3deg); }
+}
+@keyframes semantic-icon-stream {
+  0%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-1px); }
+  60% { transform: translateY(.5px); }
+}
+@keyframes semantic-icon-execute {
+  0%, 55%, 100% { transform: translateX(0) rotate(0); }
+  18% { transform: translateX(.7px) rotate(4deg); }
+  36% { transform: translateX(-.5px) rotate(-3deg); }
+}
+@keyframes semantic-icon-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .semantic-icon-motion[data-icon-animation] { animation: none; will-change: auto; }
+}
