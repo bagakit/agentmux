@@ -110,6 +110,23 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   const folded = useRef(new Set<string>())
   const wikiHandlers = useRef<{ created(link: NoteInlineLinkAttributes, previousReferenceId?: string): void; keyDown(event: KeyboardEvent): boolean; open(link: NoteLinkOpenRequest): void }>({ created() {}, keyDown: () => false, open() {} })
   const extensions = useMemo(() => [...noteEditorExtensions(() => folded.current), noteWikiInputExtension((link, previous) => wikiHandlers.current.created(link, previous)), noteWikiLiteralExtension(link => wikiHandlers.current.open(link))], [])
+  const publishContent = (editor: Editor) => {
+    // The IME owns its intermediate text. Wiki attributes are canonicalized only
+    // after composition ends, before this original onChange publishes a draft.
+    if (editor.view.composing) return
+    const current = props.current
+    let raw: string
+    try { raw = serializeNoteDocument({ ...current.note, content: editor.getJSON() }) }
+    catch (error) { current.onIssue(error instanceof Error ? error.message : String(error)); return }
+    const read = readNoteDocument(raw)
+    if (read.status === 'invalid') { current.onIssue(read.message); return }
+    current.onIssue(null)
+    current.onChange(raw)
+    if (!editor.isDestroyed && editor.view.hasFocus()) {
+      const selection = editor.state.selection, blockId = selection.$from.parent.attrs.blockId ?? editor.state.doc.nodeAt(selection.from)?.attrs.blockId
+      if (typeof blockId === 'string') current.onSelectedBlock?.({ noteId: current.note.noteId, blockId })
+    }
+  }
   const editor = useEditor({ extensions, content: note.content, editorProps: {
     attributes: { class: 'note-block-content', role: 'textbox', 'aria-label': 'Note blocks', 'aria-multiline': 'true' },
     handleKeyDown(view, event) {
@@ -125,20 +142,11 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     if (!id) id = editor.state.doc.nodeAt(editor.state.selection.from)?.attrs.blockId ?? null
     setSelected(id)
     if (id && !transaction.getMeta('noteSelectionRestore') && !editor.isDestroyed && editor.view.hasFocus()) props.current.onSelectedBlock?.({ noteId: props.current.note.noteId, blockId: id })
-  }, onUpdate({ editor }) {
-    const current = props.current
-    let raw: string
-    try { raw = serializeNoteDocument({ ...current.note, content: editor.getJSON() }) }
-    catch (error) { current.onIssue(error instanceof Error ? error.message : String(error)); return }
-    const read = readNoteDocument(raw)
-    if (read.status === 'invalid') { current.onIssue(read.message); return }
-    current.onIssue(null)
-    current.onChange(raw)
-    if (!editor.isDestroyed && editor.view.hasFocus()) {
-      const selection = editor.state.selection, blockId = selection.$from.parent.attrs.blockId ?? editor.state.doc.nodeAt(selection.from)?.attrs.blockId
-      if (typeof blockId === 'string') current.onSelectedBlock?.({ noteId: current.note.noteId, blockId })
-    }
-  } }, [note.noteId])
+  }, onTransaction({ editor, transaction, appendedTransactions }) {
+    // Plain text IME may need no wiki-normalization step, so TipTap emits no
+    // update for this metadata-only completion. Publish that final draft here.
+    if (transaction.getMeta('noteWikiCompositionEnd') && !transaction.docChanged && !appendedTransactions.some(tr => tr.docChanged)) publishContent(editor)
+  }, onUpdate({ editor }) { publishContent(editor) } }, [note.noteId])
   const wiki = useNoteWikiCompletion(editor, active, sourceIdentity)
   wikiHandlers.current = { created: wiki.created, keyDown: wiki.keyDown, open: link => {
     if (!editor || editor.isDestroyed || !active) return
