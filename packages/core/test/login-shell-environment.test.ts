@@ -1,4 +1,4 @@
-import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { fixturePath as _hygiene_fixturePath } from './helpers/fixture-values.js'
 import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -9,7 +9,7 @@ import {
   hydrateProcessEnvironmentFromLoginShell,
   loginShellEnvironmentWarning,
   parseLoginShellEnvironment
-} from '../src/main/login-shell-environment.js'
+} from '../src/login-shell-environment.js'
 
 const exec = promisify(execFile)
 
@@ -175,29 +175,28 @@ describe('login shell exported environment', () => {
    * 本条不量墙钟，改判**交给第二条臂的那个 timeoutMs**，因为那个数把三个世界分得干净且不依赖计时精度：
    * 截止时刻固定在 `start+60`，第一条臂已经花掉自己那 30ms，所以诚实世界里剩下的份额**在算术上**不可能
    * 超过 30；每轮重算会给出 60，每臂一份也给 60。地板取 30（预算的一半）而不是精确值——诚实侧只会更小
-   * （臂超时略晚于 30ms 就更小），所以这个门对抖动是单向安全的，不会假红。
+   * 本条用可控时钟推进两条臂；真实 timer 可以略早触发，不能用它证明精确的剩余额度。
    *
    * 注意这与「早退的臂让出整份余额」那条（下面一条）不冲突：那条说的是第一条臂**没花掉**份额时余额要整份
    * 让出去，本条说的是第一条臂**花掉了**份额后不许无中生有。两条一起才把除数和被除数都钉住。
    */
   it('derives the second arm share from the fixed deadline, not a fresh budget each iteration', async () => {
-    const handed: Array<{ arm: string; timeoutMs: number }> = []
-    const result = await hydrateProcessEnvironmentFromLoginShell({
-      platform: 'darwin',
-      env: { PATH: '/bin' },
-      timeoutMs: 60,
-      runner: (_shell, args, _env, timeoutMs) => {
-        handed.push({ arm: args[0]!, timeoutMs })
-        return new Promise<string>(() => {})
-      }
-    })
-    expect(result).toEqual({ ok: false, reason: 'probe-failed' })
-    // 自检：两条臂都真的起跑了，否则下面那条断言在读一个不存在的元素。
-    expect(handed.map((call) => call.arm)).toEqual(['-ilc', '-lc'])
-    expect(
-      handed[1]!.timeoutMs,
-      `第二条臂拿到 ${handed[1]!.timeoutMs}ms，超过了整个预算的剩余部分：截止时刻被每轮重算了`
-    ).toBeLessThanOrEqual(30)
+    vi.useFakeTimers()
+    try {
+      const handed: Array<{ arm: string; timeoutMs: number }> = []
+      const pending = hydrateProcessEnvironmentFromLoginShell({
+        platform: 'darwin',
+        env: { PATH: '/bin' },
+        timeoutMs: 60,
+        runner: (_shell, args, _env, timeoutMs) => {
+          handed.push({ arm: args[0]!, timeoutMs })
+          return new Promise<string>(() => {})
+        }
+      })
+      await vi.advanceTimersByTimeAsync(60)
+      expect(await pending).toEqual({ ok: false, reason: 'probe-failed' })
+      expect(handed).toEqual([{ arm: '-ilc', timeoutMs: 30 }, { arm: '-lc', timeoutMs: 30 }])
+    } finally { vi.useRealTimers() }
   })
 
   /**
