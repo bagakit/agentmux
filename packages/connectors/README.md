@@ -789,3 +789,31 @@ permissions or successful enrollment do not establish management eligibility.
 In particular, PersonalAgent management eligibility remains unqualified until
 an actual platform response supplies that fact. Existing messaging, Binding,
 Agent work and explicit creation of another identity remain available.
+
+
+### Saved Mote profile operations
+
+Desktop composes `space.mote.connection.create/sync/advance/inspect/ls` over
+its original Files, saved-avatar and Connection owners. Core supplies the pure
+contract and strict SDK/CLI parsing; connectors do not acquire a Mote or file
+configuration store. Each request freezes the exact saved public topic revision,
+optional saved PNG appearance revision, default-file baseline and child IDs
+before registration. Only the saved public title/summary and selected saved PNG
+are shared. Personality, private memory, unsaved editor content and avatar
+creation are outside this operation.
+
+Enrollment's optional `preset` fills the original platform confirmation URL.
+The user may edit that page, so a QR preset is never a confirmed profile write.
+The created application's own credential then serves the original profile owner;
+upload, PATCH, publication requirements and online observations keep their
+separate meanings. No parent action publishes an application.
+
+Default preference saving remains an original Files CAS. The parent records the
+full save input and dispatch claim before calling it. A lost File acknowledgement
+or process exit leaves that same save unknown; current equal values cannot
+certify its ACK or permit an automatic rewrite. Explicit reassociation uses a new
+original preference-save intent with the same already-created application.
+`sync` changes neither the Mote default nor any existing group Binding.
+`inspect/ls` read only the original parent journal; explicit `advance` can inspect
+or continue the fixed children, without replaying unknown registration, upload,
+PATCH or File writes. Independent Motes and original connections remain usable.
