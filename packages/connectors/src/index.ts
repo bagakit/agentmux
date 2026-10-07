@@ -16,3 +16,6 @@ export * from './platform-adapters.js'
 
 export * from './connection-enrollment-adapter.js'
 export * from './connection-enrollment.js'
+
+export * from './connection-profile-adapter.js'
+export * from './connection-profile.js'

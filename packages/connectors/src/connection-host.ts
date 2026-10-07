@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { ConnectionProfileHost } from './connection-profile.js'
 import { ConnectionEnrollmentHost } from './connection-enrollment.js'
 import { createRoomDiscovery } from './room-discovery.js'
 import { AgentMuxError } from '@agentmux/core'
@@ -16,6 +17,7 @@ export interface WritableSecretPort extends SecretPort {
 }
 export interface ConnectionAdapter {
   readonly adapterId: string
+  readonly profile?: import('./connection-profile-adapter.js').ConnectionProfileAdapter
   readonly enrollment?: import('./connection-enrollment-adapter.js').ConnectionEnrollmentAdapter
   readonly publication?: import('./publication-adapter.js').PublicationAdapter
   readonly rooms?: import('./room-provisioning-adapter.js').RoomProvisioningAdapter
@@ -33,6 +35,7 @@ function unavailable(reason: 'credential-missing' | 'adapter-unavailable' | 'che
 }
 /** Optional original Host owner. Configuration and its operation receipt commit in one SQLite transaction. */
 export class ConnectionHost implements ConnectionPort {
+  profile?: import('@agentmux/core/connections').ConnectionProfilePort
   enrollment?: import('@agentmux/core/connections').ConnectionEnrollmentPort
   rooms?: import('@agentmux/core/connections').RoomPort
   bindings?: import('@agentmux/core/connections').RoomBindingsPort
@@ -43,8 +46,9 @@ export class ConnectionHost implements ConnectionPort {
   private readonly adapters: Map<string, ConnectionAdapter>
   private readonly observations = new Map<string, { revision: number; value: ConnectionObservation }>()
   private readonly closeRoomDiscovery: () => void
+  private profileHost: ConnectionProfileHost | undefined
   private enrollmentHost: ConnectionEnrollmentHost | undefined
-  private enrollmentClosed = false
+  private closed = false
   constructor(private readonly options: ConnectionHostOptions) {
     let ownedDatabase: DatabaseSync | undefined
     try {
@@ -60,8 +64,15 @@ export class ConnectionHost implements ConnectionPort {
     if (this.adapters.size !== (options.adapters?.length ?? 0)) { if (!options.database) this.database.close(); throw new AgentMuxError('Connection adapter IDs must be unique.', 'INVALID_CONNECTION_DATA') }
     const discovery = createRoomDiscovery(this, options.secrets)
     this.rooms = discovery.port; this.closeRoomDiscovery = discovery.close
+    const profile = (): ConnectionProfileHost => {
+      if (this.closed) throw new AgentMuxError('The original profile owner is closed.', 'CONNECTION_PROFILE_UNAVAILABLE')
+      if (this.profileHost) return this.profileHost
+      try { return this.profileHost = new ConnectionProfileHost(this, options.secrets) }
+      catch { throw new AgentMuxError('Profile storage is unavailable. Existing connections remain available; retry this original profile operation.', 'CONNECTION_PROFILE_UNAVAILABLE') }
+    }
+    this.profile = { get: async (input, context) => profile().get(input, context), sync: async (input, context) => profile().sync(input, context), advance: async (input, context) => profile().advance(input, context), inspect: async input => profile().inspect(input), list: async input => profile().list(input) }
     const enrollment = (): ConnectionEnrollmentHost => {
-      if (this.enrollmentClosed) throw new AgentMuxError('The original enrollment owner is closed. Inspect the original operation on its Host.', 'CONNECTION_ENROLLMENT_UNAVAILABLE')
+      if (this.closed) throw new AgentMuxError('The original enrollment owner is closed. Inspect the original operation on its Host.', 'CONNECTION_ENROLLMENT_UNAVAILABLE')
       if (this.enrollmentHost) return this.enrollmentHost
       const secrets = options.secrets as Partial<import('./connection-enrollment-adapter.js').EnrollmentSecrets>
       try {
@@ -168,5 +179,5 @@ export class ConnectionHost implements ConnectionPort {
     const config = this.readConfiguration(connectionId)?.config
     return config?.enabled ? this.options.secrets.resolve(config.credentialRef) : null
   }
-  close(): void { this.enrollmentClosed = true; this.enrollmentHost?.close(); this.closeRoomDiscovery(); if (!this.options.database) this.database.close() }
+  close(): void { this.closed = true; this.profileHost?.close(); this.enrollmentHost?.close(); this.closeRoomDiscovery(); if (!this.options.database) this.database.close() }
 }
