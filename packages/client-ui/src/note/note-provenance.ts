@@ -27,6 +27,8 @@ function ownContent(node: JSONContent, root = true): unknown {
   return { type: node.type, ...(Object.keys(attrs).length ? { attrs } : {}), ...(node.text !== undefined ? { text: node.text } : {}),
     ...(node.marks?.length ? { marks: node.marks } : {}), ...(node.content?.length ? { content: node.content.map(child => ownContent(child, false)) } : {}) }
 }
+/** Shared semantic comparison: descendant blocks retain their identities, authorship is out of band. */
+export function noteBlockContentFingerprint(node: JSONContent): string { return JSON.stringify(ownContent(node)) }
 
 /** Called only by the original file writer with its out-of-band, authenticated actor. */
 export function attributeNoteBlocks(before: NoteDocument | null, candidate: NoteDocument, actor: NotebookActor | undefined, at: number): NoteDocument {
@@ -39,7 +41,7 @@ export function attributeNoteBlocks(before: NoteDocument | null, candidate: Note
   const next = structuredClone(candidate)
   visit(next.content, (node, id) => {
     const original = previous.get(id), old = readNoteBlockProvenance(original?.attrs?.provenance)
-    const changed = !original || JSON.stringify(ownContent(original)) !== JSON.stringify(ownContent(node))
+    const changed = !original || noteBlockContentFingerprint(original) !== noteBlockContentFingerprint(node)
     const author = actor ? { actor: { ...actor }, at } : null
     const provenance = changed ? { created: original ? old?.created ?? null : author, lastEdited: author } : old
     // Restore even an unchanged block's original metadata; submitted JSON cannot rewrite its author.

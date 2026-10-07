@@ -14,6 +14,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./note-merge": {
+      "types": "./dist/note-merge.d.ts",
+      "import": "./dist/note-merge.js"
+    },
     "./note-history": {
       "types": "./dist/note-history.d.ts",
       "import": "./dist/note-history.js"
@@ -269,6 +273,10 @@
     "./goal-role-guidance": {
       "types": "./dist/goal-role-guidance.d.ts",
       "import": "./dist/goal-role-guidance.js"
+    },
+    "./note-merge-node": {
+      "types": "./dist/note-merge-node.d.ts",
+      "import": "./dist/note-merge-node.js"
     }
   },
   "bin": {
@@ -286,21 +294,23 @@
   ],
   "dependencies": {
     "@agentmux/demand": "workspace:*",
+    "@agentmux/diagnostic-evidence": "workspace:*",
     "@agentmux/git": "workspace:*",
+    "@agentmux/identity": "workspace:*",
+    "@agentmux/relay": "workspace:*",
     "@bufbuild/protobuf": "1.10.1",
     "@noble/hashes": "2.4.0",
     "@scure/base": "2.2.0",
     "@xmldom/xmldom": "0.9.12",
     "@xterm/headless": "5.5.0",
     "dequal": "2.0.3",
+    "diff": "9.0.0",
     "fs-native-extensions": "1.5.1",
-    "wa-sqlite": "1.0.0",
-    "yaml": "2.9.0",
     "json-rpc-2.0": "1.8.1",
-    "@agentmux/relay": "workspace:*",
+    "node-diff3": "3.2.1",
     "stream-json": "3.7.0",
-    "@agentmux/identity": "workspace:*",
-    "@agentmux/diagnostic-evidence": "workspace:*"
+    "wa-sqlite": "1.0.0",
+    "yaml": "2.9.0"
   },
   "scripts": {
     "build": "node scripts/build.mjs",

@@ -25,16 +25,19 @@ export type FileListParams = Omit<FileReadParams, 'maxBytes'> & { limit?: number
 export type FileNameListing = { status: 'listed'; files: string[]; complete: boolean; omitted: 'git-ignored' | 'none'; partialReason: 'limit' | 'budget' | 'unreadable' | null }
 export type FileListResult = { resource: FileReadResource | null; result: FileNameListing | FileReadUnknown }
 /** Save an existing original text file; null revisions/new-file creation are outside this method. */
-export type FileWriteParams = Omit<FileReadParams, 'maxBytes' | 'expectedResource'> & { expectedResource: FileReadResource; content: string; expectedRevision: string }
+export type FileWriteParams = Omit<FileReadParams, 'maxBytes' | 'expectedResource'> & { expectedResource: FileReadResource; content: string; expectedRevision: string;
+  /** Both fields are present for an original, durable Note edit; otherwise this remains ordinary CAS. */
+  baseContent?: string; operationId?: string }
 /** Create one absent file at the exact original read mapping; never overwrite existing bytes. */
-export type FileCreateParams = Omit<FileWriteParams, 'expectedRevision'> & { expectedRevision: null }
+export type FileCreateParams = Omit<FileWriteParams, 'expectedRevision' | 'baseContent' | 'operationId'> & { expectedRevision: null }
 export type FileCreateResult = FileWriteResult
 /** Host-internal authority, never accepted from a File request body. */
 export type FileWriteContext = { actor?: import('./notebook-catalog.js').NotebookActor | undefined }
 export type NoteWriteAttribution = { status: 'recorded' } | { status: 'unconfirmed'; reason: string }
+export type NoteWriteConflict = { reason: 'overlap' | 'identity' | 'invalid-structure'; baseContent: string; currentContent: string; proposedContent: string }
 export type FileWriteReceipt =
   ( { status: 'written'; revision: string; content?: string; noteAttribution?: NoteWriteAttribution; noteProvenance?: NoteProvenanceSnapshot }
-  | { status: 'conflict'; observedRevision: string | null }
+  | { status: 'conflict'; observedRevision: string | null; noteConflict?: NoteWriteConflict; noteConflictUnavailable?: string }
   | { status: 'error' | 'unknown'; code: string; message: string }) & { noteHistory?: import('./note-history.js').NoteHistoryReceipt }
 export type FileWriteResult = { resource: FileReadResource | null; result: FileWriteReceipt }
 /** One bounded file, below the original encrypted Relay frame/backlog budget even after both base64 layers. */
@@ -207,18 +210,27 @@ export function parseFileReadResult(value: unknown, params: FileReadParams): Fil
   return p as FileReadResult
 }
 
-function parseFileMutationParams(value: unknown): Record<string, unknown> {
-  const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'content', 'expectedRevision'], code)
-  const { content, expectedRevision, ...read } = p
+function parseFileMutationParams(value: unknown, enhanced = false): Record<string, unknown> {
+  const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'content', 'expectedRevision', ...(enhanced ? ['baseContent', 'operationId'] : [])], code)
+  const { content, expectedRevision, baseContent: _base, operationId: _operation, ...read } = p
   const original = resource(p.expectedResource, code, true) as FileReadResource
   parseFileReadParams({ ...read, expectedResource: { hostId: original.hostId, workspaceId: original.workspaceId, workspacePath: original.workspacePath } })
-  parseFileReadResult({ resource: original, result: { status: 'directory' } }, read as FileReadParams)
+  try { parseFileReadResult({ resource: original, result: { status: 'directory' } }, read as FileReadParams) }
+  catch (error) {
+    if (error instanceof AgentMuxError && error.code === 'CONTROL_PROTOCOL_ERROR') invalid(error.message, code)
+    throw error
+  }
   if (typeof content !== 'string') invalid('File content must be text.', code)
   return p
 }
 export function parseFileWriteParams(value: unknown): FileWriteParams {
-  const p = parseFileMutationParams(value)
-  revision(p.expectedRevision, 'INVALID_CONTROL_REQUEST')
+  const code = 'INVALID_CONTROL_REQUEST', p = parseFileMutationParams(value, true)
+  revision(p.expectedRevision, code)
+  if ((p.baseContent !== undefined) !== (p.operationId !== undefined)) invalid('A durable Note edit requires both its exact base content and original operation ID.', code)
+  if (p.baseContent !== undefined) {
+    string(p.operationId, code)
+    if (typeof p.baseContent !== 'string' || fileUploadRevision(new TextEncoder().encode(p.baseContent)) !== p.expectedRevision) invalid('The exact base content must match the original expected revision.', code)
+  }
   return p as FileWriteParams
 }
 export function parseFileCreateParams(value: unknown): FileCreateParams {
@@ -228,23 +240,28 @@ export function parseFileCreateParams(value: unknown): FileCreateParams {
 }
 function parseFileMutationResult(value: unknown, params: FileWriteParams | FileCreateParams): FileWriteResult {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['resource', 'result'], code), r = rpcRecord(p.result, undefined, code)
-  const keys = r.status === 'written' ? ['status', 'revision', 'content', 'noteAttribution', 'noteProvenance'] : r.status === 'conflict' ? ['status', 'observedRevision']
+  const keys = r.status === 'written' ? ['status', 'revision', 'content', 'noteAttribution', 'noteProvenance'] : r.status === 'conflict' ? ['status', 'observedRevision', 'noteConflict', 'noteConflictUnavailable']
     : r.status === 'error' || r.status === 'unknown' ? ['status', 'code', 'message'] : null
   if (!keys) invalid('The original File write status is invalid.', code)
   rpcRecord(r, [...keys, 'noteHistory'], code)
   if (r.noteHistory !== undefined) {
-    const history = rpcRecord(r.noteHistory, ['status', 'eventId', 'batchId', 'reason'], code)
+    const history = rpcRecord(r.noteHistory, ['status', 'eventId', 'batchId', 'reason', 'replayed'], code)
     if (!['prepared', 'committed', 'unconfirmed', 'not-applied'].includes(history.status as string)) invalid('The original Note history outcome is invalid.', code)
     if (history.status !== 'unconfirmed' || history.eventId !== undefined) string(history.eventId, code)
     if (history.status !== 'unconfirmed' || history.batchId !== undefined) string(history.batchId, code)
-    if (history.reason !== undefined) string(history.reason, code)
+    if (history.reason !== undefined && (typeof history.reason !== 'string' || !history.reason.length)) invalid('The original Note history diagnostic must remain nonempty text.', code)
+    if (history.status !== 'unconfirmed' && history.reason !== undefined) invalid('Only unconfirmed Note history carries a diagnostic.', code)
     if (history.status === 'unconfirmed' && history.eventId === undefined && history.reason === undefined) invalid('Unconfirmed history requires its original event or a diagnostic.', code)
+    if ('operationId' in params && params.operationId !== undefined && history.eventId !== undefined && history.eventId !== params.operationId) invalid('The history receipt belongs to another original operation.', code)
+    if (history.replayed !== undefined && (history.replayed !== true || history.status !== 'committed' || r.status !== 'written' || !('operationId' in params) || params.operationId === undefined)) invalid('A replay requires the committed original Note operation.', code)
   }
   // Keep the original resource/path mapping checks shared with reads.
-  parseFileReadResult({ resource: p.resource, result: p.resource === null ? { ...r, message: 'Original write diagnostic follows.' } : { status: 'directory' } }, params)
+  parseFileReadResult({ resource: p.resource, result: p.resource === null ? { status: r.status, code: r.code, message: 'Original write diagnostic follows.' } : { status: 'directory' } }, params)
   if (p.resource !== null && ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => (p.resource as Record<string, unknown>)[key] !== (params.expectedResource as unknown as Record<string, unknown>)[key])) invalid('The original File mapping changed.', code)
   if (r.status === 'written') {
     revision(r.revision, code)
+    if ('operationId' in params && params.operationId !== undefined && (typeof r.content !== 'string' ||
+        !r.noteHistory || (r.noteHistory as Record<string, unknown>).eventId !== params.operationId)) invalid('The original Note edit requires its canonical saved content and operation receipt.', code)
     if (r.content !== undefined && (typeof r.content !== 'string' || fileUploadRevision(new TextEncoder().encode(r.content)) !== r.revision)) invalid('The canonical saved content does not match its revision.', code)
     if (r.noteAttribution !== undefined) {
       const attribution = rpcRecord(r.noteAttribution, ['status', 'reason'], code)
@@ -252,7 +269,17 @@ function parseFileMutationResult(value: unknown, params: FileWriteParams | FileC
     }
     if (r.noteProvenance !== undefined) validateFileNoteProvenance(r.noteProvenance, r.revision, p.resource as FileReadResource, (r.content as string | undefined) ?? params.content)
   }
-  else if (r.status === 'conflict') { if (r.observedRevision !== null) revision(r.observedRevision, code) }
+  else if (r.status === 'conflict') {
+    if (r.observedRevision !== null) revision(r.observedRevision, code)
+    if (r.noteConflictUnavailable !== undefined && (!('baseContent' in params) || params.baseContent === undefined || r.noteConflict !== undefined ||
+        typeof r.noteConflictUnavailable !== 'string' || !r.noteConflictUnavailable.length)) invalid('Unavailable conflict content requires an enhanced Note conflict and a nonempty diagnostic, without inline content.', code)
+    if (r.noteConflict !== undefined) {
+      const conflict = rpcRecord(r.noteConflict, ['reason', 'baseContent', 'currentContent', 'proposedContent'], code)
+      if (!('baseContent' in params) || params.baseContent === undefined || !['overlap', 'identity', 'invalid-structure'].includes(conflict.reason as string) ||
+          conflict.baseContent !== params.baseContent || conflict.proposedContent !== params.content || typeof conflict.currentContent !== 'string' ||
+          fileUploadRevision(new TextEncoder().encode(conflict.currentContent)) !== r.observedRevision) invalid('The Note conflict must retain the exact original base, current and proposed content.', code)
+    }
+  }
   else { string(r.code, code); if (typeof r.message !== 'string') invalid('File write diagnostics must remain text.', code) }
   return p as FileWriteResult
 }
