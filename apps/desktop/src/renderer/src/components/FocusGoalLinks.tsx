@@ -67,9 +67,9 @@ export const FocusGoalLinks = memo(function FocusGoalLinks({ links, onOpenChange
           restoringFocus.current = true; trigger.current?.focus({ preventScroll: true }); restoringFocus.current = false
         }
       }}>
-      {confirmed.length ? <><Menu.Label className="tab-context-menu__label">{links.confirmedCount === 1 ? 'Goal relationship' : `${links.confirmedCount} Goal relationships`}</Menu.Label>
+      {confirmed.length ? <><Menu.Label className="focus-goal__label">{links.confirmedCount === 1 ? 'Goal relationship' : `${links.confirmedCount} Goal relationships`}</Menu.Label>
         {confirmed.map(goal => <GoalEntry key={goal.goalId} goal={goal} sources={sources} onSelect={() => select(goal.goalId)} />)}</> : null}
-      {candidates.length ? <>{confirmed.length ? <Menu.Separator /> : null}<Menu.Label className="tab-context-menu__label">Possible Goal links · Session Host unconfirmed</Menu.Label>
+      {candidates.length ? <>{confirmed.length ? <Menu.Separator /> : null}<Menu.Label className="focus-goal__label">Possible Goal links · Session Host unconfirmed</Menu.Label>
         {candidates.map(goal => <GoalEntry key={goal.goalId} goal={goal} sources={sources} onSelect={() => select(goal.goalId)} />)}</> : null}
       <Menu.Separator /><Menu.Item className="tab-context-menu__item focus-goal__references" aria-expanded={sources}
         onSelect={event => { event.preventDefault(); setSources(value => !value) }}>{sources ? 'Hide original references' : 'Inspect original references'}</Menu.Item>
