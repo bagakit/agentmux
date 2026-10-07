@@ -23,9 +23,15 @@ export function useBotEnrollment(active: boolean) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [issuer, setIssuer] = useState(''), [label, setLabel] = useState('')
   const [submitted, setSubmitted] = useState<ConnectionEnrollmentBeginInput | null>(null)
-  const [issue, setIssue] = useState(''), [busy, setBusy] = useState<string | null>(null)
+  const [issue, setIssue] = useState(''), [pendingWrites, setPendingWrites] = useState<string[]>([])
   const selection = useRef<string | null>(null), selectionEpoch = useRef(0)
-  const epoch = useRef(0), listRead = useRef(0), writing = useRef(false)
+  const epoch = useRef(0), listRead = useRef(0), writing = useRef(new Set<string>()), creating = useRef(false)
+  const busy = selectedId && pendingWrites.includes(selectedId) ? selectedId : null
+  const startWrite = (operationId: string) => {
+    if (writing.current.has(operationId)) return false
+    writing.current.add(operationId); setPendingWrites([...writing.current]); return true
+  }
+  const finishWrite = (operationId: string) => { writing.current.delete(operationId); setPendingWrites([...writing.current]) }
   const accept = (operation: ConnectionEnrollmentOperation) => {
     setOperations(previous => {
       const known = previous.find(item => item.operationId === operation.operationId)
@@ -50,33 +56,32 @@ export function useBotEnrollment(active: boolean) {
     return () => { epoch.current++; listRead.current++ }
   }, [active])
   const begin = async (issuer: ConnectionEnrollmentCapability, label: string) => {
-    if (writing.current || issuer.availability !== 'available') return
+    if (creating.current || issuer.availability !== 'available') return
     const input: ConnectionEnrollmentBeginInput = { operationId: crypto.randomUUID(), connectionId: crypto.randomUUID(), adapterId: issuer.adapterId, domain: issuer.domain, label: label.trim() || `${issuer.label} bot` }
     const current = epoch.current, occurrence = ++selectionEpoch.current
-    writing.current = true; setBusy(input.operationId); setSubmitted(input); selection.current = input.operationId; setSelectedId(input.operationId); setIssue('')
+    creating.current = true; startWrite(input.operationId); setSubmitted(input); selection.current = input.operationId; setSelectedId(input.operationId); setIssue('')
     try {
       const result = await api.connections.call('connection.enrollment.begin', input)
       if (current === epoch.current) accept(result)
     } catch (error) { if (current === epoch.current && selection.current === input.operationId && occurrence === selectionEpoch.current) setIssue(`The creation result is not confirmed. Keep this setup and check its original result. ${presentError(error)}`) }
-    finally { writing.current = false; setBusy(null) }
+    finally { creating.current = false; finishWrite(input.operationId) }
   }
   const inspect = async () => {
-    if (!selectedId || writing.current) return
-    const operationId = selectedId, current = epoch.current, occurrence = selectionEpoch.current
-    writing.current = true; setBusy(operationId); setIssue('')
+    if (!selectedId) return
+    const operationId = selectedId, current = epoch.current, occurrence = ++selectionEpoch.current
+    setIssue('Reading the original result…')
     try {
       const result = await api.connections.call('connection.enrollment.inspect', { operationId })
       if (current === epoch.current) {
         if (result.operation) accept(result.operation)
-        else if (selection.current === operationId && occurrence === selectionEpoch.current) setIssue('This original result is not recorded here yet. It does not confirm that no application was created.')
+        if (selection.current === operationId && occurrence === selectionEpoch.current) setIssue(result.operation ? '' : 'The last lookup did not find a recorded result. Keep this setup; it does not confirm that no application was created.')
       }
     } catch (error) { if (current === epoch.current && selection.current === operationId && occurrence === selectionEpoch.current) setIssue(presentError(error)) }
-    finally { writing.current = false; setBusy(null) }
   }
   const advance = async () => {
-    if (!selectedId || writing.current) return
-    const operationId = selectedId, current = epoch.current, occurrence = selectionEpoch.current
-    writing.current = true; setBusy(operationId); setIssue('')
+    if (!selectedId || !startWrite(selectedId)) return
+    const operationId = selectedId, current = epoch.current, occurrence = ++selectionEpoch.current
+    setIssue('')
     try {
       const original = operations.find(item => item.operationId === operationId)
       // Only the original owner's explicit not-started fact permits resuming the same begin.
@@ -85,7 +90,7 @@ export function useBotEnrollment(active: boolean) {
         : await api.connections.call('connection.enrollment.advance', { operationId })
       if (current === epoch.current) accept(result)
     } catch (error) { if (current === epoch.current && selection.current === operationId && occurrence === selectionEpoch.current) setIssue(`This setup is not confirmed yet. Check or continue this same setup. ${presentError(error)}`) }
-    finally { writing.current = false; setBusy(null) }
+    finally { finishWrite(operationId) }
   }
   return { operations, capabilities, next, loaded, selectedId, submitted, issue, busy, issuer, setIssuer, label, setLabel, read, begin, inspect, advance,
     select(operationId: string | null) { selectionEpoch.current++; selection.current = operationId; setSelectedId(operationId); setIssue('') },
@@ -141,10 +146,10 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved }: {
       </div> : null}
       <div className="connector-editor-actions">{saved ? <button data-enrollment-saved className="primary-button" onClick={() => onSaved(saved)}>View connection</button> : <>
         {canContinue ? <button data-enrollment-advance className="primary-button" disabled={!!busy} onClick={() => void enrollment.advance()}>{busy === selectedId ? 'Checking setup…' : operation?.authorization === 'pending' ? `Check ${issuerLabel} confirmation` : 'Continue this setup'}</button> : null}
-        {operation?.authorization !== 'pending' ? <button data-enrollment-inspect className={canContinue ? 'small-button' : 'primary-button'} disabled={!!busy} onClick={() => void enrollment.inspect()}>{busy === selectedId ? 'Checking setup…' : 'View original result'}</button> : null}
+        {operation?.authorization !== 'pending' ? <button data-enrollment-inspect className={canContinue ? 'small-button' : 'primary-button'} onClick={() => void enrollment.inspect()}>View original result</button> : null}
       </>}</div>
       {saved ? <div className="connector-next-step"><BotIcon size={18} /><div><strong>Next, choose an Agent and a group</strong><p>Open an Agent’s menu → Create group or Connect existing group. You choose the audience and what to share there.</p></div></div> : null}
-      <details className="connector-diagnostics"><summary>Setup details</summary><dl className="connector-identity"><div><dt>Original setup</dt><dd><code>{selectedId}</code></dd></div><div><dt>Platform</dt><dd>{current.domain}</dd></div>{operation ? <><div><dt>Revision</dt><dd>{operation.revision}</dd></div><div><dt>Platform confirmation</dt><dd>{operation.authorization}</dd></div><div><dt>Credential storage</dt><dd>{operation.credential}</dd></div><div><dt>Application save</dt><dd>{operation.configuration}</dd></div>{operation.application ? <div><dt>App ID</dt><dd><code>{operation.application.appId}</code></dd></div> : null}{operation.reason ? <div><dt>Original result</dt><dd>{operation.reason}</dd></div> : null}</> : null}</dl>{operation?.authorization === 'pending' || saved ? <button data-enrollment-inspect className="small-button" disabled={!!busy} onClick={() => void enrollment.inspect()}>View original result</button> : null}</details>
+      <details className="connector-diagnostics"><summary>Setup details</summary><dl className="connector-identity"><div><dt>Original setup</dt><dd><code>{selectedId}</code></dd></div><div><dt>Platform</dt><dd>{current.domain}</dd></div>{operation ? <><div><dt>Revision</dt><dd>{operation.revision}</dd></div><div><dt>Platform confirmation</dt><dd>{operation.authorization}</dd></div><div><dt>Credential storage</dt><dd>{operation.credential}</dd></div><div><dt>Application save</dt><dd>{operation.configuration}</dd></div>{operation.application ? <div><dt>App ID</dt><dd><code>{operation.application.appId}</code></dd></div> : null}{operation.reason ? <div><dt>Original result</dt><dd>{operation.reason}</dd></div> : null}</> : null}</dl>{operation?.authorization === 'pending' || saved ? <button data-enrollment-inspect className="small-button" onClick={() => void enrollment.inspect()}>View original result</button> : null}</details>
     </>}
     {openIssue ? <p role="status" className="connector-issue">{openIssue}</p> : null}
     {enrollment.issue ? <p role="status" className="connector-issue">{enrollment.issue}</p> : null}
