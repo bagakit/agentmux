@@ -24,7 +24,6 @@ export function useFocusHistorySources(enabled: boolean) {
     setLoading(true)
     void api.sessions.historySources().then(values => {
       if (!current) return
-      if (values.length > 512) throw new Error('Retained input sources exceed the Core catalogue limit.')
       loaded.current = true; setSources(values); setError(null)
     }).catch(cause => {
       if (!current) return
