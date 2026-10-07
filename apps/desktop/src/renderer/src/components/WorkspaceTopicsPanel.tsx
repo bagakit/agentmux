@@ -88,7 +88,7 @@ export function WorkspaceTopicsPanel({
   const renameScratchTopic = useAppStore((state) => state.renameScratchTopic)
   const openFile = useAppStore((state) => state.openFile)
   const reportError = useAppStore((state) => state.reportError)
-  const { topics, error: readError } = useScratchTopics(workspace.id, visible)
+  const { topics, error: readError, reading } = useScratchTopics(workspace.id, visible)
   const [pending, setPending] = useState<string | null>(null)
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
@@ -280,8 +280,8 @@ export function WorkspaceTopicsPanel({
             disabled={pending !== null || topics === null}
             onClick={() => void createTopic()}
           >
-            {topics === null || pending === 'create'
-              ? <ThemeStatusLoadingIcon className="spin" size={13} />
+            {reading || pending === 'create'
+              ? <ThemeStatusLoadingIcon animation="spin" size={13} />
               : <ThemeActionCreateTopicIcon size={14} />}
           </button>
         }
@@ -291,20 +291,20 @@ export function WorkspaceTopicsPanel({
         <span>{categoryRefreshState?.error ?? category?.readError ?? 'The selected Category description is still restoring.'} Existing Topics and discussions remain available.</span>
         <button type="button" className="icon-button" aria-label="Refresh category description" title="Refresh category description"
           disabled={categoryRefreshState?.busy} onClick={() => void refreshCategoryDescription()}>
-          <ThemeActionRefreshIcon size={13} className={categoryRefreshState?.busy ? 'spin' : undefined} />
+          <ThemeActionRefreshIcon size={13} animation={categoryRefreshState?.busy ? 'spin' : 'none'} />
         </button>
       </div> : null}
       {topics === null ? (
         <div className="workspace-topic-state" role="status">
-          <ThemeStatusLoadingIcon className="spin" size={16} aria-hidden="true" />
-          <span><strong>Loading Topics</strong><small>Reading the Topics directory…</small></span>
+          {reading ? <ThemeStatusLoadingIcon animation="spin" size={16} aria-hidden="true" /> : <ThemeStatusInfoIcon size={16} aria-hidden="true" />}
+          <span><strong>{reading ? 'Loading Topics' : 'Topics not confirmed'}</strong><small>{reading ? 'Reading the Topics directory…' : 'The original directory and work surfaces are kept.'}</small></span>
         </div>
       ) : projected?.length === 0 ? (
         <div className="workspace-topic-state workspace-topic-state--empty">
           <span className="workspace-topic-state__icon" aria-hidden="true"><ThemeObjectTopicIcon size={16} /></span>
           <span><strong>{category ? 'No Topics in this category' : 'No Topics yet'}</strong><small>Create a Topic to keep its knowledge and discussions together.</small></span>
           <button className="small-button" type="button" disabled={pending !== null} onClick={() => void createTopic()}>
-            {pending === 'create' ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionCreateTopicIcon size={12} />}
+            {pending === 'create' ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeActionCreateTopicIcon size={12} />}
             {pending === 'create' ? 'Creating…' : 'Create Topic'}
           </button>
         </div>
@@ -408,7 +408,7 @@ export function WorkspaceTopicsPanel({
                         同一处。这里只画一个 aria-hidden 的状态记号，且只在 pinned 时占位，同 leading
                         spinner「只在有话说时才占用」的规矩。 */}
                     <SelectorRow
-                      leading={pending === topic.id ? <span className="workspace-topic-glyph" aria-hidden="true"><ThemeStatusLoadingIcon className="spin" size={14} /></span>
+                      leading={pending === topic.id ? <span className="workspace-topic-glyph" aria-hidden="true"><ThemeStatusLoadingIcon animation="spin" size={14} /></span>
                         : <SpaceObjectIcon kind={target?.kind ?? 'topic'} name={target?.name ?? topic.title} manualIcon={target ? manualIcons[target.key] ?? null : null} imageTarget={target?.imageTarget} avatarObjectKey={target?.key} avatarWorkspaceId={target?.avatarTarget?.workspaceId} avatarTopicId={target?.avatarTarget?.topicId} />}
                       title={<><span title={topic.title}>{topic.title}</span>{pinned ? <ThemeActionPinIcon className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
                       subtitle={<><span>{topic.summary || displayPath(physicalPath, workspace.hostId)}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}

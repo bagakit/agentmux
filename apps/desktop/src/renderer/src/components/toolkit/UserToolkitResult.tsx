@@ -71,6 +71,7 @@ export function UserToolkitResult({ definition, active, close, official = false,
   const ordinaryUnknown = snapshot?.state === 'unknown'
   const [evaluating, setEvaluating] = useState(false)
   const displayRunning = display?.state === 'pending' || display?.state === 'running' || display?.state === 'stopping'
+  const displayMotion = evaluating || active && !scriptOpen && !unknown && displayRunning
   const canEvaluate = Boolean((display?.admission || snapshot?.definition.display && snapshot.definition.enabled && !reading.sourceReason) && !displayRunning && !evaluating)
   async function evaluate() {
     if (!canEvaluate) return
@@ -196,8 +197,8 @@ export function UserToolkitResult({ definition, active, close, official = false,
       {operationError ? <p className="toolkit-result__notice" role="alert">{operationError}</p> : null}
     </div>
     <footer className="performance-actions toolkit-result__actions">
-      {showDisplay ? <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void evaluate()}><ThemeActionRefreshIcon size={13} className={displayRunning || evaluating ? 'toolkit-result__spinner' : undefined} /> {display?.admission ? 'Continue display request' : 'Refresh display'}</button> : null}
-      <button type="button" className="small-button" disabled={!canRun || busy || connecting} onClick={() => void primary()}>{connecting ? <ThemeActionRefreshIcon size={13} className="toolkit-result__spinner" /> : <ThemeActionStartIcon size={13} />} {connecting ? 'Generating & copying…' : runLabel ?? 'Run saved tool'}</button>
+      {showDisplay ? <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void evaluate()}><ThemeActionRefreshIcon size={13} animation={displayMotion ? 'spin' : 'none'} /> {display?.admission ? 'Continue display request' : 'Refresh display'}</button> : null}
+      <button type="button" className="small-button" disabled={!canRun || busy || connecting} onClick={() => void primary()}>{connecting ? <ThemeActionRefreshIcon size={13} animation="spin" /> : <ThemeActionStartIcon size={13} />} {connecting ? 'Generating & copying…' : runLabel ?? 'Run saved tool'}</button>
       {primaryActionId ? <button type="button" className="small-button" disabled={!canRun || busy || connecting} onClick={() => void operate('run')}><ThemeActionRefreshIcon size={13} /> {entryLabel ?? 'Run saved tool'}</button> : null}
       {snapshot?.admission ? <button type="button" className="small-button" disabled={!canStop || busy} onClick={() => void operate('stop')}><ThemeActionStopIcon size={12} /> Stop</button> : null}
       {snapshot?.state === 'unknown' && snapshot.admission?.run === null ? <button type="button" className="small-button" disabled={busy} onClick={() => void continueOriginal()}><ThemeActionStartIcon size={13} /> Continue original request</button> : null}

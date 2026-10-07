@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
+import { agentEvidenceStale, msUntilSemanticStatusStale, type AgentObservation } from '@agentmux/core/agent-status'
 import { errorMessage } from './delivery'
 
 export type MobileConnection = {
@@ -20,15 +21,17 @@ type Projection = {
   disconnected: boolean
   olderWindow: boolean
   newerAvailable: boolean
+  activity: { owner: object; hostId: string; runId: string; observation: AgentObservation } | null
 }
 const empty = (id: string | null): Projection => ({
   id, session: null, timeline: null, page: null, answerContext: null, reading: false, notice: null,
-  disconnected: false, olderWindow: false, newerAvailable: false
+  disconnected: false, olderWindow: false, newerAvailable: false, activity: null
 })
 
 /** Retained readonly SDK projections; no history reconciliation, Run owner or local business queue. */
 export function useHostedConversation(client: AgentMuxHostedClient | null, id: string | null, active: boolean) {
   const [projection, setProjection] = useState<Projection>(() => empty(id))
+  const activityOwner = useMemo(() => ({}), [client, id, active])
   const currentPage = useRef(projection.page)
   currentPage.current = projection.id === id ? projection.page : null
   const refreshRef = useRef<((cursor?: string) => Promise<void>) | null>(null)
@@ -39,6 +42,42 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
     if (!client || !id || !active) { refreshRef.current = null; return }
     let reading = false, dirty = false
     let watchEpoch = 0
+    let activityEpoch = 0, activityReading = false, activityDirty = false
+    let activityExpiry: ReturnType<typeof setTimeout> | undefined
+    function clearActivity() {
+      activityEpoch++
+      if (activityExpiry !== undefined) clearTimeout(activityExpiry)
+      activityExpiry = undefined
+      patch({ activity: null })
+    }
+    async function readActivity(): Promise<void> {
+      if (!live || document.hidden || typeof client!.statusAgent !== 'function') return
+      const generation = ++activityEpoch
+      if (activityReading) { activityDirty = true; return }
+      activityReading = true
+      try {
+        const value = await client!.statusAgent(id!)
+        if (!live || generation !== activityEpoch) return
+        const original = client!.agentSession(id!)
+        if (value.session.agentSessionId !== id || original.agentSessionId !== id ||
+            value.session.hostId !== original.hostId || value.session.run.runId !== original.run.runId ||
+            value.run.runId !== original.run.runId) { clearActivity(); return }
+        if (activityExpiry !== undefined) clearTimeout(activityExpiry)
+        activityExpiry = undefined
+        const { observation } = value
+        // Core owns the active/readiness/process judgment and its freshness window.
+        // This reader only expires the presentation, without changing a Session or input.
+        if (observation.semantic === 'active' && agentEvidenceStale(observation, Date.now())) { clearActivity(); return }
+        patch({ activity: { owner: activityOwner, hostId: original.hostId, runId: original.run.runId, observation } })
+        if (observation.semantic === 'active') activityExpiry = setTimeout(() => {
+          if (live && generation === activityEpoch) clearActivity()
+        }, msUntilSemanticStatusStale({ state: 'working', observedAt: observation.observedAt }, Date.now()))
+      } catch { if (live && generation === activityEpoch) clearActivity() }
+      finally {
+        activityReading = false
+        if (live && activityDirty) { activityDirty = false; void readActivity() }
+      }
+    }
     let watchAbort: AbortController | undefined
     let recoveryTimer: ReturnType<typeof setTimeout> | undefined, recoveryDelay = 1000
     const canRecover = (error: unknown) => {
@@ -116,6 +155,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
       cursor = nextCursor
       readingWindow.current.cursor = cursor
       patch({ reading: true, notice: null })
+      void readActivity()
       try {
         // Each read fails independently: a native-history probe cannot suppress an existing
         // Session or its captured input projection, nor become an admission gate for a Prompt.
@@ -159,16 +199,24 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
     const unlisten = client.onEvent(event => {
       if (!live) return
       if (event.type === 'connection-state') {
+        clearActivity()
         patch({ disconnected: event.state !== 'restored', notice: event.state === 'restored' ? null :
           'The original Host is unreachable. Reading and drafts are retained; unconfirmed writes are not resent.' })
         if (event.state === 'restored') { invalidateWatch(); void refresh(cursor) }
       } else if (event.type === 'agent-session' && event.session.agentSessionId === id) {
+        clearActivity(); void readActivity()
         patch({ session: event.session })
         const nextLocator = locatorKey(event.session)
         if (nextLocator !== locator) {
           locator = nextLocator; invalidateWatch()
           void refresh(cursor)
         }
+      } else if (event.type === 'agent-status' && event.agentSessionId === id) {
+        clearActivity(); void readActivity()
+      } else if (event.type === 'process-state' && event.agentSessionId === id) {
+        try {
+          if (event.run.runId === client.agentSession(id).run.runId) { clearActivity(); void readActivity() }
+        } catch { clearActivity() }
       } else if (event.type === 'agent-timeline' && event.agentSessionId === id) {
         if (cursor) { patch({ newerAvailable: true }); void refreshAnswers() }
         else void refresh()
@@ -177,23 +225,29 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
       }
     })
     const foreground = () => {
-      if (document.visibilityState === 'hidden') { if (recoveryTimer) clearTimeout(recoveryTimer); recoveryTimer = undefined; return }
+      if (document.visibilityState === 'hidden') { clearActivity(); if (recoveryTimer) clearTimeout(recoveryTimer); recoveryTimer = undefined; return }
+      void readActivity()
       if (!watchEstablished) { attemptedSource = null; void refresh(cursor) }
     }
     document.addEventListener('visibilitychange', foreground)
     void refresh(cursor)
     return () => {
       live = false
+      if (activityExpiry !== undefined) clearTimeout(activityExpiry)
       invalidateWatch()
       if (recoveryTimer) clearTimeout(recoveryTimer)
       document.removeEventListener('visibilitychange', foreground)
       unlisten()
       refreshRef.current = null
     }
-  }, [client, id, active])
+  }, [client, id, active, activityOwner])
   const refresh = useCallback(() => refreshRef.current?.(), [])
   const older = useCallback(() => {
     if (projection.id === id && projection.page?.nextCursor) return refreshRef.current?.(projection.page.nextCursor)
   }, [projection.id, projection.page, id])
-  return { ...(projection.id === id ? projection : empty(id)), refresh, older }
+  const selected = projection.id === id ? projection : empty(id)
+  const activity = active && !selected.disconnected && selected.activity?.owner === activityOwner &&
+    selected.activity.hostId === selected.session?.hostId && selected.activity.runId === selected.session?.run.runId
+    ? selected.activity.observation : null
+  return { ...selected, activity, refresh, older }
 }
