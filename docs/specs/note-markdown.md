@@ -4,17 +4,18 @@
 公共调用入口归 [公共能力来源](public-capabilities.md)。语法实现由共享 [Markdown codec](../../packages/client-ui/src/note/note-markdown.ts)
 及 [Core 身份头](../../packages/core/src/note-format.ts) 持有。
 
-文件格式与后续演进须遵守知识工作流中「文件自足是 Note 的基础原则」。本文记录当前格式和存储机制，不代表仅从文件恢复正文、显式引用及索引的完整流程已实现或验收。
+文件格式与后续演进须遵守知识工作流中「文件自足是 Note 的基础原则」。本文记录当前格式与原 owner 的机制。`notebook.scan` 可只读重建指定物理目录中的正文索引；产品、界面与安装的完成状态仍以对应 Feature 的验收为准。
 
 ## 正文和身份
 
 `.note.md` 是唯一持久正文，编辑树只在内存中存在。普通无身份头的 `.md` 沿普通 Markdown 文件处理。
-身份头保存稳定 Note ID；标题、路径和显示名称不代替身份。
+身份头保存稳定 Note ID 和可读页名 `title`；路径和显示名称不代替身份。`title` 是持久页名事实，Notebook 目录中的标题是投影。
 
 ```md
 ---
 schema: agentmux.note.md.v1
 note-id: "original-note-id"
+title: "研究记录"
 ---
 
 ## 研究结论 ^heading1
@@ -33,6 +34,26 @@ note-id: "original-note-id"
 未锚定块仍可读，`unanchoredBlockCount` 使图观察保持 partial；不能借父块身份伪造 source endpoint 或把未确认标题当成唯一目标。
 重复身份不自动改写或选首；同文件重复块／引用 ID 按原 schema 报解析问题，跨资源重复 Note ID 在图中保持歧义。
 引用块留在原文件，只有显式提取独立 Note 才拆文档。
+
+## 文件标题与目录投影
+
+新建原文件同时保存初始标题。已有无 `title` 的文件仍可读；扫描返回未知标题，不从日期文件名推断日记语义。
+普通保存显式提供的文件标题优先。草稿省略标题时，先保留准确当前文件中的标题；只有确认原文件也缺标题或明确新建时，
+才补准确已登记资源的已知目录标题。读取失败或身份不符不能把旧目录标题当作当前文件事实。
+
+原 `notebook.apply` 的 `rename-page` 和侧栏改名共用文件标题 owner，只改 YAML，保原 Note ID、正文字符、锚点、链接、
+BOM 和换行，不因改名补块 ID、改写正文排版或将块作者改为改名者。它复用原历史 journal 和可重入写入 lease；
+显式路径的 Core Store 同样串行执行。原操作检查先于新的目录 revision 判定：标题 B 已写成而目录发布失败，
+若文件后来变成 C，重试旧 B 只观察并投影当前 C，不再写回 B。未确认的原操作不凭当前标题或摘要追认完成。
+
+普通 `file.write` 后尽力刷新同一目录投影。`noteTitleProjection` 独立报告已投影、未登记或未确认，不否定已写成正文。
+投影可能观察到更晚 revision，但必须属于同一准确 Note 和资源。`notebook.inspect --operation-id` 的 `titleOperation`
+分别保原历史操作、当前文件和目录投影事实。无本地文件 owner 的 Host 经既有转发到真实 owner；本地 owner 已存在时，
+观察失败保原结果和恢复路径，不改由另一 writer 执行。
+
+单篇原文件移动确认后，`relocate` 在原目录事务中同时重映射该准确 Note／旧资源的作者和历史查询地址，
+不加载或改写历史正文；事件 ID、顺序、原请求指纹和 `originalResource` 均保留。元数据目标已有同 Note 记录时，
+整个目录／元数据事务保留原状并明确冲突，原文件移动及其待对账意图仍由原 Files／恢复入口持有。
 
 ## 链接和引用
 
@@ -78,6 +99,19 @@ block inline PM UTF16 offset，不是 Markdown 字节位置。它不是跨文件
 `notebook apply` 的 `follow/unfollow` 只改变可信调用者自己的持久关注，不表示在线或通知授权。
 完整 Agent 操作指引由 [CLI Note guide](../../packages/core/src/agentmux-cli-note-guide.ts) 持有，
 经 `amux --skill` 的模块目录发现，再由 `amux notebook --skill`／Notebook help 读取。
+
+## 仅从原 Markdown 重建索引
+
+`amux notebook scan --workspace ID --path DIR [--query TEXT]` 经原 Files 读取指定物理目录，不要求原 Notebook 数据库。
+结果包含每个准确文件的 Note ID、可用标题、revision、大纲、显式前向关系和全文命中；反链可由同一前向关系派生。
+同名页保候选，重复 Note ID 保不同资源行，不选首或合并。无锚点的新正文也可命中，`blockId:null` 明确它没有稳定跳转目标；
+读取不分配身份。未读／无效文件、缺标题、未锚定内容和预算耗尽保 partial／unknown，不能用已见单个候选确认全范围唯一。
+
+这是有明确范围的只读观察，不注册页面、不重写正文或替换原目录，也不从缺失证据重造 Notebook 收纳、可信作者、关注与历史。
+普通 ignored 文件包括在内，符号链接报告后不跟随。默认候选文件和目录各 200、总接受原文 4 MiB；可显式提高，
+各上限 20000／20000／64 MiB。全文 `limit` 默认 30、上限 1000；`total` 是已观察范围内匹配的文本块数。
+取消只结束本读者并停止后续原文件读取；已经发出的原目录列举仍由 Files 持有。单次列举当前会返回全部名字，
+不能将扫描预算称作底层目录 IO 或分配的硬上限。它不是跨文件原子快照，索引也不是新的正文或关系权威。
 
 ## 持久正文历史
 
