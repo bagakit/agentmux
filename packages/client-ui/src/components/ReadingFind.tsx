@@ -5,7 +5,7 @@ import { SemanticIcon } from '../theme/icons.js'
 
 /** One workface's loaded readable body; the original host still owns content and scrolling. */
 export function ReadingFind({ children, source, active = true, label, bodySelector, scrollSelector, onOpen, className = '' }: {
-  children: ReactNode; source: unknown; active?: boolean; label: string; bodySelector: string; scrollSelector: string; onOpen?: () => void; className?: string
+  children: ReactNode | ((trigger: ReactNode) => ReactNode); source: unknown; active?: boolean; label: string; bodySelector: string; scrollSelector: string; onOpen?: () => void; className?: string
 }) {
   const owner = useMemo(() => ({}), [source, active])
   const latest = useRef<object | null>(owner); latest.current = owner
@@ -120,6 +120,11 @@ export function ReadingFind({ children, source, active = true, label, bodySelect
     }
   }, [owner, open, query, composing, bodySelector, id, currentId])
 
+  const findTrigger = <button ref={trigger} className="reading-find__trigger" type="button" disabled={!active}
+    data-reading-find-exclude aria-label={`Find in ${label}`} title="Find in loaded text (Ctrl/⌘+F)"
+    aria-expanded={open} aria-controls={open ? id + '-tools' : undefined}
+    onMouseDown={event => event.preventDefault()} onClick={show}><SemanticIcon name="action.search" size={13} aria-hidden="true" /></button>
+
   return <div className={`reading-find ${className}`} onKeyDownCapture={event => {
     if (!current() || event.defaultPrevented || event.nativeEvent.isComposing || composing || !event.currentTarget.contains(event.target as Node)) return
     const editing = (event.target as Element).closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')
@@ -127,22 +132,22 @@ export function ReadingFind({ children, source, active = true, label, bodySelect
     else if (open && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close() }
   }}>
     <style>{`::highlight(${id}) { background-color: color-mix(in srgb, var(--green) 18%, transparent); color: var(--text); } ::highlight(${currentId}) { background-color: color-mix(in srgb, var(--green) 38%, transparent); color: var(--text); text-decoration: underline; }`}</style>
-    <div className="reading-find__tools" data-reading-find-exclude onMouseDown={event => {
+    {open ? <div id={id + '-tools'} className="reading-find__tools" role="search" aria-label={`Find in ${label}`} data-reading-find-exclude onMouseDown={event => {
       // Pointer navigation keeps the query/caret and the original document Selection.
       if ((event.target as Element).closest('button')) event.preventDefault()
     }}>
-      {open ? <>
         <label className="reading-find__field"><SemanticIcon name="action.search" size={13} aria-hidden="true" /><input ref={input} type="search" aria-label={`Find in ${label}`} placeholder="Find text" value={query}
+          title={`Search ${label} only`}
           onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)}
           onChange={event => { if (current()) { selected.current = null; setResult({ owner, count: 0, index: 0 }); setReading({ owner, open: true, query: event.target.value }) } }}
           onKeyDown={event => { if (!event.nativeEvent.isComposing && !composing && event.key === 'Enter') { event.preventDefault(); move(event.shiftKey ? -1 : 1) } }} /></label>
         <output aria-live="polite" className="reading-find__count">{query ? `${currentResult.count ? currentResult.index + 1 : 0} / ${currentResult.count}` : '0 / 0'}</output>
         <button type="button" disabled={!currentResult.count} aria-label="Previous match" title="Previous match (Shift+Enter)" onClick={() => move(-1)}><SemanticIcon name="navigation.up" size={13} /></button>
         <button type="button" disabled={!currentResult.count} aria-label="Next match" title="Next match (Enter)" onClick={() => move(1)}><SemanticIcon name="navigation.down" size={13} /></button>
-        <button type="button" aria-label="Close find" onClick={close}><SemanticIcon name="action.close" size={13} /></button>
-        <span className="reading-find__scope">{label}</span>
-      </> : <button ref={trigger} type="button" disabled={!active} aria-label={`Find in ${label}`} title="Find in loaded text (Ctrl/⌘+F)" onClick={show}><SemanticIcon name="action.search" size={13} />Find</button>}
+        <button type="button" aria-label="Close find" title="Close find (Escape)" onClick={close}><SemanticIcon name="action.close" size={13} /></button>
+    </div> : null}
+    <div ref={content} className="reading-find__content" tabIndex={-1}>
+      {typeof children === 'function' ? children(findTrigger) : <><div className="reading-find__floating-trigger">{findTrigger}</div>{children}</>}
     </div>
-    <div ref={content} className="reading-find__content" tabIndex={-1}>{children}</div>
   </div>
 }
