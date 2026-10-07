@@ -453,7 +453,7 @@ export class DemandStore {
       const priorGoal = snapshot.demands.find(item => item.progressUpdates?.some(update => update.operationId === input.operationId))
       const prior = priorGoal?.progressUpdates?.find(update => update.operationId === input.operationId)
       if (prior) {
-        const { author, reportingRunId: _run, recordedAt: _at, basis: _basis, managerVerified: _verified, ...original } = prior
+        const { author, reportingRunId: _run, recordedAt: _at, basis: _basis, managerVerified: _verified, reviewForHuman: _human, ...original } = prior
         if (priorGoal!.id !== id || JSON.stringify(original) !== JSON.stringify(input) || author.kind !== authority.author.kind || author.id !== authority.author.id)
           this.rejectDelegation('This original progress operation belongs to another input or author. Read it without rewriting responsibility.')
         return { unchanged: goal }
@@ -464,7 +464,7 @@ export class DemandStore {
     }, undefined, input.operationId)
   }
 
-  private applyProgress(goal: Demand, input: DemandProgressInput, authority: { author: DemandProgress['author']; reportingRunId: string | null }, basis: DemandResponsibilityBasis): void {
+  private applyProgress(goal: Demand, input: DemandProgressInput, authority: { author: DemandProgress['author']; reportingRunId: string | null; reviewForHuman?: boolean }, basis: DemandResponsibilityBasis): void {
     if (!demandExecutionReferences(goal).some(ref => sameDemandExecution(ref, input.execution))) this.rejectDelegation('Progress is not for an original execution in this Goal.')
     const managerVerified = authority.author.kind !== 'agent' || authority.author.id === goal.supervisorSessionId
     if (!managerVerified && (authority.author.id !== input.execution.agentSessionId || authority.reportingRunId !== input.execution.runId))
@@ -483,7 +483,7 @@ export class DemandStore {
       if (!confirmed || sameDemandExecution(input.execution, input.handoffExecution)) this.rejectDelegation('Handoff requires a different already-bound original execution, not a proposed next Agent.')
     }
     const now = Date.now()
-    const updates = [...goal.progressUpdates ?? [], { ...input, ...authority, basis, managerVerified, recordedAt: now }]
+    const updates = [...goal.progressUpdates ?? [], { ...input, ...authority, basis, managerVerified, recordedAt: now, ...(input.phase === 'review' ? { reviewForHuman: managerVerified && (authority.reviewForHuman ?? true) } : {}) }]
     if (input.handoffExecution && managerVerified && demandHandoffDestinations({ ...goal, progressUpdates: updates }).get(demandExecutionKey(input.execution)) === null)
       this.rejectDelegation('Accepted handoffs cannot form a cycle or lose the actual responsible execution.')
     goal.progressUpdates = updates
@@ -578,7 +578,7 @@ export class DemandStore {
         if (report.grounding) goal.grounding = { ...report.grounding, submissionId: mintObjectId(), acceptedAt: null }
         for (const declared of report.progress) {
           const update = declared.phase === 'review' && !declared.groundingSubmissionId && goal.grounding ? { ...declared, groundingSubmissionId: goal.grounding.submissionId } : declared
-          this.applyProgress(goal, update, { author: { kind: 'agent', id: author.agentSessionId }, reportingRunId: author.runId },
+          this.applyProgress(goal, update, { author: { kind: 'agent', id: author.agentSessionId }, reportingRunId: author.runId, reviewForHuman: report.nextOwner.kind === 'human' },
             bases.get(JSON.stringify(update.execution)) ?? { stateEnteredAt: null, activityRevision: null, inputSubmissionId: null })
           const delegation = update.execution.kind === 'delegation' && update.phase === 'review' ? goal.delegations?.find(d => d.operationId === update.execution.operationId) : undefined
           if (delegation?.report && !delegation.collection) delegation.collection = { operationId: 'patrol-collect:' + report.operationId + ':' + delegation.operationId,
