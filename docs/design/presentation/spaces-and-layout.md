@@ -171,6 +171,8 @@ Chat 使用原 Tab，既有 Group 沿原工作面分组；Thread 使用原 Agent
 
 ## Tab 与 Region 几何
 
+分隔线保持原细线、命中与拖动语言；悬停及键盘焦点可发现双击／键盘均分和拖动 Escape 撤销的用途，拖动中反馈局部且克制。操作不新增常驻布局工具条、不移动其他格或覆盖编辑／终端输入；行为仅见[当前分隔线约束](../behavior/spaces-and-layout.md#tabtab-group-与-region)。
+
 ### 顶行与 Tabbar
 
 - CLI 与界面的显示名改动沿交互合同[《显示名与身份》](../behavior/spaces-and-layout.md#显示名与身份)；复用原名称位置与截断／完整阅读语言，不新增名字条、CLI 身份行或外观。
