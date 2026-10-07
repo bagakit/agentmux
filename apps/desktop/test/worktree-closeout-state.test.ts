@@ -188,7 +188,7 @@ describe('worktree closeout moves the workface without moving execution resource
     const previous = desktopSpatialGraph(state, [])
     const patch = rehomeClosedWorkspaces(state, closedConfig)
     const next = { ...state, ...patch, config: closedConfig, activeWorkspaceId: target.id, spaceZoneBindings: desktopBindingsFromSpatial(previous) }
-    const graph = desktopSpatialGraph(next, [], previous)
+    const graph = desktopSpatialGraph(next, [], previous, new Set([workspaceZoneId(directoryIdentity(source.hostId, source.repoPath!), source.id)]))
     expectSourceRetired(graph, source)
     expect(graph.layouts[target.id]!.groups.map(group => group.id)).toEqual(['default-group', 'source-first', 'source-second'])
     const repeated = desktopSpatialGraph({ ...next, spaceZoneBindings: desktopBindingsFromSpatial(graph) }, [], graph)
