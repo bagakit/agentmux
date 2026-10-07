@@ -401,6 +401,55 @@ describe('actual App Focus residency', () => {
 })
 
 describe('actual App Focus Goal access', () => {
+  it.each(['native navigation', 'public surface target'] as const)('returns to an original scan-only Focus through %s without creating a spatial choice or opening an Agent workface', async entry => {
+    await act(async () => useAppStore.setState({ mainSurface: 'agents', workbenchSpaceSelection: null,
+      agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } },
+      demands: { observed: { ...goal('observed'), supervisorSessionId: source.control.agentSessionId } } }))
+    await settle()
+    const surface = container.querySelector<HTMLElement>('.global-focus-surface')!
+    expect(surface).not.toBeNull(); expect(surface.querySelector('.global-session-workspace')).toBeNull()
+    expect(useAppStore.getState().workbenchSpaceSelection).toBeNull(); expect(useAppStore.getState().agentFocus.execution.sessionId).toBeNull()
+    expect(useAppStore.getState().layouts.source!.groups.some(group => group.tabOrder.includes(sourceTab.id))).toBe(true)
+    await query(source.id)
+    const trigger = surface.querySelector<HTMLButtonElement>('.focus-goal__trigger')!
+    expect(trigger).not.toBeNull(); expect(trigger.getAttribute('data-goal-host-unconfirmed')).toBe('true')
+    const before = useAppStore.getState()
+    await act(async () => trigger.click()); await settle()
+    expect(container.querySelector('[data-goal-detail-id="observed"]')).not.toBeNull()
+    expect(useAppStore.getState().workbenchSpaceSelection).toBeNull(); expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
+    if (entry === 'native navigation') {
+      const back = container.querySelector<HTMLButtonElement>('.surface-navigation__focus')!
+      expect(back).not.toBeNull(); await act(async () => back.click()); await settle()
+    } else await control({ kind: 'surface', surface: 'focus' })
+    expect(useAppStore.getState().mainSurface).toBe('agents')
+    expect(useAppStore.getState().workbenchSpaceSelection).toBeNull()
+    expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
+    expect(container.querySelector('.global-focus-surface')).toBe(surface)
+    expect(surface.querySelector('.global-session-workspace')).toBeNull()
+    expect(surface.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!.value).toBe(source.id)
+    const explicitSpace = await control({ kind: 'surface', surface: 'space' })
+    expect(explicitSpace.navigation.selection.space?.tabId).toBe(sourceTab.id)
+    expect(useAppStore.getState().workbenchSpaceSelection?.regionId).toBe('source-region')
+  })
+  it.each(['native Goals navigation', 'public Goals target'] as const)('keeps an original scan-only Focus empty across %s and return', async entry => {
+    await act(async () => useAppStore.setState({ mainSurface: 'agents', workbenchSpaceSelection: null, selectedDemandId: null,
+      agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } },
+      demands: { observed: { ...goal('observed'), supervisorSessionId: source.control.agentSessionId } } }))
+    await settle()
+    const surface = container.querySelector<HTMLElement>('.global-focus-surface')!
+    expect(surface.querySelector('.global-session-workspace')).toBeNull()
+    const before = useAppStore.getState()
+    if (entry === 'native Goals navigation') {
+      const goals = container.querySelector<HTMLButtonElement>('.surface-navigation__slot[aria-label^="Goals:"]')!
+      expect(goals).not.toBeNull(); await act(async () => goals.click()); await settle()
+    } else await control({ kind: 'surface', surface: 'goals' })
+    expect(useAppStore.getState().mainSurface).toBe('board')
+    expect(useAppStore.getState().workbenchSpaceSelection).toBeNull()
+    await act(async () => container.querySelector<HTMLButtonElement>('.surface-navigation__focus')!.click()); await settle()
+    expect(useAppStore.getState().mainSurface).toBe('agents'); expect(useAppStore.getState().workbenchSpaceSelection).toBeNull()
+    expect(useAppStore.getState().agentFocus).toBe(before.agentFocus); expect(useAppStore.getState().selectedDemandId).toBeNull()
+    expect(container.querySelector('.global-focus-surface')).toBe(surface); expect(surface.querySelector('.global-session-workspace')).toBeNull()
+  })
   async function linkedGoal() {
     await focus()
     await act(async () => useAppStore.setState({ demands: { linked: { ...goal('linked'), title: 'Exact linked Goal',
