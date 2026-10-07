@@ -37,10 +37,13 @@ export function mainFocusPresentation(
     catalog.spaces.some(space => space.spaceId === choice.spaceId && !space.issue)) {
     return { projection: null, issue: null, references: [], unselected: true }
   }
-  const references = catalog?.locations.filter(location => location.displayWorkspaceId === choice.workspaceId &&
-    location.spaceId === choice.spaceId && location.zoneId === choice.zoneId &&
-    location.tabId === choice.tabId && (!choice.regionId || location.regionId === choice.regionId)).map(location => ({
-      displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, tabId: location.tabId, regionId: location.regionId })) ?? []
+  const locations = catalog?.locations.filter(location => location.displayWorkspaceId === choice.workspaceId &&
+    location.tabId === choice.tabId && (!choice.regionId || location.regionId === choice.regionId)) ?? []
+  const references = [...new Map(locations.map(location => {
+    const reference = { displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId,
+      tabId: location.tabId, regionId: location.regionId }
+    return [JSON.stringify(reference), reference] as const
+  })).values()]
   const reference = mainRegionReference(choice)
   if (!catalog || !reference || !tabs[reference.tabId]?.regions[reference.regionId] ||
     !references.some(location => sameWorkbenchProjectionSelection(location, reference))) return { projection: null, references,
@@ -48,7 +51,12 @@ export function mainFocusPresentation(
   return { projection: { entity: level === 'region' ? { kind: 'region', regionId: reference.regionId } : { kind: 'tab', tabId: reference.tabId },
     presentationId: 'focus-workbench', displayWorkspaceId: reference.displayWorkspaceId,
     catalog: selectSpatialCatalog(catalog, { displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }),
-    selection: [reference], onSelect }, issue: null, references }
+    selection: [reference], onSelect },
+    // Parent classification cannot withdraw an exact surviving workface. Keep
+    // the durable choice unchanged; explicit navigation still uses its owner.
+    issue: locations.some(location => location.groupId === reference.groupId &&
+      location.spaceId === choice.spaceId && location.zoneId === choice.zoneId) ? null
+      : 'The original Space or Zone membership is no longer confirmed. The exact Tab and Region remain available.', references }
 }
 
 /** Resolve an occurrence from authoritative membership, never from the first Session Tab. */
