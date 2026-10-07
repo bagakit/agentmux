@@ -8,7 +8,7 @@ export type FeishuMessageEvent = {
   event: {
     sender: { sender_type: string; sender_id?: { open_id?: string } }
     message: {
-      message_id: string; chat_id: string; chat_type: string; message_type: string; content: string
+      message_id: string; chat_id: string; chat_type: string; message_type?: unknown; content?: unknown
       parent_id?: string
       mentions?: { id: { open_id?: string } }[]
     }
@@ -36,7 +36,6 @@ export function readFeishuMessage(raw: string, application: ConnectionApplicatio
   feishuIdentity(header.event_id); feishuIdentity(message.message_id); feishuIdentity(message.chat_id)
   feishuIdentity(sender.sender_type); feishuIdentity(message.chat_type)
   if (message.parent_id !== undefined) feishuIdentity(message.parent_id)
-  if (typeof message.message_type !== 'string' || typeof message.content !== 'string') feishuFailure('FEISHU_EVENT_INVALID')
   if (message.mentions !== undefined) {
     if (!Array.isArray(message.mentions)) feishuFailure('FEISHU_EVENT_INVALID')
     for (const mention of message.mentions) {
@@ -48,7 +47,7 @@ export function readFeishuMessage(raw: string, application: ConnectionApplicatio
   return parsed as FeishuMessageEvent
 }
 
-/** The first intake supports text. Other message formats fail explicitly, without ACK or a fabricated body. */
+/** Decode text only. The authenticated caller records unsupported projection separately from transport validity. */
 export function feishuTextBody(content: string): string {
   let decoded: unknown
   try { decoded = JSON.parse(content) } catch { return feishuFailure('FEISHU_CONTENT_INVALID') }
@@ -60,11 +59,16 @@ export function feishuTextBody(content: string): string {
 export function projectFeishuMessage(payload: FeishuMessageEvent, application: ConnectionApplication, botOpenId: string): VerifiedIngressEvent {
   const { message, sender } = payload.event
   if (sender.sender_type !== 'user' || message.chat_type !== 'group') feishuFailure('FEISHU_EVENT_OUTSIDE_SCOPE')
-  if (message.message_type !== 'text') feishuFailure('FEISHU_MESSAGE_UNSUPPORTED')
+  let body = '', unsupported = message.message_type !== 'text' || typeof message.content !== 'string'
+  if (!unsupported) {
+    try { body = feishuTextBody(message.content as string) } catch { unsupported = true }
+  }
   const mentioned = message.mentions?.some(mention => mention.id.open_id === botOpenId) ?? false
   return {
     eventId: payload.header.event_id, messageId: message.message_id, externalConversationId: message.chat_id,
     actor: { application: { ...application }, idType: 'open_id', userId: feishuIdentity(sender.sender_id?.open_id) },
-    body: feishuTextBody(message.content), selection: mentioned ? 'mention' : 'message'
+    body, selection: mentioned ? 'mention' : 'message',
+    ...(message.parent_id === undefined ? {} : { replyToMessageId: message.parent_id }),
+    ...(unsupported ? { unsupportedContent: true as const } : {})
   }
 }
