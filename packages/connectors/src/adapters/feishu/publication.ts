@@ -52,7 +52,8 @@ function failure(status: number | undefined, code: unknown): PublicationReceipt 
 function consistent(data: Record<string, unknown>, target: PublicationTarget, mapping?: Readonly<PublicationMapping>): boolean {
   if (data.message_id !== undefined && mapping && data.message_id !== mapping.messageId ||
       data.chat_id !== undefined && data.chat_id !== target.externalConversationId ||
-      data.sender !== undefined && !ownSender(data.sender, target.application) || data.deleted === true ||
+      data.sender !== undefined && !ownSender(data.sender, target.application) ||
+      data.deleted !== undefined && typeof data.deleted !== 'boolean' || data.deleted === true ||
       data.thread_id !== undefined && mapping && data.thread_id !== mapping.threadId) return false
   return true
 }
@@ -132,7 +133,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       const matches = items.map(object).filter(item => item?.message_id === mapping.messageId)
       if (matches.length !== 1) return null
       const original = matches[0]!
-      if (original.chat_id !== target.externalConversationId || !ownSender(original.sender, target.application) || original.thread_id !== undefined && original.thread_id !== mapping.threadId) return null
+      if (original.deleted !== undefined && typeof original.deleted !== 'boolean' || original.chat_id !== target.externalConversationId || !ownSender(original.sender, target.application) || original.thread_id !== undefined && original.thread_id !== mapping.threadId) return null
       if (prepared.request.method === 'DELETE') return original.deleted === true ? { state: 'confirmed', mapping: { ...mapping } } : null
       return original.deleted !== true && original.msg_type === 'post' && samePost(object(original.body)?.content, requestText(prepared)!) ? { state: 'confirmed', mapping: { ...mapping } } : null
     } catch { return null }
