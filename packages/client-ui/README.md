@@ -18,6 +18,8 @@ Semantic icons use `@agentmux/client-ui/icons` and the shared styles. Instances 
 
 The finite presets are `none`, `work`, `stream`, `execute` and `spin`. They affect this instance only, respect reduced motion and do not change saved themes or establish Runtime state. `createSemanticIconElement` accepts the same presentation options: static calls return an SVG; explicit animation can return an HTML carrier containing that SVG. Retain the returned node rather than assuming an animated result is an SVG.
 
+For choosing an existing meaning, adding a semantic ID or glyph, and opening the live catalog with `pnpm icons:dev`, follow the [semantic icon development guide](../../docs/guides/semantic-icons.md). The shared catalog owns defaults; Settings, public discovery and the workbench derive their inventories from it.
+
 The optional `renderObjectLink` adapter receives an exact `amux://agent|region|tab|space|zone/…` URI and its Core-parsed typed target. Conversation prose and Markdown links share this inline presentation; code, read-only previews and document mode retain their original presentation. Without the adapter, Markdown remains usable as text. The host resolves current names, Mote appearance, state, details and navigation; message storage and copying retain the original source.
 
 Import `@agentmux/client-ui/styles.css` with the client's theme tokens, font and shell. Styles are also exported individually so Desktop keeps its existing cascade order. Mobile can use these surface rules without importing Desktop's application stylesheet or Zustand store.

@@ -27,6 +27,7 @@
 | --- | --- |
 | 产品对象、行为、身份、恢复、终端连续阅读 | [交互专题索引](design/agentmux-desktop-interaction.md) |
 | 视觉、密度、主题 token、控件语言 | [呈现专题索引](design/agentmux-surface-density.md) |
+| 开发复用或扩展图标、打开当前目录工作台 | [语义图标开发指南](guides/semantic-icons.md) |
 | 终端复制、粘贴、键盘、IME、链接的机制判别 | [终端交互分层](design/agentmux-terminal-interaction-layers.md) |
 | 字节到画面、Attachment 与 viewport 链路 | [Terminal Runtime 架构](architecture/terminal-runtime.md) |
 | Renderer 更新、应用安装与 Native 保全 | [Desktop 更新架构](architecture/desktop-updates.md) |
