@@ -10,6 +10,7 @@
 .mote-connection-dialog__header p { margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-body); }
 .mote-connection-dialog__body { display: grid; gap: var(--sp-3); padding: 0 var(--sp-5) var(--sp-5); }
 .mote-connection-dialog__body > label { color: var(--text-2); font-size: var(--fs-body); }
+.selection-field__menu.mote-connection-dialog__choices { background: var(--surface-2); }
 .mote-connection-dialog__secondary { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .mote-connection-dialog__footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-3) var(--sp-5); border-top: 1px solid var(--line-soft); }
 .mote-connection-dialog__requests { color: var(--text-2); font-size: var(--fs-body); }

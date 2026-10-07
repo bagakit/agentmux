@@ -134,7 +134,7 @@ function MoteConnectionDialog({ target, moteName, onClose, onRead, returnFocus }
           <Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close bot choice"><CloseIcon size={16} /></button></Dialog.Close>
         </header>
         <div className="mote-connection-dialog__body">
-          {snapshot ? <><label htmlFor={fieldId}>Chat bot</label><SelectionField id={fieldId} label="Mote chat bot" value={selection}
+          {snapshot ? <><label htmlFor={fieldId}>Chat bot</label><SelectionField id={fieldId} label="Mote chat bot" value={selection} menuClassName="mote-connection-dialog__choices"
             disabled={busy} onValueChange={value => { edited.current = true; setSelection(value) }}
             options={[{ value: '', label: 'No default bot' }, ...snapshot.connections.map(item => ({ value: choiceKey(item.config), label: item.config.label,
               disabled: !item.config.enabled, description: item.config.application.domain + ' · ' + item.config.application.appId }))]} />
