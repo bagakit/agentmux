@@ -6,7 +6,7 @@ import { DurableIngressHost } from '../dist/index.js'
 import { FeishuAdapter } from '@agentmux/connectors/adapters/feishu'
 import * as core from '../../core/dist/index.js'
 import { ingressFixture } from './fixtures/ingress.js'
-import { feishuConfig, feishuPayload, feishuSdkTransport } from './fixtures/feishu.js'
+import { feishuConfig, feishuPayload, feishuSdkTransport, startFeishuTransport } from './fixtures/feishu.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { externalIngressMailbox } from '../../../apps/desktop/test/helpers/external-ingress-mailbox.js'
 
@@ -17,9 +17,9 @@ it('the actual SDK callback joins original durable intake, Core queue, mounted M
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const f = await ingressFixture(true, feishuConfig); cleanup.push(() => f.close())
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
-  const transport = feishuSdkTransport(), adapter = new FeishuAdapter({ connections: f.connections, http: transport.http })
+  const transport = feishuSdkTransport(), adapter = new FeishuAdapter({ http: transport.http })
   const ingress = new DurableIngressHost({ ...f.options, authenticators: [adapter] }); f.connections.ingress = ingress
-  const receiver = await adapter.openReceiver(feishuConfig, 'fixture-credential', ingress); cleanup.push(() => receiver.close())
+  const receiver = await startFeishuTransport(adapter.transport, feishuConfig, ingress); cleanup.push(() => receiver.close())
   await vi.waitFor(() => expect(receiver.observation().transport.state).toBe('ready'))
   const payload = feishuPayload({ thread_id: 'platform-thread', content: JSON.stringify({ text: '群里的原始消息\nContinue in the original Session.' }) })
   await transport.receive(payload)
@@ -59,7 +59,7 @@ it('the actual SDK callback joins original durable intake, Core queue, mounted M
   expect(JSON.stringify(result)).not.toContain('fixture-credential'); expect(JSON.stringify(result)).not.toContain('transportProof')
   expect((await f.client.readAgentSessions()).map(session => session.agentSessionId)).toEqual([f.input.agentSessionId])
   expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.attach).not.toHaveBeenCalled()
-  const evidence = resolve('.bagakit/evidence/feishu-join')
+  const evidence = resolve('.bagakit/evidence/feishu-transport')
   await mkdir(evidence, { recursive: true })
   await writeFile(join(evidence, 'actual-call-chain.json'), JSON.stringify({
     transport: 'Pinned SDK with controlled HTTP and WebSocket I/O; no real platform credentials or live Run',
@@ -77,9 +77,9 @@ it('a saved SDK parent stays unknown until its exact application author is reada
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const f = await ingressFixture(true, feishuConfig, { resolve: async () => 'fixture-credential' }); cleanup.push(() => f.close())
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
-  const transport = feishuSdkTransport(), adapter = new FeishuAdapter({ connections: f.connections, http: transport.http })
+  const transport = feishuSdkTransport(), adapter = new FeishuAdapter({ http: transport.http })
   const ingress = new DurableIngressHost({ ...f.options, authenticators: [adapter] }); f.connections.ingress = ingress
-  const receiver = await adapter.openReceiver(feishuConfig, 'fixture-credential', ingress); cleanup.push(() => receiver.close())
+  const receiver = await startFeishuTransport(adapter.transport, feishuConfig, ingress); cleanup.push(() => receiver.close())
   await vi.waitFor(() => expect(receiver.observation().transport.state).toBe('ready'))
   const payload = feishuPayload({ parent_id: 'original-bot-parent', mentions: [], content: JSON.stringify({ text: 'Reply in the existing Session\n完整原文' }) })
   const request = transport.request.getMockImplementation()!

@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
 import { WSClient, type HttpInstance } from '@larksuiteoapi/node-sdk'
 import type { ConnectionConfig } from '@agentmux/core/connections'
+import type { ConnectionIngressTransport, DurableIngressHost } from '../../dist/index.js'
 
 export const feishuConfig: ConnectionConfig = { connectionId: 'feishu-connection', adapterId: 'feishu', application: { domain: 'open.feishu.cn', appId: 'cli_0123456789abcdef' }, label: 'Team bot', enabled: true, credentialRef: 'host-credential' }
 export const botOpenId = 'original-bot-open-id'
@@ -39,4 +40,9 @@ export function feishuSdkTransport() {
       headers: [{ key: 'type', value: 'event' }, { key: 'message_id', value: 'wire-message' }, { key: 'sum', value: '1' }, { key: 'seq', value: '0' }], payload: data })
   }
   return { http, request, sockets, frames, ack, receive }
+}
+
+/** Exercises the registered transport contract while keeping its original durable target fixed. */
+export function startFeishuTransport(transport: ConnectionIngressTransport, config: ConnectionConfig, ingress: Pick<DurableIngressHost, 'receive'>, signal = new AbortController().signal) {
+  return transport.start({ config, credential: 'fixture-credential', signal, receive: (input, acknowledge) => ingress.receive({ ...input, connectionId: config.connectionId }, acknowledge) })
 }

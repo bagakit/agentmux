@@ -3,35 +3,48 @@ import { DatabaseSync } from 'node:sqlite'
 import { execFileSync } from 'node:child_process'
 import { ConnectionHost, DurableIngressHost } from '../dist/index.js'
 import { FeishuAdapter } from '@agentmux/connectors/adapters/feishu'
-import { feishuConfig, feishuPayload, feishuSdkTransport, botOpenId } from './fixtures/feishu.js'
+import { feishuConfig, feishuPayload, feishuSdkTransport, botOpenId, startFeishuTransport } from './fixtures/feishu.js'
 
 const cleanup: Array<() => void> = []
 afterEach(() => { for (const close of cleanup.splice(0).reverse()) close(); vi.restoreAllMocks() })
 async function fixture() {
   const transport = feishuSdkTransport(), database = new DatabaseSync(':memory:')
-  let connections: ConnectionHost
-  const adapter = new FeishuAdapter({ connections: { readConfiguration: id => connections.readConfiguration(id) }, http: transport.http })
-  connections = new ConnectionHost({ database, secrets: { resolve: async () => 'fixture-credential' }, adapters: [adapter] })
+  const adapter = new FeishuAdapter({ http: transport.http })
+  const connections = new ConnectionHost({ database, secrets: { resolve: async () => 'fixture-credential' }, adapters: [adapter] })
   cleanup.push(() => { connections.close(); database.close() })
   await connections.configure({ operationId: 'configure-feishu', expectedRevision: null, connection: feishuConfig })
   const ingress = new DurableIngressHost({ connections, bindings: { listActive: () => [] } as never, core: () => undefined, authenticators: [adapter] })
   connections.ingress = ingress
-  const receiver = await adapter.openReceiver(feishuConfig, 'fixture-credential', ingress); cleanup.push(() => receiver.close())
+  const abort = new AbortController()
+  const receiver = await startFeishuTransport(adapter.transport, feishuConfig, ingress, abort.signal); cleanup.push(() => receiver.close())
   await vi.waitFor(() => expect(receiver.observation().transport.state).toBe('ready'))
-  return { transport, database, connections, adapter, ingress, receiver }
+  return { transport, database, connections, adapter, ingress, receiver, abort }
 }
 
 it('keeps the generic connector import independent of the platform SDK', () => {
   const result = execFileSync(process.execPath, ['--input-type=module', '-e', `
     import { createRequire } from 'node:module';
     const require = createRequire(import.meta.url);
-    await import('./packages/connectors/dist/index.js');
+    const generic = await import('./packages/connectors/dist/index.js');
+    generic.createBuiltinConnectionAdapters();
     const genericLoaded = Object.keys(require.cache).some(path => path.includes('larksuiteoapi'));
     await import('./packages/connectors/dist/adapters/feishu/index.js');
     const selectedLoaded = Object.keys(require.cache).some(path => path.includes('larksuiteoapi'));
     console.log(JSON.stringify({genericLoaded, selectedLoaded}));
   `], { encoding: 'utf8' })
   expect(JSON.parse(result)).toEqual({ genericLoaded: false, selectedLoaded: true })
+})
+
+it('passes the original Host signal through SDK token, bot and discovery requests and refuses an aborted start', async () => {
+  const f = await fixture()
+  expect(f.transport.request.mock.calls.some(([request]) => request.url?.includes('/auth/v3/'))).toBe(true)
+  expect(f.transport.request.mock.calls.some(([request]) => request.url?.endsWith('/bot/v3/info'))).toBe(true)
+  expect(f.transport.request.mock.calls.some(([request]) => request.url?.endsWith('/callback/ws/endpoint'))).toBe(true)
+  for (const [request] of f.transport.request.mock.calls) expect(request).toMatchObject({ signal: f.abort.signal })
+  const abort = new AbortController(); abort.abort()
+  const before = f.transport.request.mock.calls.length
+  await expect(startFeishuTransport(f.adapter.transport, feishuConfig, f.ingress, abort.signal)).rejects.toMatchObject({ code: 'FEISHU_CONNECTION_REVISED' })
+  expect(f.transport.request).toHaveBeenCalledTimes(before)
 })
 
 it('uses the pinned low-level SDK app authentication, exact issuer and durable payload before successful ACK', async () => {
@@ -162,14 +175,31 @@ it('cancels only the parent read observation and ignores its late SDK result', a
   expect(f.transport.request).toHaveBeenCalledTimes(before)
 })
 
+it('a late SDK token response cannot start the cancelled parent read', async () => {
+  const f = await fixture()
+  await f.transport.receive(feishuPayload({ parent_id: 'original-parent', mentions: [] }))
+  const row = f.database.prepare('SELECT event_json,raw_payload FROM connection_ingress_event').get()!
+  let finish!: (value: unknown) => void
+  const request = f.transport.request.getMockImplementation()!
+  f.transport.request.mockImplementation(async input => input.url?.includes('/auth/v3/') ? await new Promise(resolve => { finish = resolve }) : request(input))
+  const abort = new AbortController(), reading = f.adapter.qualifyReply(feishuConfig, JSON.parse(String(row.event_json)), String(row.raw_payload), 'fixture-credential', abort.signal)
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+  expect(f.transport.request.mock.calls.at(-1)![0]).toMatchObject({ signal: abort.signal })
+  abort.abort(); expect(await reading).toBe('unknown')
+  finish({ code: 0, tenant_access_token: 'fixture-tenant-access', expire: 3600 })
+  await new Promise(resolve => setImmediate(resolve))
+  expect(f.transport.request.mock.calls.some(([input]) => input.url?.endsWith('/messages/original-parent'))).toBe(false)
+  expect((await f.ingress.list({ connectionId: feishuConfig.connectionId })).ingresses[0]!.state).toBe('received')
+})
+
 it('keeps exactly one issuer/app receiver and releases only that receiver for explicit reopening', async () => {
   const f = await fixture(), alias = { ...feishuConfig, connectionId: 'same-app-alias' }
   await f.connections.configure({ operationId: 'configure-alias', expectedRevision: null, connection: alias })
-  const second = new FeishuAdapter({ connections: f.connections, http: f.transport.http })
-  await expect(second.openReceiver(alias, 'fixture-credential', f.ingress)).rejects.toMatchObject({ code: 'FEISHU_RECEIVER_ALREADY_OWNED' })
+  const second = new FeishuAdapter({ http: f.transport.http })
+  await expect(startFeishuTransport(second.transport, alias, f.ingress)).rejects.toMatchObject({ code: 'FEISHU_RECEIVER_ALREADY_OWNED' })
   const old = f.transport.sockets[0]!
   f.receiver.close()
-  const reopened = await second.openReceiver(alias, 'fixture-credential', f.ingress); cleanup.push(() => reopened.close())
+  const reopened = await startFeishuTransport(second.transport, alias, f.ingress); cleanup.push(() => reopened.close())
   await vi.waitFor(() => expect(reopened.observation().transport.state).toBe('ready'))
   await f.transport.receive(feishuPayload(), old)
   expect(f.transport.ack()).toEqual([]) // Original SDK closed its socket; no new ACK can be emitted there.
@@ -180,7 +210,7 @@ it('does not duplicate the SDK app ID syntax gate into REST authentication or co
   const f = await fixture(), original = { ...feishuConfig, connectionId: 'another-platform-app', application: { ...feishuConfig.application, appId: 'original-platform-app-id' } }
   await f.connections.configure({ operationId: 'configure-other-app', expectedRevision: null, connection: original })
   expect((await f.connections.test({ connectionId: original.connectionId })).observation.authentication.state).toBe('ready')
-  await expect(f.adapter.openReceiver(original, 'fixture-credential', f.ingress)).rejects.toMatchObject({ code: 'FEISHU_RECEIVER_UNAVAILABLE' })
+  await expect(startFeishuTransport(f.adapter.transport, original, f.ingress)).rejects.toMatchObject({ code: 'FEISHU_RECEIVER_UNAVAILABLE' })
   // The pinned SDK declines to start this identifier. That transport fact does not erase its original configuration or REST result.
   expect(f.connections.readConfiguration(original.connectionId)!.config).toEqual(original)
   expect((await f.connections.test({ connectionId: original.connectionId })).observation.authentication.state).toBe('ready')
@@ -201,14 +231,14 @@ it('uses original sender and typed mentions, preserving parent IDs without guess
   expect(f.transport.ack()).toEqual([{ code: 200 }, { code: 200 }])
 })
 
-it('configuration changes reject only the old callback while the original payload remains discoverable', async () => {
+it('the original Host signal closes only its SDK receiver while retained payload stays discoverable', async () => {
   const f = await fixture()
   await f.transport.receive(feishuPayload())
-  await f.connections.configure({ operationId: 'disable-feishu', expectedRevision: 1, connection: { ...feishuConfig, enabled: false } })
+  f.abort.abort()
   await f.transport.receive(feishuPayload({ message_id: 'after-disabled' }))
-  expect(f.transport.ack()).toEqual([{ code: 200 }, { code: 500 }])
+  expect(f.transport.ack()).toEqual([{ code: 200 }])
   expect((await f.ingress.list({ connectionId: feishuConfig.connectionId })).ingresses).toHaveLength(1)
-  expect(f.receiver.observation().transport.state).toBe('unknown')
+  expect(f.receiver.observation().transport.state).toBe('disabled')
 })
 
 it('cleans low-level exceptions and refuses non-TLS endpoints without exposing credentials or payloads', async () => {
@@ -222,7 +252,7 @@ it('cleans low-level exceptions and refuses non-TLS endpoints without exposing c
   const request = f.transport.request.getMockImplementation()!
   f.transport.request.mockImplementation(async input => input.url?.endsWith('/callback/ws/endpoint') ? { code: 0, data: { URL: 'ws://msg-frontier.feishu.cn/ws/v2', ClientConfig: { PingInterval: 30, ReconnectCount: 0, ReconnectInterval: 1, ReconnectNonce: 0 } } } : request(input))
   const attempts = f.transport.request.mock.calls.filter(([input]) => input.url?.endsWith('/callback/ws/endpoint')).length
-  const receiver = await f.adapter.openReceiver(feishuConfig, 'fixture-credential', f.ingress); cleanup.push(() => receiver.close())
+  const receiver = await startFeishuTransport(f.adapter.transport, feishuConfig, f.ingress); cleanup.push(() => receiver.close())
   await vi.waitFor(() => expect(f.transport.request.mock.calls.filter(([input]) => input.url?.endsWith('/callback/ws/endpoint'))).toHaveLength(attempts + 1))
   expect(receiver.observation().transport.state).toBe('unknown')
   expect(f.transport.sockets).toHaveLength(1)
