@@ -1637,6 +1637,7 @@ export function recoveryCandidateSession(
     agentSessionUpdatedAt: candidate.updatedAt,
     ...(candidate.semanticStatus ? { semanticStatus: structuredClone(candidate.semanticStatus) } : {}),
     ...(candidate.continuity ? { continuity: structuredClone(candidate.continuity) } : {}),
+    ...(candidate.continuityOperations ? { continuityOperations: structuredClone(candidate.continuityOperations) } : {}),
     ...(candidate.terminalCapability
       ? { terminalCapability: structuredClone(candidate.terminalCapability) }
       : {}),
