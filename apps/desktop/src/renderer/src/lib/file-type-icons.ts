@@ -11,7 +11,6 @@ const ThemeFilePackageIcon = semanticIconComponent('file.package')
 const ThemeFileBuildConfigIcon = semanticIconComponent('file.build-config')
 const ThemeFileKeyIcon = semanticIconComponent('file.key')
 const ThemeFileShellIcon = semanticIconComponent('file.shell')
-const ThemeFileLockedIcon = semanticIconComponent('file.locked')
 const ThemeFileArchiveIcon = semanticIconComponent('file.archive')
 const ThemeFileAudioIcon = semanticIconComponent('file.audio')
 const ThemeFileImageIcon = semanticIconComponent('file.image')
@@ -204,11 +203,11 @@ const FILE_ICON_BY_EXTENSION: Record<string, SemanticIconComponent> = {
   ogg: ThemeFileAudioIcon,
   opus: ThemeFileAudioIcon,
   otf: ThemeFileFontIcon,
-  p12: ThemeFileLockedIcon,
+  p12: ThemeFileKeyIcon,
   patch: ThemeFileDiffIcon,
   pdf: ThemeFileTextIcon,
   pem: ThemeFileKeyIcon,
-  pfx: ThemeFileLockedIcon,
+  pfx: ThemeFileKeyIcon,
   php: ThemeFileCodeIcon,
   pl: ThemeFileCodeIcon,
   pm: ThemeFileCodeIcon,

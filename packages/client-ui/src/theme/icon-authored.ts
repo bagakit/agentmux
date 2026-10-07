@@ -614,6 +614,27 @@ export const AUTHORED_ICON_DEFINITIONS = {
       motion: { kind: "still", animation: "none", description: "图形经实际CSS mask投影，无独立内部部位；真实内容/折叠/缩放变化已经给出结果，静止图标更清楚。", trigger: "原Monaco/Excalidraw控件值与动作；不新增内部动画renderer" }
     }
   },
+  "draft-return": {
+    shapes: [["path",{"d":"M8 7V4h12v16H8v-4 M12 17h5"}],["path",{"d":"M3 11h10 M10 8l3 3-3 3"}]],
+    design: {
+      rest: "输入纸页保留完整外轮廓，回入箭头进入编辑面，区别文件夹移动",
+      motion: {"kind":"still","animation":"none","description":"原消息移至草稿由回调与原投递记录说明；入口静止，不预播已移动或已发送","trigger":"仅沿原队列条目、资格与操作回执；图形不判断原消息是否投递。"}
+    }
+  },
+  "browser-agent": {
+    shapes: [["rect",{"x":"3","y":"4","width":"18","height":"16","rx":"2"}],["path",{"d":"M3 9h18"}],["rect",{"x":"8","y":"12","width":"10","height":"6","rx":"1.5"}],["path",{"d":"M13 10v2 M11 14v1 M15 14v1"}]],
+    design: {
+      rest: "浏览器窗口与内部Agent面孔共同保留，区别单独Agent及正在执行的箭头",
+      motion: {"kind":"still","animation":"none","description":"控制归属是静态关系，不等于Browser当前正在执行，窗口和Agent形保持静止","trigger":"原Browser driving/control事实选择此对象；实际operation活动由独立状态owner表达。"}
+    }
+  },
+  "graph-arrange": {
+    shapes: [["rect",{"x":"3","y":"4","width":"5","height":"5","rx":"1"}],["rect",{"x":"16","y":"4","width":"5","height":"5","rx":"1"}],["rect",{"x":"9.5","y":"15","width":"5","height":"5","rx":"1"}],["path",{"d":"M8 6.5h8 M5.5 9v8.5h4 M18.5 9v8.5h-4"}]],
+    design: {
+      rest: "对齐的三个节点与连接线表达关系排图，区别分屏均分",
+      motion: {"kind":"still","animation":"none","description":"节点位置的真实改变已经反馈排图结果；入口图形静止，不再加一次整理表演","trigger":"原Arrange Worker结果与positions owner持有应用/取消事实，不从图标发起或确认布局。"}
+    }
+  },
 } as const satisfies Record<string, AuthoredIconDefinition>
 
 /** Existing drawing consumers retain exact glyph keys and readonly shape literals. */

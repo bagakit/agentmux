@@ -4,11 +4,11 @@ import { PmoTeamsTopicEntry } from './PmoTeamsTopicEntry'
 import type { MainSurface } from '../store'
 import { MOTE_TYPE_NAME } from '../../../shared/scratch-topics'
 
-const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
-const ThemeObjectTeamIcon = semanticIconComponent('object.team')
-const ThemeObjectBoardIcon = semanticIconComponent('object.board')
-const ThemeActionSearchIcon = semanticIconComponent('action.search')
-const ThemeObjectNoteIcon = semanticIconComponent('object.note')
+const SpaceIcon = semanticIconComponent('navigation.space')
+const FocusIcon = semanticIconComponent('navigation.focus')
+const GoalsIcon = semanticIconComponent('navigation.goals')
+const SurveyIcon = semanticIconComponent('navigation.survey')
+const RecallIcon = semanticIconComponent('navigation.recall')
 
 
 export type SurfaceNavigationPlugin =
@@ -56,7 +56,7 @@ export const SURFACE_NAVIGATION_PLUGINS: readonly SurfaceNavigationPlugin[] = [
     ariaLabel: 'Space: show terminal and file workbench',
     title: 'Space — show terminal and file workbench',
     tooltip: 'Work with agents, terminals, files and browsers',
-    icon: ThemeObjectTerminalIcon,
+    icon: SpaceIcon,
     surface: 'workbench'
   },
   {
@@ -67,7 +67,7 @@ export const SURFACE_NAVIGATION_PLUGINS: readonly SurfaceNavigationPlugin[] = [
     ariaLabel: 'Focus: show execution contexts',
     title: 'Focus — show execution contexts',
     tooltip: 'Show execution contexts',
-    icon: ThemeObjectTeamIcon,
+    icon: FocusIcon,
     surface: 'agents'
   },
   {
@@ -78,7 +78,7 @@ export const SURFACE_NAVIGATION_PLUGINS: readonly SurfaceNavigationPlugin[] = [
     ariaLabel: 'Goals: show goals and progress',
     title: 'Goals — show goals and progress',
     tooltip: 'Organize goals and follow their progress',
-    icon: ThemeObjectBoardIcon,
+    icon: GoalsIcon,
     surface: 'board'
   },
   {
@@ -89,12 +89,12 @@ export const SURFACE_NAVIGATION_PLUGINS: readonly SurfaceNavigationPlugin[] = [
     ariaLabel: 'Survey: browse and explore',
     title: 'Survey — browse and explore',
     tooltip: 'Explore the web and collect early results',
-    icon: ThemeActionSearchIcon,
+    icon: SurveyIcon,
     surface: 'survey'
   },
   {
     id: 'recall', kind: 'surface', navigationContext: 'survey', label: 'Recall',
     ariaLabel: 'Recall: keep and revisit knowledge', title: 'Recall — keep and revisit knowledge',
-    tooltip: 'Keep, connect and revisit what you learn', icon: ThemeObjectNoteIcon, surface: 'recall'
+    tooltip: 'Keep, connect and revisit what you learn', icon: RecallIcon, surface: 'recall'
   }
 ]

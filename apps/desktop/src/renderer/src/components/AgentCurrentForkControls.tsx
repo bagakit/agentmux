@@ -10,7 +10,7 @@ import { OpenDestinationBar } from './OpenDestinationBar'
 import * as DropdownMenu from './HoverDropdownMenu'
 import '../styles/agent-current-fork.css'
 
-const ThemeGitForkIcon = semanticIconComponent('git.fork')
+const ConversationForkIcon = semanticIconComponent('action.fork-conversation')
 const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 
@@ -143,7 +143,7 @@ export function AgentCurrentForkControls({ reason, readOnly, state, begin, cance
   return <>
     <DropdownMenu.Item className="tab-context-menu__item" data-current-fork-action=""
       disabled={Boolean(reason || state.busy || state.dispatching || pending)} onSelect={event => { event.preventDefault(); begin() }}>
-      <ThemeGitForkIcon size={14} /><span>Fork current conversation…</span>
+      <ConversationForkIcon size={14} /><span>Fork current conversation…</span>
     </DropdownMenu.Item>
     {reason ? <DropdownMenu.Label className="agent-region-menu__context agent-current-fork"><span>{reason}</span></DropdownMenu.Label> : null}
     {state.review ? <div className="agent-current-fork agent-current-fork__review" data-current-fork-review="" ref={reviewRef}

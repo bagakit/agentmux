@@ -10,7 +10,8 @@ import { observeTerminalInputGeometry, readTerminalInputOverlapTop } from '../li
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
-const ThemeObjectScheduleIcon = semanticIconComponent('object.schedule')
+const ThemeQueuedIcon = semanticIconComponent('status.queued')
+const ThemeHistoryIcon = semanticIconComponent('object.history')
 const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
 const ThemeActionSubmitIcon = semanticIconComponent('action.submit')
 const ThemeStatusCopiedIcon = semanticIconComponent('status.copied')
@@ -316,7 +317,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
             const immediate = entry.immediateSend ?? sendImmediately
             const conditionChanged = entry.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED'
             const canSend = !conditionChanged && entry.id !== editingId && !state.busy && Boolean(onSend)
-            const Icon = state.busy ? ThemeStatusLoadingIcon : entry.unconfirmed ? ThemeStatusUnknownIcon : !entry.deliverable || entry.error || entry.status === 'failed' ? ThemeStatusWarningIcon : ThemeObjectScheduleIcon
+            const Icon = state.busy ? ThemeStatusLoadingIcon : entry.unconfirmed ? ThemeStatusUnknownIcon : !entry.deliverable || entry.error || entry.status === 'failed' ? ThemeStatusWarningIcon : entry.archived ? ThemeHistoryIcon : ThemeQueuedIcon
             const editing = entry.id === editingId && Boolean(onEdit)
             const explained = !editing && Boolean(entry.inputReceipt || entry.preparationWait || entry.unconfirmed || entry.error || entry.status === 'failed' || !entry.deliverable || pendingInteraction)
             const copied = copyResult?.id === entry.id && copyResult.text === entry.text ? copyResult.state : 'idle'
@@ -325,7 +326,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
               tabIndex={0} aria-label={'待发 ' + (index + 1) + ': ' + entry.text}
               onPointerMove={event => { if (!editingId && event.pointerType !== 'touch' && entry.id !== hoveredId) setHoveredId(entry.id) }}
               onPointerLeave={() => setHoveredId(current => current === entry.id ? null : current)} onFocus={() => select(entry.id)}>
-              <span className="composer-pending__state" aria-label={state.label} title={state.detail}><Icon size={12} aria-hidden="true" /><span className={explained ? 'composer-pending__reason' : 'composer-pending__sr-only'}>{state.label}</span></span>
+              <span className="composer-pending__state" aria-label={state.label} title={state.detail}><Icon size={12} animation={state.busy ? 'spin' : 'none'} aria-hidden="true" /><span className={explained ? 'composer-pending__reason' : 'composer-pending__sr-only'}>{state.label}</span></span>
               {editing && onEdit ? <ComposerQueuedMessageEditor key={entry.id} entry={entry} onSave={onEdit} onCancel={() => {
                 setEditingId(null)
                 if (surfaceRef.current?.contains(document.activeElement)) listRef.current?.querySelector<HTMLElement>('[data-selected="true"]')?.focus()

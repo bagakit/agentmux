@@ -15,7 +15,7 @@ import { TopicKnowledgeEditor, knowledgeSourceLabel, type KnowledgeEditTarget } 
 import { TopicMoveDialog, type TopicMoveTarget } from './TopicMoveDialog'
 import { TopicKnowledgeDocumentReader } from './TopicKnowledgeDocumentReader'
 
-const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+const TopicIcon = semanticIconComponent('object.topic')
 const ThemeActionExchangeIcon = semanticIconComponent('action.exchange')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeActionCreateKnowledgeIcon = semanticIconComponent('action.create-knowledge')
@@ -88,7 +88,7 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
     target?.focus()
   }
   return <section className="topic-knowledge-panel" aria-label={`Knowledge in ${title}`}>
-    <header className="topic-knowledge-panel__header"><span className="topic-knowledge-scope" title={topic ? [title, current.map(category => category.title).join(' · ') || 'Category not confirmed'].join(' · ') : 'Search across all Topics'}><ThemeObjectNotebookIcon size={13} aria-hidden="true" /><strong>{title}</strong></span>
+    <header className="topic-knowledge-panel__header"><span className="topic-knowledge-scope" title={topic ? [title, current.map(category => category.title).join(' · ') || 'Category not confirmed'].join(' · ') : 'Search across all Topics'}><TopicIcon size={13} aria-hidden="true" /><strong>{title}</strong></span>
       {topic ? <button type="button" className="icon-button" aria-label="Move to category…" title="Move to category…" onClick={() => setMoveTarget({ topicId: topic.id, title: topic.title })}><ThemeActionExchangeIcon size={14} /></button> : null}
       <button type="button" className="icon-button" aria-label="Refresh knowledge" onClick={() => setAttempt(value => value + 1)}><ThemeActionRefreshIcon size={13} /></button>
       {topic ? <button type="button" className="icon-button" aria-label="New knowledge" onClick={() => setEdit({ topicId: topic.id })}><ThemeActionCreateKnowledgeIcon size={14} /></button> : null}</header>

@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
-const ThemeGitForkIcon = semanticIconComponent('git.fork')
+const CreateWorktreeIcon = semanticIconComponent('action.create-worktree')
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
@@ -37,7 +37,7 @@ export function BranchContextMenu({
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onOpen}>
-            {hasWorktree ? <ThemeObjectFolderOpenIcon size={14} /> : <ThemeGitForkIcon size={14} />}
+            {hasWorktree ? <ThemeObjectFolderOpenIcon size={14} /> : <CreateWorktreeIcon size={14} />}
             <span>{hasWorktree ? 'Open Workspace' : 'Create Worktree'}</span>
           </ContextMenu.Item>
           <ContextMenu.Separator className="tab-context-menu__separator" />

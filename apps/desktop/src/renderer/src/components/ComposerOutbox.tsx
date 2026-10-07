@@ -22,7 +22,7 @@ const ThemeActionMoveDownIcon = semanticIconComponent('action.move-down')
 const ThemeActionRestoreIcon = semanticIconComponent('action.restore')
 const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
 const StopIcon = semanticIconComponent('action.stop')
-const DraftIcon = semanticIconComponent('action.move-to-folder')
+const DraftIcon = semanticIconComponent('action.move-to-draft')
 const ReadIcon = semanticIconComponent('object.history')
 
 

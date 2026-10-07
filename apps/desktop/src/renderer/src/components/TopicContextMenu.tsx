@@ -11,9 +11,9 @@ const ThemeActionUnpinIcon = semanticIconComponent('action.unpin')
 const ThemeActionPinIcon = semanticIconComponent('action.pin')
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeObjectLinkIcon = semanticIconComponent('object.link')
-const ThemeActionFocusIcon = semanticIconComponent('action.focus')
+const LocateInFilesIcon = semanticIconComponent('action.locate')
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
-const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+const EditNoteIcon = semanticIconComponent('action.edit-note')
 const ThemeStatusDisabledIcon = semanticIconComponent('status.disabled')
 const ThemeStatusEnabledIcon = semanticIconComponent('status.enabled')
 const ThemeActionRestoreDefaultsIcon = semanticIconComponent('action.restore-defaults')
@@ -47,10 +47,10 @@ function topicMenuItems(Item: typeof ContextMenu.Item, Separator: typeof Context
     <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onRename)}><ThemeActionEditIcon size={14} /><span>Rename Topic</span></Item>
     <Separator className="tab-context-menu__separator" />
     <Item className="tab-context-menu__item" onSelect={actions.onCopyLink}><ThemeObjectLinkIcon size={14} /><span>Copy Topic link</span></Item>
-    <Item className="tab-context-menu__item" onSelect={actions.onReveal}><ThemeActionFocusIcon size={14} /><span>Reveal in Files</span></Item>
+    <Item className="tab-context-menu__item" onSelect={actions.onReveal}><LocateInFilesIcon size={14} /><span>Reveal in Files</span></Item>
     <Item className="tab-context-menu__item" onSelect={actions.onCopyPath}><ThemeActionCopyIcon size={14} /><span>Copy Topic Path</span></Item>
     <Separator className="tab-context-menu__separator" />
-    <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onEditWiki)}><ThemeObjectNotebookIcon size={14} /><span>Edit Topic Wiki</span></Item>
+    <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onEditWiki)}><EditNoteIcon size={14} /><span>Edit Topic Wiki</span></Item>
     {actions.onToggleWiki ? <Item className="tab-context-menu__item" onSelect={actions.onToggleWiki}>
       {actions.wikiEnabled ? <ThemeStatusDisabledIcon size={14} /> : <ThemeStatusEnabledIcon size={14} />}<span>{actions.wikiEnabled ? 'Disable Topic Wiki' : 'Enable Topic Wiki'}</span>
     </Item> : null}

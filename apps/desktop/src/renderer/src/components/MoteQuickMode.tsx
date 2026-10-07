@@ -25,7 +25,7 @@ const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
 const ThemeActionPinIcon = semanticIconComponent('action.pin')
-const ThemeObjectScheduleIcon = semanticIconComponent('object.schedule')
+const ReconnectTimingIcon = semanticIconComponent('action.configure-reconnect')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeFileTextIcon = semanticIconComponent('file.text')
 
@@ -46,7 +46,7 @@ export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
     <div className="mote-details__section-actions"><span><ThemeActionQuickModeIcon size={13} />Quick mode</span><MoteBehaviorAction label="Edit quick mode" onClick={edit}><ThemeActionEditIcon size={14} /></MoteBehaviorAction></div>
     <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectAgentIcon size={14} /><span>Executor for new chat</span><strong title={defaults.executorId}>{executorLabel ?? 'Choose Executor'}</strong></button>
     <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectConversationIcon size={14} /><span>Default conversation</span><strong title={defaults.conversation?.sessionId}>{conversationLabel ?? (defaults.conversation ? 'Saved conversation' : 'Choose conversation')}</strong>{defaults.conversation ? <ThemeActionPinIcon size={12} aria-label="Kept open" /> : null}</button>
-    <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectScheduleIcon size={14} /><span>Reconnect</span><strong>{moteRecoveryTiming(scope.topic) === 'startup' ? 'At app startup' : 'When opened'}</strong></button>
+    <button className="mote-quick-mode__row" type="button" onClick={edit}><ReconnectTimingIcon size={14} /><span>Reconnect</span><strong>{moteRecoveryTiming(scope.topic) === 'startup' ? 'At app startup' : 'When opened'}</strong></button>
     {resolved.issue ? <p role="status" className="mote-details__issue">{resolved.issue}</p> : null}
     {editing ? <MoteQuickModeDialog key={scope.workspace.hostId + scope.topic.id + scope.rootPath} scope={scope} reference={reference} onOpenPath={onOpenPath}
       onClose={() => setEditing(false)} returnFocus={() => invoker.current?.isConnected ? invoker.current : null} /> : null}
@@ -118,7 +118,7 @@ function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, returnFocu
           onValueChange={value => { const { conversation: _, ...rest } = form.current; const choice = choices.find(choice => JSON.stringify(choice) === value); if (value && !choice) { setIssue('The chosen conversation is no longer confirmed. Your choices are kept.'); return } update(choice ? { ...rest, conversation: choice } : rest) }}
           options={[{ value: '', label: 'No fixed conversation' }, ...(selected && !hasSelected ? [{ value: selected, label: 'Saved location · unconfirmed' }] : []),
             ...choices.map(choice => ({ value: JSON.stringify(choice), label: `${conversationLabels[choice.sessionId]} · ${facts.config?.workspaces.find(item => item.id === choice.displayWorkspaceId)?.name ?? 'Workspace'} / ${1 + (facts.layouts[choice.displayWorkspaceId]?.groups.findIndex(group => group.id === choice.groupId) ?? -1)}` }))]} />
-        <label htmlFor={id + '-recovery'}><ThemeObjectScheduleIcon size={16} /><span>Reconnect<small>Continues the original conversation. Sends no message.</small></span></label>
+        <label htmlFor={id + '-recovery'}><ReconnectTimingIcon size={16} /><span>Reconnect<small>Continues the original conversation. Sends no message.</small></span></label>
         {scope.topic.id === PMO_TEAMS_TOPIC_ID ? <div id={id + '-recovery'} className="mote-details__hint">At app startup · Main Mote</div> :
           <SelectionField id={id + '-recovery'} label="Reconnect conversation" value={draft.recovery ?? 'on-open'}
             onValueChange={value => { if (value === 'startup' || value === 'on-open') update({ ...form.current, recovery: value }) }}

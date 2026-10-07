@@ -9,7 +9,7 @@ import { copyTextToClipboard } from '../../lib/clipboard-copy'
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
 const ThemeStatusInfoIcon = semanticIconComponent('status.info')
-const ThemeActionSubmitIcon = semanticIconComponent('action.submit')
+const UpgradeHostIcon = semanticIconComponent('action.upgrade-host')
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 
@@ -139,7 +139,7 @@ export function HostUpgradePanel({ host, committed, active }: {
   }
   return <section className="host-upgrade" data-host-upgrade={host.id}>
     <div className="host-upgrade__heading">
-      <span className="host-upgrade__title">{busy ? <ThemeStatusLoadingIcon size={14} className="spin" /> : receipt?.status === 'completed' ? <ThemeStatusCompletedIcon size={14} /> : check && !check.eligible || uncertain ? <ThemeStatusInfoIcon size={14} /> : <ThemeActionSubmitIcon size={14} />}<strong role="status">{status}</strong></span>
+      <span className="host-upgrade__title">{busy ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : receipt?.status === 'completed' ? <ThemeStatusCompletedIcon size={14} /> : check && !check.eligible || uncertain ? <ThemeStatusInfoIcon size={14} /> : <UpgradeHostIcon size={14} />}<strong role="status">{status}</strong></span>
     </div>
     <p className="field-hint host-upgrade__description">{description}</p>
     {runtimeBlocked ? <p className="host-upgrade__next-step">Copy the diagnostics for whoever maintains this host to arrange a supported runtime update. Recheck availability after that update is installed.</p> : null}
