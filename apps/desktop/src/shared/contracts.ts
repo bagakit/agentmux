@@ -222,6 +222,8 @@ export type WorkspaceRecord = {
   kind: WorkspaceKind
   repoPath?: string
   branch?: string
+  /** Original execution/file resource retained after its workface is closed. */
+  closeout?: { targetWorkspaceId: string; operationId: string; cleanup: 'pending'; reason: string; retention?: WorktreeRetention }
 }
 
 /**
@@ -840,6 +842,7 @@ export type WorktreeRetention =
  */
 export type RemoveWorktreeOutcome =
   | { status: 'removed'; removedPath: string; config: AppConfig }
+  | { status: 'closed'; config: AppConfig; closeout: import('@agentmux/core').WorktreeCloseoutReceipt }
   | { status: 'retained'; retention: WorktreeRetention; reason: string }
 
 /**
@@ -848,6 +851,7 @@ export type RemoveWorktreeOutcome =
  */
 export type FanOutTeardownResult =
   | { status: 'removed'; workspaceId: string; removedPath: string }
+  | { status: 'closed'; workspaceId: string; closeout: import('@agentmux/core').WorktreeCloseoutReceipt }
   | { status: 'retained'; workspaceId: string; retention: WorktreeRetention; reason: string }
 
 export type KeepOneOfFanOutOutcome = {

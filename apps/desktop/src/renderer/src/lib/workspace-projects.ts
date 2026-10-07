@@ -31,6 +31,7 @@ function basename(path: string): string {
 export function projectWorkspaces(workspaces: readonly WorkspaceRecord[]): WorkspaceProject[] {
   const projects = new Map<string, WorkspaceProject>()
   for (const workspace of workspaces) {
+    if (workspace.closeout) continue
     if (workspace.id === NOTES_WORKSPACE_ID) continue
     const id = workspaceProjectId(workspace)
     const existing = projects.get(id)

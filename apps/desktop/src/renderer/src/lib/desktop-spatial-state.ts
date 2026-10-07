@@ -4,6 +4,7 @@ import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics';
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control';
 import { categoriesFromSpatial, categoryResource } from '../../../shared/topic-categories';
 import { reducePersistedTab, type PersistedWorkbench } from './workbench-persistence';
+import { closeWorktreeGraph } from '../../../shared/worktree-closeout';
 /** Host resource descriptors, never a second entity or topology store. */
 const tabKey = (id: string) => 'tab:' + id;
 const regionKey = (id: string) => 'region:' + id;
@@ -71,7 +72,14 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
       if (!Object.hasOwn(tabLayouts, id) && !removed.has(id))
         tabLayouts[id] = layout;
   }
-  return { ...facts, layouts: { ...previous?.layouts, ...persisted.layouts }, tabLayouts, resources };
+  let graph: AgentMuxSpatialGraph = { ...facts, layouts: { ...previous?.layouts, ...persisted.layouts }, tabLayouts, resources };
+  const owners = new Set([...graph.zones.map(zone => zone.workspaceId), ...graph.tabs.map(tab => tab.workspaceId), ...Object.keys(graph.layouts)]);
+  for (const workspace of state.config?.workspaces ?? []) {
+    if (!workspace.closeout || !owners.has(workspace.id)) continue;
+    const target = state.config!.workspaces.find(item => item.id === workspace.closeout!.targetWorkspaceId && !item.closeout);
+    if (target) graph = closeWorktreeGraph(graph, workspace, target).graph;
+  }
+  return graph;
 }
 export function desktopWorkbenchFromSpatial(graph: AgentMuxSpatialGraph, onUnavailable?: (tabId: string) => void): PersistedWorkbench {
   const tabs: PersistedWorkbench['tabs'] = {};
@@ -207,6 +215,9 @@ export class DesktopSpatialPersistence {
   private readonly removedProjectGroups = new Set<string>();
   removeProjectGroup(id: string): void { this.removedProjectGroups.add(id); }
   removeEntity(id: string): void { this.removed.add(id); }
+  closeWorkspace(workspaceId: string): void {
+    for (const zone of this.state?.graph.zones ?? []) if (zone.workspaceId === workspaceId) this.removed.add(zone.zoneId);
+  }
   get removedEntities(): ReadonlySet<string> { return this.removed; }
   private apply: ((state: AgentMuxSpatialState) => void) | null = null;
   private unsubscribe: (() => void) | null = null;

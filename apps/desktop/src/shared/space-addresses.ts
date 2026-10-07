@@ -45,7 +45,7 @@ export function topicSpatialAddress(config: AppConfig | null, topic: ScratchTopi
 
 /** Resolve execution resources independently of every display Space and current focus. */
 export function projectResourceWorkspace(workspaces: readonly WorkspaceRecord[], projectId: string, sourceWorkspaceId?: string): WorkspaceRecord {
-  const candidates = workspaces.filter(workspace => workspace.id !== SCRATCH_WORKSPACE_ID &&
+  const candidates = workspaces.filter(workspace => !workspace.closeout && workspace.id !== SCRATCH_WORKSPACE_ID &&
     directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path) === projectId)
   if (!candidates.length) throw Object.assign(new Error('The exact resource Project is unknown. Discover it with amux app snapshot.'), { code: 'SPACE_RESOURCE_PROJECT_UNKNOWN' })
   if (sourceWorkspaceId !== undefined) {
@@ -156,6 +156,7 @@ export function spatialSources(config: AppConfig | null, topics: readonly Scratc
     seeds.set(zoneId, members)
   }
   for (const workspace of workspaces.values()) {
+    if (workspace.closeout) continue
     if (workspace.id === SCRATCH_WORKSPACE_ID) continue
     const root = workspace.repoPath ?? workspace.path
     const spaceId = directoryIdentity(workspace.hostId, root)
