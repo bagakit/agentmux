@@ -819,6 +819,9 @@ export type AgentSessionHistoryDescriptor = {
   history?: AgentSessionHistoryMetadata
 }
 
+/** Exact original source observation; omission reads the full retained catalog. */
+export type AgentSessionHistorySourcesOptions = { agentSessionId?: string; signal?: AbortSignal }
+
 /** Structured native asynchronous questions; absence of an answer is not pending authority. */
 export type AgentSessionHistoryQuestion = {
   /** Provider-owned opaque identity; clients must never construct or parse it. */

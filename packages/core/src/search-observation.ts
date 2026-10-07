@@ -5,6 +5,7 @@ import type { AgentMuxSearchInput, AgentMuxSearchIssue, AgentMuxSearchTarget } f
 import type { AgentMuxSearchMetadata, AgentMuxSearchObject } from './search-metadata.js'
 import type { AgentMuxSearchOwner, AgentMuxSearchReadContext, AgentMuxSearchSource } from './search-reader.js'
 import type { AgentSessionHistoryDescriptor } from './types.js'
+import { observeRead } from './observation-read.js'
 
 export type AgentMuxSearchObservationPorts<C extends AgentMuxSearchReadContext = AgentMuxSearchReadContext> = {
   clients(): Promise<readonly AgentMuxRpcCoreClient[]>
@@ -23,18 +24,21 @@ type Discovery = { scopes: readonly AgentMuxRpcCoreClient[]; descriptors: Array<
 export function createAgentMuxSearchObservationOwner<C extends AgentMuxSearchReadContext = AgentMuxSearchReadContext>(ports: AgentMuxSearchObservationPorts<C>): AgentMuxSearchOwner<C> {
   const discover = async (input: AgentMuxSearchInput, context: C): Promise<Discovery> => {
     const issues: AgentMuxSearchIssue[] = [], descriptors: Discovery['descriptors'] = []
+    context.signal?.throwIfAborted()
     let scopes: readonly AgentMuxRpcCoreClient[] = []
-    try { scopes = (await ports.clients()).filter(scope => !input.hostId || scope.hostId === input.hostId) }
-    catch (error) { issues.push(issue('hosts', error, input.hostId)) }
+    try { scopes = (await observeRead(ports.clients(), context.signal)).filter(scope => !input.hostId || scope.hostId === input.hostId) }
+    catch (error) { context.signal?.throwIfAborted(); issues.push(issue('hosts', error, input.hostId)) }
+    context.signal?.throwIfAborted()
     const counts = new Map<string, number>()
     for (const scope of scopes) counts.set(scope.hostId, (counts.get(scope.hostId) ?? 0) + 1)
     for (const [hostId, count] of counts) if (count !== 1) issues.push(issue('hosts', new Error('The exact search Host route is ambiguous.'), hostId))
     scopes = scopes.filter(scope => counts.get(scope.hostId) === 1)
     if (input.hostId && !scopes.length && !issues.some(value => value.hostId === input.hostId)) issues.push(issue('hosts', new Error('The exact search Host is unavailable.'), input.hostId))
-    const reads = await Promise.allSettled(scopes.map(async scope => {
-      return (await scope.client.sessionHistorySources()).filter(source => !input.agentSessionId || source.agentSessionId === input.agentSessionId)
+    const reads = await observeRead(Promise.allSettled(scopes.map(async scope => {
+      return (await scope.client.sessionHistorySources({ ...(input.agentSessionId ? { agentSessionId: input.agentSessionId } : {}),
+        ...(context.signal ? { signal: context.signal } : {}) })).filter(source => !input.agentSessionId || source.agentSessionId === input.agentSessionId)
         .map(original => ({ hostId: scope.hostId, original }))
-    }))
+    })), context.signal)
     context.signal?.throwIfAborted()
     for (let i = 0; i < reads.length; i++) {
       const read = reads[i]!
@@ -65,10 +69,10 @@ export function createAgentMuxSearchObservationOwner<C extends AgentMuxSearchRea
       const discovery = await discover(input, context), issues = [...discovery.issues], sourceHostIds = new Map<string, string>()
       const facts: AgentMuxSearchMetadata = { sessions: [], projects: [], sources: discovery.descriptors.map(({ hostId, original }) => ({ ...original, hostId })), catalog: emptyCatalog(), objects: [] }
       const sessions: Array<AgentMuxSearchMetadata['sessions'][number]> = [], objects: AgentMuxSearchObject[] = []
-      const observations = await Promise.allSettled([
+      const observations = await observeRead(Promise.allSettled([
         ports.catalog(context), ports.snapshot(context), ports.projects(context),
         ...discovery.scopes.map(async scope => ({ scope, sessions: await scope.client.readAgentSessions() }))
-      ])
+      ]), context.signal)
       context.signal?.throwIfAborted()
       if (observations[0]!.status === 'fulfilled') facts.catalog = observations[0]!.value as AgentMuxSpaceCatalog
       else issues.push(issue('spatial-catalog', observations[0]!.reason, input.hostId))

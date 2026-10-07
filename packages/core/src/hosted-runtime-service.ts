@@ -4,6 +4,7 @@ import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
 import type { AgentMuxClient } from './client.js'
 import type { AgentMuxClientEvent, AgentMuxRunAttachment, AgentMuxRunRef } from './types.js'
 import { AgentMuxError } from './errors.js'
+import { observeRead as observe } from './observation-read.js'
 import { parseAgentMuxCreationTrustInput } from './agent-creation-admission.js'
 import { rpcString } from './rpc-business-codec.js'
 import { parseAgentExternalMessageAuthor, type AgentExternalInputAuthorityPort } from './external-author.js'
@@ -114,18 +115,6 @@ function identifier(value: unknown): string {
 function count(value: unknown): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new AgentMuxError('Invalid byte cursor.', 'INVALID_CONTROL_REQUEST')
   return value
-}
-/** Release a readonly wait without claiming cancellation of its original Native operation. */
-async function observe<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (!signal) return await operation
-  let abort!: () => void
-  const cancelled = new Promise<never>((_resolve, reject) => {
-    abort = () => reject(signal.reason ?? new AgentMuxError('The original observation reader was cancelled; its Run and admitted operations are retained.', 'CONTROL_CANCELLED'))
-    signal.addEventListener('abort', abort, { once: true })
-    if (signal.aborted) abort()
-  })
-  try { return await Promise.race([operation, cancelled]) }
-  finally { signal.removeEventListener('abort', abort) }
 }
 type Consumer = { events?: InitialReader; histories: Set<() => void>; readers: Set<() => Promise<void>>; runs: Map<string, () => Promise<void>>; pending: number }
 type RunReaders = { readers: Set<Reader>; open: Promise<AgentMuxRunAttachment>; closing?: Promise<void> }
@@ -270,6 +259,11 @@ export class AgentMuxHostedRuntimeService {
     if (context.signal && (invocation.method === 'readNativeAgentHistory' || invocation.method === 'readHostNativeAgentHistory' ||
       invocation.method === 'readNativeAgentHistoryResource' || invocation.method === 'readHostNativeAgentHistoryResource')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }
     if (context.signal && invocation.method === 'clientPerformanceDiagnostics') invocation.args[0] = { signal: context.signal }
+    if (invocation.method === 'sessionHistorySources') {
+      if (invocation.args.length > 1) throw new AgentMuxError('Source observation accepts one exact optional scope.', 'INVALID_CONTROL_REQUEST')
+      const scope = record(invocation.args[0] === undefined ? {} : invocation.args[0], ['agentSessionId'])
+      invocation.args = [{ ...scope, ...(context.signal ? { signal: context.signal } : {}) }]
+    }
     const source = context.sourceDevice
     // Wire arguments cannot assert authenticated provenance. The original Host supplies it.
     for (const arg of invocation.args) if (arg && typeof arg === 'object' && 'sourceDevice' in arg)
@@ -320,11 +314,12 @@ export class AgentMuxHostedRuntimeService {
     } else {
       const operation = this.client[invocation.method] as (...args: unknown[]) => unknown
       const externalAuthor = controlledInput ? await this.externalAuthor(invocation) : undefined
-      value = await operation.apply(this.client, controlledInput ? [...invocation.args, {
+      const pending = operation.apply(this.client, controlledInput ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),
         ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}),
         ...(externalAuthor ? { externalAuthor } : {})
       } satisfies import('./agent-input-wait.js').AgentInputCallContext] : invocation.args)
+      value = invocation.method === 'sessionHistorySources' ? await observe(Promise.resolve(pending), context.signal) : await pending
     }
     } catch (error) { await recordActivity('unknown'); throw error }
     if (invocation.method === 'sessionHistoryResource') {

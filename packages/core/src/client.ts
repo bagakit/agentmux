@@ -2311,8 +2311,8 @@ export class AgentMuxClient {
   }
 
   /** Discover bounded retained sources without connecting to or controlling Runtime. */
-  async sessionHistorySources(): Promise<AgentSessionHistoryDescriptor[]> {
-    return await loadSessionHistorySources(this.store)
+  async sessionHistorySources(options: import('./types.js').AgentSessionHistorySourcesOptions = {}): Promise<AgentSessionHistoryDescriptor[]> {
+    return await loadSessionHistorySources(this.store, options)
   }
 
   /** Discover native persisted conversations without requiring a Run, installing hooks or starting input. */
