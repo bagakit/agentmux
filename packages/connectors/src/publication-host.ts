@@ -142,7 +142,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       let original = this.store.next(binding)
       if (!original) return
       let credential: string | null
-      try { credential = await this.options.connections.resolvePublicationCredential(binding.connectionId) } catch { credential = null }
+      try { credential = await this.options.connections.resolveCredential(binding.connectionId) } catch { credential = null }
       if (!credential) { lane.observation = { state: 'unavailable', reason: 'credential-missing' }; return }
       if (signal.aborted || !this.authorized(binding)) return
       if (original.state === 'not-applied') { lane.observation = { state: 'unavailable', reason: 'effect-unconfirmed' }; return }

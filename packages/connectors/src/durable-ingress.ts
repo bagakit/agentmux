@@ -147,7 +147,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
         const unknown = { replyToMessageId, state: 'unknown' as const, reason: 'reply-unconfirmed' as const }
         const timeout = new Promise<typeof addressing>(resolve => { timer = setTimeout(() => { controller.abort(); resolve(unknown) }, 5_000); timer.unref?.() })
         const observe = async (): Promise<typeof addressing> => {
-          const credential = await this.options.connections.resolvePublicationCredential(record.connectionId)
+          const credential = await this.options.connections.resolveCredential(record.connectionId)
           if (controller.signal.aborted) return unknown
           if (!credential) return { replyToMessageId, state: 'unavailable', reason: 'credential-missing' }
           const selection = await authenticator.qualifyReply!(structuredClone(connection.config), structuredClone(event), raw, credential, controller.signal)

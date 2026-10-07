@@ -136,11 +136,7 @@ export class ConnectionHost implements ConnectionPort {
         ...(ingress.qualifyReply ? { qualifyReply: (config: ConnectionConfig, event: Readonly<import('./durable-ingress.js').VerifiedIngressEvent>, raw: string, credential: string, signal: AbortSignal) => ingress.qualifyReply!(config, event, raw, credential, signal) } : {}) }]
     })
   }
-  async resolveIngressCredential(connectionId: string): Promise<string | null> {
-    const config = this.readConfiguration(connectionId)?.config
-    return config?.enabled ? this.options.secrets.resolve(config.credentialRef) : null
-  }
-  async resolvePublicationCredential(connectionId: string): Promise<string | null> {
+  async resolveCredential(connectionId: string): Promise<string | null> {
     const config = this.readConfiguration(connectionId)?.config
     return config?.enabled ? this.options.secrets.resolve(config.credentialRef) : null
   }
