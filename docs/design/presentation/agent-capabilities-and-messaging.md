@@ -43,7 +43,7 @@
 
 ### 对话身份色与语义色
 
-对话与参与者轨复用[共同消息头像](conversation-input.md#用户消息气泡的内文密度)：已核 Agent 使用真实项目图与 Agent 角标，Mote 使用原对象头像，人类与系统沿原作者呈现。身份解析、显示名与 Provider 资料各沿原事实 owner，不从事件 kind、消息声明或颜色认证作者；机器事件 glyph 仍可表达事件类型。
+对话与参与者轨复用[共同消息头像](conversation-mode.md#消息布局与身份密度)：已核 Agent 使用真实项目图与 Agent 角标，Mote 使用原对象头像，人类与系统沿原作者呈现。身份解析、显示名与 Provider 资料各沿原事实 owner，不从事件 kind、消息声明或颜色认证作者；机器事件 glyph 仍可表达事件类型。
 
 派生说话人色只提供辅助分组，不能独自区分身份或表达执行状态。同 Provider 的不同 Agent 可能共享品牌图形，也可能色相相近；接线方须提供可分辨的真实名字，名字、hover／focus 与可访问名称才是稳定判别入口。手选图形、Provider 品牌与 Mote 所选图片保原色，不把派生色重涂其图案。
 
@@ -88,7 +88,7 @@ Tab、树、Session、Board 与 Browser rail 的普通身份图按提醒价值�
 
 ## AgentMux 注入上下文的阅读
 
-范围、唯一包装、用途与投递形式以及来源边界只见[《AgentMux 注入上下文》](../behavior/agent-capabilities-and-messaging.md#agentmux-注入上下文)。沿[完整前导声明的同记录阅读](../behavior/terminal-reading.md#terminal-连续向上阅读历史)保留可展开原文与真实尾文，不把声明画成认证徽章；正文密度沿[《用户消息气泡的内文密度》](conversation-input.md#用户消息气泡的内文密度)，不因规范统一新增视觉层。
+范围、唯一包装、用途与投递形式以及来源边界只见[《AgentMux 注入上下文》](../behavior/agent-capabilities-and-messaging.md#agentmux-注入上下文)。沿[完整前导声明的同记录阅读](../behavior/terminal-reading.md#terminal-连续向上阅读历史)保留可展开原文与真实尾文，不把声明画成认证徽章；正文密度沿[《消息布局与身份密度》](conversation-mode.md#消息布局与身份密度)，不因规范统一新增视觉层。
 
 ## A2A 消息队列与身份信息密度
 

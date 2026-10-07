@@ -35,7 +35,7 @@ Agent 工作状态与待处理状态消费同一 Core 语义事实，不能从 r
 - **资源指标只在展开时采样**。折叠态不得触发任何进程扫描——一个常驻的全主机 `ps` 轮询会让空闲窗口持续耗电。展开后按固定周期采样，关闭即停。并发调用共享同一次进行中的采样（in-flight 去重），一次轮询风暴只产生一次子进程。
 - **一次全主机扫描，按 pid 子树归并**。为每个 Agent 单独起一个采样进程，开销随 Agent 数线性增长；正确做法是一次扫描后按 run 的 pid 归并出各自子树，共享祖先按注册顺序只归第一个，避免重复计数。
 - **只声明证据支持的口径**。输出字节速率就叫字节速率，不除以一个系数冒充 token/s——终端字节含 ANSI 转义与 TUI 重绘，与真实 token 数不成比例，一个无法验证的数字比没有这个数字更糟。
-- **token 用量保留原报告范围，永不报速率**。数字必须由 Provider 自己报出，整轮、响应与缺值的共同口径见[原生回合摘要与过程披露](conversation-input.md#原生回合摘要与过程披露)。声明 `usage` 能力的 Provider 在既有收尾事件上由 Hook 进程读一次自家 transcript 尾部，随原回执带回最近样本，不新增轮询或通道；最后一次响应累计明确称最近一次响应，只有原生整轮依据才称最近一轮，不把最新样本或会话累计冒充整轮（`AgentUsageCapability`／`AgentTurnUsage`，守护：`agent-usage-transcript.test.ts`、`agent-usage-capability.test.ts`；catalog 到 Hook 环境的原注入由 `agent-usage-env-injection.test.ts` 守护）。墙钟耗时包含审批等待、工具执行和网络往返，不能用它把真实 token 数换算为模型生成速度。用量仍落在所属 Agent 的**名册行**，状态栏不重复有作用域的指标，也不跨 Session 加总。报了用量、声明能力但尚无样本（显示不知道）、根本不报用量（明说不报）三态保持可辨，不能因缺席补 0；原真实零值按原报告表达，守护：`agent-usage-display.test.ts`、`agent-roster.test.ts`。
+- **token 用量保留原报告范围，永不报速率**。数字必须由 Provider 自己报出，整轮、响应与缺值的共同口径见[原生回合摘要与过程披露](conversation-mode.md#原生回合摘要与过程披露)。声明 `usage` 能力的 Provider 在既有收尾事件上由 Hook 进程读一次自家 transcript 尾部，随原回执带回最近样本，不新增轮询或通道；最后一次响应累计明确称最近一次响应，只有原生整轮依据才称最近一轮，不把最新样本或会话累计冒充整轮（`AgentUsageCapability`／`AgentTurnUsage`，守护：`agent-usage-transcript.test.ts`、`agent-usage-capability.test.ts`；catalog 到 Hook 环境的原注入由 `agent-usage-env-injection.test.ts` 守护）。墙钟耗时包含审批等待、工具执行和网络往返，不能用它把真实 token 数换算为模型生成速度。用量仍落在所属 Agent 的**名册行**，状态栏不重复有作用域的指标，也不跨 Session 加总。报了用量、声明能力但尚无样本（显示不知道）、根本不报用量（明说不报）三态保持可辨，不能因缺席补 0；原真实零值按原报告表达，守护：`agent-usage-display.test.ts`、`agent-roster.test.ts`。
 
 ## Settings 中的 Keyboard shortcuts
 

@@ -456,3 +456,13 @@ Focus 不留独立标题行，其必要过滤控件直接避开 macOS 原生窗�
 - Topic 行**不用左侧竖条表达选中**。选中态是单一几何信号（干净的 Surface 填充），与全局控件语言一致；行首也不放没有区分意义的装饰图标——一列全同的图标不携带任何信息，只在消耗宽度。
 
 - **旧配置的 Executor 身份不能丢**。头像设置迁移到 Executor 后，旧 `Appearance` 中按 Executor ID 保存的 tint/badge 仍先显示在对应模板与所有头像簇/Tab 标记中；用户明确点击 Reset 才写入一个空的 Executor 覆盖，不能静默删除旧记录或把它误认成默认 Provider。
+
+## 显示名的编辑与反馈
+
+- Agent 与 Workspace 的显示名编辑使用紧凑的行内控件：名称文本优先，内部 ID 退到详情/诊断；成功后的新名称在 Tab、Region、Project rail 和 Skill 说明中即时一致。失败只在当前表面留下短服务窗，不撑高导航。
+
+行为与身份稳定性只见[显示名与身份](../behavior/spaces-and-layout.md#显示名与身份)。
+
+## Topic 内容面的可读状态
+
+- Scratch Topic 点击后右侧必须有内容面或明确的 loading/failed surface；不可用状态沿用同一 Region 几何，不留无文字、无动作的空白区域。
