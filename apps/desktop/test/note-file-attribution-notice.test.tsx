@@ -52,15 +52,22 @@ it('keeps the actual read attribution reason and original creator visible in Rec
  const originalEditor=editor(),block=dom.container.querySelector<HTMLElement>('[data-block-id="original-block"]')!
  expect(block.title).toContain('Created: Agent original-creator');expect(block.title).toContain('Last edited: Unknown')
  expect(api.files.read).not.toHaveBeenCalled()
- await act(async()=>{originalEditor.view.focus();originalEditor.commands.insertContentAt(1,'Unsaved ')})
- const draft=useAppStore.getState().documents[key]!.content
  const check=[...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Check original file')!
  expect(check).toBeDefined();expect(check.disabled).toBe(false)
- await act(async()=>check.click())
- await act(async()=>{await vi.waitFor(()=>expect(api.files.read).toHaveBeenCalledExactlyOnceWith('workspace',path))})
+ await act(async()=>{check.click();await vi.waitFor(()=>expect(useAppStore.getState().documentObservationGenerations[key]).toBe(1))})
+ expect(api.files.read).toHaveBeenCalledExactlyOnceWith('workspace',path)
+ expect(notices()).toHaveLength(1);expect(notices()[0]!.textContent).toContain(reason)
+ expect(notices()[0]!.textContent).not.toContain('The Note was saved.')
+ expect(useAppStore.getState().documents[key]!.noteWriteAttribution).toBeUndefined()
+ expect(api.files.write).not.toHaveBeenCalled()
+ await act(async()=>{originalEditor.view.focus();originalEditor.commands.insertContentAt(1,'Unsaved ')})
+ const draft=useAppStore.getState().documents[key]!.content
+ await act(async()=>{check.click();await vi.waitFor(()=>expect(useAppStore.getState().documentObservationGenerations[key]).toBe(2))})
+ expect(api.files.read).toHaveBeenCalledTimes(2)
  expect(editor()).toBe(originalEditor);expect(editor().state.doc.textContent).toContain('Unsaved Externally changed original')
  expect(useAppStore.getState().documents[key]!.content).toBe(draft);expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
  expect(notices()).toHaveLength(1);expect(notices()[0]!.textContent).toContain(reason)
+ expect(notices()[0]!.textContent).not.toContain('The Note was saved.')
  expect(api.files.write).not.toHaveBeenCalled();expect(await readFile(join(rootPath,path),'utf8')).toBe(external)
 })
 it('shows one attribution notice through the actual File preview and Source routes when read and write metadata are both unconfirmed',async()=>{
@@ -69,8 +76,13 @@ it('shows one attribution notice through the actual File preview and Source rout
  await vi.waitFor(async()=>{await act(async()=>{});expect(dom.container.querySelector('.note-block-content')).not.toBeNull()})
  expect(notices()).toHaveLength(1);expect(notices()[0]!.textContent).toContain('The Note was saved.');expect(notices()[0]!.textContent).toContain('Original metadata recording is pending')
  expect(notices()[0]!.textContent).not.toContain(reason)
+ const originalWriteAttribution=useAppStore.getState().documents[key]!.noteWriteAttribution
+ await act(async()=>{[...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Check original file')!.click();await vi.waitFor(()=>expect(useAppStore.getState().documentObservationGenerations[key]).toBe(1))})
+ expect(api.files.read).toHaveBeenCalledExactlyOnceWith('workspace',path)
+ expect(useAppStore.getState().documents[key]!.noteWriteAttribution).toBe(originalWriteAttribution)
+ expect(notices()).toHaveLength(1);expect(notices()[0]!.textContent).toContain('Original metadata recording is pending')
  await act(async()=>[...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent?.trim()==='Source')!.click())
  await vi.waitFor(async()=>{await act(async()=>{});expect(dom.container.querySelector('textarea[aria-label="Original file source"]')).not.toBeNull()})
  expect(notices()).toHaveLength(1);expect(notices()[0]!.textContent).toContain('Original metadata recording is pending')
- expect(api.files.read).not.toHaveBeenCalled();expect(api.files.write).not.toHaveBeenCalled()
+ expect(api.files.read).toHaveBeenCalledExactlyOnceWith('workspace',path);expect(api.files.write).not.toHaveBeenCalled()
 })
