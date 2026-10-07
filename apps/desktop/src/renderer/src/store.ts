@@ -1073,8 +1073,9 @@ type AppState = {
     workspaceId: string,
     tabId: string,
     regionId: string,
-    direction: SplitDirection
-  ): void
+    direction: SplitDirection,
+    initialRequest?: { prompt: string; agentMuxNote?: string }
+  ): string | undefined
   /**
    * 重排一个 Tab 的格子。与控制协议的 `arrange` 是同一个引擎（arrangeWorkbenchControlTab），
    * 「要补几个格」由它自己从 preset 推导，这里不重算——见那个函数的注释。
@@ -6155,7 +6156,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     get().focusRegion(result.target.workspaceId, result.target.tabId, result.target.regionId)
   },
-  splitRegion(workspaceId, tabId, regionId, direction) {
+  splitRegion(workspaceId, tabId, regionId, direction, initialRequest) {
     const current = get()
     if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
     const tab = current.tabs[tabId]
@@ -6168,7 +6169,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const nextTab = addWorkbenchRegion(tab, regionId, direction, launcher)
     if (nextTab === tab) return
-    set((state) => ({ tabs: { ...state.tabs, [tabId]: nextTab } }))
+    set((state) => ({ tabs: { ...state.tabs, [tabId]: nextTab }, ...(initialRequest ? {
+      agentComposerDrafts: { ...state.agentComposerDrafts, [addedRegionId]: initialRequest.prompt },
+      ...(initialRequest.agentMuxNote === undefined ? {} : { agentComposerNotes: { ...state.agentComposerNotes, [addedRegionId]: initialRequest.agentMuxNote } })
+    } : {}) }))
+    return addedRegionId
   },
   arrangeTabRegions(workspaceId, tabId, mode) {
     const current = get()

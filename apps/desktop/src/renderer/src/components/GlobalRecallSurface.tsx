@@ -1,5 +1,5 @@
 import { DEFAULT_NOTEBOOK_ID, notebookPageArchiveRoot, type Notebook, type NotebookPage } from '@agentmux/core/notebook-catalog'
-import { NoteTalkAgent } from './NoteTalkAgent'
+import { openNoteAgentLauncher } from '../lib/note-agent-context'
 import type { AgentMuxSpaceCatalog, TopicKnowledgeSource } from '@agentmux/core/control'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
@@ -55,12 +55,24 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
   const notebooks = useMemo(() => Object.values(library?.notebooks ?? {}), [library]), pages = useMemo(() => Object.values(library?.pages ?? {}), [library])
   const notebookPages = useMemo(() => pages.filter(page => page.notebookId === notebookId), [pages, notebookId])
   const [directoryOpen, setDirectoryOpen] = useState(false), [directoryView, setDirectoryView] = useState<NotebookDirectoryView>('tree')
-  const [talkPage, setTalkPage] = useState<NotebookPage | null>(null)
-  const talkReturnFocus = useRef<HTMLElement | null>(null)
-  const beginTalk = useCallback((page: NotebookPage, returnFocus?: HTMLElement | null) => {
+  const talkPending = useRef<{ noteId: string; notebookId: string; request: number } | null>(null), talkIntent = useRef(0)
+  const [talkOpening, setTalkOpening] = useState<string | null>(null)
+  const beginTalk = useCallback((page: NotebookPage) => {
     if (!active.current) return
-    talkReturnFocus.current = returnFocus ?? null; setTalkPage(page)
-  }, [])
+    const notebook = useNotebookLibrary.getState().state?.notebooks[page.notebookId]
+    if (!notebook) { setError('This Note’s original Notebook is unconfirmed. Its content is kept; refresh the directory and retry.'); return }
+    const selectedReference = useAppStore.getState().recallZoneSelection?.active
+    const request = ++talkIntent.current
+    talkPending.current = { noteId: page.noteId, notebookId: page.notebookId, request }; setTalkOpening(page.noteId)
+    setDirectoryOpen(false); intent.current += 1
+    useAppStore.getState().setRecallNotebook(page.notebookId, page.noteId); setError(null)
+    const authorize = () => active.current && request === talkIntent.current &&
+      useAppStore.getState().mainSurface === 'recall' && useAppStore.getState().recallNoteId === page.noteId &&
+      useAppStore.getState().recallNotebookId === page.notebookId
+    void openNoteAgentLauncher({ page, notebook, selectedReference, authorize, onSelectReference })
+      .catch(cause => { if (authorize()) setError(presentError(cause)) })
+      .finally(() => { if (talkPending.current?.request === request) { talkPending.current = null; setTalkOpening(null) } })
+  }, [onSelectReference])
   const [query, setQuery] = useState(''), [archived, setArchived] = useState(false)
   useEffect(() => {
     // Only first entry chooses a default. An original saved selection is never replaced.
@@ -76,7 +88,13 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
   const [deleteTarget, setDeleteTarget] = useState<(Notebook & { pageCount: number }) | null>(null)
   const deletion = useNotebookOperation(), intent = useRef(0), createIntent = useRef(0), active = useRef(visible)
   active.current = visible
-  useLayoutEffect(() => { intent.current += 1 }, [visible, notebookId, noteId, selection?.zoneId, selection?.active])
+  useLayoutEffect(() => {
+    intent.current += 1
+    const pending = talkPending.current
+    if (pending && (!visible || pending.noteId !== noteId || pending.notebookId !== notebookId)) {
+      talkIntent.current += 1; talkPending.current = null; setTalkOpening(null)
+    }
+  }, [visible, notebookId, noteId, selection?.zoneId, selection?.active])
   const [recovering, setRecovering] = useState(false), [noteRecovery, setNoteRecovery] = useState(false)
   const pendingNote = useRef<{ zoneId: string; workspaceId: string; displayWorkspaceId: string; groupId: string; reference: WorkbenchProjectionSelection | null; notebook: NoteNotebookContext & { notebookId: string } } | null>(null)
   const [capture, setCapture] = useState<{ title: string; sources: TopicKnowledgeSource[]; noteIds: string[] } | null>(null)
@@ -167,9 +185,6 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
     {activeNotebook.notebookId !== DEFAULT_NOTEBOOK_ID ? <button className="survey-icon-button" aria-label="Delete notebook" title="Delete notebook" onClick={() => { if (!deletion.pending) setDeleteTarget({ ...activeNotebook, pageCount: pages.filter(page => page.notebookId === activeNotebook.notebookId).length }); setDeleteOpen(true) }}><ThemeActionRemoveIcon size={14} /></button> : null}
   </div> : null
   return <section ref={surfaceRef} className="global-recall-surface" aria-label="Recall" hidden={!visible} inert={!visible} aria-hidden={!visible} data-sidebar-collapsed={sidebarCollapsed} data-navigation-stacked={navigationStacked} data-native-window-controls={isMacPlatform()} style={{ '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveWidth}px` } as CSSProperties}>
-    <NoteTalkAgent page={talkPage} notebook={talkPage ? library?.notebooks[talkPage.notebookId] : undefined} visible={visible}
-      onDismiss={() => setTalkPage(null)} onActivate={page => { setDirectoryOpen(false); intent.current += 1; useAppStore.getState().setRecallNotebook(page.notebookId, page.noteId); setError(null) }} onSelectReference={onSelectReference}
-      onRestoreFocus={() => { if (active.current && talkReturnFocus.current?.isConnected) talkReturnFocus.current.focus() }} />
     <NotebookCreateDialog active={visible} open={visible && createOpen} onClose={() => setCreateOpen(false)} restoreFocus={() => notebookTrigger.current?.focus()} onCreateIntent={() => { createIntent.current = intent.current }} onCreated={id => { setCreateOpen(false); if (active.current && intent.current === createIntent.current) chooseNotebook(id) }} />
     <ConfirmationDialog open={visible && deleteOpen} title="Delete notebook?" subject={deleteTarget?.name ?? ''} description={deleteTarget?.pageCount ? `${deleteTarget.pageCount} ${deleteTarget.pageCount === 1 ? 'page will' : 'pages will'} move to 随手记. Contents, page hierarchy and archived status stay intact.` : 'This empty notebook will be removed.'} confirmLabel={deletion.pending ? 'Retry deletion' : 'Delete notebook'} busy={deletion.busy} onCancel={() => setDeleteOpen(false)} onConfirm={() => void removeNotebook()} feedback={deletion.issue ? <p className="notebook-create-issue" role="status">{deletion.issue}</p> : null} />
     <nav ref={containerRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Recall navigation" data-collapsed={sidebarCollapsed}>
@@ -188,6 +203,7 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
       {creationNotice ? <p className="survey-relation-notice" role="status">{creationNotice}</p> : null}
       {recoveries.length ? <p className="survey-history-recovery" role="status"><span>History update pending. Your notes are saved.</span><button disabled={recovering} onClick={() => { setRecovering(true); void retryNotebookRecoveries().catch(cause => setError(presentError(cause))).finally(() => setRecovering(false)) }}>Retry history</button></p> : null}
       {libraryIssue ? <p className="survey-relation-notice" role="status">Notebook directory is unconfirmed. Original pages are kept. <button onClick={() => void refreshNotebookLibrary().catch(() => {})}>Refresh</button><details><summary>Details</summary>{libraryIssue}</details></p> : null}
+      {talkOpening === noteId ? <p className="survey-relation-notice" role="status">Opening this Note’s discussion Launcher…</p> : null}
       {directoryOpen && selection && noteId ? <button type="button" className="recall-return-note" onClick={() => setDirectoryOpen(false)}><ThemeObjectNoteIcon size={14} /><span>Return to note</span><small title={library?.pages[noteId]?.title}>{library?.pages[noteId]?.title}</small></button> : null}
       <div className="recall-preserved-workbench" hidden={directoryOpen || !selection} inert={directoryOpen || !selection}>
       {selection ? projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId} projection={projection} viewOwnership="projection" viewTargets={viewTargets} onCreateTab={() => void createPage()} leadingChrome={isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined} visible={visible && !directoryOpen} /> : <div className="workbench-zone-state" role="status"><h2>The original page is kept</h2><p>Its work surface is still restoring. Reopen this same page from its Notebook.</p><button className="note-text-button" onClick={() => noteId && library?.pages[noteId] ? void showPage(library.pages[noteId]!) : chooseNotebook(notebookId)}>Reopen page</button></div>
