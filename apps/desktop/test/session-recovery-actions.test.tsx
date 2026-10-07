@@ -31,7 +31,7 @@ function launched(input: AgentLaunchInput): AgentLaunchResult {
 beforeEach(async () => {
   vi.stubGlobal('crypto', webcrypto); localStorage.clear()
   vi.spyOn(api.config, 'get').mockResolvedValue({ ...composerConfig, workspaces: [...composerConfig.workspaces, scratch], executors: { ...composerConfig.executors, claude: { ...composerConfig.executors.codex!, providerId: 'claude', label: 'Claude' } } })
-  vi.spyOn(api.providers, 'list').mockResolvedValue([]); vi.spyOn(api.demands, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockResolvedValue({ catalog: [], warnings: [] } as never); vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
   vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
@@ -120,7 +120,7 @@ describe('actual SessionPane explicit recovery actions', () => {
     const original = useAppStore.getState().sessions[0]!
     useAppStore.setState({ sessions: [{ ...original, status: { ...original.status, continuityReason: 'provider-unavailable' } }, ...useAppStore.getState().sessions.slice(1)] })
     vi.spyOn(api.sessions, 'recover').mockResolvedValue({ kind: 'agent-unavailable', continuity: 'unavailable', reason: 'provider-unavailable' } as never)
-    await mount(); await button('Restore original'); expect(api.sessions.recover).toHaveBeenCalledWith(original.control, _hygiene_fixturePath("repo"), undefined); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
+    await mount(); expect([...dom.container.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Restore original')?.querySelector('[data-semantic-icon="action.resume-session"]')).not.toBeNull(); await button('Restore original'); expect(api.sessions.recover).toHaveBeenCalledWith(original.control, _hygiene_fixturePath("repo"), undefined); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
   })
   it('analysis Agent reads first and has no authorization to execute the original work', async () => {
     await mount(); await button('Analyze…'); await choose('Recovery Executor', 'codex'); await choose('Original history source', 'native'); await button('Create analysis Agent')
@@ -290,6 +290,7 @@ describe('actual unobserved SessionPane original reference', () => {
     const original = await unobservedOriginal(); useAppStore.setState({ recoveryCandidates: [candidate(original)] }); const creation = observe(original)
     const tab = useAppStore.getState().tabs['original-tab'], drafts = useAppStore.getState().agentComposerDrafts
     await mount(); await button('Take over'); await cancelTakeover(); await button('Analyze…'); await button('Cancel'); noLifecycle()
+    expect([...dom.container.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Check original')?.querySelector('[data-semantic-icon="action.refresh"]')).not.toBeNull()
     await button('Check original'); expect(creation).toHaveBeenCalledWith('exact-original-host', 'original')
     expect(api.sessions.refresh).toHaveBeenCalledWith(original.control); expect(useAppStore.getState().sessions.find(item => item.id === 'original')).toEqual(original)
     expect(useAppStore.getState().tabs['original-tab']).toBe(tab); expect(useAppStore.getState().agentComposerDrafts).toBe(drafts); noLifecycle()
