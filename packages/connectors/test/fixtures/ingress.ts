@@ -5,10 +5,11 @@ import * as core from '../../../core/dist/index.js'
 import { rpcOwnerFixture } from '../../../core/test/helpers/public-rpc-owner.js'
 import { DurableIngressHost, ConnectionHost, RoomBindingHost, type VerifiedIngressEvent } from '../../dist/index.js'
 import { createWorkspaceLayout } from '../../../core/src/spatial-layout.js'
-import { config, context } from './room-binding.js'
+import { config as defaultConfig, context } from './room-binding.js'
+import type { ConnectionConfig } from '@agentmux/core/connections'
 
 /** One compiled Core/Store/Provider and original binding. Runtime byte I/O uses the existing deterministic port. */
-export async function ingressFixture(running = false) {
+export async function ingressFixture(running = false, config: ConnectionConfig = defaultConfig) {
   const h = await rpcOwnerFixture(['original-agent'], core, root => ({ providerId: 'claude', executorId: 'claude', nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'ingress-native', transcriptPath: join(root, 'native.jsonl') } }))
   const transcript = join(h.root, 'native.jsonl')
   await writeFile(transcript, JSON.stringify({ type: 'user', sessionId: 'ingress-native', uuid: 'native-before-binding', message: { role: 'user', content: 'Existing original work' } }) + '\n')
