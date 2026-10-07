@@ -155,13 +155,42 @@ it('the original Region context menu binds an existing group and keeps actor app
 it('a lost group-change response keeps the proposed audience unconfirmed until the exact original Binding receipt is observed', async () => {
   await f.mount(); await f.menu('Bind existing group chat'); await f.fill('Existing group ID', 'existing-original-group'); await consent(); await f.button('Connect group'); await ready('Sharing on')
   const original = (await f.services.connections.bindings!.list({})).bindings[0]!
-  vi.mocked(api.connections.call).mockImplementation(async (method, input) => { const value = await f.forward(method, input); if (method === 'connection.binding.relink') throw new Error('Original group-change response lost'); return value })
+  let observedOriginal = false, heldRefresh = false, release!: () => void
+  const continueReading = new Promise<void>(resolve => { release = resolve })
+  vi.mocked(api.connections.call).mockImplementation(async (method, input) => {
+    const value = await f.forward(method, input)
+    if (method === 'connection.binding.relink') throw new Error('Original group-change response lost')
+    if (method === 'connection.binding.inspect' && 'operationId' in input) observedOriginal = true
+    if (observedOriginal && method === 'connection.binding.ls') { heldRefresh = true; await continueReading }
+    return value
+  })
   await act(async () => [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Change connected group')!.querySelector('summary')!.click())
   await f.fill('Existing group ID', 'proposed-exact-group'); await consent(); await f.button('Change group'); await ready('The group change is not confirmed. Check its original status.')
   expect(document.querySelector('[aria-label="Group connection status"]')).toBeNull()
   const retained = Object.values(useAppStore.getState().connectorRoomIntents).find(intent => intent.method === 'connection.binding.relink')!
   expect(retained).toBeDefined(); expect(retained.input).toMatchObject({ bindingId: original.bindingId, externalConversationId: 'proposed-exact-group', expectedRevision: 1 })
-  await f.button('Check status'); await ready('Sharing on')
+  const change = [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Change connected group')!
+  await act(async () => change.querySelector('summary')!.click()); expect(change.open).toBe(false)
+  const actual = (await f.cli(['binding', 'inspect', '--binding', original.bindingId])).binding
+  expect(actual).toMatchObject({ revision: 2, externalConversationId: 'proposed-exact-group' })
+  expect(document.querySelector('[aria-label="Group connection status"]'), 'folding cannot confirm the old group while its original relink result is unknown').toBeNull()
+  expect(document.querySelector('[aria-label="Group member access"]')).toBeNull()
+  expect(document.querySelector('[aria-label="Group delivery"]')).toBeNull()
+  expect([...document.querySelectorAll('details')].some(node => node.querySelector('summary')?.textContent === 'Manage member access')).toBe(false)
+  await ready('The group change is not confirmed. Check its original status.')
+  expect(document.querySelector('.agent-connector-pairing__group')?.textContent).toContain('proposed-exact-group')
+  expect(document.querySelector('.agent-connector-pairing__group')?.textContent).not.toContain('existing-original-group')
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Requested group · proposed-exact-group')
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Last observed group · existing-original-group')
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Last observed Binding · ' + original.bindingId + ' · Revision 1')
+  expect(useAppStore.getState().connectorRoomIntents[retained.input.operationId]).toEqual(retained)
+  expect(f.calls.filter(call => call.method === 'connection.binding.relink')).toHaveLength(1)
+  expect((f.calls.filter(call => call.method === 'connection.room.get').at(-1)?.input as { externalConversationId: string }).externalConversationId).toBe('proposed-exact-group')
+  try {
+    await f.button('Check status'); await vi.waitFor(() => expect(heldRefresh).toBe(true)); await ready('Sharing on')
+    expect(document.querySelector('.agent-connector-pairing__group')?.textContent, 'the exact inspect.current snapshot replaces the old revision before a later list read can finish').toContain('proposed-exact-group')
+  } finally { release() }
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-busy')).toBe('false') })
   expect(document.querySelector('.agent-connector-pairing__group')?.textContent).toContain('proposed-exact-group')
   expect(f.calls.filter(call => call.method === 'connection.binding.relink')).toHaveLength(1)
   expect(f.calls.filter(call => call.method === 'connection.binding.inspect' && 'operationId' in (call.input as object)).at(-1)?.input).toEqual({ operationId: retained.input.operationId })
