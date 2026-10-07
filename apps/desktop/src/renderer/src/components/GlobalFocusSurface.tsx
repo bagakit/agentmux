@@ -23,7 +23,7 @@ import { FocusToolbar } from './FocusToolbar'
 import { FocusHistorySearch } from './FocusHistorySearch'
 import { useFocusHistorySearch } from '../lib/use-focus-history-search'
 import { FocusSearchLocations } from './FocusSearchLocations'
-import { focusSearchContextKey, searchFocus } from '../lib/focus-search'
+import { focusSearchCatalog, focusSearchContextKey, searchFocus } from '../lib/focus-search'
 import { FocusSourceStatus } from './FocusSourceStatus'
 import * as FilterMenu from './HoverDropdownMenu'
 import { RecentFocusTimeline } from './RecentFocusTimeline'
@@ -196,7 +196,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     timelines, sources: catalogue.sources, sourcesAvailable: catalogue.available
   }), [executionHistory, allLanes, timelines, catalogue.sources, catalogue.available])
   const trimmedQuery = query.trim()
-  const searchResult = useMemo(() => searchFocus(query, { rows: executionRows, lanes: allLanes, catalog: navigationCatalog, sources: catalogue.sources, history: executionHistory, retained: retainedProjects }), [query, executionRows, allLanes, navigationCatalog, catalogue.sources, executionHistory, retainedProjects])
+  const searchingMetadata = Boolean(trimmedQuery)
+  const searchCatalog = useMemo(() => searchingMetadata ? focusSearchCatalog(navigationCatalog, agentRegionExecution) : navigationCatalog,
+    [searchingMetadata, navigationCatalog, executionRows])
+  const searchResult = useMemo(() => searchFocus(query, { rows: executionRows, lanes: allLanes, catalog: searchCatalog, sources: catalogue.sources, history: executionHistory, retained: retainedProjects }), [query, executionRows, allLanes, searchCatalog, catalogue.sources, executionHistory, retainedProjects])
   const laneByContext = new Map(allLanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
   // The common Region choice is independent of both the project filter and Agent MRU.
   const resourceLaneIds = new Set(currentSurface && currentSurface.kind !== 'agent' && currentSurface.kind !== 'terminal'
