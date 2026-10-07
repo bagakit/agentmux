@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.json",
+  "include": [
+    "../../../src/renderer/src/global.d.ts",
+    "../../../src/renderer/src/components/SettingsPanel.tsx",
+    "../../../src/renderer/src/components/settings/AgentSettingsPane.tsx",
+    "../../../src/renderer/src/components/settings/ProviderCatalogPane.tsx",
+    "../../../src/renderer/src/components/settings/SettingsResourceLibrary.tsx"
+  ],
+  "exclude": []
+}
