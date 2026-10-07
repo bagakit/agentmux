@@ -3,6 +3,8 @@ import { rpcRecord } from './rpc-data.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { parseNoteProvenanceSnapshot, noteProvenanceResourceKey, type NoteProvenanceSnapshot } from './note-provenance.js'
 import { readNoteMarkdownHeader } from './note-format.js'
+import type { FileHistoryParams, FileHistoryResult } from './public-rpc-file-history.js'
+export { parseFileHistoryParams, parseFileHistoryResult, type FileHistoryParams, type FileHistoryResult } from './public-rpc-file-history.js'
 
 /** The original Files owner and resource, independent of display occurrences. */
 export type FileResource = { hostId: string; workspaceId: string; workspacePath: string }
@@ -31,9 +33,9 @@ export type FileCreateResult = FileWriteResult
 export type FileWriteContext = { actor?: import('./notebook-catalog.js').NotebookActor | undefined }
 export type NoteWriteAttribution = { status: 'recorded' } | { status: 'unconfirmed'; reason: string }
 export type FileWriteReceipt =
-  | { status: 'written'; revision: string; content?: string; noteAttribution?: NoteWriteAttribution; noteProvenance?: NoteProvenanceSnapshot }
+  ( { status: 'written'; revision: string; content?: string; noteAttribution?: NoteWriteAttribution; noteProvenance?: NoteProvenanceSnapshot }
   | { status: 'conflict'; observedRevision: string | null }
-  | { status: 'error' | 'unknown'; code: string; message: string }
+  | { status: 'error' | 'unknown'; code: string; message: string }) & { noteHistory?: import('./note-history.js').NoteHistoryReceipt }
 export type FileWriteResult = { resource: FileReadResource | null; result: FileWriteReceipt }
 /** One bounded file, below the original encrypted Relay frame/backlog budget even after both base64 layers. */
 export const FILE_UPLOAD_MAX_BYTES = 4 * 1024 * 1024
@@ -54,13 +56,13 @@ export interface AgentMuxRpcFileUploadsOwner {
   upload(params: FileUploadParams): Promise<FileUploadResult>
   inspect(params: FileUploadIdentity): Promise<FileUploadResult>
 }
-export type FileParameterMap = { 'file.read': FileReadParams; 'file.list': FileListParams; 'file.write': FileWriteParams; 'file.create': FileCreateParams;
+export type FileParameterMap = { 'file.read': FileReadParams; 'file.list': FileListParams; 'file.history': FileHistoryParams; 'file.write': FileWriteParams; 'file.create': FileCreateParams;
   'file.upload': FileUploadParams; 'file.upload.inspect': FileUploadIdentity }
-export type FileResultMap = { 'file.read': FileReadResult; 'file.list': FileListResult; 'file.write': FileWriteResult; 'file.create': FileCreateResult;
+export type FileResultMap = { 'file.read': FileReadResult; 'file.list': FileListResult; 'file.history': FileHistoryResult; 'file.write': FileWriteResult; 'file.create': FileCreateResult;
   'file.upload': FileUploadResult; 'file.upload.inspect': FileUploadResult }
 export type FileMethod = keyof FileParameterMap
-export interface AgentMuxRpcFilesOwner { read(params: FileReadParams): Promise<FileReadResult>; list(params: FileListParams): Promise<FileListResult>; write(params: FileWriteParams, context?: FileWriteContext): Promise<FileWriteResult>; create(params: FileCreateParams, context?: FileWriteContext): Promise<FileCreateResult> }
-export const AGENTMUX_RPC_FILE_METHODS = { 'file.read': 'short', 'file.list': 'long', 'file.write': 'long', 'file.create': 'long', 'file.upload': 'long', 'file.upload.inspect': 'long' } as const
+export interface AgentMuxRpcFilesOwner { read(params: FileReadParams): Promise<FileReadResult>; list(params: FileListParams): Promise<FileListResult>; history?(params: FileHistoryParams): Promise<FileHistoryResult>; write(params: FileWriteParams, context?: FileWriteContext): Promise<FileWriteResult>; create(params: FileCreateParams, context?: FileWriteContext): Promise<FileCreateResult> }
+export const AGENTMUX_RPC_FILE_METHODS = { 'file.read': 'short', 'file.list': 'long', 'file.history': 'long', 'file.write': 'long', 'file.create': 'long', 'file.upload': 'long', 'file.upload.inspect': 'long' } as const
 export function isFileMethod(value: unknown): value is FileMethod { return typeof value === 'string' && Object.hasOwn(AGENTMUX_RPC_FILE_METHODS, value) }
 
 const uploadFields = ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'name', 'mimeType', 'byteLength', 'revision'] as const
@@ -229,7 +231,15 @@ function parseFileMutationResult(value: unknown, params: FileWriteParams | FileC
   const keys = r.status === 'written' ? ['status', 'revision', 'content', 'noteAttribution', 'noteProvenance'] : r.status === 'conflict' ? ['status', 'observedRevision']
     : r.status === 'error' || r.status === 'unknown' ? ['status', 'code', 'message'] : null
   if (!keys) invalid('The original File write status is invalid.', code)
-  rpcRecord(r, keys, code)
+  rpcRecord(r, [...keys, 'noteHistory'], code)
+  if (r.noteHistory !== undefined) {
+    const history = rpcRecord(r.noteHistory, ['status', 'eventId', 'batchId', 'reason'], code)
+    if (!['prepared', 'committed', 'unconfirmed', 'not-applied'].includes(history.status as string)) invalid('The original Note history outcome is invalid.', code)
+    if (history.status !== 'unconfirmed' || history.eventId !== undefined) string(history.eventId, code)
+    if (history.status !== 'unconfirmed' || history.batchId !== undefined) string(history.batchId, code)
+    if (history.reason !== undefined) string(history.reason, code)
+    if (history.status === 'unconfirmed' && history.eventId === undefined && history.reason === undefined) invalid('Unconfirmed history requires its original event or a diagnostic.', code)
+  }
   // Keep the original resource/path mapping checks shared with reads.
   parseFileReadResult({ resource: p.resource, result: p.resource === null ? { ...r, message: 'Original write diagnostic follows.' } : { status: 'directory' } }, params)
   if (p.resource !== null && ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => (p.resource as Record<string, unknown>)[key] !== (params.expectedResource as unknown as Record<string, unknown>)[key])) invalid('The original File mapping changed.', code)

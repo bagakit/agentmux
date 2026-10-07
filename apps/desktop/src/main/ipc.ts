@@ -792,7 +792,7 @@ export async function registerIpc(args: {
   const notebookStore = new AgentMuxNotebookStore(undefined, notesStorageOwner.storage)
   const notebookObservation = createNotebookObservationServices(notebookStore, { files, workspace: id => config.workspaces.find(item => item.id === id) }, () => notesStorageReady)
   const noteFileWriter = new NoteFileWriter(files, { state: async () => { await notesStorageReady; return notebookStore.read() }, owner: notebookObservation.owner }, notebookStore)
-  const publicFiles = new FileReadOwner({ files: { read: noteFileWriter.read.bind(noteFileWriter), listFiles: files.listFiles.bind(files), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
+  const publicFiles = new FileReadOwner({ files: { read: noteFileWriter.read.bind(noteFileWriter), listFiles: files.listFiles.bind(files), history: noteFileWriter.history.bind(noteFileWriter), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
   const moteConnectionPreferences = new MoteConnectionPreferences({ files: publicFiles,
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },

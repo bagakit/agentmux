@@ -40,6 +40,7 @@ function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   const body = result as Record<string, unknown>
   if (['space.focus', 'goal.focus', 'app.focus'].includes(method) && body.partial === true) return true
   if ((method === 'file.write' || method === 'file.create') && (body.result as { status?: string } | undefined)?.status !== 'written') return true
+  if (method === 'file.history' && (body.result as { status?: string } | undefined)?.status !== 'read') return true
   if ((method === 'file.upload' || method === 'file.upload.inspect') && body.status !== 'uploaded') return true
   if (['file.build', 'file.build.inspect', 'file.build.cancel'].includes(method) && !['running', 'succeeded', 'cancelled'].includes(String(body.status))) return true
   if (method === 'file.format' && body.status !== 'formatted' && body.status !== 'unchanged') return true

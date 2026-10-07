@@ -634,10 +634,10 @@ export type WorkspaceFileWriteInput = {
 }
 
 export type WorkspaceFileWriteResult =
-  | { status: 'written'; revision: string; content?: string; noteAttribution?: import('@agentmux/core').NoteWriteAttribution; noteProvenance?: import('@agentmux/core/note-provenance').NoteProvenanceSnapshot }
+  ( { status: 'written'; revision: string; content?: string; noteAttribution?: import('@agentmux/core').NoteWriteAttribution; noteProvenance?: import('@agentmux/core/note-provenance').NoteProvenanceSnapshot }
   | { status: 'conflict'; observedRevision: string | null }
   | { status: 'error'; code: string; message: string }
-  | { status: 'unknown'; code: string; message: string }
+  | { status: 'unknown'; code: string; message: string }) & { noteHistory?: import('@agentmux/core/note-history').NoteHistoryReceipt }
 
 export type WorkspaceFileInvalidated = {
   workspaceId: string

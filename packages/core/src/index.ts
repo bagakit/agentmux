@@ -122,3 +122,4 @@ export * from './search-reader.js'
 
 export * from './mote-connection-contract.js'
 export * from './mote-connection-codec.js'
+export * from './note-history.js'

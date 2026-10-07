@@ -5,11 +5,13 @@ import { durableWriteFile } from './durable-write.js'
 import { AgentMuxNotesStorage, defaultNotesDirectory, withNotesStorageFileLock } from './notes-storage.js'
 import { AgentMuxError } from './errors.js'
 import { applyNotebookChange, emptyNotebookState, type NotebookActor, type NotebookObservation, type NotebookState, type NotebookWrite } from './notebook-catalog.js'
-import { NOTEBOOK_DATABASE_NAME, initializeNotebookDatabase, readNotebookDatabase, readNotebookProvenance, writeNotebookDatabase } from './notebook-database.js'
+import { NOTEBOOK_DATABASE_NAME, initializeNotebookDatabase, readNotebookDatabase, readNotebookProvenance, writeNotebookDatabase, readNotebookHistory, writeNotebookHistory, readNotebookHistoryProvenance } from './notebook-database.js'
 import { parseNoteProvenanceWrite, type NoteProvenanceQuery, type NoteProvenanceSnapshot, type NoteProvenanceWrite } from './note-provenance.js'
+import { parseNoteHistoryQuery, parseNoteHistoryRecord, type NoteHistoryQuery, type NoteHistoryRecord, type NoteHistorySnapshot } from './note-history.js'
 export * from './notes-storage.js'
 export * from './notebook-catalog.js'
 export * from './note-provenance.js'
+export * from './note-history.js'
 const sqlitePath = (path: string) => path.endsWith('.json') ? path.slice(0, -5) + '.sqlite' : path
 /** The stable original catalog lock also serializes attribution and directory publication. */
 export async function withNotebookDatabaseLock<T>(path: string, work: () => Promise<T>): Promise<T> {
@@ -90,7 +92,43 @@ export class AgentMuxNotebookStore {
   async readProvenance(query: NoteProvenanceQuery): Promise<NoteProvenanceSnapshot> {
     parseNoteProvenanceWrite({ noteId: query.noteId, resource: query.resource, revision: query.revision, blocks: Object.fromEntries(query.blockIds.map(id => [id, { created: null, lastEdited: null }])) })
     await this.locate()
-    return readNotebookProvenance(this.path, query)
+    const provenance = await readNotebookProvenance(this.path, query)
+    // Historical events distinguish a new edit/restore even when its body digest repeats.
+    let latest: Awaited<ReturnType<typeof readNotebookHistoryProvenance>>
+    try { latest = await readNotebookHistoryProvenance(this.path, query) }
+    catch (error) { return { ...provenance, status: 'unconfirmed', reason: error instanceof Error ? error.message : String(error),
+      blocks: Object.fromEntries(query.blockIds.map(id => [id, { created: provenance.blocks[id]?.created ?? null, lastEdited: null }])) } }
+    if (latest?.status === 'committed' && latest.revision === query.revision && latest.provenance && query.blockIds.every(id => Object.hasOwn(latest.provenance!.blocks, id))) {
+      const blocks = Object.fromEntries(query.blockIds.map(id => [id, latest.provenance!.blocks[id]!]))
+      const { reason: _reason, ...baseline } = provenance
+      return { ...baseline, blocks, status: 'recorded' }
+    }
+    if (latest && (['prepared', 'unconfirmed'].includes(latest.status) || latest.revision !== query.revision)) return {
+      ...provenance, status: 'unconfirmed', reason: 'The latest original write or observed body is unconfirmed; a historical digest cannot confirm its current author or receipt.',
+      blocks: Object.fromEntries(query.blockIds.map(id => [id, { created: provenance.blocks[id]?.created ?? null, lastEdited: null }]))
+    }
+    return provenance
+  }
+  async readHistory(query: NoteHistoryQuery): Promise<NoteHistorySnapshot> {
+    const original = parseNoteHistoryQuery(query)
+    await this.locate()
+    return readNotebookHistory(this.path, original)
+  }
+  /** Trusted host-internal journal port; body callers cannot submit authors or event outcomes. */
+  async recordHistory(input: NoteHistoryRecord): Promise<NoteHistoryRecord> {
+    const value = parseNoteHistoryRecord(input)
+    await this.ready()
+    const run = async () => {
+      await this.locate(true)
+      return this.withWriteLock(async () => {
+        if (this.storage && await this.storage.databaseEstablished() && !await readNotebookDatabase(this.path, false)) throw new AgentMuxError('The confirmed original SQLite directory is missing. Original files are retained.', 'NOTEBOOK_READ_UNCONFIRMED')
+        await initializeNotebookDatabase(this.path, this.legacyPath, !!this.storage && await this.storage.catalogEstablished())
+        const saved = await writeNotebookHistory(this.path, value)
+        if (this.storage) await this.storage.confirmCatalog()
+        return saved
+      })
+    }
+    return this.storage ? this.storage.withLock(run) : run()
   }
   /** Host-internal trusted writer/import port, never a caller-provided author RPC. */
   async recordProvenance(input: NoteProvenanceWrite): Promise<NoteProvenanceSnapshot> {

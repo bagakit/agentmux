@@ -1,28 +1,36 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile, link, unlink } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { gzipSync, gunzipSync } from 'node:zlib'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from './errors.js'
 import { durableWriteFile } from './durable-write.js'
 import { emptyNotebookState, notebookFingerprint, parseNotebookState, type NotebookState } from './notebook-catalog.js'
 import { noteProvenanceResourceKey, parseNoteProvenanceWrite, type NoteAuthorship, type NoteProvenanceQuery, type NoteProvenanceSnapshot, type NoteProvenanceWrite } from './note-provenance.js'
+import { noteHistoryRevision, noteHistorySnapshot, parseNoteHistoryRecord, parseNoteHistoryQuery, type NoteHistoryRecord, type NoteHistoryEntry, type NoteHistoryQuery, type NoteHistorySnapshot } from './note-history.js'
 
 export const NOTEBOOK_DATABASE_NAME = 'notebooks.sqlite'
-export type NotebookDatabaseSnapshot = { incarnation: string; state: NotebookState; provenance: NoteProvenanceWrite[] }
+export type NotebookDatabaseSnapshot = { incarnation: string; state: NotebookState; provenance: NoteProvenanceWrite[]; history?: NoteHistoryRecord[] }
+const historySchema = `CREATE TABLE IF NOT EXISTS note_history_content (revision TEXT PRIMARY KEY, content BLOB NOT NULL);
+  CREATE TABLE IF NOT EXISTS note_history_event (sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    note_id TEXT NOT NULL, resource TEXT NOT NULL, event_id TEXT NOT NULL, batch_id TEXT NOT NULL, json TEXT NOT NULL,
+    UNIQUE(note_id,resource,event_id));
+  CREATE INDEX IF NOT EXISTS note_history_original ON note_history_event(note_id,resource,sequence);`
 const applicationId = 0x414d4e42, header = Buffer.from('SQLite format 3\0')
 const failure = (message: string) => new AgentMuxError(message + ' Original knowledge and files are retained.', 'NOTEBOOK_READ_UNCONFIRMED')
-const schema = `PRAGMA application_id = ${applicationId}; PRAGMA user_version = 1;
+const schema = `PRAGMA application_id = ${applicationId}; PRAGMA user_version = 2;
   CREATE TABLE identity (incarnation TEXT NOT NULL);
   CREATE TABLE notebook_state (id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
   CREATE TABLE provenance (note_id TEXT NOT NULL, resource TEXT NOT NULL, revision TEXT NOT NULL, json TEXT NOT NULL,
-    PRIMARY KEY(note_id,resource,revision));`
+    PRIMARY KEY(note_id,resource,revision)); ${historySchema}`
 const configure = (db: DatabaseSync) => db.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; PRAGMA synchronous=EXTRA')
 export async function syncNotebookDatabase(path: string): Promise<void> {
   for (const target of [path, dirname(path)]) { const handle = await open(target, 'r'); try { await handle.sync() } finally { await handle.close() } }
 }
 async function identity(path: string) { try { return await readFile(path + '.sqlite-identity', 'utf8') } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error } }
 function validateIdentity(db: DatabaseSync, acknowledged: string | null): string {
-  if (db.prepare('PRAGMA application_id').get()?.application_id !== applicationId || db.prepare('PRAGMA user_version').get()?.user_version !== 1) throw failure('This is not the original Notebook database.')
+  const version = db.prepare('PRAGMA user_version').get()?.user_version
+  if (db.prepare('PRAGMA application_id').get()?.application_id !== applicationId || version !== 1 && version !== 2) throw failure('This is not the original Notebook database.')
   const incarnation = db.prepare('SELECT incarnation FROM identity').get()?.incarnation
   if (typeof incarnation !== 'string' || acknowledged !== null && acknowledged !== incarnation) throw failure('The acknowledged Notebook database identity changed.')
   return incarnation
@@ -32,12 +40,108 @@ function provenanceRow(row: Record<string, unknown>): NoteProvenanceWrite {
   if (row.note_id !== value.noteId || row.resource !== noteProvenanceResourceKey(value.resource) || row.revision !== value.revision) throw failure('The original attribution row identity cannot be confirmed.')
   return value
 }
+function hasHistory(db: DatabaseSync): boolean {
+  const events = !!db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name='note_history_event'").get()
+  const bodies = !!db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name='note_history_content'").get()
+  if (events !== bodies || db.prepare('PRAGMA user_version').get()?.user_version === 2 && !events) throw failure('The acknowledged original history schema is unavailable. Restore this same database; readable current Notes remain available.')
+  return events
+}
+function historyBody(db: DatabaseSync, revision: string): string {
+  const row = db.prepare('SELECT content FROM note_history_content WHERE revision=?').get(revision)
+  if (!(row?.content instanceof Uint8Array)) throw failure('The original history body is missing.')
+  const content = gunzipSync(row.content).toString('utf8')
+  if (noteHistoryRevision(content) !== revision) throw failure('The original history body digest changed.')
+  return content
+}
+function historyMetadata(row: Record<string, unknown>): Omit<NoteHistoryRecord, 'beforeContent' | 'content'> {
+  const value = JSON.parse(String(row.json)) as Omit<NoteHistoryRecord, 'beforeContent' | 'content'>
+  if (row.note_id !== value.noteId || row.resource !== noteProvenanceResourceKey(value.resource) || row.event_id !== value.eventId || row.batch_id !== value.batchId ||
+      !Number.isSafeInteger(row.sequence) || Number(row.sequence) < 1 || !/^sha256:[a-f0-9]{64}$/u.test(value.revision) ||
+      value.baseRevision !== null && !/^sha256:[a-f0-9]{64}$/u.test(value.baseRevision) ||
+      !['prepared', 'committed', 'unconfirmed', 'not-applied'].includes(value.status) || !['edit', 'restore', 'undo'].includes(value.operation) ||
+      !Number.isSafeInteger(value.at) || value.at < 0 || !value.requestFingerprint ||
+      value.actor !== null && (!['user', 'agent', 'device'].includes(value.actor.kind) || typeof value.actor.id !== 'string' || !value.actor.id || /[\0\r\n]/u.test(value.actor.id))) throw failure('The original history event identity cannot be confirmed.')
+  return { ...value, sequence: Number(row.sequence) }
+}
+function historyRecord(db: DatabaseSync, row: Record<string, unknown>): NoteHistoryRecord {
+  const value = historyMetadata(row)
+  return parseNoteHistoryRecord({ ...value, beforeContent: value.baseRevision === null ? null : historyBody(db, value.baseRevision), content: historyBody(db, value.revision) })
+}
+function putHistory(db: DatabaseSync, candidate: NoteHistoryRecord): NoteHistoryRecord {
+  const value = parseNoteHistoryRecord(candidate), key = noteProvenanceResourceKey(value.resource)
+  const oldRow = db.prepare('SELECT * FROM note_history_event WHERE note_id=? AND resource=? AND event_id=?').get(value.noteId, key, value.eventId)
+  if (oldRow) {
+    const old = historyRecord(db, oldRow)
+    const immutable = ({ sequence: _sequence, status: _status, provenance: _provenance, ...entry }: NoteHistoryRecord) => notebookFingerprint(entry)
+    if (immutable(old) !== immutable(value) || value.sequence !== old.sequence ||
+        ['committed', 'not-applied'].includes(old.status) && (old.status !== value.status || notebookFingerprint(old.provenance ?? null) !== notebookFingerprint(value.provenance ?? null))) {
+      throw new AgentMuxError('This original history operation already records another request or terminal result. Its body and event are retained.', 'NOTE_HISTORY_OPERATION_CONFLICT')
+    }
+  }
+  const content = db.prepare('INSERT OR IGNORE INTO note_history_content VALUES (?,?)')
+  content.run(value.revision, gzipSync(value.content))
+  if (value.beforeContent !== null) content.run(value.baseRevision, gzipSync(value.beforeContent))
+  const { sequence, beforeContent: _before, content: _content, ...metadata } = value
+  if (oldRow) db.prepare('UPDATE note_history_event SET json=? WHERE sequence=?').run(JSON.stringify(metadata), sequence)
+  else db.prepare('INSERT INTO note_history_event(sequence,note_id,resource,event_id,batch_id,json) VALUES (?,?,?,?,?,?)').run(sequence || null, value.noteId, key, value.eventId, value.batchId, JSON.stringify(metadata))
+  return historyRecord(db, db.prepare('SELECT * FROM note_history_event WHERE note_id=? AND resource=? AND event_id=?').get(value.noteId, key, value.eventId)!)
+}
+/** Paginated metadata reads do not inflate historical bodies or scan unrelated Notes. */
+export async function readNotebookHistory(path: string, query: NoteHistoryQuery): Promise<NoteHistorySnapshot> {
+  parseNoteHistoryQuery(query)
+  const original = await openRead(path)
+  if (!original) return noteHistorySnapshot(query, [], false)
+  try {
+    if (!hasHistory(original.db)) return noteHistorySnapshot(query, [], false)
+    const limit = query.limit ?? 50
+    const rows = query.eventId
+      ? original.db.prepare('SELECT * FROM note_history_event WHERE note_id=? AND resource=? AND event_id=?').all(query.noteId, noteProvenanceResourceKey(query.resource), query.eventId)
+      : original.db.prepare('SELECT * FROM note_history_event WHERE note_id=? AND resource=? AND sequence<? ORDER BY sequence DESC LIMIT ?').all(query.noteId, noteProvenanceResourceKey(query.resource), query.before ?? Number.MAX_SAFE_INTEGER, limit + 1)
+    const entries: NoteHistoryEntry[] = rows.slice(0, limit).map(row => {
+      const { requestFingerprint: _fingerprint, ...value } = query.includeContent ? historyRecord(original.db, row) : historyMetadata(row)
+      if (!query.includeContent) delete value.provenance
+      return value
+    })
+    return noteHistorySnapshot(query, entries, rows.length > limit)
+  } finally { original.db.close() }
+}
+/** Current attribution needs only the newest committed event, never historical body inflation. */
+export async function readNotebookHistoryProvenance(path: string, query: NoteProvenanceQuery): Promise<Pick<NoteHistoryRecord, 'status' | 'revision' | 'provenance'> | undefined> {
+  const original = await openRead(path)
+  if (!original) return
+  try {
+    if (!hasHistory(original.db)) return
+    const row = original.db.prepare("SELECT * FROM note_history_event WHERE note_id=? AND resource=? AND json_extract(json,'$.status') != 'not-applied' ORDER BY sequence DESC LIMIT 1").get(query.noteId, noteProvenanceResourceKey(query.resource))
+    const latest = row && historyMetadata(row)
+    if (!latest) return
+    const provenance = latest.provenance && parseNoteProvenanceWrite(latest.provenance)
+    if (provenance && (provenance.noteId !== query.noteId || provenance.revision !== latest.revision || noteProvenanceResourceKey(provenance.resource) !== noteProvenanceResourceKey(query.resource))) throw failure('Historical attribution belongs to another original Note or revision.')
+    return { status: latest.status, revision: latest.revision, ...(provenance ? { provenance } : {}) }
+  } finally { original.db.close() }
+}
+/** Original Notebook lock is held by the store; prepare and outcome are separate durable facts. */
+export async function writeNotebookHistory(path: string, record: NoteHistoryRecord): Promise<NoteHistoryRecord> {
+  const { DatabaseSync } = await import('node:sqlite')
+  const acknowledged = await identity(path), db = new DatabaseSync(path)
+  let result: NoteHistoryRecord
+  try {
+    configure(db); validateIdentity(db, acknowledged); db.exec('BEGIN IMMEDIATE')
+    // Extend the original v1 metadata database once, without replacing its data or identity.
+    // Once v2 acknowledges history, missing tables are a failure, never an empty new journal.
+    if (db.prepare('PRAGMA user_version').get()?.user_version === 1) { hasHistory(db); db.exec(historySchema); db.exec('PRAGMA user_version=2') }
+    else hasHistory(db)
+    result = putHistory(db, record); db.exec('COMMIT')
+  } catch (error) { try { db.exec('ROLLBACK') } catch {} throw error } finally { db.close() }
+  await syncNotebookDatabase(path)
+  return result!
+}
 function snapshot(db: DatabaseSync, acknowledged: string | null, includeProvenance = true): NotebookDatabaseSnapshot {
   const incarnation = validateIdentity(db, acknowledged)
   const raw = db.prepare('SELECT json FROM notebook_state WHERE id=1').get()?.json
   if (typeof raw !== 'string') throw failure('The original Notebook directory is missing.')
   const provenance = includeProvenance ? db.prepare('SELECT note_id,resource,revision,json FROM provenance ORDER BY note_id,resource,revision').all().map(provenanceRow) : []
-  return { incarnation, state: parseNotebookState(JSON.parse(raw)), provenance }
+  const history = includeProvenance && hasHistory(db) ? db.prepare('SELECT * FROM note_history_event ORDER BY sequence').all().map(row => historyRecord(db, row)) : []
+  return { incarnation, state: parseNotebookState(JSON.parse(raw)), provenance, ...(history.length ? { history } : {}) }
 }
 /** Read only. A known database never falls back to JSON or an empty directory. */
 async function openRead(path: string): Promise<{ db: DatabaseSync; acknowledged: string | null } | null> {
@@ -118,6 +222,7 @@ export async function publishNotebookDatabase(path: string, value: NotebookDatab
     db.prepare('INSERT INTO notebook_state VALUES (1,?)').run(JSON.stringify(parseNotebookState(value.state)))
     const insert = db.prepare('INSERT INTO provenance VALUES (?,?,?,?)')
     for (const candidate of value.provenance) { const entry = parseNoteProvenanceWrite(candidate); insert.run(entry.noteId, noteProvenanceResourceKey(entry.resource), entry.revision, JSON.stringify(entry)) }
+    for (const event of value.history ?? []) putHistory(db, event)
     db.exec('COMMIT'); db.close(); db = undefined
     await syncNotebookDatabase(candidate)
     try { await link(candidate, path) } catch (error) {
@@ -155,6 +260,8 @@ export async function replaceNotebookDatabase(path: string, value: NotebookDatab
     db.exec('DELETE FROM provenance')
     const insert = db.prepare('INSERT INTO provenance VALUES (?,?,?,?)')
     for (const candidate of value.provenance) { const entry = parseNoteProvenanceWrite(candidate); insert.run(entry.noteId, noteProvenanceResourceKey(entry.resource), entry.revision, JSON.stringify(entry)) }
+    db.exec(historySchema); db.exec('DELETE FROM note_history_event; DELETE FROM note_history_content')
+    for (const event of value.history ?? []) putHistory(db, event)
     db.exec('COMMIT')
   } catch (error) { try { db.exec('ROLLBACK') } catch {} throw error } finally { db.close() }
   await syncNotebookDatabase(path)

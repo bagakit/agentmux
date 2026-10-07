@@ -65,6 +65,24 @@ unconfirmed. Read the same Note/revision to reconcile; do not write the body aga
 A conflict requires reading the original and merging. An unknown write requires inspecting
 that exact original before another save; do not blindly resend or switch to a new file.
 
+Read durable body history with amux file history --zone ZONE --path ZONE_RELATIVE_PATH
+--resource RESOURCE_JSON --note NOTE_ID --limit 50. Keep the exact resource returned by file.read.
+Entries are newest first; when hasMore is true, use the oldest returned sequence as --before.
+The timeline returns metadata. Select one immutable --event-id EVENT_ID and add --content to
+read its beforeContent/content for comparison; content reads require this exact event selection.
+An oversized body pair is explicitly unavailable through this RPC frame; the same event without
+--content remains readable. Saved bodies are not truncated and ordinary file reads/saves remain usable.
+Activity batches group reading without deleting revisions. A paginated batch lists only events
+in that window, not necessarily the entire batch. eventId identifies an edit, not its content hash;
+returning to identical bytes does not reuse an old event or its latest author. parentEventId is
+the confirmed parent when known; null keeps uncertainty. originalResource retains the original
+event location, while resource follows the confirmed current mapping after a directory move.
+A Note write can return noteHistory separately from its body result. prepared/unconfirmed events
+do not prove that a body write committed, even if its bytes match. Keep the original eventId and
+inspect that same event plus file.read; never replay a body merely to repair history metadata.
+Unknown/unconfirmed history is a partial receipt, not a confirmed empty timeline. A missing
+history owner affects this query only. This read-only query does not restore or undo a version.
+
 Use amux notebook graph --note NOTE_ID, --notebook NOTEBOOK_ID or --all for saved relationships.
 The original owner scans the durable catalog for incoming sources, including closed pages.
 Results include catalogRevision, per-file status/revision, hierarchy, exact source block/resource,
