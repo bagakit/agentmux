@@ -1,7 +1,7 @@
 import { verifyRendererSourceMutations } from './lib/verify-renderer-source-mutations.mjs'
 const store = 'apps/desktop/src/renderer/src/store.ts'
 const pane = 'apps/desktop/src/renderer/src/features/git/GitWorkbenchPane.tsx'
-const sidebar = 'apps/desktop/src/renderer/src/components/ProjectFilesTool.tsx'
+const sidebar = 'apps/desktop/src/renderer/src/components/WorkspaceGitTool.tsx'
 const details = 'apps/desktop/src/renderer/src/features/git/commit/useGitCommitDetails.ts'
 const candidates = 'apps/desktop/src/renderer/src/lib/surface-memory-budget-candidates.ts'
 const codec = 'packages/core/src/public-rpc-git.ts'
