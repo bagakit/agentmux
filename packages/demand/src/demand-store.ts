@@ -1,9 +1,12 @@
+import { assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput } from './goal-patrol.js'
 import { parseDemandDispatchIntent, parseDemandDispatches, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent } from './dispatch.js'
 import { parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
   parseDemandDelegationAttentionInput, sameDemandDelegationAttention,
   type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type DemandDelegationCollectionInput, type DemandDelegationCollector, type DemandDelegationAttentionInput } from './delegations.js'
 import { parseDemandParticipations, parseDemandCreationOrigin, parseDemandParticipationSource, type DemandParticipationSource } from './collaboration.js'
 import { appendDemandContentReferences, parseDemandContentReferences } from './content-references.js'
+import { demandExecutionReferences, demandExecutionKey, demandHandoffDestinations, demandResponsibilityScope, parseDemandProgressInput, parseDemandProgressUpdates,
+  parseDemandResponsibilityBasis, sameDemandExecution, type DemandProgressInput, type DemandProgress, type DemandResponsibilityBasis } from './responsibility.js'
 import { randomUUID } from 'node:crypto'
 import { mintObjectId } from '@agentmux/identity'
 import { promises as fs } from 'node:fs'
@@ -162,13 +165,15 @@ function parseDemand(value: unknown, label: string): Demand {
     'contentRefs',
     'dispatches',
     'delegations',
+    'progressUpdates',
+    'patrols',
     'activities',
     'decisions',
     'alignment',
     'grounding',
     'createdAt',
     'updatedAt',
-  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'dispatches', 'delegations'])
+  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'dispatches', 'delegations', 'progressUpdates', 'patrols'])
   if (!isDemandStatus(record.status)) throw new Error(`${label}.status is invalid`)
   if (!isDemandPriority(record.priority)) throw new Error(`${label}.priority is invalid`)
   if (!Array.isArray(record.activities)) throw new Error(`${label}.activities must be an array`)
@@ -205,6 +210,8 @@ function parseDemand(value: unknown, label: string): Demand {
     ...(record.contentRefs === undefined ? {} : { contentRefs: parseDemandContentReferences(record.contentRefs) }),
     dispatches: parseDemandDispatches(record.dispatches ?? []),
     ...(record.delegations === undefined ? {} : { delegations: parseDemandDelegations(record.delegations) }),
+    ...(record.progressUpdates === undefined ? {} : { progressUpdates: parseDemandProgressUpdates(record.progressUpdates) }),
+    ...(record.patrols === undefined ? {} : { patrols: parseDemandPatrols(record.patrols) }),
     activities,
     decisions: record.decisions.map((entry, index) => parseDecision(entry, `${label}.decisions[${index}]`)),
     ...(record.alignment === undefined ? {} : { alignment: parseAlignment(record.alignment) }),
@@ -381,6 +388,158 @@ export class DemandStore {
       snapshot.demands.push(demand)
       return demand
     }, undefined, operationId)
+  }
+
+  /** Authenticated Host supplies author and observed basis; an editable phase cannot release work. */
+  async recordProgress(id: string, raw: DemandProgressInput, authority: {
+    author: DemandProgress['author']; reportingRunId: string | null; basis: DemandResponsibilityBasis
+  }): Promise<DemandReceipt> {
+    const input = parseDemandProgressInput(raw), basis = parseDemandResponsibilityBasis(authority.basis)
+    return this.mutate('responsibility.progress', snapshot => {
+      const goal = findDemand(snapshot, id, this.storePath)
+      const priorGoal = snapshot.demands.find(item => item.progressUpdates?.some(update => update.operationId === input.operationId))
+      const prior = priorGoal?.progressUpdates?.find(update => update.operationId === input.operationId)
+      if (prior) {
+        const { author, reportingRunId: _run, recordedAt: _at, basis: _basis, managerVerified: _verified, ...original } = prior
+        if (priorGoal!.id !== id || JSON.stringify(original) !== JSON.stringify(input) || author.kind !== authority.author.kind || author.id !== authority.author.id)
+          this.rejectDelegation('This original progress operation belongs to another input or author. Read it without rewriting responsibility.')
+        return { unchanged: goal }
+      }
+      if (demandResponsibilityScope(goal) !== input.expectedScope) this.rejectDelegation('The original responsibility changed. Read this same Goal before recording progress.')
+      this.applyProgress(goal, input, authority, basis)
+      return goal
+    }, undefined, input.operationId)
+  }
+
+  private applyProgress(goal: Demand, input: DemandProgressInput, authority: { author: DemandProgress['author']; reportingRunId: string | null }, basis: DemandResponsibilityBasis): void {
+    if (!demandExecutionReferences(goal).some(ref => sameDemandExecution(ref, input.execution))) this.rejectDelegation('Progress is not for an original execution in this Goal.')
+    const managerVerified = authority.author.kind !== 'agent' || authority.author.id === goal.supervisorSessionId
+    if (!managerVerified && (authority.author.id !== input.execution.agentSessionId || authority.reportingRunId !== input.execution.runId))
+      this.rejectDelegation('Only the original worker Run or current management authority can record this progress.')
+    if (input.phase === 'waiting-external' && (basis.stateEnteredAt === null || !input.evidence.length))
+      this.rejectDelegation('External waiting needs an observed original state basis and evidence for its condition; existing Agent input remains available.')
+    if (input.phase === 'review') {
+      const delegation = input.execution.kind === 'delegation' ? goal.delegations?.find(item => item.operationId === input.execution.operationId) : undefined
+      const grounding = managerVerified && input.groundingSubmissionId && goal.grounding?.submissionId === input.groundingSubmissionId && goal.grounding.alignmentRevision === goal.alignment?.revision
+      if (!delegation?.report && !grounding) this.rejectDelegation('Review requires this worker report or a current result explicitly associated by its manager. Goal-level result timing is not attribution.')
+    }
+    if (input.handoffExecution) {
+      const target = demandExecutionReferences(goal).find(ref => sameDemandExecution(ref, input.handoffExecution!))
+      const confirmed = target?.kind === 'start' ? goal.dispatches?.some(item => item.operationId === target.operationId && item.stage === 'confirmed')
+        : target && goal.delegations?.some(item => item.operationId === target.operationId && item.linkedAt !== undefined)
+      if (!confirmed || sameDemandExecution(input.execution, input.handoffExecution)) this.rejectDelegation('Handoff requires a different already-bound original execution, not a proposed next Agent.')
+    }
+    const now = Date.now()
+    const updates = [...goal.progressUpdates ?? [], { ...input, ...authority, basis, managerVerified, recordedAt: now }]
+    if (input.handoffExecution && managerVerified && demandHandoffDestinations({ ...goal, progressUpdates: updates }).get(demandExecutionKey(input.execution)) === null)
+      this.rejectDelegation('Accepted handoffs cannot form a cycle or lose the actual responsible execution.')
+    goal.progressUpdates = updates
+    goal.activities.push({ id: mintObjectId(), kind: 'progress', message: input.summary, actorId: authority.author.id, operationId: input.operationId, createdAt: now })
+    goal.updatedAt = Math.max(now, goal.updatedAt + 1)
+  }
+
+  /** Main freezes the original Goal/manager/input before any native attempt. */
+  async preparePatrol(id: string, input: DemandPatrolPreparation): Promise<DemandReceipt> {
+    return this.mutate('patrol.prepare', snapshot => {
+      const goal = findDemand(snapshot, id, this.storePath)
+      const priorGoal = snapshot.demands.find(item => item.patrols?.some(p => p.operationId === input.operationId))
+      if (priorGoal) {
+        if (priorGoal.id !== id) this.rejectDelegation('This patrol operation belongs to another original Goal.')
+        return { unchanged: goal }
+      }
+      if (demandResponsibilityScope(goal) !== input.expectedScope || goal.supervisorSessionId !== input.supervisorAgentSessionId)
+        this.rejectDelegation('The frozen Goal responsibility changed before inspection preparation.')
+      const retained = [...goal.patrols ?? []].reverse().find(p => !p.report && p.expectedScope === input.expectedScope)
+      if (retained) return { unchanged: goal }
+      assertPatrolExecutions(goal, input)
+      if (input.attempt && input.attempt.target.agentSessionId !== goal.supervisorSessionId) this.rejectDelegation('The original patrol target is not this Goal Supervisor.')
+      const now = Date.now(), { attempt, ...request } = input
+      const patrol = parseDemandPatrols([{ ...request, ...(goal.alignment ? { alignment: goal.alignment } : {}), requestedAt: now, attempts: attempt ? [{ ...attempt, preparedAt: now }] : [] }])[0]!
+      goal.patrols = [...goal.patrols ?? [], patrol]; goal.updatedAt = Math.max(now, goal.updatedAt + 1)
+      return goal
+    }, undefined, input.operationId)
+  }
+
+  async markPatrolAttempt(id: string, patrolId: string, inputOperationId: string): Promise<DemandReceipt> {
+    return this.mutate('patrol.attempt', snapshot => {
+      const goal = findDemand(snapshot, id, this.storePath), patrol = goal.patrols?.find(p => p.operationId === patrolId), attempt = patrol?.attempts.at(-1)
+      if (!patrol || !attempt || attempt.operationId !== inputOperationId || attempt.supersededAt || patrol.report ||
+        demandResponsibilityScope(goal) !== patrol.expectedScope || goal.supervisorSessionId !== attempt.target.agentSessionId)
+        this.rejectDelegation('The original patrol admission was superseded; its native input was not replaced.')
+      if (attempt.attemptedAt) return { unchanged: goal }
+      attempt.attemptedAt = Date.now(); goal.updatedAt = Math.max(attempt.attemptedAt, goal.updatedAt + 1)
+      return goal
+    })
+  }
+
+  /** Only after old Core claim absence and future-intent cancellation; original attempts stay immutable. */
+  async continuePatrol(id: string, patrolId: string, oldInputOperationId: string | null, raw: Omit<DemandPatrolAttempt, 'preparedAt'>): Promise<DemandReceipt> {
+    const next = parseDemandPatrolAttempt({ ...raw, preparedAt: Date.now() })
+    return this.mutate('patrol.continue', snapshot => {
+      const goal = findDemand(snapshot, id, this.storePath), patrol = goal.patrols?.find(p => p.operationId === patrolId)
+      if (!patrol) this.rejectDelegation('The original patrol is absent.')
+      const sameAction = patrol.attempts.find(a => a.actionOperationId === next.actionOperationId)
+      if (sameAction) {
+        const { preparedAt: _a, attemptedAt: _b, supersededAt: _c, ...original } = sameAction
+        const { preparedAt: _d, ...intent } = next
+        if (JSON.stringify(original) !== JSON.stringify(intent)) this.rejectDelegation('The original continuation action has different frozen content.')
+        return { unchanged: goal }
+      }
+      const old = patrol.attempts.at(-1)
+      if (patrol.report || patrol.attempts.some(a => a.attemptedAt) || (old?.operationId ?? null) !== oldInputOperationId || old?.supersededAt ||
+        patrol.supervisorAgentSessionId !== next.target.agentSessionId || goal.supervisorSessionId !== next.target.agentSessionId || demandResponsibilityScope(goal) !== patrol.expectedScope)
+        this.rejectDelegation('The old request changed or may have attempted input. Keep its exact receipt; no new attempt is admitted.')
+      if (old) old.supersededAt = next.preparedAt
+      patrol.attempts.push(next); goal.updatedAt = Math.max(next.preparedAt, goal.updatedAt + 1)
+      return goal
+    }, undefined, next.actionOperationId)
+  }
+
+  /** A stale actual PMO report is retained, but cannot overwrite later Goal work. */
+  async recordPatrolReport(id: string, patrolId: string, raw: DemandPatrolReportInput, author: { agentSessionId: string; runId: string },
+    bases: ReadonlyMap<string, DemandResponsibilityBasis | null>): Promise<DemandReceipt> {
+    const report = parseDemandPatrolReportInput(raw)
+    return this.mutate('patrol.report', snapshot => {
+      const goal = findDemand(snapshot, id, this.storePath), patrol = goal.patrols?.find(p => p.operationId === patrolId)
+      if (!patrol || patrol.supervisorAgentSessionId !== author.agentSessionId) this.rejectDelegation('Only the original PMO can return this retained inspection.')
+      const duplicate = snapshot.demands.flatMap(g => g.patrols ?? []).find(p => p.report?.operationId === report.operationId)
+      if (duplicate && duplicate !== patrol) this.rejectDelegation('This report operation belongs to another original patrol.')
+      if (patrol.report) {
+        const { authorAgentSessionId, reportingRunId: _run, reportedAt: _at, applied: _applied, reason: _reason, ...original } = patrol.report
+        if (authorAgentSessionId !== author.agentSessionId || JSON.stringify(original) !== JSON.stringify(report)) this.rejectDelegation('The original inspection report is immutable. Read its saved result.')
+        return { unchanged: goal }
+      }
+      const criteria = patrol.alignment?.criteria ?? []
+      if (patrol.alignment ? !report.grounding || report.grounding.alignmentRevision !== patrol.alignment.revision || report.grounding.checks.length !== criteria.length ||
+        criteria.some(c => !report.grounding!.checks.some(check => check.criterionId === c.id)) : report.grounding !== undefined)
+        this.rejectDelegation('Inspection must return each frozen criterion with evidence, a gap or an unknown; missing original alignment remains unknown.')
+      for (const update of report.progress) {
+        if (update.expectedScope !== patrol.expectedScope || !patrol.executions.some(ref => sameDemandExecution(ref, update.execution))) this.rejectDelegation('Inspection progress must name this patrol’s exact original execution scope.')
+        if (snapshot.demands.some(g => g.progressUpdates?.some(u => u.operationId === update.operationId))) this.rejectDelegation('This inspection progress operation was already used. Keep the original declaration.')
+      }
+      const applied = demandResponsibilityScope(goal) === patrol.expectedScope && goal.supervisorSessionId === author.agentSessionId && goal.grounding?.acceptedAt == null
+      if (applied && report.nextOwner.kind === 'agent' && report.nextOwner.agentSessionId !== goal.supervisorSessionId &&
+        !demandExecutionReferences(goal).some(ref => ref.agentSessionId === report.nextOwner.agentSessionId)) this.rejectDelegation('The next responsible Agent must be bound to this original Goal.')
+      const now = Date.now()
+      if (applied) {
+        if (report.grounding) goal.grounding = { ...report.grounding, submissionId: mintObjectId(), acceptedAt: null }
+        for (const declared of report.progress) {
+          const update = declared.phase === 'review' && !declared.groundingSubmissionId && goal.grounding ? { ...declared, groundingSubmissionId: goal.grounding.submissionId } : declared
+          this.applyProgress(goal, update, { author: { kind: 'agent', id: author.agentSessionId }, reportingRunId: author.runId },
+            bases.get(JSON.stringify(update.execution)) ?? { stateEnteredAt: null, activityRevision: null, inputSubmissionId: null })
+          const delegation = update.execution.kind === 'delegation' && update.phase === 'review' ? goal.delegations?.find(d => d.operationId === update.execution.operationId) : undefined
+          if (delegation?.report && !delegation.collection) delegation.collection = { operationId: 'patrol-collect:' + report.operationId + ':' + delegation.operationId,
+            replyMessageId: delegation.report.replyMessageId, collector: { kind: 'agent', id: author.agentSessionId }, collectedAt: now,
+            ...(goal.grounding ? { groundingSubmissionId: goal.grounding.submissionId } : {}) }
+        }
+        if (report.status !== undefined) goal.status = report.status
+      }
+      patrol.report = { ...report, authorAgentSessionId: author.agentSessionId, reportingRunId: author.runId, reportedAt: now, applied,
+        reason: applied ? 'Actual PMO inspection was written to this original Goal. Human confirmation and acceptance remain separate.' : 'The frozen responsibility or accepted result changed. This late inspection is retained without replacing current work.' }
+      goal.activities.push({ id: mintObjectId(), kind: 'progress', message: report.summary + '\nNext: ' + report.nextOwner.action, actorId: author.agentSessionId, operationId: report.operationId, createdAt: now })
+      goal.updatedAt = Math.max(now, goal.updatedAt + 1)
+      return goal
+    }, undefined, report.operationId)
   }
 
   /** Only the explicit business Start owner calls this; ordinary updates cannot write it. */
@@ -1118,6 +1277,7 @@ async function enqueue<T>(root: string, fn: () => Promise<T>): Promise<T> {
 }
 
 function rejectProvenanceInput(value: object): void {
+  if (Object.hasOwn(value, 'progressUpdates') || Object.hasOwn(value, 'patrols')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Only the original responsibility owner records progress and inspection facts')
   if (Object.hasOwn(value, 'delegations')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Only the actual delegation owner can prepare, link, report or collect original business work.')
   if (['participations', 'creationOrigin', 'requesterParticipationId', 'requesterAsSupervisor', 'supervisorDefaultPending', 'assigneeExecutorId'].some(key => Object.hasOwn(value, key)))
     throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Original Goal provenance is authored only by the trusted host; assign accurate Sessions.')
