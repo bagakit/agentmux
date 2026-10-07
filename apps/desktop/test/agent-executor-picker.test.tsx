@@ -67,3 +67,21 @@ it('preserves the original Launcher catalog eligibility and selection', async ()
   await act(async () => (container.querySelector('[data-executor-id="ready"]') as HTMLElement).click())
   expect(changed).toHaveBeenCalledExactlyOnceWith('ready')
 })
+
+it('all missing causes keep factual guidance and the original launch eligibility', async () => {
+  const unavailable: ExecutorChoice[] = ['EXECUTABLE_NOT_FILE', 'EXECUTABLE_NOT_FOUND'].map((code, index) => {
+    const original = { ...input, executorId: 'unavailable-' + index }
+    return { id: original.executorId, label: 'Unavailable ' + index, providerId: 'codex', command: original.command,
+      detection: { state: 'missing', input: original, result: { input: original, availability: 'missing',
+        executable: original.command, cause: { code, message: code === 'EXECUTABLE_NOT_FILE' ? 'Path is a directory.' : 'Exact executable not found.' } } } }
+  })
+  const changed = vi.fn()
+  await act(async () => root.render(<AgentExecutorPicker executors={unavailable} selected={null} onSelect={changed} />))
+  expect(container.querySelector('.agent-catalog__empty')!.textContent).toContain('Check their configuration and unavailable details, then refresh.')
+  expect(container.querySelector('.agent-catalog__empty')!.textContent).not.toMatch(/install|commands were not found/i)
+  expect(container.querySelectorAll('[data-executor-id]')).toHaveLength(0)
+  await act(async () => container.querySelector<HTMLButtonElement>('.launcher-other-agents')!.click())
+  expect(container.querySelector('.launcher-unavailable-agents')!.textContent).toContain('Not available')
+  expect(container.querySelector('.launcher-unavailable-agents')!.textContent).toContain('Not found')
+  expect(changed).not.toHaveBeenCalled()
+})
