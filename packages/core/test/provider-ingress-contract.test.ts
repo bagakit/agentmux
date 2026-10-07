@@ -1,4 +1,3 @@
-import { withInteractionOperation } from './fixtures/interaction-client.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -138,24 +137,16 @@ async function ingressClient(
 }
 
 /** This ingress fixture supplies native target/completion facts; Core still owns the typed input. */
-function supplyTypedTarget(client: AgentMuxClient): void {
+function supplyNativeSource(client: AgentMuxClient): void {
   const provider = client.providers.get(client.agentSession(AGENT_SESSION_ID).providerId)
   provider.discoverNativeSession = async () => ({ handle: { kind: 'provider', providerId: 'codex', sessionId: 'ingress-native-source' },
     assertCurrent: async () => {} })
-  provider.prepareInteractionResponse = async (context, request, response) => ({
-    plan: provider.planInteractionResponse(request, response),
-    target: { agentSessionId: context.agentSessionId, run: context.run, requestId: request.id,
-      nativeToolCallId: request.nativeToolCallId!, nativeSourceId: 'ingress-native-source', inputByte: context.inputByte,
-      frame: { run: context.run, outputThroughByte: 0, geometryRevision: 0, evidenceGeneration: 0 } },
-    inspectCurrentTarget: () => true, verifyCurrentTarget: async () => true
-  })
-  ;(client as unknown as { screenEvidence: { currentCompleteFrame: () => unknown } }).screenEvidence.currentCompleteFrame = () => ({
-    snapshot: { cols: 80, rows: 24, cursor: { row: 0, column: 0 }, lines: [] }, outputThroughByte: 0, geometryRevision: 0, evidenceGeneration: 0 })
+
 }
 
-async function completeTypedAnswer(client: AgentMuxClient): Promise<void> {
+async function completeNativeAnswer(client: AgentMuxClient): Promise<void> {
   const pending = client.agentSession(AGENT_SESSION_ID).pendingInteraction!
-  expect(pending.response?.acknowledged).toBe(true)
+  expect(pending.nativeInput?.delivery).toBe('accepted')
   await (client as unknown as { acceptHookEvent(envelope: import('../src/types.js').NativeHookEnvelope, signal: AbortSignal): Promise<void> }).acceptHookEvent({
     receiptId: `completed-${pending.request.id}`, agentSessionId: AGENT_SESSION_ID, providerId: 'codex', runId: RUN_ID,
     payload: { hook_event_name: 'PostToolUse', session_id: 'ingress-native-source', tool_name: 'exec_command', tool_call_id: pending.request.nativeToolCallId }
@@ -477,7 +468,8 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
       const { operationId, startByte, endByte, completionId } = stored.promptCompletionAdmission!
       // This is the exact already-installed shape. Missing logical identity is unknown, not invalid.
       expect(completionId).toBe('["ingress-run",100]')
-      const existing = { operationId, startByte, endByte, completionId: completionId! }
+      const existing = { operationId, startByte, endByte, completionId: completionId! } as unknown as
+        NonNullable<AgentMuxStoredAgentSession['promptCompletionAdmission']>
       await first.store.compareAndSwap(stored, { ...stored, promptCompletionAdmission: existing })
       const restarted = await ingressClient({}, new AgentMuxFileAgentSessionStore(path), daemon)
       await expect(restarted.client.submitAgentPrompt(input)).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
@@ -569,9 +561,9 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
     expect(fixture.client.agentSession(AGENT_SESSION_ID).terminalPromptSubmission?.submit.acknowledged).toBe(false)
   })
 
-  it('lets an exact typed answer end the optional Prompt render observation in the same Core', async () => {
+  it('lets explicit native terminal input end the optional Prompt render observation in the same Core', async () => {
     const fixture = await ingressClient({ providerId: 'codex', executorId: 'codex' })
-    supplyTypedTarget(fixture.client)
+    supplyNativeSource(fixture.client)
     const inner = fixture.client as unknown as Internals
     let release!: () => void, started!: () => void, observation!: AbortSignal
     const entered = new Promise<void>(resolve => { started = resolve })
@@ -595,15 +587,14 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
     } }
     await inner.registry.update(AGENT_SESSION_ID, { runId: RUN_ID }, current => ({ ...current,
       pendingInteraction: pending, updatedAt: Math.max(current.updatedAt, 200) }))
-    const answer = fixture.client.respondAgentInteraction(withInteractionOperation(fixture.client, { agentSessionId: AGENT_SESSION_ID,
-      expectedRun: { runId: RUN_ID }, response: { kind: 'permission', requestId: pending.request.id,
-        decision: { outcome: 'selected', optionId: 'allow-once' } } })).then(() => null, error => error)
+    const answer = fixture.client.writeAgent({ agentSessionId: AGENT_SESSION_ID,
+      expectedRun: { runId: RUN_ID }, source: 'user', data: '1' }).then(() => null, error => error)
     try { await vi.waitFor(() => expect(observation.aborted).toBe(true)) }
     finally { release(); await Promise.all([prompt, answer]) }
     expect(await prompt).toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
     expect(await answer).toBeNull()
-    expect(fixture.writes).toEqual(['ordinary prompt', '1'])
-    await completeTypedAnswer(fixture.client)
+    expect(fixture.writes).toEqual(['\u001b[200~ordinary prompt\u001b[201~', '1'])
+    await completeNativeAnswer(fixture.client)
     expect((await fixture.status()).state).toEqual({ type: 'running' })
   })
 
@@ -613,7 +604,7 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
       const store = source === 'new message joins' ? new AgentMuxMemoryAgentSessionStore()
         : new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
       const fixture = await ingressClient({ providerId: 'codex', executorId: 'codex' }, store)
-      supplyTypedTarget(fixture.client)
+      supplyNativeSource(fixture.client)
       const inner = fixture.client as unknown as Internals
       const pending: AgentMuxPendingInteraction = { request: {
         kind: 'permission', id: 'human-before-submit', nativeToolCallId: 'native-human-before-submit', agentSessionId: AGENT_SESSION_ID, title: 'Exact decision',
@@ -629,17 +620,16 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
         operationId: 'partial-before-human', prompt: 'original payload' }))
         .rejects.toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
       const originalClaim = ((await fixture.store.load())[0] as AgentMuxStoredAgentSession).promptCompletionAdmission
-      expect(fixture.writes).toEqual(['original payload'])
-      await fixture.client.respondAgentInteraction(withInteractionOperation(fixture.client, { agentSessionId: AGENT_SESSION_ID,
-        expectedRun: { runId: RUN_ID }, response: { kind: 'permission', requestId: pending.request.id,
-          decision: { outcome: 'selected', optionId: 'allow-once' } } }))
-      expect(fixture.writes).toEqual(['original payload', '1'])
-      await completeTypedAnswer(fixture.client)
+      expect(fixture.writes).toEqual(['\u001b[200~original payload\u001b[201~'])
+      await fixture.client.writeAgent({ agentSessionId: AGENT_SESSION_ID,
+        expectedRun: { runId: RUN_ID }, source: 'user', data: '1' })
+      expect(fixture.writes).toEqual(['\u001b[200~original payload\u001b[201~', '1'])
+      await completeNativeAnswer(fixture.client)
       let rejectedSubmit = 0
       inner.kernel.input = async (runId: string, operation: Parameters<CtxmuxRunAdapter['input']>[1]) => {
         // The original submit has never entered Native. Its immutable range is now
         // behind the actual cursor, so this exact request has no future write eligibility.
-        if (operation.data === '\r' && operation.expectedByte === originalClaim!.endByte - 1) {
+        if (operation.data === '\r' && operation.expectedByte === originalClaim!.endByte! - 1) {
           expect((await fixture.status()).acceptedInputBytes).toBeGreaterThan(operation.expectedByte)
           rejectedSubmit++
           throw new AgentMuxError('Original submit range was occupied', 'CTXMUX_input_cursor_mismatch', 'not_applied')
@@ -666,7 +656,7 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
         operationId: 'next-after-human', prompt: 'next payload', allowUncertainTurn: true }).then(() => null, error => error)
       expect(result).toBeNull()
       expect(rejectedSubmit).toBe(1)
-      expect(fixture.writes).toEqual(['original payload', '1', 'next payload', '\r'])
+      expect(fixture.writes).toEqual(['\u001b[200~original payload\u001b[201~', '1', '\u001b[200~next payload\u001b[201~', '\r'])
       expect(((await fixture.store.load())[0] as AgentMuxStoredAgentSession).promptCompletionAdmission)
         .toMatchObject({ submissionId: 'next-after-human', acknowledged: true })
       expect((await fixture.status()).state).toEqual({ type: 'running' })

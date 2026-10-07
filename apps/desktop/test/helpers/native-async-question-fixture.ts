@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentMuxClient, type AgentMuxSessionQuestionReplyInput } from '../../../../packages/core/dist/client.js';
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../../../../packages/core/dist/agent-session-store.js';
 import { agentPromptCondition } from '../../../../packages/core/dist/agent-prompt-condition.js';
-import { codexQuestionRequest, encodeCodexQuestionReply } from '../../../../packages/core/dist/providers/codex-question.js';
+import { codexQuestionRequest } from '../../../../packages/core/dist/providers/codex-question.js';
 import { AgentTerminalScreen } from '../../../../packages/core/dist/agent-terminal-screen.js';
 import type { AgentMuxAgentSessionRegistry } from '../../../../packages/core/dist/agent-session-registry.js';
 import type { CtxmuxAdapterRun } from '../../../../packages/core/dist/ctxmux-run-adapter.js';
@@ -33,7 +33,9 @@ const answers = [{
   questionId: request.questions[0]!.id,
   answer: 'Keep original'
 }];
-export const raw = encodeCodexQuestionReply(request, answers);
+export const raw = '<send_user_message_question_reply>\n' + JSON.stringify(answers.map(answer => ({
+  answer: answer.answer, question: request.questions[0]!.prompt.replace(/\r?\n/g, ' '), questionItemId: answer.questionId
+}))) + '\n</send_user_message_question_reply>';
 const closes: Array<() => Promise<void>> = [];
 afterEach(async () => {
   vi.restoreAllMocks();

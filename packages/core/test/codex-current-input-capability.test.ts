@@ -3,11 +3,9 @@ import { appendFile, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
-import type { AgentProviderInteractionResponseContext } from '../src/agent-provider.js'
 import { AgentMuxError } from '../src/errors.js'
 import { CodexPromptTransportUnconfirmedError } from '../src/providers/codex-prompt-execution-evidence.js'
 import { createCodexPromptTransportPreparation } from '../src/providers/codex-prompt-transport-preparation.js'
-import type { AgentMuxInteractionRequest } from '../src/types.js'
 
 const native = vi.hoisted(() => ({ path: '', device: 0n, inode: 0n, owners: [22] as number[], descriptor: '8',
   rootBirth: 'root-birth', writerBirth: 'writer-birth', fileReads: 0, changedAfterRead: '' }))
@@ -40,29 +38,7 @@ async function fixture() {
   return { root, path, provider, context: { ...context, nativeSourceId: evidence!.sourceId } }
 }
 
-async function typed() {
-  const f = await fixture(), args = JSON.stringify({ cmd: 'printf private', sandbox_permissions: 'require_escalated' })
-  await appendFile(f.path, JSON.stringify({ type: 'response_item', payload: { type: 'function_call', call_id: 'exact-call', name: 'exec_command', arguments: args } }) + '\n')
-  const request: AgentMuxInteractionRequest = { kind: 'permission', id: 'original-request', agentSessionId: 'original', title: 'approval',
-    nativeToolCallId: 'exact-call', toolName: 'exec_command', toolInput: args, options: [{ id: 'allow-once', kind: 'allow-once', label: 'Allow' }],
-    evidence: { source: 'native-hook', observedAt: 1, run: { runId: 'original-run' }, hookReceiptId: 'hook' } }
-  const lines = ['', '  Would you like to run the following command?', '', '  $ printf private', '', '› 1. Yes, proceed (y)',
-    '  2. No, and tell Codex what to do differently (esc)', '', '  Press enter to confirm or esc to cancel', '']
-  const context: AgentProviderInteractionResponseContext = { ...f.context, agentSessionId: 'original', run: { runId: 'original-run' }, inputByte: 0,
-    observeTarget: async inspect => { expect(inspect({ cols: 80, rows: lines.length, cursor: { row: 0, column: 1 },
-      lines: lines.map(text => ({ text, cells: [], wrapped: false })) })).toBe(true)
-      return { run: { runId: 'original-run' }, outputThroughByte: 100, geometryRevision: 1, evidenceGeneration: 1 } } }
-  const prepared = await f.provider.prepareInteractionResponse!(context, request,
-    { kind: 'permission', requestId: request.id, decision: { outcome: 'selected', optionId: 'allow-once' } })
-  return { f, context, request, prepared }
-}
-
 describe('current source/writer capability without an executable pathname gate', () => {
-  it('prepares the exact supported typed target from its original protocol source and writer', async () => {
-    const f = await typed()
-    expect(f.prepared?.plan.data).toBe('1'); expect(f.prepared?.target.nativeToolCallId).toBe('exact-call')
-    expect(await f.prepared!.verifyCurrentTarget(f.context)).toBe(true)
-  })
   it.each(['pid', 'birth', 'root-birth', 'descriptor', 'multiple', 'source', 'handle', 'remote'])('refuses changed %s in the actual prompt final verifier', async fault => {
     const f = await fixture(), prepared = await f.provider.preparePromptExecutionTransport!(f.context)
     expect(prepared).not.toBeNull()

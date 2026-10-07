@@ -334,48 +334,18 @@ it('raw ACK requires no semantic Store write and preserves state when that Store
   expect(metadataSave).not.toHaveBeenCalled()
 })
 
-it('native interaction first claim invalidates idle but replay preserves the newly completed epoch', async () => {
-  const h = await harness({
-    ...session(done(100)), pendingInteraction: { request: {
-      kind: 'permission', id: 'permission-one', nativeToolCallId: 'entry-tool-call', agentSessionId: 'entry-agent', title: 'Allow action?',
-      options: [{ id: 'allow-once', label: 'Allow once', kind: 'allow-once' }],
-      evidence: { source: 'native-hook', observedAt: reshapeFixtureEpoch(0, 0, 100), run: { runId: 'entry-run' }, hookReceiptId: 'permission-one' }
-    } }
-  })
-  // This state-entry test contributes an explicit synthetic Provider target.
-  // Exact native target admission is independently covered by interaction-input-target.
-  const provider = h.client.providers.get('codex')
-  provider.prepareInteractionResponse = async (context, request, response) => ({
-    plan: provider.planInteractionResponse(request, response),
-    target: { agentSessionId: context.agentSessionId, run: context.run, requestId: request.id,
-      nativeToolCallId: request.nativeToolCallId!, nativeSourceId: 'native-entry', inputByte: context.inputByte,
-      frame: { run: context.run, outputThroughByte: 0, geometryRevision: 0, evidenceGeneration: 0 } },
-    inspectCurrentTarget: () => true, verifyCurrentTarget: async () => true
-  })
-  h.inner.screenEvidence.currentCompleteFrame = () => ({
-    snapshot: { cols: 80, rows: 24, cursor: { row: 0, column: 0 }, lines: [] },
-    outputThroughByte: 0, geometryRevision: 0, evidenceGeneration: 0
-  })
-  h.beforeAck(async () => {
-    expect(h.client.agentSession('entry-agent').semanticStatus?.stateEnteredAt).toBeUndefined()
-    // The fixture already accepted the original bytes; lose only their ACK.
-    // Modern Stores may commit through their atomic updater rather than CAS.
-    throw new Error('response input acknowledgement lost')
-  })
-  const respond = () => h.client.respondAgentInteraction(withInteractionOperation(h.client, {
+it('a terminal-only typed answer preserves idle evidence and the original request', async () => {
+  const h = await harness({ ...session(done(reshapeFixtureEpoch(0, 0, 100))), pendingInteraction: { request: {
+    kind: 'permission', id: 'permission-one', nativeToolCallId: 'entry-tool-call', agentSessionId: 'entry-agent', title: 'Allow action?',
+    options: [{ id: 'allow-once', label: 'Allow once', kind: 'allow-once' }],
+    evidence: { source: 'native-hook', observedAt: reshapeFixtureEpoch(0, 0, 100), run: { runId: 'entry-run' }, hookReceiptId: 'permission-one' }
+  } } })
+  const before = h.client.agentSession('entry-agent')
+  await expect(h.client.respondAgentInteraction(withInteractionOperation(h.client, {
     agentSessionId: 'entry-agent', expectedRun: { runId: 'entry-run' },
     response: { kind: 'permission', requestId: 'permission-one', decision: { outcome: 'selected', optionId: 'allow-once' } }
-  }))
-  await expect(respond()).rejects.toThrow('response input acknowledgement lost')
-  h.beforeAck()
-  const clock = vi.spyOn(Date, 'now').mockReturnValue(reshapeFixtureEpoch(0, 0, 2_000))
-  await h.feed('UserPromptSubmit')
-  clock.mockReturnValue(reshapeFixtureEpoch(0, 0, 3_000))
-  await h.feed('Stop')
-  await respond()
-  expect(h.client.agentSession('entry-agent').semanticStatus?.stateEnteredAt).toBe(reshapeFixtureEpoch(0, 0, 3_000))
-  expect(h.client.agentSession('entry-agent').pendingInteraction).toMatchObject({
-    request: { nativeToolCallId: 'entry-tool-call' }, response: { acknowledged: true }
-  })
-  expect(h.writes.map((input) => input.data)).toEqual(['1'])
+  }))).rejects.toMatchObject({ code: 'AGENT_INTERACTION_UNCONFIRMED' })
+  expect(h.client.agentSession('entry-agent').semanticStatus).toEqual(before.semanticStatus)
+  expect(h.client.agentSession('entry-agent').pendingInteraction).toEqual(before.pendingInteraction)
+  expect(h.writes).toEqual([])
 })
