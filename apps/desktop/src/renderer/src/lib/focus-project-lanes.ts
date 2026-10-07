@@ -16,15 +16,18 @@ export type FocusHierarchyFacts = {
 export const EMPTY_FOCUS_HIERARCHY: FocusHierarchyFacts = { topics: {}, worktrees: [] }
 let indexedConfig: AppConfig | null | undefined
 let roots: ReadonlyMap<string, AppConfig['workspaces'][number]> = new Map()
+let workspacesById: ReadonlyMap<string, AppConfig['workspaces'][number]> = new Map()
 /** Cached read-only references to the immutable Config, never an independent ownership registry. */
 export function focusProjectRoots(config: AppConfig | null) {
   if (indexedConfig !== config) {
     const next = new Map<string, AppConfig['workspaces'][number]>()
+    const ids = new Map<string, AppConfig['workspaces'][number]>()
     for (const workspace of config?.workspaces ?? []) {
+      ids.set(workspace.id, workspace)
       const key = JSON.stringify([workspace.hostId, workspace.path])
       if (!next.has(key)) next.set(key, workspace)
     }
-    indexedConfig = config; roots = next
+    indexedConfig = config; roots = next; workspacesById = ids
   }
   return roots
 }
@@ -56,8 +59,19 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
   const activity = new Map<string, number>()
   const recentActivityMs = resolveFocusRecentActivityHours(config?.focus?.recentActivityHours) * 3_600_000
   for (const row of rows) {
-    const workspace = row.workspace
-    const checkout = facts.worktrees.find(item => item.path === row.workspacePath && item.hostId === row.hostId)
+    const resource = row.workspace
+    const configured = workspacesById.get(resource?.id ?? row.workspaceId)
+    const closeout = configured?.closeout ?? resource?.closeout
+    const displayId = closeout?.targetWorkspaceId ?? (!configured ? tabWorkspace.get(row.id) : undefined)
+    const candidate = displayId ? workspacesById.get(displayId) : undefined
+    const display = candidate && !candidate.closeout && candidate.hostId === row.hostId ? candidate : undefined
+    // Focus groups current presentation, while the Context retains its original
+    // execution path. A completed closeout must not revive its former branch from
+    // retained Git observations after the source resource is withdrawn.
+    const gathered = Boolean(display && (closeout || display.id !== resource?.id))
+    const workspace = gathered ? display : resource
+    const displayPath = gathered ? workspace!.path : row.workspacePath
+    const checkout = gathered ? undefined : facts.worktrees.find(item => item.path === row.workspacePath && item.hostId === row.hostId)
     const repoPath = workspace?.repoPath ?? checkout?.repoPath
     const project = repoPath ? projectRoots.get(JSON.stringify([row.hostId, repoPath])) : workspace
     const projectId = project?.id ?? (repoPath ? directoryIdentity(row.hostId, repoPath) : workspace?.id ?? row.workspaceId)
@@ -69,11 +83,11 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     const branch = workspace?.branch ?? checkout?.branch
     if (branch) labels.push(branch)
     if (topicId) labels.push(topic?.title || topicId)
-    const id = JSON.stringify([row.hostId, workspaceId, row.workspacePath, topicId])
+    const id = JSON.stringify([row.hostId, workspaceId, displayPath, topicId])
     const iconTarget = workspace && topic ? topicSpaceIconTarget(workspace, topic) : null
     const lane = lanes.get(id) ?? { id, workspaceId, projectId, projectWorkspaceId: project?.id ?? workspace?.id ?? null,
       name: labels.join(' / '), labels, summary: topic?.readError ? null : topic?.summary.trim() || null,
-      path: row.workspacePath, hostId: row.hostId, topicId,
+      path: displayPath, hostId: row.hostId, topicId,
       ...(topicId ? { objectKind: scratchTopicKind(topicId, topics),
         ...(iconTarget ? { objectIconKey: iconTarget.key } : {}) } : {}),
       recovery: checkout?.removed ? 'removed' : !workspace && config ? 'unknown' : null, activeAgentIds: [], contextIds: [] }
