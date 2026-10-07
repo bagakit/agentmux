@@ -6,7 +6,7 @@ import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
 type Props = ComponentProps<typeof ActivityView>
 /** Fixture parameters for the real common Activity. No component, page, cache or alternate reader. */
 export function activityReadingProps({ control, visible = true, readingKey, label, onClose, returnLabel, describeSpeaker,
-  ...content }: Pick<Props, 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation' | 'renderMessageActions' | 'onReplyQuestion'> & {
+  ...content }: Pick<Props, 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation' | 'renderMessageActions'> & {
   control: SessionHistoryReference & { kind?: 'agent'; run?: { runId: string } }
   visible?: boolean
   readingKey?: string

@@ -6,7 +6,7 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentMuxClient, AgentMuxFileAgentSessionStore, type AgentSessionHistoryPage } from '@agentmux/core';
-import { codexQuestionRequest, encodeCodexQuestionReply } from '../../../packages/core/src/providers/codex-question.js';
+import { codexQuestionRequest } from '../../../packages/core/src/providers/codex-question.js';
 import { ClientUiProvider, type ClientUiPlatform } from '@agentmux/client-ui/platform';
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView';
 import { ActivityView } from '../src/renderer/src/components/ActivityView';
@@ -21,7 +21,9 @@ const platform: ClientUiPlatform = { copyText: copy, overlayContainer: () => doc
 let root: Root, container: HTMLDivElement, directory: string, client: AgentMuxClient, store: AgentMuxFileAgentSessionStore, oldPage: AgentSessionHistoryPage, fullPage: AgentSessionHistoryPage, latestPage: AgentSessionHistoryPage, calls: MockInstance<typeof api.sessions.historyPage>, stored: Buffer;
 let contextSnapshot: ReturnType<typeof useSessionUserMessages> | undefined;
 const question = { type: 'agentMessage', id: 'native-question', phase: 'final_answer', delivery: 'async', text: 'Original request', questions: [{ title: 'Continue the original goal?', options: ['Keep the original goal', 'Revise'] }] };
-const request = codexQuestionRequest(question)!, reply = encodeCodexQuestionReply(request, [{ questionId: request.questions[0]!.id, answer: 'Keep the original goal' }]);
+const request = codexQuestionRequest(question)!, reply = '<send_user_message_question_reply>\n' + JSON.stringify([
+  { questionItemId: request.questions[0]!.id, question: question.questions[0]!.title, answer: 'Keep the original goal' }
+]) + '\n</send_user_message_question_reply>';
 async function render(node: ReactNode) { await act(async () => root.render(<ClientUiProvider platform={platform}>{node}</ClientUiProvider>)); }
 function card() { const c = container.querySelector<HTMLElement>('[aria-label="Native asynchronous question"]'); expect(c).not.toBeNull(); return c!; }
 function view(context: AgentSessionHistoryPage | null = fullPage, page = oldPage) { return <ConversationView page={page} sessionId={sid} questionAnswerContext={context}/>; }
@@ -93,19 +95,18 @@ it('confirms an already recorded same-source answer outside a preserved page wit
 it.each(['session', 'provider', 'native'] as const)('rejects %s context even when the opaque question ID matches', async (kind) => { const foreign = { ...fullPage, ...(kind === 'session' ? { agentSessionId: 'other-session' } : {}), source: { ...fullPage.source, ...(kind === 'provider' ? { providerId: 'claude' } : kind === 'native' ? { nativeSessionId: 'other-native' } : {}) } }; await render(view(foreign)); expect(card().dataset.questionState).toBe('unknown'); expect(card().querySelector('.agent-question__answer')).toBeNull(); expect(calls).not.toHaveBeenCalled(); });
 it('does not infer confirmation from literal reply text or non-user-message facts', async () => { const literal = { ...fullPage, items: fullPage.items.map(i => i.id === 'native-answer' ? (({ questionAnswers: _answers, ...record }) => record)(i) : i) }; await render(view(literal)); expect(card().dataset.questionState).toBe('unknown'); const wrongKind = { ...fullPage, items: fullPage.items.map(i => i.id === 'native-answer' ? { ...i, kind: 'assistant-message' as const } : i) }; await render(view(wrongKind)); expect(card().dataset.questionState).toBe('unknown'); });
 it('keeps recorded page answers authoritative and does not retain a confirmation after its same-source facts leave', async () => { const conflicting = { ...fullPage, items: fullPage.items.map(i => i.questionAnswers ? { ...i, questionAnswers: i.questionAnswers.map(a => ({ ...a, answer: 'Different context text' })) } : i) }; await render(view(conflicting, fullPage)); expect(card().querySelector('.agent-question__answer')?.textContent).toBe('Keep the original goal'); await render(view(fullPage)); expect(card().dataset.questionState).toBe('answered'); await render(view(null)); expect(card().dataset.questionState).toBe('unknown'); });
-it('an input receipt alone cannot confirm a submitted reply and no automatic retry is issued', async () => {
+it('a retained submitted operation stays independent of recorded answers and opening the terminal', async () => {
   const answers = [{ questionId: request.questions[0]!.id, answer: 'Keep the original goal' }]
-  let submitted = false
-  const send = vi.fn(async () => { submitted = true; return { agentSessionId: sid, source, recordId: question.id,
-    questionIds: [request.questions[0]!.id], operationId: 'original-operation', outcome: 'submitted' as const } })
+  const attempt = { phase: 'submitted' as const, answers }
+  const terminal = vi.fn(), edit = vi.fn()
   const node = (context: AgentSessionHistoryPage | null) => <ConversationView page={oldPage} sessionId={sid}
-    questionAnswerContext={context} onReplyQuestion={send} questionReplyState={() => submitted ? { phase: 'submitted', answers } : undefined}/>
+    questionAnswerContext={context} questionReplyRoute="terminal" onOpenQuestionTerminal={terminal}
+    onQuestionDraftChange={edit} questionReplyState={() => attempt}/>
   await render(node(null))
-  await act(async () => { [...card().querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.includes('Keep the original goal'))!.click() })
+  expect(card().dataset.questionState).toBe('submitted')
   await act(async () => card().querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
-  await render(node(null))
-  expect(send).toHaveBeenCalledTimes(1); expect(card().dataset.questionState).toBe('submitted')
+  expect(terminal).toHaveBeenCalledOnce()
   await render(node(fullPage)); expect(card().dataset.questionState).toBe('answered')
-  expect(send).toHaveBeenCalledTimes(1); expect(calls).not.toHaveBeenCalled()
+  expect(attempt.phase).toBe('submitted'); expect(calls).not.toHaveBeenCalled()
 })
 it('actual shared reader→Activity consumes accepted context beyond latest30 and makes no read demand while hidden', async () => { await render(<Reading />); await vi.waitFor(() => expect(contextSnapshot?.nativeContextItems.some(i => i.questionAnswers?.length)).toBe(true)); await act(async () => { }); expect(card().dataset.questionState).toBe('answered'); expect(card().querySelector('.agent-question__answer')?.textContent).toBe('Keep the original goal'); expect(container.querySelectorAll('[data-native-record-id="native-answer"]')).toHaveLength(0); expect(calls).toHaveBeenCalledTimes(3); const reads = calls.mock.calls.length, body = container.querySelector('[data-native-record-id="original-prose"] .log-turn__body'); await render(<Reading visible={false}/>); await new Promise(resolve => setTimeout(resolve, 90)); expect(calls).toHaveBeenCalledTimes(reads); expect(container.querySelector('[data-native-record-id="original-prose"] .log-turn__body')).toBe(body); expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('ORIGINAL DRAFT'); });

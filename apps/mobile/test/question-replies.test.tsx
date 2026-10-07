@@ -1,257 +1,110 @@
 import { act } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
 import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
+import { MobileApp } from '../src/MobileApp'
 import { MobileConversationSurface } from '../src/conversation/MobileConversationSurface'
 import { createLocalDrafts } from '../src/conversation/local-drafts'
-import * as questionReplyOwner from '../src/conversation/question-replies'
-import { observeMobileQuestionAnswers, replyMobileQuestion } from '../src/conversation/question-replies'
+import { reconcileMobileQuestionReplies } from '../src/conversation/question-replies'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { DEVICE_WORKFACE_KEY, emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, deferred, editor, evidence, fixture, history, mount, mounted, paste } from './conversation-fixture'
-
-const sid = 'session-original', questionId = 'opaque-question'
-const target = { source: history().source, turnId: 'original-turn', recordId: 'original-question' }
-const key = questionReplyKey(sid, target)
-const page: AgentSessionHistoryPage = { ...history(), nextCursor: null, items: [{ id: target.recordId, turnId: target.turnId,
-  kind: 'assistant-message', contentParts: [{ kind: 'text', text: '原始问题正文' }], questionRequest: { delivery: 'async', questions: [{
-    id: questionId, prompt: '如何处理原工作面？', options: [{ id: 'keep', label: 'Keep original' }, { id: 'revise', label: 'Revise' }], acceptsText: true
-  }] } }] }
+import { button, click, deferred, fixture, history, mount, mounted } from './conversation-fixture'
+vi.mock('@xterm/xterm', () => ({ Terminal: class {
+  options: Record<string, unknown>; unicode = { activeVersion: '6' }; textarea = document.createElement('textarea'); rows = 24
+  buffer = { active: { type: 'normal', baseY: 0, viewportY: 0 } }; element: HTMLElement | undefined
+  parser = { registerOscHandler: () => ({ dispose() {} }) }
+  constructor(options: Record<string, unknown>) { this.options = options }
+  loadAddon() {} open(node: HTMLElement) { this.element = node; node.append(this.textarea) } dispose() { this.textarea.remove() }
+  user: (() => void) | undefined; data: ((value: string) => void) | undefined
+  input(value: string, user: boolean) { if (user) this.user?.(); this.data?.(value) }
+  getSelection() { return '' } scrollToLine() {} focus() {} onUserInput(listener: () => void) { this.user = listener; return { dispose() {} } } onData(listener: (value: string) => void) { this.data = listener; return { dispose() {} } } onBinary() { return { dispose() {} } }
+} }))
+vi.mock('../src/terminal/reader', () => ({ createMobileTerminalReader: () => ({ setVisible() {}, dispose: async () => {}, retry: async () => {} }) }))
+const sid = 'session-original', target = { source: history().source, turnId: 'original-turn', recordId: 'original-question' }, key = questionReplyKey(sid, target)
+const page: AgentSessionHistoryPage = { ...history(), nextCursor: null, items: [{ id: target.recordId, turnId: target.turnId, kind: 'assistant-message', contentParts: [{ kind: 'text', text: '原始问题正文' }], questionRequest: { delivery: 'async', questions: [
+  { id: 'first', prompt: '如何处理原工作面？', options: [{ id: 'keep', label: 'Keep original' }], acceptsText: true },
+  { id: 'second', prompt: '补充说明', options: [], acceptsText: true }
+] } }] }
+const held = { phase: 'unknown' as const, runtimeId: 'original-runtime', hostId: 'host-original', diagnostic: { code: 'ORIGINAL_UNKNOWN', message: '原答复回执仍未知' }, input: { ...target, operationId: 'original-operation', expectedRun: { runId: 'run-original' }, afterSubmissionId: 'original-predecessor', answers: [{ questionId: 'first', answer: 'Original frozen answer' }] } }
 const record = () => JSON.parse(localStorage.getItem(DEVICE_WORKFACE_KEY)!).conversation
 const attempt = () => record().questions?.find(([id]: [string]) => id === key)?.[1]
 function questionFixture() {
   const f = fixture(); f.setPage(page)
-  const original = f.sessions.get(sid)!
-  f.sessions.set(sid, { ...original, promptCompletionAdmission: { operationId: 'previous', submissionId: 'original-predecessor', startByte: 0, endByte: 1 } })
-  const rpc = vi.fn(async (_method: string, input: any) => ({ agentSessionId: sid, source: input.source, recordId: input.recordId,
-    questionIds: input.answers.map((answer: any) => answer.questionId), operationId: input.operationId, outcome: 'submitted' }))
-  Object.assign(f.client, { forwardRpc: rpc, runtimeOwnerIdentity: () => ({ runtimeId: 'original-runtime' }) })
-  return { ...f, rpc }
-}
-function surface(f: ReturnType<typeof questionFixture>) { return <MobileConversationSurface client={f.client} agentSessionId={sid}
-  connection={{ state: 'connected', message: 'connected' }} platform={createBrowserPlatform()} /> }
-async function unmount(element: HTMLElement) {
-  const index = mounted.findIndex(view => view.element === element), view = mounted.splice(index, 1)[0]!
-  await act(async () => view.root.unmount()); element.remove()
-}
-async function type(element: HTMLElement, value: string) {
-  const field = element.querySelector<HTMLTextAreaElement>('textarea')!
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, value)
-    field.dispatchEvent(new Event('input', { bubbles: true }))
+  f.sessions.set(sid, { ...f.sessions.get(sid)!, nativeHandle: { kind: 'provider', providerId: page.source.providerId, sessionId: page.source.nativeSessionId } })
+  const rpc = vi.fn(async (method: string) => {
+    if (method === 'space.ls') return { catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [], agentPresentation: [] } }
+    if (method === 'app.snapshot') return { agents: [] }
+    if (method === 'agent.inspect') return { session: f.client.agentSession(sid), displayName: { override: null, availability: 'observed' } }
+    throw new Error('Unexpected automatic RPC: ' + method)
   })
+  const write = vi.fn(async (input: any) => ({ runId: input.expectedRun.runId, appliedByteRange: { startByte: 0, endByte: new TextEncoder().encode(input.data).length }, acceptedThroughByte: new TextEncoder().encode(input.data).length }))
+  Object.assign(f.client, { forwardRpc: rpc, writeAgent: write, runtimeIdentity: () => ({ hostId: 'host-original', instanceId: 'original-runtime' }), runtimeOwnerIdentity: () => ({ runtimeId: 'original-runtime' }) })
+  return { ...f, rpc, write }
 }
-async function refresh(element: HTMLElement) {
-  if (!element.querySelector('[aria-label="刷新原对话"]')) await click(button(element, 'Show the message tool row'))
-  await click(button(element, '刷新原对话'))
-}
+async function type(element: HTMLElement, value: string) { const field = element.querySelector<HTMLTextAreaElement>('[aria-label="Your answer: 补充说明"]')!; expect(field.disabled).toBe(false); await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })) }) }
+async function refresh(element: HTMLElement) { if (!element.querySelector('[aria-label="刷新原对话"]')) await click(button(element, 'Show the message tool row')); await click(button(element, '刷新原对话')) }
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() } vi.restoreAllMocks() })
-
-describe('actual mobile native question intent owner', () => {
-  it('restores an interrupted in-flight reply as unknown without automatic input and preserves its complete intent for explicit retry', async () => {
-    const f = questionFixture(), local = createLocalDrafts()
-    const input = { ...target, operationId: 'interrupted-original-operation', expectedRun: { runId: 'run-original' }, afterSubmissionId: 'original-frozen-predecessor', answers: [{ questionId, answer: 'Keep original' }] }
-    local.questions.set(key, { phase: 'sending', runtimeId: 'original-runtime', hostId: 'host-original', input }); await local.save()
-    const view = await mount(surface(f))
-    expect(view.element.textContent).toContain('Reply unconfirmed'); expect(f.rpc).not.toHaveBeenCalled()
-    await click(button(view.element, 'Retry original reply')); await vi.waitFor(() => expect(f.rpc).toHaveBeenCalledOnce())
-    expect(f.rpc.mock.calls[0]![1]).toEqual({ ...input, agentSessionId: sid, sourceChannel: 'api' })
-  })
-  it('keeps unknown original answers and edited drafts separately through remount; only explicit retry rejoins the original operation and condition', async () => {
-    const f = questionFixture(); f.rpc.mockRejectedValueOnce(new Error('Original receipt lost'))
-    const first = await mount(surface(f))
-    await click(button(first.element, 'Keep original')); await click(button(first.element, 'Submit reply'))
-    await vi.waitFor(() => expect(attempt()?.phase).toBe('unknown'))
-    const input = f.rpc.mock.calls[0]![1]
-    expect(input).toMatchObject({ ...target, expectedRun: { runId: 'run-original' }, afterSubmissionId: 'original-predecessor', sourceChannel: 'api' })
-    await click(button(first.element, 'Revise')); await type(first.element, '另一份未发送草稿\n保留空白  ')
-    await vi.waitFor(() => expect(record().questionDrafts?.[0]?.[1]).toEqual([{ questionId, answer: '另一份未发送草稿\n保留空白  ' }]))
-    expect(attempt().input.answers).toEqual([{ questionId, answer: 'Keep original' }])
-    expect(editor(first.element).getAttribute('contenteditable')).toBe('true')
-    await unmount(first.element)
-    const restored = await mount(surface(f))
-    expect(restored.element.querySelector('textarea')?.value).toBe('另一份未发送草稿\n保留空白  ')
-    expect(restored.element.textContent).toContain('Keep original')
-    expect(f.rpc).toHaveBeenCalledOnce()
-    await act(async () => { f.emit({ type: 'connection-state', state: 'restored', evidence }) })
-    expect(f.rpc).toHaveBeenCalledOnce()
-    f.sessions.set(sid, { ...f.sessions.get(sid)!, promptCompletionAdmission: { operationId: 'later-phase', submissionId: input.operationId, startByte: 0, endByte: 2 } })
-    await click(button(restored.element, 'Retry original reply'))
-    await vi.waitFor(() => expect(attempt()?.phase).toBe('submitted'))
-    expect(f.rpc.mock.calls[1]![1]).toEqual(input)
-    expect(record().questionDrafts?.[0]?.[1]).toEqual([{ questionId, answer: '另一份未发送草稿\n保留空白  ' }])
-  })
-  it('does not treat a later zero-input refusal as proof that the original unknown reply was not applied', async () => {
-    const f = questionFixture()
-    f.rpc.mockRejectedValueOnce(new Error('Original receipt unknown')).mockRejectedValueOnce(Object.assign(new Error('Later invocation refused'), { controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } }))
-    const view = await mount(surface(f))
-    await click(button(view.element, 'Keep original')); await click(button(view.element, 'Submit reply'))
-    await vi.waitFor(() => expect(attempt()?.phase).toBe('unknown'))
-    const original = attempt().input
-    await click(button(view.element, 'Retry original reply')); await vi.waitFor(() => expect(f.rpc).toHaveBeenCalledTimes(2))
-    await vi.waitFor(() => expect(attempt()?.phase).toBe('unknown'))
-    expect(attempt().input).toEqual(original); expect(button(view.element, 'Revise').disabled).toBe(false)
-    await expect(replyMobileQuestion(f.client, sid, 'run-original', { ...target, answers: [{ questionId, answer: 'Revise' }] }, createLocalDrafts(), () => {})).rejects.toThrow('不能替换')
-    expect(f.rpc).toHaveBeenCalledTimes(2)
-  })
-  it('settles unknown only from the same original whole-operation Core fact and keeps edited drafts through remount until explicit Send', async () => {
-    const f = questionFixture(); f.rpc.mockRejectedValueOnce(new Error('Original receipt unknown'))
-    const first = await mount(surface(f))
-    await click(button(first.element, 'Keep original')); await click(button(first.element, 'Submit reply'))
-    await vi.waitFor(() => expect(attempt()?.phase).toBe('unknown'))
-    const original = attempt().input
-    await click(button(first.element, 'Revise')); await type(first.element, 'New answer remains unsent')
-    const frozen = f.sessions.get(sid)!, negative = { ...frozen, updatedAt: frozen.updatedAt + 1,
-      promptCompletionAdmission: { operationId: 'original-native-phase', submissionId: original.operationId, startByte: 0, endByte: 20,
-        notApplied: true, intent: { run: frozen.run, ownerInstanceId: 'original-native-owner', prompt: 'original', plan: { kind: 'single-phase' as const, data: 'original' } } } }
-    // Different Run/operation/Host/Runtime and independent redraw cannot discharge the held original.
-    for (const session of [{ ...negative, run: { runId: 'another-run' } }, { ...negative, hostId: 'another-host' },
-      { ...negative, promptCompletionAdmission: { ...negative.promptCompletionAdmission, submissionId: 'another-operation' } },
-      { ...negative, promptCompletionAdmission: { ...negative.promptCompletionAdmission, frameRefresh: { operationId: 'redraw', acknowledged: false, notApplied: true as const,
-        inputByteRange: { startByte: 0, endByte: 1 }, outputCursorBytes: 0, resizeRevision: 0, nativeSourceId: 'native-original' } } }]) {
-      expect(await observeMobileQuestionAnswers(createLocalDrafts(), sid, page, session, 'original-runtime')).toBe(false)
-      expect(attempt()?.phase).toBe('unknown')
-    }
-    expect(await observeMobileQuestionAnswers(createLocalDrafts(), sid, page, negative, 'another-runtime')).toBe(false)
-    const legacy = createLocalDrafts()
-    legacy.questions.set(key, { ...legacy.questions.get(key)!, runtimeId: null })
-    expect(await observeMobileQuestionAnswers(legacy, sid, page, negative, 'original-runtime')).toBe(false)
-    expect(legacy.questions.get(key)?.phase).toBe('unknown')
-    await act(async () => { f.sessions.set(sid, negative); f.emit({ type: 'agent-session', session: negative }) })
-    await vi.waitFor(() => expect(attempt()?.phase).toBe('rejected'))
-    expect(f.rpc).toHaveBeenCalledOnce(); expect(first.element.querySelector('textarea')?.value).toBe('New answer remains unsent')
-    await unmount(first.element); const restored = await mount(surface(f))
-    expect(restored.element.querySelector('textarea')?.value).toBe('New answer remains unsent'); expect(f.rpc).toHaveBeenCalledOnce()
-    await click(button(restored.element, 'Submit reply')); await vi.waitFor(() => expect(f.rpc).toHaveBeenCalledTimes(2))
-    expect(f.rpc.mock.calls[1]![1]).toMatchObject({ answers: [{ questionId, answer: 'New answer remains unsent' }], afterSubmissionId: original.operationId })
-    expect(f.rpc.mock.calls[1]![1].operationId).not.toBe(original.operationId)
-  })
-  it('settles the exact original Core refusal already cached before the RPC callback is lost, without a read or replay', async () => {
-    const f = questionFixture(), pending = deferred<any>(); f.rpc.mockImplementationOnce(() => pending.promise)
-    const view = await mount(surface(f)); await click(button(view.element, 'Keep original')); await click(button(view.element, 'Submit reply'))
-    await vi.waitFor(() => expect(f.rpc).toHaveBeenCalledOnce())
-    const input = f.rpc.mock.calls[0]![1], frozen = f.sessions.get(sid)!, negative = { ...frozen, updatedAt: frozen.updatedAt + 1,
-      promptCompletionAdmission: { operationId: 'original-phase', submissionId: input.operationId, startByte: 0, endByte: 20, notApplied: true,
-        intent: { run: frozen.run, ownerInstanceId: 'original-owner', prompt: 'original', plan: { kind: 'single-phase' as const, data: 'original' } } } }
-    await act(async () => { f.sessions.set(sid, negative); f.emit({ type: 'agent-session', session: negative }) })
-    expect(attempt()?.phase).toBe('sending')
-    const reads = f.readHistory.mock.calls.length
-    await act(async () => pending.reject(new Error('Original RPC reply lost')))
-    await vi.waitFor(() => expect(attempt()?.phase).toBe('rejected'))
-    expect(f.readHistory.mock.calls.length).toBe(reads); expect(f.rpc).toHaveBeenCalledOnce()
-    expect(attempt().input.operationId).toBe(input.operationId); expect(button(view.element, 'Submit reply').disabled).toBe(false)
-  })
-  it('does not scan device question intents for ordinary unsent composer edits', async () => {
-    const f = questionFixture(), observe = vi.spyOn(questionReplyOwner, 'observeMobileQuestionAnswers')
-    const view = await mount(surface(f)), observations = observe.mock.calls.length
-    expect(observations).toBeGreaterThan(0)
-    await paste(view.element, 'Ordinary unsent message keeps the question observer quiet')
-    await vi.waitFor(() => expect(JSON.stringify(record())).toContain('Ordinary unsent message'))
-    expect(observe.mock.calls.length).toBe(observations); expect(f.rpc).not.toHaveBeenCalled()
-  })
-  it('allows a fresh answer only after that original invocation was proven completely unapplied', async () => {
-    const f = questionFixture()
-    f.rpc.mockImplementationOnce(async (_method, input) => {
-      const frozen = f.sessions.get(sid)!
-      f.sessions.set(sid, { ...frozen, promptCompletionAdmission: { submissionId: input.operationId, operationId: 'original-native-phase', startByte: 0, endByte: 20, notApplied: true,
-        intent: { run: frozen.run, ownerInstanceId: 'original-native-owner', prompt: 'original', plan: { kind: 'single-phase', data: 'original' } } } })
-      throw new Error('Original receipt lost after Core recorded the whole refusal')
-    })
-    const view = await mount(surface(f))
-    await click(button(view.element, 'Keep original')); await click(button(view.element, 'Submit reply'))
-    await vi.waitFor(() => expect(attempt()?.phase).toBe('rejected'))
-    await click(button(view.element, 'Revise')); await click(button(view.element, 'Submit reply'))
-    await vi.waitFor(() => expect(f.rpc).toHaveBeenCalledTimes(2))
-    expect(f.rpc.mock.calls[1]![1].answers).toEqual([{ questionId, answer: 'Revise' }])
-    expect(f.rpc.mock.calls[1]![1].operationId).not.toBe(f.rpc.mock.calls[0]![1].operationId)
-  })
-  it('keeps exact native confirmation when the original dispatched callback later fails, without matching literal answer text or foreign source', async () => {
-    const f = questionFixture(), pending = deferred<any>(); f.rpc.mockImplementationOnce(() => pending.promise)
-    const view = await mount(surface(f)); await click(button(view.element, 'Keep original')); await click(button(view.element, 'Submit reply'))
-    await vi.waitFor(() => expect(f.rpc).toHaveBeenCalledOnce())
-    const answer = { id: 'native-recorded-answer', kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text: 'Keep original' }], questionAnswers: [{ questionId, answer: 'Keep original' }] }
-    f.setPage({ ...page, source: { ...page.source, nativeSessionId: 'foreign-native' }, items: [...page.items, answer] })
-    await refresh(view.element); expect(attempt()?.phase).toBe('sending')
-    f.setPage({ ...page, items: [...page.items, { ...answer, questionAnswers: [{ questionId: 'other-question', answer: 'Keep original' }] }] })
-    await refresh(view.element); expect(attempt()?.phase).toBe('sending')
-    f.setPage({ ...page, items: [...page.items, answer] }); await refresh(view.element)
-    await vi.waitFor(() => expect(attempt()?.phase).toBe('confirmed'))
-    await act(async () => pending.reject(new Error('Late callback failure')))
-    expect(attempt()?.phase).toBe('confirmed'); expect(f.rpc).toHaveBeenCalledOnce()
-    const frozen = f.sessions.get(sid)!, original = attempt().input
-    const negative = { ...frozen, promptCompletionAdmission: { operationId: 'original-phase', submissionId: original.operationId, startByte: 0, endByte: 20,
-      notApplied: true, intent: { run: frozen.run, ownerInstanceId: 'native-owner', prompt: 'original', plan: { kind: 'single-phase' as const, data: 'original' } } } }
-    expect(await observeMobileQuestionAnswers(createLocalDrafts(), sid, page, negative, 'original-runtime')).toBe(false)
-    expect(attempt()?.phase).toBe('confirmed')
-  })
-  it('does not dispatch a competing unknown operation from a stale mounted page; both original and edited answers remain recoverable', async () => {
-    const f = questionFixture(), view = await mount(surface(f))
-    await click(button(view.element, 'Revise'))
-    const other = createLocalDrafts()
-    other.questions.set(key, { phase: 'unknown', runtimeId: 'original-runtime', hostId: 'host-original', input: {
-      ...target, operationId: 'other-original-operation', expectedRun: { runId: 'run-original' }, afterSubmissionId: null, answers: [{ questionId, answer: 'Keep original' }]
-    } }); await other.save()
-    await click(button(view.element, 'Submit reply'))
-    expect(f.rpc).not.toHaveBeenCalled()
-    expect(attempt().input.operationId).toBe('other-original-operation')
-    expect(record().conflicts).toContainEqual(expect.objectContaining({ bucket: 'questions', key, value: expect.objectContaining({ input: expect.objectContaining({ answers: [{ questionId, answer: 'Revise' }] }) }) }))
-  })
-  it('cannot confirm another managed Session intent that shares the same native source and question', async () => {
-    const f = questionFixture(), local = createLocalDrafts(), foreignKey = questionReplyKey('another-managed-session', target)
-    const input = { ...target, operationId: 'same-original-operation', expectedRun: { runId: 'run-original' }, afterSubmissionId: null, answers: [{ questionId, answer: 'Keep original' }] }
-    local.questions.set(foreignKey, { phase: 'unknown', runtimeId: 'original-runtime', hostId: 'host-original', input }); await local.save()
-    f.setPage({ ...page, items: [...page.items, { id: 'native-answer', kind: 'user-message', contentParts: [{ kind: 'text', text: 'Keep original' }], questionAnswers: input.answers }] })
-    const frozen = f.sessions.get(sid)!
-    f.sessions.set(sid, { ...frozen, promptCompletionAdmission: { operationId: 'native-phase', submissionId: input.operationId, startByte: 0, endByte: 20, notApplied: true,
-      intent: { run: frozen.run, ownerInstanceId: 'original-owner', prompt: 'original', plan: { kind: 'single-phase', data: 'original' } } } })
-    const view = await mount(surface(f))
-    expect(view.element.textContent).toContain('Keep original')
-    expect(record().questions.find(([id]: [string]) => id === foreignKey)[1].phase).toBe('unknown'); expect(f.rpc).not.toHaveBeenCalled()
-    // A negative Core fact is scoped to the same bucket even without a native answer.
-    expect(await observeMobileQuestionAnswers(createLocalDrafts(), sid, page, f.sessions.get(sid), 'original-runtime')).toBe(false)
-    expect(record().questions.find(([id]: [string]) => id === foreignKey)[1].phase).toBe('unknown')
-  })
-  it('retains the old answer for export when a pending callback returns after device-record replacement, without writing into the imported record', async () => {
-    const f = questionFixture(), pending = deferred<any>(); f.rpc.mockImplementationOnce(() => pending.promise)
-    const view = await mount(surface(f)); await click(button(view.element, 'Keep original')); await click(button(view.element, 'Submit reply'))
-    await vi.waitFor(() => expect(f.rpc).toHaveBeenCalledOnce())
-    const input = f.rpc.mock.calls[0]![1]
-    await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()); const imported = localStorage.getItem(DEVICE_WORKFACE_KEY)
-    await act(async () => pending.resolve({ agentSessionId: sid, source: input.source, recordId: input.recordId, questionIds: [questionId], operationId: input.operationId, outcome: 'submitted' }))
-    expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(imported)
-    expect(view.element.textContent).toContain('工作面已被替换')
-    const platform = createBrowserPlatform(), copy = vi.spyOn(platform, 'copyText').mockResolvedValue(true)
-    await view.render(<MobileConversationSurface client={f.client} agentSessionId={sid} connection={{ state: 'connected', message: 'connected' }} platform={platform} />)
-    await click(button(view.element, '复制本页保全备份'))
-    expect(JSON.parse(copy.mock.calls[0]![0]).workface.conversation.questions[0][1].input).toEqual(expect.objectContaining({ operationId: input.operationId, answers: input.answers }))
-  })
+it('actual MobileApp edits two answers, copies a plain answer, opens the same original terminal in watch mode and retains drafts/unknown on return', async () => {
+  const f = questionFixture(), local = createLocalDrafts(); local.questions.set(key, structuredClone(held)); await local.save()
+  await getDeviceWorkface().updateNavigation({ selectedSessionId: sid, hostUrl: '', panel: 'conversation' })
+  const platform = createBrowserPlatform(), copy = vi.spyOn(platform, 'copyText').mockResolvedValue(true)
+  const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '原连接' }} platform={platform}/>)
+  await click(button(view.element, 'Keep original')); await type(view.element, '  第二题答案\n保留空白  ')
+  await click(button(view.element, 'Copy answer: 补充说明')); expect(copy.mock.calls[0]![0]).toBe('  第二题答案\n保留空白  ')
+  const draft = structuredClone(record().questionDrafts), frozen = structuredClone(attempt())
+  await click(button(view.element, 'View original terminal'))
+  expect(view.element.querySelector('.mobile-terminal')?.getAttribute('data-control')).toBe('watch')
+  expect(JSON.parse(localStorage.getItem(DEVICE_WORKFACE_KEY)!).selectedSessionId).toBe(sid)
+  expect(f.write).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled(); expect(f.rpc.mock.calls.some(([method]) => method === 'agent.question.reply' || method.includes('goal.pause'))).toBe(false)
+  await click(button(view.element, '控制终端')); await click(button(view.element, '终端 Esc'))
+  await vi.waitFor(() => expect(f.write).toHaveBeenCalledExactlyOnceWith({ agentSessionId: sid, expectedRun: { runId: 'run-original' }, data: '\u001b', source: 'user' }))
+  await click(button(view.element, '返回对话'))
+  expect(view.element.querySelector<HTMLTextAreaElement>('[aria-label="Your answer: 补充说明"]')!.value).toBe('  第二题答案\n保留空白  ')
+  expect(record().questionDrafts).toEqual(draft); expect(attempt()).toEqual(frozen)
+  expect(view.element.querySelector('.agent-question__original')?.textContent).toContain('original-runtime')
+})
+it('same-source native answers update the card while preserving complete unknown and diagnostic; legacy confirmed is untouched', async () => {
+  const f = questionFixture(), local = createLocalDrafts(); local.questions.set(key, structuredClone(held)); await local.save()
+  const platform = createBrowserPlatform(), view = await mount(<MobileConversationSurface client={f.client} agentSessionId={sid} connection={{ state: 'connected', message: 'connected' }} platform={platform} onShowTerminal={vi.fn()}/>)
+  for (const answer of ['Original frozen answer', 'Different native answer']) {
+    f.setPage({ ...page, items: [...page.items, { id: 'native-answer', kind: 'user-message', contentParts: [], questionAnswers: [{ questionId: 'first', answer }, { questionId: 'second', answer: 'Recorded second answer' }] }] })
+    await refresh(view.element); expect(view.element.textContent).toContain('Answered'); expect(attempt()).toEqual(held)
+    expect(view.element.textContent).toContain('original reply operation remains unconfirmed'); expect(view.element.textContent).toContain(held.diagnostic.message)
+  }
+  const confirmed = { ...held, phase: 'confirmed' as const }, owner = createLocalDrafts(); owner.questions.set(key, confirmed); await owner.save()
+  expect(await reconcileMobileQuestionReplies(owner, sid)).toBe(false); expect(owner.questions.get(key)).toBe(confirmed)
+})
+it('only exact original whole-operation notApplied can release unknown; Host/Run/Runtime/operation and foreign SID never do', async () => {
+  const f = questionFixture(), local = createLocalDrafts(); local.questions.set(key, structuredClone(held)); await local.save()
+  const session = f.sessions.get(sid)!, negative = { ...session, promptCompletionAdmission: { operationId: 'original-phase', submissionId: held.input.operationId, startByte: 0, endByte: 10, notApplied: true, intent: { run: session.run, ownerInstanceId: 'owner', prompt: 'original', plan: { kind: 'single-phase' as const, data: 'original' } } } }
+  for (const wrong of [{ ...negative, hostId: 'other-host' }, { ...negative, run: { runId: 'other-run' } }, { ...negative, agentSessionId: 'other' }, { ...negative, promptCompletionAdmission: { ...negative.promptCompletionAdmission, submissionId: 'other-operation' } }]) { expect(await reconcileMobileQuestionReplies(local, sid, wrong, held.runtimeId)).toBe(false); expect(local.questions.get(key)).toEqual(held) }
+  expect(await reconcileMobileQuestionReplies(local, sid, negative, 'other-runtime')).toBe(false)
+  expect(await reconcileMobileQuestionReplies(local, sid, negative, held.runtimeId)).toBe(true); expect(local.questions.get(key)?.phase).toBe('rejected')
+  const legacy = { ...held, runtimeId: null }; local.questions.set(key, legacy); expect(await reconcileMobileQuestionReplies(local, sid, negative, held.runtimeId)).toBe(false); expect(local.questions.get(key)).toBe(legacy)
+})
+it('keeps editing/terminal/clipboard failure available after device save failure and ignores clipboard callbacks after another SID/Host/Run/source', async () => {
+  const f = questionFixture(), platform = createBrowserPlatform(), copy = vi.spyOn(platform, 'copyText').mockResolvedValue(false), showTerminal = vi.fn()
+  const surface = (id = sid) => <MobileConversationSurface client={f.client} agentSessionId={id} connection={{ state: 'connected' as const, message: 'connected' }} platform={platform} onShowTerminal={showTerminal}/>
+  const view = await mount(surface()); await type(view.element, 'Original answer'); await click(button(view.element, 'Copy answer: 补充说明')); expect(view.element.textContent).toContain('Retry copy')
+  const set = localStorage.setItem.bind(localStorage); vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => { if (key === DEVICE_WORKFACE_KEY) throw new Error('Device save unavailable'); return set(key, value) })
+  await type(view.element, 'Unsaved answer retained'); await vi.waitFor(() => expect(view.element.textContent).toContain('尚未持久保存'))
+  await click(button(view.element, 'Answer in original terminal')); expect(showTerminal).toHaveBeenCalledOnce(); expect(f.write).not.toHaveBeenCalled()
+  const pending = deferred<boolean>(); copy.mockImplementationOnce(() => pending.promise); await click(button(view.element, 'Copy answer: 补充说明'))
+  const other = f.sessions.get('other')!; f.sessions.set('other', { ...other, hostId: 'other-host', run: { runId: 'other-run' } }); f.setPage({ ...page, agentSessionId: 'other', source: { ...page.source, nativeSessionId: 'other-source' } })
+  await view.render(surface('other')); await act(async () => pending.resolve(true))
+  expect(view.element.querySelector('.agent-interaction--async')?.textContent).not.toContain('Copied'); expect(f.write).not.toHaveBeenCalled()
 })
 
-it('holds a legacy unknown Runtime despite an exact current refusal and only retries its original frozen reply on explicit action', async () => {
-  const f = questionFixture(), local = createLocalDrafts()
-  const input = { ...target, operationId: 'legacy-original-operation', expectedRun: { runId: 'run-original' }, afterSubmissionId: 'legacy-original-predecessor', answers: [{ questionId, answer: 'Keep original' }] }
-  local.questions.set(key, { input, phase: 'unknown', hostId: 'host-original', runtimeId: null }); await local.save()
-  const frozen = f.sessions.get(sid)!
-  f.sessions.set(sid, { ...frozen, promptCompletionAdmission: { submissionId: input.operationId, operationId: 'original-native-phase', startByte: 0, endByte: 20, notApplied: true,
-    intent: { run: frozen.run, ownerInstanceId: 'current-native-owner', prompt: 'original', plan: { kind: 'single-phase', data: 'original' } } } })
-  const view = await mount(surface(f))
-  expect(attempt()?.phase).toBe('unknown'); expect(f.rpc).not.toHaveBeenCalled()
-  await click(button(view.element, 'Revise')); await type(view.element, 'A new draft cannot release the unknown Runtime')
-  expect(attempt()?.phase).toBe('unknown')
-  await click(button(view.element, 'Retry original reply')); await vi.waitFor(() => expect(f.rpc).toHaveBeenCalledOnce())
-  expect(f.rpc.mock.calls[0]![1]).toEqual({ ...input, agentSessionId: sid, sourceChannel: 'api' })
-})
-
-it('holds a first dispatched zero-byte phase failure without an original whole Core refusal and retries the original answer rather than its edited draft', async () => {
-  const f = questionFixture()
-  f.rpc.mockRejectedValueOnce(Object.assign(new Error('Only the submit phase was refused'), { controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 }, detail: 'not_applied' }))
-  const view = await mount(surface(f))
-  await click(button(view.element, 'Keep original')); await click(button(view.element, 'Submit reply'))
-  await vi.waitFor(() => expect(attempt()?.phase).toBe('unknown'))
-  const input = f.rpc.mock.calls[0]![1]
-  await click(button(view.element, 'Revise')); await type(view.element, 'Another independent draft')
-  await click(button(view.element, 'Retry original reply')); await vi.waitFor(() => expect(f.rpc).toHaveBeenCalledTimes(2))
-  expect(f.rpc.mock.calls[1]![1]).toEqual(input)
-  expect(view.element.querySelector('textarea')?.value).toBe('Another independent draft')
+it('actual mobile surface treats changed or unknown current native source as retained viewing while keeping the original draft/copy/navigation', async () => {
+  const f = questionFixture(), platform = createBrowserPlatform(), copy = vi.spyOn(platform, 'copyText').mockResolvedValue(true), show = vi.fn()
+  const view = await mount(<MobileConversationSurface client={f.client} agentSessionId={sid} connection={{ state: 'connected', message: 'connected' }} platform={platform} onShowTerminal={show}/>)
+  await type(view.element, 'Kept draft across source changes'); expect(button(view.element, 'Answer in original terminal')).toBeDefined()
+  for (const nativeHandle of [{ kind: 'provider' as const, providerId: 'codex', sessionId: 'changed-native-source' }, undefined]) {
+    const next = { ...f.sessions.get(sid)!, nativeHandle }; await act(async () => { f.sessions.set(sid, next); f.emit({ type: 'agent-session', session: next }) })
+    expect(button(view.element, 'View original terminal')).toBeDefined(); expect(view.element.textContent).toContain('retained question')
+    expect(view.element.querySelector<HTMLTextAreaElement>('[aria-label="Your answer: 补充说明"]')!.disabled).toBe(false)
+    await click(button(view.element, 'Copy answer: 补充说明')); expect(copy.mock.lastCall?.[0]).toBe('Kept draft across source changes')
+  }
+  await click(button(view.element, 'View original terminal')); expect(show).toHaveBeenCalledOnce(); expect(f.write).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
 })
