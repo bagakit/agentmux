@@ -5,7 +5,7 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxError } from '../src/errors.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { RECONNECT_MAX_ATTEMPTS } from '../src/ctxmux-reconnect.js'
-import type { AgentMuxClientEvent, AgentMuxRunAttachment, AgentSessionHistoryObservation } from '../src/types.js'
+import type { AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxRunAttachment, AgentSessionHistoryObservation } from '../src/types.js'
 import { AgentMuxHostedRuntimeService as SourceHostedService } from '../src/hosted-runtime-service.js'
 import { connectHostedAgentMux as SourceConnectHosted } from '../src/hosted-client.js'
 import type { AgentMuxHostedClient, AgentMuxHostedRpcPort } from '../src/hosted-client-contract.js'
@@ -38,7 +38,7 @@ function fixture() {
     refreshRunAttachment: vi.fn(async () => attachment), readRunReplay: vi.fn(async () => attachment),
     runtimeProjection: vi.fn(async () => ({ hostId: 'local', subjects: [{ kind: 'terminal', run: attachment.run }] })),
     observeSessionHistory: vi.fn(async (_id: string, _listener: (value: AgentSessionHistoryObservation) => void) => ({ source: { providerId: 'codex', nativeSessionId: 'original-native' }, dispose: vi.fn() })),
-    submitAgentPrompt: vi.fn(async () => {}),
+    submitAgentPrompt: vi.fn(async (..._args: unknown[]) => {}),
     sessionHistorySources: vi.fn(async () => [{ agentSessionId: 'a123456789012345', providerId: 'codex' }]),
     inspectManagedHooks: vi.fn(async () => ({ status: 'installed' })),
     authorizeAgentCaller: vi.fn(async () => {}), handOff: vi.fn(async () => ({ accepted: true })),
@@ -97,6 +97,86 @@ function watchedEventPort(service: AgentMuxHostedRuntimeService) {
   }) as unknown as AgentMuxHostedRpcPort['subscribe']
   return { ...bridge, leases }
 }
+
+describe('Hosted invocation Session observations', () => {
+  async function observationFixture(shape: 'direct' | 'nested') {
+    const f = fixture()
+    const original: AgentMuxAgentSession = { kind: 'agent', agentSessionId: 'a123456789012345', providerId: 'codex', executorId: 'fixture',
+      hostId: 'local', workspacePath: fixturePath('private-workspace'), run: { runId: 'original-run' }, retiredRuns: [], createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
+    const sibling = { ...original, agentSessionId: 'b123456789012345', run: { runId: 'unrelated-run' } }
+    let current = original
+    const read = vi.fn(async () => {
+      // Property order is not a changed Session fact. Each wire receipt is a new object.
+      const session = Object.fromEntries(Object.entries(structuredClone(current)).reverse())
+      return shape === 'direct' ? session : { session }
+    })
+    f.core.agentSessions = () => [original, sibling] as never
+    Object.assign(f.core, shape === 'direct' ? { inspectAgentCreation: read } : { statusAgent: read })
+    const client = await connectHostedAgentMux({ rpc: rpcPort(f.service).port })
+    const inspect = () => shape === 'direct' ? client.inspectAgentCreation(original.agentSessionId) : client.statusAgent(original.agentSessionId)
+    const events: AgentMuxClientEvent[] = []
+    client.onEvent(event => { if (event.type === 'agent-session') events.push(event) })
+    return { ...f, client, original, sibling, events, read, inspect,
+      replace: (session: AgentMuxAgentSession) => { current = session },
+      dispose: async () => { await client.dispose(); await f.service.dispose() } }
+  }
+
+  it.each(['direct', 'nested'] as const)('keeps repeated unchanged %s Session receipts quiet while preserving the exact cached identity', async shape => {
+    const f = await observationFixture(shape)
+    try {
+      await f.inspect(); await f.inspect()
+      expect(f.read).toHaveBeenCalledTimes(2)
+      expect(f.events).toEqual([])
+      expect(f.client.agentSessions()).toEqual([f.original, f.sibling])
+      expect(f.core.stopTerminal).not.toHaveBeenCalled()
+      expect(f.core.submitAgentPrompt).not.toHaveBeenCalled()
+    } finally { await f.dispose() }
+  })
+
+  it.each(['direct', 'nested'] as const)('publishes changed nested facts from %s receipts without relying on updatedAt and preserves real Host events', async shape => {
+    const f = await observationFixture(shape)
+    try {
+      const changed: AgentMuxAgentSession = { ...f.original,
+        nativeHandle: { kind: 'provider', providerId: f.original.providerId, sessionId: 'same-original-native', transcriptPath: fixturePath('private-workspace/native.jsonl') } }
+      expect(changed.updatedAt).toBe(f.original.updatedAt)
+      f.replace(changed)
+      await f.inspect()
+      expect(f.events).toEqual([{ type: 'agent-session', session: changed }])
+      expect(f.client.agentSession(f.original.agentSessionId)).toEqual(changed)
+      expect(f.client.agentSession(f.sibling.agentSessionId)).toEqual(f.sibling)
+      await f.inspect()
+      expect(f.events).toHaveLength(1)
+      // A real owner publication remains an event even when a read already observed its value.
+      f.emit({ type: 'agent-session', session: changed })
+      await vi.waitFor(() => expect(f.events).toHaveLength(2))
+      expect(f.events[1]).toEqual({ type: 'agent-session', session: changed })
+    } finally { await f.dispose() }
+  })
+
+  it('settles a Goal-like status-read observer instead of feeding an unchanged receipt back into its next read', async () => {
+    const f = await observationFixture('nested')
+    const rereads: Promise<unknown>[] = []
+    // The private bound makes an actual broken implementation fail finitely.
+    const release = f.client.onEvent(event => {
+      if (event.type === 'agent-session' && event.session.agentSessionId === f.original.agentSessionId && rereads.length < 8) rereads.push(f.inspect())
+    })
+    try {
+      await f.inspect()
+      await Promise.all(rereads)
+      expect(f.read).toHaveBeenCalledTimes(1)
+      expect(rereads).toEqual([])
+      const changed = { ...f.original, updatedAt: reshapeFixtureEpoch(0, 0, 2) }
+      f.replace(changed); f.emit({ type: 'agent-session', session: changed })
+      await vi.waitFor(() => expect(rereads).toHaveLength(1))
+      await Promise.all(rereads)
+      expect(f.read).toHaveBeenCalledTimes(2)
+      expect(f.events).toEqual([{ type: 'agent-session', session: changed }])
+      expect(f.client.agentSession(f.original.agentSessionId).run).toEqual(f.original.run)
+      expect(f.core.stopTerminal).not.toHaveBeenCalled()
+      expect(f.core.submitAgentPrompt).not.toHaveBeenCalled()
+    } finally { release(); await Promise.allSettled(rereads); await f.dispose() }
+  })
+})
 
 describe('failed Hosted event lease release', () => {
   const original = { kind: 'agent', agentSessionId: 'a123456789012345', providerId: 'codex', executorId: 'codex',
@@ -525,7 +605,7 @@ describe('semantic Host observation consumers', () => {
     f.core.agentSessions = () => [original, { ...original, agentSessionId: 'b123456789012345', run: { runId: 'unrelated-run' } }] as never
     const client = await connectHostedAgentMux({ rpc: bridge.port })
     expect(client.agentSessions().map(value => value.agentSessionId)).toEqual(['a123456789012345', 'b123456789012345'])
-    f.emit({ type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: reshapeFixtureEpoch(0, 0, 2) } })
+    f.emit({ type: 'connection-state', state: 'lost', observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' }, evidence: { source: 'agentmux', observedAt: reshapeFixtureEpoch(0, 0, 2) } })
     expect(client.agentSessions().map(value => value.agentSessionId)).toEqual(['a123456789012345', 'b123456789012345'])
     f.emit({ type: 'run-removed', agentSessionId: 'a123456789012345', run: { runId: 'original-run' }, evidence: { source: 'user', observedAt: reshapeFixtureEpoch(0, 0, 3) } })
     await vi.waitFor(() => expect(client.agentSessions().map(value => value.agentSessionId)).toEqual(['b123456789012345']))
@@ -805,7 +885,7 @@ describe('semantic Host observation consumers', () => {
       expect(() => {
         f.output('original-run'); f.output('second-run')
         f.emit({ type: 'terminal-resized', run: { runId: 'second-run' }, cols: 81, rows: 25, throughByte: 1, resizeRevision: 1 })
-        f.emit({ type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: reshapeFixtureEpoch(0, 0, 4) } })
+        f.emit({ type: 'connection-state', state: 'lost', observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' }, evidence: { source: 'agentmux', observedAt: reshapeFixtureEpoch(0, 0, 4) } })
       }).not.toThrow()
       await vi.waitFor(() => expect(f.eventsB.map(value => decodeHostedValue(value))).toEqual([
         expect.objectContaining({ data: { event: expect.objectContaining({ type: 'terminal-output', run: { runId: 'original-run' }, dataBytes: Uint8Array.of(120) }) } }),
@@ -840,8 +920,8 @@ describe('semantic Host observation consumers', () => {
     callbacks[1]!({ kind: 'invalidated', agentSessionId: 'b123456789012345', source: { providerId: 'codex', nativeSessionId: 'original-native' } })
     await vi.waitFor(() => expect(releases.map(release => release.mock.calls.length)).toEqual([1, 0]))
     expect(healthy).toEqual([{ type: 'snapshot', data: { observation: { kind: 'invalidated', agentSessionId: 'b123456789012345', source: { providerId: 'codex', nativeSessionId: 'original-native' } } } }])
-    f.emit({ type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: reshapeFixtureEpoch(0, 0, 4) } })
-    expect(f.eventsA).toEqual([{ type: 'snapshot', data: { event: { type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: reshapeFixtureEpoch(0, 0, 4) } } } }])
+    f.emit({ type: 'connection-state', state: 'lost', observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' }, evidence: { source: 'agentmux', observedAt: reshapeFixtureEpoch(0, 0, 4) } })
+    expect(f.eventsA).toEqual([{ type: 'snapshot', data: { event: { type: 'connection-state', state: 'lost', observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' }, evidence: { source: 'agentmux', observedAt: reshapeFixtureEpoch(0, 0, 4) } } } }])
     await broken.dispose(); await first.dispose()
     expect(releases.map(release => release.mock.calls.length)).toEqual([1, 0])
     callbacks[1]!({ kind: 'invalidated', agentSessionId: 'b123456789012345', source: { providerId: 'codex', nativeSessionId: 'original-native' } })
@@ -854,7 +934,7 @@ describe('transport-authenticated device origin', () => {
   it('binds phone prompt attribution from context and refuses a wire-supplied device', async () => {
     const f = fixture(), subscription = await f.subscribe('consumer-device', f.eventsA)
     const sourceDevice = { hostId: 'original-host', deviceId: 'phone-1', name: 'iPhone' }
-    const recordDeviceOperation = vi.fn(async () => {})
+    const recordDeviceOperation = vi.fn(async (..._args: unknown[]) => {})
     const args = [{ agentSessionId: 'a123456789012345', expectedRun: { runId: 'original-run' }, operationId: 'phone-prompt', prompt: 'hello', authorHuman: true }]
     try {
       await f.service.call('runtime.invoke', { fence, consumerId: 'consumer-device', invocation: { method: 'submitAgentPrompt', args } }, { sourceDevice, recordDeviceOperation })
