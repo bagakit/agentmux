@@ -44,7 +44,8 @@ export type PersistedBrowserSurface = {
   kind: 'browser'
   workspaceId: string
   browserId: string
-  profileId?: string
+  mode?: import('@agentmux/core').AgentMuxBrowserMode
+  profileId?: string | null
   url: string
   title: string
   bookmarkOrigin?: BrowserWorkbenchSurface['bookmarkOrigin']
@@ -81,18 +82,20 @@ export type RestoredWorkbench = {
 
 /** 把一个存盘 browser 复活成活体 surface：url/title/browserId 保留，其余瞬时位填默认，等待真快照覆盖。 */
 function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): BrowserWorkbenchSurface {
+  const privateMode = surface.mode === 'private'
   return {
     regionId: surface.regionId,
     kind: 'browser',
     workspaceId: surface.workspaceId,
     browserId: surface.browserId,
     id: surface.browserId,
-    url: surface.url,
-    title: surface.title,
-    ...(surface.bookmarkOrigin ? { bookmarkOrigin: surface.bookmarkOrigin } : {}),
+    mode: privateMode ? 'private' : 'normal',
+    url: privateMode ? 'about:blank' : surface.url,
+    title: privateMode ? 'Private page' : surface.title,
+    ...(privateMode ? { privateSessionEnded: true as const } : surface.bookmarkOrigin ? { bookmarkOrigin: surface.bookmarkOrigin } : {}),
     // 瞬时位：由 store 启动路径 create 出真 WebContentsView 后的快照经 applyBrowserEvent 覆盖。
     navigationId: '',
-    profileId: surface.profileId ?? '',
+    profileId: privateMode ? null : surface.profileId ?? '',
     loading: false,
     canGoBack: false,
     canGoForward: false,
@@ -105,6 +108,10 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
 
 /** 存盘时把一个 browser 活体 surface 缩成最小可再实例化子集，剥掉全部瞬时/敏感运行时位。 */
 function reduceBrowserSurfaceForPersistence(surface: BrowserWorkbenchSurface): PersistedBrowserSurface {
+  if (surface.mode === 'private') return {
+    regionId: surface.regionId, kind: 'browser', workspaceId: surface.workspaceId,
+    browserId: surface.browserId, mode: 'private', url: 'about:blank', title: 'Private page'
+  }
   return {
     regionId: surface.regionId,
     kind: 'browser',

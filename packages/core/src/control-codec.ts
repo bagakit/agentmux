@@ -423,6 +423,9 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: 'open.git', ...parseGitOpenParams(params) }
   }
   if (source.operation === 'open.terminal' || source.operation === 'open.browser') {
+    if (source.operation === 'open.browser' && source.mode !== undefined && source.mode !== 'normal' && source.mode !== 'private') {
+      throw new AgentMuxError('Browser mode must be normal or private.', 'INVALID_CONTROL_REQUEST')
+    }
     const destination = openDestination(source.destination)
     const owner = optionalCaller(source.caller)
     if (destinationUsesSelf(destination) && !owner) throw new AgentMuxError('A self destination requires a managed caller.', 'INVALID_CONTROL_REQUEST')
@@ -440,6 +443,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
           requestId,
           operation: source.operation,
           url: text(source.url, 'Browser URL'),
+          ...(source.mode === undefined ? {} : { mode: source.mode as 'normal' | 'private' }),
           destination,
           ...(owner ? { caller: owner } : {})
         }
@@ -854,7 +858,9 @@ function parseTerminalRegion(value: unknown): AgentMuxTerminalRegion {
 function parseBrowserRegion(value: unknown): AgentMuxBrowserRegion {
   const region = parseRegion(value)
   if (region.kind !== 'browser') throw new AgentMuxError('Control Browser Region result is invalid.', 'CONTROL_PROTOCOL_ERROR')
-  return region
+  const source = object(value, 'Control Browser Region result is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (source.mode !== undefined && source.mode !== 'normal' && source.mode !== 'private') throw new AgentMuxError('Browser mode result is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return { ...region, ...(source.mode === undefined ? {} : { mode: source.mode as 'normal' | 'private' }) }
 }
 
 function parseTab(value: unknown) {

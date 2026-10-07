@@ -1238,11 +1238,12 @@ const mockApi: AgentMuxDesktopApi = {
       mockConfig = structuredClone(next)
       for (const listener of configListeners) listener(structuredClone(mockConfig))
     },
-    create: async (id, url, _workspace, rememberedProfileId) => {
+    create: async (id, url, _workspace, rememberedProfileId, mode = 'normal') => {
       const browser: BrowserSnapshot = {
         id,
+        mode,
         navigationId: crypto.randomUUID(),
-        profileId: rememberedProfileId ?? mockDefaultBrowserProfile.id,
+        profileId: mode === 'private' ? null : rememberedProfileId ?? mockDefaultBrowserProfile.id,
         url: resolveBrowserAddress(url),
         title: 'New Tab',
         loading: false,
@@ -1411,6 +1412,7 @@ const mockApi: AgentMuxDesktopApi = {
       if (!current) {
         const browser: BrowserSnapshot = {
           id,
+          mode: input.mode ?? 'normal',
           navigationId: crypto.randomUUID(),
           profileId: input.profileId,
           url: 'about:blank',

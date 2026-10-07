@@ -36,8 +36,9 @@ export function reduceBrowserEvent(
         if (surface.kind !== 'browser' || surface.browserId !== event.browser.id) continue
         if (!surface.nativeOwnerUnavailable && Object.entries(event.browser).every(([key, value]) => Object.is(surface[key as keyof BrowserWorkbenchSurface], value))) continue
         if (regions === tab.regions) regions = { ...regions }
-        const { nativeOwnerUnavailable: _unavailable, ...availableSurface } = surface
-        regions[surface.regionId] = { ...availableSurface, ...event.browser, regionId: surface.regionId }
+        const { nativeOwnerUnavailable: _unavailable, privateSessionEnded, ...availableSurface } = surface
+        regions[surface.regionId] = { ...availableSurface, ...event.browser, regionId: surface.regionId,
+          ...(privateSessionEnded && event.browser.mode === 'private' && event.browser.url === 'about:blank' ? { privateSessionEnded } : {}) }
       }
       if (regions === tab.regions) continue
       if (tabs === state.tabs) tabs = { ...tabs }

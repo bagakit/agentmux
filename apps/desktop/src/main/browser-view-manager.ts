@@ -5,9 +5,9 @@ import { parseBrowserStructuredOutputRequest } from './browser-structured-output
 import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
 import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type BrowserOutcomeFieldRunInput, type BrowserOutcomeRegistration } from '../shared/browser-outcome-criteria.js'
 import { randomUUID } from 'node:crypto'
-import { WebContentsView, type BrowserWindow, type WebContents, type WebFrameMain, type Session } from 'electron'
+import { session, WebContentsView, type BrowserWindow, type WebContents, type WebFrameMain, type Session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, type AgentMuxBrowserTarget } from '@agentmux/core'
+import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, type AgentMuxBrowserMode, type AgentMuxBrowserTarget } from '@agentmux/core'
 import {
   BROWSER_EVENT_CHANNEL,
   BROWSER_PRESENTATION_EVENT_CHANNEL,
@@ -84,11 +84,15 @@ import {
   buildCancelBrowserElementSelectionScript
 } from './browser-selection-script.js'
 
+type BrowserStorage =
+  | { mode: 'normal'; profileId: string; partition: string }
+  | { mode: 'private'; profileId: null; partition: string; session: Session; windows: Set<BrowserWindow> }
+
 type BrowserEntry = {
   id: string
   readonly workspaceId: string | null
   view: WebContentsView
-  profileId: string
+  storage: BrowserStorage
   requestedUrl: string
   navigationId: string
   faviconDataUrl?: string | undefined
@@ -161,7 +165,7 @@ type PresentationCapture = {
   entry: BrowserEntry
   document: PresentationDocument
   source: WebContentsView
-  profileId: string
+  profileId: string | null
   granted: boolean
   preparingSource: boolean
   revoked: boolean
@@ -191,7 +195,7 @@ const BROWSER_ACTION_PAGE_CALLS = BROWSER_PAGE_MUTATING_CAPABILITY_NAMES
 type ReleasedBrowser = {
   id: string
   workspaceId: string | null
-  profileId: string
+  storage: BrowserStorage
   requestedUrl: string
   viewport: BrowserViewport
   pendingSwitch?: PendingProfileSwitch
@@ -200,7 +204,8 @@ type ReleasedBrowser = {
 
 type BrowserRestoreInput = {
   workspaceId: string | null
-  profileId: string
+  profileId: string | null
+  mode?: AgentMuxBrowserMode
   viewport: BrowserViewport
 }
 
@@ -273,7 +278,7 @@ export class BrowserViewManager {
       const contents = entry.view.webContents
       const available = !contents.isDestroyed()
       const workspaceId = entry.workspaceId
-      return { id: entry.id, workspaceId, source: 'embedded', status: available ? 'ready' : 'unavailable',
+      return { id: entry.id, workspaceId, source: 'embedded', mode: entry.storage.mode, status: available ? 'ready' : 'unavailable',
         url: available ? contents.getURL() : '', title: available ? contents.getTitle().slice(0, 512) : '',
         navigationId: entry.navigationId,
         capabilities: workspaceId ? [...BROWSER_PAGE_CAPABILITY_NAMES] : BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
@@ -334,11 +339,11 @@ export class BrowserViewManager {
     }
   }
 
-  inputHistoryScope(id: string, profileId: string): BrowserInputHistoryScope {
+  inputHistoryScope(id: string, profileId: string | null): BrowserInputHistoryScope {
     const entry = this.require(id)
-    if (entry.profileId !== profileId) throw new Error('The Browser Profile changed before input history was requested.')
+    if (entry.storage.profileId !== profileId) throw new Error('The Browser Profile changed before input history was requested.')
     if (entry.workspaceId === null) throw new Error('This Browser has no verified Workspace for input history.')
-    return { workspaceId: entry.workspaceId, profileId: entry.profileId }
+    return { workspaceId: entry.workspaceId, profileId: entry.storage.profileId }
   }
 
   registerPresentation(sender: WebContents, frame: WebFrameMain | null, input: {
@@ -399,7 +404,7 @@ export class BrowserViewManager {
     if (lease.entry.view.webContents.isDestroyed()) throw new Error('Browser native page is unavailable')
     const capture: PresentationCapture = {
       id: randomUUID(), entry: lease.entry, document: lease.document,
-      source: lease.entry.view, profileId: lease.entry.profileId,
+      source: lease.entry.view, profileId: lease.entry.storage.profileId,
       granted: false, preparingSource: false, revoked: false, trackIds: null
     }
     // A never-shown native widget cannot start tab capture, even with positive bounds.
@@ -663,7 +668,7 @@ export class BrowserViewManager {
   private isPresentationCaptureCurrent(capture: PresentationCapture): boolean {
     return !capture.revoked && this.isPresentationDocumentCurrent(capture.document) &&
       this.owns(capture.entry, capture.source) && !capture.source.webContents.isDestroyed() &&
-      capture.entry.profileId === capture.profileId && this.hasVisiblePresentation(capture.entry)
+      capture.entry.storage.profileId === capture.profileId && this.hasVisiblePresentation(capture.entry)
   }
 
   private clearPresentationInput(entry: BrowserEntry): void {
@@ -766,18 +771,34 @@ export class BrowserViewManager {
     return [...pids]
   }
 
-  async create(id: string, rawUrl: string, workspaceId: string | null = null, rememberedProfileId?: string): Promise<BrowserSnapshot> {
+  async create(id: string, rawUrl: string, workspaceId: string | null = null, rememberedProfileId?: string, mode?: AgentMuxBrowserMode): Promise<BrowserSnapshot> {
     if (!id.trim()) throw new Error('Browser id is required')
+    if (mode !== undefined && mode !== 'normal' && mode !== 'private') throw new Error('Browser mode must be normal or private')
+    if (mode === 'private' && rememberedProfileId !== undefined) throw new Error('A private Browser cannot use a saved Profile. Open a normal Browser to use that Profile.')
     // A repeated recovery handshake addresses this owner, not a new navigation/profile choice.
     const existing = this.entries.get(id)
     if (existing) {
       this.assertWorkspaceBinding(existing.workspaceId, workspaceId)
+      if (mode !== undefined && existing.storage.mode !== mode) throw new Error('An existing Browser cannot change mode. Open a new Browser instead.')
       return this.snapshot(existing)
     }
-    if (this.releasedEntries.has(id)) return await this.restore(id, { workspaceId })
+    if (this.releasedEntries.has(id)) return await this.restore(id, { workspaceId, ...(mode === undefined ? {} : { mode }) })
     const url = normalizeBrowserUrl(rawUrl)
-    const profileId = rememberedProfileId ?? this.profiles.defaultProfileId()
-    return await this.createEntry(id, url, profileId, 'responsive', workspaceId)
+    let storage: BrowserStorage
+    if (mode === 'private') {
+      const partition = `agentmux-browser-private:${randomUUID()}`
+      storage = { mode: 'private', profileId: null, partition, session: session.fromPartition(partition), windows: new Set() }
+    } else {
+      const profileId = rememberedProfileId ?? this.profiles.defaultProfileId()
+      storage = { mode: 'normal', profileId, partition: this.resolvePartition(profileId) }
+    }
+    try { return await this.createEntry(id, url, storage, 'responsive', workspaceId) }
+    catch (error) {
+      if (storage.mode === 'private') await this.clearPrivateStorage(storage).catch(cleanup => {
+        throw new AggregateError([error, cleanup], 'Private Browser creation and website-data cleanup failed')
+      })
+      throw error
+    }
   }
 
   /**
@@ -809,7 +830,7 @@ export class BrowserViewManager {
     const released: ReleasedBrowser = {
       id,
       workspaceId: entry.workspaceId,
-      profileId: entry.profileId,
+      storage: entry.storage,
       requestedUrl,
       viewport: entry.viewport
     }
@@ -828,12 +849,15 @@ export class BrowserViewManager {
     const existing = this.entries.get(id)
     if (existing) {
       this.assertWorkspaceBinding(existing.workspaceId, input?.workspaceId ?? null)
+      if (input?.mode !== undefined && input.mode !== existing.storage.mode) throw new Error('An existing Browser cannot change mode. Open a new Browser instead.')
       return this.snapshot(existing)
     }
     const released = this.releasedEntries.get(id)
     if (!released) throw new Error(`Unknown released browser: ${id}`)
     this.assertWorkspaceBinding(released.workspaceId, input?.workspaceId ?? null)
-    const profileId = input?.profileId ?? released.profileId
+    if (input?.mode !== undefined && input.mode !== released.storage.mode) throw new Error('An existing Browser cannot change mode. Open a new Browser instead.')
+    const profileId = input?.profileId ?? released.storage.profileId
+    if (released.storage.mode === 'private' && profileId !== null) throw new Error('A private Browser cannot use a saved Profile.')
     // The retained Main descriptor is the only authoritative URL while the native owner is gone.
     // Renderer tab.url can lag did-start-navigation, so accepting it here could restore an older
     // committed page and silently change the Region's identity.
@@ -844,14 +868,15 @@ export class BrowserViewManager {
     }
     // Validate the profile before removing the retained descriptor. A failed restore must leave the
     // original profile ownership intact so deleting/repairing a profile cannot orphan this Region.
-    this.resolvePartition(profileId)
+    const storage: BrowserStorage = released.storage.mode === 'private' ? released.storage
+      : { mode: 'normal', profileId: profileId!, partition: this.resolvePartition(profileId!) }
     this.cleanupReleasedOwner(released)
     this.releasedEntries.delete(id)
     try {
-      const snapshot = await this.createEntry(id, url, profileId, viewport, released.workspaceId)
+      const snapshot = await this.createEntry(id, url, storage, viewport, released.workspaceId)
       return snapshot
     } catch (error) {
-      this.releasedEntries.set(id, { ...released, profileId, requestedUrl: url, viewport })
+      this.releasedEntries.set(id, { ...released, storage, requestedUrl: url, viewport })
       throw error
     }
   }
@@ -859,17 +884,17 @@ export class BrowserViewManager {
   private async createEntry(
     id: string,
     url: string,
-    profileId: string,
+    storage: BrowserStorage,
     viewport: BrowserViewport = 'responsive',
     workspaceId: string | null = null
   ): Promise<BrowserSnapshot> {
     if (this.entries.has(id)) throw new Error(`Browser already exists: ${id}`)
-    const view = this.createView(this.resolvePartition(profileId))
+    const view = this.createView(storage.partition)
     const entry: BrowserEntry = {
       id,
       workspaceId,
       view,
-      profileId,
+      storage,
       requestedUrl: url,
       navigationId: randomUUID(),
       selectionRevision: 0,
@@ -987,9 +1012,10 @@ export class BrowserViewManager {
 
   async switchProfile(id: string, profileId: string): Promise<BrowserSnapshot> {
     const entry = this.require(id)
+    if (entry.storage.mode === 'private') throw new Error('A private Browser cannot switch to a saved Profile. Open a new normal Browser instead.')
     const partition = this.resolvePartition(profileId)
     this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded'))
-    if (entry.profileId === profileId) return this.snapshot(entry)
+    if (entry.storage.profileId === profileId) return this.snapshot(entry)
 
     const authoritativeView = entry.view
     // Keep profile switching consistent with release: the committed URL may lag the latest
@@ -1040,7 +1066,7 @@ export class BrowserViewManager {
       this.revokePresentationCapture(entry, 'source-replaced')
       this.clearFavicon(entry)
       entry.view = candidate
-      entry.profileId = profileId
+      entry.storage = { mode: 'normal', profileId, partition }
       entry.requestedUrl = candidate.webContents.getURL() || url
       entry.navigationId = randomUUID()
       entry.selectionOperation = null
@@ -1075,9 +1101,9 @@ export class BrowserViewManager {
 
   usesProfile(profileId: string): boolean {
     return [...this.entries.values()].some((entry) => (
-      entry.profileId === profileId || entry.pendingSwitch?.profileId === profileId
+      entry.storage.profileId === profileId || entry.pendingSwitch?.profileId === profileId
     )) || [...this.releasedEntries.values()].some((entry) => (
-      entry.profileId === profileId || entry.pendingSwitch?.profileId === profileId
+      entry.storage.profileId === profileId || entry.pendingSwitch?.profileId === profileId
     ))
   }
 
@@ -2462,8 +2488,64 @@ export class BrowserViewManager {
     view.webContents.setBackgroundThrottling(view.webContents.getBackgroundThrottling())
   }
 
-  close(id: string): void {
-    if (this.destroyOwner(id)) this.send({ type: 'closed', id })
+  close(id: string): void | Promise<void> {
+    const storage = this.entries.get(id)?.storage ?? this.releasedEntries.get(id)?.storage
+    if (storage?.mode === 'private') return this.closePrivateOwner(id, storage)
+    if (!this.destroyOwner(id)) return
+    this.send({ type: 'closed', id })
+  }
+
+  private async closePrivateOwner(id: string, storage: Extract<BrowserStorage, { mode: 'private' }>, notify = true): Promise<void> {
+    const failures: unknown[] = []
+    const entry = this.entries.get(id)
+    try { this.destroyOwner(id) } catch (error) { failures.push(error) }
+    // A failed native teardown must still retire this incarnation. Late popup callbacks compare
+    // this exact storage object; a newly created Browser with the same id remains independent.
+    if (this.entries.get(id)?.storage === storage) this.entries.delete(id)
+    // destroyOwner can remove the map entry before native close throws. Keep using the captured
+    // exact view to finish that consumer, independently of any later incarnation with this id.
+    try { if (entry && !entry.view.webContents.isDestroyed() && !this.window.isDestroyed()) this.window.contentView.removeChildView(entry.view) } catch (error) { failures.push(error) }
+    try { if (entry && !entry.view.webContents.isDestroyed()) entry.view.webContents.close() } catch (error) { failures.push(error) }
+    if (this.releasedEntries.get(id)?.storage === storage) this.releasedEntries.delete(id)
+    try { if (notify) this.send({ type: 'closed', id }) } catch (error) { failures.push(error) }
+    try { await this.clearPrivateStorage(storage) } catch (error) { failures.push(error) }
+    if (failures.length) throw new AggregateError(failures, 'Private Browser closed with website-data cleanup failures.')
+  }
+
+  private async clearPrivateStorage(storage: Extract<BrowserStorage, { mode: 'private' }>): Promise<void> {
+    // A Session has no public destroy API. End its consumers, clear only this session and never
+    // reuse its partition; failure cannot send a future Browser back into this incarnation.
+    const failures: unknown[] = []
+    for (const child of storage.windows) {
+      try { if (!child.isDestroyed()) child.destroy() } catch (error) { failures.push(error) }
+    }
+    storage.windows.clear()
+    try { this.webAuthnSessions.get(storage.session)?.() } catch (error) { failures.push(error) }
+    this.webAuthnSessions.delete(storage.session)
+    // A native consumer whose teardown failed must not fall back to Electron's permission
+    // defaults. This retired session has no future owner and is never used for a new Browser.
+    for (const deny of [
+      () => storage.session.setPermissionCheckHandler(() => false),
+      () => storage.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false)),
+      () => storage.session.setDevicePermissionHandler(() => false)
+    ]) {
+      try { deny() } catch (error) { failures.push(error) }
+    }
+    const results = await Promise.allSettled([
+      () => storage.session.clearStorageData(), () => storage.session.clearCache(), () => storage.session.closeAllConnections()
+    ].map(cleanup => Promise.resolve().then(cleanup)))
+    for (const result of results) if (result.status === 'rejected') failures.push(result.reason)
+    if (failures.length) throw new AggregateError(failures, 'Private website-data cleanup was incomplete.')
+  }
+
+  private trackPrivatePopup(id: string, storage: Extract<BrowserStorage, { mode: 'private' }>, child: BrowserWindow): void {
+    if ((this.entries.get(id)?.storage ?? this.releasedEntries.get(id)?.storage) !== storage) {
+      if (!child.isDestroyed()) child.destroy()
+      return
+    }
+    storage.windows.add(child)
+    child.once('closed', () => storage.windows.delete(child))
+    child.webContents.on('did-create-window', popup => this.trackPrivatePopup(id, storage, popup))
   }
 
   /** Native teardown has no authority to retire the Renderer Region. */
@@ -2515,10 +2597,17 @@ export class BrowserViewManager {
     this.disposePresentationRequester = null
     this.presentationCaptures.clear()
     this.unsubscribeTaskAssets?.()
+    for (const id of [...this.entries.keys(), ...this.releasedEntries.keys()]) {
+      const storage = this.entries.get(id)?.storage ?? this.releasedEntries.get(id)?.storage
+      if (storage?.mode === 'private') {
+        void this.closePrivateOwner(id, storage, false).catch(error => console.warn('Private website-data cleanup failed during disposal:', error))
+      }
+    }
+    // Retire private incarnations before the existing normal teardown, whose synchronous error
+    // contract is preserved. A normal native failure cannot strand a later private consumer.
+    for (const id of [...this.entries.keys(), ...this.releasedEntries.keys()]) this.destroyOwner(id)
     for (const unsubscribe of this.webAuthnSessions.values()) unsubscribe()
     this.webAuthnSessions.clear()
-    for (const id of [...this.entries.keys()]) this.destroyOwner(id)
-    for (const id of [...this.releasedEntries.keys()]) this.destroyOwner(id)
     void this.uploads?.dispose().catch(error => console.warn('Browser upload staging cleanup failed during disposal:', error))
   }
 
@@ -2533,6 +2622,10 @@ export class BrowserViewManager {
 
   private attach(entry: BrowserEntry, view: WebContentsView): void {
     const contents = view.webContents
+    if (entry.storage.mode === 'private') {
+      const storage = entry.storage
+      contents.on('did-create-window', child => this.trackPrivatePopup(entry.id, storage, child))
+    }
     installTextEditContextMenu(contents, this.window, {
       isCurrent: () => this.nativeOwner(entry.id)?.view === view,
       origin: () => view.getBounds()
@@ -2690,7 +2783,7 @@ export class BrowserViewManager {
       // Native destruction is authoritative even if a separate resource's cleanup throws. Retain
       // only the existing metadata: a dead WebContents cannot supply a fresh live snapshot.
       const released: ReleasedBrowser = {
-        id: entry.id, workspaceId: entry.workspaceId, profileId: entry.profileId, requestedUrl: entry.requestedUrl, viewport: entry.viewport
+        id: entry.id, workspaceId: entry.workspaceId, storage: entry.storage, requestedUrl: entry.requestedUrl, viewport: entry.viewport
       }
       this.releasedEntries.set(entry.id, released)
       const cleanupErrors: unknown[] = []
@@ -2756,9 +2849,9 @@ export class BrowserViewManager {
     const entry = [...this.entries.values()].find(candidate => candidate.view.webContents === contents)
     if (!entry) return null
     const view = entry.view
-    const profileId = entry.profileId
+    const profileId = entry.storage.profileId
     const navigationId = entry.navigationId
-    const ownsRequest = (): boolean => this.owns(entry, view) && entry.profileId === profileId && entry.navigationId === navigationId
+    const ownsRequest = (): boolean => this.owns(entry, view) && entry.storage.profileId === profileId && entry.navigationId === navigationId
     const currentBounds = (): BrowserBounds | null => this.nativeOwner(entry.id)?.bounds ?? null
     return {
       window: this.window,
@@ -2910,12 +3003,12 @@ export class BrowserViewManager {
     try { url = new URL(reported, view.webContents.getURL()).href } catch { this.clearFavicon(entry); this.emit(entry); return }
     if (entry.faviconUrl === url && (entry.faviconDataUrl || entry.faviconRequest)) return
     this.clearFavicon(entry)
-    const request = new AbortController(), navigationId = entry.navigationId, profileId = entry.profileId
+    const request = new AbortController(), navigationId = entry.navigationId, profileId = entry.storage.profileId
     entry.faviconUrl = url
     entry.faviconRequest = request
     this.emit(entry)
     void readBrowserFavicon(view.webContents.session, url, request.signal).then(dataUrl => {
-      if (request.signal.aborted || entry.faviconRequest !== request || !this.owns(entry, view) || entry.navigationId !== navigationId || entry.profileId !== profileId) return
+      if (request.signal.aborted || entry.faviconRequest !== request || !this.owns(entry, view) || entry.navigationId !== navigationId || entry.storage.profileId !== profileId) return
       entry.faviconRequest = undefined
       entry.faviconDataUrl = dataUrl
       this.emit(entry)
@@ -2927,9 +3020,10 @@ export class BrowserViewManager {
     const persistenceWarning = this.operationJournal?.getPersistenceWarning()
     return {
       id: entry.id,
+      mode: entry.storage.mode,
       navigationId: entry.navigationId,
       faviconDataUrl: entry.faviconDataUrl,
-      profileId: entry.profileId,
+      profileId: entry.storage.profileId,
       url: contents.getURL() || entry.requestedUrl,
       title: contents.getTitle(),
       loading: contents.isLoading(),
