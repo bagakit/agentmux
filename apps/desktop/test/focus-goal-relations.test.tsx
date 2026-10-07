@@ -93,6 +93,7 @@ describe('actual Focus Goal relationships', () => {
     expect(trigger(other.id).querySelector('.focus-goal__unknown')?.textContent).toBe('?')
     await inspect(); expect(menu().querySelectorAll('[data-goal-id="mixed"]')).toHaveLength(1)
     const exact = menu().querySelector('[data-goal-roles="confirmed"]')!, bare = menu().querySelector('[data-goal-roles="unconfirmed"]')!
+    expect(exact).not.toBeNull(); expect(bare).not.toBeNull()
     expect(exact.textContent).toContain('Created with'); expect(exact.textContent).toContain('Execution reference')
     expect(exact.textContent).not.toContain('Assignee'); expect(bare.textContent).toContain('Session Host unconfirmed · Related Session · Assignee · Supervisor')
     expect(bare.textContent).toContain('Supervisor')
@@ -115,6 +116,7 @@ describe('actual Focus Goal relationships', () => {
   it('matches a remote presentation alias through its original control Host and canonical Session', async () => {
     useAppStore.setState({ demands: { remote: goal('remote', { participations: [participation('remote-record', 'other-host')] }) } })
     await mount()
+    expect(trigger(other.id)).not.toBeNull()
     expect(trigger()).toBeNull(); expect(trigger(other.id).getAttribute('aria-label')).toBe('1 Goal')
     expect(trigger(other.id).querySelector('.focus-goal__unknown')).toBeNull()
     await inspect(other.id); await showSources()
@@ -172,7 +174,7 @@ describe('actual Focus Goal relationships', () => {
     await act(async () => useAppStore.setState({ demands: {} }))
     expect(trigger()).toBeNull(); const before = useAppStore.getState()
     await act(async () => finish([])); await settle()
-    expect(useAppStore.getState().error).toContain('exact Goal')
+    expect(useAppStore.getState().error).not.toBeNull(); expect(useAppStore.getState().error).toContain('exact Goal')
     expect(useAppStore.getState().mainSurface).toBe('agents'); unchanged(before)
   })
 
@@ -186,7 +188,7 @@ describe('actual Focus Goal relationships', () => {
     await act(async () => trigger().click()); expect(finish).toBeDefined()
     await act(async () => useAppStore.getState().setMainSurface('survey'))
     const before = useAppStore.getState(); await act(async () => finish([])); await settle()
-    expect(useAppStore.getState().mainSurface).toBe('survey'); expect(useAppStore.getState().error).toContain('newer navigation')
+    expect(useAppStore.getState().mainSurface).toBe('survey'); expect(useAppStore.getState().error).not.toBeNull(); expect(useAppStore.getState().error).toContain('newer navigation')
     expect(useAppStore.getState().selectedDemandId).toBe(before.selectedDemandId); unchanged(before)
   })
 
@@ -203,7 +205,7 @@ describe('actual Focus Goal relationships', () => {
     await act(async () => button.click()); expect(finish).toBeDefined()
     await act(async () => useAppStore.setState({ demands: {} }))
     await act(async () => finish([])); await settle()
-    expect(useAppStore.getState().error).toContain('exact Goal')
+    expect(useAppStore.getState().error).not.toBeNull(); expect(useAppStore.getState().error).toContain('exact Goal')
     expect(useAppStore.getState().mainSurface).toBe('agents')
   })
 })
