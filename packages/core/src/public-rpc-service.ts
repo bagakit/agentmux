@@ -32,7 +32,7 @@ import { normalizeMessageChannel } from './message-origin.js'
 
 import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult, type AgentMuxRpcFileUploadsOwner, type FileMethod } from './public-rpc-files.js';
 import { isTopicMethod, parseTopicParams, parseTopicResult, type AgentMuxRpcTopicsOwner, type TopicMethod } from './public-rpc-topics.js'
-import { isFileMethod, parseFileCreateParams, parseFileCreateResult, parseFileWriteParams, parseFileWriteResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult, type AgentMuxRpcFilesOwner } from './public-rpc-files.js'
+import { isFileMethod, parseFileHistoryParams, parseFileHistoryResult, parseFileCreateParams, parseFileCreateResult, parseFileWriteParams, parseFileWriteResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult, type AgentMuxRpcFilesOwner } from './public-rpc-files.js'
 import { isGitMethod, parseGitParams, parseGitResult, type AgentMuxRpcGitOwner, type GitMethod } from './public-rpc-git.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult, type AgentMuxRpcSchedulesOwner, type ScheduleMethod } from './public-rpc-schedules.js'
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
@@ -63,7 +63,7 @@ import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
 import { AGENTMUX_HOSTED_RPC_METHODS, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHostedRuntimeMethod, type AgentMuxRuntimeFence } from './hosted-client-contract.js'
 import type { AgentMuxHostedRuntimeService } from './hosted-runtime-service.js'
 import type { AgentMuxRpcSubscriptionOptions, AgentMuxRpcSubscription } from './public-rpc-client.js'
-import { AgentMuxRpcError, rpcFailure } from './public-rpc-frame.js'
+import { AgentMuxRpcError, rpcEncode, rpcFailure } from './public-rpc-frame.js'
 import { isAgentMuxRpcDeviceMethod, parseAgentMuxRpcDeviceParams, parseAgentMuxRpcDeviceResult,
   type AgentMuxRpcDeviceAdministration } from './public-rpc-device.js'
 import { normalizeOperationDevice } from './operation-device.js'
@@ -662,6 +662,23 @@ export class AgentMuxRpcService {
         if (!this.ports.files && !this.ports.forwardControl) throw new AgentMuxError('The original Host file owner is unavailable. Original files and Agents are retained.', 'CONTROL_UNAVAILABLE')
         const result = this.ports.files ? await this.ports.files.write(input, { actor: caller ? { kind: 'agent', id: caller.agentSessionId } : context.principal }) : await this.ports.forwardControl!('file.write', input, context)
         return parseFileWriteResult(result, input) as AgentMuxRpcResult<M>
+      }
+
+      if (method === 'file.history') {
+        const input = parseFileHistoryParams(params)
+        context.signal?.throwIfAborted()
+        if (!this.ports.files?.history && !this.ports.forwardControl) throw new AgentMuxError('The original Host Note history owner is unavailable. Original files, history and Agents are retained.', 'CONTROL_UNAVAILABLE')
+        const result = this.ports.files?.history ? await this.ports.files.history(input) : await this.ports.forwardControl!('file.history', input, context)
+        const parsed = parseFileHistoryResult(result, input)
+        if (input.includeContent) {
+          try { rpcEncode({ jsonrpc: '2.0', id: null, result: parsed }) }
+          catch (error) {
+            if (!(error instanceof AgentMuxError) || error.code !== 'CONTROL_PROTOCOL_ERROR') throw error
+            return { resource: parsed.resource, result: { status: 'unknown', code: 'FILE_HISTORY_CONTENT_UNAVAILABLE',
+              message: 'This historical body exceeds the original RPC frame budget. Its original event and metadata remain available; query the same event without content.' } } as AgentMuxRpcResult<M>
+          }
+        }
+        return parsed as AgentMuxRpcResult<M>
       }
 
       if (method === 'file.list') {

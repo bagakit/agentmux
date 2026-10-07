@@ -12,6 +12,7 @@ import { applyNotebookChange, parseNotebookState, notebookFingerprint, type Note
 import { NOTE_FILE_EXTENSION, readNoteMarkdownHeader } from './note-format.js'
 import { initializeNotebookDatabase, NOTEBOOK_DATABASE_NAME, notebookDatabaseFingerprint, publishNotebookDatabase, readNotebookDatabase, replaceNotebookDatabase, type NotebookDatabaseSnapshot } from './notebook-database.js'
 import { noteProvenanceResourceKey, parseNoteProvenanceWrite, type NoteProvenanceWrite } from './note-provenance.js'
+import { parseNoteHistoryRecord, type NoteHistoryRecord } from './note-history.js'
 export type NotesResourceChange = { noteId: string; from: NoteResource; to: NoteResource; conversion?: { sourceRevision: string; targetRevision: string } }
 export type NotesStorageChange = { operationId: string; expectedDirectory: string; directory: string }
 export type NotesConversionIssue = { noteId: string | null; resource: NoteResource | null; code: string; message: string }
@@ -56,6 +57,7 @@ const operationDatabase = async (operation: NotesStorageOperation): Promise<Note
   if (digest(bytes) !== operation.database.snapshotHash) throw failure('The original prepared metadata export changed.')
   const value = JSON.parse(bytes.toString('utf8')) as NotebookDatabaseSnapshot
   parseNotebookState(value.state); value.provenance.forEach(parseNoteProvenanceWrite)
+  value.history?.forEach(parseNoteHistoryRecord)
   if (value.incarnation !== operation.database.incarnation || notebookFingerprint(value.state) !== notebookFingerprint(operation.catalog)) throw failure('The original prepared metadata export identity changed.')
   return value
 }
@@ -182,7 +184,7 @@ export class AgentMuxNotesStorage {
           await collect(sourceRoot)
         }
         const provenance = this.relocateProvenance(original.provenance, resourceChanges)
-        const operation: NotesStorageOperation = { ...input, directory: destination, expectedDirectory: sourceRoot, phase: 'prepared', resourceChanges, files, catalog, sourceCatalog, sourceCatalogHash: notebookDatabaseFingerprint(original), database: await this.exportMetadata({ incarnation: original.incarnation, state: catalog, provenance }) }
+        const operation: NotesStorageOperation = { ...input, directory: destination, expectedDirectory: sourceRoot, phase: 'prepared', resourceChanges, files, catalog, sourceCatalog, sourceCatalogHash: notebookDatabaseFingerprint(original), database: await this.exportMetadata({ ...original, state: catalog, provenance, ...(original.history ? { history: this.relocateHistory(original.history, resourceChanges) } : {}) }) }
         location = { ...location, pending: input.operationId, operations: { ...location.operations, [input.operationId]: operation } }; await this.persist(location); await this.finish(location, operation, true); return this.inspect(input.operationId)
       })
     })
@@ -223,7 +225,7 @@ export class AgentMuxNotesStorage {
           if (existing && notebookFingerprint(existing) !== notebookFingerprint(value)) throw failure('Converted attribution conflicts with original trusted metadata.', 'NOTES_STORAGE_CONFLICT')
           if (!existing) provenance.push(value)
         }
-        const operation: NotesStorageOperation = { operationId: input.operationId, expectedDirectory: location.directory, directory: location.directory, kind: 'convert', phase: 'prepared', resourceChanges: prepared.resourceChanges, files: prepared.files, catalog, sourceCatalog, sourceCatalogHash: notebookDatabaseFingerprint(original), database: await this.exportMetadata({ incarnation: original.incarnation, state: catalog, provenance }) }
+        const operation: NotesStorageOperation = { operationId: input.operationId, expectedDirectory: location.directory, directory: location.directory, kind: 'convert', phase: 'prepared', resourceChanges: prepared.resourceChanges, files: prepared.files, catalog, sourceCatalog, sourceCatalogHash: notebookDatabaseFingerprint(original), database: await this.exportMetadata({ ...original, state: catalog, provenance, ...(original.history ? { history: this.relocateHistory(original.history, prepared.resourceChanges) } : {}) }) }
         parseNotesStorageOperation(operation)
         location = { ...location, pending: input.operationId, operations: { ...location.operations, [input.operationId]: operation } }; await this.persist(location); await this.finish(location, operation, true); return this.inspect(input.operationId)
       })
@@ -265,7 +267,7 @@ export class AgentMuxNotesStorage {
             if (old && notebookFingerprint(old) !== notebookFingerprint(value)) throw failure('Recovered attribution conflicts with the original trusted authors.', 'NOTES_STORAGE_CONFLICT')
             if (!old) provenance.push(value)
           }
-          const operation: NotesStorageOperation = { ...originalOperation, kind: 'convert', phase: 'prepared', files: prepared.files, resourceChanges: prepared.resourceChanges, catalog, sourceCatalog, sourceCatalogHash: notebookDatabaseFingerprint(original), database: await this.exportMetadata({ incarnation: original.incarnation, state: catalog, provenance }) }
+          const operation: NotesStorageOperation = { ...originalOperation, kind: 'convert', phase: 'prepared', files: prepared.files, resourceChanges: prepared.resourceChanges, catalog, sourceCatalog, sourceCatalogHash: notebookDatabaseFingerprint(original), database: await this.exportMetadata({ ...original, state: catalog, provenance, ...(original.history ? { history: this.relocateHistory(original.history, prepared.resourceChanges) } : {}) }) }
           parseNotesStorageOperation(operation)
           location.pending = operationId; location.operations[operationId] = operation
           await this.persist(location); await this.finish(location, operation, true); return this.inspect(operationId)
@@ -284,6 +286,13 @@ export class AgentMuxNotesStorage {
   }
   private relocateProvenance(rows: NoteProvenanceWrite[], changes: NotesResourceChange[]) {
     return rows.map(row => { const change = changes.find(change => change.noteId === row.noteId && noteProvenanceResourceKey(change.from) === noteProvenanceResourceKey(row.resource)); return { ...row, resource: change?.to ?? row.resource } })
+  }
+  private relocateHistory(rows: NoteHistoryRecord[], changes: NotesResourceChange[]) {
+    return rows.map(row => {
+      const change = changes.find(change => change.noteId === row.noteId && noteProvenanceResourceKey(change.from) === noteProvenanceResourceKey(row.resource))
+      return { ...row, resource: change?.to ?? row.resource,
+        ...(row.provenance ? { provenance: { ...row.provenance, resource: change?.to ?? row.provenance.resource } } : {}) }
+    })
   }
   private async confirmOriginal(source: string, workspacePath: string) {
     if (!nested(workspacePath, source) || !(await lstat(source)).isFile() || !nested(await realpath(workspacePath), await realpath(source))) throw failure('The original Note file cannot be confirmed.')
@@ -367,6 +376,10 @@ export class AgentMuxNotesStorage {
       for (const expected of (await operationDatabase(operation)).provenance) {
         const actual = destination.provenance.find(row => row.noteId === expected.noteId && row.revision === expected.revision && noteProvenanceResourceKey(row.resource) === noteProvenanceResourceKey(expected.resource))
         if (!actual || notebookFingerprint(actual) !== notebookFingerprint(expected)) throw failure('The destination no longer confirms the original trusted attribution.')
+      }
+      for (const expected of (await operationDatabase(operation)).history ?? []) {
+        const actual = destination.history?.find(row => row.eventId === expected.eventId && row.noteId === expected.noteId && noteProvenanceResourceKey(row.resource) === noteProvenanceResourceKey(expected.resource))
+        if (!actual || notebookFingerprint(actual) !== notebookFingerprint(expected)) throw failure('The destination no longer confirms the original edit history. Original copies are retained.')
       }
     }
     await confirmDestination()

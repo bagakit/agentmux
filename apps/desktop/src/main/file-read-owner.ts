@@ -5,6 +5,8 @@ import { SCRATCH_WORKSPACE_ID, type ScratchDirectoryFact } from '../shared/scrat
 import { zoneFileResource } from '../shared/zone-file-resource'
 import type { WorkspaceFiles } from './workspace-files'
 import type { WorkspaceFileReadBudget } from '../shared/workspace-file-bytes'
+import { parseFileHistoryParams, type FileHistoryParams, type FileHistoryResult } from '@agentmux/core/files'
+import type { NoteHistoryQuery, NoteHistorySnapshot } from '@agentmux/core/note-history'
 
 /** Resolve once from original spatial/resource facts, then delegate to original Files. */
 export class FileReadOwner implements AgentMuxRpcFilesOwner {
@@ -12,8 +14,26 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
     catalog(): Promise<AgentMuxSpaceCatalog | null>
     topicForDirectory?(workspace: WorkspaceRecord, directory: string): Promise<ScratchDirectoryFact | null>
     workspace(id: string): WorkspaceRecord | undefined
-    files: Pick<WorkspaceFiles, 'read' | 'listFiles'> & { write(workspace: WorkspaceRecord, input: Parameters<WorkspaceFiles['write']>[1], context?: FileWriteContext): ReturnType<WorkspaceFiles['write']> }
+    files: Pick<WorkspaceFiles, 'read' | 'listFiles'> & {
+      write(workspace: WorkspaceRecord, input: Parameters<WorkspaceFiles['write']>[1], context?: FileWriteContext): ReturnType<WorkspaceFiles['write']>
+      history?(workspace: WorkspaceRecord, input: Omit<NoteHistoryQuery, 'resource'> & { path: string }): Promise<NoteHistorySnapshot>
+    }
   }) {}
+  async history(input: FileHistoryParams): Promise<FileHistoryResult> {
+    const params = parseFileHistoryParams(input), resolved = await this.resolve(params)
+    if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_HISTORY_UNCONFIRMED', message: resolved.message } }
+    const { resource, workspace } = resolved
+    if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => resource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) throw new AgentMuxError('The original history resource mapping changed. Inspect the exact file before querying it again.', 'FILE_RESOURCE_MISMATCH')
+    try {
+      if (!this.ports.files.history) throw new Error('The original Note history owner is unavailable. Files and Agents remain available.')
+      const result = await this.ports.files.history(workspace, { noteId: params.noteId, path: resource.path,
+        ...(params.limit === undefined ? {} : { limit: params.limit }), ...(params.before === undefined ? {} : { before: params.before }),
+        ...(params.eventId === undefined ? {} : { eventId: params.eventId }), ...(params.includeContent === undefined ? {} : { includeContent: params.includeContent }) })
+      const current = this.ports.workspace(workspace.id)
+      if (!current || current.hostId !== workspace.hostId || current.path !== workspace.path) throw new Error('The original File resource changed during history observation. Keep the original reference and refresh it.')
+      return { resource, result }
+    } catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_HISTORY_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
+  }
   async read(input: FileReadParams, budget?: WorkspaceFileReadBudget): Promise<FileReadResult> {
     budget?.signal?.throwIfAborted()
     const params = parseFileReadParams(input)

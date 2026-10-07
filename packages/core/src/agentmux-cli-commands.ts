@@ -22,7 +22,7 @@ import { parseFileReadCommand } from './agentmux-cli-files.js'
 import { parseGitParams, parseGitOpenParams } from './public-rpc-git.js'
 
 import { AGENTMUX_SCHEDULE_CLI_COMMANDS } from './schedule-cli.js'
-import { parseFileListParams, parseFileUploadIdentity, parseFileUploadParams } from './public-rpc-files.js'
+import { parseFileHistoryParams, parseFileListParams, parseFileUploadIdentity, parseFileUploadParams } from './public-rpc-files.js'
 import { parseToolkitCommand } from './toolkit-cli.js'
 import { isSplitDirection, SPLIT_FLAG_DIRECTIONS } from './split-direction-ssot.js'
 import type { AgentMuxRpcParams } from './public-rpc.js'
@@ -436,6 +436,11 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     { '--zone': 'data', '--path': 'data', '--host': 'data', '--workspace': 'data', '--workspace-path': 'data', '--space': 'data', '--max-bytes': 'value' },
     f => parseFileReadCommand({ zoneId: value(f, '--zone', true)!, path: value(f, '--path', true)!, hostId: value(f, '--host', true)!, workspaceId: value(f, '--workspace', true)!, workspacePath: value(f, '--workspace-path', true)!,
       ...(f.values.has('--space') ? { spaceId: value(f, '--space', true)! } : {}), ...numbers(f, { '--max-bytes': 'maxBytes' }) }) as unknown as Record<string, unknown>),
+  command('file.history', '--zone ID --path PATH --resource JSON --note ID [--space ID] [--limit N] [--before SEQUENCE] [--event-id ID [--content]]', 'Read saved Note edit events and their persistent batches at the exact original Files resource.',
+    { '--zone': 'data', '--path': 'data', '--resource': 'data', '--note': 'data', '--space': 'data', '--limit': 'value', '--before': 'value', '--event-id': 'data', '--content': 'boolean' },
+    f => parseFileHistoryParams({ zoneId: value(f, '--zone', true)!, path: value(f, '--path', true)!, expectedResource: jsonValue(value(f, '--resource', true)!, 'Original Files resource'), noteId: id(f, '--note', true),
+      ...fields(f, { '--space': 'spaceId', '--event-id': 'eventId' }), ...numbers(f, { '--limit': 'limit', '--before': 'before' }), ...(f.booleans.has('--content') ? { includeContent: true } : {}) }) as unknown as Record<string, unknown>,
+    'Read file.read first and pass its complete resource JSON. Events are newest first; continue with --before using the oldest returned sequence. The timeline returns metadata. --event-id selects one original event; only then may --content include its revision-checked before/after bodies. Oversized content reads remain explicitly unavailable while metadata and the original event are retained. Unconfirmed or unavailable history remains explicit. This query never restores, undoes, writes a file or sends Agent input.'),
   command('file.write', '--zone ID --path PATH --resource JSON --expected-revision REV [--space ID] < content', 'Save the exact existing file pinned by its original read resource and revision.',
     { '--zone': 'data', '--path': 'data', '--resource': 'data', '--space': 'data', '--expected-revision': 'data' },
     f => ({ zoneId: value(f, '--zone', true)!, path: value(f, '--path', true)!, expectedResource: JSON.parse(value(f, '--resource', true)!),
