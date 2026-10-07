@@ -108,8 +108,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     const node = feed.current
     if (!visible || !node) return
     const tail = reading.page?.items.at(-1) ?? reading.timeline?.items.at(-1)
-    const geometry = { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight }
-    const change = onContentChange(follow.current, { itemCount: reading.page?.items.length ?? reading.timeline?.items.length ?? 0, lastItemId: tail?.id ?? null, lastItemLength: tail ? JSON.stringify(tail).length : 0 }, geometry)
+    const change = onContentChange(follow.current, { itemCount: reading.page?.items.length ?? reading.timeline?.items.length ?? 0, lastItemId: tail?.id ?? null, lastItemLength: tail ? JSON.stringify(tail).length : 0 })
     follow.current = change.state
     if (change.scrollToBottom && !reading.olderWindow) node.scrollTop = node.scrollHeight
     const resize = new ResizeObserver(() => { if (follow.current.following && !reading.olderWindow) node.scrollTop = node.scrollHeight })

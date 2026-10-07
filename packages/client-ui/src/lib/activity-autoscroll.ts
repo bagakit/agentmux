@@ -106,8 +106,7 @@ export type ContentChangeDecision = {
  */
 export function onContentChange(
   state: FollowState,
-  signature: ContentSignature,
-  _geometry: ScrollGeometry
+  signature: ContentSignature
 ): ContentChangeDecision {
   const previous = state.lastSignature
   const appended =
