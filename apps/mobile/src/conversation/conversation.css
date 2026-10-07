@@ -101,7 +101,7 @@
 .mobile-send-status[data-phase='unknown'] { color: var(--status-warning-text); }
 .mobile-send-status p { margin: 0 0 6px; overflow-wrap: anywhere; user-select: text; }
 .mobile-send-status[data-original-response] { grid-template-columns: minmax(0, 1fr); }
-.mobile-send-status[data-original-response] > button { justify-self: start; }
+.mobile-send-status[data-original-response] > button { justify-self: start; color: var(--green); font-size: 12px; }
 .agent-interaction .mobile-send-status[data-original-response] { margin: 4px 0 0; }
 .mobile-send-status__diagnosis { min-width: 0; color: var(--text-2); }
 .mobile-send-status__diagnosis[open] { grid-column: 1 / -1; max-height: min(32dvh, 240px); overflow: auto; overscroll-behavior: contain; }
