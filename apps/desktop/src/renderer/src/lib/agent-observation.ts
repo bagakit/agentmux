@@ -46,11 +46,11 @@ export function activityObservationPresentation(observation: AgentObservation, o
   const last = observation.lastKnownActivity
   const confirmed = last
     ? `Last confirmed ${last.state} · ${new Date(last.observedAt).toLocaleString()}`
-    : 'No confirmed activity observed'
+    : 'Last confirmed activity unavailable'
   return {
     label: observation.reason === 'activity-stale' ? 'Activity signal expired' : 'Activity not confirmed',
     detail: `${confirmed} · ${observationAvailable
-      ? `Run ${observation.process} · Input ${observation.readiness === 'ready' ? 'available' : observation.readiness}`
+      ? `Run ${observation.process} · Prompt readiness ${observation.readiness}`
       : `Last observed Run ${observation.process} · Current input availability unconfirmed`}`
   }
 }

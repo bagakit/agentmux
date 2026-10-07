@@ -31,9 +31,12 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
     } }
   })
   const identity = [session.hostId, session.id, session.control.run.runId]
-  const activity = activityObservationPresentation(observeAgentSession(session, Date.now()), observationAvailable && session.status.state !== 'disconnected')
+  const activityObservation = observeAgentSession(session, Date.now())
+  const activityAvailable = observationAvailable && session.status.state !== 'disconnected'
+  const activity = activityObservationPresentation(activityObservation, activityAvailable)
   if (activity) notices.push({ id: 'activity-observation', occurrence: JSON.stringify(identity),
-    cause: activity.detail, notice: { kind: 'indeterminate', notice: {
+    cause: JSON.stringify([activityObservation.reason, activityObservation.lastKnownActivity, activityObservation.process,
+      activityObservation.readiness, activityAvailable]), notice: { kind: 'indeterminate', notice: {
       step: activity.label, mode: activity.detail,
       restore: 'Open the original Agent to inspect its current work. A new native activity observation updates this state; no message is replayed.'
     } } })
