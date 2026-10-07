@@ -10,7 +10,8 @@ export type ConnectionIngressAddressing = { replyToMessageId: string } & (
 )
 
 /** Original external intake facts. Claim means a Core call may have happened, never delivery. */
-export type ConnectionIngressRecord = {
+export type ConnectionIngressMessage = {
+  kind?: never
   ingressId: string
   connectionId: string
   application: ConnectionApplication
@@ -27,6 +28,25 @@ export type ConnectionIngressRecord = {
     operationId: string; messageId: string; author: AgentExternalMessageAuthor
   }
 }
+/** Authenticated native action intake, currently unsupported. Missing context remains absent. */
+export type ConnectionIngressAction = {
+  kind: 'action'
+  ingressId: string
+  connectionId: string
+  application: ConnectionApplication
+  eventId: string
+  actor?: ConnectionActor
+  externalConversationId?: string
+  sourceMessageId?: string
+  actionRef?: string
+  state: 'refused'
+  code: 'INGRESS_ACTION_UNSUPPORTED'
+  body?: never
+  externalMessageId?: never
+  addressing?: never
+  input?: never
+}
+export type ConnectionIngressRecord = ConnectionIngressMessage | ConnectionIngressAction
 export type ConnectionIngressInspectInput = { ingressId: string }
 export type ConnectionIngressListInput = { connectionId: string; bindingId?: string; afterIngressId?: string; limit?: number }
 export type ConnectionIngressInspection = {
