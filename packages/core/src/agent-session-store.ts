@@ -2361,11 +2361,11 @@ type AgentTimelineFileState = {
   revision: number
   items: AgentTimelineItem[]
   mutationLines: number
-  fileBytes: number
+  journalBytes: number
   exists: boolean
 }
 
-/** JSONL 追加行数或体积越过阈值时整写一次快照，把重放成本重新压回常数。 */
+/** Compact appended journal growth; the retained snapshot itself is not replay overhead. */
 const TIMELINE_COMPACTION_MUTATION_LINES = 256
 // Compaction is maintenance, never an admission limit or a reason to trim history.
 const TIMELINE_COMPACTION_BYTES = 4 * 1024 * 1024
@@ -2373,7 +2373,7 @@ const TIMELINE_COMPACTION_BYTES = 4 * 1024 * 1024
 function shouldCompactTimeline(timeline: AgentTimelineFileState): boolean {
   return (
     timeline.mutationLines >= TIMELINE_COMPACTION_MUTATION_LINES ||
-    timeline.fileBytes >= TIMELINE_COMPACTION_BYTES
+    timeline.journalBytes >= TIMELINE_COMPACTION_BYTES
   )
 }
 
@@ -3391,13 +3391,14 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
           revision: 0,
           items: [],
           mutationLines: 0,
-          fileBytes: 0,
+          journalBytes: 0,
           exists: false
         }
       }
       throw error
     }
     const lines = content.split('\n').filter((line, index) => line !== '' || index === 0)
+    const snapshotEnd = content.indexOf('\n')
     const snapshot = parseTimelineSnapshotLine(lines[0], agentSessionId)
     let revision = snapshot.revision
     let items = normalizeAgentTimeline(agentSessionId, snapshot.items)
@@ -3425,7 +3426,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       revision,
       items,
       mutationLines,
-      fileBytes: Buffer.byteLength(content),
+      journalBytes: snapshotEnd < 0 ? 0 : Buffer.byteLength(content.slice(snapshotEnd + 1)),
       exists: true
     }
   }
