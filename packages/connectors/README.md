@@ -707,3 +707,52 @@ The original SDK registration protocol is invoked as finite begin/poll effects,
 without its internal polling loop or implicit issuer migration. Requested bot
 permissions and configuration are not evidence that the platform granted them.
 The existing credential-entry flow remains available independently.
+
+
+## Application profile operations
+
+The original Connection owner provides `connection profile get/sync/advance/inspect/ls`.
+`get` performs explicit platform reads. `inspect` and bounded `ls` read only the
+original local journal. A trusted user/device uses `sync --input FILE|-` with
+`operationId`, `connectionId`, `expectedConnectionRevision` and a nonempty
+`desired` object containing `name`, `description` or `avatar: {pngDataUrl}`.
+The PNG follows the original saved avatar contract: a bounded 256-pixel square.
+Image bytes, native prepared requests and credentials never appear in receipts.
+
+The Host freezes the exact application, configuration revision, requested fields,
+PNG bytes/hash and each serialized request before claiming its effect in the
+original connection database. Upload and profile PATCH have independent facts.
+A duplicate original request joins its receipt; changed input or actor cannot
+replace it. After uncertain delivery or a process loss, inspect the same operation.
+`advance` may continue known not-dispatched steps or refresh observations, but
+never replays an unknown upload or PATCH. A live Host can save its matching
+verified response after transient journal failure without repeating the effect.
+Different application identities remain independently usable.
+
+The official leaf uses the application's own credentials, without user OAuth.
+Name and description target the leaf's recorded language (`zh_cn` for Feishu,
+`en_us` for Lark), not every language or an inferred primary language. Because
+per-entry array merging is not established, preparing these fields requires an
+exact original application i18n baseline, preserves other languages and known
+fields, and checks that baseline again before PATCH. This is not a platform CAS;
+concurrent edits can still happen between the read and write. Missing baseline
+or observed drift prevents that name/description write. Avatar-only PATCH does
+not acquire this read-permission prerequisite.
+
+A confirmed PATCH means the configuration was written and requires platform
+review/publication. No profile operation calls publish: the official publish
+endpoint submits the application's whole pending version and cannot isolate
+profile changes. An optional adapter-provided `managementUrl` is a continuation
+into platform management, not a publication receipt or a version review link.
+The current native bot name/avatar are separate observations. Online description
+requires `online_version_id` and an exact matching application/version response;
+application-level description remains metadata. A returned language does not
+infer the language of native bot fields, and an avatar URL does not certify
+original PNG equality.
+
+Management permission, review state and application creation-source restrictions
+affect only this original profile action. Missing source metadata, existing IM
+permissions or successful enrollment do not establish management eligibility.
+In particular, PersonalAgent management eligibility remains unqualified until
+an actual platform response supplies that fact. Existing messaging, Binding,
+Agent work and explicit creation of another identity remain available.
