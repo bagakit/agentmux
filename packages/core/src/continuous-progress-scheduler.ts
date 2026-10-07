@@ -100,13 +100,15 @@ export class ContinuousProgressScheduler {
   stop(loopId: string): ContinuousProgressLoop { return this.update(loopId, { status: 'stopped' }) }
 
   due(now = this.now()): ContinuousProgressLoop[] {
-    return this.list().filter((loop) => loop.status === 'active' && loop.nextCheckAt <= now)
+    return [...this.loops.values()]
+      .filter((loop) => loop.status === 'active' && loop.nextCheckAt <= now)
+      .map((loop) => structuredClone(loop))
   }
 
   /** On restart, recover at most one current due tick per loop; missed periods are never replayed. */
   recover(now = this.now()): Array<{ loop: ContinuousProgressLoop; tickId: string }> {
-    return this.list().flatMap((loop) => {
-      const claim = this.claimTick(loop.loopId, now)
+    return [...this.loops.keys()].flatMap((loopId) => {
+      const claim = this.claimTick(loopId, now)
       return claim ? [claim] : []
     })
   }
