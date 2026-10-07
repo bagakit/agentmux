@@ -159,8 +159,8 @@ describe('Settings drafts across external commits', () => {
     expect(saveButton().disabled).toBe(false)
     await dom.click('[data-settings-save-bar] button')
     expect(onSave.mock.calls[1]).toEqual([
-      { copyPathsAsAbsolute: false },
-      { copyPathsAsAbsolute: true }
+      { copyPathsAsAbsolute: false, skipAgentAvailabilityCheckWait: false },
+      { copyPathsAsAbsolute: true, skipAgentAvailabilityCheckWait: false }
     ])
     await act(async () => finish())
   })
@@ -173,8 +173,8 @@ describe('Settings drafts across external commits', () => {
     expect(saveButton().disabled).toBe(false)
     await dom.click('[data-settings-save-bar] button')
     expect(onSave).toHaveBeenCalledWith(
-      { copyPathsAsAbsolute: true },
-      { copyPathsAsAbsolute: false }
+      { copyPathsAsAbsolute: true, skipAgentAvailabilityCheckWait: false },
+      { copyPathsAsAbsolute: false, skipAgentAvailabilityCheckWait: false }
     )
     expect(saveButton().disabled).toBe(true)
   })
@@ -189,8 +189,8 @@ describe('Settings drafts across external commits', () => {
     expect(saveButton().disabled).toBe(false)
     await dom.click('[data-settings-save-bar] button')
     expect(onSave.mock.calls).toEqual(Array.from({ length: 2 }, () => [
-      { copyPathsAsAbsolute: true },
-      { copyPathsAsAbsolute: false }
+      { copyPathsAsAbsolute: true, skipAgentAvailabilityCheckWait: false },
+      { copyPathsAsAbsolute: false, skipAgentAvailabilityCheckWait: false }
     ]))
     expect(saveButton().disabled).toBe(true)
   })

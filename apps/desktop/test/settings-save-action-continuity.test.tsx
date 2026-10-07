@@ -17,7 +17,7 @@ it('keeps the original save action while its actual draft moves through saving, 
   expect(button.disabled).toBe(true)
   await dom.click('input[type="checkbox"]')
   await dom.click('[data-settings-save-bar] button')
-  expect(onSave).toHaveBeenCalledExactlyOnceWith({ copyPathsAsAbsolute: true }, { copyPathsAsAbsolute: false })
+  expect(onSave).toHaveBeenCalledExactlyOnceWith({ copyPathsAsAbsolute: true, skipAgentAvailabilityCheckWait: false }, { copyPathsAsAbsolute: false, skipAgentAvailabilityCheckWait: false })
   expect(button.textContent).toBe('Save')
   expect(button.getAttribute('aria-busy')).toBe('true')
   expect(button.disabled).toBe(true)
