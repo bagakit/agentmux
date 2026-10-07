@@ -36,6 +36,7 @@
     "@excalidraw/excalidraw": "0.18.1",
     "@floating-ui/dom": "1.8.0",
     "@monaco-editor/react": "^4.7.0",
+    "@noble/hashes": "2.4.0",
     "@plantuml/core": "1.2026.8",
     "@radix-ui/react-context-menu": "2.3.3",
     "@radix-ui/react-dialog": "^1.1.23",
