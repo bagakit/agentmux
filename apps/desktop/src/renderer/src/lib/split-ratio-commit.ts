@@ -38,6 +38,7 @@ function ratioFromLayout(sizes: number[]): number | null {
 
 export class SplitRatioCommitter {
   private dragging = false
+  private dragOrigin: number | null = null
   private latestRatio: number
 
   /**
@@ -83,8 +84,20 @@ export class SplitRatioCommitter {
   }
 
   setDragging(dragging: boolean): void {
+    if (dragging === this.dragging) return
+    if (dragging) this.dragOrigin = this.latestRatio
     this.dragging = dragging
-    if (!dragging) this.commitLatest()
+    if (!dragging) {
+      this.dragOrigin = null
+      this.commitLatest()
+    }
+  }
+
+  /** Cancel this local gesture before the original handle unregisters and releases it. */
+  cancelDragging(): void {
+    if (this.dragOrigin !== null) this.latestRatio = this.dragOrigin
+    this.dragOrigin = null
+    this.dragging = false
   }
 
   private commitLatest(): void {
