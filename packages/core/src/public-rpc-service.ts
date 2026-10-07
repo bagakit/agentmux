@@ -1,5 +1,6 @@
 import { isConnectionDeliveryMethod, parseConnectionDeliveryParams } from './connection-delivery-codec.js'
 import { isRoomBindingMethod, parseRoomBindingParams } from './room-binding-codec.js'
+import { isRoomProvisioningMethod, parseRoomProvisioningParams } from './room-provisioning-codec.js'
 import { parseConversationRef, parseConversationCheckpointPage, parseConversationChangesInput, parseConversationChangesPage } from './conversation-changes.js'
 import { createAgentMuxSearchReader, type AgentMuxSearchReadContext } from './search-reader.js'
 import { createAgentMuxSearchObservationOwner } from './search-observation.js'
@@ -392,13 +393,19 @@ export class AgentMuxRpcService {
       if (!this.ports.connections) throw new AgentMuxError('The connection owner is not enabled on this Host. Existing Agent capabilities remain available.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       const owner = this.ports.connections
+      const administration = { actor: { kind: context.principal.kind as 'user' | 'device', id: context.principal.id }, assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.() } }
+      if (isRoomProvisioningMethod(method)) {
+        if (!owner.rooms) throw new AgentMuxError('Room creation is not enabled on this Host. Existing Agents and connections remain available.', 'CONTROL_UNAVAILABLE')
+        const result = method === 'connection.room.create' ? await owner.rooms.create(parseRoomProvisioningParams(method, params), administration)
+          : await owner.rooms.inspect(parseRoomProvisioningParams(method, params))
+        return parseConnectionResult(method, result, input) as AgentMuxRpcResult<M>
+      }
       if (isConnectionDeliveryMethod(method)) {
         const delivery = owner.delivery
         if (!delivery) throw new AgentMuxError('Delivery inspection is not enabled on this Host. Existing Agents and connections remain available.', 'CONTROL_UNAVAILABLE')
-        const retryContext = { actor: { kind: context.principal.kind as 'user' | 'device', id: context.principal.id }, assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.() } }
         const result = method === 'connection.delivery.inspect' ? await delivery.inspect(parseConnectionDeliveryParams(method, params))
           : method === 'connection.delivery.ls' ? await delivery.list(parseConnectionDeliveryParams(method, params))
-          : await delivery.retry(parseConnectionDeliveryParams(method, params), retryContext)
+          : await delivery.retry(parseConnectionDeliveryParams(method, params), administration)
         return parseConnectionResult(method, result, input) as AgentMuxRpcResult<M>
       }
       if (method === 'connection.ingress.inspect' || method === 'connection.ingress.ls' || method === 'connection.ingress.authority') {
@@ -411,13 +418,12 @@ export class AgentMuxRpcService {
       if (isRoomBindingMethod(method)) {
         const bindings = owner.bindings
         if (!bindings) throw new AgentMuxError('Room bindings are not enabled on this Host. Existing Agents and connections remain available.', 'CONTROL_UNAVAILABLE')
-        const bindingContext = { actor: { kind: context.principal.kind as 'user' | 'device', id: context.principal.id }, assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.() } }
-        const result = method === 'connection.bind' ? await bindings.bind(parseRoomBindingParams(method, params), bindingContext)
+        const result = method === 'connection.bind' ? await bindings.bind(parseRoomBindingParams(method, params), administration)
           : method === 'connection.binding.inspect' ? await bindings.inspect(parseRoomBindingParams(method, params))
           : method === 'connection.binding.ls' ? await bindings.list(parseRoomBindingParams(method, params))
-          : method === 'connection.binding.pause' ? await bindings.pause(parseRoomBindingParams(method, params), bindingContext)
-          : method === 'connection.binding.relink' ? await bindings.relink(parseRoomBindingParams(method, params), bindingContext)
-          : await bindings.grant(parseRoomBindingParams(method, params), bindingContext)
+          : method === 'connection.binding.pause' ? await bindings.pause(parseRoomBindingParams(method, params), administration)
+          : method === 'connection.binding.relink' ? await bindings.relink(parseRoomBindingParams(method, params), administration)
+          : await bindings.grant(parseRoomBindingParams(method, params), administration)
         return parseConnectionResult(method, result, input) as AgentMuxRpcResult<M>
       }
       const result = method === 'connection.ls' ? await owner.list()
