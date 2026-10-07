@@ -1,5 +1,6 @@
 import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
+import { ConversationToolPayload } from '@agentmux/client-ui/components/ConversationToolPayload'
 import { ReadingFind } from '@agentmux/client-ui/components/ReadingFind'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -22,7 +23,7 @@ import {
   type ToolDiff
 } from '../lib/activity-diff'
 import { createRulerScale, describeReadout, describeRulerAxis, describeSpan, describeActivityRecordTime, rulerBand, stepRulerSelection, type RulerReadoutText, type RulerScale } from '../lib/activity-ruler'
-import { formatClock, formatDuration } from '@agentmux/client-ui/conversation-time'
+import { formatClock } from '@agentmux/client-ui/conversation-time'
 import { stepTitle } from '@agentmux/client-ui/activity-step-summary'
 import { showEmptyState, showWorkingIndicator } from '../lib/activity-working-state'
 import { speaksAsAgent, type ConversationAxisItem, type ConversationAxisMark } from '../lib/conversation-axis'
@@ -44,8 +45,7 @@ import { ConversationView } from '@agentmux/client-ui/components/ConversationVie
 import { renderConversationQuestionNotice } from './ConversationQuestionNotice'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { SemanticIcon } from './semantic-icons'
-import { WorkflowCard } from './workflow/WorkflowCard'
-import { WorkflowToolRow } from './workflow/WorkflowToolRow'
+import { RecordedStepsCard as WorkflowCard, RecordedToolRow as WorkflowToolRow } from '@agentmux/client-ui/components/WorkflowObservation'
 import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import { conversationReadingAnchor, protectsConversationWindow, restoreConversationAnchor, useSessionConversationWindow, type ConversationReading } from '../lib/session-conversation-window'
@@ -190,6 +190,9 @@ function Row({
   workspaceRoot: string
 }) {
   const [open, setOpen] = useState(false)
+  const sourceIdentity = useMemo(() => ({}), [item])
+  const payloadIdentity = useMemo(() => ({}), [sourceIdentity, item.toolInput, item.content])
+  const outputIdentity = useMemo(() => ({}), [sourceIdentity, item.toolOutput])
   // What the agent said is the content of the trace; what a tool was invoked with is its payload.
   // Prose stays on the page, machine arguments fold away — that is the noise the run view is hiding.
   const prose = item.kind === 'tool_call' ? undefined : item.content
@@ -223,11 +226,17 @@ function Row({
       }} className={`log-row log-row--${item.kind}`} icon={<Glyph kind={item.kind} {...(item.toolName ? { toolName: item.toolName } : {})} />}
         {...(expandable ? { expanded: open, onToggle: () => setOpen((value) => !value) } : {})} />
       {prose ? <p className="log-row__prose">{prose}</p> : null}
-      {open && diff ? <DiffBlock diff={diff} /> : null}
-      {open && !diff && payload ? <pre className="log-row__payload">{payload}</pre> : null}
-      {open && output ? (
-        <pre className="log-row__output" data-status={item.status}>{output}</pre>
-      ) : null}
+      {open ? <div className="wf-native-process__body">
+        {diff ? <DiffBlock diff={diff} /> : null}
+        {payload ? diff ? <details><summary>Original tool input</summary><div className="conversation-tool-trace__payload">
+          <ConversationToolPayload text={payload} identity={payloadIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy tool input" />
+        </div></details> : <div className="conversation-tool-trace__payload">
+          <ConversationToolPayload text={payload} identity={payloadIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy tool input" />
+        </div> : null}
+        {output ? <div className="conversation-tool-trace__payload" data-status={item.status}>
+          <ConversationToolPayload text={output} identity={outputIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy tool output" />
+        </div> : null}
+      </div> : null}
     </Fragment>
   )
 }
@@ -278,27 +287,20 @@ function Run({ items, origin, workspaceRoot }: { items: AgentTimelineItem[]; ori
     })
   }, [items, open, showAll])
   if (items.length === 0) return null
-  const counts = items.reduce((result, item) => {
-    if (item.status === 'complete' || item.status === 'streaming' || item.status === 'failed') result[item.status]++
-    else result.unknown++
-    return result
-  }, { complete: 0, streaming: 0, failed: 0, unknown: 0 })
   const hiddenCount = items.filter((item, index) => !visible(item, index)).length
   const failed = items.some((item) => item.status === 'failed')
   const streaming = items.some((item) => item.status === 'streaming')
   const complete = items.every((item) => item.status === 'complete')
   // This is the recorded range of these observations, not a Run execution duration.
   const lastRecordedAt = Math.max(...items.map((item) => item.updatedAt))
-  const elapsed = lastRecordedAt - items[0]!.createdAt
   const recordedTime = describeActivityRecordTime(items[0]!.createdAt, lastRecordedAt, origin)
-  return <WorkflowCard observation={{
+  return <WorkflowCard compact observation={{
     id: `observed-${items[0]!.id}`,
+    label: '执行过程',
     stepCount: items.length,
-    counts,
     ...(failed ? { status: 'failed' as const } : streaming ? { status: 'streaming' as const } : complete ? { status: 'complete' as const } : {}),
     streaming,
-    recordedTime,
-    ...(elapsed > 0 ? { elapsed: formatDuration(elapsed) } : {})
+    recordedTime
   }} expanded={open} onExpandedChange={setOpen}>
     {hiddenCount > 0 ? <button type="button" className="wf-observation__more" onClick={() => setShowAll(true)}>
       <ThemeNavigationDisclosureIcon size={12} aria-hidden="true" />Show {hiddenCount} more recorded steps
@@ -317,7 +319,8 @@ function placeSegments(segments: Segment[]): PlacedSegment[] {
   let index = 0
   for (const entry of segments) {
     const size = entry.kind === 'run' ? entry.items.length : 1
-    const key = entry.kind === 'run' ? entry.id : entry.kind === 'user-message' ? entry.message.id : entry.item.id
+    const identity = entry.kind === 'run' ? entry.id : entry.kind === 'user-message' ? entry.message.id : entry.item.id
+    const key = JSON.stringify([entry.kind, identity])
     placed.push({ entry, key, from: index, to: index + size - 1 })
     index += size
   }
@@ -454,6 +457,7 @@ export function ActivityView({
   const returnRef = useRef<HTMLButtonElement>(null)
   const earlierRef = useRef<HTMLDivElement>(null)
   const nativeTailRef = useRef<HTMLDivElement>(null)
+  const readingTailRef = useRef<HTMLDivElement>(null)
   const readingSpaceRef = useRef<HTMLDivElement>(null)
   const earlierSpaceAllowed = useRef(false)
   const earlierCommitPending = useRef(false)
@@ -549,38 +553,20 @@ export function ActivityView({
     return buildActivityEntries(items, observedMessages)
   }, [items, userMessages, nativeHistoryPage, sessionId, readingWindow.historical, Boolean(conversationReading), Boolean(conversationReading?.nativeSourceFacts)])
   const placed = useMemo(() => placeSegments(segments), [segments])
-  const nativeSupplement = (entry: Segment): boolean => entry.kind === 'user-message' && entry.message.source.kind === 'native'
-  const observations = placed.reduce((summary, { entry }) => {
-    if (nativeSupplement(entry)) return summary
-    if (entry.kind === 'user-message') {
-      summary.count++
-      if (entry.message.deliveryStatus === 'failed') summary.failed++
-      if (entry.message.deliveryStatus === 'unverified') summary.unconfirmed++
-    } else for (const item of entry.kind === 'run' ? entry.items : [entry.item]) {
-      summary.count++
-      if (item.status === 'failed') summary.failed++
-      if (item.kind === 'user_message' && item.status === 'streaming') summary.unconfirmed++
-    }
-    return summary
-  }, { count: 0, failed: 0, unconfirmed: 0 })
-  const observationRef = useRef<HTMLDetailsElement>(null)
-  const [observationDisclosure, setObservationDisclosure] = useState({ sessionId, open: false })
-  const observationOpen = observationDisclosure.sessionId === sessionId && observationDisclosure.open
-  const observationVisible = observationOpen && conversationReading?.enabled !== false
   function captureReadingAnchor(viewport: HTMLElement, target?: EventTarget | null): ReturnType<typeof conversationReadingAnchor> {
-    const observations = observationRef.current
-    const observed = observations?.open && (target instanceof Node ? observations.contains(target)
-      : anchorRef.current?.kind === 'segment' || observations.getBoundingClientRect().top <= viewport.getBoundingClientRect().top)
-    return conversationReadingAnchor(viewport, observed ? observations : null)
+    const captured = logRef.current
+    const selection = viewport.ownerDocument.defaultView?.getSelection()
+    let selectedObserved = false
+    if (captured && selection && !selection.isCollapsed && selection.rangeCount) {
+      try { selectedObserved = captured.contains(selection.getRangeAt(0).startContainer) }
+      catch { /* A detached selection cannot supply a reading anchor. */ }
+    }
+    const observed = captured && (target instanceof Node ? captured.contains(target)
+      : selectedObserved || anchorRef.current?.kind === 'segment' || captured.getBoundingClientRect().top <= viewport.getBoundingClientRect().top)
+    return conversationReadingAnchor(viewport, observed ? captured : null)
   }
-  const readObservationImage = useCallback<ReadPastedImage>(path => observationVisible && readPastedImage
-    ? readPastedImage(path) : Promise.resolve(null), [observationVisible, readPastedImage])
-  const expandObservationFor = (target: Element): void => {
-    const disclosure = observationRef.current
-    if (!disclosure?.contains(target)) return
-    disclosure.open = true
-    setObservationDisclosure({ sessionId, open: true })
-  }
+  const readEntryImage = useCallback<ReadPastedImage>(path => readingEnabled && readPastedImage
+    ? readPastedImage(path) : Promise.resolve(null), [readingEnabled, readPastedImage])
   const origin = useMemo(() => {
     for (const it of unifiedItems) {
       const t = 'createdAt' in it ? it.createdAt : it.recordedAt
@@ -631,7 +617,11 @@ export function ActivityView({
       ? el.scrollTop + tail.getBoundingClientRect().top - el.getBoundingClientRect().top
       : null
   }
-  const readingHeight = (el: HTMLElement): number => Math.max(el.clientHeight, nativeReadingTail(el) ?? el.scrollHeight)
+  // Displayed content and native pagination have different ends. A captured reply is readable
+  // content too; opening machine details must not change which native cursor owns paging.
+  const readingHeight = (el: HTMLElement): number => Math.max(el.clientHeight, readingTailRef.current
+    ? el.scrollTop + readingTailRef.current.getBoundingClientRect().top - el.getBoundingClientRect().top
+    : el.scrollHeight)
   const feedGeometry = (): ScrollGeometry | null => {
     const el = feedEl ?? logRef.current?.closest('.activity-feed')
     if (!(el instanceof HTMLElement)) return null
@@ -688,7 +678,7 @@ export function ActivityView({
     const boundaryTop = boundary ? el.scrollTop + boundary.getBoundingClientRect().bottom - el.getBoundingClientRect().top : 0
     const earlier = nextTop <= boundaryTop + distance
     const tailTop = (nativeReadingTail(el) ?? el.scrollHeight) - el.scrollTop
-    const newer = tailTop >= 0 && readingHeight(el) - el.clientHeight - nextTop <= distance
+    const newer = tailTop >= 0 && (nativeReadingTail(el) ?? el.scrollHeight) - el.clientHeight - nextTop <= distance
     if (!earlier) edges.earlier = false
     if (!newer) edges.newer = false
     if (direction < 0 && earlier && !edges.earlier && readingWindow.hasMore) {
@@ -744,13 +734,14 @@ export function ActivityView({
     const page = nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null
     const nativeTail = page?.items.at(-1)
     const observedTail = unifiedItems.at(-1)
-    // The native source owns the reading tail. Inspect only its final record, never the whole page.
+    // Each independent source keeps its own tail. Both can change in place while displayed;
+    // this signature is display change detection, never an association or adoption claim.
     const nativeLength = nativeTail?.contentParts.reduce((length, part) => length +
-      Object.values(part).reduce<number>((size, value) => size + (typeof value === 'string' ? value.length : 0), 0), 0)
+      Object.values(part).reduce<number>((size, value) => size + (typeof value === 'string' ? value.length : 0), 0), 0) ?? 0
     const decision = onContentChange(followRef.current, {
       itemCount: unifiedItems.length + (page?.items.length ?? 0),
-      lastItemId: nativeTail ? JSON.stringify([page!.source.providerId, page!.source.nativeSessionId, nativeTail.id]) : observedTail?.id ?? null,
-      lastItemLength: nativeLength ?? observedTail?.content?.length ?? 0
+      lastItemId: JSON.stringify([nativeTail ? [page!.source.providerId, page!.source.nativeSessionId, nativeTail.id] : null, observedTail?.id ?? null]),
+      lastItemLength: nativeLength + (observedTail?.content?.length ?? 0)
     }, geometry)
     followRef.current = decision.state
     if (decision.scrollToBottom) pinToBottom()
@@ -780,9 +771,6 @@ export function ActivityView({
 
   useEffect(() => {
     if (!readingEnabled || !revealRequest || !feedEl) return
-    const target = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]'))
-      .find(node => node.dataset.messageSourceKey === revealRequest.sourceKey)
-    if (target && revealRequest.isCurrent()) expandObservationFor(target)
     const frame = requestAnimationFrame(() => {
       if (!revealRequest.isCurrent() || !feedEl.isConnected) { revealRequest.complete(false); return }
       const matches = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]'))
@@ -818,7 +806,6 @@ export function ActivityView({
     const el = host ? segmentEls.current.get(host.key) : undefined
     // Reuse the same scroll primitive the rest of the app uses to bring a row into view; there is no
     // second scroll controller for the Activity log.
-    if (el) expandObservationFor(el)
     el?.scrollIntoView({ block: 'nearest' })
     if (feedEl) {
       anchorRef.current = captureReadingAnchor(feedEl, el)
@@ -986,7 +973,6 @@ export function ActivityView({
     {!readingWindow.historical ? <UserMessageReadNotice showEarlier={!conversationReading} read={userMessageRead ? { ...userMessageRead,
       onReadEarlier: conversationReading ? readingWindow.readEarlier : userMessageRead.onReadEarlier } : undefined} /> : null}
   </>
-
   const latestControl = conversationReading?.opened || showJump || readingWindow.historical || readingWindow.hasEarlierNavigation || readingWindow.newerOutside || readingWindow.held || readingWindow.error ? (
     <div className="activity-feed__latest-layer" data-conversation-current-entry>
       {readingWindow.held ? <span className="activity-feed__latest-held" role="status">保留阅读位置</span> : null}
@@ -1064,7 +1050,6 @@ export function ActivityView({
   }
 
   const renderPlaced = ({ entry, key }: PlacedSegment): JSX.Element => {
-  const readEntryImage = readPastedImage && (nativeSupplement(entry) ? readPastedImage : readObservationImage)
   // Identity is resolved once here; the shared message only renders that verdict.
   const speaker = entry.kind === 'run'
     ? null
@@ -1111,7 +1096,7 @@ export function ActivityView({
           homeDir={homeDir}
           {...(described?.providerId ? { providerId: described.providerId } : {})}
           {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
-          {...(readEntryImage ? { readPastedImage: readEntryImage } : {})}
+          {...(readPastedImage ? { readPastedImage: readEntryImage } : {})}
           {...(openHttpLink ? { openHttpLink } : {})}
           {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.message)) } : {})}
           {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
@@ -1135,7 +1120,7 @@ export function ActivityView({
           homeDir={homeDir}
           {...(described ?? {})}
           {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
-          {...(readEntryImage ? { readPastedImage: readEntryImage } : {})}
+          {...(readPastedImage ? { readPastedImage: readEntryImage } : {})}
           {...(openHttpLink ? { openHttpLink } : {})}
           {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.item)) } : {})}
           {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
@@ -1213,29 +1198,9 @@ export function ActivityView({
         {...(openHttpLink ? { openHttpLink } : {})}
         {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
       /> : null}
-      <div className="activity-log" ref={logRef}>{placed.filter(({ entry }) => nativeSupplement(entry)).map(renderPlaced)}</div>
       <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" />
-      {observations.count > 0 ? <details key={sessionId} ref={observationRef} className="activity-feed__observations"
-        open={observationOpen} onToggle={event => {
-          if (event.currentTarget === observationRef.current) {
-            setObservationDisclosure({ sessionId, open: event.currentTarget.open })
-            if (event.currentTarget.open) {
-              followRef.current = { ...followRef.current, following: false }
-              if (feedEl) anchorRef.current = conversationReadingAnchor(feedEl, event.currentTarget)
-              setShowJump(true)
-            }
-          }
-        }}>
-        <summary className="activity-feed__observation-source">
-          <ThemeNavigationDisclosureIcon size={12} aria-hidden="true" />
-          <span>投递与运行详情</span>
-          <span className="activity-feed__observation-count">· {observations.count} 项</span>
-          {observations.failed > 0 ? <span className="activity-feed__observation-issue">{observations.failed} failed records</span> : null}
-          {observations.unconfirmed > 0 ? <span className="activity-feed__observation-issue">{observations.unconfirmed} submissions unconfirmed</span> : null}
-        </summary>
-        <div className="activity-feed__observation-scope">包含发送回执和运行观察，不代表 Agent 已接纳的对话消息</div>
-        <div className="activity-log">{placed.filter(({ entry }) => !nativeSupplement(entry)).map(renderPlaced)}</div>
-      </details> : null}
+      <div className="activity-log" ref={logRef}>{placed.map(renderPlaced)}</div>
+      <div ref={readingTailRef} data-conversation-reading-tail aria-hidden="true" />
       {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator active={activitySemantic === 'active'} /> : null}
       <div ref={readingSpaceRef} data-conversation-reading-space aria-hidden="true" />
     </div>
