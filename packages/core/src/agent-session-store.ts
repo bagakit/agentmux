@@ -9,6 +9,7 @@ import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import { assertCurrentAgentCapabilityBinding, type AgentCapabilityBinding } from './agent-capability.js'
 import { agentActivityTimelineItem } from './agent-activity-state.js'
 import { createHash } from 'node:crypto'
+import type { BigIntStats } from 'node:fs'
 import { appendFile, mkdir, open, readFile, readdir, stat, unlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
@@ -2363,6 +2364,17 @@ type AgentTimelineFileState = {
   mutationLines: number
   journalBytes: number
   exists: boolean
+  version: string | null
+  sourceBytes: number
+  appendSafe: boolean
+}
+
+// Disposable decoded facts, not a business/history limit or a heap-size promise.
+const TIMELINE_CACHE_ENTRIES = 8
+const TIMELINE_CACHE_SOURCE_BYTES = 16 * 1024 * 1024
+
+function timelineFileVersion(metadata: BigIntStats): string {
+  return `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeNs}:${metadata.ctimeNs}`
 }
 
 /** Compact appended journal growth; the retained snapshot itself is not replay overhead. */
@@ -2470,6 +2482,9 @@ export class AgentMuxSessionDurabilityError extends AgentMuxError {
 
 export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore {
   private tail: Promise<void> = Promise.resolve()
+  private readonly timelineTails = new Map<string, Promise<void>>()
+  private readonly timelines = new Map<string, AgentTimelineFileState>()
+  private timelineSourceBytes = 0
   private pendingLockRelease: (() => Promise<void>) | null = null
   /** 已报过的抢救事件（键是隔离文件的内容寻址路径），防同一份坏字节在一次加载里刷多条告警。 */
   private readonly reportedSalvages = new Set<string>()
@@ -2942,7 +2957,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async loadTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
-    await this.tail
+    await this.timelineTails.get(agentSessionId)
     const timeline = await this.readTimeline(agentSessionId)
     return structuredClone({
       agentSessionId: timeline.agentSessionId,
@@ -2955,38 +2970,59 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     mutation: AgentTimelineMutation,
     signal?: AbortSignal
   ): Promise<AgentTimelineCommit> {
-    let result!: AgentTimelineCommit
-    await this.enqueue(async () => {
-      signal?.throwIfAborted()
-      const canonicalMutation = normalizeAgentTimelineMutation(mutation)
-      if (!await this.timelineMutationAllowed(canonicalMutation, signal)) {
-        throw new AgentMuxError(`Unknown Agent Session: ${canonicalMutation.agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
+    const canonicalMutation = normalizeAgentTimelineMutation(mutation)
+    const id = canonicalMutation.agentSessionId
+    // Preserve local Timeline call order for this Session; unrelated cold histories do
+    // not reserve the global commit queue. Membership is still checked in its transaction.
+    const current = (this.timelineTails.get(id) ?? Promise.resolve()).then(async () => {
+      try {
+        let timeline = await this.readTimeline(id, signal)
+        for (;;) {
+          let result: AgentTimelineCommit | undefined
+          let committedTimeline: AgentTimelineFileState | undefined
+          await this.enqueue(async () => {
+            signal?.throwIfAborted()
+            if (!await this.timelineMutationAllowed(canonicalMutation, signal)) {
+              throw new AgentMuxError(`Unknown Agent Session: ${id}`, 'UNKNOWN_AGENT_SESSION')
+            }
+            // Another process/lifecycle may have changed the original while cold
+            // preparation ran. Rebuild outside this lock, never from a guessed suffix.
+            if (await this.readTimelineVersion(id, signal) !== timeline.version) return
+            const items = applyNormalizedTimelineMutation(timeline.items, canonicalMutation)
+            const changed = items !== timeline.items
+            result = { agentSessionId: id, revision: changed ? nextTimelineRevision(timeline.revision) : timeline.revision,
+              changed, mutation: canonicalMutation }
+            if (!changed) return
+            const snapshot = !timeline.exists || !timeline.appendSafe || shouldCompactTimeline(timeline)
+            const writtenBytes = snapshot
+              ? await this.writeTimelineSnapshot({ agentSessionId: id, revision: result.revision, items }, signal)
+              : await this.appendTimelineMutation(canonicalMutation, signal)
+            const version = await this.readTimelineVersion(id, signal)
+            // Retain only the version witnessed under the original writer lock.
+            // Publication waits for the complete transaction/cleanup receipt below.
+            if (version !== null) committedTimeline = { agentSessionId: id, revision: result.revision, items,
+              mutationLines: snapshot ? 0 : timeline.mutationLines + 1,
+              journalBytes: snapshot ? 0 : timeline.journalBytes + writtenBytes,
+              sourceBytes: snapshot ? writtenBytes : timeline.sourceBytes + writtenBytes,
+              exists: true, version, appendSafe: true }
+          }, signal)
+          if (result) {
+            if (this.pendingLockRelease) this.forgetTimeline(id)
+            else if (committedTimeline) this.retainTimeline(committedTimeline)
+            else if (result.changed) this.forgetTimeline(id)
+            return structuredClone(result)
+          }
+          timeline = await this.readTimeline(id, signal)
+        }
+      } catch (error) {
+        this.forgetTimeline(id)
+        throw sessionStorageFailure(error, 'mutation')
       }
-      const timeline = await this.readTimeline(canonicalMutation.agentSessionId, signal)
-      const items = applyNormalizedTimelineMutation(timeline.items, canonicalMutation)
-      const changed = items !== timeline.items
-      result = {
-        agentSessionId: canonicalMutation.agentSessionId,
-        revision: changed ? nextTimelineRevision(timeline.revision) : timeline.revision,
-        changed,
-        mutation: canonicalMutation
-      }
-      if (!changed) {
-        signal?.throwIfAborted()
-        return
-      }
-      // 热路径是 JSONL 追加一行；只有文件缺失或超过 compaction 阈值才整写快照。
-      if (!timeline.exists || shouldCompactTimeline(timeline)) {
-        await this.writeTimelineSnapshot({
-          agentSessionId: canonicalMutation.agentSessionId,
-          revision: result.revision,
-          items
-        }, signal)
-      } else {
-        await this.appendTimelineMutation(canonicalMutation, signal)
-      }
-    }, signal)
-    return structuredClone(result)
+    })
+    const settled = current.then(() => {}, () => {})
+    this.timelineTails.set(id, settled)
+    void settled.then(() => { if (this.timelineTails.get(id) === settled) this.timelineTails.delete(id) })
+    return current
   }
 
   private async withReadDatabase<T>(read: (db: DatabaseSync) => T,
@@ -3373,36 +3409,100 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
    */
   private async readTimeline(
     agentSessionId: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    underWriterLock = false
   ): Promise<AgentTimelineFileState> {
     const path = this.timelinePath(agentSessionId)
-    let content: string
+    try {
+      let originalChanged = false
+      for (;;) {
+        signal?.throwIfAborted()
+        if (!underWriterLock && originalChanged) {
+          // A continuously changing original must not starve a public read with no
+          // AbortSignal. Contention returns to the existing serialized owner for one
+          // stable observation; this is not a data limit or a second lock protocol.
+          let stable!: AgentTimelineFileState
+          await this.enqueue(async () => { stable = await this.readTimeline(agentSessionId, signal, true) }, signal)
+          return stable
+        }
+        const version = await this.readTimelineVersion(agentSessionId, signal)
+        const cached = this.timelines.get(agentSessionId)
+        if (cached && cached.version === version) {
+          this.retainTimeline(cached)
+          return cached
+        }
+        this.forgetTimeline(agentSessionId)
+        if (version === null) return { agentSessionId, revision: 0, items: [], mutationLines: 0,
+          journalBytes: 0, exists: false, version: null, sourceBytes: 0, appendSafe: true }
+        let content: string, openedVersion: string, finishedVersion: string
+        try {
+          const handle = await open(path, 'r')
+          try {
+            const before = await handle.stat({ bigint: true })
+            if (!before.isFile()) throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
+            openedVersion = timelineFileVersion(before)
+            content = await handle.readFile({ encoding: 'utf8', signal })
+            finishedVersion = timelineFileVersion(await handle.stat({ bigint: true }))
+          } finally { await handle.close() }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') { originalChanged = true; continue }
+          throw error
+        }
+        // An open descriptor can outlive an atomic pathname replacement. Validate
+        // both its generation and the current path before retaining decoded facts.
+        if (openedVersion !== finishedVersion || finishedVersion !== await this.readTimelineVersion(agentSessionId, signal)) {
+          originalChanged = true
+          continue
+        }
+        const timeline = this.decodeTimeline(agentSessionId, content, finishedVersion)
+        this.retainTimeline(timeline)
+        return timeline
+      }
+    } catch (error) {
+      this.forgetTimeline(agentSessionId)
+      throw error
+    }
+  }
+
+  private async readTimelineVersion(agentSessionId: string, signal?: AbortSignal): Promise<string | null> {
     try {
       signal?.throwIfAborted()
-      const metadata = await stat(path)
+      const metadata = await stat(this.timelinePath(agentSessionId), { bigint: true })
+      signal?.throwIfAborted()
       if (!metadata.isFile()) {
         throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
       }
-      content = await readFile(path, { encoding: 'utf8', signal })
+      return timelineFileVersion(metadata)
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return {
-          agentSessionId,
-          revision: 0,
-          items: [],
-          mutationLines: 0,
-          journalBytes: 0,
-          exists: false
-        }
-      }
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
       throw error
     }
+  }
+
+  private forgetTimeline(agentSessionId: string): void {
+    const previous = this.timelines.get(agentSessionId)
+    if (previous) this.timelineSourceBytes -= previous.sourceBytes
+    this.timelines.delete(agentSessionId)
+  }
+
+  private retainTimeline(timeline: AgentTimelineFileState): void {
+    this.forgetTimeline(timeline.agentSessionId)
+    if (timeline.sourceBytes > TIMELINE_CACHE_SOURCE_BYTES) return
+    this.timelines.set(timeline.agentSessionId, timeline)
+    this.timelineSourceBytes += timeline.sourceBytes
+    while (this.timelines.size > TIMELINE_CACHE_ENTRIES || this.timelineSourceBytes > TIMELINE_CACHE_SOURCE_BYTES) {
+      this.forgetTimeline(this.timelines.keys().next().value!)
+    }
+  }
+
+  private decodeTimeline(agentSessionId: string, content: string, version: string): AgentTimelineFileState {
     const lines = content.split('\n').filter((line, index) => line !== '' || index === 0)
     const snapshotEnd = content.indexOf('\n')
     const snapshot = parseTimelineSnapshotLine(lines[0], agentSessionId)
     let revision = snapshot.revision
     let items = normalizeAgentTimeline(agentSessionId, snapshot.items)
     let mutationLines = 0
+    let appendSafe = content.endsWith('\n')
     for (let index = 1; index < lines.length; index += 1) {
       const line = lines[index]!
       try {
@@ -3414,7 +3514,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         if (next !== items) revision = nextTimelineRevision(revision)
         items = next
       } catch (error) {
-        if (index === lines.length - 1) break
+        if (index === lines.length - 1) { appendSafe = false; break }
         throw error instanceof AgentMuxError
           ? error
           : new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
@@ -3427,35 +3527,42 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       items,
       mutationLines,
       journalBytes: snapshotEnd < 0 ? 0 : Buffer.byteLength(content.slice(snapshotEnd + 1)),
-      exists: true
+      exists: true,
+      version,
+      sourceBytes: Buffer.byteLength(content),
+      appendSafe
     }
   }
 
   private async writeTimelineSnapshot(
     document: { agentSessionId: string; revision: number; items: readonly AgentTimelineItem[] },
     signal?: AbortSignal
-  ): Promise<void> {
+  ): Promise<number> {
     signal?.throwIfAborted()
     const content = `${JSON.stringify({ version: 3, ...document })}\n`
     const path = this.timelinePath(document.agentSessionId)
     await mkdir(dirname(path), { recursive: true, mode: 0o700 })
     await durableWriteFile(path, content, { mode: 0o600, ...(signal ? { signal } : {}) })
+    return Buffer.byteLength(content)
   }
 
   private async appendTimelineMutation(
     mutation: AgentTimelineMutation,
     signal?: AbortSignal
-  ): Promise<void> {
+  ): Promise<number> {
     signal?.throwIfAborted()
+    const content = `${JSON.stringify(mutation)}\n`
     await appendFile(
       this.timelinePath(mutation.agentSessionId),
-      `${JSON.stringify(mutation)}\n`,
+      content,
       { mode: 0o600 }
     )
     signal?.throwIfAborted()
+    return Buffer.byteLength(content)
   }
 
   private async removeTimelineFile(agentSessionId: string): Promise<void> {
+    this.forgetTimeline(agentSessionId)
     await unlink(this.timelinePath(agentSessionId)).catch((error: NodeJS.ErrnoException) => {
       if (error.code !== 'ENOENT') throw error
     })
