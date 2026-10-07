@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>AgentMux · 图标语义工作台</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" type="module"></script>
+</head>
+<body>
+  <header class="masthead">
+    <a class="wordmark" href="./" aria-label="图标语义工作台首页"><span class="brand-mark" aria-hidden="true">a<span>m</span></span><span>AgentMux <span class="wordmark-divider">/</span> <b>图标语义工作台</b></span></a>
+    <div class="header-actions">
+      <span id="save-state" class="save-state" role="status">正在读取目录…</span>
+      <button id="import" class="button quiet">导入文件</button>
+      <button id="copy" class="button quiet">复制修改</button>
+      <button id="export" class="button primary">导出修改 <span aria-hidden="true">↗</span></button>
+      <input type="file" id="import-file" accept="application/json,.json" hidden>
+    </div>
+  </header>
+  <div id="storage-notice" class="notice" hidden></div>
+  <main class="workspace">
+    <nav class="sidebar" aria-label="用途分类">
+      <div class="sidebar-heading">按用途浏览</div>
+      <div id="categories"></div>
+      <button id="draft-summary" class="draft-summary"><span class="draft-mark" aria-hidden="true">✎</span><span><b id="draft-count">0 项修改</b><small>查看与管理草稿</small></span><span aria-hidden="true">↗</span></button>
+      <div class="sidebar-foot"><span class="source-dot"></span> 来自当前源码快照<br><span id="snapshot-label"></span></div>
+    </nav>
+    <section class="inventory" aria-label="图标目录">
+      <div class="inventory-intro">
+        <div><p class="eyebrow">SEMANTIC ICONS</p><h1>按含义，选择图形。</h1><p class="intro-copy">与项目共用图标目录和主题预览。修改只在此页，导出主题后可导入设置。</p></div>
+        <div id="totals" class="totals"></div>
+      </div>
+      <div class="theme-preview-tools" aria-label="主题预览">
+        <label>主题 <select id="preview-theme" aria-label="预览主题"></select></label>
+        <label>明度 <select id="preview-mode" aria-label="预览明度"><option value="light">浅色</option><option value="dark">深色</option></select></label>
+        <button id="export-theme" class="button">导出主题文件</button>
+      </div>
+      <div id="semantic-samples" class="semantic-samples" aria-label="工作相关语义预览"></div>
+      <div class="inventory-tools">
+        <label class="search"><span id="search-icon" aria-hidden="true"></span><input id="search" type="search" placeholder="搜索图标、功能、含义或语义 ID" aria-label="搜索图标、功能、含义或语义 ID"><kbd>/</kbd></label>
+        <select id="mobile-category" aria-label="用途分类"></select>
+        <div class="view-switch" aria-label="目录视图"><button id="view-gallery" aria-pressed="true">图标概览</button><button id="view-matrix" aria-pressed="false">用途矩阵</button></div>
+      </div>
+      <div class="result-toolbar"><p id="result-count"></p><div class="result-actions"><label class="edited-filter"><input id="modified-only" type="checkbox">只看已修改 <span id="modified-count">0</span></label><button id="mobile-drafts">管理草稿</button></div></div>
+      <div id="inventory-content" class="inventory-content" tabindex="-1"><div class="loading">正在加载图标与源码引用…</div></div>
+      <footer class="inventory-foot"><span>图形与 ID 来自源码；中文用途说明由 Agent 整理，可直接修订。</span><span id="catalog-version"></span></footer>
+    </section>
+    <dialog id="inspector" class="inspector" aria-label="编辑图标用途"><div id="inspector-content"></div></dialog>
+  </main>
+  <dialog id="glyph-picker" class="glyph-picker" aria-labelledby="picker-title">
+    <header class="dialog-header"><div><p class="eyebrow">CHOOSE A GLYPH</p><h2 id="picker-title">换一个图标</h2><p>仅修改当前语义项，其他复用不受影响。</p></div><button data-close="glyph-picker" class="icon-button" aria-label="关闭图标选择">×</button></header>
+    <label class="search picker-search"><span aria-hidden="true">⌕</span><input id="glyph-search" type="search" placeholder="搜索字形名，例如 circle、play、activity" aria-label="搜索可选图标"></label>
+    <div id="picker-grid" class="picker-grid"></div>
+    <footer class="dialog-footer"><span id="picker-count"></span><span>Lucide 字形与项目自绘</span></footer>
+  </dialog>
+  <dialog id="draft-dialog" class="draft-dialog" aria-labelledby="draft-title">
+    <header class="dialog-header"><div><p class="eyebrow">YOUR CHANGES</p><h2 id="draft-title">修改草稿</h2><p>仅存在当前浏览器。导出后可交给 Agent 继续处理。</p></div><button data-close="draft-dialog" class="icon-button" aria-label="关闭修改草稿">×</button></header>
+    <div id="draft-list" class="draft-list"></div>
+    <footer class="dialog-footer"><span id="history-count"></span><button id="reset-all" class="button danger">恢复全部原始定义</button></footer>
+  </dialog>
+  <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title"><h2 id="confirm-title">恢复全部原始定义？</h2><p>当前修改将撤回，操作仍保留在导出历史里。建议先导出一份备份。</p><div><button id="cancel-reset" class="button">取消</button><button id="confirm-reset" class="button danger">确认恢复</button></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
