@@ -128,6 +128,7 @@ it('the original Region context menu binds an existing group and keeps actor app
   await ready('exact-member: active')
   expect(document.querySelector('[aria-label="Group member access"]')?.textContent).toBe('1 member approved')
   expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).grants).toMatchObject([{ actor: { idType: 'account_id', userId: 'exact-member' }, capabilities: ['input', 'answer'] }])
+  await act(async () => [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Change connected group')!.querySelector('summary')!.click())
   await f.fill('Existing group ID', 'another-exact-group'); await consent(); await f.button('Change group')
   await ready('another-exact-groupSharing on'); await ready('No members approved')
   binding = (await f.services.connections.bindings!.list({})).bindings[0]!
