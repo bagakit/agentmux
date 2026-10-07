@@ -19,6 +19,7 @@ const sessions = seed.rows.map(({ session, run, capabilities }) => ({ ...present
   capabilities, processState: run.state, latestOutputBytes: run.latestOutputBytes,
   status: session.semanticStatus ?? { state: 'running', source: 'run-process', observedAt: run.observedAt },
   ...(session.semanticStatus ? { semanticStatus: session.semanticStatus } : {}),
+  ...(session.currentActivity ? { currentActivity: session.currentActivity } : {}),
   control: { kind: 'agent', hostId: session.hostId, agentSessionId: session.agentSessionId, run: session.run } }))
 const workspace = { ...config.workspaces[0], id: 'activity-certainty-project', name: 'Activity certainty · private proof',
   hostId: seed.rows[0].session.hostId, path: seed.rows[0].session.workspacePath, kind: 'folder' }
