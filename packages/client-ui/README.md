@@ -8,6 +8,16 @@ Product requirements are defined by the [conversation behavior SSOT](../../docs/
 
 Applications wrap their view in `ClientUiProvider` with an explicit `ClientUiPlatform`. The adapter supplies clipboard error reporting, the overlay target, editor focus registration and identity/icon rendering. File opening, HTTP navigation, pasted-image IO, send/queue/interrupt and permission responses are typed component props. `DescribeSpeaker` may supply an already-rendered avatar; platform-specific Mote and project discovery stays in Desktop.
 
+Semantic icons use `@agentmux/client-ui/icons` and the shared styles. Instances accept `size`, `color`, `strokeWidth`, `strokeLinecap`, `strokeLinejoin` and `animation`. Explicit props override inline style, then the theme pen and inherited color. Animation defaults to `none` for every meaning; current activity must come from the caller's existing state:
+
+```tsx
+<SemanticIcon name="status.working" /> // Static heading or recorded status.
+<SemanticIcon name="status.working" color="var(--success)" size={12}
+  animation={currentlyProducing ? 'work' : 'none'} />
+```
+
+The finite presets are `none`, `work`, `stream`, `execute` and `spin`. They affect this instance only, respect reduced motion and do not change saved themes or establish Runtime state. `createSemanticIconElement` accepts the same presentation options: static calls return an SVG; explicit animation can return an HTML carrier containing that SVG. Retain the returned node rather than assuming an animated result is an SVG.
+
 The optional `renderObjectLink` adapter receives an exact `amux://agent|region|tab|space|zone/…` URI and its Core-parsed typed target. Conversation prose and Markdown links share this inline presentation; code, read-only previews and document mode retain their original presentation. Without the adapter, Markdown remains usable as text. The host resolves current names, Mote appearance, state, details and navigation; message storage and copying retain the original source.
 
 Import `@agentmux/client-ui/styles.css` with the client's theme tokens, font and shell. Styles are also exported individually so Desktop keeps its existing cascade order. Mobile can use these surface rules without importing Desktop's application stylesheet or Zustand store.
