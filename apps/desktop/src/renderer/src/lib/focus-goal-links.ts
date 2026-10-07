@@ -7,6 +7,7 @@ export type FocusGoalLink = Pick<GoalRelation, 'goalId' | 'title' | 'status'> & 
   unconfirmedRoles: readonly GoalRelationRole[]
 }
 export type FocusGoalLinks = { items: readonly FocusGoalLink[]; confirmedCount: number }
+export const focusGoalCardKey = (hostId: string, presentationId: string) => JSON.stringify([hostId, presentationId])
 const EMPTY_ROLES: readonly GoalRelationRole[] = []
 function merge(confirmed: readonly GoalRelation[] = [], unconfirmed: readonly GoalRelation[] = []): FocusGoalLinks {
   const goals = new Map<string, FocusGoalLink>()
@@ -57,10 +58,10 @@ export function createFocusGoalLinksSelector() {
     let identityChanged = false
     if (input.sessions !== previousSessions) {
       const agents = input.sessions.filter(session => session.kind === 'agent')
-      const next = agents.map(session => JSON.stringify([session.id, session.control.hostId, session.control.agentSessionId]))
+      const next = agents.map(session => JSON.stringify([session.hostId, session.id, session.control.hostId, session.control.agentSessionId]))
       identityChanged = next.length !== subjects.length || next.some((value, index) => value !== subjects[index])
       if (identityChanged) {
-        identities = new Map(agents.map(session => [session.id, session.control]))
+        identities = new Map(agents.map(session => [focusGoalCardKey(session.hostId, session.id), session.control]))
         qualifiedCards = new Map(); unqualifiedCards = new Map()
         for (const [id, subject] of identities) {
           const key = demandRelationKey(subject.hostId, subject.agentSessionId), exact = qualifiedCards.get(key) ?? new Set<string>(), bare = unqualifiedCards.get(subject.agentSessionId) ?? new Set<string>()

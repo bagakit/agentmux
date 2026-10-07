@@ -22,7 +22,7 @@ import type { FocusLaneCounts, FocusLaneMetrics } from '../lib/focus-lane-layout
 import { FocusToolbar } from './FocusToolbar'
 import { FocusHistorySearch } from './FocusHistorySearch'
 import { useFocusHistorySearch } from '../lib/use-focus-history-search'
-import { createFocusGoalLinksSelector } from '../lib/focus-goal-links'
+import { createFocusGoalLinksSelector, focusGoalCardKey } from '../lib/focus-goal-links'
 import { FocusSearchLocations } from './FocusSearchLocations'
 import { focusSearchCatalog, focusSearchContextKey, searchFocus } from '../lib/focus-search'
 import { FocusSourceStatus } from './FocusSourceStatus'
@@ -298,7 +298,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         const label = neutral?.label ?? meta.label
         return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-focus-sparse={sparse || undefined} style={{ '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
           {!sparse ? groupHeader(bucket) : null}
-            <div className="focus-context-group__cards">{grouped.map(context => <FocusContextRow key={context.id} context={context} goalLinks={goalLinks.get(context.id)} identity={contextIdentities.get(focusContextIdentityKey(context.hostId, context.id))} selected={shownSessionId === context.id} onSelect={focusExecutionSession} />)}</div>
+            <div className="focus-context-group__cards">{grouped.map(context => <FocusContextRow key={context.id} context={context} goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))} identity={contextIdentities.get(focusContextIdentityKey(context.hostId, context.id))} selected={shownSessionId === context.id} onSelect={focusExecutionSession} />)}</div>
         </section>
       })
     }</FocusLaneGroups> : null}</>

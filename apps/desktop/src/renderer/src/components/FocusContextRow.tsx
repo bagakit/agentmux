@@ -63,5 +63,5 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
     <AgentContextContent context={context} identity={position} presentation="card" headingAccessory={goalLinks ? <span className="focus-goal__space" aria-hidden="true"><FocusGoalMark links={goalLinks} /></span> : undefined} />
   </button>
   const main = context.kind === 'agent' ? <FocusContextMenu open={active && menuOpen} context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={() => { hover.close(); ++editGeneration.current; expectedNameRevision.current = { revision: currentDisplayNameRevision('agent-session', context.id) }; setDraft(context.name) }}>{card}</FocusContextMenu> : card
-  return <>{goalLinks ? <div className="focus-context-card">{main}<FocusGoalLinks links={goalLinks} onOpenChange={goalDisclosure} /></div> : main}{hover.preview}</>
+  return <><div className="focus-context-card">{main}{goalLinks ? <FocusGoalLinks links={goalLinks} onOpenChange={goalDisclosure} /> : null}</div>{hover.preview}</>
 })
