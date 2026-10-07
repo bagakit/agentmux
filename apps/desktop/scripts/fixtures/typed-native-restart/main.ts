@@ -123,8 +123,8 @@ app.whenReady().then(async () => {
     if (phase === 'seed') {
       assert.equal(calls.filter(call => call.operation === 'launch').length, 1)
       assert.equal(result.initial.session.interactionResponseUnavailableReason, undefined, 'Protocol replies cannot mark a request unconfirmed')
-      // A second private Agent proves the non-defining Core caller and both live projections.
-      // Its observed Provider Stop clears attention; a resolved input ACK alone is not enough.
+      // This generic Hook has no native invocation identity. A second Core caller
+      // must refuse typed input and retain both original request projections.
       const extra = await runtime.launchAgent({ hostId: 'local', executorId: 'codex', workspacePath: config.workspaces[0].path }, config as any)
       let extraSession: any
       const deadline = Date.now() + 15000
@@ -139,15 +139,28 @@ app.whenReady().then(async () => {
       const extraState = () => win.webContents.executeJavaScript(`window.nativeExtraState(${JSON.stringify(extraSession.id)})`)
       await until(`window.nativeExtraState(${JSON.stringify(extraSession.id)}).cards.length === 2`)
       const before = await extraState()
-      result.otherViewResponse = await runtime.respondInteraction(extraSession.control, { kind: 'permission', requestId: extraSession.pendingInteraction.id,
-        decision: { outcome: 'selected', optionId: 'allow-once' } },
-      { operationId: 'private-extra-permission-response', expectedRequest: extraSession.pendingInteraction })
-      await until(`window.nativeExtraState(${JSON.stringify(extraSession.id)}).cards.length === 0 && window.nativeExtraState(${JSON.stringify(extraSession.id)}).session.status.state === "done"`)
+      assert.equal(extraSession.pendingInteraction.nativeToolCallId, undefined)
+      assert.equal(extraSession.pendingInteraction.permissionHook, undefined)
+      const inputBefore = (await client().listRuns()).find((run: any) => run.runId === extraSession.control.run.runId).acceptedInputBytes
+      let refusal: any
+      try {
+        await runtime.respondInteraction(extraSession.control, { kind: 'permission', requestId: extraSession.pendingInteraction.id,
+          decision: { outcome: 'selected', optionId: 'allow-once' } },
+        { operationId: 'private-extra-permission-response', expectedRequest: extraSession.pendingInteraction })
+      } catch (error: any) { refusal = { code: error.code, message: error.message } }
+      assert.equal(refusal?.code, 'AGENT_INTERACTION_UNCONFIRMED', 'A generic Hook cannot acquire an unconfirmed native input target')
+      const inputAfter = (await client().listRuns()).find((run: any) => run.runId === extraSession.control.run.runId).acceptedInputBytes
+      assert.equal(inputAfter, inputBefore, 'The unsupported typed response must write zero Native bytes')
+      const canonicalAfter = (await runtime.snapshot(config as any)).sessions.find((one: any) => one.id === extraSession.id)
+      assert.equal(canonicalAfter?.pendingInteraction?.id, extraSession.pendingInteraction.id)
+      assert.deepEqual(canonicalAfter.control, extraSession.control)
+      assert.equal(canonicalAfter.processState, 'running')
       const after = await extraState()
-      assert.equal(after.needsYou, before.needsYou - 1)
-      assert.equal(after.session.pendingInteraction, undefined)
+      assert.equal(after.needsYou, before.needsYou)
+      assert.deepEqual(after.cards, before.cards)
+      assert.equal(after.session.pendingInteraction.id, extraSession.pendingInteraction.id)
       assert.equal(after.session.processState, 'running')
-      result.otherViewAnswer = { before, after }
+      result.otherViewAnswer = { before, after, refusal, inputBefore, inputAfter, canonicalAfter }
       await win.webContents.executeJavaScript('window.nativeCloseExtra(); true')
       await client().stopAgent(extraSession.id, extraSession.control.run)
       armed = true
