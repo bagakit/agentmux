@@ -143,8 +143,12 @@ export const Trigger = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<ty
       onPointerDown={(event) => {
         onPointerDown?.(event)
         if (event.defaultPrevented) return
-        // A click after hovering must not close the menu just opened under the pointer.
-        if (menu.open && menu.hover.current && event.button === 0) event.preventDefault()
+        // An explicit click pins the hovered menu and enters its original focus owner.
+        if (menu.open && menu.hover.current && event.button === 0) {
+          event.preventDefault()
+          menu.hover.current = false
+          menu.content.current?.focus()
+        }
       }}
       onKeyDown={(event) => {
         onKeyDown?.(event)
@@ -160,7 +164,7 @@ export const Trigger = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<ty
 )
 
 export const Content = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof Menu.Content>>(
-  function Content({ onPointerEnter, onPointerLeave, onCloseAutoFocus, onKeyDown, onPointerDownOutside, onContextMenu, ...props }, ref) {
+  function Content({ onPointerEnter, onPointerLeave, onPointerDown, onCloseAutoFocus, onKeyDown, onPointerDownOutside, onContextMenu, ...props }, ref) {
     const menu = useMenu()
     return <Menu.Content {...props} ref={(node) => {
       // FocusScope exposes a cancellable DOM mount event. DropdownMenu deliberately omits the
@@ -180,8 +184,13 @@ export const Content = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeo
         onPointerLeave?.(event)
         if (!event.defaultPrevented) menu.leave(event)
       }}
+      onPointerDown={(event) => {
+        onPointerDown?.(event)
+        if (!event.defaultPrevented) menu.hover.current = false
+      }}
       onPointerDownOutside={(event) => {
-        if (menu.hover.current && menu.trigger.current?.contains(event.target as Node)) event.preventDefault()
+        if (menu.trigger.current?.contains(event.target as Node) &&
+            (menu.hover.current || event.detail.originalEvent.defaultPrevented)) event.preventDefault()
         onPointerDownOutside?.(event)
       }}
       onContextMenu={(event) => {
