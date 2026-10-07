@@ -1,6 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { parseConnectionActor } from './room-binding-codec.js'
+import { parseConnectionActor, parseConnectionApplication } from './room-binding-codec.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { parseAgentInputSubmissionReceipt } from './agent-input-receipt-codec.js'
 import type { ConnectionIngressAddressing, ConnectionIngressMethod, ConnectionIngressParamsMap, ConnectionIngressRecord, ConnectionIngressResultMap } from './ingress-contract.js'
@@ -23,7 +23,7 @@ function addressing(value: unknown): ConnectionIngressAddressing {
 export function parseConnectionIngressRecord(value: unknown): ConnectionIngressRecord {
   if (value && typeof value === 'object' && !Array.isArray(value) && Reflect.get(value, 'kind') === 'action') {
     const p = object(value, ['kind', 'ingressId', 'connectionId', 'application', 'eventId', 'actor', 'externalConversationId', 'sourceMessageId', 'actionRef', 'state', 'code'])
-    const app = object(p.application, ['domain', 'appId']), application = { domain: text(app.domain), appId: text(app.appId) }
+    const application = parseConnectionApplication(p.application)
     const actor = p.actor === undefined ? undefined : parseConnectionActor(p.actor)
     if (p.state !== 'refused' || p.code !== 'INGRESS_ACTION_UNSUPPORTED' || actor && !equal(actor.application, application)) fail()
     return { kind: 'action', ingressId: text(p.ingressId), connectionId: text(p.connectionId), application, eventId: text(p.eventId),
