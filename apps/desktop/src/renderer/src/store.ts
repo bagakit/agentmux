@@ -9,6 +9,7 @@ import { submitWithPreparationRetry, type PromptPreparationRetryProgress } from 
 import { moteDefaultExecutor, moteDefaultConversation, recentMoteAgentsAfterVisit, restoredRecentMoteAgents, type MoteRecentAgent } from './lib/mote-quick-preferences'
 import { showMoteConversation } from './lib/mote-conversation-mode'
 import { goalPmoOperation, type GoalPmoIntent, type GoalPmoReceipt } from '../../shared/goal-pmo-origin'
+import { initializeGoalResponsibilityObservation, refreshKnownGoalResponsibilities } from './lib/goal-delegation-work'
 import { goalCreationDraftKey, restoredGoalAgentCreationDrafts, restoredGoalAgentSelectionDrafts, type GoalAgentSelectionDraft, type GoalAgentCreationDraft } from './lib/goal-agent-selection'
 import type { DemandContentReference } from '@agentmux/demand'
 import { confirmedGoalContentReference, goalContentSource } from '../../shared/goal-content-references'
@@ -1407,6 +1408,10 @@ function demandRecordFromFilesystem(demand: FilesystemDemand, retained?: DemandR
     ...(retained?.delegationObservations ? { delegationObservations: retained.delegationObservations } : {}),
     ...(retained?.delegationObservationIssue ? { delegationObservationIssue: retained.delegationObservationIssue } : {}),
     ...(retained?.delegationReadCut ? { delegationReadCut: retained.delegationReadCut } : {}),
+    ...(retained?.responsibility ? { responsibility: retained.responsibility } : {}),
+    ...(demand.progressUpdates ? { progressUpdates: demand.progressUpdates } : {}),
+    ...(demand.patrols ? { patrols: demand.patrols } : {}),
+    ...(retained?.patrolObservations ? { patrolObservations: retained.patrolObservations } : {}),
     dispatches: [...(demand.dispatches ?? [])],
     activities: demand.activities,
     decisions: demand.decisions,
@@ -3837,6 +3842,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const disposeMoteStartupRecovery = beginMoteStartupRecovery()
     const disposeRunServiceProjection = initializeRunServiceProjection()
     const disposeInputOccupation = initializeAgentInputOccupation()
+    const disposeGoalResponsibilities = initializeGoalResponsibilityObservation()
     const pendingSessionEvents = sessionMembershipEventBuffer()
     const pendingBrowserEvents: BrowserEvent[] = []
     let booting = true
@@ -3884,6 +3890,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       disposeMoteStartupRecovery()
       disposeRunServiceProjection()
       disposeInputOccupation()
+      disposeGoalResponsibilities()
       disposeSessions()
       disposeBrowsers()
       disposeControl()
@@ -4049,9 +4056,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (!observing) return
         if (result.status === 'rejected') get().reportError(new Error(startupWorkflowWarning('Demand filesystem snapshot', result.reason,
           'The saved Board Demand projection remains visible; retry the Demand store when the filesystem is available.')))
-        else set(state => ({ demands: { ...state.demands, ...Object.fromEntries(result.value
-          .filter(demand => state.demands[demand.id] === demandsBeforeRead[demand.id])
-          .map(demand => [demand.id, demandRecordFromFilesystem(demand, state.demands[demand.id])])) } }))
+        else {
+          set(state => ({ demands: { ...state.demands, ...Object.fromEntries(result.value
+            .filter(demand => state.demands[demand.id] === demandsBeforeRead[demand.id])
+            .map(demand => [demand.id, demandRecordFromFilesystem(demand, state.demands[demand.id])])) } }))
+          refreshKnownGoalResponsibilities(result.value.map(goal => goal.id))
+        }
       })
       const queuedNotesStorage = pendingNotesStorage; pendingNotesStorage = null
       void (queuedNotesStorage ? Promise.resolve(queuedNotesStorage) : api.notesStorage.inspect())
@@ -4846,6 +4856,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const retained = get().demands
       const records = Object.fromEntries(facts.map(demand => [demand.id, demandRecordFromFilesystem(demand, retained[demand.id])]))
       set(state => ({ demands: { ...state.demands, ...records } }))
+      refreshKnownGoalResponsibilities(facts.map(goal => goal.id))
       const projected = projectDemands(get().config, get().sessions, records)
       if (request.operation === 'demand.list') {
         return { operation: request.operation, demands: projected.map(({ sessions: _sessions, workspacePath: _workspacePath, ...record }) => ({ ...record, assigneeSessionIds: [...(record.assigneeSessionIds ?? [])], supervisorSessionId: record.supervisorSessionId ?? null, participations: record.participations ?? [] })) }
@@ -4995,6 +5006,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const fresh = facts.find(goal => goal.id === demandId)
       if (!fresh) throw controlFailure('CONTROL_UNAVAILABLE', 'The original Goal is unavailable. Its Agent, input and saved continuation are retained.')
       set(state => ({ demands: { ...state.demands, [demandId]: demandRecordFromFilesystem(fresh, state.demands[demandId]) } }))
+      refreshKnownGoalResponsibilities([demandId])
       const current = demandRecord(demandId)
       const assigneeSessionIds = current.assigneeSessionIds ?? []
       if (continuation) {
@@ -5019,6 +5031,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ...(savedContinuation ? { loopId: savedContinuation.loopId, alignmentRevision: continuation!.alignmentRevision } : {})
       }, options?.admittedControlRequestId)
       set(state => ({ demands: { ...state.demands, [demandId]: demandRecordFromFilesystem(prepared.demand, state.demands[demandId]) } }))
+      refreshKnownGoalResponsibilities([demandId])
       const operationId = admitAgentSteer(session.id, prompt, undefined, businessOperationId, undefined, undefined,
         original && savedContinuation ? { goalDispatch: dispatchReference, goalContinuation: { goalId: demandId, loopId: savedContinuation.loopId, condition: original.condition } } : { goalDispatch: dispatchReference, execution: 'default' })
       if (!operationId) throw controlFailure('CONTROL_FAILED', 'The message could not be queued. Its content is kept.')
@@ -6566,6 +6579,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const publish = (): void => {
       const record = { ...demandRecordFromFilesystem(receipt.demand), source: current.source, decisionLog: [...decisionLog] }
       set(state => ({ demands: { ...state.demands, [id]: record } }))
+      refreshKnownGoalResponsibilities([id])
     }
     publish()
     try {
@@ -6585,16 +6599,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async confirmDemandGoal(id, expectedRevision) {
     const receipt = await api.demands.confirmAlignment(id, expectedRevision)
     set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(receipt.demand, state.demands[id]) } }))
+    refreshKnownGoalResponsibilities([id])
   },
   async acceptDemandResult(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps) {
     const receipt = await api.demands.acceptGrounding(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps)
     set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(receipt.demand, state.demands[id]) } }))
+    refreshKnownGoalResponsibilities([id])
   },
   async refreshDemand(id) {
     const facts = await api.demands.list()
     const demand = facts.find(demand => demand.id === id)
     if (!demand) throw Object.assign(new Error(get().demands[id] ? 'The Goal owner did not return this goal. Its saved view is kept; retry loading the current proposal.' : 'The complete Goal owner read confirms this ID is not saved. Save this same ID explicitly to continue.'), { code: 'GOAL_OWNER_NOT_FOUND' })
     set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(demand, state.demands[id]) } }))
+    refreshKnownGoalResponsibilities([id])
   },
   deleteDemand(id) {
     void api.demands.delete(id).catch((error) => get().reportError(error))

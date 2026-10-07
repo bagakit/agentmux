@@ -1705,7 +1705,7 @@ export type AgentMuxDesktopApi = {
     resetWiki(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
   }
   demands: {
-    delegation<M extends 'goal.delegations' | 'goal.collect'>(method: M, input: import('@agentmux/core/goal-delegation').GoalDelegationParamsMap[M]): Promise<import('@agentmux/core/goal-delegation').GoalDelegationResult>
+    delegation<M extends 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue'>(method: M, input: import('@agentmux/core/goal-delegation').GoalDelegationParamsMap[M]): Promise<import('@agentmux/core/goal-delegation').GoalDelegationResult>
     onChanged(listener: (goalIds: string[]) => void): () => void
     prepareGoalStart(goalId: string, intent: import('@agentmux/demand').DemandDispatchIntent, controlRequestId?: string): Promise<import('@agentmux/demand').DemandReceipt>
     inspectDispatch(reference: import('./goal-dispatch').GoalDispatchReference): Promise<import('@agentmux/demand').DemandDispatch | null>

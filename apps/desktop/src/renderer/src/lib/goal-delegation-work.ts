@@ -5,6 +5,7 @@ import { api } from './api'
 import { useAppStore } from '../store'
 import type { DemandRecord } from './global-demand-board'
 import { createGoalDelegationEvents } from './goal-delegation-events'
+import { updateCurrentDemandIndex } from './goal-current-work'
 
 const observe = createGoalDelegationEvents({ sessions: listener => api.sessions.onEvent(listener), demands: listener => api.demands.onChanged(listener) })
 const flights = new Map<string, { reread: boolean; promise: Promise<void> }>()
@@ -19,10 +20,14 @@ export function applyGoalDelegationResult(result: GoalDelegationResult, request 
     if (result.goalUpdatedAt < Math.max(original.updatedAt, retainedCut?.goalUpdatedAt ?? 0) ||
       result.goalUpdatedAt === retainedCut?.goalUpdatedAt && request < retainedCut.request) return state
     const { delegationObservationIssue: _issue, ...retained } = original
-    return { demands: { ...state.demands, [result.goalId]: { ...retained, delegations: result.delegations,
+    const demands = { ...state.demands, [result.goalId]: { ...retained, ...(result.goalState ? result.goalState : {}), updatedAt: Math.max(original.updatedAt, result.goalUpdatedAt), delegations: result.delegations,
       delegationReadCut: { goalUpdatedAt: result.goalUpdatedAt, request },
       delegationObservations: result.observations ?? [], ...(result.dispatches ? { dispatches: result.dispatches } : {}),
-      ...(result.startObservations ? { startObservations: result.startObservations } : {}), ...(result.grounding ? { grounding: result.grounding } : {}) } } }
+      ...(result.progressUpdates ? { progressUpdates: result.progressUpdates } : {}),
+      ...(result.patrols ? { patrols: result.patrols } : {}), ...(result.patrolObservations ? { patrolObservations: result.patrolObservations } : {}), ...(result.responsibility ? { responsibility: result.responsibility } : {}),
+      ...(result.startObservations ? { startObservations: result.startObservations } : {}), ...(result.grounding ? { grounding: result.grounding } : {}) } }
+    updateCurrentDemandIndex(state.demands, demands, [result.goalId])
+    return { demands }
   })
 }
 
@@ -61,4 +66,23 @@ export function useGoalDelegationObservation(goal: DemandRecord, active = true):
     changed()
     return release
   }, [active, goal.id, references])
+}
+
+/** App-lifetime domain consumer. Closing a detail or Region does not stop responsibility reads. */
+export function initializeGoalResponsibilityObservation(): () => void {
+  const releaseChanges = api.demands.onChanged(goalIds => {
+    refreshKnownGoalResponsibilities(goalIds)
+  })
+  refreshKnownGoalResponsibilities(Object.keys(useAppStore.getState().demands))
+  return releaseChanges
+}
+
+/** Startup supplies its actual original ids once; subsequent invalidations already name affected Goals. */
+export function refreshKnownGoalResponsibilities(goalIds: readonly string[]): void {
+  const goals = useAppStore.getState().demands
+  for (const id of goalIds) {
+    const goal = goals[id]
+    if (goal && goal.status !== 'done' && goal.status !== 'cancelled' && (goal.delegations?.length || goal.dispatches?.some(item => item.execution === 'finite')))
+      void refreshGoalDelegations(id)
+  }
 }
