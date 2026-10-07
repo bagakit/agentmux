@@ -53,7 +53,7 @@ it('actual Main snapshot and real Focus card explain expired work while preservi
   expect(card.getAttribute('aria-label')).toContain('Activity signal expired')
   expect(card.getAttribute('aria-label')).toContain('Last confirmed working')
   expect(card.getAttribute('aria-label')).toContain(new Date(OLD).toLocaleString())
-  expect(card.getAttribute('aria-label')).toContain('Input available')
+  expect(card.getAttribute('aria-label')).toContain('Prompt readiness ready')
   expect(card.querySelector('.focus-context__detail')?.textContent).toContain('Activity signal expired')
   card.focus(); expect(document.activeElement).toBe(card)
   expect(useAppStore.getState().sessions[0]!.control).toEqual(original)
@@ -96,4 +96,34 @@ it('a disconnected observation describes the last process reading without claimi
   const implicit = sessionServiceNotices(disconnected).find(item => item.id === 'activity-observation')!
   expect(implicit.notice.notice?.mode).toContain('Current input availability unconfirmed')
   expect(agentContextForSession(disconnected, undefined, undefined, undefined, null).detail).toContain('Current input availability unconfirmed')
+})
+it('prompt readiness never contradicts a confirmed Native input-lane failure', async () => {
+  const { session } = await fixture()
+  const blocked = { ...session, nativeService: { revision: 1, owner: { type: 'serving' as const }, output: { type: 'serving' as const },
+    input: { phase: { type: 'unavailable' as const, reason: 'write_failed' as const }, unsettledCommands: 0, unsettledRequestBytes: 0,
+      writeBlocked: true, completedInputBytes: 0, currentSize: { cols: 80, rows: 24 }, activeConfirmedBytes: 0 }, terminalFault: null } }
+  expect(observeAgentSession(blocked, NOW).readiness).toBe('ready')
+  const notices = sessionServiceNotices(blocked)
+  expect(notices.find(item => item.id === 'native-service')?.notice.notice.mode).toContain('input unavailable')
+  expect(notices.find(item => item.id === 'activity-observation')?.notice.notice.mode).toContain('Prompt readiness ready')
+  expect(notices.map(item => item.notice.notice.mode).join(' ')).not.toContain('Input available')
+})
+it('missing current retained evidence does not deny an earlier working observation in the same Session', async () => {
+  const { session } = await fixture()
+  expect(session.semanticStatus?.state).toBe('working')
+  const ended = { ...session, semanticStatus: { state: 'running' as const, source: 'native-transcript' as const, observedAt: NOW },
+    status: { state: 'running' as const, source: 'native-transcript' as const, observedAt: NOW } }
+  const notices = sessionServiceNotices(ended)
+  const explanation = notices.find(item => item.id === 'activity-observation')!.notice.notice.mode
+  expect(explanation).toContain('Last confirmed activity unavailable')
+  expect(explanation).not.toContain('No confirmed activity observed')
+})
+it('localized display wording cannot change an activity notice read identity', async () => {
+  const { session } = await fixture()
+  const first = sessionServiceNotices(session).find(item => item.id === 'activity-observation')!
+  vi.spyOn(Date.prototype, 'toLocaleString').mockReturnValue('Different local date wording')
+  const next = sessionServiceNotices(session).find(item => item.id === 'activity-observation')!
+  expect(next.notice.notice.mode).not.toBe(first.notice.notice.mode)
+  expect(next.cause).toBe(first.cause)
+  expect(next.occurrence).toBe(first.occurrence)
 })
