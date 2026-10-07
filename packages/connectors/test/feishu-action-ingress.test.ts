@@ -123,7 +123,8 @@ it('retains truthful missing native context and rejects malformed public action 
   const base = { kind: 'action', ingressId: 'original-ingress', connectionId: 'original-connection', application: config.application,
     eventId: 'original-event', state: 'refused', code: 'INGRESS_ACTION_UNSUPPORTED' }
   expect(parseConnectionIngressRecord(base)).toEqual(base)
-  for (const malformed of [{ state: 'received' }, { code: ['INGRESS_ACTION_UNSUPPORTED'] }, { body: '' }, { input: {} }, { actor: { application: config.application, idType: 'open_id', userId: [] } }, { actionRef: {} }]) {
+  for (const malformed of [{ state: 'received' }, { code: ['INGRESS_ACTION_UNSUPPORTED'] }, { body: '' }, { input: {} }, { actor: { application: config.application, idType: 'open_id', userId: [] } }, { actionRef: {} },
+    { application: { ...config.application, domain: 'https://open.feishu.cn' } }, { application: { ...config.application, appId: [] } }]) {
     expect(() => parseConnectionIngressRecord({ ...base, ...malformed })).toThrow()
   }
   expect(parseIngressResult('connection.ingress.inspect', { ingress: base, inputReceipt: null, observation: 'not-started' }, { ingressId: base.ingressId })).toEqual({ ingress: base, inputReceipt: null, observation: 'not-started' })
