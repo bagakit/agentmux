@@ -49,7 +49,7 @@ container.append(node)
 ## 添加新含义或新图形
 
 1. 先检查 [SEMANTIC_ICON_CATALOG](../../packages/client-ui/src/theme/icon-catalog.ts)。只有新的产品含义才新增稳定 ID，并填写准确 `label` 与默认 `glyph`；复用现有类别前缀。不要为尺寸、颜色或动画新增 ID。
-2. 默认图形已在库中时直接引用 `IconGlyphId`。确需新绘图时，在 [ICON_GLYPHS](../../packages/client-ui/src/theme/icon-glyphs.ts) 登记数据式 24 单位 SVG 几何，核对小尺寸、主题笔触与授权来源。不要在业务组件粘贴第二份路径。
+2. 默认图形已在库中时直接引用 `IconGlyphId`。确需项目自绘时，在 [AUTHORED_ICON_GLYPHS](../../packages/client-ui/src/theme/icon-authored.ts) 登记数据式 24 单位 SVG 几何，核对静态单色、小尺寸、主题笔触与授权来源；原 [ICON_GLYPHS](../../packages/client-ui/src/theme/icon-glyphs.ts) 自动聚合库字形与自绘，并派生完整类型。不要在业务组件粘贴第二份路径，也不要手工维护工作台的自绘名单。
 3. [getSemanticIconCatalog](../../packages/client-ui/src/theme/icon-catalog-metadata.ts) 从目录派生元数据；只有新增类别或上下文描述时才修改其分组信息。`SemanticIconId`、glyph ID 类型也从原目录派生，无须另写 ID 清单。
 4. 接到真实产品调用方并检查内置主题的显式覆盖。目录默认、主题覆盖和本次实例呈现分别由各自 owner 持有；主题文件中的 `icons[id]` 可选择登记 glyph 或合法 paths，解析与导出沿原 [schema](../../packages/client-ui/src/theme/schema.ts)。
 5. 在工作台核对新语义、默认图形、浅深主题与实际小尺寸，再在真实消费界面核对含义、对齐及状态变化。测试与变异沿[测试策略](../testing/strategy.md#任务验收与假绿防护)，视觉改动沿[看图验收](agent-visual-e2e-review.md)。
@@ -70,6 +70,7 @@ pnpm icons:build
 | --- | --- |
 | 产品含义、稳定 ID、默认映射 | `icon-catalog.ts` |
 | 可选 SVG 几何 | `icon-glyphs.ts` |
+| 项目自绘几何与派生作者标记 | `icon-authored.ts` |
 | Settings、公共发现和工具的目录投影 | `icon-catalog-metadata.ts` |
 | React 与原生 sprite 投影 | `icons.tsx`、`icon-sprite.ts` |
 | 实例呈现参数与共享动效 | `icon-presentation.ts`、`styles/semantic-icons.css` |
