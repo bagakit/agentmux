@@ -1,10 +1,11 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
 import { clampStep } from '@agentmux/client-ui/activity-step-summary'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
+import { currentAgentSemanticStatus, msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { nativeBindingKey } from '../../../shared/agent-native-source'
 import { agentContextForSession, type FocusContext } from '../lib/focus-context'
@@ -147,6 +148,7 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const back = useRef<HTMLButtonElement>(null), returnToReading = useRef(false)
   const reflowAnchor = useRef<ReturnType<typeof captureReadingAnchor>>(null)
+  const heldSelection = useRef<Range | null>(null), laterSelection = useRef(false)
   const [tab, setTab] = useState<AgentInformationTab | null>(null)
   const [visible, setVisible] = useState(() => document.visibilityState !== 'hidden')
   const lastVisibleSession = useRef(request.session)
@@ -154,8 +156,19 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
     session.control.run.runId === context.runId && (context.kind !== 'agent' || session.kind === 'agent' &&
       session.control.hostId === request.control?.hostId && session.control.agentSessionId === request.control?.agentSessionId && nativeBindingKey(session) === request.sourceKey)))
   useLayoutEffect(() => { if (visible) lastVisibleSession.current = session }, [visible, session])
+  const [observationNow, setObservationNow] = useState(Date.now)
+  useEffect(() => {
+    if (!visible || session?.kind !== 'agent') return
+    const now = Date.now(), current = currentAgentSemanticStatus(session.semanticStatus) ?? session.status
+    const delays = [session.status, current].map(status => msUntilSemanticStatusStale(status, now)).filter(delay => delay > 0)
+    if (!delays.length) return
+    const timer = setTimeout(() => setObservationNow(Date.now()), Math.min(...delays))
+    return () => clearTimeout(timer)
+  }, [visible, session, observationNow])
   const sameSource = Boolean(session)
-  const currentContext = visible && session && session !== request.session ? { ...agentContextForSession(session, undefined, context.name, context.workspace, context.topicId), lastActivityAt: context.lastActivityAt } : context
+  const currentContext = useMemo(() => visible && session
+    ? { ...agentContextForSession(session, undefined, context.name, context.workspace, context.topicId), lastActivityAt: context.lastActivityAt } : context,
+  [visible, session, context, observationNow])
   const observation = session?.kind === 'agent' ? observeAgentSession(session, Date.now()) : undefined
   const usage = session?.kind === 'agent' ? session.turnUsage : request.session?.kind === 'agent' ? request.session.turnUsage : undefined
   const sourceNotice = !sameSource ? 'Original Run or source is no longer confirmed. This reading is kept; new source data is not attached.' : null
@@ -203,11 +216,37 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
     if (reading.current && reflowAnchor.current) restoreReadingAnchor(reading.current, reflowAnchor.current)
     reflowAnchor.current = null
   }, [request.pinned])
-  function showMetadata(next: AgentInformationTab) { cancelDeparture(); setTab(next) }
+  function showMetadata(next: AgentInformationTab) {
+    cancelDeparture()
+    if (!tab) {
+      laterSelection.current = false
+      const selection = window.getSelection()
+      heldSelection.current = selection?.rangeCount && !selection.isCollapsed && reading.current?.contains(selection.anchorNode) && reading.current.contains(selection.focusNode)
+        ? selection.getRangeAt(0).cloneRange() : null
+    }
+    setTab(next)
+  }
   function showReading() { returnToReading.current = true; setTab(null) }
   useLayoutEffect(() => {
     if (tab) back.current?.focus({ preventScroll: true })
-    else if (returnToReading.current) { returnToReading.current = false; reading.current?.focus({ preventScroll: true }) }
+    else if (returnToReading.current) {
+      returnToReading.current = false
+      const selection = window.getSelection(), saved = heldSelection.current
+      const restore = !laterSelection.current && saved && reading.current?.contains(saved.startContainer) && reading.current.contains(saved.endContainer) &&
+        (selection?.isCollapsed || reading.current.contains(selection?.anchorNode ?? null))
+      reading.current?.focus({ preventScroll: true })
+      if (restore && selection) { selection.removeAllRanges(); selection.addRange(saved) }
+      heldSelection.current = null
+    }
+  }, [tab !== null])
+  useEffect(() => {
+    if (!tab) return
+    const changed = () => {
+      const selection = window.getSelection()
+      if (selection && !selection.isCollapsed && !reading.current?.contains(selection.anchorNode)) laterSelection.current = true
+    }
+    document.addEventListener('selectionchange', changed)
+    return () => document.removeEventListener('selectionchange', changed)
   }, [tab !== null])
   useLayoutEffect(() => {
     const surface = panel.current
@@ -274,7 +313,7 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
       {sameSource && visible ? <FocusContextStateSummary context={currentContext} explanationVisible={Boolean(service)} /> : <span className="focus-context-hover__state">Reading snapshot</span>}
     </header>
     {sourceNotice || service ? <div className="agent-information-reader__service" role={sourceNotice ? 'status' : undefined}>
-      <InfoIcon size={13} aria-hidden="true" /><p>{sourceNotice ?? service}</p><button type="button" onClick={() => showMetadata('source')}>Source</button>
+      <InfoIcon size={13} aria-hidden="true" /><p>{sourceNotice ?? service}</p><button type="button" onPointerDown={event => { if (event.button === 0) event.preventDefault() }} onClick={() => showMetadata('source')}>Source</button>
     </div> : null}
     <div className="agent-information-reader__body">
       <div ref={reading} className="agent-information-reader__reading" tabIndex={0} aria-label="Original Agent content"
