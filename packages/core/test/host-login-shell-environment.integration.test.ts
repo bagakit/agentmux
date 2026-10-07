@@ -20,7 +20,9 @@ async function withHost(mode: 'profile' | 'failed', check: (fixture: {
   client: Awaited<ReturnType<typeof connectHostedAgentMux>>
   root: string
   executables: readonly string[]
+  nativePid: number
   stderr(): string
+  restartHost(): Promise<Awaited<ReturnType<typeof connectHostedAgentMux>>>
 }) => Promise<void>): Promise<void> {
   const root = await mkdtemp(fixtureDisplayPath('private/tmp/amx-host-env-'))
   const home = join(root, 'home'), runtime = join(root, 'runtime'), state = join(root, 'state')
@@ -33,7 +35,7 @@ async function withHost(mode: 'profile' | 'failed', check: (fixture: {
     await Promise.all([mkdir(home), mkdir(runtime, { mode: 0o700 }), mkdir(join(state, 'ctxmux'), { recursive: true, mode: 0o700 }), mkdir(bin, { recursive: true })])
     for (const executable of executables) {
       const path = join(bin, executable)
-      await writeFile(path, '#!/bin/sh\nprintf "%s\\n" "$FIXTURE_SHELL_VALUE"\n')
+      await writeFile(path, '#!/bin/sh\nprintf "%s\\n" "$FIXTURE_SHELL_VALUE"\nif [ "$1" = "--wait" ]; then\n  while IFS= read -r input; do printf "continued:%s\\n" "$input"; done\nfi\n')
       await chmod(path, 0o755)
     }
     // Only the interactive profile contributes these commands. Neither the parent process
@@ -65,20 +67,37 @@ async function withHost(mode: 'profile' | 'failed', check: (fixture: {
     const entry = join(root, 'host.mjs')
     await build({ entryPoints: [resolve(import.meta.dirname, '../../../apps/host/src/index.ts')], outfile: entry,
       bundle: true, packages: 'external', platform: 'node', format: 'esm', target: 'node24', logLevel: 'silent' })
-    host = spawn(process.execPath, [entry, '--store', env.AGENTMUX_AGENT_SESSION_STORE!], { env, stdio: ['ignore', 'pipe', 'pipe'] })
-    let stdout = '', stderr = ''
-    host.stdout!.on('data', data => { stdout += String(data) })
-    host.stderr!.on('data', data => { stderr += String(data) })
-    await vi.waitFor(() => {
-      expect(host!.exitCode, stderr).toBeNull()
-      expect(stdout, stderr).toContain('\n')
-    }, { timeout: 10_000 })
-    const published = JSON.parse(stdout.split('\n')[0]!)
-    expect(published).toMatchObject({ pid: host.pid, owner: { processId: host.pid } })
-    rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtime, 'control.sock') } })
-    client = await connectHostedAgentMux({ rpc })
-    await client.connect()
-    await check({ client, root, executables, stderr: () => stderr })
+    let stderr = ''
+    const startHost = async () => {
+      // Reuse the same restricted inherited environment on every OS process launch.
+      host = spawn(process.execPath, [entry, '--store', env.AGENTMUX_AGENT_SESSION_STORE!], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+      let stdout = ''
+      host.stdout!.on('data', data => { stdout += String(data) })
+      host.stderr!.on('data', data => { stderr += String(data) })
+      await vi.waitFor(() => {
+        expect(host!.exitCode, stderr).toBeNull()
+        expect(stdout, stderr).toContain('\n')
+      }, { timeout: 10_000 })
+      const published = JSON.parse(stdout.split('\n')[0]!)
+      expect(published).toMatchObject({ pid: host.pid, owner: { processId: host.pid } })
+      rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtime, 'control.sock') } })
+      client = await connectHostedAgentMux({ rpc })
+      await client.connect()
+      return client
+    }
+    const restartHost = async () => {
+      const daemonPid = daemon!.pid
+      await client?.dispose()
+      await rpc?.dispose()
+      await stop(host)
+      expect(host!.exitCode).toBe(0)
+      expect(daemon!.exitCode).toBeNull()
+      const restarted = await startHost()
+      expect(daemon!.pid).toBe(daemonPid)
+      expect(daemon!.exitCode).toBeNull()
+      return restarted
+    }
+    await check({ client: await startHost(), root, executables, nativePid: daemon.pid!, stderr: () => stderr, restartHost })
   } finally {
     await client?.dispose()
     await rpc?.dispose()
@@ -89,8 +108,8 @@ async function withHost(mode: 'profile' | 'failed', check: (fixture: {
 }
 
 describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')('production Host login shell environment', () => {
-  it('loads interactive PATH before public probes and real Run execution in the Host', async () => {
-    await withHost('profile', async ({ client, root, executables, stderr }) => {
+  it('loads interactive PATH before public probes and keeps the original Run across a real Host restart', async () => {
+    await withHost('profile', async ({ client, root, executables, nativePid, stderr, restartHost }) => {
       const catalog = client.catalog()
       expect(catalog.length).toBeGreaterThan(0)
       const providerId = catalog[0]!.id
@@ -105,6 +124,44 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')('produ
         })
         await client.removeTerminal({ runId: run.runId })
       }
+      const originalOwner = client.runtimeOwnerIdentity()!
+      const originalNative = client.runtimeIdentity()
+      const retained = await client.createTerminal({ workspacePath: root, command: executables[0]!, args: ['--wait'] })
+      await vi.waitFor(async () => {
+        const replay = await client.readRunReplay({ runId: retained.runId }, 0, 'raw')
+        expect(replay.run).toMatchObject({ runId: retained.runId, pid: retained.pid, state: 'running' })
+        expect(Buffer.concat(replay.replay.map(chunk => Buffer.from(chunk.dataBytes))).toString()).toContain('interactive-profile')
+      })
+      const restarted = await restartHost()
+      const replacementOwner = restarted.runtimeOwnerIdentity()!
+      expect(replacementOwner.runtimeId).toBe(originalOwner.runtimeId)
+      expect(replacementOwner.ownerInstanceId).not.toBe(originalOwner.ownerInstanceId)
+      expect(replacementOwner.processId).not.toBe(originalOwner.processId)
+      expect(restarted.runtimeIdentity()).toEqual(originalNative)
+      expect((await restarted.listRuns()).filter(run => run.runId === retained.runId))
+        .toMatchObject([{ runId: retained.runId, pid: retained.pid, state: 'running' }])
+      const restored = await restarted.readRunReplay({ runId: retained.runId }, 0, 'raw')
+      expect(restored.run).toMatchObject({ runId: retained.runId, pid: retained.pid, state: 'running' })
+      expect(Buffer.concat(restored.replay.map(chunk => Buffer.from(chunk.dataBytes))).toString()).toContain('interactive-profile')
+      for (const executable of executables) {
+        expect(await restarted.probeExecutorAvailability(providerId, executable)).toEqual({ executable, availability: 'available' })
+      }
+      const attached = await restarted.attachTerminal(retained.runId, 0, 'raw')
+      const ack = await restarted.writeTerminal({ runId: retained.runId }, {
+        ownerInstanceId: restarted.runtimeIdentity().instanceId, operationId: 'continue-retained-host-environment-run',
+        expectedByte: attached.run.acceptedInputBytes!, data: 'after-host-restart\n'
+      })
+      expect(ack).toMatchObject({ runId: retained.runId, acceptedThroughByte: attached.run.acceptedInputBytes! + 19 })
+      await vi.waitFor(async () => {
+        const replay = await restarted.readRunReplay({ runId: retained.runId }, 0, 'raw')
+        expect(replay.run).toMatchObject({ runId: retained.runId, pid: retained.pid, state: 'running' })
+        expect(Buffer.concat(replay.replay.map(chunk => Buffer.from(chunk.dataBytes))).toString()).toContain('continued:after-host-restart')
+      })
+      console.info(JSON.stringify({ schema: 'agentmux.host-environment-owner-restart.v1',
+        firstHostPid: originalOwner.processId, secondHostPid: replacementOwner.processId,
+        firstOwnerInstanceId: originalOwner.ownerInstanceId, secondOwnerInstanceId: replacementOwner.ownerInstanceId,
+        originalRunId: retained.runId, originalRunPid: retained.pid, nativeDaemonPid: nativePid, native: originalNative,
+        originalOutputRetained: true, sameRunAcceptedNewInput: true, probesAfterRestart: executables }))
       expect(stderr()).not.toContain('Shell environment loading did not complete')
     })
   }, 20_000)

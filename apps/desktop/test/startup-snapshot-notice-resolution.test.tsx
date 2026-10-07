@@ -540,7 +540,7 @@ it.each([false, true])('settles only the adopted complete original facts (buffer
   expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   f.retained()
 })
-it.each(['empty', 'unavailable-host', 'rejected', 'invalid-timeline'] as const)('keeps unresolved %s facts visible', async mode => {
+it.each(['empty', 'unavailable-host', 'rejected'] as const)('keeps unresolved %s facts visible', async mode => {
   const f = await fixture()
   let snapshot: RuntimeSnapshot | Error = complete()
   if (mode === 'empty') snapshot = empty()
@@ -550,12 +550,22 @@ it.each(['empty', 'unavailable-host', 'rejected', 'invalid-timeline'] as const)(
     recovery: 'Restore the original endpoint and refresh its observation.', availability: 'unverified'
   }] }
   if (mode === 'rejected') snapshot = new Error('Canonical read refused')
-  if (mode === 'invalid-timeline') snapshot = { ...complete(), timelines: {} }
   await f.settle(snapshot)
-  expect(useAppStore.getState().error).toBe(f.warning)
-  expect(useAppStore.getState().lastError).toBe(f.warning)
+  const current = useAppStore.getState().error
+  expect(current).toContain(f.warning)
+  if (mode === 'rejected') expect(current).toContain('Canonical read refused')
+  expect(useAppStore.getState().lastError).toBe(current)
   expect(element.querySelectorAll('.notification-item[data-notice-id="current"]')).toHaveLength(1)
   expect(element.querySelector('.notification-item[data-notice-id="current"]')!.textContent).toContain(f.warning)
+  f.retained()
+})
+
+it('confirms original Session membership while retaining each missing Timeline as a scoped observation', async () => {
+  const f = await fixture()
+  await f.settle({ ...complete(), timelines: {} })
+  expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toBeUndefined()
+  expect(useAppStore.getState().sessions.map(session => session.kind === 'agent' ? [session.id, session.timelineObservation?.code] : null))
+    .toEqual(ids.map(id => [id, 'TIMELINE_OBSERVATION_FAILED']))
   f.retained()
 })
 it('settles observed original Session facts while keeping unverified Native ownership as its separate notice', async () => {
