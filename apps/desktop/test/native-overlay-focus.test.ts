@@ -9,7 +9,7 @@ vi.mock('electron', () => ({ ipcMain: native.main, ipcRenderer: { sendSync: nati
 describe('native Chrome focus observation', () => {
   it('answers only the original main document and releases its listener', () => {
     const contents = { mainFrame: {} }, window = { webContents: contents, isDestroyed: vi.fn(() => false) }
-    const overlays = { hasFocusedProjection: vi.fn(() => true) }
+    const overlays = { hasProjectionInFocusedWindow: vi.fn(() => true) }
     const dispose = installNativeOverlayFocus(window as any, overlays as any)
     const read = (sender: unknown, senderFrame: unknown) => {
       const event = { sender, senderFrame, returnValue: undefined }
@@ -19,8 +19,8 @@ describe('native Chrome focus observation', () => {
     expect(read(contents, contents.mainFrame)).toBe(true)
     expect(read({}, contents.mainFrame)).toBe(false)
     expect(read(contents, {})).toBe(false)
-    expect(overlays.hasFocusedProjection).toHaveBeenCalledTimes(1)
-    overlays.hasFocusedProjection.mockReturnValue(false)
+    expect(overlays.hasProjectionInFocusedWindow).toHaveBeenCalledTimes(1)
+    overlays.hasProjectionInFocusedWindow.mockReturnValue(false)
     expect(read(contents, contents.mainFrame)).toBe(false)
     window.isDestroyed.mockReturnValue(true)
     expect(read(contents, contents.mainFrame)).toBe(false)
@@ -38,13 +38,17 @@ describe('native Chrome focus observation', () => {
       observe(event)
       return event.stopImmediatePropagation
     }
-    native.query.mockReset().mockReturnValue(true)
+    let nativeWindowActive = true
+    native.query.mockReset().mockImplementation(() => nativeWindowActive)
     expect(blur()).toHaveBeenCalledTimes(1)
     expect(native.query).toHaveBeenCalledWith(NATIVE_OVERLAY_FOCUS_CHANNEL)
     expect(blur({})).not.toHaveBeenCalled()
     expect(blur(target, false)).not.toHaveBeenCalled()
     expect(native.query).toHaveBeenCalledTimes(1)
-    for (const unknown of [false, undefined, 'true']) {
+    nativeWindowActive = false
+    expect(blur()).not.toHaveBeenCalled()
+    expect(native.query).toHaveBeenCalledTimes(2)
+    for (const unknown of [undefined, 'true']) {
       native.query.mockReturnValue(unknown)
       expect(blur()).not.toHaveBeenCalled()
     }

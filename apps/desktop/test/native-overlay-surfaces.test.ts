@@ -66,26 +66,28 @@ function originalPage(bounds: { x: number; y: number; width: number; height: num
 }
 const float = { id: 'chrome-1', bounds: { x: 120, y: 150, width: 100, height: 80 }, radius: 8 }
 
-it('confirms focus only for its attached visible live projection in the active window', async () => {
+it('keeps document blur separate from App departure before sibling focus settles', async () => {
   const { owner, window } = fixture()
-  expect(owner.hasFocusedProjection()).toBe(false)
+  expect(owner.hasProjectionInFocusedWindow()).toBe(false)
   await owner.update([float])
   const projection = fake.views.at(-1)
+  expect(projection.webContents.isFocused()).toBe(false)
+  expect(owner.hasProjectionInFocusedWindow()).toBe(true)
   projection.webContents.isFocused.mockReturnValue(true)
-  expect(owner.hasFocusedProjection()).toBe(true)
+  expect(owner.hasProjectionInFocusedWindow()).toBe(true)
   window.isFocused.mockReturnValue(false)
-  expect(owner.hasFocusedProjection()).toBe(false)
+  expect(owner.hasProjectionInFocusedWindow()).toBe(false)
   window.isFocused.mockReturnValue(true)
   projection.setVisible(false)
-  expect(owner.hasFocusedProjection()).toBe(false)
+  expect(owner.hasProjectionInFocusedWindow()).toBe(false)
   projection.setVisible(true)
   window.contentView.removeChildView(projection)
-  expect(owner.hasFocusedProjection()).toBe(false)
+  expect(owner.hasProjectionInFocusedWindow()).toBe(false)
   window.contentView.addChildView(projection)
   projection.webContents.close()
-  expect(owner.hasFocusedProjection()).toBe(false)
+  expect(owner.hasProjectionInFocusedWindow()).toBe(false)
   owner.dispose()
-  expect(owner.hasFocusedProjection()).toBe(false)
+  expect(owner.hasProjectionInFocusedWindow()).toBe(false)
 })
 
 // A separate process observes real unhandled-rejection delivery without changing Vitest's
