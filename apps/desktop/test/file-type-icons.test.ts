@@ -8,7 +8,7 @@ describe('file type icons', () => {
   it('prefers known filenames over generic extensions', () => {
     expect(getFileTypeIcon('package.json')).toBe(semanticIconComponent('file.package'))
     expect(getFileTypeIcon(_hygiene_fixturePath("repo/tsconfig.json"))).toBe(semanticIconComponent('file.config'))
-    expect(getFileTypeIcon(_hygiene_win32.join("C:", _hygiene_win32.sep, "repo\\.env.local"))).toBe(semanticIconComponent('file.locked'))
+    expect(getFileTypeIcon(_hygiene_win32.join("C:", _hygiene_win32.sep, "repo\\.env.local"))).toBe(semanticIconComponent('file.config'))
     expect(getFileTypeIcon('README')).toBe(semanticIconComponent('file.text'))
     expect(getFileTypeIcon('Dockerfile.dev')).toBe(semanticIconComponent('file.build-config'))
   })
@@ -22,7 +22,7 @@ describe('file type icons', () => {
     expect(getFileTypeIcon('db/schema.sql')).toBe(semanticIconComponent('file.database'))
     expect(getFileTypeIcon('reports/summary.xlsx')).toBe(semanticIconComponent('file.spreadsheet'))
     expect(getFileTypeIcon('certs/server.pem')).toBe(semanticIconComponent('file.key'))
-    expect(getFileTypeIcon('slides/status.pptx')).toBe(semanticIconComponent('file.chart'))
+    expect(getFileTypeIcon('slides/status.pptx')).toBe(semanticIconComponent('file.presentation'))
     expect(getFileTypeIcon('sound/theme.mp3')).toBe(semanticIconComponent('file.audio'))
     expect(getFileTypeIcon('demo.mov')).toBe(semanticIconComponent('file.video'))
   })
