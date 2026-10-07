@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -8,7 +8,7 @@ import { transform } from 'esbuild'
 
 // One exact private source/artifact snapshot; no shared source/dist mutations or Native build.
 const root = fileURLToPath(new URL('../../../', import.meta.url))
-const output = resolve(process.argv[2] ?? join(root, '.tmp/goal-responsibility/t002/mutations'))
+const output = join(resolve(process.argv[2] ?? join(root, '.tmp/goal-responsibility/t002/mutations')), 'run-' + randomUUID())
 await mkdir(output, { recursive: true })
 const sha = value => createHash('sha256').update(value).digest('hex')
 const sources = [
