@@ -16,6 +16,8 @@ Survey 是 Know 下明确创建或保存的浏览／研究入口，须让普通�
 
 Survey 的进入来自明确的浏览／研究创建意图，不来自某个项目存在 Browser 的事实。普通浏览不要求先建立研究 Item、选择项目、Notebook 或 Topic；左侧以 Browser 浏览／研究入口为起点，不列 Notebook、Note 页面目录或知识模式切换。记录与沉淀由显式成果动作进入 Recall 或 Topic；原研究已有的 Note／混合 Region 继续可达，Group／Region 和其他内容在研究中按需使用。底层复用现有 Zone 工作面，不要求用户先理解这些结构才能打开网页。独立选择、跨上下文打开及分别恢复只见[Work、Survey、Recall 与 Mote 的导航上下文](spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)。
 
+Survey 可通过原创建菜单明确新建匿名页，不设置未来默认匿名偏好；Browser 更多菜单提供同一创建动作。匿名的 session、模式、历史与重启边界唯一见[匿名 Browser](browser-workface.md#匿名-browser)，不因 Survey 展示归属另建 Profile 或存储 owner。
+
 ### 研究的创建与身份
 
 - **项目 Browser 不自动属于 Survey。** 其他项目、对话、Topic 中用户或 Agent 打开的 Browser 不因 Browser 存在、导航、操作、选择、目录或展示关系而自动入列。Survey 列表只消费明确在 Survey 创建或保存的浏览／研究入口；项目 Browser 是原项目的一块内容。纯 Agent、Terminal、File、Note 和 Mote 亦不因有内容或没有 Topic 自动成为研究。已明确保存的 Survey 内容及旧恢复引用保全；改变资格不清实体、草稿或健康 Run，不从发现事实补造创建记录。
