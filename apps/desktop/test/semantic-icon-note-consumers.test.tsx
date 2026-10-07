@@ -12,7 +12,7 @@ import { NoteCanvas } from '../src/renderer/src/components/NoteCanvas'
 import { api } from '../src/renderer/src/lib/api'
 import { noteKnowledge } from '../src/renderer/src/lib/note-knowledge'
 import { useAppStore } from '../src/renderer/src/store'
-import { newNoteDocument, readNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, readNoteDocument, serializeNoteDocument, NOTE_FILE_EXTENSION } from '../src/shared/note-document'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 import { fixtureEpoch, fixturePath } from '../../../test/fixture-values.mjs'
@@ -101,4 +101,21 @@ it('the actual saved-note graph themes direction drawings while retaining counts
   await dom.click('.note-canvas-title[data-note-id="original-note"]')
   expect(open).toHaveBeenCalledExactlyOnceWith(original)
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
+})
+
+it('the actual Note source button follows the original reference without claiming a reply or editing either Note', async () => {
+  const original = newNoteDocument('Original block body retained', 'source-note', 'source-block')
+  const referring = newNoteDocument('', 'referring-note', 'referring-paragraph')
+  referring.content.content = [{ type: 'blockReference', attrs: { blockId: 'referring-block', referenceId: 'original-reference', target: { noteId: original.noteId, blockId: 'source-block' }, mode: 'reference' } }]
+  const knowledge = noteKnowledge([{ location: { workspaceId: 'original-workspace', path: `source${NOTE_FILE_EXTENSION}` }, document: { path: `source${NOTE_FILE_EXTENSION}`, content: serializeNoteDocument(original), revision: 'original-revision' } }], 'complete')
+  const open = vi.fn(), change = vi.fn(), saved = JSON.stringify(referring)
+  await dom.render(<NoteBlockEditor note={referring} active sourceIdentity="original-referring-note" knowledge={knowledge} onChange={change} onOpen={open} onSave={() => {}} onIssue={() => {}} />)
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-reference__source button')).not.toBeNull())
+  const button = dom.container.querySelector<HTMLButtonElement>('.note-reference__source button')!
+  expectDrawing(button, 'object.link')
+  expect(button.querySelector('[data-semantic-icon="action.reply"]')).toBeNull()
+  await act(async () => { button.click() })
+  expect(open).toHaveBeenCalledExactlyOnceWith(knowledge.sources[0], 'source-block')
+  expect(JSON.stringify(referring)).toBe(saved)
+  expect(dom.container.querySelector('.note-reference')?.textContent).toContain('Original block body retained')
 })

@@ -121,6 +121,7 @@ it('retains an unreadable sibling reference, retries it lazily and still reaches
   await click(host.querySelector('.md-conversation-image')!); await click(button('Next image'))
   expect(full()).toBeNull(); expect(document.querySelector('.md-conversation-image__state')?.textContent).toContain(`@${paths[1]}`)
   expect(button('Zoom in').disabled).toBe(true); expect(position()).toBe('2 / 3')
+  expect(button('Retry image').querySelector('[data-semantic-icon="action.retry"]')).not.toBeNull()
   await click(button('Retry image'))
   expect(full()).toBeNull(); expect(document.activeElement).toBe(document.querySelector('.md-conversation-image__viewport'))
   fail = false; await click(button('Retry image'))
