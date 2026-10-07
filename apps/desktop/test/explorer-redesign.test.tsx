@@ -40,13 +40,15 @@ import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 const dom = composerDOM()
 const workspace = { id: 'one', name: 'Project one', hostId: 'local', path: _hygiene_fixturePath("Users/reader/project"), branch: 'main', kind: 'folder' as const }
 const second = { ...workspace, id: 'two', name: 'Project two', path: _hygiene_fixturePath("Users/reader/second") }
+const worktree = { ...workspace, id: 'other', name: 'Other worktree', path: _hygiene_fixturePath("Users/reader/worktrees/other"), repoPath: workspace.path, branch: 'other', kind: 'worktree' as const }
 const open = vi.fn(async (_path: string) => true)
 const rename = vi.fn<(source: string, destination: string, workspaceId?: string) => Promise<void>>()
 beforeEach(() => {
   installFileTreeGeometry()
   vi.clearAllMocks(); rename.mockResolvedValue(undefined)
-  useAppStore.setState({ config: { ...composerConfig, workspaces: [workspace, second] }, localHome: _hygiene_fixturePath("Users/reader"),
-    activeWorkspaceId: 'one', workspaceTool: 'files-branches', projectRailOpen: true, sessions: [],
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [workspace, second, worktree] }, localHome: _hygiene_fixturePath("Users/reader"),
+    activeWorkspaceId: 'one', workspaceTool: 'files-branches', workspaceGitView: 'changes', projectRailOpen: true, sessions: [],
+    workbenchSpaceSelection: null, spaceZoneBindings: {},
     fileExplorerStates: {}, explorerCollapsed: {}, workspaceFileRevisions: {}, dirtyDocuments: {},
     lastActiveFileByWorkspace: {}, layouts: {}, tabs: {}, pinnedItems: {}, openFile: open, openFileAndReveal: open, renamePath: rename })
 })
@@ -81,7 +83,10 @@ describe('actual Explorer shared header and interactions', () => {
     expect(header.querySelector('[title="New file"]')).not.toBeNull()
     expect(dom.container.querySelectorAll('.explorer-header')).toHaveLength(0)
     expect(dom.container.querySelectorAll('.branches-repo')).toHaveLength(0)
-    expect(element('[aria-label="Branch actions"]').textContent!.trim()).toBe('2 branches')
+    expect(element('.workspace-zones-panel').closest('[hidden]')).toBeNull()
+    expect(dom.container.querySelectorAll('.workspace-zone-entry')).toHaveLength(2)
+    expect(element('.workspace-zone-entry[aria-pressed="true"] .selector-row__identity strong').textContent).toBe('main')
+    expect(dom.container.querySelector('.workspace-zones-panel [role="tablist"]')).toBeNull()
     await event(element('[title="New file"]'), 'click')
     expect(element<HTMLInputElement>('[placeholder="file name"]').value).toBe('')
     await key(element('[placeholder="file name"]'), 'Escape')
@@ -195,13 +200,13 @@ describe('actual Explorer shared header and interactions', () => {
     await dom.render(<SurfaceToolDock workspace={workspace} />)
     expect(element('.workspace-tool-context--explorer > span').title).toBe('~/project')
     expect(element('[data-tree-path="alias.ts"]').title).toBe('~/project/alias.ts → ~/project/one.ts · File link')
-    const worktree = element('.branch-row .selector-row__identity small')
-    expect([worktree.textContent, worktree.title]).toEqual(['~/worktrees/other', '~/worktrees/other'])
+    const worktreePath = element('.workspace-zone-entry .selector-row__identity small[title="~/worktrees/other · local"]')
+    expect([worktreePath.textContent, worktreePath.title]).toEqual(['~/worktrees/other · local', '~/worktrees/other · local'])
     const config = useAppStore.getState().config!
     await act(async () => useAppStore.setState({ config: { ...config, copyPathsAsAbsolute: true } }))
     expect(element('.workspace-tool-context--explorer > span').title).toBe(workspace.path)
     expect(element('[data-tree-path="one.ts"]').title).toBe(`${workspace.path}/one.ts`)
-    expect(element('.branch-row .selector-row__identity small').title).toBe(_hygiene_fixturePath("Users/reader/worktrees/other"))
+    expect(element(`.workspace-zone-entry .selector-row__identity small[title="${worktree.path} · local"]`).title).toBe(`${worktree.path} · local`)
     expect(useAppStore.getState().config!.workspaces[0]).toBe(workspace)
   })
 
@@ -222,8 +227,13 @@ describe('actual Explorer shared header and interactions', () => {
 
   it('uses one keyboard-accessible Git navigation plane without duplicate panel titles', async () => {
     await dom.render(<SurfaceToolDock workspace={workspace} />)
+    await event(element('[data-space-tool="git"]'), 'click')
     expect(element('[role="tablist"]').className).toBe('surface-mode-switch')
+    expect(element('[role="tab"][aria-selected="true"]').textContent).toBe('Changes')
+    await key(element('[role="tab"][aria-selected="true"]'), 'End')
     const branches = element<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
+    expect(branches.textContent).toBe('Branches')
+    expect(element('[aria-label="Branch actions"]').textContent!.trim()).toBe('2 branches')
     await key(branches, 'ArrowRight')
     const changes = element<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
     expect(changes.textContent).toBe('Changes')
@@ -233,7 +243,7 @@ describe('actual Explorer shared header and interactions', () => {
     expect(element('.changes-repository-context [title="Fetch from remote"]')).toBeDefined()
     expect(element('.changes-repository-context [aria-label="Open a pull request"]')).toBeDefined()
     await key(changes, 'Home')
-    expect(element('[role="tab"][aria-selected="true"]').textContent).toBe('Branches')
+    expect(element('[role="tab"][aria-selected="true"]').textContent).toBe('Changes')
   })
 
   it('loads actual control styles with nonempty surfaces and keeps static material/focus signals', () => {

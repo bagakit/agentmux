@@ -306,21 +306,21 @@ function session(input: {
 }
 
 describe('shared surface tool dock resize', () => {
-  it('keeps Files and Agents as the Workspace tools', () => {
-    expect(WORKSPACE_TOOL_IDS).toEqual(['files-branches', 'agents'])
+  it('keeps Zone content, Agents and Git as peer Workspace tools', () => {
+    expect(WORKSPACE_TOOL_IDS).toEqual(['files-branches', 'agents', 'git'])
   })
 
   it('keeps every tool for Scratch and lands on the content slot (wiki-first, not Agents)', () => {
     // Scratch is a wiki-first workspace with real topic/outcome/refs/.agents content, so the
     // content slot is meaningful — it is re-skinned as Files + Topics, not dropped.
     const scratch = resolveWorkspaceTools({ workspaceTool: 'files-branches', isScratch: true })
-    expect(scratch.tools).toEqual(WORKSPACE_TOOL_IDS)
+    expect(scratch.tools).toEqual(['files-branches', 'agents'])
     expect(scratch.effective).toBe('files-branches')
   })
 
   it('keeps a Scratch selection that is still valid instead of forcing the content slot', () => {
     const scratch = resolveWorkspaceTools({ workspaceTool: 'agents', isScratch: true })
-    expect(scratch.tools).toEqual(WORKSPACE_TOOL_IDS)
+    expect(scratch.tools).toEqual(['files-branches', 'agents'])
     expect(scratch.effective).toBe('agents')
   })
 
@@ -332,7 +332,7 @@ describe('shared surface tool dock resize', () => {
 
   it('re-skins the content slot as Files + Topics only for Scratch, Topics taking the larger split', () => {
     const project = contentSlotPresentation(false)
-    expect(project.label).toBe('Files + Branches')
+    expect(project.label).toBe('Files + Zones')
     expect(project.showTopics).toBe(false)
     // Real projects keep the original 68/32 split unchanged.
     expect(project.fileTreeDefaultSize).toBe(68)
@@ -673,37 +673,37 @@ describe('shared surface tool dock resize', () => {
   it('contains compact window chrome and all workspace tools when the project rail is closed', () => {
     expect(getToolDockMinimumWidth(true)).toBe(TOOL_DOCK_MIN_WIDTH)
     expect(getToolDockMinimumWidth(false)).toBe(TOOL_DOCK_COLLAPSED_RAIL_MIN_WIDTH)
-    expect(getRenderedToolDockWidth(TOOL_DOCK_MIN_WIDTH, false)).toBe(274)
+    expect(getRenderedToolDockWidth(TOOL_DOCK_MIN_WIDTH, false)).toBe(302)
     expect(getRenderedSidebarWidthCssValue(
       true,
       TOOL_DOCK_MIN_WIDTH,
       0,
       TOOL_DOCK_COLLAPSED_RAIL_MIN_WIDTH,
       TOOL_DOCK_MAX_WIDTH
-    )).toBe('274px')
+    )).toBe('302px')
   })
 
   it('keeps the stored width while a closed project rail only raises the rendered floor', () => {
     const storedWidth = TOOL_DOCK_MIN_WIDTH
-    expect(getRenderedToolDockWidth(storedWidth, false)).toBe(274)
+    expect(getRenderedToolDockWidth(storedWidth, false)).toBe(302)
     expect(getRenderedToolDockWidth(storedWidth, true)).toBe(storedWidth)
     expect(getNextSidebarResizeDraftWidth({
-      clientX: 274,
-      startX: 274,
+      clientX: 302,
+      startX: 302,
       storedStartWidth: storedWidth,
-      renderedStartWidth: 274,
+      renderedStartWidth: 302,
       deltaSign: 1,
-      minWidth: 274,
+      minWidth: 302,
       maxWidth: 440
     })).toBe(storedWidth)
     expect(getNextSidebarResizeDraftWidth({
-      clientX: 290,
-      startX: 274,
+      clientX: 318,
+      startX: 302,
       storedStartWidth: storedWidth,
-      renderedStartWidth: 274,
+      renderedStartWidth: 302,
       deltaSign: 1,
-      minWidth: 274,
+      minWidth: 302,
       maxWidth: 440
-    })).toBe(290)
+    })).toBe(318)
   })
 })

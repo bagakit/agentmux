@@ -27,7 +27,8 @@ const key = async (button: HTMLElement, name: string) => act(async () => {
 beforeEach(() => {
   reduced = false; changes.clear(); animations.mockClear()
   useAppStore.setState({ config: { ...composerConfig, workspaces: [workspace] }, activeWorkspaceId: workspace.id,
-    workspaceTool: 'files-branches', projectRailOpen: true, explorerCollapsed: { one: true }, sessions: [], tabs: {}, layouts: {} })
+    workspaceTool: 'files-branches', workspaceGitView: 'changes', workbenchSpaceSelection: null, spaceZoneBindings: {},
+    projectRailOpen: true, explorerCollapsed: { one: true }, sessions: [], tabs: {}, layouts: {} })
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
   const media = window.matchMedia.bind(window)
   vi.spyOn(window, 'matchMedia').mockImplementation(query => query !== '(prefers-reduced-motion: reduce)' ? media(query) : {
@@ -38,7 +39,7 @@ beforeEach(() => {
   } as MediaQueryList)
   // Layout is supplied by the browser in Native; the mounted boundary uses known tab rectangles.
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    const index = ['branches', 'changes', 'history'].indexOf(this.getAttribute('data-surface-mode') ?? '')
+    const index = ['changes', 'history', 'branches'].indexOf(this.getAttribute('data-surface-mode') ?? '')
     return new DOMRect(index < 0 ? 0 : index * 100, 0, index < 0 ? 300 : 100, 28)
   })
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function (this: HTMLElement) { return [this.getBoundingClientRect()] as unknown as DOMRectList })
@@ -50,15 +51,16 @@ beforeEach(() => {
 describe('actual Explorer Git switch material', () => {
   it('connects one shared lens to the three original buttons and keeps keyboard selection and focus', async () => {
     await dom.render(<SurfaceToolDock workspace={workspace} />)
+    await dom.click('[data-space-tool="git"]')
     expect(nav()).not.toBeNull()
-    expect(tabs().map(button => button.textContent)).toEqual(['Branches', 'Changes', 'History'])
-    expect(tabs().map(button => button.dataset.surfaceMode)).toEqual(['branches', 'changes', 'history'])
+    expect(tabs().map(button => button.textContent)).toEqual(['Changes', 'History', 'Branches'])
+    expect(tabs().map(button => button.dataset.surfaceMode)).toEqual(['changes', 'history', 'branches'])
     expect(nav().querySelectorAll('[data-liquid-selection]')).toHaveLength(1)
     const surface = lens()
     expect(surface.getAttribute('aria-hidden')).toBe('true')
     expect(surface.hidden).toBe(false)
-    expect(surface.dataset.liquidSelection).toBe('branches')
-    for (const [name, view] of [['ArrowRight', 'changes'], ['End', 'history'], ['Home', 'branches']] as const) {
+    expect(surface.dataset.liquidSelection).toBe('changes')
+    for (const [name, view] of [['ArrowRight', 'history'], ['End', 'branches'], ['Home', 'changes']] as const) {
       await key(selected(), name)
       expect(selected().dataset.surfaceMode).toBe(view)
       expect(document.activeElement).toBe(selected())
@@ -72,11 +74,12 @@ describe('actual Explorer Git switch material', () => {
 
   it('pauses decoration when the actual dock is hidden or motion is reduced and restores the original selection', async () => {
     await dom.render(<SurfaceToolDock workspace={workspace} />)
+    await dom.click('[data-space-tool="git"]')
     await key(selected(), 'End')
     await dom.render(<SurfaceToolDock workspace={workspace} visible={false} />)
     expect(lens().hidden).toBe(true)
     expect(lens().dataset.liquidPaused).toBe('true')
-    expect(lens().dataset.liquidSelection).toBe('history')
+    expect(lens().dataset.liquidSelection).toBe('branches')
     await dom.render(<SurfaceToolDock workspace={workspace} visible />)
     expect(lens().hidden).toBe(false)
     animations.mockClear()
@@ -85,13 +88,14 @@ describe('actual Explorer Git switch material', () => {
       for (const listener of changes) typeof listener === 'function' ? listener(new Event('change')) : listener.handleEvent(new Event('change'))
     })
     await key(selected(), 'Home')
-    expect(lens().dataset.liquidSelection).toBe('branches')
+    expect(lens().dataset.liquidSelection).toBe('changes')
     expect(lens().dataset.liquidPaused).toBe('true')
     expect(animations).not.toHaveBeenCalled()
   })
 
   it('connects the compact neutral surface, transparent selected foreground and system contrast alternatives', async () => {
     await dom.render(<SurfaceToolDock workspace={workspace} />)
+    await dom.click('[data-space-tool="git"]')
     const css = readFileSync(new NodeURL('../src/renderer/src/styles/surface-mode-switch.css', import.meta.url), 'utf8')
     const sheet = new CSSStyleSheet(); sheet.replaceSync(css)
     expect(sheet.cssRules.length).toBeGreaterThan(8)
