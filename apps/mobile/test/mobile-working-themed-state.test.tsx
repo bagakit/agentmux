@@ -1,4 +1,3 @@
-import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { GRAPHITE_THEME, mountThemeRuntime, previewTheme } from '@agentmux/client-ui/theme'
@@ -6,12 +5,14 @@ import { semanticIconHref } from '@agentmux/client-ui/icons'
 import { MobileConversationSurface } from '../src/conversation/MobileConversationSurface'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { fixture, mounted, mount, paste, editor } from './conversation-fixture'
+import { activityStatus } from './activity-status-fixture'
 let cleanup: () => void
 beforeEach(() => { cleanup = mountThemeRuntime(window) })
 afterEach(async () => { for(const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }; cleanup(); vi.unstubAllGlobals() })
 it('the actual phone conversation themes only the confirmed working glyph while retaining the original Session, editable draft and label', async () => {
   const f=fixture(), original=f.sessions.get('session-original')!
-  original.semanticStatus={state:'working',source:'native-hook',observedAt:_reshape_fixtureEpoch(0, 0, 1)}
+  original.semanticStatus={state:'working',source:'native-hook',observedAt:Date.now()}
+  f.client.statusAgent=vi.fn(async()=>activityStatus(original))
   const props={client:f.client,agentSessionId:original.agentSessionId,connection:{state:'connected' as const,message:'Original Host'},platform:createBrowserPlatform()}
   const view=await mount(<MobileConversationSurface {...props}/>)
   const state=view.element.querySelector<HTMLElement>('.mobile-active-state')!, icon=state.querySelector('svg')!
