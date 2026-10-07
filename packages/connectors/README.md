@@ -80,6 +80,22 @@ group. Its trusted credential-entry IPC is separate from the public reference-on
 connection methods. The Settings component reconciles the original operation after
 a lost save response rather than creating a second connection.
 
+The original Agent Region menu consumes the same public room and Binding methods.
+It creates a dedicated group or explicitly selects an existing group, then confirms
+sharing separately. Another Region displaying the same Host/Session reads the same
+Binding. Actor approval, member inclusion and platform delivery remain separate
+facts; their behavioral contract is defined in
+[the conversation design](../../docs/design/behavior/conversation-input.md#共同对话协议与外部交流入口).
+
+Desktop retains only the exact submitted request and operation correlation in its
+existing workbench persistence. Reopening a form reads original Core/Host receipts;
+an unknown effect has no fresh-create or retry action. The original Composer reads
+its own Session's audiences and retains the last known audience during an observation
+gap. Group details read bounded delivery pages and original operations without
+retrying them. Configuration alone does not certify delivery; results are shown per
+group. Local drafts, native input and execution lifetimes stay with their original
+owners.
+
 ## Independent service facts
 
 Authentication, transport, durable receiving and group delivery have independent
