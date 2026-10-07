@@ -22,10 +22,10 @@ export type MobilePanel = 'conversation' | 'sessions' | 'terminal'
 export type Navigation = { selectedSessionId: string | null; hostUrl: string; panel: MobilePanel }
 export type DraftRecord = { version: 1; drafts: Array<[string, string]>;
   attempts: Array<[string, Omit<PromptAttempt, 'message'>]>;
-  responses: Array<[string, Pick<ResponseAttempt, 'phase'>]>; questions?: Array<[string, MobileQuestionReplyAttempt]>;
+  responses: Array<[string, Omit<ResponseAttempt, 'message'>]>; questions?: Array<[string, MobileQuestionReplyAttempt]>;
   questionDrafts?: Array<[string, AgentSessionHistoryQuestionAnswer[]]>; conflicts?: ConversationConflict[] }
 export type ConversationBucket = 'drafts' | 'attempts' | 'responses' | 'questions' | 'questionDrafts'
-export type ConversationValue = string | Omit<PromptAttempt, 'message'> | Pick<ResponseAttempt, 'phase'> | MobileQuestionReplyAttempt | AgentSessionHistoryQuestionAnswer[]
+export type ConversationValue = string | Omit<PromptAttempt, 'message'> | Omit<ResponseAttempt, 'message'> | MobileQuestionReplyAttempt | AgentSessionHistoryQuestionAnswer[]
 export type ConversationEdit = { bucket: ConversationBucket; key: string; expected?: ConversationValue | undefined; next?: ConversationValue | undefined }
 export type ConversationConflict = { bucket: ConversationBucket; key: string; value: ConversationValue }
 /** Facts written by this transaction, excluding later optimistic edits. */
@@ -154,7 +154,22 @@ export function parseDraftRecord(value: unknown): DraftRecord {
           !(r.runtimeId === null || id(r.runtimeId))) throw invalid()
     }
   }
-  for (const [, item] of responses) if (!phase(record(item, ['phase']).phase)) throw invalid()
+  for (const [key, item] of responses) {
+    const attempt = record(item, ['phase', ...Object.hasOwn(item ?? {}, 'original') ? ['original'] : []])
+    if (!phase(attempt.phase)) throw invalid()
+    if (attempt.original !== undefined) {
+      const original = record(attempt.original, ['input', 'hostId', 'runtimeId'])
+      const input = record(original.input, ['agentSessionId', 'expectedRun', 'operationId', 'expectedRequest', 'response'])
+      const run = record(input.expectedRun, ['runId'])
+      // Storage validates the read reference, not Provider semantics or current permission.
+      const request = input.expectedRequest as { id?: unknown; agentSessionId?: unknown; kind?: unknown }
+      const response = input.response as { requestId?: unknown; kind?: unknown }
+      if (!id(original.hostId) || !(original.runtimeId === null || id(original.runtimeId)) || !id(input.agentSessionId) ||
+          !id(input.operationId) || !id(run.runId) || !request || !id(request.id) || request.agentSessionId !== input.agentSessionId ||
+          !['question', 'permission'].includes(String(request.kind)) || !response || response.kind !== request.kind || response.requestId !== request.id ||
+          key !== JSON.stringify([input.agentSessionId, run.runId, request.id]) || !body(JSON.stringify(input))) throw invalid()
+    }
+  }
   if (v.questions !== undefined) for (const [, item] of entries(v.questions)) {
     const attempt = parseQuestionReplyAttempt(item), scope = item as MobileQuestionReplyAttempt
     if (!(scope.runtimeId === null || id(scope.runtimeId)) || !id(scope.hostId) || !attempt.input.answers.length) throw invalid()
