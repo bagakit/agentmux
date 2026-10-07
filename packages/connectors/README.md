@@ -375,10 +375,28 @@ scope; authored text never determines that distinction.
 The text projection keeps the original text exactly and fixes actor identity to
 the platform's `open_id` namespace. A mention qualifies only when the typed
 mention ID equals the authenticated bot's original open ID. An arbitrary parent
-or thread ID does not establish a reply to that bot. The parent remains retained
-for the Host's separate dispatch-time qualification; this leaf does not perform
-a network reply lookup before ACK. Unsupported content formats fail explicitly
-instead of fabricating a text body or acknowledging an unretained message.
+or thread ID does not establish a reply to that bot. The original parent ID is
+frozen with the authenticated event, without a network lookup before ACK.
+Unsupported formats and unrecognized text encodings return an empty projection
+with the explicit unsupported-content fact; the original intake owner durably
+retains the complete payload and its safe refusal before ACK. No empty projection
+is submitted as authored text.
+
+`qualifyReply` reads the exact original parent through the authenticated SDK
+Client after durable admission. Only a matching message ID, chat ID and the
+application sender tuple (`sender_type: app`, `id_type: app_id`, original App ID)
+qualify the reply. An explicitly different application or user author confirms a
+regular message. Missing fields, duplicate parent records, deletion, wrong
+targets and network failure stay unknown. Display names and `open_bot_id`
+similarity do not certify the application principal.
+[Original message read](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/get)
+
+The parent request carries the Host's observation signal and cancellation returns
+unknown without granting reply scope. A late result cannot change that result or
+write intake facts. SDK credential acquisition can outlive the canceled
+observation; an already canceled signal prevents the parent HTTP request from
+granting qualification. The original Host owns persistence, observation retry
+and final Core admission.
 
 The leaf reports authentication, transport and durable-receiving observations
 separately; none certifies delivery to a particular group. SDK log arguments are
@@ -390,4 +408,4 @@ stop or replace the original Agent.
 The SDK protocol samples and original Core/CLI/Mailbox consumer tests use
 controlled network ports. They do not certify real application credentials,
 platform subscription permissions, a live group, generic Host startup composition
-or final end-to-end reply support.
+or final platform end-to-end delivery.
