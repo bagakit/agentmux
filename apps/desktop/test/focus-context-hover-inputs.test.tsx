@@ -88,7 +88,7 @@ it('keeps reply DOM and Range through input arrival and unrelated output without
  await pointer(card(),'pointerout',panel());await pointer(panel()!,'pointerover',card());await act(async()=>new Promise(resolve=>setTimeout(resolve,180)));expect(panel()).not.toBeNull()
  await act(async()=>panel()!.dispatchEvent(new Event('scroll')));expect(panel()).not.toBeNull()
 })
-it('shows fewer available messages honestly and bounds long/non-text excerpts without reading older pages to fill three',async()=>{
+it('preserves complete long and non-text inputs without reading older pages to fill three',async()=>{
  vi.mocked(api.sessions.historyPage).mockResolvedValue({...page(A,[native('long','🙂'.repeat(800),20),{id:'resource',kind:'user-message',contentParts:[{kind:'resource',resourceType:'image',reference:_hygiene_fixturePath("recorded/image.png")}],startedAt:30}]),nextCursor:'earlier-real-cursor'})
- await open();await act(async()=>vi.waitFor(()=>expect(inputs()).toHaveLength(2)));expect(inputs()[0]!.querySelector('p')!.textContent!.length).toBeLessThanOrEqual(360);expect(inputs()[0]!.querySelector('p')!.textContent).toMatch(/…$/);expect(inputs()[1]!.textContent).toContain('Non-text input');expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
+ await open();await act(async()=>vi.waitFor(()=>expect(inputs()).toHaveLength(2)));expect(inputs()[0]!.querySelector('p')!.textContent).toBe('🙂'.repeat(800));expect(inputs()[1]!.textContent).toContain('Non-text input');expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
 })

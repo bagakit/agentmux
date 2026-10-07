@@ -16,6 +16,8 @@ vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () =
 vi.mock('../src/renderer/src/components/RecentFocusTimeline', () => ({ RecentFocusTimeline: () => null }))
 vi.mock('../src/renderer/src/lib/use-focus-hierarchy', () => ({ useFocusHierarchy: () => ({ facts: { topics: {}, worktrees: [] }, errors: [] }) }))
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 
 const initial = useAppStore.getState()
 const recipient = 'reading-recipient', declared = 'reading-declared', writer = 'reading-writer'
@@ -212,7 +214,7 @@ it('disambiguates records on different dates and preserves source order when a r
   expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
 })
 
-it('labels bounded reply and input literals as Excerpts without rendering cut Markdown or reading an earlier page', async () => {
+it('keeps complete observed reply and input tails without reading an earlier page', async () => {
   const longReply = '**literal reply**\n\n' + 'r'.repeat(820) + 'UNSEEN-REPLY-TAIL'
   const inputBody = '**literal input**\n\n' + 'i'.repeat(400) + 'UNSEEN-INPUT-TAIL'
   const longInput = ("[Message from Agent " + (declared) + ("]\n<bagakit-msg type=\"result\" name=\"Declared long\" time=\"" + _hygiene_fixtureIso(1097125800000, "zone-second", 480) + "\">") + (inputBody) + "</bagakit-msg>")
@@ -220,25 +222,31 @@ it('labels bounded reply and input literals as Excerpts without rendering cut Ma
   const nativePage = { ...page([native('long-input', longInput, 20)]), nextCursor: 'opaque-real-earlier-cursor' }
   vi.mocked(api.sessions.historyPage).mockResolvedValue(nativePage)
   await open(); await act(async () => vi.waitFor(() => expect(inputRows()).toHaveLength(1)))
-  const replyLiteral = recap().querySelector('p')!, inputLiteral = inputRows()[0]!.querySelector('p')!
-  expect(replyLiteral).not.toBeNull(); expect(inputLiteral).not.toBeNull()
-  expect(recap().textContent).toContain('Excerpt'); expect(inputRows()[0]!.textContent).toContain('Excerpt')
-  expect(recap().querySelector('[data-reading-format]')?.getAttribute('data-reading-format')).toBe('excerpt')
-  expect(inputRows()[0]!.querySelector('[data-reading-format]')?.getAttribute('data-reading-format')).toBe('excerpt')
-  expect(replyLiteral.textContent!.length).toBeLessThanOrEqual(800)
-  expect(replyLiteral.textContent).toMatch(/^\*\*literal reply\*\*\n\n/)
-  expect(replyLiteral.textContent).toMatch(/…$/)
-  expect(inputLiteral.textContent!.length).toBeLessThanOrEqual(360)
-  expect(inputLiteral.textContent).toMatch(/^\*\*literal input\*\*\n\n/)
-  expect(inputLiteral.textContent).toMatch(/…$/)
-  expect(replyLiteral.querySelector('strong,code')).toBeNull(); expect(inputLiteral.querySelector('strong,code')).toBeNull()
-  expect(replyLiteral.textContent).not.toContain('UNSEEN-REPLY-TAIL'); expect(inputLiteral.textContent).not.toContain('UNSEEN-INPUT-TAIL')
+  const replyBody = recap().querySelector('[data-reading-format]')!, inputBodyNode = inputRows()[0]!.querySelector('[data-reading-format]')!
+  expect(replyBody).not.toBeNull(); expect(inputBodyNode).not.toBeNull()
+  expect(recap().textContent).not.toContain('Excerpt'); expect(inputRows()[0]!.textContent).not.toContain('Excerpt')
+  expect(replyBody.getAttribute('data-reading-format')).toBe('markdown')
+  expect(inputBodyNode.getAttribute('data-reading-format')).toBe('markdown')
+  expect(replyBody.querySelector('strong')!.textContent).toBe('literal reply')
+  expect(inputBodyNode.querySelector('strong')!.textContent).toBe('literal input')
+  expect(replyBody.textContent).toContain('UNSEEN-REPLY-TAIL'); expect(inputBodyNode.textContent).toContain('UNSEEN-INPUT-TAIL')
+  expect(card().textContent).not.toContain('UNSEEN-REPLY-TAIL')
+  expect(panel().tabIndex).toBe(0)
+  await act(async () => card().focus())
+  await act(async () => card().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await act(async () => vi.waitFor(() => expect(document.activeElement).toBe(panel())))
   expect(originalContent()).toBe(longReply)
   expect(nativePage.items[0]!.contentParts[0]).toEqual({ kind: 'text', text: longInput })
   expect(inputRows()[0]!.dataset.inputAuthor).toBe('unknown')
   expect(accessibleSource(inputRows()[0]!)).toContain(`[Message from Agent ${declared}]`)
   expect(accessibleSource(inputRows()[0]!)).toContain('Declared long')
   expect(api.sessions.historyPage).toHaveBeenCalledExactlyOnceWith(useAppStore.getState().sessions[0]!.control, { limit: 30 })
+  await act(async () => panel().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  expect(document.querySelector('.focus-context-hover')).toBeNull(); expect(document.activeElement).toBe(card())
+  await act(async () => card().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await act(async () => vi.waitFor(() => expect(document.activeElement).toBe(panel())))
+  expect(api.sessions.historyPage).toHaveBeenCalledTimes(2)
+
 })
 
 it('keeps HTTP, file, image, code, anchor and footnote references selectable with no resource reads or focusable no-op controls', async () => {
@@ -343,4 +351,22 @@ it('retains rich reply nodes and the original Range, input selection and draft t
   expect(useAppStore.getState().sessions[0]!.control).toBe(before.sessions[0]!.control)
   expect(document.activeElement).toBe(editable); expect([editable!.selectionStart, editable!.selectionEnd]).toEqual([2, 8])
   expect(originalContent()).toBe(originalReply)
+})
+
+it('retains large complete literal bodies while bounding Markdown parsing and preserving internal scroll ownership', async () => {
+  const replyText = '**original reply**\n\n' + 'r'.repeat(9000) + 'COMPLETE-REPLY-END'
+  const inputText = '**original input**\n\n' + 'i'.repeat(9000) + 'COMPLETE-INPUT-END'
+  await setTimeline(replyText)
+  vi.mocked(api.sessions.historyPage).mockResolvedValue({ ...page([native('large', inputText, _historyFixtureEpoch(0, 0, 20))]), nextCursor: 'original-earlier-cursor' })
+  await open(); await act(async () => vi.waitFor(() => expect(inputRows()).toHaveLength(1)))
+  const replyBody = recap().querySelector('[data-reading-format]')!, inputBody = inputRows()[0]!.querySelector('[data-reading-format]')!
+  expect(replyBody.getAttribute('data-reading-format')).toBe('plain'); expect(inputBody.getAttribute('data-reading-format')).toBe('plain')
+  expect(replyBody.textContent).toBe(replyText); expect(inputBody.textContent).toBe(inputText)
+  expect(replyBody.querySelector('strong')).toBeNull(); expect(inputBody.querySelector('strong')).toBeNull()
+  const range = document.createRange(); range.selectNodeContents(inputBody)
+  window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
+  await act(async () => inputBody.dispatchEvent(new Event('scroll')))
+  expect(panel().contains(inputBody)).toBe(true); expect(window.getSelection()!.toString()).toBe(inputText)
+  expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
+  expect(useAppStore.getState().agentComposerDrafts[recipient]).toBe('Original composer draft')
 })
