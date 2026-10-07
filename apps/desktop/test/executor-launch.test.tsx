@@ -62,7 +62,7 @@ it('unfinished: preserves incomplete arguments, recovers its preview and never s
   expect(split(preview().querySelector('code')!.textContent!)).toEqual([_historyFixturePath("opt/Agent Tools/wrapper"), '--model', 'finished'])
 })
 it('host: registration uses the same literal program and visible arguments in the original API', async () => {
-  const register = vi.spyOn(api.executors, 'register').mockResolvedValue({} as never)
+  const register = vi.spyOn(api.executors, 'register').mockImplementation(async (hostId, input) => ({ routeHostId: hostId, runtimeId: 'controlled-runtime', executor: { executorId: input.executorId, label: input.config.label, providerId: input.config.providerId, command: input.config.command, source: 'registered', configRevision: 'captured-revision', availability: 'unknown' } }))
   await dom.render(<HostExecutorSettings config={config} active />)
   const button = [...dom.container.querySelectorAll('button')].find(node => node.textContent?.trim() === 'Register command')!
   await act(async () => button.click())
