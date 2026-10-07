@@ -94,7 +94,7 @@ it('keeps unknown author and time honest, uses only explicit human origin and ne
   const outgoing=[outgoingItem('unknown','Same original text',40),
     {...outgoingItem('human','Same original text',30),authorHuman:true}]
   await dom.render(<SessionMailbox system={system} queued={[]} timeline={{agentSessionId:'agent-1',revision:1,items:outgoing}} userMessages={[{id:'captured:timeless',rawId:'timeless',agentSessionId:'agent-1',content:'An original record with no timestamp',contentParts:[],author:{kind:'unknown'},deliveryStatus:'complete',source:{kind:'captured',submissionId:'timeless'}}]} />);await open();await choose('outbox')
-  const rows=[...panel().querySelectorAll<HTMLButtonElement>('.composer-mailbox__history .composer-mailbox__row')]
+  const rows=[...panel().querySelectorAll<HTMLButtonElement>('[role="tabpanel"][id$="-outbox"] .composer-mailbox__row')]
   expect(rows.map(row=>row.dataset.recordKey)).toEqual(['timeline:unknown','timeline:human','timeline:timeless'])
   expect(rows[0]!.textContent).toContain('Author unknown');expect(rows[0]!.textContent).not.toContain('Human')
   expect(rows[1]!.textContent).toContain('Human');expect(rows[2]!.querySelector('time')).toBeNull()
@@ -283,7 +283,7 @@ it('keeps Archived beside active Pending, preserves unknown cause and locates on
   await dom.render(<SessionMailbox control={composerSession().control} system={system} queued={queued} onArchiveQueued={archive} onSendQueued={send}
     timeline={{agentSessionId:'agent-1',revision:1,items:[outgoingItem('prompt:confirmed','Original confirmed History')]}} />)
   await open();await choose('outbox');expect(panel().querySelector('[id$="-outbox-tab"]')!.getAttribute('aria-label')).toBe('Outbox: 1 pending')
-  expect(panel().querySelectorAll('.composer-outbox')).toHaveLength(2)
+  expect([...panel().querySelectorAll<HTMLElement>('li[data-operation-id]')].map(row => row.dataset.operationId)).toEqual(['active','unknown','confirmed'])
   await read('queue:unknown');expect(panel().querySelector('.composer-mailbox__back')).toBeNull()
   expect(panel().querySelectorAll('.composer-mailbox__row')).toHaveLength(4)
   expect(panel().querySelector('.composer-outbox__inline')!.textContent).toContain('此前是否已输入仍待核实')
@@ -297,7 +297,7 @@ it('keeps Archived beside active Pending, preserves unknown cause and locates on
   expect(confirmed.querySelector('.composer-mailbox__risk')).toBeNull()
   expect(confirmed.textContent).toContain('输入已确认')
   expect(confirmed.querySelector<HTMLButtonElement>('[aria-label="恢复为待发"]')!.disabled).toBe(true)
-  await act(async()=>confirmed.querySelector<HTMLButtonElement>('.composer-outbox__actions button:last-child')!.click())
+  await act(async()=>confirmed.querySelector<HTMLButtonElement>('[aria-label="读取原记录"]')!.click())
   expect(panel().querySelector('.log-turn__body')!.textContent).toBe('Original confirmed History')
   expect(archive).toHaveBeenCalledTimes(1);expect(send).not.toHaveBeenCalled()
 })
@@ -326,7 +326,7 @@ it('cannot confirm or hide an original Pending record with a foreign timeline th
     timeline={{agentSessionId:'foreign',revision:1,items:[item('prompt:original','Foreign confirmed')]}} />)
   await open();await choose('outbox')
   expect(panel().querySelector('li[data-operation-id="original"]')).not.toBeNull()
-  expect(panel().querySelector('.composer-mailbox__history')!.textContent).not.toContain('Foreign confirmed')
+  expect(panel().querySelector('[role="tabpanel"][id$="-outbox"]')!.textContent).not.toContain('Foreign confirmed')
   await choose('inbox');expect(panel().textContent).not.toContain('Foreign confirmed')
 })
 

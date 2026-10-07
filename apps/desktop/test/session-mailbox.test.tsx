@@ -298,7 +298,7 @@ it('orders mixed recorded and captured history by original time, keeping equal/m
   const render = () => dom.render(<SessionMailbox system={system} queued={queued}
     timeline={{ agentSessionId: 'agent-1', revision: 1, items }} userMessages={userMessages} />)
   await render(); await toggle('open'); await folder('outbox')
-  const contents = (name: string) => [...mailbox().querySelectorAll(`[id$="-${name}"] ${name === 'outbox' ? '.composer-mailbox__history ' : ''}.composer-mailbox__messages .composer-mailbox__preview`)].map(el => el.textContent)
+  const contents = (name: string) => [...mailbox().querySelectorAll<HTMLButtonElement>(`[id$="-${name}"] .composer-mailbox__row`)].filter(row => !row.dataset.recordKey?.startsWith('queue:')).map(row => row.querySelector('.composer-mailbox__preview')!.textContent)
   expect(contents('outbox')).toEqual(['native-new', 'Body tie-a', 'Body tie-b', 'native-tie', 'Body old', 'missing-a', 'missing-b'])
   await folder('inbox')
   expect(contents('inbox')).toEqual(['Body in-new', 'Body in-old'])

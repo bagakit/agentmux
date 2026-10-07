@@ -15,7 +15,7 @@ const list = () => panel().querySelector<HTMLElement>('.input-history')!
 const editor = () => dom.container.querySelector<HTMLElement>('[role="textbox"]')! as HTMLElement & { editor: import('@tiptap/core').Editor }
 const wait = async (check: () => void) => { await vi.waitFor(async () => { await act(async () => { await Promise.resolve() }); check() }) }
 const clickText = async (text: string, root: ParentNode = list()) => {
- const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === text)
+ const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === text || node.getAttribute('aria-label') === text)
  expect(button, text).toBeDefined(); await act(async () => button!.click())
 }
 async function open() {
@@ -42,20 +42,22 @@ it('actual Composer → Unix Hosted SDK → Core Provider reads older native inp
  const f = await createHostedHistoryFixture('claude', 352); cleanups.push(() => f.dispose())
  vi.spyOn(api.sessions, 'readHistory').mockImplementation((reference, input, context) => f.client.readAgentSessionHistory({ ...input, ...reference }, context))
  const controls = ['send', 'enqueueAgentSteer', 'interrupt', 'respondInteraction'].map(name => vi.spyOn(useAppStore.getState(), name as 'send'))
- const unknown = { operationId: 'unknown-original', runId: 'original-run', text: 'original uncertain body', status: 'deferred' as const, errorCode: 'NO_ACK', logId: 'original-log', inputIntakeStarted: true }
+ const unknown = { operationId: 'unknown-original', runId: 'original-run', text: 'original uncertain body', status: 'deferred' as const, errorCode: 'NO_ACK', logId: 'original-log', inputIntakeStarted: true as const }
  useAppStore.setState({ agentSteerQueues: { [sid]: [unknown] } })
  await dom.render(<AgentSessionComposer sessionId={sid} />); await open()
- await wait(() => expect(list().querySelectorAll('[data-input-history-id]').length, list().textContent ?? '').toBeGreaterThan(0))
+ await wait(() => expect(list().querySelectorAll('.composer-mailbox__row').length, list().textContent ?? '').toBeGreaterThan(0))
  await wait(() => expect(list().textContent).toContain('原生记录 · 入口未记录'))
  await search('needle')
  await wait(() => expect(list().textContent).toContain('继续查找原生记录'))
- expect(list().textContent).toContain('已读取范围内没有匹配项')
- expect(list().querySelectorAll('[data-input-history-id]')).toHaveLength(0)
+ expect(list().textContent).toContain('No recorded messages')
+ expect([...list().querySelectorAll<HTMLElement>('.composer-mailbox__row')].filter(row => !row.dataset.recordKey?.startsWith('queue:'))).toHaveLength(0)
  await clickText('继续查找原生记录')
  await wait(() => expect(list().textContent).toContain('needle older than three hundred records'))
  expect(list().textContent).toContain('已查完可用记录')
- await clickText('复制正文'); expect(api.ui.writeClipboardText).toHaveBeenCalledWith('needle older than three hundred records')
- await clickText('填入草稿'); expect(dom.draft(sid)).toBe('needle older than three hundred records')
+ const originalRow = [...list().querySelectorAll<HTMLElement>('.composer-mailbox__row')].find(row => row.textContent?.includes('needle older than three hundred records'))!.closest('li')!
+ await clickText('复制全文', originalRow); await wait(() => expect(api.ui.writeClipboardText).toHaveBeenCalledWith('needle older than three hundred records'))
+ await act(async () => editor().editor.commands.setTextSelection('unfinished'.length + 1))
+ await clickText('填入草稿', originalRow); await wait(() => expect(dom.draft(sid)).toBe('unfinished needle older than three hundred records original'))
  await act(async () => { expect(editor().editor.commands.undo()).toBe(true) }); expect(dom.draft(sid)).toBe('unfinished original')
  expect(useAppStore.getState().agentSteerQueues[sid]).toEqual([unknown])
  for (const control of controls) expect(control).not.toHaveBeenCalled()
@@ -83,4 +85,30 @@ it('a foreign receipt is a local reading failure and never disables ordinary Sen
  expect(dom.draft(sid)).toBe('unfinished original')
  await act(async () => editor().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true })))
  expect(send).toHaveBeenCalledWith(sid, 'unfinished original', expect.any(Function), 'manual')
+})
+
+it('actual Inbox Agent mail uses the same original Hosted captured record for plain copy and caret insertion without leaking into Outbox or changing its receipt', async () => {
+ const f = await createHostedHistoryFixture('claude', 2); cleanups.push(() => f.dispose())
+ const incoming = { ...f.captured(77, 'Exact original Agent mail'), id: 'incoming-peer', authorHuman: false, authorAgentSessionId: 'original-peer' }
+ await f.store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item: incoming })
+ // The real app's captured Timeline owner feeds Inbox independently of a search window.
+ const originalTimeline = await f.client.sessionTimeline(sid)
+ useAppStore.setState({ timelines: { [sid]: originalTimeline } })
+ vi.spyOn(api.sessions, 'readHistory').mockImplementation((reference, input, context) => f.client.readAgentSessionHistory({ ...input, ...reference }, context))
+ const controls = ['send', 'enqueueAgentSteer', 'interrupt', 'respondInteraction'].map(name => vi.spyOn(useAppStore.getState(), name as 'send'))
+ await dom.render(<AgentSessionComposer sessionId={sid} />); await open()
+ await wait(() => expect(list().querySelector('.composer-mailbox__row')).not.toBeNull())
+ expect(list().textContent).not.toContain('Exact original Agent mail')
+ await dom.click('[role="tab"][id$="-inbox-tab"]')
+ await wait(() => expect(panel().textContent).toContain('Exact original Agent mail'))
+ const originalRow = [...panel().querySelectorAll<HTMLElement>('.composer-mailbox__row')].find(row => row.textContent?.includes('Exact original Agent mail'))!.closest('li')!
+ expect(originalRow.querySelector('.composer-mailbox__row')?.getAttribute('data-record-key')).toBe('timeline:incoming-peer')
+ await clickText('复制全文', originalRow); await wait(() => expect(api.ui.writeClipboardText).toHaveBeenCalledWith('Exact original Agent mail'))
+ await act(async () => editor().editor.commands.setTextSelection('unfinished'.length + 1))
+ await clickText('填入草稿', originalRow); await wait(() => expect(dom.draft(sid)).toBe('unfinished Exact original Agent mail original'))
+ await act(async () => { expect(editor().editor.commands.undo()).toBe(true) }); expect(dom.draft(sid)).toBe('unfinished original')
+ const retained = await f.client.readAgentSessionHistory({ ...f.reference, source: 'captured', kind: 'user-message', query: 'Exact original Agent mail', maxBytes: 128 * 1024 })
+ expect(retained.userMessages?.find(message => message.rawId === 'incoming-peer')).toMatchObject({ author: { kind: 'agent', agentSessionId: 'original-peer' }, content: incoming.content, deliveryStatus: 'complete' })
+ for (const control of controls) expect(control).not.toHaveBeenCalled()
+ await f.noControls()
 })

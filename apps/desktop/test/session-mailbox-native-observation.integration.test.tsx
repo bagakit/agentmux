@@ -55,7 +55,7 @@ async function fixture(count = 1) {
   expect(mailbox).not.toBeNull()
   const toggle = async (open: boolean) => { const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: open ? 'open' : 'closed' }); await act(async () => mailbox.dispatchEvent(event)) }
   const wait = (check: () => void) => act(async () => vi.waitFor(check, { timeout: 3000, interval: 10 }))
-  const rows = () => [...mailbox.querySelectorAll<HTMLElement>('.composer-mailbox__history [data-record-key]')]
+  const rows = () => [...mailbox.querySelectorAll<HTMLElement>('[role="tabpanel"][id$="-outbox"] .composer-mailbox__row[data-record-key]')]
   const click = async (text: string) => { const button = [...mailbox.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === text); expect(button).toBeDefined(); await act(async () => button!.click()) }
   await toggle(true)
   await act(async () => mailbox.querySelector<HTMLButtonElement>('[role="tab"][id$="-outbox-tab"]')!.click())
