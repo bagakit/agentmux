@@ -13,7 +13,7 @@ export class DesktopConnectorSecrets implements WritableSecretPort {
   constructor(private readonly database: DatabaseSync, private readonly encryption: CredentialEncryption) {
     database.exec('CREATE TABLE IF NOT EXISTS connection_credential (credential_ref TEXT PRIMARY KEY, operation_id TEXT UNIQUE NOT NULL, ciphertext BLOB NOT NULL)')
   }
-  private assertAvailable(): void {
+  assertAvailable(): void {
     let available = false
     try { available = this.encryption.isEncryptionAvailable() && this.encryption.getSelectedStorageBackend?.() !== 'basic_text' } catch { /* Never expose raw OS credential-service errors. */ }
     if (!available) throw new AgentMuxError('Secure credential storage is unavailable on this Host. Unlock the operating system credential service and retry the same operation.', 'CONNECTION_CREDENTIAL_UNAVAILABLE')

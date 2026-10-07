@@ -13,3 +13,6 @@ export * from './durable-ingress.js'
 export * from './connection-receivers.js'
 export * from './core-ingress-port.js'
 export * from './platform-adapters.js'
+
+export * from './connection-enrollment-adapter.js'
+export * from './connection-enrollment.js'
