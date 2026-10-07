@@ -55,7 +55,7 @@ export function connectorJourneyFixture() {
   })
   afterEach(async () => {
     if (calls?.length) {
-      const test = expect.getState().currentTestName!, directory = resolve('.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts/T-013-direction-consumers')
+      const test = expect.getState().currentTestName!, directory = resolve('.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts/T-013-final-consumers')
       await mkdir(directory, { recursive: true })
       await writeFile(join(directory, createHash('sha256').update(test).digest('hex').slice(0, 12) + '.json'), JSON.stringify({
         test, scope: 'Mounted original Workbench/menu/Composer through trusted IPC and compiled public Core/CLI into the original Desktop Host. Adapter, encryption and terminal rendering are controlled; no real platform or provider qualification.',
