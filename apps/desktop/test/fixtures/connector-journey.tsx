@@ -55,7 +55,7 @@ export function connectorJourneyFixture() {
   })
   afterEach(async () => {
     if (calls?.length) {
-      const test = expect.getState().currentTestName!, directory = resolve('.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts/T-013-consumers')
+      const test = expect.getState().currentTestName!, directory = resolve('.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts/T-013-progressive-consumers')
       await mkdir(directory, { recursive: true })
       await writeFile(join(directory, createHash('sha256').update(test).digest('hex').slice(0, 12) + '.json'), JSON.stringify({
         test, scope: 'Mounted original Workbench/menu/Composer through trusted IPC and compiled public Core/CLI into the original Desktop Host. Adapter, encryption and terminal rendering are controlled; no real platform or provider qualification.',
@@ -82,6 +82,9 @@ export function connectorJourneyFixture() {
   async function fill(label: string, value: string) {
     const input = document.querySelector<HTMLInputElement | HTMLTextAreaElement>('[aria-label="' + label + '"]')!
     expect(input).not.toBeNull()
+    const folded: HTMLDetailsElement[] = []
+    for (let parent = input.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement && !parent.open) folded.push(parent)
+    for (const details of folded.reverse()) { await act(async () => details.querySelector('summary')!.click()); expect(details.open).toBe(true) }
     await act(async () => { Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) })
   }
   async function button(label: string) { const item = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(node => node.textContent?.trim() === label); expect(item, label).toBeDefined(); await act(async () => item!.click()) }
