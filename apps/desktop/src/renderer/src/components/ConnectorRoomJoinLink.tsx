@@ -1,14 +1,15 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { RoomLinkOperation } from '@agentmux/core/connections'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 
 /** Joining and Agent access remain separate facts; this view never guesses the local person's account. */
-export function ConnectorRoomJoinLink({ submitted, operation, pending, canContinue, onCreate, onInspect, onContinue, onRegenerate }: {
-  submitted: boolean; operation: RoomLinkOperation | null; pending: boolean; canContinue: boolean; onCreate(): void; onInspect(): void; onContinue(): void; onRegenerate(): void
+export function ConnectorRoomJoinLink({ submitted, operation, pending, prominent, canContinue, onCreate, onInspect, onContinue, onRegenerate }: {
+  submitted: boolean; operation: RoomLinkOperation | null; pending: boolean; prominent: boolean; canContinue: boolean; onCreate(): void; onInspect(): void; onContinue(): void; onRegenerate(): void
 }) {
   const [feedback, setFeedback] = useState('')
+  useEffect(() => setFeedback(''), [operation?.operationId, submitted])
   const link = operation?.state === 'confirmed' ? operation.link : null
   const expired = link && link.expiresAtUnixSeconds * 1000 <= Date.now()
   async function open() {
@@ -16,9 +17,9 @@ export function ConnectorRoomJoinLink({ submitted, operation, pending, canContin
     try { await api.ui.openExternal(link.url); setFeedback('Join link handed to your system. Membership and Agent access still need confirmation.') }
     catch (error) { setFeedback(presentError(error)) }
   }
-  return <section className="agent-connector-fields" aria-label="Joining this group">
-    <h3>Join this group</h3>
-    <p className="agent-connector-note">Your platform account is not linked here. Use a join link to request entry; the group may require approval. Joining does not give permission to use this Agent.</p>
+  return <details className="agent-connector-disclosure" open={prominent || undefined} aria-label="Joining this group"><summary>Join this group</summary><div className="agent-connector-fields">
+    <p className="agent-connector-note">Open a join link in your chat application to request entry. Your own membership is not verified here; the group may require approval.</p>
+    <p className="agent-connector-note">Joining and permission to use this Agent are separate.</p>
     {!submitted ? <button className="small-button" disabled={pending} onClick={onCreate}>Create join link</button>
       : <><p role="status" className="agent-connector-note">{link ? expired ? 'This join link has expired' : 'Join link ready' : operation?.state === 'refused' ? 'Join link could not be created' : canContinue ? 'Join link has not been sent' : 'Join link result not confirmed'}</p>
         {link ? <><div className="agent-connector-link-actions"><button className="small-button" onClick={() => void open()}>Open join link</button>
@@ -27,10 +28,16 @@ export function ConnectorRoomJoinLink({ submitted, operation, pending, canContin
         <button className="agent-connector-text-action" disabled={pending} onClick={onInspect}>Check link status</button>
         {canContinue ? <button className="small-button" disabled={pending} onClick={onContinue}>Save and continue</button> : null}
         {operation?.state === 'confirmed' || operation?.state === 'refused' ? <button className="small-button" disabled={pending} onClick={onRegenerate}>Generate a new join link</button> : null}
-        <details className="agent-connector-disclosure"><summary>Join link receipt</summary><div className="agent-connector-fields">
-          {operation ? <><span>{operation.input.externalConversationId}</span><code>{operation.operationId}</code><span>{operation.state}{operation.state === 'refused' ? ' · ' + operation.reason : ''}</span></> : <span>The original operation is kept. Its result is unknown.</span>}
-        </div></details>
+        <details className="agent-connector-disclosure"><summary>Join link receipt</summary><ConnectorRoomJoinReceipt operation={operation} /></details>
       </>}
     {feedback ? <p role="status" className="agent-connector-note">{feedback}</p> : null}
-  </section>
+  </div></details>
+}
+
+/** A historical receipt is readable without becoming the current request or a new effect. */
+export function ConnectorRoomJoinReceipt({ operation }: { operation: RoomLinkOperation | null }) {
+  return <div className="agent-connector-fields">
+    {operation ? <><span>Result · {operation.state}{operation.state === 'refused' ? ' · ' + operation.reason : ''}</span><span>Group · {operation.input.externalConversationId}</span><code>{operation.operationId}</code>
+      {operation.state === 'confirmed' ? <><span>Valid until {new Date(operation.link.expiresAtUnixSeconds * 1000).toLocaleString()}</span><code>{operation.link.url}</code></> : null}</> : <span>The original operation is kept. Its result is unknown.</span>}
+  </div>
 }
