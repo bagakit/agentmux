@@ -45,6 +45,8 @@ async function saved() {
 describe('Mounted Settings preserves the registered adapter identity', () => {
   it.each(['open.feishu.cn', 'open.larksuite.com'])('starts the original default SDK receiver after saving %s', async domain => {
     await dom.render(<ExternalConnectionsSettings active />)
+    await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-enrollment-existing]')).not.toBeNull() })
+    await dom.click('[data-enrollment-existing]')
     await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[aria-label="Connection app ID"]')).not.toBeNull() })
     await act(async () => { dom.container.querySelector<HTMLDetailsElement>('.connector-optional')!.open = true }); await fill('Connection name', 'Original team application'); await fill('Connection app ID', feishuConfig.application.appId); await fill('Connection app secret', 'fixture-credential')
     const platform = dom.container.querySelector<HTMLSelectElement>('[aria-label="Connection platform"]')!
