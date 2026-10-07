@@ -274,12 +274,13 @@ describe('actual native Chrome owner', () => {
     expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[false]])
     expect(await owner.refresh()).toEqual({ projected: 1, capturedPixels: 8000 })
     expect(await owner.update([{ ...float, bounds: { ...float.bounds, x: 200 } }])).toEqual({ projected: 1, capturedPixels: 8000 })
-    view.listeners['input-event']({}, { type: 'keyDown', keyCode: 'Escape' })
+    expect(contents.focus).not.toHaveBeenCalled()
+    view.listeners['input-event']({}, { type: 'keyDown', key: 'Escape', modifiers: [] })
     await vi.waitFor(() => expect(contents.capturePage).toHaveBeenCalledTimes(4))
     expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[false]])
     expect(fake.views).toHaveLength(1)
     expect(view.setVisible.mock.calls).toEqual([[true]])
-    expect(contents.focus).not.toHaveBeenCalled()
+    expect(contents.focus).toHaveBeenCalledOnce()
     owner.dispose()
   })
   it.each(['document', 'image'] as const)('does not swallow an original menu gesture while its cold %s paint is pending', async phase => {
@@ -533,11 +534,24 @@ describe('actual native Chrome owner', () => {
     expect(contents.focus).toHaveBeenCalledTimes(1)
     await owner.update([{ ...float, bounds: { ...float.bounds, x: 200 } }])
     view.listeners['input-event']({}, { type: 'mouseUp', x: 5, y: 7, button: 'left' })
-    view.listeners['input-event']({}, { type: 'keyDown', keyCode: 'Escape' })
+    view.listeners['input-event']({}, { type: 'keyDown', key: 'Escape', modifiers: [] })
     expect(contents.sendInputEvent.mock.calls.map(call => call[0])).toEqual([
       { type: 'mouseDown', x: 125, y: 157, button: 'left' },
-      { type: 'mouseUp', x: 205, y: 157, button: 'left' }, { type: 'keyDown', keyCode: 'Escape' }
+      { type: 'mouseUp', x: 205, y: 157, button: 'left' }, { type: 'keyDown', keyCode: 'Escape', modifiers: [] }
     ])
+    owner.dispose()
+  })
+  it.each([
+    ['rawKeyDown', 'Escape', 'Escape', []], ['keyUp', 'Escape', 'Escape', []],
+    ['rawKeyDown', 'ArrowDown', 'Down', ['shift']], ['keyUp', 'ArrowLeft', 'Left', ['meta']],
+    ['rawKeyDown', 'Tab', 'Tab', ['shift']], ['char', 'a', 'a', []]
+  ])('converts actual Electron %s key %s into the original injectable protocol', async (type, key, keyCode, modifiers) => {
+    const { owner, contents } = fixture()
+    await owner.update([float])
+    fake.views[0].listeners['input-event']({}, { type, key, modifiers })
+    expect(contents.sendInputEvent).toHaveBeenCalledExactlyOnceWith({ type, keyCode, modifiers })
+    expect(contents.focus).toHaveBeenCalledOnce()
+    expect(contents.focus.mock.invocationCallOrder[0]).toBeLessThan(contents.sendInputEvent.mock.invocationCallOrder[0])
     owner.dispose()
   })
   it.each([
@@ -601,11 +615,11 @@ describe('actual native Chrome owner', () => {
       await vi.waitFor(() => expect(view.webContents.executeJavaScript).toHaveBeenCalledTimes(2))
       view.listeners['input-event']({}, { type: 'mouseDown', x: 5, y: 7, button: 'left' })
       view.listeners['input-event']({}, { type: 'mouseUp', x: 5, y: 7, button: 'left' })
-      view.listeners['input-event']({}, { type: 'keyDown', keyCode: 'Escape' })
+      view.listeners['input-event']({}, { type: 'keyDown', key: 'Escape', modifiers: [] })
       expect(contents.sendInputEvent.mock.calls.map(call => call[0])).toEqual([
         { type: 'mouseDown', x: 125, y: 157, button: 'left' },
         { type: 'mouseUp', x: 125, y: 157, button: 'left' },
-        { type: 'keyDown', keyCode: 'Escape' }
+        { type: 'keyDown', keyCode: 'Escape', modifiers: [] }
       ])
       finishContent!()
       expect(await repaint).toEqual({ projected: 1, capturedPixels: 8000 })
@@ -634,7 +648,7 @@ describe('actual native Chrome owner', () => {
       view.listeners['input-event']({}, { type: 'mouseUp', x: 25, y: 7, button: 'left' })
       // No new gesture or keyboard input is authorized by an unfinished paint.
       view.listeners['input-event']({}, { type: 'mouseDown', x: 30, y: 7, button: 'right' })
-      view.listeners['input-event']({}, { type: 'keyDown', keyCode: 'Escape' })
+      view.listeners['input-event']({}, { type: 'keyDown', key: 'Escape', modifiers: [] })
       view.listeners['input-event']({}, { type: 'mouseMove', x: 30, y: 7, button: 'none' })
       finishContent!()
       expect(await repaint).toEqual({ projected: 1, capturedPixels: 8000 })
