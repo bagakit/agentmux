@@ -77,15 +77,15 @@ it('preserves ordered pressure, fault, reason and recovery facts in existing ser
   expect(terminal?.notice.mode).toContain('resource pressure')
   expect(terminal?.notice.mode).toContain('input was last observed open')
   expect(terminal?.notice.restore).toContain('do not resend unconfirmed input')
-  const faultNotice = sessionServiceNotices(original, [], undefined, undefined, movedFault)[0]!
+  const faultNotice = sessionServiceNotices(original, [], undefined, movedFault)[0]!
   expect(faultNotice.notice.notice.mode).toContain('terminal view export at byte 15')
   expect(faultNotice.notice.notice.mode).toContain('input unavailable')
   expect(serviceNoticeFingerprint(faultNotice)).toBe(serviceNoticeFingerprint(
-    sessionServiceNotices(original, [], undefined, undefined, { ...movedFault, revision: 100 })[0]!))
-  expect(sessionServiceNotices(original, [], undefined, undefined, recovered)).toEqual([])
+    sessionServiceNotices(original, [], undefined, { ...movedFault, revision: 100 })[0]!))
+  expect(sessionServiceNotices(original, [], undefined, recovered)).toEqual([])
   const agent: SessionSnapshot = { ...original, kind: 'agent', agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 1), providerId: 'codex', executorId: 'codex', capabilities: agentCapabilities,
     control: { kind: 'agent', hostId: 'local', agentSessionId: 'agent', run: { runId: 'original' } } }
-  expect(sessionServiceNotices(agent, [], undefined, undefined, pressured)[0]?.notice).toEqual(terminal)
+  expect(sessionServiceNotices(agent, [], undefined, pressured)[0]?.notice).toEqual(terminal)
   expect(composerSubmitMode(agent)).toMatchObject({ canType: true, canSubmit: true })
   expect(original.control.run.runId).toBe('original')
   expect(original.processState).toBe('running')

@@ -87,7 +87,7 @@ it('native-source uncertainty is an independent notice and never overrides fresh
 })
 it('a disconnected observation describes the last process reading without claiming current input availability', async () => {
   const { session } = await fixture()
-  const notices = sessionServiceNotices(session, [], undefined, undefined, undefined, false)
+  const notices = sessionServiceNotices(session, [], undefined, undefined, false)
   const activity = notices.find(item => item.id === 'activity-observation')!
   expect(activity.notice.notice?.mode).toContain('Last observed Run running')
   expect(activity.notice.notice?.mode).toContain('Current input availability unconfirmed')
