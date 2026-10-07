@@ -1260,7 +1260,9 @@ export type HostExecutorInventory = import('@agentmux/core').AgentMuxHostExecuto
 export type HostExecutorConfiguration = import('@agentmux/core').AgentMuxHostExecutorConfiguration & { routeHostId: string }
 
 export type DesktopControlRequest = AgentMuxControlRequest | ContinuousProgressInputRequest | import('@agentmux/core/control').MetricsRendererRequest | import('./system-web-url').SystemWebUrlRequest
+  | { operation: 'worktree.closeout.prepare'; requestId: string }
 export type DesktopControlResult = AgentMuxControlResult | ContinuousProgressInputResult | import('@agentmux/core/control').MetricsRendererResult | import('./system-web-url').SystemWebUrlResult
+  | { operation: 'worktree.closeout.prepare'; requestId: string; diskDurability: 'confirmed' }
 
 export type DesktopControlResponse =
   | { requestId: string; ok: true; result: DesktopControlResult }
