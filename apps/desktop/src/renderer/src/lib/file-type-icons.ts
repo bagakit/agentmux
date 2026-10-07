@@ -1,6 +1,10 @@
 import { semanticIconComponent, type SemanticIconComponent } from '@agentmux/client-ui/icons'
 
 const ThemeFileConfigIcon = semanticIconComponent('file.config')
+const ThemeFileLicenseIcon = semanticIconComponent('file.license')
+const ThemeFileNotebookIcon = semanticIconComponent('file.notebook')
+const ThemeFileDiagramIcon = semanticIconComponent('file.diagram')
+const ThemeFilePresentationIcon = semanticIconComponent('file.presentation')
 const ThemeFileJsonIcon = semanticIconComponent('file.json')
 const ThemeFileTextIcon = semanticIconComponent('file.text')
 const ThemeFilePackageIcon = semanticIconComponent('file.package')
@@ -20,7 +24,6 @@ const ThemeFileSpreadsheetIcon = semanticIconComponent('file.spreadsheet')
 const ThemeFileDatabaseIcon = semanticIconComponent('file.database')
 const ThemeFileDiffIcon = semanticIconComponent('file.diff')
 const ThemeFileStructuredDataIcon = semanticIconComponent('file.structured-data')
-const ThemeFileChartIcon = semanticIconComponent('file.chart')
 const ThemeFileGenericIcon = semanticIconComponent('file.generic')
 const ThemeFileMobileIcon = semanticIconComponent('file.mobile')
 
@@ -51,21 +54,18 @@ const FILE_ICON_BY_NAME: Record<string, SemanticIconComponent> = {
   changelog: ThemeFileTextIcon,
   'changelog.md': ThemeFileTextIcon,
   'cmakelists.txt': ThemeFileBuildConfigIcon,
-  codeowners: ThemeFileKeyIcon,
+  codeowners: ThemeFileTextIcon,
   'components.json': ThemeFileConfigIcon,
   'composer.json': ThemeFilePackageIcon,
   'composer.lock': ThemeFilePackageIcon,
   contributing: ThemeFileTextIcon,
   'contributing.md': ThemeFileTextIcon,
-  copying: ThemeFileKeyIcon,
   dockerfile: ThemeFileBuildConfigIcon,
   gemfile: ThemeFilePackageIcon,
   'go.mod': ThemeFilePackageIcon,
   'go.sum': ThemeFilePackageIcon,
-  license: ThemeFileKeyIcon,
   makefile: ThemeFileShellIcon,
   'meson.build': ThemeFileBuildConfigIcon,
-  notice: ThemeFileKeyIcon,
   'package-lock.json': ThemeFilePackageIcon,
   'package.json': ThemeFilePackageIcon,
   pipfile: ThemeFilePackageIcon,
@@ -82,8 +82,8 @@ const FILE_ICON_BY_NAME: Record<string, SemanticIconComponent> = {
   'readme.md': ThemeFileTextIcon,
   'requirements-dev.txt': ThemeFilePackageIcon,
   'requirements.txt': ThemeFilePackageIcon,
-  security: ThemeFileLockedIcon,
-  'security.md': ThemeFileLockedIcon,
+  security: ThemeFileTextIcon,
+  'security.md': ThemeFileTextIcon,
   'settings.gradle': ThemeFileBuildConfigIcon,
   'settings.gradle.kts': ThemeFileBuildConfigIcon,
   'tailwind.config.cjs': ThemeFileConfigIcon,
@@ -167,7 +167,7 @@ const FILE_ICON_BY_EXTENSION: Record<string, SemanticIconComponent> = {
   html: ThemeFileCodeIcon,
   ico: ThemeFileImageIcon,
   ini: ThemeFileConfigIcon,
-  ipynb: ThemeFileChartIcon,
+  ipynb: ThemeFileNotebookIcon,
   iso: ThemeFileArchiveIcon,
   java: ThemeFileCodeIcon,
   jpeg: ThemeFileImageIcon,
@@ -181,7 +181,7 @@ const FILE_ICON_BY_EXTENSION: Record<string, SemanticIconComponent> = {
   kt: ThemeFileCodeIcon,
   kts: ThemeFileCodeIcon,
   less: ThemeFileStylesheetIcon,
-  lock: ThemeFileLockedIcon,
+  lock: ThemeFilePackageIcon,
   log: ThemeFileTextIcon,
   lua: ThemeFileCodeIcon,
   m4a: ThemeFileAudioIcon,
@@ -190,7 +190,7 @@ const FILE_ICON_BY_EXTENSION: Record<string, SemanticIconComponent> = {
   mdx: ThemeFileTextIcon,
   mjs: ThemeFileCodeIcon,
   mkv: ThemeFileVideoIcon,
-  mmd: ThemeFileChartIcon,
+  mmd: ThemeFileDiagramIcon,
   mov: ThemeFileVideoIcon,
   mp3: ThemeFileAudioIcon,
   mp4: ThemeFileVideoIcon,
@@ -213,8 +213,8 @@ const FILE_ICON_BY_EXTENSION: Record<string, SemanticIconComponent> = {
   pl: ThemeFileCodeIcon,
   pm: ThemeFileCodeIcon,
   png: ThemeFileImageIcon,
-  ppt: ThemeFileChartIcon,
-  pptx: ThemeFileChartIcon,
+  ppt: ThemeFilePresentationIcon,
+  pptx: ThemeFilePresentationIcon,
   prisma: ThemeFileDatabaseIcon,
   properties: ThemeFileConfigIcon,
   proto: ThemeFileStructuredDataIcon,
@@ -298,10 +298,11 @@ export function getFileTypeIcon(filePath: string | undefined | null): SemanticIc
   const filename = getFilename(filePath)
   if (!filename) return ThemeFileGenericIcon
   const lowerName = filename.toLowerCase()
+  if (/^(?:licen[cs]e|copying|notice)(?:\.(?:md|txt|rst))?$/.test(lowerName)) return ThemeFileLicenseIcon
   const exactMatch = FILE_ICON_BY_NAME[lowerName]
   if (exactMatch) return exactMatch
   if (lowerName === 'mobile emulator' || lowerName === 'simulator') return ThemeFileMobileIcon
-  if (lowerName === '.env' || lowerName.startsWith('.env.')) return ThemeFileLockedIcon
+  if (lowerName === '.env' || lowerName.startsWith('.env.')) return ThemeFileConfigIcon
   if (lowerName === 'dockerfile' || lowerName.startsWith('dockerfile.')) return ThemeFileBuildConfigIcon
   if (lowerName === 'makefile' || lowerName.startsWith('makefile.')) return ThemeFileShellIcon
   // Filename/extension matching stays deterministic for Local and SSH workspaces.
