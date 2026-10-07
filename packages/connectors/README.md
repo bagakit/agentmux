@@ -225,7 +225,9 @@ boundary, or an image/file the adapter cannot deliver completely, `connection
 delivery ls` reports `unavailable` with reason `content-unconfirmed`. The original
 source cut and pending work remain intact across worker restart. Unsupported
 content is never silently skipped to report ready; local conversation and input
-remain available. The existing assistant-speech scope retains its original
+remain available. Already admitted pending work still proceeds, and original
+effect inspection cannot overwrite the content-gap observation. Inspect the
+original delivery separately to reconcile an older unknown effect. The existing assistant-speech scope retains its original
 coverage.
 
 ```sh
