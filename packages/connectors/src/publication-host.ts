@@ -127,7 +127,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
         } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' }; return }
         if (signal.aborted) return
         try { this.store.commitPage(binding, after, page, () => this.authorized(binding), { resolvedText, fragmentBytes: adapter.fragmentBytes }) }
-        catch { lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }; return }
+        catch (error) { lane.observation = { state: 'unavailable', reason: error instanceof AgentMuxError && error.code === 'PUBLICATION_CONTENT_UNCONFIRMED' ? 'content-unconfirmed' : 'storage-unconfirmed' }; return }
         after = page.checkpoint
         if (!page.more) break
         if (reads === 7) lane.dirty = true

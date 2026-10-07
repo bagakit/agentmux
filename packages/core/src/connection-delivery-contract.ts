@@ -30,7 +30,7 @@ export type ConnectionDelivery = {
 /** Current process service window for the requested Binding scope; never platform delivery or Agent health. */
 export type ConnectionDeliveryObservation = {
   state: 'unknown' | 'ready' | 'unavailable' | 'disabled'
-  reason?: 'not-started' | 'source-unconfirmed' | 'source-gap' | 'storage-unconfirmed' | 'adapter-unavailable' | 'credential-missing' | 'effect-unconfirmed'
+  reason?: 'not-started' | 'source-unconfirmed' | 'source-gap' | 'content-unconfirmed' | 'storage-unconfirmed' | 'adapter-unavailable' | 'credential-missing' | 'effect-unconfirmed'
 }
 export type ConnectionDeliveryOperationInput = { operationId: string }
 export type ConnectionDeliveryListInput = { connectionId: string; bindingId: string; bindingRevision: number; after?: string; limit?: number }
