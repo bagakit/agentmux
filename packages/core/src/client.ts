@@ -40,7 +40,7 @@ import {
   type AgentProviderPromptExecutionContext
 } from './agent-provider.js'
 import { createDefaultAgentMuxPluginRegistry, type AgentMuxPlugin } from './agent-plugin.js'
-import { releaseSubagentRoster, agentHasActiveSubagents, nativeHookHasSubagentSubject, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation } from './hook-normalizer.js'
+import { releaseSubagentRoster, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, nativeHookHasSubagentSubject, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation } from './hook-normalizer.js'
 import { eventNamesCanReopenTurn, resolveHookEventName } from './agent-hook-event.js'
 import { classifyRunExit, type AgentMuxRunExitReason } from './agent-run-exit.js'
 import {
@@ -6532,12 +6532,13 @@ export class AgentMuxClient {
   private projectCurrentActivity(session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run' | 'nativeHandle' |
     'promptCompletionAdmission' | 'nativeSourceObservation'>): AgentCurrentActivity | undefined {
     const activity = this.nativeCurrentActivities.get(session.agentSessionId)
+    const childrenUnconfirmed = agentSubagentActivityUnconfirmed(session.run.runId, activity?.event.sourceId)
     if (activity?.fact && activity.runId === session.run.runId &&
         session.nativeHandle?.kind === 'provider' && activity.fact.nativeSessionId === session.nativeHandle.sessionId &&
         !this.endedRuns.has(session.run.runId) &&
-        (activity.fact.state !== 'idle' || !agentHasActiveSubagents(session.run.runId))) {
+        (activity.fact.state !== 'idle' || activity.invalidated || childrenUnconfirmed || !agentHasActiveSubagents(session.run.runId))) {
       return { ...structuredClone(activity.fact),
-        ...(activity.invalidated || activity.admissionId !== session.promptCompletionAdmission?.submissionId ||
+        ...(activity.invalidated || childrenUnconfirmed || activity.admissionId !== session.promptCompletionAdmission?.submissionId ||
           session.nativeSourceObservation?.state === 'changed' ? { state: 'unknown' as const } : {}) }
     }
     return undefined
@@ -6589,7 +6590,7 @@ export class AgentMuxClient {
 
   private settleHookRestore(session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run'>): void {
     const observation = this.hookIngressObservations.get(session.agentSessionId)
-    if (!observation || !sameRun(observation.run, session.run)) return
+    if (!observation || !sameRun(observation.run, session.run) || observation.code === 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE') return
     this.hookIngressObservations.delete(session.agentSessionId)
     const current = this.registry.findByRun(session.run)
     if (current?.agentSessionId === session.agentSessionId) this.publishSession(current)
@@ -6603,7 +6604,7 @@ export class AgentMuxClient {
       ...(session ? { agentSessionId: session.agentSessionId } : {}), code: 'HOOK_BINDING_RELEASE_UNCONFIRMED',
       message: `The original Run ended, but draining its Hook binding is unconfirmed. ${error instanceof Error ? error.message : String(error)}`,
       evidence: { source: 'agentmux', run: { ...run }, observedAt: Date.now() } }))
-    if (session) this.settleHookRestore(session)
+    if (session) this.hookIngressObservations.delete(session.agentSessionId)
   }
 
   /** One in-flight binding restoration per exact Run; no independent reconnect or input owner. */
@@ -8157,6 +8158,16 @@ export class AgentMuxClient {
     })
     const childrenWereActive = agentHasActiveSubagents(session.run.runId)
     const normalized = provider.normalizeHook(envelope, context)
+    if (normalized.observationFailure) {
+      const observation = { run: { ...session.run }, phase: 'binding' as const,
+        ...normalized.observationFailure, observedAt: normalized.status.observedAt }
+      this.hookIngressObservations.set(session.agentSessionId, observation)
+      this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+        code: observation.code, message: observation.message,
+        evidence: { source: 'agentmux', run: { ...session.run }, observedAt: observation.observedAt } })
+      this.publishSession(session)
+      return
+    }
     const childrenChanged = childrenWereActive !== agentHasActiveSubagents(session.run.runId)
     if (protectedTarget && normalized.nativeHandle && session.nativeHandle && (
       normalized.nativeHandle.kind !== session.nativeHandle.kind ||
@@ -8177,13 +8188,15 @@ export class AgentMuxClient {
     const activityId = JSON.stringify(['activity-state', 'native-hook', session.run.runId, envelope.receiptId])
     const nativeActivity = normalized.currentActivity
     const previousActivity = this.nativeCurrentActivities.get(session.agentSessionId)
-    if (nativeActivity && previousActivity?.runId === session.run.runId &&
-        nativeActivity.sourceId !== previousActivity.event.sourceId) {
-      previousActivity.invalidated = true
-      previousActivity.conflicted = true
+    if ((nativeActivity || normalized.childActivity) && (agentSubagentActivityUnconfirmed(session.run.runId, previousActivity?.runId === session.run.runId ? previousActivity.event.sourceId : undefined) || nativeActivity && previousActivity?.runId === session.run.runId &&
+        nativeActivity.sourceId !== previousActivity.event.sourceId)) {
+      if (previousActivity?.runId === session.run.runId) {
+        previousActivity.invalidated = true
+        previousActivity.conflicted = true
+      }
       this.hookIngressObservations.set(session.agentSessionId, { run: { ...session.run }, phase: 'binding',
         code: 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE', observedAt: normalized.status.observedAt,
-        message: 'Several native activity source lifetimes were observed for this Run. Current activity is unconfirmed. The original Session, Run and input remain available; a subsequent original-identity Run can establish a fresh source.' })
+        message: 'Native activity identity or source continuity is unconfirmed for this Run. The original Session, Run and input remain available; a subsequent original-identity Run can establish a fresh source.' })
       this.publishSession(session)
       return
     }

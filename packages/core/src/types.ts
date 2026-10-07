@@ -1994,6 +1994,9 @@ export type AgentCurrentActivity = AgentNativeActivityEvent & {
   observedAt: number
 } & ({ state: 'active' | 'idle'; nativeTurnId: string } | { state: 'unknown'; nativeTurnId?: string })
 
+/** A Provider observation failure is diagnostic only; it does not alter Agent authority. */
+export type AgentHookObservationFailure = { code: string; message: string }
+
 export type NormalizedHookEvent = {
   agentSessionId: string
   run: AgentMuxRunRef
@@ -2008,6 +2011,7 @@ export type NormalizedHookEvent = {
   /** Direct main-subject contribution; false still permits proven roster-derived parent end. */
   mainSubject: boolean
   currentActivity?: AgentNativeActivityEvent
+  observationFailure?: AgentHookObservationFailure
   nativeTurnId?: string
   toolInvocation?: AgentHookToolInvocation
   subject?: AgentHookSubject

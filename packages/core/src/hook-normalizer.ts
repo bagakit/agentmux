@@ -12,6 +12,7 @@ import type {
   AgentSemanticState,
   AgentStatus,
   AgentNativeActivityEvent,
+  AgentHookObservationFailure,
   NativeHookEnvelope,
   NormalizedHookEvent
 } from './types.js'
@@ -58,6 +59,9 @@ export type AgentNativeSubagentTracking = {
 }
 
 export type AgentNativeHookSpecification = {
+  /** Pure diagnostic from the authenticated Run; it cannot promote an unknown native actor. */
+  observationFailure?: (eventName: string, payload: Readonly<Record<string, unknown>>,
+    context: AgentProviderHookNormalizationContext) => AgentHookObservationFailure | undefined
   /** Ordered native main-turn activity, independent of task completion and permissions. */
   currentActivity?: (eventName: string, payload: Readonly<Record<string, unknown>>,
     context: AgentProviderHookNormalizationContext) => AgentNativeActivityEvent | undefined
@@ -145,6 +149,7 @@ export type { AgentHookEventNameSource }
 type SubagentRoster = {
   live: Map<string, { nativeTurnId: string; sourceId: string; sequence: number } | undefined>
   unidentified: boolean
+  sourceId?: string
   mainStopPending: boolean
 }
 
@@ -174,6 +179,13 @@ export function releaseSubagentRoster(runId: string): boolean {
 export function agentHasActiveSubagents(runId: string): boolean {
   const roster = subagentRosters.get(runId)
   return roster !== undefined && subagentRosterAlive(roster)
+}
+
+/** Missing or conflicting child identity cannot settle current main activity. */
+export function agentSubagentActivityUnconfirmed(runId: string, mainSourceId?: string): boolean {
+  const roster = subagentRosters.get(runId)
+  return roster !== undefined && (roster.unidentified ||
+    mainSourceId !== undefined && roster.sourceId !== undefined && mainSourceId !== roster.sourceId)
 }
 
 function subagentRosterAlive(roster: SubagentRoster): boolean {
@@ -241,11 +253,17 @@ function applySubagentTracking(
   }
   const trackedSubject = tracking.matches?.(eventName, payload) ?? true
   if (trackedSubject && tracking.startEvents.includes(eventName)) {
-    const roster = subagentRosters.get(key) ?? { live: new Map(), unidentified: false, mainStopPending: false }
+    const roster: SubagentRoster = subagentRosters.get(key) ?? { live: new Map(), unidentified: false, mainStopPending: false }
     const identity = tracking.turnIdentity?.(payload)
     if (tracking.turnIdentity && !identity) { roster.unidentified = true; subagentRosters.set(key, roster); return observation }
     const previous = id ? roster.live.get(id) : undefined
-    if (previous && identity && (previous.sourceId !== identity.sourceId || identity.sequence <= previous.sequence)) return observation
+    if (identity && roster.sourceId !== undefined && roster.sourceId !== identity.sourceId) {
+      roster.unidentified = true
+      subagentRosters.set(key, roster)
+      return observation
+    }
+    if (identity) roster.sourceId = identity.sourceId
+    if (previous && identity && identity.sequence <= previous.sequence) return observation
     if (id) roster.live.set(id, identity)
     else roster.unidentified = true
     subagentRosters.set(key, roster)
@@ -689,6 +707,7 @@ export function normalizeNativeHook(
     childSubject
   )
   const currentActivity = mainSubject ? specification.currentActivity?.(eventName, payload, context) : undefined
+  const observationFailure = specification.observationFailure?.(eventName, payload, context)
   return {
     agentSessionId: envelope.agentSessionId,
     run: {
@@ -698,6 +717,7 @@ export function normalizeNativeHook(
     eventName,
     mainSubject,
     ...(currentActivity ? { currentActivity } : {}),
+    ...(observationFailure ? { observationFailure } : {}),
     ...(nativeTurnId ? { nativeTurnId } : {}),
     subject,
     ...(childActivity ? { childActivity: true } : {}),
