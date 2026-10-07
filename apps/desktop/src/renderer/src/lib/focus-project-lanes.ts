@@ -6,6 +6,7 @@ import type { AgentSessionHistoryDescriptor, AgentTimelineSnapshot } from '@agen
 import { scratchTopicKind, scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
 import { topicSpaceIconTarget } from './space-object-appearance'
 import { FOCUS_RECENT_PROJECT_HOURS, resolveFocusRecentActivityHours } from '../../../shared/focus-preferences'
+import { directoryIdentity } from '../../../shared/space-addresses'
 
 export type FocusWorktreeFact = { hostId: string; path: string; repoPath: string; branch: string; removed: boolean }
 export type FocusHierarchyFacts = {
@@ -50,6 +51,7 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
   for (const tab of Object.values(tabs)) for (const region of Object.values(tab.regions)) if ('sessionId' in region) tabWorkspace.set(region.sessionId, tab.workspaceId)
   const lanes = new Map<string, FocusProjectLane>()
   const priorities = new Map<string, number>()
+  const groupRanks = new Map<string, number>()
   const projectRoots = focusProjectRoots(config)
   const activity = new Map<string, number>()
   const recentActivityMs = resolveFocusRecentActivityHours(config?.focus?.recentActivityHours) * 3_600_000
@@ -58,12 +60,12 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     const checkout = facts.worktrees.find(item => item.path === row.workspacePath && item.hostId === row.hostId)
     const repoPath = workspace?.repoPath ?? checkout?.repoPath
     const project = repoPath ? projectRoots.get(JSON.stringify([row.hostId, repoPath])) : workspace
-    const projectId = project?.id ?? workspace?.id ?? row.workspaceId
+    const projectId = project?.id ?? (repoPath ? directoryIdentity(row.hostId, repoPath) : workspace?.id ?? row.workspaceId)
     const workspaceId = workspace?.id ?? tabWorkspace.get(row.id) ?? row.workspaceId
     const topicId = row.topicId ?? null
     const topics = topicSnapshots ? scratchTopicsForWorkspace(topicSnapshots, workspace) : facts.topics[workspaceId]
     const topic = topicId ? topics?.find(item => item.id === topicId) : undefined
-    const labels = [project?.name ?? row.workspaceName]
+    const labels = [project?.name ?? repoPath ?? row.workspaceName]
     const branch = workspace?.branch ?? checkout?.branch
     if (branch) labels.push(branch)
     if (topicId) labels.push(topic?.title || topicId)
@@ -79,6 +81,7 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     lane.contextIds.push(row.id)
     lanes.set(id, lane)
     const key = activityKey(lane)
+    if (!groupRanks.has(key)) groupRanks.set(key, groupRanks.size)
     const at = row.lastActivityAt
     if (at != null && Number.isFinite(at) && at > 0 && at <= now) activity.set(key, Math.max(activity.get(key) ?? 0, at))
     const priority = row.bucket === 'attention' ? 0 : row.bucket === 'working' ? 1 : at != null && at > 0 && at <= now
@@ -86,8 +89,12 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     priorities.set(key, Math.min(priorities.get(key) ?? priority, priority))
   }
   for (const lane of lanes.values()) lane.lastActivityAt = activity.get(activityKey(lane)) ?? null
-  return [...lanes.values()].sort((a, b) => priorities.get(activityKey(a))! - priorities.get(activityKey(b))!
-    || (priorities.get(activityKey(a))! < 3 ? (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0) : 0))
+  return [...lanes.values()].sort((a, b) => {
+    const first = activityKey(a), second = activityKey(b)
+    return priorities.get(first)! - priorities.get(second)!
+      || (priorities.get(first)! < 3 ? (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0) : 0)
+      || groupRanks.get(first)! - groupRanks.get(second)!
+  })
 }
 
 /** Display identity is a Host/Project pair, independent of a checkout or view. */
