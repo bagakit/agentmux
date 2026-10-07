@@ -40,7 +40,7 @@ import {
   type AgentProviderPromptExecutionContext
 } from './agent-provider.js'
 import { createDefaultAgentMuxPluginRegistry, type AgentMuxPlugin } from './agent-plugin.js'
-import { releaseSubagentRoster, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation } from './hook-normalizer.js'
+import { releaseSubagentRoster, agentHasActiveSubagents, nativeHookHasSubagentSubject, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation } from './hook-normalizer.js'
 import { eventNamesCanReopenTurn, resolveHookEventName } from './agent-hook-event.js'
 import { classifyRunExit, type AgentMuxRunExitReason } from './agent-run-exit.js'
 import {
@@ -168,6 +168,8 @@ import type {
   AgentMuxAgentPasteInput,
   AgentMuxAgentWriteInput,
   AgentMuxAgentSession,
+  AgentNativeActivityEvent,
+  AgentCurrentActivity,
   AgentMuxNativeSessionConfirmationInput,
   AgentMuxNativeSessionConfirmation,
   AgentPromptMessageContent,
@@ -908,6 +910,11 @@ export class AgentMuxClient {
   private readonly hookBindings = new Map<string, AgentHookBinding>()
   private readonly hookRestorations = new Map<string, Promise<void>>()
   private readonly hookIngressObservations = new Map<string, NonNullable<AgentMuxAgentSession['hookIngressObservation']>>()
+  /** One live observation per Session; never restored from a durable idle snapshot. */
+  private readonly nativeCurrentActivities = new Map<string, {
+    event: AgentNativeActivityEvent; runId: string; admissionId: string | undefined
+    fact?: AgentCurrentActivity; invalidated?: boolean; conflicted?: boolean
+  }>()
   private readonly pendingLifecycleBindings = new Map<string, AgentHookBinding>()
   private readonly executingReopens = new Set<string>()
   private readonly reopenSettlements = new Map<string, Promise<void>>()
@@ -1882,6 +1889,7 @@ export class AgentMuxClient {
     await Promise.allSettled([...this.hookBindings.values()].map(async (binding) => await binding.close()))
     this.hookBindings.clear()
     this.hookIngressObservations.clear()
+    this.nativeCurrentActivities.clear()
     this.pendingLifecycleBindings.clear()
     await this.acp.dispose()
     this.publisher.dispose()
@@ -3383,6 +3391,7 @@ export class AgentMuxClient {
       process: projectedRun.state,
       status,
       retainedStatus: session.semanticStatus,
+      currentActivity: session.currentActivity,
       timelineCapability: capabilities.timeline,
       awaitingRequest: agentInteractionActiveRequest(session.pendingInteraction) !== undefined,
       terminalCapabilityUnverified: session.terminalCapability !== undefined
@@ -5812,6 +5821,17 @@ export class AgentMuxClient {
     }
     const provider = this.providers.get(session.providerId)
     const condition = admissionIntent.kind === 'exact-condition' ? admissionIntent.condition : admissionIntent
+    const assertCurrentSubmission = (current: AgentMuxAgentSession): void => {
+      assertSession?.(current)
+      if (input.expectedCompletionId === undefined && input.expectedFutureIntent === undefined) return
+      const position = this.nativeCurrentActivities.get(current.agentSessionId)
+      if (position?.runId !== current.run.runId) return
+      const activity = this.projectCurrentActivity(current)
+      if (!activity || activity.state !== 'idle' || activity.nativeTurnId !== current.semanticStatus?.nativeTurnId) {
+        throw new AgentMuxError('Current native activity does not confirm the original automatic input boundary. The saved message and manual input remain available.',
+          input.expectedCompletionId === undefined ? 'AGENT_TURN_END_UNCONFIRMED' : 'AGENT_COMPLETION_CHANGED')
+      }
+    }
     const ordinaryPlan = provider.planPromptInput(outbound,
       admissionIntent.kind === 'manual-actor' || input.execution === undefined ? undefined : { execution: input.execution })
     const protocolInput: AgentPromptProtocolInputBoundary = { invalid: false }
@@ -5855,7 +5875,7 @@ export class AgentMuxClient {
               ...(savedMessage?.sourceDevice ? { sourceDevice: savedMessage.sourceDevice } : {})
             } : message
             return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, ordinaryPlan, condition,
-              input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertSession, transportQualification,
+              input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertCurrentSubmission, transportQualification,
               producer === 'prompt' ? { kind: producer, agentSessionId: current.agentSessionId, expectedRun, submissionId: operationId }
                 : { kind: producer, agentSessionId: current.agentSessionId, expectedRun, messageId: operationId },
               { ...(authority ? { authority } : {}), ...(inputControl ? { authorizeDispatch: inputControl.authorizeDispatch } : {}) })
@@ -6509,9 +6529,25 @@ export class AgentMuxClient {
     }
   }
 
+  private projectCurrentActivity(session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run' | 'nativeHandle' |
+    'promptCompletionAdmission' | 'nativeSourceObservation'>): AgentCurrentActivity | undefined {
+    const activity = this.nativeCurrentActivities.get(session.agentSessionId)
+    if (activity?.fact && activity.runId === session.run.runId &&
+        session.nativeHandle?.kind === 'provider' && activity.fact.nativeSessionId === session.nativeHandle.sessionId &&
+        !this.endedRuns.has(session.run.runId) &&
+        (activity.fact.state !== 'idle' || !agentHasActiveSubagents(session.run.runId))) {
+      return { ...structuredClone(activity.fact),
+        ...(activity.invalidated || activity.admissionId !== session.promptCompletionAdmission?.submissionId ||
+          session.nativeSourceObservation?.state === 'changed' ? { state: 'unknown' as const } : {}) }
+    }
+    return undefined
+  }
+
   /** Public projections overlay live Core observations without writing them to the Session store. */
   private projectSession(session: AgentMuxStoredAgentSession): AgentMuxAgentSession {
     const projected = cloneSession(session)
+    const currentActivity = this.projectCurrentActivity(session)
+    if (currentActivity) projected.currentActivity = currentActivity
     if (session.nativeHandle) projected.nativeHandlePersistence = this.registry.isDurabilityUnconfirmed(session.agentSessionId)
       ? 'unconfirmed' : 'confirmed'
     const pending = projected.pendingInteraction
@@ -8035,6 +8071,22 @@ export class AgentMuxClient {
     return result
   }
 
+  private acceptsNativeCurrentActivity(session: AgentMuxStoredAgentSession, event: AgentNativeActivityEvent): boolean {
+    if (!event.sourceId?.trim() || !Number.isSafeInteger(event.sequence) || event.sequence < 1 ||
+        !['active', 'idle', 'unknown'].includes(event.state) ||
+        session.nativeHandle?.kind !== 'provider' || event.nativeSessionId !== session.nativeHandle.sessionId ||
+        (event.state !== 'unknown' && !event.nativeTurnId?.trim())) return false
+    const previous = this.nativeCurrentActivities.get(session.agentSessionId)
+    if (previous?.runId === session.run.runId) {
+      if (previous.conflicted) return false
+      if (event.sourceId !== previous.event.sourceId || event.sequence <= previous.event.sequence) return false
+      if (event.state === 'idle' && (previous.event.state !== 'active' || previous.invalidated ||
+          previous.admissionId !== session.promptCompletionAdmission?.submissionId ||
+          event.nativeTurnId !== previous.event.nativeTurnId)) return false
+    } else if (event.state === 'idle') return false
+    return true
+  }
+
   private async acceptHookEvent(envelope: NativeHookEnvelope, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted()
     // 进程已经终结的 run 不再收它的 hook。这一条挡的是**两个**写入点：下面既发 agent-status 事件、又把
@@ -8055,6 +8107,11 @@ export class AgentMuxClient {
       session.providerId !== envelope.providerId
     ) return
     const provider = this.providers.get(envelope.providerId)
+    if (provider.hook.nativeSessionTransition?.(envelope.eventName ?? '', envelope.payload ?? {}) &&
+        !nativeHookHasSubagentSubject(provider.hook, envelope.eventName ?? '', envelope.payload ?? {})) {
+      const previous = this.nativeCurrentActivities.get(session.agentSessionId)
+      if (previous?.runId === session.run.runId) previous.invalidated = true
+    }
     const witness = await this.hookNativeWitness(session, envelope, signal)
     if (this.endedRuns.has(envelope.runId)) return
     // Source change is an observation, never permission to apply the new conversation's semantics to the old binding.
@@ -8098,7 +8155,9 @@ export class AgentMuxClient {
       ...(witness.handle && !(protectedTarget && witnessTargetMismatch) ? { processNativeHandle: Object.freeze({ ...witness.handle }) } : {}),
       ...(protectedTarget && witnessTargetMismatch ? { nativeIdentityReason: 'resume-target-mismatch' } : witness.reason ? { nativeIdentityReason: witness.reason } : {})
     })
+    const childrenWereActive = agentHasActiveSubagents(session.run.runId)
     const normalized = provider.normalizeHook(envelope, context)
+    const childrenChanged = childrenWereActive !== agentHasActiveSubagents(session.run.runId)
     if (protectedTarget && normalized.nativeHandle && session.nativeHandle && (
       normalized.nativeHandle.kind !== session.nativeHandle.kind ||
       normalized.nativeHandle.sessionId !== session.nativeHandle.sessionId ||
@@ -8116,6 +8175,22 @@ export class AgentMuxClient {
     const precedingInteractionReceiptId = normalized.interaction?.nativeToolCallId &&
       !nativeHookToolCallId(envelope.payload ?? {}) ? context.previousHookReceipt?.id : undefined
     const activityId = JSON.stringify(['activity-state', 'native-hook', session.run.runId, envelope.receiptId])
+    const nativeActivity = normalized.currentActivity
+    const previousActivity = this.nativeCurrentActivities.get(session.agentSessionId)
+    if (nativeActivity && previousActivity?.runId === session.run.runId &&
+        nativeActivity.sourceId !== previousActivity.event.sourceId) {
+      previousActivity.invalidated = true
+      previousActivity.conflicted = true
+      this.hookIngressObservations.set(session.agentSessionId, { run: { ...session.run }, phase: 'binding',
+        code: 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE', observedAt: normalized.status.observedAt,
+        message: 'Several native activity source lifetimes were observed for this Run. Current activity is unconfirmed. The original Session, Run and input remain available; a subsequent original-identity Run can establish a fresh source.' })
+      this.publishSession(session)
+      return
+    }
+    // Ordered source positions are independent of wall clocks and task completion.
+    // A late native start must not update semanticStatus before this same fence.
+    if (nativeActivity && !this.acceptsNativeCurrentActivity(
+      session.nativeHandle || !normalized.nativeHandle ? session : { ...session, nativeHandle: normalized.nativeHandle }, nativeActivity)) return
     const knownActivity = session.activityCommit?.latest.id === activityId || session.activityCommit?.pending?.id === activityId
     if (knownActivity) {
       await this.flushAgentActivity(session)
@@ -8193,9 +8268,9 @@ export class AgentMuxClient {
       ...(normalized.lifecycleEvent !== undefined ? { lifecycleEvent: normalized.lifecycleEvent } : {}),
       observedAt: normalized.status.observedAt,
       ...(normalized.subject ? { subject: normalized.subject } : {}),
-      decision: { activityApplied: updatesSemanticStatus || normalized.childActivity === true,
+      decision: { activityApplied: updatesSemanticStatus || normalized.childActivity === true || nativeActivity !== undefined,
         lifecycleApplied: normalized.lifecycleEvent !== undefined && normalized.lifecycleEvent !== null && (updatesSemanticStatus || normalized.lifecycleEvent === 'turn-end'),
-        reason: updatesSemanticStatus ? normalized.mainSubject ? 'main-semantic-applied' : 'pending-parent-completion-applied' : normalized.childActivity ? 'proven-child-activity' :
+        reason: nativeActivity ? 'main-current-activity-applied' : updatesSemanticStatus ? normalized.mainSubject ? 'main-semantic-applied' : 'pending-parent-completion-applied' : normalized.childActivity ? 'proven-child-activity' :
           normalized.subject?.kind === 'main' ? normalized.semanticState !== 'unknown' ? 'main-turn-already-ended' : 'no-semantic-rule' :
           normalized.subject?.kind === 'child' ? 'child-observation-only' : normalized.subject?.reason ?? 'no-semantic-rule' },
       ...(stopRun ? { outputCursorBytes: stopRun.latestOutputBytes } : {})
@@ -8301,6 +8376,10 @@ export class AgentMuxClient {
               ? { turnUsage: current.turnUsage }
               : {})
       }
+      if ((nativeActivity || childrenChanged) && next.semanticStatus) {
+        next.semanticStatus = { ...next.semanticStatus,
+          currentActivityRevision: (next.semanticStatus.currentActivityRevision ?? 0) + 1 }
+      }
       const pending = current.pendingInteraction
       if (completion && completedRequestId && pending?.request.kind === completion.kind &&
         pending.request.id === completedRequestId && pending.request.agentSessionId === current.agentSessionId &&
@@ -8390,6 +8469,40 @@ export class AgentMuxClient {
           )
     }
     signal.throwIfAborted()
+    if (nativeActivity) {
+      // CAS may have admitted a new prompt while this receipt was being saved.
+      // Such a claim consumes idle and cannot be crossed by an old turn end.
+      if (this.acceptsNativeCurrentActivity(next, nativeActivity)) {
+        this.nativeCurrentActivities.set(next.agentSessionId, { event: structuredClone(nativeActivity), runId: next.run.runId,
+          admissionId: next.promptCompletionAdmission?.submissionId,
+          ...(nativeActivity.state !== 'unknown' && nativeActivity.nativeTurnId ? { fact: {
+            ...nativeActivity, state: nativeActivity.state, nativeTurnId: nativeActivity.nativeTurnId,
+            source: 'native-hook', run: { ...next.run }, hookReceiptId: receipt.id, observedAt: receipt.observedAt
+          } } : { invalidated: true, fact: { ...nativeActivity, state: 'unknown' as const,
+            source: 'native-hook', run: { ...next.run }, hookReceiptId: receipt.id, observedAt: receipt.observedAt } }) })
+        if (nativeActivity.state === 'unknown') {
+          const observation = { run: { ...next.run }, phase: 'binding' as const,
+            code: 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE', observedAt: receipt.observedAt,
+            message: 'The native activity source changed or lost delivery continuity. Current idle is unconfirmed; the original Session, Run, task results and input remain available. A new confirmed native turn can restore observation.' }
+          this.hookIngressObservations.set(next.agentSessionId, observation)
+          this.publisher.publish({ type: 'agent-error', agentSessionId: next.agentSessionId,
+            code: observation.code, message: observation.message,
+            evidence: { source: 'agentmux', run: { ...next.run }, observedAt: receipt.observedAt } })
+        } else if (this.hookIngressObservations.get(next.agentSessionId)?.code === 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE') {
+          this.hookIngressObservations.delete(next.agentSessionId)
+        }
+      }
+    } else if (updatesSemanticStatus || normalized.childActivity) {
+      const previous = this.nativeCurrentActivities.get(next.agentSessionId)
+      if (previous?.runId === next.run.runId && previous.fact) {
+        if (normalized.lifecycleEvent === 'turn-end' || normalized.semanticState === 'error' || normalized.semanticState === 'blocked') {
+          delete previous.fact
+        } else if (!normalized.childActivity && (previous.fact.state === 'idle' || previous.invalidated)) {
+          // A new classic activity is independently authoritative; do not resurrect old main work.
+          delete previous.fact
+        }
+      }
+    }
     const persistedReceipt = next.hookReceipt
     if (!persistedReceipt) {
       throw new AgentMuxError('Native Hook receipt was not persisted.', 'HOOK_RECEIPT_INVALID')
@@ -8605,6 +8718,7 @@ export class AgentMuxClient {
     // SubagentStop 投递失败，normalizer 的花名册里那条 id 永不删除、Map 条目随进程泄漏。在此清掉，
     // 给「子代理事件丢失」一个终结路径——否则那个 runId 的记账会长驻内存。
     releaseSubagentRoster(event.runId)
+    if (agentSession) this.nativeCurrentActivities.delete(agentSession.agentSessionId)
     // 退出时把停止意图（我们记的）与观察到的 code/signal（内核报的）合成诚实的 exitReason。意图是一次性的：
     // 一个 runId 只退出一次，读完即删，绝不留驻。非 exited 的终结（interrupted）不参与本分类。
     const stopRequested = this.stopRequestedRuns.delete(event.runId)

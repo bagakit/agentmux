@@ -1185,6 +1185,8 @@ export type AgentMuxAgentSession = {
   terminalPromptDelivery?: AgentTerminalPromptDeliveryState
   terminalOutputChannel?: AgentTerminalOutputChannelState
   semanticStatus?: AgentStatus
+  /** Live, ordered native main-turn activity. Not a task result or durable recovery proof. */
+  currentActivity?: AgentCurrentActivity
   pendingInteraction?: AgentMuxPendingInteraction
   nativeHandle?: AgentNativeSessionHandle
   /** Live Core save acknowledgement for this locator; readable post-replacement bytes are unconfirmed. Never stored. */
@@ -1376,7 +1378,7 @@ export type AgentHookIngressObservation = {
 
 /** This is the complete persistent semantic/control record. It deliberately has no
  * PTY, process, replay, terminal snapshot, terminal output bytes or ephemeral Hook observation. */
-export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'nativeHandlePersistence'> & {
+export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'nativeHandlePersistence' | 'currentActivity'> & {
   /** Original response operation index. Retained after the live request settles; never broadcast. */
   interactionOperations?: Record<string, AgentMuxInteractionOperationReceipt>
 
@@ -1976,6 +1978,22 @@ export type NativeHookEnvelope = {
   payload?: Record<string, unknown>
 }
 
+/** Provider-owned ordered activity facts; an observation gap never ends a task. */
+export type AgentNativeActivityEvent = {
+  state: 'active' | 'idle' | 'unknown'
+  nativeSessionId: string
+  nativeTurnId?: string
+  sourceId: string
+  sequence: number
+}
+
+export type AgentCurrentActivity = AgentNativeActivityEvent & {
+  source: 'native-hook'
+  run: AgentMuxRunRef
+  hookReceiptId: string
+  observedAt: number
+} & ({ state: 'active' | 'idle'; nativeTurnId: string } | { state: 'unknown'; nativeTurnId?: string })
+
 export type NormalizedHookEvent = {
   agentSessionId: string
   run: AgentMuxRunRef
@@ -1989,6 +2007,7 @@ export type NormalizedHookEvent = {
   eventName: string
   /** Direct main-subject contribution; false still permits proven roster-derived parent end. */
   mainSubject: boolean
+  currentActivity?: AgentNativeActivityEvent
   nativeTurnId?: string
   toolInvocation?: AgentHookToolInvocation
   subject?: AgentHookSubject

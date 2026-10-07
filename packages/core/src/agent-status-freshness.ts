@@ -4,7 +4,8 @@ import type {
   AgentMuxEvidenceSource,
   AgentMuxRunState,
   AgentSemanticState,
-  AgentStatus
+  AgentStatus,
+  AgentCurrentActivity
 } from './types.js'
 
 /**
@@ -261,6 +262,7 @@ export function observeAgent(
     status: Pick<AgentStatus, 'state' | 'source' | 'observedAt'>
     /** Original native fact, retained when a client has decayed its display status. */
     retainedStatus?: AgentStatus | undefined
+    currentActivity?: AgentCurrentActivity | undefined
     timelineCapability: AgentCapabilities['timeline']
     awaitingRequest: boolean
     terminalCapabilityUnverified: boolean
@@ -270,10 +272,17 @@ export function observeAgent(
   const running = input.process === 'running'
   const state = input.status.state
   const declared = isAgentActivityStatusSource(input.status.source)
+  const currentActivity = input.currentActivity
+  const currentFresh = currentActivity?.state === 'unknown' || currentActivity?.state === 'idle' || currentActivity?.state === 'active' &&
+    !agentEvidenceStale({ observedAt: currentActivity.observedAt }, now)
   const semantic: AgentObservation['semantic'] = input.timelineCapability === 'unavailable'
     ? 'unsupported'
     : !running
       ? 'unknown'
+      : input.awaitingRequest
+        ? 'awaiting-input'
+      : currentActivity && currentFresh
+        ? currentActivity.state
       // 语义活性由**声明的 state** 与**来源**共同决定，不是只看来源：只有活动声明来源（native-hook/acp）
       // 才谈得上语义活性；裸进程证据不能证明正在工作，也不能证明空闲。
       : !declared
@@ -298,7 +307,7 @@ export function observeAgent(
   const current = currentAgentSemanticStatus(input.retainedStatus) ?? input.status
   const retained = current.state === 'working' ? current : input.retainedStatus ?? input.status
   const reason = running && semantic === 'unknown'
-    ? isAgentActivityStatusSource(current.source) && semanticStatusStale(current, now)
+    ? currentActivity?.state !== 'unknown' && isAgentActivityStatusSource(current.source) && semanticStatusStale(current, now)
       ? 'activity-stale' as const : 'activity-unconfirmed' as const
     : undefined
   const lastKnownActivity = reason && isAgentActivityStatusSource(retained.source)
@@ -308,9 +317,9 @@ export function observeAgent(
     process: input.process,
     semantic,
     readiness,
-    source: input.status.source,
-    observedAt: input.status.observedAt,
-    stale: agentEvidenceStale(input.status, now),
+    source: currentActivity && currentFresh ? currentActivity.source : input.status.source,
+    observedAt: currentActivity && currentFresh ? currentActivity.observedAt : input.status.observedAt,
+    stale: currentActivity && currentFresh ? false : agentEvidenceStale(input.status, now),
     ...(reason ? { reason } : {}),
     ...(lastKnownActivity ? { lastKnownActivity } : {})
   }
