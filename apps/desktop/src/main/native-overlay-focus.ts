@@ -6,7 +6,7 @@ import type { NativeOverlaySurfaces } from './native-overlay-surfaces.js'
 export function installNativeOverlayFocus(window: BrowserWindow, overlays: NativeOverlaySurfaces): () => void {
   const observe = (event: IpcMainEvent): void => {
     event.returnValue = !window.isDestroyed() && event.sender === window.webContents &&
-      event.senderFrame === window.webContents.mainFrame && overlays.hasFocusedProjection()
+      event.senderFrame === window.webContents.mainFrame && overlays.hasProjectionInFocusedWindow()
   }
   ipcMain.on(NATIVE_OVERLAY_FOCUS_CHANNEL, observe)
   return () => ipcMain.off(NATIVE_OVERLAY_FOCUS_CHANNEL, observe)

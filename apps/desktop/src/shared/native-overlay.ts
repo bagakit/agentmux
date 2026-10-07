@@ -1,6 +1,6 @@
 import type { BrowserBounds } from './contracts'
 
-/** Synchronous observation of this window's display-only native Chrome focus. */
+/** Synchronous observation of an attached Chrome projection in its focused App window. */
 export const NATIVE_OVERLAY_FOCUS_CHANNEL = 'ui:nativeOverlayFocus'
 
 /** Main-owned physically visible Browser rectangles; revision orders initial/read-event races. */
