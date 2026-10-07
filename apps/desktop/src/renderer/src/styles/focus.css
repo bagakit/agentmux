@@ -511,6 +511,7 @@
 .focus-goal__count { font-size: 10px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .focus-goal__unknown { position: absolute; top: -2px; right: -2px; display: grid; place-items: center; width: 9px; height: 9px; border-radius: 50%; background: var(--surface-2); color: var(--text-2); font-size: 8px; line-height: 1; font-weight: 600; }
 .focus-goal__menu { width: 340px; max-width: calc(100vw - 24px); max-height: min(440px, 65vh); overflow-y: auto; }
+.focus-goal__label { padding: 6px 8px 4px; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; font-weight: 500; }
 .focus-goal__menu .focus-goal__item { align-items: flex-start; }
 .focus-goal__item > span { display: grid; min-width: 0; gap: 4px; }
 .focus-goal__item strong { font-weight: 600; overflow-wrap: anywhere; }
