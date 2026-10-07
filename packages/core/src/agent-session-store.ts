@@ -3,6 +3,7 @@ export { parsePromptSubmissionRecord, normalizePromptCompletionAdmission } from 
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
 import { observeRead } from './observation-read.js'
+import { parseCumulativeUsage } from './agent-usage-transcript.js'
 import { parseAgentForkSource } from './agent-fork.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import { assertCurrentAgentCapabilityBinding, type AgentCapabilityBinding } from './agent-capability.js'
@@ -788,14 +789,16 @@ function semanticStatus(value: unknown): AgentStatus {
 
 function turnUsage(value: unknown): AgentTurnUsage {
   const source = record(value, 'turnUsage')
-  // token 数与观测时刻都是非负安全整数——沿用 timestamp 的校验（它正是这个约束），任一字段不合就整条拒绝，
-  // 绝不落一个半残的用量。
+  const cumulative = parseCumulativeUsage(source.cumulative)
+  // 必需的响应计数与观测时刻沿 timestamp 校验非负安全整数。
+  // 可选累计单独校验，缺失或损坏不删除有效响应与 context。
   return {
     inputTokens: timestamp(source.inputTokens, 'turnUsage.inputTokens'),
     outputTokens: timestamp(source.outputTokens, 'turnUsage.outputTokens'),
     totalTokens: timestamp(source.totalTokens, 'turnUsage.totalTokens'),
     observedAt: timestamp(source.observedAt, 'turnUsage.observedAt'),
     ...(source.scope === 'response' ? { scope: 'response' as const } : {}),
+    ...(cumulative ? { cumulative } : {}),
     ...(source.context === undefined ? {} : {
       context: {
         usedTokens: timestamp(record(source.context, 'turnUsage.context').usedTokens, 'turnUsage.context.usedTokens'),

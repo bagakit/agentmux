@@ -100,6 +100,10 @@ export function parseRpcAgentSession(value: unknown): ReturnType<typeof normaliz
   if (Object.hasOwn(source, 'hookBindingId') || Object.hasOwn(source, 'hookToken')) fail()
   try {
     const session = normalizeAgentSession(source)
+    if (source.turnUsage !== undefined) {
+      const usage = record(source.turnUsage)
+      if (usage.cumulative !== undefined && !isDeepStrictEqual(usage.cumulative, session.turnUsage?.cumulative)) fail()
+    }
     if (source.nativeHandlePersistence !== undefined) {
       if (!session.nativeHandle) fail()
       member(source.nativeHandlePersistence, ['confirmed', 'unconfirmed'])
