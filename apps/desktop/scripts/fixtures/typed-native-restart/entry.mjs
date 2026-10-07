@@ -76,9 +76,9 @@ window.nativeLiveReady = () => readTerminalViewObservation({ regionId: identity.
 window.nativeFlush = async () => { await prepareRendererUpdate(); await request('flush') }
 window.nativeActivity = () => useAppStore.getState().setViewMode(identity.sessionId, 'activity')
 window.nativeReviewHere = () => {
-  useAppStore.setState(state => ({ mainSurface: 'agents', agentFocus: {
-    ...state.agentFocus, execution: { sessionId: identity.sessionId, history: [] }
-  } }))
+  const state = useAppStore.getState()
+  if (!state.focusExecutionSession(identity.sessionId)) throw new Error('The original Agent occurrence could not be confirmed.')
+  state.setMainSurface('agents')
 }
 let extraRoot
 window.nativeObserveExtra = session => {
