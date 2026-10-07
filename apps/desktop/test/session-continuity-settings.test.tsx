@@ -40,7 +40,12 @@ it('the registered continuity module reaches Overview, search, narrow navigation
   await dom.click('[data-settings-target="continuity"]')
   expect(field('Recovery wait').value).toBe('0'); expect(field('Authoritative idle window').value).toBe('86400')
   expect(dom.container.querySelector('[data-continuity-reminder-preview]')?.textContent).toBe(DEFAULT_AGENT_CONTINUITY_REMINDER)
-  expect(dom.container.textContent).toContain('ordinary User role and start a new turn')
+  const delivery = dom.container.querySelector('[aria-label="Recovery delivery preview"]')!.textContent
+  expect(delivery).toContain('platform note and joins the continuation prompt in one new input')
+  expect(delivery).toContain('Either part alone still uses one input; turning both off sends none')
+  expect(delivery).toContain('same original input key and Provider acceptance record')
+  expect(delivery).toContain('ordinary User role and open one turn')
+  expect(delivery).toContain('Provider acceptance does not mean the model completed the task')
   const saveSpy = vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => {
     const saved = applyConfigEdit(useAppStore.getState().config!, expected, next)
     useAppStore.setState({ config: saved }); return saved

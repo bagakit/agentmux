@@ -5,13 +5,35 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 
 exports.run = async p => {
-  const { win, read, q, until, settle, click, type, scene, capture, owner, result, ownerBundle, privateRoot, root } = p
+  const { win, read, q, until, settle, click, type, scene, capture, owner, result, mode, ownerBundle, privateRoot, root } = p
   const field = label => q(`[data-settings-pane="continuity"] [aria-label="${label}"]`)
   const save = () => click(q('[data-settings-pane="continuity"] [data-settings-save-bar] button'))
   const saved = () => until('document.querySelector(\'[data-settings-pane="continuity"] [data-settings-save-bar]\')?.textContent.includes("Changes saved")')
   win.showInactive()
   await click(q('nav[aria-label="Settings sections"] [data-settings-target="continuity"]'))
   await until('document.querySelector(\'.settings-content__header h2\')?.textContent==="Session continuity"')
+  if (mode === 'session-continuity-delivery') {
+    await owner.update(current => ({ ...current, continuity: { ...current.continuity,
+      reminderMode: 'default-plus-custom', reminderAppend: 'Keep the original task and acceptance criteria.',
+      continuationEnabled: true, continuationPrompt: 'Continue the interrupted work with the retained conversation.' } }))
+    await until(field('Recovery reminder') + '.value==="default-plus-custom" && ' + field('Continue interrupted work after recovery') + '.checked===true')
+    assert.equal(await read(field('Append to recovery reminder') + '.value'), owner.current.continuity.reminderAppend)
+    assert.equal(await read(field('Continuation prompt') + '.value'), owner.current.continuity.continuationPrompt)
+    const preview = '[data-settings-pane="continuity"] [aria-label="Recovery delivery preview"]'
+    const position = async () => { await read(`document.querySelector(${JSON.stringify(preview)}).scrollIntoView({block:"center"})`); await settle() }
+    const complete = async () => {
+      const geometry = await read(`(()=>{const n=document.querySelector(${JSON.stringify(preview)}),r=n.getBoundingClientRect(),pane=n.closest('[data-settings-pane]').getBoundingClientRect(),save=document.querySelector('[data-settings-pane="continuity"] [data-settings-save-bar]').getBoundingClientRect();return{top:r.top,bottom:r.bottom,paneTop:pane.top,saveTop:save.top,text:n.textContent}})()`)
+      assert.ok(geometry.top >= geometry.paneTop - 1 && geometry.bottom <= geometry.saveTop + 1, 'The complete delivery explanation fits between the fixed header and Save')
+      assert.ok(geometry.text.includes('one new input') && geometry.text.includes('same original input key and Provider acceptance record'))
+      return geometry
+    }
+    await position(); result.deliveryWide = await complete()
+    await capture('1480-dark-continuity-delivery.png', 'Saved reminder platform note and continuation compose one input with one original key and acceptance')
+    await scene(320, 'light'); await position(); result.deliveryNarrow = await complete()
+    await capture('320-light-continuity-delivery.png', 'The full shared-input explanation and acceptance boundary remain readable at 320 px')
+    result.savedContinuity = structuredClone(owner.current.continuity)
+    result.settingsOnly = true; result.deliveryOnly = true; return
+  }
   assert.equal(await read(field('Recovery wait') + '.value'), '0')
   assert.equal(await read(field('Authoritative idle window') + '.value'), '86400')
   await capture('1480-dark-continuity-defaults.png', 'Actual Settings module, complete default reminder and independent continuation controls')

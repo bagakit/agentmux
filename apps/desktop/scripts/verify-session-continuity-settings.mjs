@@ -8,6 +8,7 @@ import { qualify } from './verify-settings-glass-prompts.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const args = process.argv.slice(2), at = args.indexOf('--output')
+const deliveryOnly = args.includes('--delivery-only')
 const directory = path.resolve(root, at >= 0 ? args[at + 1] : `.tmp/session-continuity-settings/${randomUUID()}`)
 await fs.mkdir(directory, { recursive: true })
 const digest = value => createHash('sha256').update(value).digest('hex')
@@ -87,17 +88,20 @@ for (const [symbol, definition] of [
   assert.ok(found.length > 0, 'Nonempty definition-excluded production callers: ' + symbol); callers.push({ symbol, excludedDefinition: definition, found })
 }
 await fs.writeFile(path.join(directory, 'callers.json'), JSON.stringify(callers, null, 2))
-if (!args.includes('--visual-only')) {
+if (!args.includes('--visual-only') && !deliveryOnly) {
   await run('control')
   for (const mutant of mutants) await run(mutant.id, mutant.id)
 }
-const native = await qualify(path.join(directory, 'native'), false, false, { modes: ['session-continuity-settings'], sources: [
+const mode = deliveryOnly ? 'session-continuity-delivery' : 'session-continuity-settings'
+const native = await qualify(path.join(directory, 'native'), false, false, { modes: [mode], sources: [
   'apps/desktop/scripts/fixtures/session-continuity-settings/scenario.cjs',
   'apps/desktop/scripts/verify-session-continuity-settings.mjs'
 ] })
 assert.equal(native.completed, true, JSON.stringify(native.failure))
-const raw = JSON.parse(await fs.readFile(path.join(directory, 'native/session-continuity-settings.json'), 'utf8'))
-assert.ok(raw.cli?.length > 5 && raw.settingsOnly && raw.surface.exact, 'Actual CLI and mounted writable GUI share the original ConfigOwner')
+const raw = JSON.parse(await fs.readFile(path.join(directory, `native/${mode}.json`), 'utf8'))
+assert.ok(raw.settingsOnly && raw.surface.exact, 'Settings keep the original work surface')
+if (deliveryOnly) assert.ok(raw.deliveryOnly && raw.savedContinuity && native.png.length === 2, 'Two complete delivery views consume the actual saved preferences')
+else assert.ok(raw.cli?.length > 5, 'Actual CLI and mounted writable GUI share the original ConfigOwner')
 for (const [file, sha] of Object.entries(sourceIdentity)) assert.equal(digest(await fs.readFile(path.join(root, file))), sha, 'Candidate source drift: ' + file)
 await fs.writeFile(path.join(directory, 'receipt.json'), JSON.stringify({ completed: true, sourceIdentity, runs, native: { sourceIdentity: native.sourceIdentity, frames: native.png, boundary: native.boundary }, independentVisualReview: 'pending' }, null, 2))
 console.log(JSON.stringify({ completed: true, directory, mutations: Math.max(0, runs.length - 1), frames: native.png.length, independentVisualReview: 'pending' }))
