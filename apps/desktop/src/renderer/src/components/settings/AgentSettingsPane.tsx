@@ -26,7 +26,6 @@ const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 const ThemeStatusFailedIcon = semanticIconComponent('status.failed')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeActionCreateExecutorIcon = semanticIconComponent('action.create-executor')
-const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeStatusUnrestrictedIcon = semanticIconComponent('status.unrestricted')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
@@ -104,7 +103,6 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   const initialHost = config.hosts.find(host => host.kind === 'local')?.id ?? 'local'
   const [filter, setFilter] = useState({ query: '', snapshot: [] as string[] })
   const [selectedId, setSelectedId] = useState<string | null>(() => executorId ?? Object.keys(config.executors)[0] ?? null)
-  const [view, setView] = useState<'library' | 'editor'>(executorId ? 'editor' : 'library')
   const [providersOpen, setProvidersOpen] = useState(false)
   const [catalogRead, setCatalogRead] = useState<{ state: 'idle' | 'loading' | 'ready' | 'error'; error?: string }>({ state: 'idle' })
   const catalogPending = useRef(false)
@@ -177,7 +175,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
 
   function closeProviders(): void {
     setProvidersOpen(false)
-    if (view === 'editor' && selectedId) setPendingEdit({ id: selectedId, select: false })
+    if (selectedId) setPendingEdit({ id: selectedId, select: false })
     else setReturnFocus({ id: selectedId })
   }
 
@@ -193,7 +191,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     consumedNavigation.current = request
     setSelectedId(targetId)
     setProvidersOpen(false)
-    setView('editor')
+    setScope('templates')
     setFilter({ query: '', snapshot: [] })
     setPendingEdit({ id: targetId, select: false })
   }, [active, executorId, navigationRequest])
@@ -212,16 +210,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
 
   function selectExecutor(id: string): void {
     setSelectedId(id)
-    setView('editor')
     setPendingEdit({ id, select: false })
-  }
-
-  function backToLibrary(): void {
-    setView('library')
-    if (selectedId) {
-      if (!matches(selectedId)) setFilter({ query: '', snapshot: [] })
-      setReturnFocus({ id: selectedId })
-    }
   }
 
   function removeExecutor(id: string): void {
@@ -229,7 +218,6 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     const next = executors.find((executor) => executor.id !== id)?.id ?? null
     setSelectedId(next)
     setFilter({ query: '', snapshot: [] })
-    setView('library')
     setReturnFocus({ id: next })
   }
 
@@ -316,6 +304,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
 
   function addExecutor(provider = providerCatalog[0]): void {
     if (!provider) { openProviders(); return }
+    setScope('templates')
     const id = createExecutorId()
     setDrafts((current) => ({ ...current, [id]: {
       label: `${provider.label} ${Object.keys(current).length + 1}`, providerId: provider.id,
@@ -324,37 +313,43 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     setFilter({ query: '', snapshot: [] })
     setSelectedId(id)
     setProvidersOpen(false)
-    setView('editor')
     setPendingEdit({ id, select: true })
   }
 
-  const scopeControl = <label className="settings-compact-field"><span>Executors</span><select aria-label="Executor configuration scope" value={scope} onChange={event => setScope(event.target.value as 'templates' | 'host')}><option value="templates">Global templates</option><option value="host">On a Host</option></select></label>
+  const scopeControl = <label className="settings-compact-field"><span>Configure</span><select aria-label="Executor configuration scope" value={scope} onChange={event => setScope(event.target.value as 'templates' | 'host')}><option value="templates">Global templates</option><option value="host">On a Host</option></select></label>
+  const executorCounts = Object.values(drafts).reduce<Record<string, number>>((counts, draft) => {
+    counts[draft.providerId] = (counts[draft.providerId] ?? 0) + 1
+    return counts
+  }, {})
   return (
-    <div className="settings-pane-stack">
-      <div className="settings-pane-toolbar">{scopeControl}</div>
-      <div hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && scope === 'host'} /></div>
-      <div hidden={scope !== 'templates'}>
-    <div className="settings-pane-stack settings-resource-workbench" data-resource-view={view}>
-      <div className="settings-pane-toolbar">
-        <span className="settings-resource-count">{providersOpen ? (providerCatalog.length || catalogRead.state === 'ready' ? `${providerCatalog.length} providers` : catalogRead.state === 'loading' ? 'Loading providers…' : 'Provider catalog') : `${filter.query.trim() ? `${matchCount} of ` : ''}${executors.length} ${executors.length === 1 ? 'executor' : 'executors'}`}</span>
-        <button type="button" className="small-button settings-providers-toggle" aria-pressed={providersOpen} onClick={() => providersOpen ? closeProviders() : openProviders()}>Providers{providerCatalog.length ? <span>{providerCatalog.length}</span> : null}</button>
-        {!providersOpen && <div className="settings-resource-check-tools">
-            <span className="settings-group-note">Local availability</span>
-            <button className="icon-button" aria-label="Refresh saved executor availability" title="Refresh saved commands" disabled={checking} onClick={() => void detectExecutors(hostId)}>{checking ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionRefreshIcon size={14} />}</button>
-        </div>}
-        <button className="small-button" disabled={saving} onClick={() => addExecutor()}><ThemeActionCreateExecutorIcon size={13} /> Add executor</button>
+    <div className="settings-agent-pane">
+      <div className="settings-agent-navigation" role="group" aria-label="Agent configuration">
+        <button type="button" aria-pressed={!providersOpen} onClick={closeProviders}>Executors</button>
+        <button type="button" className="settings-providers-toggle" aria-pressed={providersOpen} onClick={openProviders}>Providers</button>
       </div>
-      {providersOpen ? <ProviderCatalogPane entries={providerCatalog} read={catalogRead} saving={saving}
-        onRefresh={() => void refreshProviders()} onBack={closeProviders} onCreate={addExecutor} /> : <div className="settings-resource-split">
-        <SettingsResourceLibrary label="Executors" selectedId={selectedId} query={filter.query} onQuery={filterExecutors} onSelect={selectExecutor} focusRequest={returnFocus}
+      {providersOpen ? <div className="settings-agent-body">
+        <ProviderCatalogPane entries={providerCatalog} read={catalogRead} saving={saving} executorCounts={executorCounts}
+          onRefresh={() => void refreshProviders()} onCreate={addExecutor} />
+      </div> : null}
+      <div className="settings-agent-body" hidden={providersOpen}>
+        <div className="settings-pane-toolbar settings-agent-toolbar">
+          {scopeControl}
+          <span className="settings-resource-count">{scope === 'templates' ? `${filter.query.trim() ? `${matchCount} of ` : ''}${executors.length} ${executors.length === 1 ? 'executor' : 'executors'}` : null}</span>
+          {scope === 'templates' ? <>
+            <button className="icon-button" aria-label="Refresh saved executor availability" title="Refresh saved commands" disabled={checking} onClick={() => void detectExecutors(hostId)}>{checking ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionRefreshIcon size={14} />}</button>
+            <button className="small-button" disabled={saving} onClick={() => addExecutor()}><ThemeActionCreateExecutorIcon size={13} /> Add executor</button>
+          </> : null}
+        </div>
+        <div hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && !providersOpen && scope === 'host'} /></div>
+        {!providersOpen ? <div hidden={scope !== 'templates'} className="settings-agent-templates">
+          <div className="settings-resource-workbench settings-executor-detail-layout">
+        <SettingsResourceLibrary label="Executors" layout="horizontal" selectedId={selectedId} query={filter.query} onQuery={filterExecutors} onSelect={selectExecutor} focusRequest={returnFocus}
           items={executors.filter(({ id }) => matches(id)).map(({ id, draft, detection }) => ({
             id, name: draft.label, detail: `${agentProviderLabel(draft.providerId)} · ${id}`,
             mark: <AgentAvatar providerId={draft.providerId} executorId={id} label={draft.label} appearance={draft.avatar ?? (config.appearance.agentAvatars && Object.hasOwn(config.appearance.agentAvatars, id) ? config.appearance.agentAvatars[id] : undefined) ?? {}} size={22} />,
-            status: <span className={`settings-resource-row__check check-pill--${detection?.state ?? 'idle'}`} role="img" aria-label={statusCopy(detection).label} title={statusCopy(detection).label}>{statusCopy(detection).icon}<span>{statusCopy(detection).label}</span></span>
+            status: <span className={`settings-resource-row__check check-pill--${detection?.state ?? 'idle'}`} role="img" aria-label={statusCopy(detection).label} title={statusCopy(detection).label}>{statusCopy(detection).icon}</span>
           }))} />
         <div ref={editor} className="settings-resource-editor">
-          <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All executors</button>
-          <p className="settings-group-note">Global templates configure local Desktop launches. Host executors are read and registered separately. Save a changed command before refreshing.</p>
         {executors.filter(({ id }) => id === selectedId).map(({ id, draft, detection }) => {
           const status = statusCopy(detection)
           // Effective appearance is a projection; the editable baseline remains the Executor DTO.
@@ -364,14 +359,17 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
             <section className="agent-settings-card" key={id} id={`executor-settings-${id}`} data-resource-editor={id}>
               <header className="settings-resource-editor__header">
                 <span className="agent-provider-mark"><AgentAvatar providerId={draft.providerId} executorId={id} label={draft.label} appearance={avatar ?? {}} size={20} /></span>
-                <span><strong>{draft.label}</strong><small>{agentProviderLabel(draft.providerId)} · {id}</small></span>
+                <span><strong>{draft.label}</strong><small>{agentProviderLabel(draft.providerId)} executor · Global template</small></span>
                 <em className={`check-pill check-pill--${detection?.state ?? 'idle'}`}>{status.icon}{status.label}</em>
               </header>
               <div className="agent-settings-fields">
+                <h4 className="settings-executor-section-title">Configuration</h4>
                 {detection?.detail ? <p className="settings-inline-error">{detection.detail}</p> : null}
                 <label><span>Name</span><TextInput data-executor-name value={draft.label} onChange={(event) => update(id, { label: event.target.value })} /></label>
                 {Object.hasOwn(resource.expected, id) ? <dl className="settings-executor-identity"><div><dt>Provider</dt><dd>{agentProviderLabel(draft.providerId)}</dd></div><div><dt>Executor ID</dt><dd><code>{id}</code></dd></div></dl> :
                   <label><span>Provider</span><select data-executor-provider disabled={saving} value={draft.providerId} onChange={(event) => chooseProvider(id, event.target.value)}>{providerCatalog.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>}
+                <label><span>Command</span><TextInput value={draft.command} onChange={(event) => update(id, { command: event.target.value })} /></label>
+                <p className="settings-group-note">Used for new local sessions. Save a changed command before checking availability.</p>
                 <div className="agent-avatar-settings__row">
                   <span className="agent-avatar-settings__name"><strong>Appearance</strong><small>Recognize this executor across your workspace</small></span>
                   <label>Tint<input type="color" aria-label={`${draft.label} avatar tint`} value={avatar?.tint ?? '#8ab4f8'} onChange={(event) => updateAvatar(id, { ...avatar, tint: event.target.value })} /></label>
@@ -379,11 +377,10 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
                   <button type="button" className="small-button" aria-label={`Reset ${draft.label} avatar`} disabled={!avatar?.tint && !avatar?.badge} onClick={() => updateAvatar(id, {})}>Reset</button>
                 </div>
                 <details className="settings-launch-config" open={launchOpen[id] ?? false} onToggle={(event) => { const open = event.currentTarget.open; setLaunchOpen((current) => current[id] === open ? current : { ...current, [id]: open }) }}>
-                  <summary><span><strong>Launch configuration</strong><small>Command, arguments, and environment</small></span><ThemeNavigationDownIcon size={14} /></summary>
+                  <summary><span><strong>Advanced</strong><small>Arguments, environment, and permissions</small></span><ThemeNavigationDownIcon size={14} /></summary>
                   <div className="settings-launch-config__fields">
                     <p className="settings-group-note">Used for new sessions. Running agents keep their current configuration.</p>
                     {!config.executors[id] ? <p className="settings-group-note">Executor ID: <code>{id}</code>. Provider and ID are fixed after saving.</p> : null}
-                    <label><span>Command</span><TextInput value={draft.command} onChange={(event) => update(id, { command: event.target.value })} /></label>
                     <label><span>Arguments <small>shell-style quoting</small></span><ComposerTextarea value={draft.args} onValueChange={(value) => update(id, { args: value })} placeholder="--model fable --effort high" rows={3} /></label>
                     <label><span>Environment <small>JSON object · values stay literal</small></span><ComposerTextarea value={draft.env} onValueChange={(value) => update(id, { env: value })} placeholder={'{"API_BASE": "https://example.test"}'} rows={3} /></label>
                     <label className="agent-guide-toggle"><input type="checkbox" checked={draft.injectAgentMuxGuide} onChange={(event) => update(id, { injectAgentMuxGuide: event.target.checked })} /><span><strong>AgentMux guide</strong><small>Help this agent use your views, tabs, and configured executors.</small></span></label>
@@ -398,8 +395,12 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
           {!executors.some(({ id }) => id === selectedId) ? <div className="settings-resource-editor__empty" tabIndex={-1} role="status"><ThemeObjectAgentIcon size={28} aria-hidden="true" /><strong>{selectedId ? 'Executor unavailable' : 'Your agent configurations'}</strong><p>{selectedId ? 'This executor is no longer in the configuration. Select another, or add a new one.' : 'Choose an executor to edit its identity and launch configuration.'}</p></div> : null}
           {executors.some(({ draft }) => withYoloArgs(draft.providerId, []) !== null) ? <details className="settings-bulk-actions"><summary>Launch actions <ThemeNavigationDownIcon size={13} /></summary><div className="settings-launch-action"><span>Skip permission prompts for all Claude and Codex executors on future launches.</span><button className="small-button" disabled={saving} onClick={() => void enableYolo()}><ThemeStatusUnrestrictedIcon size={13} /> Enable YOLO for Claude &amp; Codex</button></div></details> : null}
         </div>
-      </div>}
-      <SettingsSaveBar save={saveState} dirty={dirty} label="Save executors" onSave={() => void saveDrafts(() => drafts)} />
-    </div></div></div>
+          </div>
+        </div> : null}
+      </div>
+      <div className="settings-agent-save" hidden={!providersOpen && scope !== 'templates'}>
+        <SettingsSaveBar save={saveState} dirty={dirty} label="Save executors" onSave={() => void saveDrafts(() => drafts)} />
+      </div>
+    </div>
   )
 }

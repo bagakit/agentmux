@@ -209,7 +209,7 @@
 .agent-settings-fields label, .host-edit-grid label, .workspace-composer label { display: grid; gap:var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
 .agent-settings-card[hidden] { display: none; }
 .agent-settings-fields .agent-guide-toggle { grid-column: 1 / -1; display: flex; grid-template-columns: none; align-items: flex-start; gap:var(--sp-4); padding:var(--sp-4) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); cursor: pointer; }
-.agent-settings-fields .agent-guide-toggle input { flex: 0 0 auto; width: 14px; height: 14px; margin:1px 0 0; padding:0; border: 0; background: none; accent-color: var(--green); }
+.agent-settings-fields .agent-guide-toggle input { flex: 0 0 auto; width: 14px; height: 14px; margin:1px 0 0; padding:0; }
 .agent-settings-fields .agent-guide-toggle > span { display: grid; justify-content: normal; gap:var(--sp-1); }
 .agent-settings-fields .agent-guide-toggle strong { color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
 .agent-settings-fields label > span, .host-edit-grid label > span, .workspace-composer label > span { display: flex; justify-content: space-between; }
