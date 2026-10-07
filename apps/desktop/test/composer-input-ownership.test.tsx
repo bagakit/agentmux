@@ -22,10 +22,11 @@ it('only the visible Launcher acquires editor focus, including after visibility 
   try {
     outside.focus()
     await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={false} />)
-    const editor = dom.container.querySelector<HTMLElement>('.tiptap')!
-    expect(editor).not.toBeNull()
+    expect(dom.container.querySelector('.tiptap')).toBeNull()
     expect(document.activeElement).toBe(outside)
     await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible />)
+    const editor = dom.container.querySelector<HTMLElement>('.tiptap')!
+    expect(editor).not.toBeNull()
     await vi.waitFor(() => expect(document.activeElement).toBe(editor))
     await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={false} />)
     outside.focus()
