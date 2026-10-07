@@ -26,7 +26,9 @@ import { runCompiledObjectCli, objectCliEnvironment } from '../../../../packages
 export async function moteConnectionJourney() {
   const root = await mkdtemp(join(tmpdir(), 'amx-mote-choice-'))
   const workspace = { ...moteConfig.workspaces[0]!, path: root }
-  const config = { ...moteConfig, workspaces: [workspace, ...moteConfig.workspaces.slice(1)] }
+  // Exercise the loaded workface while the separate startup availability read finishes.
+  const config = { ...moteConfig, startup: { skipAgentAvailabilityCheckWait: true },
+    workspaces: [workspace, ...moteConfig.workspaces.slice(1)] }
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   await useAppStore.persist.rehydrate()
