@@ -8,6 +8,8 @@ import { noteHistoryRevision, noteHistorySnapshot, type NoteHistoryRecord } from
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
+import { AgentMuxRpcDispatcher } from '../src/public-rpc-wire.js'
+import { AGENTMUX_RPC_MAX_MESSAGE_BYTES, rpcEncode } from '../src/public-rpc-frame.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import { parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
 import { runCompiledObjectCli, objectCliEnvironment } from './helpers/object-cli-rpc.js'
@@ -62,7 +64,7 @@ describe('exact original Note history public contract', () => {
     withContent.result.entries[0]!.provenance = provenance
     expect(parseFileHistoryResult(withContent, contentQuery)).toEqual(withContent)
     ;(provenance.blocks.block.created.actor as unknown as Record<string, unknown>).kind = ['agent']
-    expect(() => parseFileHistoryResult(withContent, contentQuery)).toThrow('actor is invalid')
+    expect(() => parseFileHistoryResult(withContent, contentQuery)).toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
     const exactQuery = { ...params, eventId: 'event-2' }
     const exact = { resource, result: noteHistorySnapshot({ ...exactQuery, resource: original }, records.slice(0, 1), false) }
     expect(parseFileHistoryResult(exact, exactQuery)).toEqual(exact)
@@ -135,6 +137,24 @@ describe('exact original Note history public contract', () => {
     expect(metadata.result).not.toHaveProperty('entries.0.content')
     expect(await service.call('file.read', { zoneId: params.zoneId, path: params.path,
       expectedResource: { hostId: original.hostId, workspaceId: original.workspaceId, workspacePath: original.workspacePath } })).toMatchObject({ result: { status: 'directory' } })
+    expect(owner.write).not.toHaveBeenCalled(); expect(owner.create).not.toHaveBeenCalled()
+  }, 30_000)
+  it('includes the trusted original response ID in selected-history content capacity without restricting that ID', async () => {
+    const content = '\t'.repeat(12 * 1024 * 1024), revision = noteHistoryRevision(content), responseId = 'h'.repeat(20 * 1024 * 1024)
+    const event = { ...records[0]!, content, beforeContent: content, baseRevision: revision, revision }
+    const input = { ...params, eventId: event.eventId, includeContent: true }, withContent = { resource, result: noteHistorySnapshot({ ...input, resource: original }, [event], false) }
+    const request = { jsonrpc: '2.0', id: responseId, method: 'file.history', params: input }
+    expect(Buffer.byteLength(rpcEncode(request))).toBeLessThan(AGENTMUX_RPC_MAX_MESSAGE_BYTES)
+    expect(Buffer.byteLength(rpcEncode({ jsonrpc: '2.0', id: null, result: withContent }))).toBeLessThan(AGENTMUX_RPC_MAX_MESSAGE_BYTES)
+    expect(() => rpcEncode({ jsonrpc: '2.0', id: responseId, result: withContent })).toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+    const owner = files(async () => withContent), service = new AgentMuxRpcService({ coreClients: () => [], files: owner }); cleanup.push(() => service.dispose())
+    const response = await new AgentMuxRpcDispatcher(service).receive(request, { signal: new AbortController().signal, stream: false,
+      send: vi.fn(), activate: vi.fn(), cancel: vi.fn(), afterResponse: [] })
+    if (!response || Array.isArray(response)) throw Error('Expected one original response')
+    expect(response.id === responseId).toBe(true)
+    expect(response.error).toBeUndefined()
+    expect(response.result).toMatchObject({ resource, result: { status: 'unknown', code: 'FILE_HISTORY_CONTENT_UNAVAILABLE' } })
+    expect(Buffer.byteLength(rpcEncode(response))).toBeLessThan(AGENTMUX_RPC_MAX_MESSAGE_BYTES)
     expect(owner.write).not.toHaveBeenCalled(); expect(owner.create).not.toHaveBeenCalled()
   }, 30_000)
   it('connects typed RPC and the compiled CLI through the real public server, including unconfirmed receipts', async () => {
