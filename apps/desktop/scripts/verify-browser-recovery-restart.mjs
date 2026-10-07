@@ -31,7 +31,11 @@ const workspacePath = join(root, 'workspace'), codexHome = join(privateHome, 'co
 const workspaceId = 'private-browser-recovery', workspaceName = 'Private Browser recovery'
 const children = new Set(), connections = new Set()
 const launchedProbes = new Set()
-const deadline = Date.now() + 120_000
+const privateCase = process.argv.includes('--case-private')
+const privateCrash = process.argv.includes('--private-crash')
+const privateVisual = process.argv.includes('--private-visual')
+assert.ok(!privateCrash || privateCase); assert.ok(!privateVisual || privateCase)
+const deadline = Date.now() + (privateCase ? 180_000 : 120_000)
 const receipt = { schema: 'agentmux.browser-recovery-restart.v1', completeGate: false, cleanup: {} }
 const downloadCase = process.argv.includes('--case-download')
 const uploadCase = process.argv.includes('--case-upload')
@@ -58,7 +62,7 @@ assert.ok(!observeNativeBounds || structuredCase, 'Main bounds observation belon
 if(observeRestartLifecycle)receipt.diagnosticMode='passive-original-second-process-lifecycle'
 if(observeStageDelivery)receipt.diagnosticMode='original-stage-conditional-breakpoints'
 if(overlayCase && process.env.AGENTMUX_OVERLAY_OBSERVE_ORIGINAL_PAINT === '1')receipt.diagnosticMode='original-overlay-paint-conditional-breakpoints'
-assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,taskDownloadCase,framesCase,localRecoveryCase,browserToolsCase,structuredCase,outcomeCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
+assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,taskDownloadCase,framesCase,localRecoveryCase,browserToolsCase,structuredCase,outcomeCase,privateCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
 const downloadPayload = Buffer.from([0,255,128,13,10,1,2,0,254])
 const downloadRequests = []
 if(downloadCase)receipt.case='download'
@@ -72,6 +76,7 @@ if(localRecoveryCase){receipt.case='local-recovery';receipt.localRecoveryKind=lo
 if(browserToolsCase)receipt.case='browser-tools'
 if(structuredCase)receipt.case='structured-output'
 if(outcomeCase)receipt.case='outcome'
+if(privateCase){receipt.case='private';receipt.privateExitKind=privateCrash?'crash':'ordinary'}
 await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
 const captureDirectory = await mkdtemp(join(repositoryRoot,'.tmp/browser-operation-visual-'))
 receipt.visual = { captureDirectory, captureOnly: true, aestheticReview: 'not-performed', frames: [],
@@ -152,6 +157,13 @@ async function identity() {
     'apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/src/renderer/src/styles/index.css',
     'apps/desktop/src/renderer/src/lib/workbench-persistence.ts', 'apps/desktop/scripts/probe-process.mjs',
     'apps/desktop/scripts/verify-browser-recovery-restart.mjs',
+    ...(privateCase ? ['apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts','packages/core/src/spatial-state.ts','packages/core/dist/spatial-state.js','apps/desktop/scripts/browser-private-probe-scenario.mjs','apps/desktop/scripts/verify-browser-private.mjs',
+      'apps/desktop/src/renderer/src/components/GlobalSurveySurface.tsx','apps/desktop/src/renderer/src/components/BrowserProfilesPanel.tsx',
+      'apps/desktop/src/renderer/src/lib/survey-browser-creation.ts','apps/desktop/src/main/browser-input-history.ts',
+      'apps/desktop/src/shared/browser-input-history.ts','packages/core/src/browser-targets.ts','packages/core/src/control-codec.ts',
+      'packages/core/src/control-browser-targets.ts','packages/core/src/agentmux-cli-commands.ts','packages/core/src/agentmux-cli-browser-guide.ts',
+      'packages/core/dist/agentmux.js','packages/core/dist/control-codec.js','packages/core/dist/control-browser-targets.js',
+      'packages/core/dist/browser-targets.js','packages/core/dist/agentmux-cli-commands.js','packages/core/dist/agentmux-cli-browser-guide.js'] : []),
     'apps/desktop/scripts/lib/browser-capability-proof-join.mjs',
     'apps/desktop/scripts/browser-window-visual-capture.mjs',
     ...(observeNativeBounds ? ['apps/desktop/scripts/browser-native-bounds-observer.mjs'] : []),
@@ -235,7 +247,7 @@ async function launch(label) {
   const readyFile = join(root, `ready-${label}.json`)
   const child = spawn(require('electron'), ['--inspect-brk=0', join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0', `--agentmux-probe-root=${root}`], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...process.env, ...fixtureEnvironment, AGENTMUX_DESKTOP_READY_FILE: readyFile }
+    env: { ...(privateCase ? Object.fromEntries(Object.entries(process.env).filter(([key])=>!key.startsWith('AGENTMUX_')&&!key.startsWith('CTXMUX_'))) : process.env), ...fixtureEnvironment, AGENTMUX_DESKTOP_READY_FILE: readyFile }
   })
   children.add(child)
   let diagnostics = '', mainUrl, rendererUrl, spawnError
@@ -829,7 +841,7 @@ async function consumeNativeProof(indexPath) {
   process.stdout.write(JSON.stringify({passed:true,completeGate:true,consumedOriginalNativeReceipt:proof.receipt.path})+'\n')
 }
 function lastReceiptPath() {
-  return join(repositoryRoot,'.tmp',localRecoveryCase?`browser-local-recovery-${localRecoveryKind}-last.json`:framesCase?'browser-frame-observation-last.json':taskDownloadCase?'browser-task-outcome-download-last.json':downloadCase?'browser-files-download-last.json':uploadCase?'browser-files-upload-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':taskAssetsCase?'browser-task-assets-last.json':browserToolsCase?'browser-tools-last.json':structuredCase?'browser-structured-output-last.json':outcomeCase?'browser-outcome-last.json':'browser-recovery-restart-last.json')
+  return join(repositoryRoot,'.tmp',privateCase?(privateCrash?'browser-private-crash-restart-last.json':'browser-private-restart-last.json'):localRecoveryCase?`browser-local-recovery-${localRecoveryKind}-last.json`:framesCase?'browser-frame-observation-last.json':taskDownloadCase?'browser-task-outcome-download-last.json':downloadCase?'browser-files-download-last.json':uploadCase?'browser-files-upload-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':taskAssetsCase?'browser-task-assets-last.json':browserToolsCase?'browser-tools-last.json':structuredCase?'browser-structured-output-last.json':outcomeCase?'browser-outcome-last.json':'browser-recovery-restart-last.json')
 }
 if(process.env.AGENTMUX_BROWSER_NATIVE_PROOF_INDEX) {
   try { await consumeNativeProof(process.env.AGENTMUX_BROWSER_NATIVE_PROOF_INDEX) }
@@ -846,6 +858,7 @@ try {
   const browserTools = browserToolsCase ? await import('./browser-tools-probe-scenario.mjs') : null
   const structured = structuredCase ? await import('./browser-structured-probe-scenario.mjs') : null
   const outcome = outcomeCase ? await import('./browser-outcome-probe-scenario.mjs') : null
+  const privateScenario = privateCase ? await import('./browser-private-probe-scenario.mjs') : null
   const cost = outcomeCase ? await import('./lib/browser-capability-cost-collector.mjs') : null
   const scenarioContext = (probe,browserId,pageUrl)=>({probe,browserId,pageUrl,urls,receipt,localRecoveryKind,click,selectors,waitFor,runBrowser,setPhase:value=>{phase=value},nativeFrameReady:actualPageUrl=>observeNativeFrameReady(probe,actualPageUrl),nativePageScript:(target,expression,actualPageUrl=pageUrl)=>nativePageScript(target,expression,actualPageUrl),resize,
     rpc,
@@ -854,6 +867,7 @@ try {
   await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true})])
   receipt.identityBefore=await identity();receipt.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repositoryRoot})).stdout.trim()
   server=createServer((request,response)=>{
+    if(privateScenario?.handlePrivateRequest(request,response,receipt))return
     if(localRecovery?.handleLocalRecoveryDisconnect(request,response,receipt))return
     if(taskDownload && request.url==='/task-completion.bin'){
       receipt.taskDownload??={requests:[]}
@@ -888,6 +902,12 @@ try {
   const address=server.address();assert.ok(address&&typeof address==='object');const urls=['a','b'].map(path=>`http://127.0.0.1:${address.port}/${path}`)
   await writeFile(join(userData,'agentmux.config.json'),JSON.stringify({version:9,hosts:[{id:'local',kind:'local',label:'Private local'}],executors:{},workspaces:[{id:workspaceId,name:workspaceName,hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{agentAutomation:true,toolbar:{selectElement:true,screenshot:true,devTools:true,viewport:true,saveBookmark:true,more:true}},notifications:{mode:'off'}}))
   first=await launch('first');phase='create-actual-browser-split'
+  if(privateScenario) {
+    await privateScenario.reviewPrivate({ ...scenarioContext(first,null,urls[0]), privateCrash, privateVisual, workspaceId, runtimeDirectory, privateHome,
+      state, launch, normalQuit,
+      retainSecond: probe => {second=probe},
+      crash: async probe => {await signalOwnedProbeProcess(probe.child.pid,root,'SIGKILL');await waitFor('exact crashed private process exits',()=>probe.child.signalCode!==null||probe.child.exitCode!==null);return {exitCode:probe.child.exitCode,signal:probe.child.signalCode}} })
+  } else {
   await click(first.cdp,selectors(`.project-rail-row[data-workspace-id="${workspaceId}"]`))
   await click(first.cdp,selectors('[aria-label="Search: search and manage browsers"]'))
   if(browserTools) {
@@ -960,6 +980,7 @@ try {
   if(outcome)await outcome.recoverBrowserOutcome(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   if(overlay)await overlay.recoverOverlay(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   receipt.secondUi={...after,pages:restoredPages,ensure};receipt.secondExit=await normalQuit(second)
+  }
   receipt.identityAfter=await identity();assert.deepEqual(receipt.identityAfter,receipt.identityBefore)
   receipt.completeGate=true
 } catch(error) {
