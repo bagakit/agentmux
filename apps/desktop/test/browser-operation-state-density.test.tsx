@@ -29,10 +29,10 @@ async function renderStatus(activity: BrowserActivityState, handlers = {}) {
 describe('Browser operation status in existing controls', () => {
   it('renders four nonempty observed states with distinct glyphs and accessible facts', async () => {
     const cases: [BrowserOperationPhase, BrowserActivityState['control'], string, string][] = [
-      ['running', 'agent', 'Operating page', '.semantic-icon--working'],
-      ['waiting', 'agent', 'Waiting for page', '.lucide-pause'],
-      ['human', 'human', 'Human has control', '.lucide-user-round'],
-      ['failed', 'human', 'Failed', '.lucide-circle-x']
+      ['running', 'agent', 'Operating page', '[data-semantic-icon="status.browser-running"]'],
+      ['waiting', 'agent', 'Waiting for page', '[data-semantic-icon="action.pause"]'],
+      ['human', 'human', 'Human has control', '[data-semantic-icon="object.user"]'],
+      ['failed', 'human', 'Failed', '[data-semantic-icon="status.failed"]']
     ]
     expect(cases.map(([phase]) => phase)).toEqual(['running', 'waiting', 'human', 'failed'])
     for (const [phase, control, label, glyph] of cases) {
@@ -53,13 +53,13 @@ describe('Browser operation status in existing controls', () => {
     const human = await renderStatus({ operation, control: 'human' })
     try {
       expect(human.trigger.getAttribute('aria-label')).toContain('Human has control')
-      expect(human.trigger.querySelector('.lucide-user-round')).not.toBeNull()
+      expect(human.trigger.querySelector('[data-semantic-icon="object.user"]')).not.toBeNull()
     } finally { await human.close() }
     const unknown = await renderStatus({ operation: null, control: 'agent' })
     try {
       expect(unknown.host.querySelector('.browser-operation-status')!.getAttribute('data-phase')).toBe('unknown')
       expect(unknown.trigger.getAttribute('aria-label')).toContain('Activity details are loading')
-      expect(unknown.trigger.querySelector('.lucide-circle-alert')).not.toBeNull()
+      expect(unknown.trigger.querySelector('[data-semantic-icon="status.warning"]')).not.toBeNull()
       expect(unknown.trigger.getAttribute('aria-label')).not.toContain('Completed')
     } finally { await unknown.close() }
   })
