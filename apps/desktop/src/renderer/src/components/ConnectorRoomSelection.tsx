@@ -33,7 +33,7 @@ export function ConnectorRoomSelection({ connection, value, onChange, disabled }
   const rooms = value && !options.some(room => room.externalConversationId === value)
     ? [chosen ?? { externalConversationId: value, name: null, state: 'unknown' as const }, ...options] : options
   return <div className="agent-connector-room-choice" aria-busy={pending}>
-    <SelectionField label="Existing group" value={value} disabled={disabled}
+    <SelectionField searchable={false} label="Existing group" value={value} disabled={disabled}
       options={[{ value: '', label: pending ? 'Finding groups…' : 'Choose a group…' }, ...rooms.map(room => ({ value: room.externalConversationId, label: roomName(room), disabled: room.state === 'dissolved', description: room.name ? room.externalConversationId : 'Group name unavailable' }))]}
       onValueChange={id => { setSelected(rooms.find(room => room.externalConversationId === id) ?? null); onChange(id) }} />
     <div className="agent-connector-search">
