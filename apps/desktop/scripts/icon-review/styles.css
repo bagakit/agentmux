@@ -20,3 +20,67 @@
 body{height:100dvh;display:flex;flex-direction:column;overflow:hidden;font-family:var(--font-sans,var(--sans))}.masthead,.notice{flex-shrink:0}.workspace{flex:1;min-height:0;width:100%;height:auto!important}.inventory-intro,.inventory-tools,.theme-preview-tools,.semantic-samples,.result-toolbar,.inventory-foot{flex-shrink:0}@media(max-width:580px){.header-actions .button{min-height:40px}}
 .instance-preview-tools{display:flex;flex-shrink:0;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 12px;font-size:11px;color:var(--muted)}.instance-preview-tools label{display:inline-flex;align-items:center;gap:6px}.instance-preview-tools select{max-width:130px;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink)}.instance-preview-tools input[type=color]{width:30px;height:27px;padding:2px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}.instance-preview-tools small{font-size:10px;color:var(--muted)}.instance-preview-tools button{font-size:10px;padding:5px 7px}
 @media(max-width:580px){.instance-preview-tools select,.instance-preview-tools button{min-height:36px}.instance-preview-tools small{flex-basis:100%}}
+
+/* The authored design browser is read-only; editing stays in the existing inspector. */
+.workspace[data-view=motion]{grid-template-columns:186px minmax(0,1fr)}
+.workspace[data-view=motion]>.inspector{display:none}
+.motion-inventory-note{font-size:12px;line-height:1.7;color:var(--muted);margin:0 0 15px}
+.motion-grid{grid-template-columns:repeat(auto-fill,minmax(175px,1fr))}
+.design-card{min-height:194px;padding:19px 14px 15px;align-items:stretch;text-align:left}
+.design-card svg{align-self:center;margin:15px 0 17px}
+.design-card .glyph-name{text-align:left;font-size:11px}
+.design-kind{align-self:flex-start;font-size:10px;color:var(--muted);background:var(--soft);border:1px solid var(--line);border-radius:4px;padding:3px 6px;line-height:1.4}
+.design-kind[data-kind=loop],.design-kind[data-kind=once]{color:var(--green);background:var(--mint)}
+.design-rest{font-size:11px;line-height:1.65;color:var(--muted);margin-top:8px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.design-card small{font-size:10px;margin-top:auto;padding-top:10px}
+.motion-dialog{padding:0;border-radius:12px;width:min(760px,calc(100vw - 40px));max-height:90dvh;box-shadow:0 18px 90px #142b2424;overflow:hidden}
+.motion-dialog[open]{display:flex;flex-direction:column}
+.motion-dialog .dialog-header{flex-shrink:0;border-bottom:1px solid var(--line)}
+.motion-dialog .dialog-header h2{font-family:var(--mono);font-size:20px;overflow-wrap:anywhere;line-height:1.4}
+.motion-content{min-height:0;overflow-y:auto;padding:23px 26px 26px;scrollbar-gutter:stable}
+.motion-content h3{font-size:12px;font-weight:550;margin:0 0 12px}
+.motion-content p{font-size:12px;line-height:1.8;color:var(--muted);margin:12px 0 0;overflow-wrap:anywhere}
+.motion-comparison{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.motion-panel{min-width:0;border:1px solid var(--line);border-radius:8px;padding:17px;background:var(--soft)}
+.motion-panel--demo{background:var(--mint)}
+.motion-rest-sizes{min-height:78px;display:flex;gap:17px;align-items:flex-end;justify-content:center;padding:9px 0 7px}
+.motion-rest-sizes>span{display:flex;min-width:26px;min-height:58px;flex-direction:column;align-items:center;justify-content:flex-end;gap:13px}
+.motion-rest-sizes small{font-size:10px;color:var(--muted);font-family:var(--mono)}
+.authored-demo{min-height:78px;display:flex;justify-content:center;align-items:center;color:var(--green)}
+.motion-controls{min-height:36px;display:flex;justify-content:center;align-items:center;margin-top:8px}
+.motion-controls .button{font-size:11px;min-height:34px;padding:6px 11px}
+.motion-still-label{font-size:11px;color:var(--muted)}
+.motion-guidance{padding:20px 0;border-bottom:1px solid var(--line)}
+.motion-guidance p{margin:0}
+.motion-guidance small{display:block;font-size:10px;color:var(--muted);line-height:1.7;margin-top:10px}
+.motion-roles{padding-top:20px}
+.motion-roles>p{font-size:11px;margin-top:0}
+.motion-role-list{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+.motion-role{display:flex;align-items:center;gap:12px;min-width:0;border:1px solid var(--line);border-radius:6px;padding:12px;text-align:left;background:var(--surface)}
+.motion-role:hover{border-color:var(--green);background:var(--soft)}
+.motion-role>span:first-of-type{flex:1;min-width:0}
+.motion-role strong{display:block;font-size:11px;font-weight:550}
+.motion-role code,.motion-role small{display:block;font-size:10px;line-height:1.6;overflow-wrap:anywhere;color:var(--muted);margin-top:3px}
+.motion-role code{font-family:var(--mono)}
+.motion-role>span:last-child{color:var(--green);font-size:13px}
+.motion-unbound{border:1px dashed var(--line);padding:14px;border-radius:6px;background:var(--soft)}
+@media(max-width:1200px){.workspace[data-view=motion]{grid-template-columns:155px minmax(0,1fr)}}
+@media(max-width:950px){.workspace[data-view=motion]{display:block}}
+@media(max-width:580px){
+  .motion-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .design-card{min-height:195px;padding:13px 11px}
+  .design-card svg{width:29px;height:29px;margin:13px 0 15px}
+  .design-card .glyph-name{font-size:10px}
+  .design-rest{font-size:11px}
+  .motion-dialog{width:calc(100vw - 20px);max-height:94dvh;border-radius:10px}
+  .motion-dialog .dialog-header h2{font-size:17px}
+  .motion-content{padding:18px 16px 22px}
+  .motion-comparison{gap:9px}
+  .motion-panel{padding:13px 11px}
+  .motion-content h3{font-size:11px}
+  .motion-content p{font-size:11px}
+  .motion-rest-sizes{gap:8px}
+  .motion-rest-sizes>span{min-width:25px}
+  .motion-role-list{grid-template-columns:1fr}
+  .motion-controls .button{min-height:40px}
+}

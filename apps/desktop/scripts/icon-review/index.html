@@ -48,7 +48,7 @@
       <div class="inventory-tools">
         <label class="search"><span id="search-icon" aria-hidden="true"></span><input id="search" type="search" placeholder="搜索图标、功能、含义或语义 ID" aria-label="搜索图标、功能、含义或语义 ID"><kbd>/</kbd></label>
         <select id="mobile-category" aria-label="用途分类"></select>
-        <div class="view-switch" aria-label="目录视图"><button id="view-gallery" aria-pressed="true">图标概览</button><button id="view-matrix" aria-pressed="false">用途矩阵</button></div>
+        <div class="view-switch" aria-label="目录视图"><button id="view-gallery" aria-pressed="true">图标概览</button><button id="view-matrix" aria-pressed="false">用途矩阵</button><button id="view-motion" aria-pressed="false">静止与动效</button></div>
       </div>
       <div class="result-toolbar"><p id="result-count"></p><div class="result-actions"><label class="edited-filter"><input id="modified-only" type="checkbox">只看已修改 <span id="modified-count">0</span></label><button id="mobile-drafts">管理草稿</button></div></div>
       <div id="inventory-content" class="inventory-content" tabindex="-1"><div class="loading">正在加载图标与源码引用…</div></div>
@@ -66,6 +66,10 @@
     <header class="dialog-header"><div><p class="eyebrow">YOUR CHANGES</p><h2 id="draft-title">修改草稿</h2><p>仅存在当前浏览器。导出后可交给 Agent 继续处理。</p></div><button data-close="draft-dialog" class="icon-button" aria-label="关闭修改草稿">×</button></header>
     <div id="draft-list" class="draft-list"></div>
     <footer class="dialog-footer"><span id="history-count"></span><button id="reset-all" class="button danger">恢复全部原始定义</button></footer>
+  </dialog>
+  <dialog id="motion-dialog" class="motion-dialog" aria-labelledby="motion-title">
+    <header class="dialog-header"><div><p class="eyebrow">REST &amp; MOTION</p><h2 id="motion-title">静止与动效</h2><p>目录原图的设计演示；不会修改主题或草稿。</p></div><button data-close="motion-dialog" class="icon-button" aria-label="关闭动效预览">×</button></header>
+    <div id="motion-content" class="motion-content"></div>
   </dialog>
   <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title"><h2 id="confirm-title">恢复全部原始定义？</h2><p>当前修改将撤回，操作仍保留在导出历史里。建议先导出一份备份。</p><div><button id="cancel-reset" class="button">取消</button><button id="confirm-reset" class="button danger">确认恢复</button></div></dialog>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

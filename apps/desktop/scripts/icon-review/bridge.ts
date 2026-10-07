@@ -2,12 +2,14 @@ import { getSemanticIconCatalog } from '../../../../packages/client-ui/src/theme
 import { ICON_GLYPHS, type SemanticIconId } from '../../../../packages/client-ui/src/theme/icon-catalog.js'
 import { createSemanticIconElement } from '../../../../packages/client-ui/src/theme/icon-sprite.js'
 import { ICON_ANIMATIONS, type SemanticIconPresentation } from '../../../../packages/client-ui/src/theme/icon-presentation.js'
+import { AUTHORED_ICON_DESIGNS } from '../../../../packages/client-ui/src/theme/icons.js'
 import { getThemeCatalog, GRAPHITE_THEME } from '../../../../packages/client-ui/src/theme/catalog.js'
 import { mountThemeRuntime, updateObservedTheme } from '../../../../packages/client-ui/src/theme/runtime.js'
 import { parseThemeFile, serializeThemeFile, type ThemeDocument, type ThemeMode, type ThemeIconAsset } from '../../../../packages/client-ui/src/theme/schema.js'
 
 export const catalog = getSemanticIconCatalog()
 export const glyphs = ICON_GLYPHS
+export const authoredDesigns = AUTHORED_ICON_DESIGNS
 export const themes = getThemeCatalog().items.filter(item => item.readonly).map(item => ({ id: item.id, ...item.value }))
 export { parseThemeFile, serializeThemeFile }
 export { ICON_ANIMATIONS }

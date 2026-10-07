@@ -7,12 +7,14 @@ const editable = ['glyph','feature','meaning','note','status'];
 let data, roleById, draft, activeId = 'status.working', category = 'all', mode = 'gallery', query = '', modifiedOnly = false;
 let storageAvailable = true, corruptRaw = null, toastTimer, lastTrigger = null;
 let manifest, sessionExportTime, projectedTheme;
+let motionGlyph, motionTrigger;
 if (import.meta.hot) import.meta.hot.on('icon-review:source-change', () => {
   if (!window.iconReview?.ready || storageAvailable) location.reload();
   else notice('源码已更新；当前草稿尚未保存，请先导出修改，再手动刷新。');
 });
 // Simulated instance parameters never enter the saved draft or a theme file.
 const samplePresentation = { animation:'none', color:undefined };
+const motionLabels = { loop:'循环动态', once:'单次反馈', still:'保持静止' };
 const mobile = () => matchMedia('(max-width:950px)').matches;
 const changed = id => Boolean(draft.edits[id]);
 const effective = r => ({...r, note:'',status:'not_started',...draft.edits[r.id]});
@@ -48,6 +50,9 @@ function applyPreview() {
 }
 function renderSamples() {
   const items=[['status.working','工作产出'],['status.streaming','内容流入'],['status.browser-running','浏览器执行'],['object.activity','工作记录'],['status.waiting','操作等待']];
+  const designedGlyph=samplePresentation.animation==='none'?undefined:Object.entries(ThemeBridge.authoredDesigns).find(([,design])=>design.motion.animation===samplePresentation.animation)?.[0];
+  const designedRole=ThemeBridge.catalog.icons.find(role=>role.defaultGlyph===designedGlyph);
+  if(designedRole&&!items.some(([id])=>id===designedRole.id))items.push([designedRole.id,designedRole.label]);
   $('#semantic-samples').innerHTML=items.map(([id,label])=>`<button type="button" data-sample="${id}" aria-label="编辑 ${id}"><span class="sample-icons">${ThemeBridge.semanticMarkup(id,12,'',samplePresentation)}${ThemeBridge.semanticMarkup(id,24,'',samplePresentation)}</span><strong>${label}</strong><small>${id}</small></button>`).join('');
 }
 function toast(message) {
@@ -118,11 +123,17 @@ function renderCategories() {
   $('#mobile-category').innerHTML=data.categories.map(c=>`<option value="${c.id}">${escape(c.label)}</option>`).join('');
   $('#mobile-category').value=category;
 }
-function setCategory(value) {category=value;renderCategories();renderInventory();$('#inventory-content').scrollTop=0;}
+function setCategory(value) {category=value;if(mode==='motion')mode='gallery';renderCategories();renderInventory();$('#inventory-content').scrollTop=0;}
 function renderInventory() {
+  for(const view of ['gallery','matrix','motion'])$('#view-'+view).setAttribute('aria-pressed',mode===view);
+  $('.workspace').dataset.view=mode;
+  $('.edited-filter').hidden=mode==='motion';
+  $('.instance-preview-tools').hidden=mode==='motion';$('#semantic-samples').hidden=mode==='motion';
+  $('#search').placeholder=mode==='motion'?'搜索自绘名称、静止设计、动效或用途':'搜索图标、功能、含义或语义 ID';
+  $('#search').setAttribute('aria-label',$('#search').placeholder);
+  if(mode==='motion'){renderMotionInventory();return;}
   const found=rows(),groups=orderedGroups(found);
   $('#result-count').textContent=`${groups.length} 种图形 · ${found.length} 个用途${query?' · 搜索结果':''}`;
-  $('#view-gallery').setAttribute('aria-pressed',mode==='gallery');$('#view-matrix').setAttribute('aria-pressed',mode==='matrix');
   const host=$('#inventory-content');
   if(!found.length){host.innerHTML='<div class="empty"><strong>没有匹配的图标</strong>试试其他关键词，或取消“只看已修改”。</div>';return;}
   if(mode==='gallery') {
@@ -136,6 +147,47 @@ function renderInventory() {
       return `<tr data-role="${r.id}" class="${r.id===activeId?'selected':''}"><td>${semantic(r.id,22)}</td><td><button class="role-name" aria-label="编辑 ${r.id}">${escape(e.meaning)}</button><small>${escape(r.id)}</small></td><td class="feature">${escape(e.feature)}<small>${escape(drawingLabel(r))}</small></td><td class="row-check">${changed(r.id)?'✎':''}</td></tr>`;
     }).join('')}</tbody></table>`;
   }
+}
+function authoredRoles(glyph) {return data.roles.filter(role=>role.glyph===glyph);}
+function renderMotionInventory() {
+  const needle=query.trim().toLowerCase(), entries=Object.entries(ThemeBridge.authoredDesigns);
+  const found=entries.filter(([glyph,design])=>[glyph,design.rest,design.motion.description,design.motion.trigger,motionLabels[design.motion.kind],...authoredRoles(glyph).flatMap(role=>[role.id,role.label,role.meaning,role.feature])].join(' ').toLowerCase().includes(needle));
+  $('#result-count').textContent=`${found.length} / ${entries.length} 个自绘设计 · 全部用途${query?' · 搜索结果':''}`;
+  $('#inventory-content').innerHTML=found.length?`<p class="motion-inventory-note">所有原图保持静止。选择一项查看设计与演示；用途分类可返回原目录。</p><div class="glyph-grid motion-grid">${found.map(([glyph,design])=>{
+    const roles=authoredRoles(glyph);
+    return `<button class="glyph-card design-card" data-motion-glyph="${escape(glyph)}" aria-label="查看 ${escape(glyph)} 的静止与动效设计"><span class="design-kind" data-kind="${design.motion.kind}">${motionLabels[design.motion.kind]}</span>${icon(glyph,29)}<span class="glyph-name">${escape(glyph)}</span><span class="design-rest">${escape(design.rest)}</span><small>${roles.length?`${roles.length} 个目录用途`:'尚未绑定语义用途'}</small></button>`;
+  }).join('')}</div>`:'<div class="empty"><strong>没有匹配的自绘设计</strong>可搜索图形名称、用途或设计说明。</div>';
+}
+// Catalogue drawings retain the authored parts; the product stylesheet owns all motion.
+// This does not replace a semantic symbol or alter a user-selected glyph/paths asset.
+function authoredDemoMarkup(glyph,animation) {
+  const drawing=icon(glyph,24,'semantic-icon');
+  return animation==='none'?drawing:`<span class="semantic-icon-motion" data-icon-animation="${animation}">${drawing}</span>`;
+}
+function renderMotionDialog() {
+  const design=ThemeBridge.authoredDesigns[motionGlyph];if(!design)return;
+  const roles=authoredRoles(motionGlyph), motion=design.motion;
+  $('#motion-title').textContent=motionGlyph;
+  $('#motion-content').innerHTML=`
+    <div class="motion-comparison">
+      <section class="motion-panel"><h3>静止轮廓</h3><div class="motion-rest-sizes">${[12,16,24].map(size=>`<span>${icon(motionGlyph,size)}<small>${size} px</small></span>`).join('')}</div><p>${escape(design.rest)}</p></section>
+      <section class="motion-panel motion-panel--demo"><h3>${motionLabels[motion.kind]}</h3><div id="authored-demo" class="authored-demo" data-authored-glyph="${escape(motionGlyph)}">${authoredDemoMarkup(motionGlyph,motion.animation)}</div><div class="motion-controls">${motion.kind==='loop'?'<button id="pause-motion" class="button" aria-pressed="false">暂停循环</button>':motion.kind==='once'?'<button id="replay-motion" class="button">重播一次</button>':'<span class="motion-still-label">此图形保持静止</span>'}</div><p>${escape(motion.description)}</p></section>
+    </div>
+    <div class="motion-guidance"><h3>何时使用</h3><p>${escape(motion.trigger)}</p><small>此处仅演示设计，遵循系统的“减少动画”设置。</small></div>
+    <section class="motion-roles"><h3>当前主题与草稿</h3><p>下方按真实语义用途显示当前图形，保持静止；自选图形与路径不会被目录演示替换。</p>${roles.length?`<div class="motion-role-list">${roles.map(role=>`<button class="motion-role" data-motion-role="${escape(role.id)}">${semantic(role.id,20)}<span><strong>${escape(role.label)}</strong><code>${escape(role.id)}</code><small>${escape(drawingLabel(role))}</small></span><span aria-hidden="true">↗</span></button>`).join('')}</div>`:'<p class="motion-unbound">尚未绑定语义用途，当前主题没有可对照的语义项。目录原图仍可完整查看。</p>'}</section>`;
+}
+function openMotion(glyph,trigger) {
+  if(!Object.hasOwn(ThemeBridge.authoredDesigns,glyph))return;
+  // Stop any older sample simulation so this view plays only the selected drawing.
+  samplePresentation.animation='none';$('#preview-animation').value='none';renderSamples();
+  motionGlyph=glyph;motionTrigger=trigger;renderMotionDialog();$('#motion-dialog').showModal();
+}
+function closeMotion() {
+  const dialog=$('#motion-dialog'), trigger=motionTrigger;
+  // Release immediately: hidden tabs can defer the native close event indefinitely.
+  $('#motion-content').replaceChildren();motionGlyph=undefined;motionTrigger=undefined;
+  if(dialog.open)dialog.close();
+  trigger?.focus();
 }
 function selectRole(id,trigger) {
   activeId=id;lastTrigger=trigger??lastTrigger;renderInventory();renderInspector();
@@ -254,7 +306,7 @@ function renderDrafts() {
   $('#reset-all').disabled=!entries.length;
 }
 function attachEvents() {
-  const animationLabels={none:'静态',work:'写写停停',stream:'轻轻浮动',execute:'小步探看',wait:'流沙等待',spin:'旋转加载'};
+  const animationLabels={none:'静态',work:'写写停停',stream:'光标推进',execute:'箭头前送',wait:'流沙等待',orbit:'短弧环行',feedback:'单次反馈',spin:'旋转加载'};
   $('#preview-animation').innerHTML=ThemeBridge.ICON_ANIMATIONS.map(value=>`<option value="${value}">${animationLabels[value]}</option>`).join('');
   $('#preview-animation').addEventListener('change',event=>{samplePresentation.animation=event.target.value;renderSamples();});
   $('#preview-color').addEventListener('input',event=>{samplePresentation.color=event.target.value;renderSamples();$('#inherit-color').disabled=false;});
@@ -274,11 +326,38 @@ function attachEvents() {
   $('#mobile-category').addEventListener('change',event=>setCategory(event.target.value));
   $('#search').addEventListener('input',event=>{query=event.target.value;renderInventory();});
   $('#modified-only').addEventListener('change',event=>{modifiedOnly=event.target.checked;renderInventory();});
-  for(const view of ['gallery','matrix'])$('#view-'+view).addEventListener('click',()=>{mode=view;renderInventory();});
+  for(const view of ['gallery','matrix','motion'])$('#view-'+view).addEventListener('click',()=>{
+    mode=view;
+    if(view==='motion'){samplePresentation.animation='none';$('#preview-animation').value='none';renderSamples();}
+    renderInventory();$('#inventory-content').scrollTop=0;
+  });
   $('#inventory-content').addEventListener('click',event=>{
-    const card=event.target.closest('[data-glyph]'),row=event.target.closest('[data-role]');
+    const card=event.target.closest('[data-glyph]'),row=event.target.closest('[data-role]'),design=event.target.closest('[data-motion-glyph]');
+    if(design)openMotion(design.dataset.motionGlyph,design);
     if(card){const candidates=rows().filter(r=>r.glyph===card.dataset.glyph);selectRole(candidates.find(r=>r.id===activeId)?.id??candidates[0].id,card);}
     if(row)selectRole(row.dataset.role,row.querySelector('button'));
+  });
+  $('#motion-content').addEventListener('click',event=>{
+    if(event.target.closest('#replay-motion')){
+      $('#authored-demo').innerHTML=authoredDemoMarkup(motionGlyph,ThemeBridge.authoredDesigns[motionGlyph].motion.animation);
+    }
+    const pause=event.target.closest('#pause-motion');
+    if(pause){
+      const paused=pause.getAttribute('aria-pressed')!=='true';
+      $('#authored-demo .semantic-icon-motion').style.animationPlayState=paused?'paused':'running';
+      pause.setAttribute('aria-pressed',paused);pause.textContent=paused?'继续循环':'暂停循环';
+    }
+    const role=event.target.closest('[data-motion-role]');
+    if(role){
+      const id=role.dataset.motionRole;
+      closeMotion();mode='matrix';query=id;$('#search').value=id;category='all';modifiedOnly=false;$('#modified-only').checked=false;
+      renderCategories();selectRole(id,$('#view-motion'));
+    }
+  });
+  $('#motion-dialog').addEventListener('cancel',event=>{event.preventDefault();closeMotion();});
+  $('#motion-dialog').addEventListener('close',()=>{
+    // An older queued close must not clear a preview opened since that closure.
+    if(!$('#motion-dialog').open)closeMotion();
   });
   $('#inspector-content').addEventListener('click',event=>{
     const reuse=event.target.closest('[data-reuse]');
@@ -296,7 +375,7 @@ function attachEvents() {
     const choice=event.target.closest('[data-pick]');if(!choice)return;
     patchRole(activeId,'glyph',choice.dataset.pick);$('#glyph-picker').close();renderInspector();toast('已更换这一用途的图标');
   });
-  document.addEventListener('click',event=>{const b=event.target.closest('[data-close]');if(b)$('#'+b.dataset.close).close();});
+  document.addEventListener('click',event=>{const b=event.target.closest('[data-close]');if(b){if(b.dataset.close==='motion-dialog')closeMotion();else $('#'+b.dataset.close).close();}});
   $('#inspector').addEventListener('close',()=>{if(mobile())lastTrigger?.focus();});
   $('#import').addEventListener('click',()=>$('#import-file').click());
   $('#import-file').addEventListener('change',()=>{const file=$('#import-file').files[0];if(file)importPacket(file);});
