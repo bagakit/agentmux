@@ -67,6 +67,8 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'settings.hosts.upgrade-inspect': 'settings.hosts.upgrade-inspect',
   'settings.executors.refresh': 'settings.executors.refresh',
   'settings.workspaces.register': 'settings.workspaces.add',
+  'settings.browser-default.inspect': 'settings.browser.default.inspect',
+  'settings.browser-default.open-settings': 'settings.browser.default.open-settings',
   'settings.browser-links.ls': 'settings.browser.links.list',
   'settings.browser-links.forget': 'settings.browser.links.forget',
   'settings.executors.ls': 'settings.resource.list', 'settings.executors.inspect': 'settings.resource.get',

@@ -1240,8 +1240,8 @@ export type ExecutorDetection = { input: ExecutorDetectionInput } & (
 export type HostExecutorInventory = import('@agentmux/core').AgentMuxHostExecutorInventory & { routeHostId: string }
 export type HostExecutorConfiguration = import('@agentmux/core').AgentMuxHostExecutorConfiguration & { routeHostId: string }
 
-export type DesktopControlRequest = AgentMuxControlRequest | ContinuousProgressInputRequest | import('@agentmux/core/control').MetricsRendererRequest
-export type DesktopControlResult = AgentMuxControlResult | ContinuousProgressInputResult | import('@agentmux/core/control').MetricsRendererResult
+export type DesktopControlRequest = AgentMuxControlRequest | ContinuousProgressInputRequest | import('@agentmux/core/control').MetricsRendererRequest | import('./system-web-url').SystemWebUrlRequest
+export type DesktopControlResult = AgentMuxControlResult | ContinuousProgressInputResult | import('@agentmux/core/control').MetricsRendererResult | import('./system-web-url').SystemWebUrlResult
 
 export type DesktopControlResponse =
   | { requestId: string; ok: true; result: DesktopControlResult }
@@ -1746,6 +1746,8 @@ export type AgentMuxDesktopApi = {
     rendererUpdateReady(token: string): Promise<void>
     /** Best-effort observation of this Workbench's original startup error; no lifecycle effect. */
     recordStartupFailure(input: import('./workbench-startup-failure').WorkbenchRendererStartupFailure): Promise<boolean>
+    inspectDefaultBrowser(): Promise<import('@agentmux/core').BrowserDefaultInspection>
+    openDefaultBrowserSettings(): Promise<import('@agentmux/core').BrowserDefaultSettingsRequest>
     spatialLinksReady(): Promise<void>
     /** Submit an internal object-link intent; later navigation issues use onSpatialLinkIssue. */
     openObjectLink(url: string): Promise<void>

@@ -819,6 +819,8 @@ const mockApi: AgentMuxDesktopApi = {
     requestStorageFlush: async () => {},
     rendererUpdateReady: async () => {},
     recordStartupFailure: async () => false,
+    inspectDefaultBrowser: async () => ({ platform: 'web', outcome: 'unsupported', protocols: null }),
+    openDefaultBrowserSettings: async () => { throw new Error('Default browser settings require the desktop app.') },
     spatialLinksReady: async () => {},
     openObjectLink: async () => { throw new Error('Object link navigation requires the desktop app. Open its original work surface in Desktop and retry.') },
     onSpatialLinkIssue: () => () => {},
