@@ -109,12 +109,12 @@ describe('mounted Focus consumes original workbench identity', () => {
   it('uses the same exact highlighted map in the original keyboard reading preview', async () => {
     await mount(); await act(async () => card().focus())
     expect(fullPreview()).not.toBeNull(); expect(topologyPreview()).toBeNull()
-    const regions = fullPreview()!.querySelectorAll<HTMLElement>('.workbench-topology__inspector-regions__region[data-subject-region="true"]')
+    const regions = fullPreview()!.querySelectorAll<HTMLElement>('.workbench-topology__tab-glyph__cell[data-subject-region="true"]')
     expect(regions).toHaveLength(1); expect(regions[0]!.dataset.regionId).toBe('subject-region')
-    expect(regions[0]!.textContent).toContain('Current Agent')
+    expect(fullPreview()!.querySelector('.workbench-topology__inspector-regions')).toBeNull()
     expect(fullPreview()!.textContent).toContain(originalReply)
     expect(fullPreview()!.querySelector('.focus-context-hover__recap small')?.textContent).toContain('Latest reply')
-    expect(fullPreview()!.querySelector('.focus-context-hover__workbench')?.textContent).toContain('1 confirmed position')
+    expect(fullPreview()!.querySelector('.focus-context-hover__workbench')?.getAttribute('aria-label')).toBe('1 confirmed position')
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })))
     expect(fullPreview()).toBeNull()
   })
@@ -212,7 +212,7 @@ describe('mounted Focus consumes original workbench identity', () => {
     expect(card().querySelector('.focus-context__position')?.getAttribute('aria-label')).toBe('3 confirmed positions')
     await act(async () => card().focus())
     expect(fullPreview()!.querySelectorAll('[data-subject-region="true"]')).toHaveLength(3)
-    expect(fullPreview()!.querySelector('.focus-context-hover__workbench')?.textContent).toContain('3 confirmed positions')
+    expect(fullPreview()!.querySelector('.focus-context-hover__workbench')?.getAttribute('aria-label')).toBe('3 confirmed positions')
   })
 
   it('retains separate Group occurrences of one original Tab in both readonly and keyboard previews', async () => {
@@ -232,7 +232,7 @@ describe('mounted Focus consumes original workbench identity', () => {
     const maps = [...fullPreview()!.querySelectorAll<HTMLElement>('[data-focus-occurrence-key]')]
     expect(maps).toHaveLength(2)
     expect(maps.map(map => map.dataset.focusOccurrenceKey)).toEqual([other.id, reference.groupId].map(group => JSON.stringify([workspace.id, group, tab.id])))
-    expect(maps.map(map => map.querySelector('.focus-context-hover__position-label')?.textContent)).toEqual(['Project · Group 2', 'Project · Group 1'])
+    expect(maps.map(map => map.querySelector('.focus-context-hover__position-label')?.textContent)).toEqual(['Project · Group 2 · 2 Regions', 'Project · Group 1 · 2 Regions'])
     for (const map of maps) expect(map.querySelectorAll('[data-subject-region="true"]')).toHaveLength(1)
     expect(useAppStore.getState().layouts[workspace.id]).toBe(duplicated)
   })
