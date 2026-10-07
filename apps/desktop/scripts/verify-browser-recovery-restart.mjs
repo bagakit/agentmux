@@ -1055,10 +1055,11 @@ try {
   for(const probe of [...launchedProbes].reverse()){if(probe.child.exitCode===null&&probe.child.signalCode===null){try{await normalQuit(probe)}catch(error){errors.push(error.message)}}}
   for(const connection of connections){try{connection.close()}catch(error){errors.push(error.message)}}
   const ownedCleanup=await cleanupOwnedProbes(root)
-  errors.push(...ownedCleanup.errors)
+  const cleanupObservations=privateCase&&ownedCleanup.remaining?.length===0?ownedCleanup.errors:[]
+  if(!privateCase||ownedCleanup.remaining?.length!==0)errors.push(...ownedCleanup.errors)
   const remaining=ownedCleanup.remaining
   try{if(server){server.closeAllConnections();await new Promise((done,fail)=>server.close(error=>error?fail(error):done()))}}catch(error){errors.push(error.message)}
-  receipt.cleanup={remaining:remaining??null,errors,privateProcessesReaped:errors.length===0&&remaining?.length===0,temporaryRootRemoved:false}
+  receipt.cleanup={remaining:remaining??null,errors,...(cleanupObservations.length?{observations:cleanupObservations}:{}),privateProcessesReaped:errors.length===0&&remaining?.length===0,temporaryRootRemoved:false}
   if(receipt.cleanup.privateProcessesReaped){try{await rm(root,{recursive:true,force:true});receipt.cleanup.temporaryRootRemoved=true}catch(error){errors.push(error.message)}}
   if(errors.length&&!failure)failure={phase:'cleanup',message:errors.join('; ')}
 }

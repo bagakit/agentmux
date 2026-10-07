@@ -87,8 +87,8 @@ async function privateFrame(ctx, label) {
     if(native.length)throw new Error('A Renderer-only private start-page frame cannot omit any visible native surface');
     const image=await win.webContents.capturePage();if(image.isEmpty())throw new Error('Private UI frame is empty');const png=image.toPNG();process.getBuiltinModule('fs').writeFileSync(${quote(file)},png);
     return {size:image.getSize(),sha256:process.getBuiltinModule('crypto').createHash('sha256').update(png).digest('hex'),visibleNative:native.map(v=>({url:v.webContents.getURL(),bounds:v.getBounds()}))};})()`)
-  const text = await ctx.probe.cdp.evaluate(`(()=>{return {body:document.body.innerText,badges:[...document.querySelectorAll('.browser-private-badge')].filter(e=>e.getClientRects().length).map(e=>e.textContent),notice:[...document.querySelectorAll('.browser-private-notice,.browser-empty')].filter(e=>e.getClientRects().length&&e.textContent.includes('network identity')).map(e=>({text:e.textContent,bounds:e.getBoundingClientRect().toJSON()}))}})()`)
-  assert.ok(text.badges.includes('Private')); assert.equal(text.notice.length, 1)
+  const text = await ctx.probe.cdp.evaluate(`(()=>{return {body:document.body.innerText,badges:${ctx.selectors('.browser-private-badge')}.map(e=>e.textContent),notice:${ctx.selectors('.browser-private-notice,.browser-empty')}.filter(e=>e.textContent.includes('network identity')).map(e=>({text:e.textContent,bounds:e.getBoundingClientRect().toJSON()})),noticeOwners:[...document.querySelectorAll('.browser-private-notice,.browser-empty')].map(e=>({className:e.className,visibility:getComputedStyle(e).visibility,regionId:e.closest('[data-workbench-region-id]')?.getAttribute('data-workbench-region-id'),bounds:e.getBoundingClientRect().toJSON()}))}})()`)
+  assert.ok(text.badges.includes('Private')); assert.equal(text.notice.length, 1, JSON.stringify(text))
   assert.deepEqual(sha(await readFile(file)), result.sha256)
   ctx.receipt.privateVisual ??= []; ctx.receipt.privateVisual.push({ label, file, ...result, text,
     provenance: 'Actual product Renderer capture; the exact native page is blank. No visible website or overlay pixels are omitted or composited.', aestheticReview: 'pending-independent-review' })
@@ -220,7 +220,7 @@ export async function reviewPrivate(ctx) {
   assert.deepEqual(after.graph.layouts, before.graph.layouts, 'Cold restart must preserve the original Tab Group topology')
   assert.deepEqual(after.graph.resources['region:' + retained.regionId], privateSurface, 'The original private Region stays empty in the actual Core descriptor')
   await ctx.rpc.call('space.focus', { target: { kind: 'region', regionId: retained.regionId } })
-  await ctx.waitFor('actual private restart notice', () => next.cdp.evaluate("[...document.querySelectorAll('.browser-private-notice,.browser-empty')].some(e=>e.getClientRects().length&&e.textContent.includes('Temporary data has ended'))"))
+  await ctx.waitFor('actual private restart notice', () => next.cdp.evaluate(`${ctx.selectors(`[data-workbench-region-id="${retained.regionId}"] .browser-private-notice,[data-workbench-region-id="${retained.regionId}"] .browser-empty`)}.some(e=>e.textContent.includes('Temporary data has ended'))`))
   if (ctx.privateVisual) {
     await ctx.resize(next, 1440, 900); await privateFrame(restarted, 'private-restarted-normal')
     await ctx.resize(next, 980, 700); await privateFrame(restarted, 'private-restarted-narrow')
