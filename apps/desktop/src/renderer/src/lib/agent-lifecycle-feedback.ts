@@ -2,19 +2,17 @@ import type { AgentSessionControl } from '../../../shared/contracts'
 import type { AgentMuxRunState } from '@agentmux/core'
 import type { RenderableServiceNotice } from './service-window-notice'
 
-/** Presentation attributes of the existing current error, not another Runtime fact store. */
+/** Presentation attributes of the source-owned current failure, not another Runtime fact store. */
 export type AgentLifecycleFailure =
   | { step: 'launch'; regionId: string; tabId: string }
   | { step: 'resume'; subject: AgentSessionControl; lastProcessState: AgentMuxRunState }
 
 export type AgentLifecycleFeedbackOwner = { regionId: string } | { subject: AgentSessionControl }
 
-export function lifecycleFailureBelongsTo(failure: AgentLifecycleFailure | undefined, owner: AgentLifecycleFeedbackOwner): boolean {
-  if (!failure) return false
-  if (failure.step === 'launch') return 'regionId' in owner && failure.regionId === owner.regionId
-  return 'subject' in owner && failure.subject.hostId === owner.subject.hostId &&
-    failure.subject.agentSessionId === owner.subject.agentSessionId &&
-    failure.subject.run.runId === owner.subject.run.runId
+/** Region identity survives movement; a resume belongs to one exact Session and Run. */
+export function lifecycleFeedbackOwnerKey(owner: AgentLifecycleFeedbackOwner): string {
+  return JSON.stringify('regionId' in owner ? ['launch', owner.regionId]
+    : ['resume', owner.subject.hostId, owner.subject.agentSessionId, owner.subject.run.runId])
 }
 
 /** The entry point knows the failed step; the original error never becomes a type guessed from text. */
