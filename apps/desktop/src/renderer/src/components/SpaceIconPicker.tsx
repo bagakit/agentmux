@@ -30,7 +30,7 @@ const ThemeObjectProfileIcon = semanticIconComponent('object.profile')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeObjectShapesIcon = semanticIconComponent('object.shapes')
 const ThemeActionAddImageIcon = semanticIconComponent('action.add-image')
-const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
+const ThemeActionRestoreDefaultsIcon = semanticIconComponent('action.restore-defaults')
 const ThemeObjectLibraryIcon = semanticIconComponent('object.library')
 
 /** Shared chooser; drafts stay local until Save, authored metadata has the existing store owner. */
@@ -308,7 +308,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
               onClick={() => select(id)}><Icon size={18} /></button>)}
         </div> : null}
         <button type="button" className="small-button space-icon-picker__automatic" aria-pressed={mode === 'alternative' && !preview && draft === null}
-          disabled={busy} onClick={() => { select(null); setMode('alternative') }}><ThemeActionRotateResetIcon size={13} />Restore automatic</button>
+          disabled={busy} onClick={() => { select(null); setMode('alternative') }}><ThemeActionRestoreDefaultsIcon size={13} />Restore automatic</button>
         {error ? <p className="space-icon-picker__error" role="alert">{errorStep === 'save' ? 'Saving is unconfirmed. Your choice is kept; review the current avatar before saving again.' : 'Image preparation failed. Your current avatar is unchanged; choose image again.'} {error}</p> : null}
         {target?.avatarTarget && avatarReading ? <p className="space-icon-picker__description" role="status">Reading current avatar…</p> : null}
         {target?.avatarTarget && (avatarReadIssue || seriesAttempt || seriesStorageIssue) ? <div className="mote-series__notice" role="status" data-avatar-save-notice>

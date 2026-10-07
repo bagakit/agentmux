@@ -57,7 +57,7 @@ export function ConversationImageGallery({ references, initial, onInitialError }
     fallback={<div className="md-conversation-image__state" role="status">
       <span className="md-conversation-image__reference">{reference.text}</span>
       <span>{failure ?? 'Loading image…'}</span>
-      {failure ? <button type="button" className="md-conversation-image__control" aria-label="Retry image" title="Retry image" onClick={event => { event.currentTarget.closest<HTMLElement>('.md-conversation-image__viewport')?.focus({ preventScroll: true }); setAttempt(value => value + 1) }}><SemanticIcon name="action.rotate-reset" size={16} aria-hidden="true" /></button> : null}
+      {failure ? <button type="button" className="md-conversation-image__control" aria-label="Retry image" title="Retry image" onClick={event => { event.currentTarget.closest<HTMLElement>('.md-conversation-image__viewport')?.focus({ preventScroll: true }); setAttempt(value => value + 1) }}><SemanticIcon name="action.retry" size={16} aria-hidden="true" /></button> : null}
     </div>}
     {...(references.length > 1 ? { navigation: { index, count: references.length, previous: () => move(-1), next: () => move(1), previousButton, nextButton } } : {})} />
 }

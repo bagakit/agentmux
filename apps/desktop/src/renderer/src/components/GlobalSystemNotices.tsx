@@ -16,7 +16,7 @@ import { runtimeEndpointNotice } from '../lib/runtime-endpoint-notice'
 
 const ThemeStatusUnreadIcon = semanticIconComponent('status.unread')
 const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
-const ThemeLayoutCollapseIcon = semanticIconComponent('layout.collapse')
+const ThemeNavigationCollapseIcon = semanticIconComponent('navigation.up')
 
 
 /** One window-level inbox. Reading a service notice never changes its owner's current facts. */
@@ -210,7 +210,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       <div className="global-system-notices__heading">
         <strong>System notifications</strong>
         <button type="button" className="icon-button" aria-label="Collapse system notifications" title="Collapse system notifications"
-          popoverTarget={id} popoverTargetAction="hide"><ThemeLayoutCollapseIcon size={14} /></button>
+          popoverTarget={id} popoverTargetAction="hide"><ThemeNavigationCollapseIcon size={14} /></button>
       </div>
       {currentCount ? <h3 className="global-system-notices__section">Current issues <span>{currentCount}</span></h3> : null}
       {inboxes.map((inbox, index) => <div key={index}>

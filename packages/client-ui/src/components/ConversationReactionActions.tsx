@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import { useClientUiPlatform } from '../platform.js'
 
-const glyphs = { check: 'action.confirm', play: 'action.start', 'message-circle': 'object.context' } as const
+const glyphs = { check: 'action.confirm', play: 'action.start', 'message-circle': 'object.conversation' } as const
 
 /** The same bounded SVG vocabulary in replies and the Prompt editor. */
 export function PromptReactionIconView({ icon, size = 15 }: { icon: PromptReactionIcon; size?: number }) {

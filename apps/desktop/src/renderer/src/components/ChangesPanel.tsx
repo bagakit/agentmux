@@ -26,7 +26,7 @@ const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeGitUnstageIcon = semanticIconComponent('git.unstage')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
-const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
+const ThemeGitFetchIcon = semanticIconComponent('git.fetch')
 const ThemeActionDownloadIcon = semanticIconComponent('action.download')
 const ThemeActionUploadIcon = semanticIconComponent('action.upload')
 const ThemeGitPullRequestIcon = semanticIconComponent('git.pull-request')
@@ -401,7 +401,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
           <ThemeObjectRepositoryIcon size={11} />
           <span>{repo.branch ?? 'Detached HEAD'}</span>
           <div className="changes-remote">
-            {remoteButton('fetch', <ThemeActionRotateResetIcon size={12} />, 'Fetch from remote')}
+            {remoteButton('fetch', <ThemeGitFetchIcon size={12} />, 'Fetch from remote')}
             {remoteButton('pull', <ThemeActionDownloadIcon size={12} />, 'Pull from remote')}
             {remoteButton('push', <ThemeActionUploadIcon size={12} />, 'Push to remote')}
             {/*

@@ -23,7 +23,7 @@ const ThemeStatusInfoIcon = semanticIconComponent('status.info')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
-const ThemeObjectBroadcastIcon = semanticIconComponent('object.broadcast')
+const ThemeObjectHostIcon = semanticIconComponent('object.host')
 
 
 const NO_SESSIONS: SessionSnapshot[] = []
@@ -252,7 +252,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
               connectionChanged={JSON.stringify(draft) !== JSON.stringify(committed)}
               active={active && selectedId === id && panel === 'projects'} hidden={selectedId !== id || panel !== 'projects'} onClose={onClose} />
           })}
-          {!hosts.some((host) => host.id === selectedId) ? <div className="settings-resource-editor__empty" role="status"><ThemeObjectBroadcastIcon size={28} aria-hidden="true" /><strong>{requestedHost !== null ? 'Connection no longer available' : 'Connect your environments'}</strong><p>{requestedHost !== null ? `The requested connection (${requestedHost}) is no longer in these settings. Choose another connection to review it.` : 'Choose a connection, or add an SSH host to reuse across your projects.'}</p></div> : null}
+          {!hosts.some((host) => host.id === selectedId) ? <div className="settings-resource-editor__empty" role="status"><ThemeObjectHostIcon size={28} aria-hidden="true" /><strong>{requestedHost !== null ? 'Connection no longer available' : 'Connect your environments'}</strong><p>{requestedHost !== null ? `The requested connection (${requestedHost}) is no longer in these settings. Choose another connection to review it.` : 'Choose a connection, or add an SSH host to reuse across your projects.'}</p></div> : null}
         </div>
       </div>
       <SettingsSaveBar save={saveState} dirty={dirty} label="Save hosts" onSave={() => void save()} />

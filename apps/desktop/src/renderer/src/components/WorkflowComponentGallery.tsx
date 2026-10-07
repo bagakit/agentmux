@@ -87,10 +87,10 @@ export function WorkflowComponentGallery() {
       <nav className="wf-gallery__map" aria-label="Gallery 内容导航">
         <a href="#workflow-context"><SemanticIcon name="object.context" />上下文</a>
         <a href="#workflow-states"><SemanticIcon name="status.completed" />终态与恢复</a>
-        <a href="#workflow-scale"><SemanticIcon name="layout.scale" />规模与降级</a>
+        <a href="#workflow-scale"><SemanticIcon name="object.workflow" />规模与降级</a>
         <a href="#workflow-dock"><SemanticIcon name="layout.dock" />输入框上方 dock</a>
         <a href="#existing-surfaces"><SemanticIcon name="object.branch" />聊天表面</a>
-        <a href="#composer-details"><SemanticIcon name="conversation.message-tools" />Composer 细节</a>
+        <a href="#composer-details"><SemanticIcon name="object.composer-details" />Composer 细节</a>
         <a href="#inline-rename"><ThemeActionEditIcon size={13} />原位改名</a>
       </nav>
       <section id="workflow-context" className="wf-gallery__section">
@@ -113,7 +113,7 @@ export function WorkflowComponentGallery() {
         </div>
       </section>
       <section id="workflow-scale" className="wf-gallery__section">
-        <p className="wf-gallery__caption"><SemanticIcon name="layout.scale" /><b>C · 规模与旧 daemon</b><span>超过 8 个 Agent 自动分栏，安静尾部可反复收起；没有阶段事实就退化成普通 tool 行。</span></p>
+        <p className="wf-gallery__caption"><SemanticIcon name="object.workflow" /><b>C · 规模与旧 daemon</b><span>超过 8 个 Agent 自动分栏，安静尾部可反复收起；没有阶段事实就退化成普通 tool 行。</span></p>
         <div className="wf-gallery__stack">
           <WorkflowCard workflow={largeWorkflow} />
           <WorkflowToolRow title="Bash npm --prefix app/web run build" workflowName={legacyDaemonWorkflow.name} status="running" duration={legacyDaemonWorkflow.duration} notice={legacyDaemonWorkflow.legacyNotice ?? ''} />

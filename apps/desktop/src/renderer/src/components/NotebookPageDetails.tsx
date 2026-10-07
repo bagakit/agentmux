@@ -17,7 +17,7 @@ import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { api } from '../lib/api'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
-const ThemeActionOpenFolderIcon = semanticIconComponent('action.open-folder')
+const ThemeActionMoveToFolderIcon = semanticIconComponent('action.move-to-folder')
 const ThemeObjectLinkIcon = semanticIconComponent('object.link')
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 const ThemeActionMoreIcon = semanticIconComponent('action.more')
@@ -112,7 +112,7 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
       </button>
       <Menu.Root modal={false} open={visible && menuOpen} onOpenChange={setMenuOpen}><Menu.Trigger asChild><button ref={optionsTrigger} type="button" className="note-text-button" aria-label="Page options" title="Page options"><ThemeActionMoreIcon size={15} /></button></Menu.Trigger>
         <Menu.Portal container={resolveOverlayContainer()}><Menu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
-          <Menu.Group aria-label="Page organization"><Menu.Item className="tab-context-menu__item" aria-label="Move page" onSelect={() => openPanel('move')}><ThemeActionOpenFolderIcon size={14} /><span>Move page</span></Menu.Item></Menu.Group>
+          <Menu.Group aria-label="Page organization"><Menu.Item className="tab-context-menu__item" aria-label="Move page" onSelect={() => openPanel('move')}><ThemeActionMoveToFolderIcon size={14} /><span>Move page</span></Menu.Item></Menu.Group>
           <Menu.Separator className="tab-context-menu__separator" />
           <Menu.Group aria-label="Page information">
             <Menu.Item className="tab-context-menu__item" aria-label="Page sources" onSelect={() => openPanel('sources')}><ThemeObjectLinkIcon size={14} /><span>Sources{page.sources.length ? ` · ${page.sources.length}` : ''}</span></Menu.Item>

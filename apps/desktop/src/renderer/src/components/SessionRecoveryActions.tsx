@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -10,14 +10,13 @@ import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { recoveryOperationId, createRecoveryAgent, analyzeWithRecoveryMote, inspectRecoveryRequest, recoveryMoteTargets,
   type RecoveryMode, type RecoverySource, type RecoveryActionResult } from '../lib/session-recovery-actions'
 
-const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
 const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 
 
 /** Explicit choices share the existing spatial/queue correlation across dialog and Renderer mounts. */
-export function SessionRecoveryActions({ source, restoring, restoreDisabled = false, restoreLabel = 'Restore original', workingLabel = 'Restoring…', onRestore, onTakeOver }: {
-  source: RecoverySource; restoring: boolean; restoreDisabled?: boolean; restoreLabel?: string; workingLabel?: string; onRestore: () => void; onTakeOver?: (() => void) | undefined
+export function SessionRecoveryActions({ source, restoring, restoreDisabled = false, restoreLabel = 'Restore original', restoreIcon = 'action.resume-session', workingLabel = 'Restoring…', onRestore, onTakeOver }: {
+  source: RecoverySource; restoring: boolean; restoreDisabled?: boolean; restoreLabel?: string; restoreIcon?: 'action.resume-session' | 'action.refresh' | 'status.waiting'; workingLabel?: string; onRestore: () => void; onTakeOver?: (() => void) | undefined
 }) {
   const [mode, setMode] = useState<RecoveryMode | null>(null), [destination, setDestination] = useState<'agent' | 'mote'>('agent')
   const config = useAppStore(state => mode ? state.config : null)
@@ -81,7 +80,7 @@ export function SessionRecoveryActions({ source, restoring, restoreDisabled = fa
   const canSubmit = existing || (destination === 'agent' ? Boolean(executorId && config?.executors[executorId]) : Boolean(target))
   return <div className="session-recovery-actions">
     <button type="button" className="small-button" disabled={restoreDisabled || restoring} title={source.diagnostic} onClick={onRestore}>
-      <ThemeActionRotateResetIcon size={12} /> {restoring ? workingLabel : restoreLabel}
+      <SemanticIcon name={restoreIcon} size={12} /> {restoring ? workingLabel : restoreLabel}
     </button>
     {onTakeOver ? <button type="button" className="small-button" data-takeover-session-id={source.agentSessionId} data-takeover-region-id={source.regionId} onClick={onTakeOver}><ThemeNavigationForwardIcon size={12} /> Take over</button> : null}
     <button type="button" className="small-button" onClick={() => { setDestination('agent'); setExecutorId(''); setMoteKey(''); setMode('analyze') }}><ThemeActionSearchIcon size={12} /> Analyze…</button>

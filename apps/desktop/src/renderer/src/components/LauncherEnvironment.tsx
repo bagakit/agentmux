@@ -8,7 +8,7 @@ import { hostCheckLabel } from '../lib/host-check'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { LauncherExecutionPicker } from './LauncherExecutionPicker'
 
-const ThemeObjectBroadcastIcon = semanticIconComponent('object.broadcast')
+const ThemeObjectHostIcon = semanticIconComponent('object.host')
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 const ThemeObjectFolderIcon = semanticIconComponent('object.folder')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
@@ -35,7 +35,7 @@ export function LauncherEnvironment({ workspace, host, check, displayPath, activ
   const label = host?.label ?? workspace?.hostId ?? 'No host'
   const name = contextName ?? workspace?.name ?? 'Choose a workspace'
   const kind = host?.kind === 'local' ? 'Local host' : host?.kind === 'ssh' ? 'SSH host' : 'Host unconfirmed'
-  const Icon = host?.kind === 'ssh' ? ThemeObjectBroadcastIcon : ThemeObjectTerminalIcon
+  const Icon = host?.kind === 'ssh' ? ThemeObjectHostIcon : ThemeObjectTerminalIcon
   useEffect(() => { if (!active) setOpen(false) }, [active])
   useLayoutEffect(() => {
     const anchor = trigger.current

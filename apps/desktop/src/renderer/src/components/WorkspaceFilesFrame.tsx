@@ -9,7 +9,7 @@ import { FileExplorer } from './FileExplorer'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
-const ThemeObjectBroadcastIcon = semanticIconComponent('object.broadcast')
+const ThemeObjectHostIcon = semanticIconComponent('object.host')
 
 
 export type WorkspaceFileActions = {
@@ -41,7 +41,7 @@ export function WorkspaceFilesFrame({ workspace, visible, presentation, title, s
         {directoryFirst ? <strong>{title}</strong> : null}
       </button>
       <span title={displayPath(contextPath, workspace.hostId)}>{!directoryFirst ? <strong>{title}</strong> : null}{subtitle ? <small>{subtitle}</small> : null}</span>
-      {workspace.hostId !== 'local' ? <em><ThemeObjectBroadcastIcon size={11} /> {workspace.hostId}</em> : null}
+      {workspace.hostId !== 'local' ? <em><ThemeObjectHostIcon size={11} /> {workspace.hostId}</em> : null}
       <div className="workspace-tool-context__actions">{actions}<div ref={setToolbarTarget} /></div>
     </div>
   const content = <Panel key="content" defaultSize={100 - presentation.fileTreeDefaultSize} minSize={directoryFirst ? 55 : 20}>{children}</Panel>

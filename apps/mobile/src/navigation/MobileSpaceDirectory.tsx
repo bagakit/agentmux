@@ -75,7 +75,7 @@ export function MobileSpaceDirectory({ catalog, home, query, selectedSpaceId, on
           : <ul className="mobile-space-tree mobile-session-list" key={index}>{entries}</ul>
       })}
     </details>)}
-    {spaces.some(space => space.kind !== 'folder' && matching(space)) && <details className="mobile-tree-section" open><summary><SemanticIcon name="object.note" size={14} /><strong>Topics / 其他空间</strong></summary>
+    {spaces.some(space => space.kind !== 'folder' && matching(space)) && <details className="mobile-tree-section" open><summary><SemanticIcon name="object.topic" size={14} /><strong>Topics / 其他空间</strong></summary>
       <ul className="mobile-space-tree mobile-session-list">{spaces.filter(space => space.kind !== 'folder' && matching(space)).map(space => row(space))}</ul></details>}
     {filtering && !spaces.some(matching) && <p className="mobile-spatial-empty">没有匹配的空间。</p>}
   </div>

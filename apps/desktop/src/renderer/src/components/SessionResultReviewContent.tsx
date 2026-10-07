@@ -13,7 +13,7 @@ import { useGitStatus } from '../hooks/useGitStatus'
 import { useAppStore } from '../store'
 
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
-const ThemeObjectCriteriaIcon = semanticIconComponent('object.criteria')
+const ThemeObjectActivityIcon = semanticIconComponent('object.activity')
 const ThemeFileDiffIcon = semanticIconComponent('file.diff')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
@@ -108,7 +108,7 @@ export function SessionResultReviewContent({ sessionId, items, origin, controls,
       {controls}
     </div>
         <div className="session-result-review__details-actions">
-          <button type="button" className="small-button" onClick={() => { setViewMode(sessionId, 'activity'); onNavigate?.() }}><ThemeObjectCriteriaIcon size={12} /> Activity</button>
+          <button type="button" className="small-button" onClick={() => { setViewMode(sessionId, 'activity'); onNavigate?.() }}><ThemeObjectActivityIcon size={12} /> Activity</button>
           {workspace && repository ? reviewableChanges.map(({ change, path }) => (
             <button key={change.path} type="button" className="small-button" onClick={() => void openFileDiff(path, workspace.id).then(onNavigate).catch(reportError)}><ThemeFileDiffIcon size={12} /> <span title={path}>{path}</span></button>
           )) : null}

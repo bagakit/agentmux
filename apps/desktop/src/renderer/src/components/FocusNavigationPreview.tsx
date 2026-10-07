@@ -5,18 +5,18 @@ import { createFocusProjectionSelector, focusNeutralGroupSummary, type FocusBuck
 import { useAppStore } from '../store'
 import { AgentProviderIcon } from './AgentProviderIcon'
 
-const ThemeActionStartIcon = semanticIconComponent('action.start')
+const ThemeStatusWorkingIcon = semanticIconComponent('status.working')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
-const ThemeStatusPausedIcon = semanticIconComponent('status.paused')
+const ThemeStatusIdleIcon = semanticIconComponent('status.idle')
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 
 
 const groups = [
-  { bucket: 'working', label: 'Working', icon: ThemeActionStartIcon },
+  { bucket: 'working', label: 'Working', icon: ThemeStatusWorkingIcon },
   { bucket: 'attention', label: 'Attention', icon: ThemeStatusWarningIcon },
   { bucket: 'results', label: 'Results', icon: ThemeStatusCompletedIcon },
-  { bucket: 'idle', label: 'Idle', icon: ThemeStatusPausedIcon }
+  { bucket: 'idle', label: 'Idle', icon: ThemeStatusIdleIcon }
 ] as const
 const priority: Record<FocusBucket, number> = { attention: 0, working: 1, results: 2, idle: 3 }
 

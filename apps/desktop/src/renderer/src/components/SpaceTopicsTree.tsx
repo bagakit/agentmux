@@ -36,7 +36,7 @@ const ThemeActionMoreIcon = semanticIconComponent('action.more')
 const ThemeActionPinIcon = semanticIconComponent('action.pin')
 const ThemeActionEditNoteIcon = semanticIconComponent('action.edit-note')
 const ThemeActionRestoreIcon = semanticIconComponent('action.restore')
-const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 const ThemeActionCreateFolderIcon = semanticIconComponent('action.create-folder')
 
 
@@ -238,7 +238,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
     categoryTopics.get(category.spaceId)!.some(topic => matchesSpaceQuery(query, 'Topics', category.title, topic.title, topic.summary, scratchTopicPhysicalPath(workspace, topic), workspace.hostId)))
   return <div ref={tree} className="space-topics-tree">
     {moteSection(motes.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived))}
-    <div className="space-section space-topics-section"><SpaceSectionHeader label="Topics" count={categories.length} icon={<ThemeObjectNotebookIcon size={14} />}
+    <div className="space-section space-topics-section"><SpaceSectionHeader label="Topics" count={categories.length} icon={<ThemeObjectTopicIcon size={14} />}
       expanded={filtering || collapsedGroups['space:topics'] !== true} filtering={filtering} onToggle={() => toggleGroup('space:topics')}
       onOpen={() => void openOverview()} createLabel="Create Category" createIcon={<ThemeActionCreateFolderIcon size={13} />}
       onCreate={async () => editCategory('create')} />

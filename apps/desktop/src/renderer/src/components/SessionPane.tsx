@@ -67,7 +67,8 @@ import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-m
 import type { ConversationRevealRequest, MailboxMessageNavigationResult } from '../lib/mailbox-message-navigation'
 
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
-const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
+const ThemeActionResumeSessionIcon = semanticIconComponent('action.resume-session')
+const ThemeActionRestartTerminalIcon = semanticIconComponent('action.restart-terminal')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 const ThemeStatusHostUnavailableIcon = semanticIconComponent('status.host-unavailable')
@@ -653,7 +654,7 @@ export function SessionPane({
       restore: 'Re-read this original owner. This action does not start a Run or send input.'
     } }} /> : null}
     {recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={onTakeOver} restoring={refreshing}
-      workingLabel="Reading…" restoreLabel="Check original" onRestore={() => void refreshUnobserved()} />
+      workingLabel="Reading…" restoreLabel="Check original" restoreIcon="action.refresh" onRestore={() => void refreshUnobserved()} />
       : <button type="button" className="small-button" disabled={refreshing} onClick={() => void refreshUnobserved()}>
         <ThemeActionRefreshIcon size={12} /> {refreshing ? 'Reading…' : 'Check original identity'}
       </button>}
@@ -819,7 +820,7 @@ export function SessionPane({
     const identityLabel = providerLabel && executorLabel && providerLabel.toLowerCase() !== executorLabel.toLowerCase()
       ? `${providerLabel} · ${executorLabel}` : providerLabel
     const resumeAction = projectionPolicy.allowsRecovery && recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={onTakeOver}
-      restoring={recovering} workingLabel={continuationUnconfirmed ? 'Checking…' : 'Restoring…'} restoreLabel={continuationUnconfirmed ? 'Check original restore' : 'Restore original'} onRestore={() => void reopenRetained()} /> : null
+      restoring={recovering} restoreIcon={continuationUnconfirmed ? 'action.refresh' : 'action.resume-session'} workingLabel={continuationUnconfirmed ? 'Checking…' : 'Restoring…'} restoreLabel={continuationUnconfirmed ? 'Check original restore' : 'Restore original'} onRestore={() => void reopenRetained()} /> : null
     const reopenCause = retainedReopenError ?? (pendingReopen
       ? pendingReopen.operationId ? 'Core retains the original continue operation. Its result is not yet confirmed.'
         : 'Core retains the original continue operation, but its correlation is unavailable. Its result remains unknown.' : null)
@@ -919,11 +920,12 @@ export function SessionPane({
     <span>Open this Session in its Project to restore it.</span>
   ) : recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={onTakeOver} restoring={recovering || refreshing}
     workingLabel={refreshing ? 'Re-reading…' : 'Restoring…'}
+    restoreIcon={continuityNotice && continuityRefreshEnabled(continuityNotice) ? 'action.refresh' : continuityNotice?.remedy.kind === 'wait' ? 'status.waiting' : 'action.resume-session'}
     restoreDisabled={continuityNotice ? !(continuityRetryEnabled(continuityNotice) || continuityRefreshEnabled(continuityNotice)) : false}
     restoreLabel={continuityNotice && continuityRefreshEnabled(continuityNotice) ? 'Re-read original' : continuityNotice?.remedy.kind === 'wait' ? 'Waiting for operation' : 'Restore original'}
     onRestore={() => { if (continuityNotice && continuityRefreshEnabled(continuityNotice)) void refresh(); else void recover() }} /> : (
     <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
-      <ThemeActionRotateResetIcon size={12} /> {recovering ? 'Resuming…' : 'Resume'}
+      <ThemeActionResumeSessionIcon size={12} /> {recovering ? 'Resuming…' : 'Resume'}
     </button>
   )
   const pendingRestoreDetail = pendingAgentRestore && startupDecision ? continuityNotice?.reason ?? (recoveryCandidate
@@ -1077,7 +1079,7 @@ export function SessionPane({
                   ) : (
                     // The PTY is gone for good — relaunch a fresh terminal in the same cwd.
                     <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
-                      <ThemeActionRotateResetIcon size={12} /> {recovering ? 'Restarting…' : 'Restart terminal'}
+                      <ThemeActionRestartTerminalIcon size={12} /> {recovering ? 'Restarting…' : 'Restart terminal'}
                     </button>
                   )
                 ) : agentRecoveryAction}

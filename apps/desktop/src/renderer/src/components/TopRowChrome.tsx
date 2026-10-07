@@ -10,7 +10,7 @@ import { SURFACE_NAVIGATION_PLUGINS } from './SurfaceNavigation'
 import { OVERLAY_LAYER_BANDS, WindowOverlayPortal } from './WindowOverlayHost'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 
-const ThemeLayoutActiveFirstIcon = semanticIconComponent('layout.active-first')
+const ThemeLayoutSidebarProjectsIcon = semanticIconComponent('layout.sidebar-projects')
 const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
 const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
 
@@ -89,7 +89,7 @@ function ProjectRailToggle() {
       data-project-rail-toggle
       onClick={toggleProjectRail}
     >
-      <ThemeLayoutActiveFirstIcon size={15} />
+      <ThemeLayoutSidebarProjectsIcon size={15} />
     </button>
   )
 }

@@ -178,7 +178,7 @@ export function AgentInteractionCard({
               className={option.kind === 'allow-once' ? 'is-primary' : undefined}
               onClick={() => void respond(response)}
             >
-              {isAffirmative(option) ? <SemanticIcon name="action.confirm" size={12} /> : <SemanticIcon name="action.dismiss" size={12} />}
+              {isAffirmative(option) ? <SemanticIcon name="action.confirm" size={12} /> : <SemanticIcon name="action.reject" size={12} />}
               {option.label}
             </button>
           ))}

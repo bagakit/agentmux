@@ -34,7 +34,7 @@ const ThemeStatusNotificationIcon = semanticIconComponent('status.notification')
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
 const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
 const ThemeActionUnlinkIcon = semanticIconComponent('action.unlink')
-const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
@@ -86,9 +86,9 @@ const ROW_KIND_META: Record<BoardRow['kind'], {
   },
   topic: {
     cornerLabel: 'Topic',
-    cornerIcon: ThemeObjectNotebookIcon,
-    rowIcon: ThemeObjectNotebookIcon,
-    unboundIcon: ThemeObjectNotebookIcon,
+    cornerIcon: ThemeObjectTopicIcon,
+    rowIcon: ThemeObjectTopicIcon,
+    unboundIcon: ThemeObjectTopicIcon,
     title: 'Topic × status',
     subtitle: 'Topics run vertically. Agent progress moves horizontally within the same row.',
     emptyPathLabel: 'No directory'

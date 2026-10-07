@@ -72,7 +72,7 @@ export function ConversationInputDetails({ messageId, source, publicContent, exe
           <dl><dt>Session</dt><dd><code>{details.sessionId}</code></dd><dt>Provider</dt><dd>{details.providerId}</dd>
             <dt>Lifecycle start</dt><dd>{Number.isFinite(details.createdAt) ? new Date(details.createdAt).toLocaleString() : 'Unknown'}</dd>
             <dt>Lifecycle end</dt><dd>Not recorded</dd></dl>
-          {details.goals.length ? <div className="conversation-input-details__goals"><h4><SemanticIcon name="object.marker" size={11} aria-hidden="true" />Explicitly linked goals</h4>
+          {details.goals.length ? <div className="conversation-input-details__goals"><h4><SemanticIcon name="object.goal" size={11} aria-hidden="true" />Explicitly linked goals</h4>
             <ul>{details.goals.map((goal) => <li key={goal.id}>{goal.title}</li>)}</ul></div> : <p>No linked goal recorded.</p>}
           <p className="conversation-input-details__notice">Current metadata; title, project and goals at message time were not recorded.</p>
         </> : <p>No current sender metadata for this exact session.</p>}

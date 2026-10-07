@@ -17,7 +17,7 @@ import { agentProviderLabel } from './AgentProviderIcon'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
-const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
 const ThemeActionCreateConversationIcon = semanticIconComponent('action.create-conversation')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
@@ -117,7 +117,7 @@ export function BoardDiscussionCanvas({
   }
 
   const isTopic = row?.kind === 'topic'
-  const ContextIcon = isTopic ? ThemeObjectNotebookIcon : ThemeObjectBranchIcon
+  const ContextIcon = isTopic ? ThemeObjectTopicIcon : ThemeObjectBranchIcon
 
   return (
     <Dialog.Root open={row !== null} onOpenChange={(open) => !open && !launching && onClose()}>
