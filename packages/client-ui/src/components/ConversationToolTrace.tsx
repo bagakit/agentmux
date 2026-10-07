@@ -38,7 +38,7 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
           if (onToggle) onToggle(!open)
           else setLocalOpen(!open)
         }} title={name}>
-        {failed ? <SemanticIcon name="status.failed" size={13} aria-hidden="true" /> : <SemanticIcon name="object.terminal" size={13} aria-hidden="true" />}
+        <SemanticIcon name={failed ? 'status.failed' : isCall ? 'conversation.tool-call' : 'conversation.tool-result'} size={13} aria-hidden="true" />
         <span className="conversation-tool-trace__title">{title}</span>
         <span className="conversation-tool-trace__kind">{isCall ? 'Tool call' : 'Tool result'}</span>
         {failed ? <span className="conversation-tool-trace__failure">Failed</span> : null}
