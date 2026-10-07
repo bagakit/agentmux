@@ -702,6 +702,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         <AgentInteractionCard key={requestKey} request={request} disabled={responseDisabled}
           {...(responseAttempt?.phase === 'unknown' ? { responseUnavailableReason: responseAttempt.message } : responseUnavailableReason ? { responseUnavailableReason } : {})}
           responseStatus={responseAttempt?.original ? responseStatus(requestKey, responseAttempt) : undefined}
+          {...(onShowTerminal ? { onOpenTerminal: onShowTerminal } : {})}
           onRespond={respond} />
         {responseAttempt && !responseAttempt.original ? <p role="status">{responseAttempt.message}</p> : null}
       </div> : null}
