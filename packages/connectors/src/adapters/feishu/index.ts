@@ -6,6 +6,7 @@ import type { ConnectionIngressTransport, ConnectionIngressReceiver } from '../.
 import type { IngressAuthenticator, VerifiedIngressEvent } from '../../durable-ingress.js'
 import { feishuFailure, feishuIdentity, readFeishuMessage, projectFeishuMessage } from './message.js'
 import { feishuParentAddressing } from './reply.js'
+import { FeishuPublicationAdapter } from './publication.js'
 
 export type FeishuAdapterOptions = { http?: HttpInstance }
 /** Only original application identity is needed by the SDK; Host authorization stays outside the leaf. */
@@ -21,6 +22,7 @@ const safeLogger: Logger = { error: muted, warn: muted, info: muted, debug: mute
 
 export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   readonly adapterId = 'feishu'
+  readonly publication = new FeishuPublicationAdapter(this)
   readonly ingress = this
   readonly transport: ConnectionIngressTransport = { start: input => this.startReceiver(input) }
   private readonly witnesses = new WeakSet<object>()
