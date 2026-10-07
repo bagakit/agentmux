@@ -246,8 +246,8 @@ describe('四条路径的接线守护：真的都改成调用同一出口', () =
     expect(submit).toContain('composeAgentPrompt(content, input.agentMuxNote)')
     expect(submit).toContain('const outbound = composed.text')
     // 出口的产物 outbound 才是喂给 provider/记录的东西——不是原始 content。
-    expect(submit).toContain('planPromptInput(outbound,')
-    expect(submit).toMatch(/this\.promptSubmission\.submitInputPlan\(current,\s*run,\s*operationId,\s*outbound,\s*plan(?:,|\))/)
+    expect(submit).toContain('const ordinaryPlan = provider.planPromptInput(outbound,')
+    expect(submit).toMatch(/this\.promptSubmission\.submitInputPlan\(current,\s*run,\s*operationId,\s*outbound,\s*ordinaryPlan(?:,|\))/)
     expect(submit).not.toContain('planPromptInput(content)')
   })
 
