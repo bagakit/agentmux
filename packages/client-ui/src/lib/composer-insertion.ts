@@ -5,7 +5,12 @@ export type ComposerInsert = (
   resolve: () => string | null | Promise<string | null>,
   options?: { separate?: boolean }
 ) => Promise<void>
-export type ComposerInsertionHandle = { insert: ComposerInsert; replace(value: string): void }
+export type ComposerInsertionHandle = {
+  insert: ComposerInsert
+  replace(value: string): void
+  /** Replace a confirmed original editor range; returns false if that exact text no longer exists. */
+  replaceRange?(range: { from: number; to: number; expected: string }, value: string): boolean
+}
 export type ComposerPasteImage = (file: File, insert: ComposerInsert) => void
 
 /** An open document slice joins its edge paragraphs to the surrounding text, like a native paste. */
@@ -49,9 +54,11 @@ export async function insertComposerContent(
     if (editor.isDestroyed) throw new Error('The message editor closed before the attachment finished. The saved draft was not changed.')
     const range = bookmark.resolve(editor.state.doc)
     const { from } = range
-    const before = editor.state.doc.textBetween(Math.max(0, from - 1), from, '\n', ' ')
+    const before = editor.state.doc.textBetween(Math.max(0, from - 1), from, '\n', '\ufffc')
+    const after = editor.state.doc.textBetween(range.to, Math.min(editor.state.doc.content.size, range.to + 1), '\n', '\ufffc')
     const prefix = options.separate && before && !/\s/u.test(before) ? ' ' : ''
-    replaceComposerRange(editor, parse(`${prefix}${value}`), range)
+    const suffix = options.separate && after && !/\s/u.test(after) && !/\s$/u.test(value) ? ' ' : ''
+    replaceComposerRange(editor, parse(`${prefix}${value}${suffix}`), range)
     if (document.activeElement === focusOwner || editor.isFocused) editor.commands.focus()
   } finally {
     editor.off('transaction', map)

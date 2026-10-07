@@ -2,7 +2,7 @@ import type { AgentTimelineSnapshot, AppConfig, SessionSnapshot, WorkspaceRecord
 import type { ConversationSenderDetails, ConversationSpeaker, DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import type { DemandRecord } from './global-demand-board'
 import { agentDisplayName, firstPromptFromTimeline, topicIdForSession, workspaceForSession } from './workbench-tabs'
-import { projectWorkspaces, workspaceProjectId } from './workspace-projects'
+import { projectWorkspaces, workspaceProjectId, type WorkspaceProject } from './workspace-projects'
 import { sessionPresentationById } from './session-presentation'
 import { scratchTopicKind, scratchTopicsForConfig, scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
 import { topicSpaceIconTarget, type SpaceIconOverrides } from './space-object-appearance'
@@ -55,38 +55,49 @@ export function createConversationSpeakerFactsSelector(speakerIds: readonly stri
 }
 
 /** Cheap current identity only. Complete sender details and goals remain an explicit disclosure read. */
-export function currentConversationSpeakerMetadata(sessionId: string, snapshot: SpeakerSnapshot):
-  (Omit<ConversationSenderDetails, 'goals'> & { mote?: MoteConversationIdentity }) | undefined {
-  const sender = sessionPresentationById(snapshot.sessions).get(sessionId)
-  if (!sender || sender.kind !== 'agent') return undefined
-  const workspace = snapshot.workspaces.find((item) =>
-    item.hostId === sender.hostId && item.path === sender.workspacePath)
-  const project = workspace ? projectWorkspaces(snapshot.workspaces).find((item) =>
-    item.id === workspaceProjectId(workspace)) : undefined
+export function createConversationSpeakerMetadataReader(snapshot: SpeakerSnapshot) {
+  const sessions = sessionPresentationById(snapshot.sessions)
+  let projects: Map<string, WorkspaceProject> | undefined
   const sourceTopics = scratchTopicsForConfig(snapshot.config, snapshot.scratchTopicSnapshots)
-  const sourceWorkspace = workspaceForSession(snapshot.config ?? null, sender, sourceTopics)
-  const topicId = topicIdForSession(snapshot.config ?? null, sender, sourceTopics)
-  const topics = snapshot.scratchTopicSnapshots ? scratchTopicsForWorkspace(snapshot.scratchTopicSnapshots, sourceWorkspace) : null
-  const topic = topicId ? topics?.find(item => item.id === topicId) : undefined
-  const target = sourceWorkspace && topicId && topic && !topic.readError && scratchTopicKind(topicId, topics) === 'mote'
-    ? topicSpaceIconTarget(sourceWorkspace, topic) : undefined
-  const mote = target && sourceWorkspace && topic ? { workspaceId: sourceWorkspace.id, topicId: topic.id,
-    objectKey: target.key, name: topic.title, icon: snapshot.spaceObjectIcons?.[target.key] ?? null } : undefined
-  return {
-    sessionId: sender.id,
-    label: agentDisplayName({ userName: snapshot.agentNames[sender.id],
-      firstPrompt: firstPromptFromTimeline(snapshot.timelines?.[sender.id]),
-      fallbackLabel: sender.label, providerLabel: sender.providerId }),
-    providerId: sender.providerId,
-    createdAt: sender.createdAt,
-    ...(mote ? { mote } : {}),
-    ...(project ? { project: {
-      workspaceId: project.preferredWorkspaceId,
-      name: project.name,
-      path: project.repoPath,
-      ...(workspace?.branch ? { branch: workspace.branch } : {})
-    } } : {})
+  const contexts = new Map<string, { project: ConversationSenderDetails['project']; mote: MoteConversationIdentity | undefined }>()
+  return (sessionId: string): (Omit<ConversationSenderDetails, 'goals'> & { mote?: MoteConversationIdentity }) | undefined => {
+    const sender = sessions.get(sessionId)
+    if (!sender || sender.kind !== 'agent') return undefined
+    const resource = JSON.stringify([sender.hostId, sender.workspacePath])
+    let context = contexts.get(resource)
+    if (!context) {
+      const workspace = snapshot.workspaces.find((item) =>
+        item.hostId === sender.hostId && item.path === sender.workspacePath)
+      const project = workspace ? (projects ??= new Map(projectWorkspaces(snapshot.workspaces).map(project => [project.id, project]))).get(workspaceProjectId(workspace)) : undefined
+      const sourceWorkspace = workspaceForSession(snapshot.config ?? null, sender, sourceTopics)
+      const topicId = topicIdForSession(snapshot.config ?? null, sender, sourceTopics)
+      const topics = snapshot.scratchTopicSnapshots ? scratchTopicsForWorkspace(snapshot.scratchTopicSnapshots, sourceWorkspace) : null
+      const topic = topicId ? topics?.find(item => item.id === topicId) : undefined
+      const target = sourceWorkspace && topicId && topic && !topic.readError && scratchTopicKind(topicId, topics) === 'mote'
+        ? topicSpaceIconTarget(sourceWorkspace, topic) : undefined
+      const mote = target && sourceWorkspace && topic ? { workspaceId: sourceWorkspace.id, topicId: topic.id,
+        objectKey: target.key, name: topic.title, icon: snapshot.spaceObjectIcons?.[target.key] ?? null } : undefined
+      context = { mote, project: project ? { workspaceId: project.preferredWorkspaceId, name: project.name, path: project.repoPath,
+        ...(workspace?.branch ? { branch: workspace.branch } : {}) } : undefined }
+      contexts.set(resource, context)
+    }
+    return {
+      sessionId: sender.id,
+      label: agentDisplayName({ userName: snapshot.agentNames[sender.id],
+        firstPrompt: firstPromptFromTimeline(snapshot.timelines?.[sender.id]),
+        fallbackLabel: sender.label, providerLabel: sender.providerId }),
+      providerId: sender.providerId,
+      createdAt: sender.createdAt,
+      ...(context.mote ? { mote: context.mote } : {}),
+      ...(context.project ? { project: context.project } : {})
+    }
   }
+}
+
+/** A single current read uses the same resolver as a batch menu. */
+export function currentConversationSpeakerMetadata(sessionId: string, snapshot: SpeakerSnapshot) {
+  if (sessionPresentationById(snapshot.sessions).get(sessionId)?.kind !== 'agent') return undefined
+  return createConversationSpeakerMetadataReader(snapshot)(sessionId)
 }
 
 /** An explicit detail read over the existing Store snapshot and exact identity. */
