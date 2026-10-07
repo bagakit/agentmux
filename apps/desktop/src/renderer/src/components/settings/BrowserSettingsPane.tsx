@@ -32,7 +32,7 @@ export function BrowserSettingsPane({ browser, onSave, onForget }: {
 
   return (
     <div className="settings-pane-stack">
-      <section className="settings-group">
+      <section className="settings-group" data-settings-field="agent-automation">
         <header><span>Agent automation</span><small>Saved: {saved ? 'On' : 'Off'}</small></header>
         <label className="browser-automation-toggle">
           <input

@@ -24,12 +24,12 @@ export function BrowserStartPageSettings({ config, onSave, onOpen }: {
   return <div className="settings-pane-stack">
     <section className="settings-group">
       <header><span>Browser start page</span><small>Survey</small></header>
-      <label className="browser-start-settings__field"><span>Title</span><TextInput aria-label="Start page title" value={draft.value.title} maxLength={BROWSER_START_PAGE_TITLE_LIMIT} onChange={event => draft.setField('title', event.target.value)} /></label>
-      <label className="browser-start-settings__field"><span>Subtitle</span><TextInput aria-label="Start page subtitle" value={draft.value.subtitle} maxLength={BROWSER_START_PAGE_SUBTITLE_LIMIT} onChange={event => draft.setField('subtitle', event.target.value)} /></label>
-      <label className="browser-start-settings__field"><span>Icon image</span><TextInput aria-label="Start page icon" placeholder="Image URL · leave blank to hide" value={draft.value.icon} onChange={event => draft.setField('icon', event.target.value)} /></label>
-      <label className="browser-start-settings__field"><span>Background image</span><TextInput aria-label="Start page background image" placeholder="Image URL · leave blank to hide" value={draft.value.backgroundImage} onChange={event => draft.setField('backgroundImage', event.target.value)} /></label>
+      <label className="browser-start-settings__field" data-settings-field="start-title"><span>Title</span><TextInput aria-label="Start page title" value={draft.value.title} maxLength={BROWSER_START_PAGE_TITLE_LIMIT} onChange={event => draft.setField('title', event.target.value)} /></label>
+      <label className="browser-start-settings__field" data-settings-field="start-subtitle"><span>Subtitle</span><TextInput aria-label="Start page subtitle" value={draft.value.subtitle} maxLength={BROWSER_START_PAGE_SUBTITLE_LIMIT} onChange={event => draft.setField('subtitle', event.target.value)} /></label>
+      <label className="browser-start-settings__field" data-settings-field="start-icon"><span>Icon image</span><TextInput aria-label="Start page icon" placeholder="Image URL · leave blank to hide" value={draft.value.icon} onChange={event => draft.setField('icon', event.target.value)} /></label>
+      <label className="browser-start-settings__field" data-settings-field="start-background"><span>Background image</span><TextInput aria-label="Start page background image" placeholder="Image URL · leave blank to hide" value={draft.value.backgroundImage} onChange={event => draft.setField('backgroundImage', event.target.value)} /></label>
       <p className="settings-group-note">Use an image URL or inline image. Empty image fields turn them off.</p>
-      <label className="browser-automation-toggle"><input type="checkbox" aria-label="Show recent input cards" checked={draft.value.showHistory} onChange={event => draft.setField('showHistory', event.target.checked)} />
+      <label className="browser-automation-toggle" data-settings-field="start-history"><input type="checkbox" aria-label="Show recent input cards" checked={draft.value.showHistory} onChange={event => draft.setField('showHistory', event.target.checked)} />
         <span><strong>Show recent addresses and searches</strong><small>Cards use this Browser's saved input history. Turning them off keeps your history.</small></span></label>
     </section>
     <SettingsSaveBar save={save} dirty={draft.dirty} label="Save start page" onSave={() => void submit()} />

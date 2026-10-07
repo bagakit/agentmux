@@ -18,6 +18,9 @@ export const spaceSettingsModule = {
   id: 'space', group: 'work', title: 'Space', icon: ThemeObjectLauncherIcon,
   description: 'Project rail density, topics and projects.',
   keywords: 'work topic topics project projects density rail compact dense',
+  searchTargets: [
+    { id: 'project-rail', title: 'Project rail density', keywords: 'comfortable compact dense sidebar' },
+  ],
   savedSummary: config => `${projectRailDensityLabel(config.projectRailDensity)} project rail`,
   Pane({ config, onClose, onNavigate }) {
     return <SpaceSettingsPane density={config.projectRailDensity} onSave={saveDensity}

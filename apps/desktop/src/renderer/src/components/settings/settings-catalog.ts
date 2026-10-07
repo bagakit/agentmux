@@ -25,12 +25,21 @@ export type SettingsPaneProps = {
 }
 
 /** A source contribution; editors and save semantics stay with their feature. */
+export type SettingsSearchTarget = {
+  id: string
+  title: string
+  description?: string
+  keywords?: string
+  kind?: 'field' | 'action' | 'info'
+}
+
 export type SettingsModule = {
   id: string
   group: typeof SETTINGS_GROUPS[number]['id']
   title: string
   description: string
   keywords: string
+  searchTargets?: readonly SettingsSearchTarget[]
   icon: SemanticIconComponent
   savedSummary(config: AppConfig): string
   Pane: ComponentType<SettingsPaneProps>
@@ -50,7 +59,18 @@ export function createSettingsCatalog<const Modules extends readonly SettingsMod
     if (!normalized) return [...orderedModules]
     return orderedModules.filter((module) =>
       `${module.title} ${module.description} ${module.keywords}`.toLowerCase().includes(normalized)
+      || (module as SettingsModule).searchTargets?.some(target => targetText(target).includes(normalized))
     )
+  }
+
+  function searchResults(query: string) {
+    const normalized = query.trim().toLowerCase()
+    if (!normalized) return []
+    return visibleSections(query).map(module => ({
+      module,
+      targets: ((module as SettingsModule).searchTargets ?? []).filter(target =>
+        module.title.toLowerCase().includes(normalized) || targetText(target).includes(normalized))
+    }))
   }
 
   function navGroups(query: string): SettingsNavGroup<Modules[number]>[] {
@@ -61,5 +81,9 @@ export function createSettingsCatalog<const Modules extends readonly SettingsMod
     })
   }
 
-  return { visibleSections, navGroups }
+  return { visibleSections, navGroups, searchResults }
+}
+
+function targetText(target: SettingsSearchTarget): string {
+  return `${target.title} ${target.description ?? ''} ${target.keywords ?? ''}`.toLowerCase()
 }

@@ -40,7 +40,7 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, skipAgentAvailability
 
   return (
     <div className="settings-pane-stack">
-      <section className="settings-group">
+      <section className="settings-group" data-settings-field="copy-paths">
         <header><span>Project path display and copying</span><small>Saved: {saved ? 'Absolute' : 'Abbreviated'}</small></header>
         <label className="browser-automation-toggle">
           <input type="checkbox" checked={draft.value.copyPathsAsAbsolute} onChange={(event) => draft.setField('copyPathsAsAbsolute', event.target.checked)} />
@@ -50,7 +50,7 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, skipAgentAvailability
           </span>
         </label>
       </section>
-      <section className="settings-group">
+      <section className="settings-group" data-settings-field="startup-checks">
         <header><span>Startup checks</span><small>Saved: {startupSaved ? 'Continue while checking' : 'Wait for Agent availability'}</small></header>
         <label className="browser-automation-toggle">
           <input type="checkbox" checked={draft.value.skipAgentAvailabilityCheckWait} onChange={(event) => draft.setField('skipAgentAvailabilityCheckWait', event.target.checked)} />
@@ -63,20 +63,20 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, skipAgentAvailability
       <section className="settings-card">
         <dl className="settings-footnote">
           <div>
-            <dt>Local data</dt>
+            <dt data-settings-field="local-data">Local data</dt>
             <dd>AgentMux keeps your workspace configuration on this machine.</dd>
           </div>
           <div>
-            <dt>Session recovery</dt>
+            <dt data-settings-field="session-recovery">Session recovery</dt>
             <dd>Your tabs and layouts are restored when you return. Running agents stay available when the desktop window closes.</dd>
           </div>
           <div>
-            <dt>System SSH</dt>
+            <dt data-settings-field="system-ssh">System SSH</dt>
             <dd>Remote AgentMux Runs are not supported yet. Connection metadata and key file paths stay on this machine; private key contents are never stored.</dd>
           </div>
         </dl>
       </section>
-      <div className="settings-diagnostics">
+      <div className="settings-diagnostics" data-settings-field="crash-log">
         {/* 「不上传」这句要和按钮同框。用户第一次意识到崩溃证据存在，就是点这个按钮的时候——
             那一刻他会想「这些东西被发到哪去了」，而答案（哪也没发）必须当场在场，不能在别的页面。 */}
         <span>

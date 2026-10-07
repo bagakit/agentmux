@@ -67,7 +67,7 @@ export function NotificationSettingsPane({ notifications, onSave }: {
         <p className="notification-preview__body">Review Codex: Ready for your call on the migration plan.</p>
         <div className="notification-preview__dwell" data-persist={persist ? 'true' : undefined} style={{ '--dwell-fill': dwellFill } as CSSProperties}><i /></div>
       </figure>
-      <section className="settings-group">
+      <section className="settings-group" data-settings-field="notification-dwell">
         <header><span>How long it stays</span><small>{active.label}</small></header>
         <div className="notification-dwell">
           <input
@@ -95,7 +95,7 @@ export function NotificationSettingsPane({ notifications, onSave }: {
           <p className="notification-dwell__description">{active.description}</p>
         </div>
       </section>
-      <section className="settings-group">
+      <section className="settings-group" data-settings-field="notification-sound">
         <header><span>Sound</span><small>{sound ? 'On' : 'Off'}</small></header>
         <label className="notification-sound-toggle">
           <input
