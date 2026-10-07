@@ -11,12 +11,14 @@ const object = (value: unknown, fields: string[]) => rpcRecord(value, fields, 'I
 function text(value: unknown): string { if (typeof value !== 'string' || !value || value.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(value)) fail(); return value as string }
 function id(value: unknown): string { const result = text(value); if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(result)) fail(); return result }
 function revision(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 1) fail(); return value as number }
-function application(value: unknown): ConnectionApplication { const p = object(value, ['domain', 'appId']), domain = text(p.domain); if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail(); return { domain, appId: id(p.appId) } }
+export function parseConnectionApplication(value: unknown): ConnectionApplication { const p = object(value, ['domain', 'appId']), domain = text(p.domain); if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail(); return { domain, appId: id(p.appId) } }
 function source(value: unknown) { const p = object(value, ['providerId', 'nativeSessionId']); return { providerId: text(p.providerId), nativeSessionId: text(p.nativeSessionId) } }
 function scope(value: unknown): RoomBindingScope { const p = object(value, ['input', 'publication']); if (!['mentions-and-replies', 'all-messages'].includes(String(p.input)) || p.publication !== 'future-native-user-facing') fail(); return { input: p.input as RoomBindingScope['input'], publication: 'future-native-user-facing' } }
 function target(p: Record<string, unknown>) { const anchor = object(p.regionAnchor, ['regionId']); return { executionHostId: id(p.executionHostId), agentSessionId: id(p.agentSessionId), regionAnchor: { regionId: id(anchor.regionId) } } }
+export function parseRoomBindingTarget(value: unknown) { return target(object(value, ['executionHostId', 'agentSessionId', 'regionAnchor'])) }
+export function parseConnectionMember(value: unknown): Pick<ConnectionActor, 'idType' | 'userId'> { const p = object(value, ['idType', 'userId']); return { idType: id(p.idType), userId: text(p.userId) } }
 export function parseRoomBindingAuthority(value: unknown): RoomBindingAuthority { const p = object(value, ['kind', 'id']); if (p.kind !== 'user' && p.kind !== 'device') fail(); return { kind: p.kind as RoomBindingAuthority['kind'], id: text(p.id) } }
-export function parseConnectionActor(value: unknown): ConnectionActor { const p = object(value, ['application', 'idType', 'userId']); return { application: application(p.application), idType: id(p.idType), userId: text(p.userId) } }
+export function parseConnectionActor(value: unknown): ConnectionActor { const p = object(value, ['application', 'idType', 'userId']); return { application: parseConnectionApplication(p.application), ...parseConnectionMember({ idType: p.idType, userId: p.userId }) } }
 function capabilities(value: unknown): ConnectionGrant['capabilities'] { if (!Array.isArray(value) || value.length > 3 || new Set(value).size !== value.length || value.some(v => !['input', 'answer', 'permission'].includes(v))) fail(); return [...value as ConnectionGrant['capabilities']] }
 export function parseConnectionGrant(value: unknown): ConnectionGrant {
   const p = object(value, ['grantId', 'revision', 'bindingId', 'bindingRevision', 'connectionId', 'actor', 'externalConversationId', 'state', 'capabilities'])
@@ -28,7 +30,7 @@ export function parseRoomBinding(value: unknown): RoomBinding {
   if (p.state !== 'active' && p.state !== 'paused' || !Array.isArray(p.sourceCheckpoints) || p.sourceCheckpoints.length < 1 || p.sourceCheckpoints.length > 32) fail()
   const t = target(p), checkpoints = (p.sourceCheckpoints as unknown[]).map(parseConversationCheckpoint)
   if (checkpoints.some(c => c.agentSessionId !== t.agentSessionId) || new Set(checkpoints.map(c => JSON.stringify(c.source))).size !== checkpoints.length) fail()
-  return { ...t, bindingId: id(p.bindingId), revision: revision(p.revision), state: p.state as RoomBinding['state'], connectionId: id(p.connectionId), application: application(p.application), externalConversationId: text(p.externalConversationId), scope: scope(p.scope), sourceCheckpoints: checkpoints, authorizedBy: parseRoomBindingAuthority(p.authorizedBy) }
+  return { ...t, bindingId: id(p.bindingId), revision: revision(p.revision), state: p.state as RoomBinding['state'], connectionId: id(p.connectionId), application: parseConnectionApplication(p.application), externalConversationId: text(p.externalConversationId), scope: scope(p.scope), sourceCheckpoints: checkpoints, authorizedBy: parseRoomBindingAuthority(p.authorizedBy) }
 }
 export function parseRoomBindingOperation(value: unknown): RoomBindingOperation {
   const p = object(value, ['operationId', 'action', 'state', 'binding', 'grant', 'reused', 'code'])

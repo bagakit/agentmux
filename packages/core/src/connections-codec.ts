@@ -1,10 +1,11 @@
 import { CONNECTION_DELIVERY_RPC_METHODS, isConnectionDeliveryMethod, parseConnectionDeliveryParams, parseConnectionDeliveryResult } from './connection-delivery-codec.js'
 import { INGRESS_RPC_METHODS, isIngressMethod, parseIngressParams, parseIngressResult } from './ingress-codec.js'
 import { ROOM_BINDING_RPC_METHODS, isRoomBindingMethod, parseRoomBindingParams, parseRoomBindingResult } from './room-binding-codec.js'
+import { ROOM_PROVISIONING_RPC_METHODS, isRoomProvisioningMethod, parseRoomProvisioningParams, parseRoomProvisioningResult } from './room-provisioning-codec.js'
 import { AgentMuxError } from './errors.js'
 import type { ConnectionConfig, ConnectionMethod, ConnectionObservation, ConnectionOperation, ConnectionParamsMap, ConnectionRecord, ConnectionResultMap } from './connections-contract.js'
 
-export const CONNECTION_RPC_METHODS = { ...ROOM_BINDING_RPC_METHODS, ...CONNECTION_DELIVERY_RPC_METHODS, ...INGRESS_RPC_METHODS, 'connection.ls': 'long', 'connection.inspect': 'long', 'connection.configure': 'long', 'connection.test': 'long' } as const
+export const CONNECTION_RPC_METHODS = { ...ROOM_PROVISIONING_RPC_METHODS, ...ROOM_BINDING_RPC_METHODS, ...CONNECTION_DELIVERY_RPC_METHODS, ...INGRESS_RPC_METHODS, 'connection.ls': 'long', 'connection.inspect': 'long', 'connection.configure': 'long', 'connection.test': 'long' } as const
 export const isConnectionMethod = (value: unknown): value is ConnectionMethod => typeof value === 'string' && Object.hasOwn(CONNECTION_RPC_METHODS, value)
 const fail = (): never => { throw new AgentMuxError('Connection data is malformed or belongs to another original object.', 'INVALID_CONNECTION_DATA') }
 function object(value: unknown, fields: string[]): Record<string, unknown> {
@@ -41,6 +42,7 @@ function operation(value: unknown): ConnectionOperation {
   return { operationId: identity(p.operationId), status: 'configured', connection: parseConnectionRecord(p.connection) }
 }
 export function parseConnectionParams<M extends ConnectionMethod>(method: M, value: unknown): ConnectionParamsMap[M] {
+  if (isRoomProvisioningMethod(method)) return parseRoomProvisioningParams(method, value) as ConnectionParamsMap[M]
   if (isConnectionDeliveryMethod(method)) return parseConnectionDeliveryParams(method, value) as ConnectionParamsMap[M]
   if (isIngressMethod(method)) return parseIngressParams(method, value) as ConnectionParamsMap[M]
   if (isRoomBindingMethod(method)) return parseRoomBindingParams(method, value) as ConnectionParamsMap[M]
@@ -55,6 +57,7 @@ export function parseConnectionParams<M extends ConnectionMethod>(method: M, val
   return (p.connectionId === undefined ? { operationId: identity(p.operationId) } : { connectionId: identity(p.connectionId) }) as ConnectionParamsMap[M]
 }
 export function parseConnectionResult<M extends ConnectionMethod>(method: M, value: unknown, input: ConnectionParamsMap[M]): ConnectionResultMap[M] {
+  if (isRoomProvisioningMethod(method)) return parseRoomProvisioningResult(method, value, input as never) as ConnectionResultMap[M]
   if (isConnectionDeliveryMethod(method)) return parseConnectionDeliveryResult(method, value, input as never) as ConnectionResultMap[M]
   if (isIngressMethod(method)) return parseIngressResult(method, value, input as never) as ConnectionResultMap[M]
   if (isRoomBindingMethod(method)) return parseRoomBindingResult(method, value, input as never) as ConnectionResultMap[M]
