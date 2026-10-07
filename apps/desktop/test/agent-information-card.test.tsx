@@ -16,7 +16,7 @@ vi.mock('../src/renderer/src/lib/use-focus-hierarchy', () => ({ useFocusHierarch
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { WorkspaceAgentsTool } from '../src/renderer/src/components/SurfaceToolDock'
 
-const dom = composerDOM(), workspace = composerConfig.workspaces[0]!, sid = 'information-agent'
+const dom = composerDOM({ agentInformation: true }), workspace = composerConfig.workspaces[0]!, sid = 'information-agent'
 const usage = { scope: 'response' as const, inputTokens: 1400, outputTokens: 100, totalTokens: 1500,
   cumulative: { scope: 'native-session' as const, inputTokens: 500000, outputTokens: 40000, totalTokens: 540000 },
   context: { usedTokens: 8000, capacityTokens: 32000 }, observedAt: fixtureEpoch(1) }
@@ -35,11 +35,15 @@ const panel = () => document.querySelector<HTMLElement>('.focus-context-hover')!
 const card = (surface: 'focus' | 'workspace') => dom.container.querySelector<HTMLButtonElement>(surface === 'focus' ? '.global-focus-surface .focus-context[data-session-id]' : '.workspace-agents-tool .workspace-agent-row')!
 async function open(surface: 'focus' | 'workspace') { await act(async () => card(surface).focus()); await act(async () => vi.waitFor(() => expect(panel()).not.toBeNull())) }
 async function disclose(label: string) {
-  const details = [...panel().querySelectorAll<HTMLDetailsElement>('details')].find(node => node.querySelector('summary')?.textContent?.startsWith(label))!
-  expect(details).toBeDefined()
-  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+  if (!panel().querySelector('.agent-information-reader__metadata')) await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__facts')!.click())
+  const button = [...panel().querySelectorAll<HTMLButtonElement>('.agent-information-details__tabs button')].find(node => node.textContent === label)!
+  expect(button).toBeDefined(); await act(async () => button.click())
 }
-async function close() { await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); expect(panel()).toBeNull() }
+async function close() {
+  if (panel()?.querySelector('.agent-information-reader__metadata')) await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  expect(panel()).toBeNull()
+}
 async function mount() { await dom.render(<><GlobalFocusSurface workspaceOpen={false} /><WorkspaceAgentsTool workspace={workspace} sessions={[agent]} onOpen={() => { throw Error('Reading must not navigate') }} /></>) }
 beforeEach(() => {
   useAppStore.setState({ loading: false, config: composerConfig, sessions: [agent], mainSurface: 'agents', agentNames: { [sid]: 'Original task' }, tabs: {}, layouts: {}, scratchTopicSnapshots: {}, demands: { [goal.id]: goal },
@@ -54,13 +58,14 @@ beforeEach(() => {
 it.each(['focus', 'workspace'] as const)('%s consumes shared usage, exact Goal and original message relationships only on disclosure', async surface => {
   await mount(); expect(api.sessions.historyPage).not.toHaveBeenCalled(); expect(api.sessions.dispatches).not.toHaveBeenCalled()
   expect(card(surface).querySelector('button')).toBeNull()
-  await open(surface); expect(panel().textContent).toContain('75% context left'); expect(panel().textContent).toContain('540k Session tokens')
+  await open(surface); expect(panel().textContent).toContain('75% context left'); expect(panel().textContent).toContain('540k tokens')
   expect(api.sessions.dispatches).not.toHaveBeenCalled()
   await disclose('Usage'); expect(panel().querySelector('[data-agent-usage-scope="native-session"]')!.textContent).toContain('540k')
   expect(panel().querySelector('[data-agent-usage-scope="response"]')!.textContent).toContain('1.5k')
   expect(panel().textContent).toContain('24k remaining')
-  await disclose('Connections'); await act(async () => vi.waitFor(() => expect(panel().textContent).toContain('original-worker')))
+  await disclose('Goals')
   expect(panel().querySelectorAll('[data-goal-id="information-goal"]')).toHaveLength(1); expect(panel().textContent).toContain('Discussion')
+  await disclose('Messages'); await act(async () => vi.waitFor(() => expect(panel().textContent).toContain('original-worker')))
   expect(api.sessions.dispatches).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', agentSessionId: sid }, { limit: 10 })
   expect(panel().textContent).toContain('Request to'); expect(panel().textContent).toContain('Request from'); expect(panel().textContent).toContain('Loaded records only')
   expect(panel().textContent).toContain('More records are available')
@@ -79,7 +84,7 @@ it('retains the original reply DOM and selection while usage updates in the shar
 })
 it('does not infer communication from a native body prefix or claim exhaustive absence', async () => {
   vi.mocked(api.sessions.dispatches).mockResolvedValue({ hostId: 'local', participantSessionId: sid, dispatches: [], nextSourceMessageId: null })
-  await mount(); await open('focus'); await disclose('Connections')
+  await mount(); await open('focus'); await disclose('Messages')
   await act(async () => vi.waitFor(() => expect(panel().textContent).toContain('No supervised requests in this reading window.')))
   expect(panel().querySelector('.agent-information-relations__messages')!.textContent).not.toContain('declared-peer')
   expect(panel().querySelector('[data-input-author]')?.getAttribute('data-input-author')).toBe('unknown')
@@ -88,7 +93,7 @@ it.each(['host', 'participant', 'record'] as const)('keeps a wrong %s query resu
   const result = page(wrong === 'host' ? 'other-host' : 'local', wrong === 'participant' ? 'other-agent' : sid)
   const checked = wrong === 'record' ? { ...result, dispatches: [{ ...result.dispatches[0]!, ownerAgentSessionId: 'other-owner', workerAgentSessionId: 'other-worker' }, ...result.dispatches.slice(1)] } : result
   vi.mocked(api.sessions.dispatches).mockResolvedValue(checked)
-  await mount(); const before = useAppStore.getState(); await open('focus'); await disclose('Connections')
+  await mount(); const before = useAppStore.getState(); await open('focus'); await disclose('Messages')
   await act(async () => vi.waitFor(() => expect(panel().textContent).toContain('Message relationships unavailable')))
   expect(panel().textContent).toContain('Original reply'); expect(panel().querySelector('.agent-information-relations__messages button')).toBeNull()
   expect(useAppStore.getState().sessions).toBe(before.sessions); expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
@@ -96,7 +101,7 @@ it.each(['host', 'participant', 'record'] as const)('keeps a wrong %s query resu
 it('does not revive a closed reader or add message demand after the Focus surface is hidden', async () => {
   let resolve!: (result: Page) => void
   vi.mocked(api.sessions.dispatches).mockImplementationOnce(() => new Promise(done => { resolve = done }))
-  await mount(); await open('focus'); await disclose('Connections'); await close()
+  await mount(); await open('focus'); await disclose('Messages'); await close()
   await act(async () => resolve(page('local', sid, 'late-worker'))); expect(panel()).toBeNull()
   await open('workspace'); expect(panel().textContent).not.toContain('late-worker'); expect(api.sessions.dispatches).toHaveBeenCalledTimes(1)
   await close(); await dom.render(<GlobalFocusSurface visible={false} />); expect(panel()).toBeNull(); expect(api.sessions.dispatches).toHaveBeenCalledTimes(1)
@@ -108,7 +113,7 @@ it('keeps canonical same-SID usage isolated by exact Host and Run in the reusabl
   await dom.render(<WorkspaceAgentRow context={context} percent={null} onOpen={() => { throw Error('Reading must not navigate') }} />)
   await act(async () => dom.container.querySelector<HTMLButtonElement>('.workspace-agent-row')!.focus())
   await act(async () => vi.waitFor(() => expect(panel()).not.toBeNull()))
-  expect(panel().textContent).toContain('90k Session tokens'); expect(panel().textContent).not.toContain('540k')
+  expect(panel().textContent).toContain('90k tokens'); expect(panel().textContent).not.toContain('540k')
 })
 
 it('keeps a recorded peer SID without borrowing another Host display name', async () => {

@@ -292,6 +292,23 @@ describe('actual App Focus residency', () => {
     await act(async () => { window.dispatchEvent(new PointerEvent('pointermove', { clientY: -300 })); window.dispatchEvent(new PointerEvent('pointerup')) })
     expect(useAppStore.getState().focusTimelineHeight).toBe(previous)
   })
+  it('App owns the original Agent reading tree outside the Focus row and preserves metadata return', async () => {
+    await focus()
+    const card = container.querySelector<HTMLButtonElement>('.focus-context[data-session-id="source-agent"]')!
+    await act(async () => card.focus())
+    const panel = document.querySelector<HTMLElement>('.agent-information-reader')!
+    expect(panel).not.toBeNull(); expect(panel.closest('.global-focus-surface')).toBeNull()
+    const body = panel.querySelector('.agent-information-reader__reading')!
+    expect(body.textContent).toContain(reply.content)
+    await act(async () => panel.querySelector<HTMLButtonElement>('.agent-information-reader__facts')!.click())
+    expect(panel.querySelector('.agent-information-details')).not.toBeNull()
+    await act(async () => panel.querySelector<HTMLButtonElement>('[aria-label="Back to original content"]')!.click())
+    expect(panel.querySelector('.agent-information-reader__reading')).toBe(body)
+    expect(document.activeElement).toBe(body)
+    await act(async () => window.dispatchEvent(new Event('resize')))
+    expect(document.querySelector('.agent-information-reader')).toBeNull()
+    expect(useAppStore.getState().agentComposerDrafts[source.id]).toBe('Unsent original draft')
+  })
   it('adds no hidden Global directory projection for unrelated bytes or statuses and catches up on return', async () => {
     const subjects = Array.from({ length: 80 }, (_, index) => agent(`cost-agent-${index}`, 'source'))
     await act(async () => { useAppStore.setState({ mainSurface: 'agents', sessions: subjects }); root.render(<GlobalFocusSurface workspaceOpen={false} />) })
