@@ -9,7 +9,7 @@ import { demandExecutionReferences, demandExecutionKey, demandHandoffDestination
   parseDemandResponsibilityBasis, sameDemandExecution, type DemandProgressInput, type DemandProgress, type DemandResponsibilityBasis } from './responsibility.js'
 import { randomUUID } from 'node:crypto'
 import { mintObjectId } from '@agentmux/identity'
-import { promises as fs } from 'node:fs'
+import { promises as fs, type BigIntStats } from 'node:fs'
 import path from 'node:path'
 import {
   DEMAND_RECEIPT_SCHEMA,
@@ -56,6 +56,16 @@ class SnapshotWriteError extends DemandStoreError {
 
 type TitleAttempt = DemandTitleMutationOptions & { targetId: string; requested: string | null }
 type ActivityAttempt = { targetId: string; kind: string; message: string; actorId: string | null }
+type DemandSnapshotRead = {
+  identity: string | null
+  snapshot: DemandStoreSnapshot
+  demandsById: ReadonlyMap<string, Demand>
+  namesById: ReadonlyMap<string, DemandNameChangeRecord>
+}
+
+function snapshotFileIdentity(stat: BigIntStats): string {
+  return [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(':')
+}
 
 export type OpenDemandStoreOptions = {
   root: string
@@ -281,6 +291,8 @@ export class DemandStore {
   private readonly lockTimeoutMs: number
   private readonly lockRetryMs: number
   private readonly listeners = new Set<DemandStoreListener>()
+  private snapshotReadCache: DemandSnapshotRead | undefined
+  private snapshotReadFlight: { identity: string; promise: Promise<DemandSnapshotRead> } | undefined
 
   constructor(options: OpenDemandStoreOptions) {
     if (typeof options.root !== 'string' || options.root.trim() === '') {
@@ -302,16 +314,33 @@ export class DemandStore {
   }
 
   async snapshot(): Promise<DemandStoreSnapshot> {
-    return projectNameHistory(await this.readSnapshot())
+    return projectNameHistory((await this.readConfirmedSnapshot()).snapshot)
   }
 
+  /** Mutable transactions/readers receive their own copy, never the retained parsed file. */
   private async readSnapshot(): Promise<DemandStoreSnapshot> {
+    return clone((await this.readConfirmedSnapshot()).snapshot)
+  }
+
+  /** File identity is checked on every read; only one stable original file is cached. */
+  private async readConfirmedSnapshot(): Promise<DemandSnapshotRead> {
     try {
-      const raw = await fs.readFile(this.storePath, 'utf8')
-      return parseSnapshot(JSON.parse(raw) as unknown, this.storePath)
+      const identity = snapshotFileIdentity(await fs.stat(this.storePath, { bigint: true }))
+      if (this.snapshotReadCache?.identity === identity) return this.snapshotReadCache
+      let flight = this.snapshotReadFlight
+      if (flight?.identity !== identity) {
+        const pending: { identity: string; promise: Promise<DemandSnapshotRead> } = {
+          identity, promise: this.readStableSnapshot().finally(() => {
+            if (this.snapshotReadFlight === pending) this.snapshotReadFlight = undefined
+          }) }
+        this.snapshotReadFlight = pending
+        flight = pending
+      }
+      return await flight!.promise
     } catch (error) {
+      this.snapshotReadCache = undefined
       if (error instanceof DemandStoreError) throw error
-      if (isNodeError(error, 'ENOENT')) return emptySnapshot()
+      if (isNodeError(error, 'ENOENT')) return this.indexSnapshot(emptySnapshot(), null)
       if (error instanceof SyntaxError) {
         throw new DemandStoreError('INVALID_SNAPSHOT', 'read', this.storePath, `Demand snapshot is not valid JSON at ${this.storePath}`, error)
       }
@@ -319,13 +348,37 @@ export class DemandStore {
     }
   }
 
+  private async readStableSnapshot(): Promise<DemandSnapshotRead> {
+    const file = await fs.open(this.storePath, 'r')
+    try {
+      const before = await file.stat({ bigint: true }), identity = snapshotFileIdentity(before)
+      const raw = await fs.readFile(file, 'utf8')
+      const after = await file.stat({ bigint: true })
+      // Replacing the path unlinks this old inode (ctime/nlink), without editing its bytes.
+      const contentChanged = before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeNs !== after.mtimeNs
+      const changedInPlace = before.ctimeNs !== after.ctimeNs && before.nlink === after.nlink
+      if (contentChanged || changedInPlace) throw new DemandStoreError('READ_FAILED', 'read', this.storePath,
+        `Demand snapshot changed while its original file was being read at ${this.storePath}; current facts are unconfirmed. Read the original store again.`)
+      const read = this.indexSnapshot(parseSnapshot(JSON.parse(raw) as unknown, this.storePath), identity)
+      this.snapshotReadCache = read
+      return read
+    } finally { await file.close() }
+  }
+
+  private indexSnapshot(snapshot: DemandStoreSnapshot, identity: string | null): DemandSnapshotRead {
+    return { identity, snapshot, demandsById: new Map(snapshot.demands.map(demand => [demand.id, demand])),
+      namesById: new Map(snapshot.nameHistory.map(change => [change.id, change])) }
+  }
+
   async list(): Promise<Demand[]> {
     return (await this.snapshot()).demands
   }
 
   async get(id: string): Promise<Demand | null> {
-    const demand = (await this.snapshot()).demands.find((entry) => entry.id === id)
-    return demand ? clone(demand) : null
+    const read = await this.readConfirmedSnapshot(), demand = read.demandsById.get(id)
+    if (!demand) return null
+    const { activities, ...content } = demand
+    return { ...clone(content), activities: projectActivities(activities, read.namesById) }
   }
 
   async read(id: string): Promise<Demand | null> {
