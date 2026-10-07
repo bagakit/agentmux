@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises'
 import { afterEach, expect, it, vi } from 'vitest'
 import { RoomProvisioningHost } from '../src/room-provisioning.js'
 import { RoomProvisioningStore } from '../src/room-provisioning-store.js'
+import type { RoomMemberResult } from '@agentmux/core/connections'
 import { roomProvisioningFixture, context } from './fixtures/room-provisioning.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
@@ -101,6 +102,19 @@ it('preserves frozen member identities when an adapter mutates its detached requ
   expect(result.creation.state).toBe('created')
   expect(result.membership).toEqual({ state: 'settled', attemptId: expect.any(String), results: original.members.map(member => ({ member, state: 'unknown' })) })
   expect(await f.provisioning.create(f.createInput, context)).toEqual(result); expect(f.addMembers).toHaveBeenCalledTimes(1); await f.unchanged()
+})
+
+it.each([
+  ['array', ['joined']],
+  ['object', { toString: (): string => 'joined' }]
+])('keeps malformed %s member status unknown through the real Host instead of confirming a coerced receipt', async (_kind, malformed) => {
+  const f = await fixture({ addMembers: async request => ({ results: request.members.map(member => ({ member, state: malformed as RoomMemberResult['state'] })) }) })
+  const result = await f.provisioning.create(f.createInput, context)
+  expect(result.creation.state).toBe('created')
+  expect(result.membership).toEqual({ state: 'settled', attemptId: expect.any(String), results: f.createInput.members.map(member => ({ member, state: 'unknown' })) })
+  expect(await f.provisioning.inspect({ operationId: result.operationId })).toEqual({ operation: result })
+  expect(await f.provisioning.create(f.createInput, context)).toEqual(result)
+  expect(f.create).toHaveBeenCalledTimes(1); expect(f.addMembers).toHaveBeenCalledTimes(1); await f.unchanged()
 })
 
 it('admits each original effect once across concurrent Host instances sharing the durable claim', async () => {
