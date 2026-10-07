@@ -41,7 +41,12 @@ async function run(args, log) {
 }
 await mkdir(output, { recursive: true })
 if (process.argv.includes('--os')) {
-  throw new Error('OS package proof has not been implemented or run yet. Keep this Task active; source tests cannot stand in for packaged HTTP(S) eligibility or actual system ingress.')
+  const appIndex = process.argv.indexOf('--app')
+  assert(appIndex >= 0 && process.argv[appIndex + 1], 'OS proof requires --app <exact non-installed production application>')
+  const { verifyDefaultBrowserOs } = await import('./verify-browser-default-os.mjs')
+  const result = await verifyDefaultBrowserOs({ repository, appPath: process.argv[appIndex + 1], output })
+  process.stdout.write(JSON.stringify({ status: result.receipt.status, evidence: result.evidence, visualReview: result.receipt.visualReview }) + '\n')
+  process.exit(0)
 }
 const before = await manifest(), receipt = { schema: 'agentmux.browser-default-proof.v1', runId: randomUUID(), status: 'running',
   candidateHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim(),
