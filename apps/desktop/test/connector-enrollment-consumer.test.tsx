@@ -181,3 +181,66 @@ it('a lost Renderer reply preserves the admitted original setup when returning a
   expect(platformCalls).toEqual(['begin'])
   expect((await services.connections.enrollment!.list({})).operations.map(value => value.operationId)).toEqual([original.operationId])
 })
+
+it('a delayed result for one original setup keeps another setup inspectable through the actual Settings consumer', async () => {
+  const a = await api.connections.call('connection.enrollment.begin', { operationId: 'setup-a', connectionId: 'application-a', adapterId: 'feishu', domain: 'open.feishu.cn', label: 'Bot A' })
+  const b = await api.connections.call('connection.enrollment.begin', { operationId: 'setup-b', connectionId: 'application-b', adapterId: 'feishu', domain: 'open.feishu.cn', label: 'Bot B' })
+  await mount(); await click('.connector-enrollment__history > summary'); await click('[data-enrollment-select="' + a.operationId + '"]')
+  const actualCall = vi.mocked(api.connections.call).getMockImplementation()! as typeof api.connections.call
+  let release!: () => void, held = false
+  const gate = new Promise<void>(resolve => { release = resolve })
+  vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
+    const result = await actualCall(method, input)
+    if (method === 'connection.enrollment.inspect' && (input as { operationId: string }).operationId === a.operationId) { held = true; await gate; throw new Error('Only the earlier setup lookup lost its reply') }
+    return result
+  })
+  try {
+    await click('.connector-enrollment > .connector-diagnostics > summary'); await click('[data-enrollment-inspect]')
+    await vi.waitFor(() => expect(held).toBe(true))
+    await click('.connector-enrollment > .connector-back'); await click('.connector-enrollment__history > summary'); await click('[data-enrollment-select="' + b.operationId + '"]')
+    await click('.connector-enrollment > .connector-diagnostics > summary')
+    expect((await actualCall('connection.enrollment.inspect', { operationId: b.operationId })).operation?.operationId).toBe(b.operationId)
+    const button = dom.container.querySelector<HTMLButtonElement>('[data-enrollment-inspect]')!
+    expect(button.disabled, 'An earlier result wait must not disable another original setup').toBe(false)
+    await click('[data-enrollment-inspect]')
+    await vi.waitFor(() => expect(calls.filter(call => call.method === 'connection.enrollment.inspect' && (call.input as { operationId: string }).operationId === b.operationId)).toHaveLength(2))
+    await act(async () => { release(); await gate })
+    expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe(b.operationId)
+    expect(dom.container.textContent).not.toContain('Only the earlier setup lookup lost its reply')
+    expect(platformCalls).toEqual(['begin', 'begin'])
+  } finally { release() }
+})
+
+it('a pending platform effect keeps other setup actions and the original local lookup available', async () => {
+  const a = await api.connections.call('connection.enrollment.begin', { operationId: 'effect-a', connectionId: 'effect-application-a', adapterId: 'feishu', domain: 'open.feishu.cn', label: 'Pending bot A' })
+  const b = await api.connections.call('connection.enrollment.begin', { operationId: 'effect-b', connectionId: 'effect-application-b', adapterId: 'feishu', domain: 'open.feishu.cn', label: 'Ready bot B' })
+  const originalFetch = globalThis.fetch
+  let release!: () => void, held = false
+  const gate = new Promise<void>(resolve => { release = resolve })
+  vi.stubGlobal('fetch', async (...args: Parameters<typeof fetch>) => {
+    if (new URLSearchParams(String(args[1]?.body)).get('action') === 'poll' && !held) { held = true; await gate }
+    return await originalFetch(...args)
+  })
+  await mount(); await click('.connector-enrollment__history > summary'); await click('[data-enrollment-select="' + a.operationId + '"]')
+  clock = Math.max(a.challenge!.nextPollAt, b.challenge!.nextPollAt) + 1
+  try {
+    await click('[data-enrollment-advance]'); await vi.waitFor(() => expect(held).toBe(true))
+    await click('.connector-enrollment > .connector-diagnostics > summary')
+    expect(dom.container.querySelector<HTMLButtonElement>('[data-enrollment-inspect]')!.disabled, 'Read-only recovery must remain available during the original platform effect').toBe(false)
+    await click('[data-enrollment-inspect]')
+    await vi.waitFor(() => expect(calls.some(call => call.method === 'connection.enrollment.inspect' && (call.input as { operationId: string }).operationId === a.operationId)).toBe(true))
+    await click('.connector-enrollment > .connector-back'); await click('.connector-enrollment__history > summary'); await click('[data-enrollment-select="' + b.operationId + '"]')
+    expect(dom.container.querySelector<HTMLButtonElement>('[data-enrollment-advance]')!.disabled, 'Another setup must not inherit the first setup’s pending write').toBe(false)
+    await click('[data-enrollment-advance]')
+    await vi.waitFor(() => expect(calls.some(call => call.method === 'connection.enrollment.advance' && (call.input as { operationId: string }).operationId === b.operationId)).toBe(true))
+    expect((await services.connections.enrollment!.inspect({ operationId: b.operationId })).operation?.revision).toBeGreaterThan(b.revision)
+    expect(platformCalls).toEqual(['begin', 'begin', 'poll'])
+    await act(async () => { release(); await gate })
+    await vi.waitFor(() => expect(calls.some(call => call.method === 'connection.enrollment.advance' && (call.input as { operationId: string }).operationId === a.operationId)).toBe(true))
+    expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe(b.operationId)
+    expect(platformCalls).toEqual(['begin', 'begin', 'poll', 'poll'])
+  } finally {
+    release()
+    await vi.waitFor(() => expect(calls.some(call => call.method === 'connection.enrollment.advance' && (call.input as { operationId: string }).operationId === a.operationId)).toBe(true))
+  }
+})
