@@ -28,8 +28,8 @@ describe('full-page loading surface contract', () => {
   it('uses the shared motion tokens instead of a second duration scale', () => {
     expect(styles.match(/animation:\s*[^;]+/g) ?? []).not.toHaveLength(0)
     expect(styles).toContain('var(--dur-enter)')
-    expect(styles).toContain('full-page-loading-turn var(--dur-sweep) linear infinite')
-    expect(styles).toContain("[data-waiting-visible='false'] .full-page-loading__activity { animation: none; }")
+    expect(styles).not.toContain('full-page-loading-turn')
+    expect(component).toContain("animation={visible ? 'wait' : 'none'}")
     expect(styles).not.toMatch(/animation:\s*[^;]+\b\d+ms\b/)
   })
 })

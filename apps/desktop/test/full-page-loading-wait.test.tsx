@@ -29,6 +29,7 @@ async function render(phase: 'loading' | 'recovering' | 'failed' | 'parked') {
 it('shows local waiting, marks a long wait without inventing completion, and stops when the phase ends', async () => {
   await render('recovering')
   expect(container.querySelector('.full-page-loading__waiting')?.textContent).toBe('Waiting0s')
+  expect(container.querySelector('[data-icon-animation="wait"] .full-page-loading__activity')).not.toBeNull()
   await act(async () => vi.advanceTimersByTime(16000))
   expect(container.querySelector('.full-page-loading__waiting')?.textContent).toBe('Still waiting16s')
   expect(container.textContent).toContain('Complete original recap')
@@ -52,11 +53,13 @@ it('releases the clock while hidden and resumes honest elapsed time when shown',
   await act(async () => document.dispatchEvent(new Event('visibilitychange')))
   expect(vi.getTimerCount()).toBe(0)
   expect(container.querySelector('[data-waiting-visible]')?.getAttribute('data-waiting-visible')).toBe('false')
+  expect(container.querySelector('[data-icon-animation]')).toBeNull()
   await act(async () => vi.advanceTimersByTime(20000))
   expect(container.querySelector('.full-page-loading__elapsed')?.textContent).toBe('0s')
   visible = true
   await act(async () => document.dispatchEvent(new Event('visibilitychange')))
   expect(container.querySelector('.full-page-loading__elapsed')?.textContent).toBe('20s')
+  expect(container.querySelector('[data-icon-animation="wait"]')).not.toBeNull()
   expect(vi.getTimerCount()).toBe(1)
 })
 
