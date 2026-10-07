@@ -21,7 +21,7 @@ const observation: DesktopClientObservation = {
     renderer: { kind: 'bundled', id: 'b'.repeat(64), identity: { shell: 'private-shell', ctxmux: 'private-native' } },
     storage: { userData: _hygiene_fixturePath("private-user-data"), sessionData: _hygiene_fixturePath("private-session-data"), directory: _hygiene_fixturePath("private-storage"),
       localStorage: 'present', detail: null }, runtimes: [] },
-  workbench: { loading: false, startupProgress: { step: 'layout' }, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
+  workbench: { loading: false, startupProgress: { step: 'layout' }, startupAgentAvailability: null, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
     focus: { executionSessionId: null, pmoSessionId: null },
     desktop: {
       selection: { surface: 'space', mainSurface: 'workbench', space: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace',

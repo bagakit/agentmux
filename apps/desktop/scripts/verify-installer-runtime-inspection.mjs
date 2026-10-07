@@ -96,7 +96,7 @@ try {
   const observation = { schema: 'agentmux.desktop-client-observation.v1', main: { pid: 1, package: null,
     renderer: { kind: 'bundled', id: 'a'.repeat(64), identity: { shell: 'shell', ctxmux: 'ctxmux' } },
     runtimes: [{ hostId: 'local', identity: { hostId: 'local', buildIdentity: identity.buildId, protocolVersion: 22, processId: null, instanceId: identity.daemonInstanceId } }] },
-    workbench: { loading: false, startupProgress: { step: 'layout' }, activeWorkspaceId: 'workspace', mainSurface: 'workbench', focus,
+    workbench: { loading: false, startupProgress: { step: 'layout' }, startupAgentAvailability: null, activeWorkspaceId: 'workspace', mainSurface: 'workbench', focus,
       desktop: { selection: { surface: 'space', mainSurface: 'workbench', space: null, goalId: null },
         presentation: { provenance: 'unknown', state: 'unknown', tabId: null, regionId: null, blockers: [] },
         input: { provenance: 'unknown', scope: 'unknown', ownerKind: null, tabId: null, regionId: null, sessionId: null, connected: null, visible: null, inert: null },
