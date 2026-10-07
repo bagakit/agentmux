@@ -14,10 +14,22 @@ class ConfirmationCode extends Component<{ children: ReactNode }, { failed: bool
   render() { return this.state.failed ? <p role="status" className="settings-group-note">The code could not be displayed. Open the confirmation page instead.</p> : this.props.children }
 }
 const issuerKey = (issuer: ConnectionEnrollmentCapability) => JSON.stringify([issuer.adapterId, issuer.domain])
+function checkedSetupMessage(operation: ConnectionEnrollmentOperation): string {
+  if (operation.authorization === 'unknown') return operation.reason === 'begin-unconfirmed'
+    ? 'No new progress was found. The confirmation link is still unavailable. Your original setup is kept.'
+    : 'No new platform result was confirmed. Your original setup is kept; you can check its saved progress again.'
+  if (operation.authorization === 'pending') return operation.challenge && Date.now() < operation.challenge.nextPollAt
+    ? 'Still waiting for platform confirmation. Give it a moment, then check again.'
+    : 'Still waiting for platform confirmation. Complete the confirmation on the platform, then check again.'
+  if (operation.authorization === 'not-started') return 'This setup has not started on the platform. Its original details are kept.'
+  if (operation.authorization === 'authorized' && !operation.configured) return 'The application was created. Its local connection setup is still incomplete.'
+  return ''
+}
 
 /** A bounded reading window. The Host owns every durable attempt and its recovery. */
 export function useBotEnrollment(active: boolean) {
   const [operations, setOperations] = useState<ConnectionEnrollmentOperation[]>([])
+  const observedOperations = useRef(operations)
   const [capabilities, setCapabilities] = useState<ConnectionEnrollmentCapability[]>([])
   const [next, setNext] = useState<string | null>(null), [loaded, setLoaded] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -36,11 +48,12 @@ export function useBotEnrollment(active: boolean) {
   const finishWrite = (operationId: string) => { writing.current.delete(operationId); setPendingWrites([...writing.current]) }
   const accept = (operation: ConnectionEnrollmentOperation) => {
     setSubmissions(previous => previous.filter(item => item.operationId !== operation.operationId))
-    setOperations(previous => {
-      const known = previous.find(item => item.operationId === operation.operationId)
-      if (known && known.revision >= operation.revision) return previous
-      return known ? previous.map(item => item.operationId === operation.operationId ? operation : item) : [operation, ...previous]
-    })
+    const previous = observedOperations.current, known = previous.find(item => item.operationId === operation.operationId)
+    if (known && known.revision >= operation.revision) return known
+    // The same bounded reading window supplies both the rendered state and this request's feedback.
+    observedOperations.current = known ? previous.map(item => item.operationId === operation.operationId ? operation : item) : [operation, ...previous]
+    setOperations(observedOperations.current)
+    return operation
   }
   const read = async (cursor?: string, current = epoch.current) => {
     const request = ++listRead.current
@@ -77,8 +90,8 @@ export function useBotEnrollment(active: boolean) {
     try {
       const result = await api.connections.call('connection.enrollment.inspect', { operationId })
       if (current === epoch.current) {
-        if (result.operation) accept(result.operation)
-        if (selection.current === operationId && occurrence === selectionEpoch.current) setIssue(result.operation ? '' : 'The last lookup did not find a recorded result. Keep this setup; it does not confirm that no application was created.')
+        const observed = result.operation ? accept(result.operation) : null
+        if (selection.current === operationId && occurrence === selectionEpoch.current) setIssue(observed ? checkedSetupMessage(observed) : 'The last lookup did not find a recorded result. Keep this setup; it does not confirm that no application was created.')
       }
     } catch (error) { if (current === epoch.current && selection.current === operationId && occurrence === selectionEpoch.current) setIssue(presentError(error)) }
   }
@@ -92,7 +105,10 @@ export function useBotEnrollment(active: boolean) {
       const result = original?.authorization === 'not-started'
         ? await api.connections.call('connection.enrollment.begin', { operationId, connectionId: original.connectionId, adapterId: original.adapterId, domain: original.domain, label: original.label })
         : await api.connections.call('connection.enrollment.advance', { operationId })
-      if (current === epoch.current) accept(result)
+      if (current === epoch.current) {
+        const observed = accept(result)
+        if (selection.current === operationId && occurrence === selectionEpoch.current) setIssue(checkedSetupMessage(observed))
+      }
     } catch (error) { if (current === epoch.current && selection.current === operationId && occurrence === selectionEpoch.current) setIssue(`This setup is not confirmed yet. Check or continue this same setup. ${presentError(error)}`) }
     finally { finishWrite(operationId) }
   }
@@ -124,7 +140,8 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved }: {
     : operation?.authorization === 'denied' ? 'The platform did not approve this setup. Its original result is kept below.'
     : operation?.authorization === 'expired' ? 'The platform confirmation has expired. This does not confirm whether an application was created.'
     : operation?.authorization === 'authorized' ? 'The application was created. Continue this same setup to finish saving it on this environment.'
-    : current ? 'The result is not confirmed. Check the original result or continue its local recovery without creating another bot.'
+    : operation?.authorization === 'unknown' && operation.reason === 'begin-unconfirmed' ? 'A confirmation link is not available for this setup yet. Check its saved progress, or connect a bot you already have.'
+    : current ? 'The platform result is still unconfirmed. Check the saved progress for this original setup.'
     : unfinished ? 'Resume the same bot setup to check or finish its original result.' : ''
   useEffect(() => { openAttempt.current++; setOpenIssue(''); return () => { openAttempt.current++ } }, [selectedId, operation?.challenge?.verificationUrl])
   const openConfirmation = async () => {
@@ -150,15 +167,16 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved }: {
         <div>{operation.challenge.userCode ? <p className="connector-enrollment__public-code">Confirmation code <strong>{operation.challenge.userCode}</strong></p> : null}<button className="small-button" data-enrollment-open onClick={() => void openConfirmation()}>Open confirmation page</button><p className="settings-group-note">Keep this setup while you confirm on your platform. Closing Settings only leaves this page.</p>{operation.challenge.expiresAt !== null ? <p className="settings-group-note">Confirmation valid until {new Date(operation.challenge.expiresAt).toLocaleTimeString()}.</p> : null}</div>
       </div> : null}
       <div className="connector-editor-actions">{saved ? <button data-enrollment-saved className="primary-button" onClick={() => onSaved(saved)}>View connection</button> : <>
-        {canContinue ? <button data-enrollment-advance className="primary-button" disabled={!!busy} onClick={() => void enrollment.advance()}>{busy === selectedId ? 'Checking setup…' : operation?.authorization === 'pending' ? `Check ${issuerLabel} confirmation` : 'Continue this setup'}</button> : null}
+        {canContinue ? <button data-enrollment-advance className="primary-button" disabled={!!busy} onClick={() => void enrollment.advance()}>{busy === selectedId ? 'Checking setup…' : operation?.authorization === 'pending' ? `Check ${issuerLabel} confirmation` : operation?.authorization === 'unknown' ? 'Check saved progress' : 'Continue this setup'}</button> : null}
         {operation?.authorization !== 'pending' ? <button data-enrollment-inspect className={canContinue ? 'small-button' : 'primary-button'} onClick={() => void enrollment.inspect()}>View original result</button> : null}
+        <button data-enrollment-existing className="small-button" onClick={onExisting}>Connect an existing bot</button>
       </>}</div>
       {saved ? <div className="connector-next-step"><BotIcon size={18} /><div><strong>Next, choose an Agent and a group</strong><p>Open an Agent’s menu → Create group or Connect existing group. You choose the audience and what to share there.</p></div></div> : null}
       <details className="connector-diagnostics"><summary>Setup details</summary><dl className="connector-identity"><div><dt>Original setup</dt><dd><code>{selectedId}</code></dd></div><div><dt>Platform</dt><dd>{current.domain}</dd></div>{operation ? <><div><dt>Revision</dt><dd>{operation.revision}</dd></div><div><dt>Platform confirmation</dt><dd>{operation.authorization}</dd></div><div><dt>Credential storage</dt><dd>{operation.credential}</dd></div><div><dt>Application save</dt><dd>{operation.configuration}</dd></div>{operation.application ? <div><dt>App ID</dt><dd><code>{operation.application.appId}</code></dd></div> : null}{operation.reason ? <div><dt>Original result</dt><dd>{operation.reason}</dd></div> : null}</> : null}</dl>{operation?.authorization === 'pending' || saved ? <button data-enrollment-inspect className="small-button" onClick={() => void enrollment.inspect()}>View original result</button> : null}</details>
     </>}
     {openIssue ? <p role="status" className="connector-issue">{openIssue}</p> : null}
     {enrollment.issue ? <p role="status" className="connector-issue">{enrollment.issue}</p> : null}
-    {!current && unfinished ? <details data-enrollment-separate className="connector-optional"><summary>Create another bot</summary><p className="settings-group-note">Start a separate setup. Your original bot setup stays available below.</p><button data-enrollment-start-another className="small-button" onClick={() => enrollment.startAnother()}>Start a separate setup</button></details> : null}
+    {!saved && (current || unfinished) ? <details data-enrollment-separate className="connector-optional"><summary>Create another bot</summary><p className="settings-group-note">A separate setup may create another bot. Your original setup stays available.</p><button data-enrollment-start-another className="small-button" onClick={() => enrollment.startAnother()}>Start a separate setup</button></details> : null}
     {!current && history.length ? <details className="connector-enrollment__history"><summary>Previous bot setups</summary>{history.map(({ input: item, operation: receipt }) => <button key={item.operationId} data-enrollment-select={item.operationId} className="connector-enrollment__previous" onClick={() => enrollment.select(item.operationId)}><strong>{item.label}</strong><span>{receipt ? receipt.configured ? 'Saved' : receipt.authorization === 'pending' ? 'Waiting for confirmation' : receipt.authorization === 'authorized' ? 'Application created · setup incomplete' : receipt.authorization === 'unknown' ? 'Result not confirmed' : receipt.authorization : 'Result not confirmed'}</span></button>)}</details> : null}
     {!current && enrollment.next ? <button data-enrollment-more className="small-button connector-back" onClick={() => void enrollment.read(enrollment.next!)}>Load earlier setups</button> : null}
   </section>
