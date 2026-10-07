@@ -326,8 +326,11 @@ policy are not used. The inspected low-level WebSocket handler awaits the event
 handler before constructing its success ACK, and reports handler failure with a
 failed ACK. [Official SDK](https://github.com/larksuite/node-sdk)
 
-The generic connector entry does not load this SDK. Hosts select this adapter
-subpath when composing an enabled Feishu connection.
+The generic connector entry and `createBuiltinConnectionAdapters()` do not load
+this SDK. The built-in delegate loads one leaf instance when the original Host
+tests or starts an enabled Feishu connection. A disabled connection or ordinary
+connection list does not start platform I/O. Hosts can still select the adapter
+subpath directly when composing their own trusted application.
 
 A Feishu connection uses `adapterId: "feishu"` and a canonical application
 **hostname**: `open.feishu.cn` or `open.larksuite.com`. The leaf constructs the
@@ -342,15 +345,17 @@ one SDK release does not become a platform identity rule: receiver startup reads
 the SDK's actual lifecycle result, while configuration and independently working
 REST authentication remain available.
 
-A trusted Host passes its original connection read port to `FeishuAdapter`,
-registers that adapter with `ConnectionHost` and `DurableIngressHost`, resolves
-the credential through its own secret port, then calls
-`openReceiver(config, credential, ingress)`. The returned handle owns that
-issuer/application receiver and provides `observation()` and `close()`. Close
-the receiver before releasing its connection owner. A second local receiver for
-the same issuer/application fails explicitly, including through a different
-connection alias or adapter instance. Configuration revisions invalidate old
-callbacks; the Host closes the old handle before explicitly reopening it.
+A trusted Host registers `FeishuAdapter` through its original `ingress` and
+`transport` ports. The original receiver owner resolves credentials and calls
+`transport.start({ config, credential, signal, receive })` with the exact
+configuration and a guarded callback bound to that connection. The adapter
+never chooses a second connection target or reads a second configuration owner.
+The returned handle owns only that issuer/application receiver and provides
+`observation()` and `close()`. The Host aborts or closes the old receiver when its
+configuration changes. A second local receiver for the same issuer/application
+fails explicitly, including through a different alias or adapter instance.
+The registered ingress delegates both private proof verification and deferred
+reply qualification to the same leaf instance.
 `withClient` provides an exception-safe official Client call for other adapter
 leaves without introducing an outbound queue or send policy.
 
@@ -391,12 +396,11 @@ targets and network failure stay unknown. Display names and `open_bot_id`
 similarity do not certify the application principal.
 [Original message read](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/get)
 
-The parent request carries the Host's observation signal and cancellation returns
-unknown without granting reply scope. A late result cannot change that result or
-write intake facts. SDK credential acquisition can outlive the canceled
-observation; an already canceled signal prevents the parent HTTP request from
-granting qualification. The original Host owns persistence, observation retry
-and final Core admission.
+SDK token, bot, discovery and parent HTTP requests carry their original caller's
+signal. Parent cancellation returns unknown without granting reply scope. A late
+result cannot change that result or write intake facts; an already canceled
+signal prevents a later parent HTTP request after token acquisition. The original
+Host owns persistence, observation retry and final Core admission.
 
 The leaf reports authentication, transport and durable-receiving observations
 separately; none certifies delivery to a particular group. SDK log arguments are
