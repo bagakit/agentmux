@@ -131,10 +131,10 @@ export function ProjectActivity({
   const done = sessions.filter((session) => session.kind === 'agent' && session.status.state === 'done').length
   const needsYou = sessions.filter((session) => session.kind === 'agent' && categoryFor(session.status.state) === 'needs-you').length
   const metrics = [
-    { key: 'needs-you', count: needsYou, icon: 'conversation.message-queue' as const, label: 'Needs you' },
+    { key: 'needs-you', count: needsYou, icon: 'status.needs-input' as const, label: 'Needs you' },
     { key: 'error', count: error, icon: 'status.failed' as const, label: 'Error' },
     { key: 'working', count: working, icon: 'status.working' as const, label: 'Working' },
-    { key: 'idle', count: idle, icon: 'status.running' as const, label: 'Idle' },
+    { key: 'idle', count: idle, icon: 'status.idle' as const, label: 'Idle' },
     { key: 'done', count: done, icon: 'status.completed' as const, label: 'Completed' }
   ].filter((metric) => metric.count > 0)
   const hasActivity = metrics.length > 0

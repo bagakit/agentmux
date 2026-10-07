@@ -9,7 +9,7 @@ const source = import.meta.dirname
 const sha = value => createHash('sha256').update(value).digest('hex')
 
 // Both live development and immutable builds project this same catalog.
-export async function createReviewCatalog({ getSemanticIconCatalog, ICON_GLYPHS }, { context } = {}) {
+export async function createReviewCatalog({ getSemanticIconCatalog, ICON_GLYPHS, AUTHORED_ICON_GLYPH_IDS }, { context } = {}) {
   const metadata = getSemanticIconCatalog()
   if (!metadata.icons.length || !metadata.glyphs.length) throw new Error('The shared icon catalog must be nonempty.')
   const prior = context ? JSON.parse(await fs.readFile(resolve(root, context), 'utf8')) : { roles: [] }
@@ -66,8 +66,8 @@ export async function createReviewCatalog({ getSemanticIconCatalog, ICON_GLYPHS 
       provenance: { geometry: 'shared_owner', meaning: 'review_annotation', feature: confirmedRefs.length ? 'source_scan' : sources.length ? 'dynamic_candidates' : 'catalog_only' } }
   })
   const sourceFiles = {}
-  for (const path of [ownerPath, 'packages/client-ui/src/theme/icon-glyphs.ts', 'packages/client-ui/src/theme/icon-catalog-metadata.ts']) sourceFiles[path] = sha(await fs.readFile(join(root, path)))
-  const customGlyphs = ['status-dot', 'redaction-block', 'resize-corner', 'workflow-progress', 'mote-mark', 'work-writing', 'content-stream', 'browser-executing', 'work-history']
+  for (const path of [ownerPath, 'packages/client-ui/src/theme/icon-glyphs.ts', 'packages/client-ui/src/theme/icon-authored.ts', 'packages/client-ui/src/theme/icon-catalog-metadata.ts']) sourceFiles[path] = sha(await fs.readFile(join(root, path)))
+  const customGlyphs = [...AUTHORED_ICON_GLYPH_IDS]
   const catalog = { format: 'agentmux.icon-catalog.v1', pageId: 'agentmux-icon-matrix', snapshot: sha(JSON.stringify(sourceFiles)),
     generatedAt: new Date().toISOString(), head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
     categories: [{ id: 'all', label: categoryLabels.all }, ...metadata.groups.map(group => ({ id: group.id, label: categoryLabels[group.id] ?? group.label }))],

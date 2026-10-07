@@ -1,5 +1,5 @@
 import type { IconGlyphId } from './icon-glyphs.js'
-export { ICON_GLYPHS, ICON_GLYPH_IDS, type IconGlyphId } from './icon-glyphs.js'
+export { ICON_GLYPHS, ICON_GLYPH_IDS, AUTHORED_ICON_GLYPH_IDS, type IconGlyphId } from './icon-glyphs.js'
 
 /** IDs describe product meaning. Library glyph IDs are only the default drawing choice. */
 export const SEMANTIC_ICON_CATALOG = {
@@ -463,12 +463,14 @@ export const SEMANTIC_ICON_CATALOG = {
   'status.paused': { label: 'Paused', glyph: 'circle-pause' },
   'status.queued': { label: 'Queued', glyph: 'circle' },
   'status.neutral': { label: 'Neutral', glyph: 'circle-dot' },
-  'status.running': { label: 'Process running', glyph: 'radio' },
+  'status.running': { label: 'Process running', glyph: 'process-live' },
   'status.working': { label: 'Producing work', glyph: 'work-writing' },
   'status.streaming': { label: 'Streaming content', glyph: 'content-stream' },
   'status.browser-running': { label: 'Browser operation running', glyph: 'browser-executing' },
   'status.loading': { label: 'Loading', glyph: 'loader-circle' },
-  'status.waiting': { label: 'Waiting for an operation', glyph: 'rotate-ccw' },
+  'status.waiting': { label: 'Waiting for an operation', glyph: 'operation-wait' },
+  'status.idle': { label: 'Agent idle', glyph: 'process-idle' },
+  'status.needs-input': { label: 'Agent needs your input', glyph: 'input-needed' },
   'status.unknown': { label: 'Unknown', glyph: 'circle-help' },
   'status.warning': { label: 'Warning', glyph: 'triangle-alert' },
   'status.info': { label: 'Information', glyph: 'info' },
