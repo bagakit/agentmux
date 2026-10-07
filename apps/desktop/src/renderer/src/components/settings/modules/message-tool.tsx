@@ -26,6 +26,15 @@ export const messageToolSettingsModule = {
   description: 'Input layout, configurable shortcut input, sending shortcuts, and each Agent’s mailbox.',
   icon: semanticIconComponent('object.inbox'),
   keywords: 'message tool composer input initial layout one line two lines send immediately steer queue mailbox inbox outbox history source keyboard shortcuts enter draft skills commands files agents trigger prefix dollar slash at 技能 指令 文件 引用 快捷输入 一行 两行 初始 发送 立即发送 邮箱 历史 快捷键',
+  searchTargets: [
+    { id: 'initial-layout', title: 'Initial layout', keywords: 'one line two lines input composer' },
+    { id: 'completion-command', title: 'Commands prefix', keywords: 'shortcut input trigger symbol slash prompts' },
+    { id: 'completion-skill', title: 'Skills prefix', keywords: 'shortcut input trigger symbol dollar' },
+    { id: 'completion-reference', title: 'Agents & files prefix', keywords: 'shortcut input trigger symbol at references' },
+    { id: 'completion-keywords', title: 'Suggest saved prompts by keyword', keywords: 'shortcut input suggestions bare keyword' },
+    { id: 'message-shortcuts', title: 'Keyboard shortcuts', keywords: 'sending enter steer queue draft', kind: 'info' },
+    { id: 'mailbox', title: 'Mailbox', keywords: 'inbox outbox history', kind: 'info' },
+  ],
   savedSummary: config => `${(config.messageToolInitialLayout ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT) === 'one-line' ? 'One-line' : 'Two-line'} input · Per-Agent mailbox`,
   Pane({ config }) {
     return <MessageToolSettingsPane initialLayout={config.messageToolInitialLayout ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT} onSave={saveInitialLayout} {...(config.messageToolCompletion ? { completion: config.messageToolCompletion } : {})} onSaveCompletion={saveCompletion} />

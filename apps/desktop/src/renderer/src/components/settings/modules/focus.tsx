@@ -22,6 +22,10 @@ export const focusSettingsModule = {
   description: 'How long task activity keeps a project near the front.',
   icon: ThemeObjectScheduleIcon,
   keywords: 'focus work recent activity hours window project lanes timeline time ruler time zone',
+  searchTargets: [
+    { id: 'recent-activity', title: 'Recent activity window', keywords: 'hours projects timeline' },
+    { id: 'link-destination', title: 'Open links in Focus', keywords: 'beside agent new tab region destination' },
+  ],
   savedSummary: config => `${resolveFocusRecentActivityHours(config.focus?.recentActivityHours)} hours · ${resolveFocusLinkDestination(config.focus?.linkDestination) === 'region' ? 'Links beside the Agent' : 'Links in Space'}`,
   Pane({ config }) {
     return <FocusSettingsPane recentActivityHours={config.focus?.recentActivityHours} {...(config.focus?.linkDestination ? { linkDestination: config.focus.linkDestination } : {})} onSave={saveRecentActivityHours} />

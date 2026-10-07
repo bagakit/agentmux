@@ -42,7 +42,7 @@ export function DefaultBrowserSetting({ active }: { active: boolean }) {
     catch (cause) { if (live.current && request.current === token) setError(cause instanceof Error ? cause.message : String(cause)) }
     finally { if (live.current && request.current === token) { openingRef.current = false; setOpening(false) } }
   }
-  return <section className="settings-group">
+  return <section className="settings-group" data-settings-field="default-browser">
     <header><span>Default browser</span><small>Survey</small></header>
     <p className="settings-group-note">Choose AgentMux in your system settings to open web links in Survey.</p>
     <p role="status">{fact ? stateLabel(fact) : reading ? 'Checking current default browser…' : 'Current default browser is unknown.'}</p>

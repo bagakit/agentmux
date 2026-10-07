@@ -28,7 +28,7 @@ export function SpaceSettingsPane({ density, onSave, onTopics, onProjects }: {
     { id: 'projects', label: 'Projects in Environments', description: 'Manage registered folders and worktrees on each Host.', icon: ThemeObjectFolderOpenIcon, open: onProjects },
   ]
   return <div className="settings-pane-stack">
-    <section className="settings-group">
+    <section className="settings-group" data-settings-field="project-rail">
       <header><span>Project rail</span><small>Saved: {projectRailDensityLabel(saved)}</small></header>
       <fieldset className="settings-workflows__density"><legend>Project rail density</legend>
         {PROJECT_RAIL_DENSITY_IDS.map(value => <label key={value} data-selected={draft.value === value}>

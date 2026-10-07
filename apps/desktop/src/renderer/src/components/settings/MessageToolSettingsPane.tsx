@@ -36,7 +36,7 @@ export function MessageToolSettingsPane({ initialLayout, completion, onSave, onS
   }
 
   return <div className="settings-pane-stack" data-message-tool-settings>
-    <section className="settings-group">
+    <section className="settings-group" data-settings-field="initial-layout">
       <header><span>Initial layout</span><small>Saved: {saved === 'one-line' ? 'One line' : 'Two lines'}</small></header>
       <fieldset className="settings-reading-width">
         <legend>New Message Tools start with</legend>
@@ -53,7 +53,7 @@ export function MessageToolSettingsPane({ initialLayout, completion, onSave, onS
       <header><span>Shortcut input</span></header>
       <p className="settings-workflows__note">Choose the symbols that open each menu. Leave a field empty to turn off its shortcut; toolbar menus stay available.</p>
       <div className="message-tool-prefixes">
-        {([{ key: 'command', label: 'Commands', detail: 'Agent commands and saved prompts' }, { key: 'skill', label: 'Skills', detail: 'Available skills' }, { key: 'reference', label: 'Agents & files', detail: 'Agent cards, files and folders' }] as const).map(field => <label key={field.key}>
+        {([{ key: 'command', label: 'Commands', detail: 'Agent commands and saved prompts' }, { key: 'skill', label: 'Skills', detail: 'Available skills' }, { key: 'reference', label: 'Agents & files', detail: 'Agent cards, files and folders' }] as const).map(field => <label key={field.key} data-settings-field={`completion-${field.key}`}>
           <span>{field.label}</span>
           <TextInput aria-label={`${field.label} prefix`} aria-describedby={inputError ? errorId : undefined} aria-invalid={!!inputError}
             value={inputDraft.value[field.key]} placeholder="Off" spellCheck={false} autoComplete="off"
@@ -61,16 +61,16 @@ export function MessageToolSettingsPane({ initialLayout, completion, onSave, onS
           <small>{field.detail}</small>
         </label>)}
       </div>
-      <label className="message-tool-keywords"><input type="checkbox" checked={inputDraft.value.keywords}
+      <label className="message-tool-keywords" data-settings-field="completion-keywords"><input type="checkbox" checked={inputDraft.value.keywords}
         onChange={event => inputDraft.setField('keywords', event.target.checked)} />Suggest saved prompts by keyword</label>
       {inputError && <p id={errorId} className="settings-inline-error" role="alert">{inputError}</p>}
       <SettingsSaveBar save={completionSave} dirty={inputDraft.dirty} disabled={!!inputError} label="Save shortcut input" onSave={() => void saveCompletion()} />
     </section>
-    <section className="settings-group" aria-label="Message Tool keyboard shortcuts">
+    <section className="settings-group" aria-label="Message Tool keyboard shortcuts" data-settings-field="message-shortcuts">
       <header><span>Keyboard shortcuts</span></header>
       <KeyboardShortcutsPane group="message-tool" />
     </section>
-    <section className="settings-group" aria-label="Mailbox">
+    <section className="settings-group" aria-label="Mailbox" data-settings-field="mailbox">
       <header><span>Mailbox</span></header>
       <p className="settings-workflows__note">Open the mailbox beside Send to read replies, manage queued messages, or search this Agent’s input history. Each Agent keeps its own records; history shows the source when recorded.</p>
     </section>

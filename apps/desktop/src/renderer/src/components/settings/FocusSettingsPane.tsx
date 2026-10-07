@@ -22,7 +22,7 @@ export function FocusSettingsPane({ recentActivityHours, linkDestination, onSave
     submittedLink.finish(saved)
   }
   return <div className="settings-pane-stack">
-    <section className="settings-group">
+    <section className="settings-group" data-settings-field="recent-activity">
       <header><span>Recent activity</span><small>Saved: {saved} hours</small></header>
       <p className="focus-settings-description">Keep projects with recent task activity ahead of older work in Focus.</p>
       <fieldset className="focus-settings-window"><legend>Recent activity window</legend>
@@ -33,7 +33,7 @@ export function FocusSettingsPane({ recentActivityHours, linkDestination, onSave
       </fieldset>
       <p className="focus-settings-description">Attention and Working stay first. Older projects and activity with unknown time remain available.</p>
     </section>
-    <section className="settings-group">
+    <section className="settings-group" data-settings-field="link-destination">
       <header><span>Open links in Focus</span></header>
       <fieldset className="focus-settings-window"><legend>Default destination</legend>
         {(['region', 'tab'] as const).map(destination => <label key={destination} data-selected={linkDraft.value === destination}>

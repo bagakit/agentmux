@@ -23,6 +23,9 @@ export const browserSettingsModule = {
   description: 'Choose how agents interact with your pages.',
   icon: ThemeObjectBrowserIcon,
   keywords: 'browser agent automation drive page script run snapshot click permission enable disable',
+  searchTargets: [
+    { id: 'agent-automation', title: 'Agent automation', keywords: 'browser script page permission enable disable' },
+  ],
   savedSummary: (config) => config.browser.agentAutomation === true ? 'Automation on' : 'Automation off',
   Pane({ config }) {
     return <BrowserSettingsPane browser={config.browser} onSave={saveBrowser} onForget={api.browser.forgetAppLinkScheme} />

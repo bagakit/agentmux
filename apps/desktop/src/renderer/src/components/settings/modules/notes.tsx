@@ -19,6 +19,11 @@ export const notesSettingsModule = {
   id: 'notes', group: 'work', title: 'Recall', icon: ThemeActionEditNoteIcon,
   description: 'A comfortable reading space for your notebooks and pages.',
   keywords: 'recall directory folder storage path work notes note notebook notebooks pages quick notes 随手记 knowledge reading font size width wide',
+  searchTargets: [
+    { id: 'notes-storage', title: 'Notes directory', keywords: 'recall storage folder path' },
+    { id: 'notes-font-size', title: 'Notes body text size', keywords: 'reading font typography' },
+    { id: 'notes-width', title: 'Reading width', keywords: 'recall notes wide standard' },
+  ],
   savedSummary: config => { const saved = resolveNotesPreferences(config.notes); return `${saved.fontSize} px · ${saved.contentWidth === 'wide' ? 'Wide' : 'Standard'}` },
   Pane({ config, onClose }) {
     return <NotesSettingsPane preferences={config.notes} onSave={saveNotes} onOpenNotes={() => {

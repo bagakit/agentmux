@@ -13,6 +13,14 @@ export const surveySettingsModule = {
   id: 'survey', group: 'work', title: 'Survey', icon: ThemeActionSearchIcon,
   description: 'Personalize your browser start page and continue research.',
   keywords: 'work survey research browser default system http https browsing exploration start page title subtitle icon background history cards',
+  searchTargets: [
+    { id: 'default-browser', title: 'Default browser', keywords: 'http https system settings', kind: 'action' },
+    { id: 'start-title', title: 'Start page title', keywords: 'survey browser title' },
+    { id: 'start-subtitle', title: 'Start page subtitle', keywords: 'survey browser subtitle' },
+    { id: 'start-icon', title: 'Start page icon', keywords: 'survey image url' },
+    { id: 'start-background', title: 'Start page background image', keywords: 'survey image url' },
+    { id: 'start-history', title: 'Show recent addresses and searches', keywords: 'browser history cards' },
+  ],
   savedSummary: config => config.browser.startPage?.title ?? 'AMUX - Survey',
   Pane({ config, onClose, active }) {
     return <><DefaultBrowserSetting active={active} /><BrowserStartPageSettings config={config.browser.startPage} onSave={saveStartPage}

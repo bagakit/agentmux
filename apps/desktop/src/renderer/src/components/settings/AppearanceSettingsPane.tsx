@@ -87,7 +87,7 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
 
   return (
     <div className="settings-pane-stack" data-theme-editing={editingTheme ? '' : undefined}>
-      <section className="settings-group">
+      <section className="settings-group" data-settings-field="workspace-theme">
         <header><span>Workspace theme</span><small>{catalog.items.length} themes</small></header>
         <div className="settings-theme-grid" role="radiogroup" aria-label="Workspace theme">
           {catalog.items.map(item => <label key={item.id} className={`settings-theme-choice ${theme.value === item.id ? 'settings-theme-choice--selected' : ''}`}>
@@ -112,7 +112,7 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
         <p className="settings-hint">Each theme includes dark and light surfaces. Application appearance below chooses the brightness; your terminal palette stays independent.</p>
       </section>
       {editingTheme ? <ThemeEditor key={editingTheme.id} item={editingTheme} appearance={appearance} active={active} onSave={onSave} onClose={() => setEditingTheme(null)} /> : null}
-      <section className="settings-group">
+      <section className="settings-group" data-settings-field="app-appearance">
         <header><span>Application appearance</span><small>Window</small></header>
         <div className="settings-appearance-modes" role="radiogroup" aria-label="Application appearance">
           {APP_APPEARANCE_IDS.map((mode) => (
@@ -127,7 +127,7 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
           ))}
         </div>
       </section>
-      <section className="settings-group">
+      <section className="settings-group" data-settings-field="editor-font-size">
         <header><span>Editor font size</span><small>{inheritsEditorFont ? 'App size' : validEditorFontSize ? `${parsedEditorFontSize}px` : 'Unsaved'}</small></header>
         <label className="browser-automation-toggle">
           <input type="checkbox" aria-label="Use App font size" checked={inheritsEditorFont}
@@ -143,7 +143,7 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
         </div>
         <p className="settings-hint">Applies to source and diff editors. Inherit the App size or choose {EDITOR_FONT_SIZE_MIN} to {EDITOR_FONT_SIZE_MAX} pixels.</p>
       </section>
-      <section className="settings-group">
+      <section className="settings-group" data-settings-field="terminal-font-size">
         <header><span>Terminal font size</span><small>{fontSize}px</small></header>
         <div className="terminal-font-size-control">
           {/* Incomplete numeric text stays editable. The range shows the original expectation until
@@ -170,7 +170,7 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
         </div>
         <p className="settings-hint">Applies to every open terminal, from {TERMINAL_FONT_SIZE_MIN} to {TERMINAL_FONT_SIZE_MAX} pixels.</p>
       </section>
-      <section className="settings-group">
+      <section className="settings-group" data-settings-field="terminal-palette">
         <header><span>Terminal palette</span><small>{TERMINAL_THEME_CATALOG.length}</small></header>
         <div className="terminal-theme-grid" role="radiogroup" aria-label="Terminal palette">
           {TERMINAL_THEME_CATALOG.map((definition) => {

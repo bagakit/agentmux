@@ -22,6 +22,10 @@ export const notificationsSettingsModule = {
   description: 'Choose when and how agents get your attention.',
   icon: ThemeObjectNotificationsIcon,
   keywords: 'notification alert attention dwell duration banner needs you done error until dismiss sound audio silent mute chime',
+  searchTargets: [
+    { id: 'notification-dwell', title: 'How long it stays', keywords: 'notification dwell banner attention duration dismiss' },
+    { id: 'notification-sound', title: 'Sound', keywords: 'system notification audio silent mute' },
+  ],
   savedSummary(config) {
     const mode = resolveNotificationModeId(config)
     const tier = NOTIFICATION_TIERS.find((candidate) => candidate.id === mode)!

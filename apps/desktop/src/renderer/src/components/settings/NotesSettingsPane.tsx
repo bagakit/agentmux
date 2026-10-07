@@ -38,7 +38,7 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
     }))
   }
   return <div className="settings-pane-stack">
-    <section className="settings-group"><header><span>Storage</span><small>{storage?.directory ?? 'Reading the saved directory…'}</small></header>
+    <section className="settings-group" data-settings-field="notes-storage"><header><span>Storage</span><small>{storage?.directory ?? 'Reading the saved directory…'}</small></header>
       <label className="settings-reading-size settings-notes-directory"><span><strong>Notes directory</strong><small>Move your notebook directory and stored notes together.</small></span>
         <TextInput aria-label="Notes directory" value={directory} disabled={moving || !!intent} onChange={event => setDirectory(event.target.value)} /></label>
       <div className="settings-workflows__inline-action"><button type="button" className="small-button" disabled={!storage || moving || (!intent && directory.trim() === storage.directory)} onClick={() => void moveDirectory()}>{moving ? 'Moving…' : intent ? 'Retry original move' : 'Move notes'}</button></div>
@@ -51,14 +51,14 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
     </section>
     <section className="settings-group">
       <header><span>Reading</span><small>Saved: {saved.fontSize} px · {saved.contentWidth === 'wide' ? 'Wide' : 'Standard'}</small></header>
-      <div className="settings-reading-size">
+      <div className="settings-reading-size" data-settings-field="notes-font-size">
         <label htmlFor={fontId}><strong>Body text size</strong><small>Applies to Notes and embedded note text.</small></label>
         <div><TextInput id={fontId} type="text" inputMode="numeric" aria-label="Notes body text size" value={draft.value.fontSize}
           onChange={event => draft.setField('fontSize', event.target.value)} aria-invalid={!valid} /><span>px</span></div>
       </div>
       <input className="settings-reading-slider" type="range" min={NOTE_FONT_SIZE_MIN} max={NOTE_FONT_SIZE_MAX} step={1}
         aria-label="Adjust Notes body text size" value={valid ? fontSize : saved.fontSize} onChange={event => draft.setField('fontSize', event.target.value)} />
-      <fieldset className="settings-reading-width"><legend>Reading width</legend>
+      <fieldset className="settings-reading-width" data-settings-field="notes-width"><legend>Reading width</legend>
         {NOTE_CONTENT_WIDTHS.map(width => <label key={width} data-selected={draft.value.contentWidth === width}>
           <input type="radio" name={widthGroup} checked={draft.value.contentWidth === width} onChange={() => draft.setField('contentWidth', width)} />
           <span><strong>{width === 'standard' ? 'Standard' : 'Wide'}</strong><small>{width === 'standard' ? 'A focused reading column' : 'Use the available space'}</small></span>

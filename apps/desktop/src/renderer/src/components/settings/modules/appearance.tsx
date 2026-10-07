@@ -26,6 +26,13 @@ export const appearanceSettingsModule = {
   description: 'Theme, typography, and terminal colors.',
   icon: ThemeAppearanceThemeIcon,
   keywords: 'theme color palette terminal tui composer input background editor source diff font size typography',
+  searchTargets: [
+    { id: 'workspace-theme', title: 'Workspace theme', keywords: 'theme color palette custom' },
+    { id: 'app-appearance', title: 'Application appearance', keywords: 'dark light system window' },
+    { id: 'editor-font-size', title: 'Editor font size', keywords: 'source diff typography inherit app' },
+    { id: 'terminal-font-size', title: 'Terminal font size', keywords: 'terminal typography pixels' },
+    { id: 'terminal-palette', title: 'Terminal palette', keywords: 'terminal colors' },
+  ],
   savedSummary(config) {
     const mode = config.appearance.appAppearance ?? APP_APPEARANCE_DEFAULT
     const theme = getThemeCatalog(config.appearance.customThemes).items.find(item => item.id === (config.appearance.themeId ?? DEFAULT_THEME_ID))

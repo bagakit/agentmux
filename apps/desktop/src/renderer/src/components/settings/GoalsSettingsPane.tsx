@@ -30,7 +30,7 @@ export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals 
     submitted.finish(committed); submittedView.finish(committed); submittedFinished.finish(committed); submittedSupervisor.finish(committed)
   }
   return <div className="settings-pane-stack">
-    <section className="settings-group">
+    <section className="settings-group" data-settings-field="starting-view">
       <header><span>Starting view</span><small>Saved: {savedView.defaultView === 'board' ? 'Board' : 'List'}</small></header>
       <p className="settings-workflows__note">Used when you open a new Goals view. You can still switch views while working.</p>
       <fieldset className="settings-goals-view"><legend>Default Goals view</legend>
@@ -40,18 +40,18 @@ export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals 
           <span>{choice === 'list' ? 'List' : 'Board'}</span>
         </label>)}
       </fieldset>
-      <label className="browser-automation-toggle"><input type="checkbox" checked={finished.value} onChange={event => finished.setValue(event.target.checked)} aria-label="Show finished goals by default" />
+      <label className="browser-automation-toggle" data-settings-field="finished-goals"><input type="checkbox" checked={finished.value} onChange={event => finished.setValue(event.target.checked)} aria-label="Show finished goals by default" />
         <span><strong>Show finished goals by default</strong><small>Include Done and Cancelled goals when you open a new view.</small></span>
       </label>
     </section>
-    <section className="settings-group">
+    <section className="settings-group" data-settings-field="goal-supervisor">
       <header><span>Supervisor for new goals</span><small>Saved: {savedView.requesterAsSupervisor ? 'Requester' : 'Choose manually'}</small></header>
       <label className="browser-automation-toggle"><input type="checkbox" checked={supervisor.value} onChange={event => supervisor.setValue(event.target.checked)} aria-label="Use the requesting Agent as Supervisor" />
         <span><strong>Use the requesting Agent as Supervisor</strong><small>Assign the original requesting Agent or PMO when a new goal is created. It also becomes an assignee and a related session. Continue starts separately.</small></span>
       </label>
       <p className="settings-workflows__note">Existing goals and your manual choices stay as saved. Without a confirmed source, choose a Supervisor in the goal.</p>
     </section>
-    <section className="settings-group">
+    <section className="settings-group" data-settings-field="common-actions">
       <header><span>Common actions</span><small>Saved: {saved ? 'Collapsed' : 'Expanded'}</small></header>
       <label className="browser-automation-toggle"><input type="checkbox" checked={draft.value} onChange={event => draft.setValue(event.target.checked)} aria-label="Collapse common actions" />
         <span><strong>Start with common actions collapsed</strong><small>Keep Goals focused on your work. Expand common actions whenever you need them.</small></span>
