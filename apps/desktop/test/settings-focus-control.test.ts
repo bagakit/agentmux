@@ -10,7 +10,9 @@ import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-ser
 import { parseSettingsCommand } from '../../../packages/core/src/settings-cli.js'
 import { executeSettingsControl } from '../src/main/settings-control.js'
 import { ConfigStore } from '../src/main/config-store.js'
-import { agentStartupRecoveryDecision } from '../src/renderer/src/lib/idle-agent-restore-policy.js'
+import { agentContinuityAdmission, normalizeAgentContinuityPolicy } from '@agentmux/core/agent-session-continuity'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 
 const principal = { transport: 'unix', principal: { kind: 'user', id: 'focus-test' } } as const
 function publicSettings(f: Awaited<ReturnType<typeof configOwnerFixture>>) {
@@ -126,12 +128,14 @@ it('actual private filesystem save failure cannot produce public success or publ
 
 it('public Focus changes leave the independent 24 hour idle recovery policy intact', async () => {
   const f = await configOwnerFixture(), rpc = publicSettings(f), now = Date.UTC(_hygiene_fixtureYear, 9, 8), hour = 3_600_000
-  const decision = (hours: number) => agentStartupRecoveryDecision({ runState: 'missing', canonical: true, now,
-    semanticStatus: { state: 'done', source: 'native-hook', observedAt: now, stateEnteredAt: now - hours * hour } })
+  const decision = (hours: number) => agentContinuityAdmission({ trigger: 'startup', policy: normalizeAgentContinuityPolicy(), admittedAt: now, now,
+    session: { kind: 'agent', agentSessionId: 'original', providerId: 'codex', executorId: 'codex', hostId: 'local',
+      workspacePath: _hygiene_fixturePath('policy'), run: { runId: 'old-run' }, retiredRuns: [], createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: now,
+      semanticStatus: { state: 'done', source: 'native-hook', observedAt: now, stateEnteredAt: now - hours * hour } } })
   for (const value of ['12', '168']) {
     await set(rpc, 'focus.recentActivityHours', value)
-    expect(decision(18)).toEqual({ kind: 'resume' })
-    expect(decision(24)).toEqual({ kind: 'resume' })
-    expect(decision(30)).toEqual({ kind: 'pending', reason: 'idle-over-day' })
+    expect(decision(_historyFixtureEpoch(0, 0, 18))).toMatchObject({ kind: 'resume' })
+    expect(decision(_historyFixtureEpoch(0, 0, 24))).toMatchObject({ kind: 'resume' })
+    expect(decision(_historyFixtureEpoch(0, 0, 30))).toEqual({ kind: 'pending', reason: 'idle-window-expired' })
   }
 })
