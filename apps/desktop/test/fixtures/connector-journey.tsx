@@ -55,7 +55,7 @@ export function connectorJourneyFixture() {
   })
   afterEach(async () => {
     if (calls?.length) {
-      const test = expect.getState().currentTestName!, directory = resolve('.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts/T-013-progressive-consumers')
+      const test = expect.getState().currentTestName!, directory = resolve('.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts/T-013-direction-consumers')
       await mkdir(directory, { recursive: true })
       await writeFile(join(directory, createHash('sha256').update(test).digest('hex').slice(0, 12) + '.json'), JSON.stringify({
         test, scope: 'Mounted original Workbench/menu/Composer through trusted IPC and compiled public Core/CLI into the original Desktop Host. Adapter, encryption and terminal rendering are controlled; no real platform or provider qualification.',
@@ -77,7 +77,7 @@ export function connectorJourneyFixture() {
     await vi.waitFor(async () => { await act(async () => {}); item = [...document.querySelectorAll<HTMLElement>(context ? '.region-context-menu [role="menuitem"]' : '.agent-region-menu[data-owner-region-id="' + regionId + '"] [role="menuitem"]')].find(node => node.textContent?.trim() === label); expect(item, 'actual ' + label + ' action').toBeDefined() }, { timeout: 6000 })
     await act(async () => item!.click())
     await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')).not.toBeNull() })
-    await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector<HTMLSelectElement>('[aria-label="Group application"]')?.value, document.querySelector('[role="dialog"]')?.textContent).toBe(config.connectionId) }, { timeout: 6000 })
+    await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value, document.querySelector('[role="dialog"]')?.textContent).toBe(config.connectionId) }, { timeout: 6000 })
   }
   async function fill(label: string, value: string) {
     const input = document.querySelector<HTMLInputElement | HTMLTextAreaElement>('[aria-label="' + label + '"]')!
