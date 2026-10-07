@@ -10,6 +10,7 @@ import { nativeBindingKey } from '../../../shared/agent-native-source'
 import { agentContextForSession, type FocusContext } from '../lib/focus-context'
 import { type AgentInformationPreview as PreviewRequest, agentInformationPreview } from '../lib/agent-information-preview'
 import { useSessionUserMessages } from '../lib/session-user-messages'
+import { captureReadingAnchor, restoreReadingAnchor } from '../lib/reading-anchor'
 import { useAppStore } from '../store'
 import { agentStateEnteredAt } from '../lib/agent-state-time'
 import { elapsedShort } from '../lib/project-activity-row'
@@ -24,6 +25,7 @@ import { getWindowOverlayHost, markWindowOverlayDismissal, wasWindowOverlayDismi
 const InfoIcon = semanticIconComponent('status.info')
 const CloseIcon = semanticIconComponent('action.close')
 const OpenIcon = semanticIconComponent('action.open-external')
+const PinIcon = semanticIconComponent('action.pin')
 
 /** Full held text stays readable; only bounded complete prose enters Markdown parsing. */
 function ReadingBody({ reading }: { reading: { text: string; truncated: boolean } }) {
@@ -33,19 +35,52 @@ function ReadingBody({ reading }: { reading: { text: string; truncated: boolean 
   </div>
 }
 
-/** Mounted only inside the open preview; all input facts use the shared reader. */
-function FocusContextInputs({ request, enabled }: { request: PreviewRequest; enabled: boolean }) {
-  const reader = useSessionUserMessages(request.control, { enabled })
+type InputReading = Pick<ReturnType<typeof useSessionUserMessages>, 'messages' | 'loading' | 'error' | 'observationError' | 'sourceChanged' | 'windowFrozen' | 'windowIncomplete'>
+function inputReading(reader: ReturnType<typeof useSessionUserMessages>): InputReading {
   const ordered = reader.messages.every(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt))
-  // Missing times retain the public source order; they cannot establish a cross-source chronology.
   const messages = (ordered ? [...reader.messages].sort((a, b) => a.recordedAt! - b.recordedAt!) : reader.messages).slice(-3)
+  return { messages, loading: reader.loading, error: reader.error, observationError: reader.observationError,
+    sourceChanged: reader.sourceChanged, windowFrozen: reader.windowFrozen, windowIncomplete: reader.windowIncomplete }
+}
+
+/** The original reader supplies facts; a pin retains only the three presented inputs. */
+function FocusContextInputs({ request, enabled }: { request: PreviewRequest; enabled: boolean }) {
+  const [paused, setPaused] = useState(false), [frozen, setFrozen] = useState<InputReading | null>(null)
+  const reader = useSessionUserMessages(paused || frozen && !enabled ? undefined : request.control, { enabled: enabled && !paused })
+  const region = useRef<HTMLElement>(null), held = useRef<InputReading | null>(null)
+  const reflow = useRef<{ container: HTMLElement; anchor: ReturnType<typeof captureReadingAnchor> } | null>(null)
+  const current = inputReading(reader)
+  useLayoutEffect(() => {
+    if (enabled && !request.pinned && !frozen) held.current = current
+    if (request.pinned && !frozen) setFrozen(held.current ?? current)
+  })
+  useEffect(() => {
+    if (!enabled || !frozen || paused || reader.loading || !(reader.nativeHistoryPage || reader.error || reader.observationError)) return
+    // Keep every already presented input. Only the original in-flight native batch
+    // may fill unused slots; later captured requests cannot evict selected text.
+    const ids = new Set(frozen.messages.map(message => message.id)), slots = Math.max(0, 3 - frozen.messages.length)
+    const arrivals = slots ? reader.messages.filter(message => message.source.kind === 'native' && !ids.has(message.id)).slice(-slots) : []
+    const messages = slots ? [...frozen.messages, ...arrivals.slice(-slots)] : frozen.messages
+    if (messages !== frozen.messages) {
+      const container = region.current?.closest<HTMLElement>('.agent-information-reader__reading')
+      if (container) reflow.current = { container, anchor: captureReadingAnchor(container) }
+    }
+    setFrozen({ ...current, messages }); setPaused(true)
+  }, [enabled, frozen, paused, reader.loading, reader.nativeHistoryPage, reader.error, reader.observationError])
+  useLayoutEffect(() => {
+    if (reflow.current) { restoreReadingAnchor(reflow.current.container, reflow.current.anchor); reflow.current = null }
+  }, [frozen])
+  const snapshot = frozen ?? (enabled ? current : held.current ?? current)
+  const ordered = snapshot.messages.every(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt))
+  // Missing times retain the public source order; they cannot establish a cross-source chronology.
+  const messages = (ordered ? [...snapshot.messages].sort((a, b) => a.recordedAt! - b.recordedAt!) : snapshot.messages).slice(-3)
   // Recorded authors carry a canonical SID, but no authoritative peer Host.
   // Keep that reference rather than assigning a global first-match display name.
   const describe = createSpeakerResolver()
-  const notice = !request.control || reader.error || reader.observationError ? 'Recent message reading unavailable'
-    : reader.sourceChanged ? 'Message source changed' : reader.windowFrozen ? 'Reading window paused'
-      : reader.windowIncomplete ? 'Reading window incomplete' : null
-  return <section className="focus-context-hover__inputs" aria-label="Recent user messages">
+  const notice = !request.control || snapshot.error || snapshot.observationError ? 'Recent message reading unavailable'
+    : snapshot.sourceChanged ? 'Message source changed' : snapshot.windowFrozen ? 'Reading window paused'
+      : snapshot.windowIncomplete ? 'Reading window incomplete' : null
+  return <section ref={region} className="focus-context-hover__inputs" aria-label="Recent user messages">
     <h4>Recent inputs</h4>
     {!ordered ? <small className="focus-context-hover__coverage">Current reading window · Order unavailable</small> : null}
     {messages.length ? <ol>{messages.map(message => {
@@ -61,8 +96,8 @@ function FocusContextInputs({ request, enabled }: { request: PreviewRequest; ena
         <time dateTime={date?.toISOString()} title={provenance} aria-label={`${time} · ${provenance}`}>{time}</time></div>
       <ReadingBody reading={reading} />
       {reading.truncated ? <small className="focus-context-hover__coverage">Excerpt</small> : null}
-    </li>})}</ol> : <p className="focus-context-hover__coverage">{reader.loading ? 'Loading recent messages…' : 'No user messages in the available reading window.'}</p>}
-    {notice ? <p className="focus-context-hover__notice" role="status" title={reader.error?.message ?? reader.observationError?.message}>
+    </li>})}</ol> : <p className="focus-context-hover__coverage">{snapshot.loading ? enabled ? 'Loading recent messages…' : 'Input reading paused; observed content is kept.' : 'No user messages in the available reading window.'}</p>}
+    {notice ? <p className="focus-context-hover__notice" role="status" title={snapshot.error?.message ?? snapshot.observationError?.message}>
       {notice}. Open the Agent to read History.</p> : null}
   </section>
 }
@@ -92,10 +127,11 @@ function FocusContextStateSummary({ context, explanationVisible }: { context: Fo
 const HeldReading = memo(function HeldReading({ request, enabled }: { request: PreviewRequest; enabled: boolean }) {
   const context = request.context
   return <>
+    {!context.recap && request.contentChanged ? <small className="agent-information-reader__change">Card content changed · Reading kept</small> : null}
     {context.recap ? <section className="focus-context-hover__recap">
       <small title={`${context.recap.source} · ${context.recap.origin}`}>
         {context.recap.source === 'Last assistant message' ? 'Latest reply' : 'Latest input'}
-        <span>{(context.recap.reading?.truncated ?? true) ? 'Excerpt at opening' : 'Observed at opening'}</span>
+        <span>{request.contentChanged ? 'Card content changed · Reading kept' : (context.recap.reading?.truncated ?? true) ? 'Excerpt at opening' : 'Observed at opening'}</span>
       </small>
       <ReadingBody reading={context.recap.reading ?? { text: context.recap.text, truncated: true }} />
     </section> : !context.detailIsRecap && context.detailKind !== 'service' ? <p className="focus-context-hover__activity">{context.detail}</p> : null}
@@ -110,17 +146,20 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
   const panel = useRef<HTMLDivElement>(null), reading = useRef<HTMLDivElement>(null)
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const back = useRef<HTMLButtonElement>(null), returnToReading = useRef(false)
+  const reflowAnchor = useRef<ReturnType<typeof captureReadingAnchor>>(null)
   const [tab, setTab] = useState<AgentInformationTab | null>(null)
   const [visible, setVisible] = useState(() => document.visibilityState !== 'hidden')
-  const session = useAppStore(state => state.sessions.find(session => session.id === context.id && session.hostId === context.hostId &&
+  const lastVisibleSession = useRef(request.session)
+  const session = useAppStore(state => !visible ? lastVisibleSession.current : state.sessions.find(session => session.id === context.id && session.hostId === context.hostId &&
     session.control.run.runId === context.runId && (context.kind !== 'agent' || session.kind === 'agent' &&
       session.control.hostId === request.control?.hostId && session.control.agentSessionId === request.control?.agentSessionId && nativeBindingKey(session) === request.sourceKey)))
+  useLayoutEffect(() => { if (visible) lastVisibleSession.current = session }, [visible, session])
   const sameSource = Boolean(session)
-  const currentContext = session && session !== request.session ? { ...agentContextForSession(session, undefined, context.name, context.workspace, context.topicId), lastActivityAt: context.lastActivityAt } : context
+  const currentContext = visible && session && session !== request.session ? { ...agentContextForSession(session, undefined, context.name, context.workspace, context.topicId), lastActivityAt: context.lastActivityAt } : context
   const observation = session?.kind === 'agent' ? observeAgentSession(session, Date.now()) : undefined
   const usage = session?.kind === 'agent' ? session.turnUsage : request.session?.kind === 'agent' ? request.session.turnUsage : undefined
   const sourceNotice = !sameSource ? 'Original Run or source is no longer confirmed. This reading is kept; new source data is not attached.' : null
-  const service = observation?.reason && currentContext.bucket === 'idle' ? `${observation.reason === 'activity-stale' ? 'Work signal expired' : 'Current activity unconfirmed'} · Run ${observation.process}`
+  const service = observation?.reason && currentContext.bucket === 'idle' && currentContext.state !== 'disconnected' ? `${observation.reason === 'activity-stale' ? 'Work signal expired' : 'Current activity unconfirmed'} · Run ${observation.process}`
     : !currentContext.detailIsRecap && currentContext.detailKind === 'service' ? currentContext.detail : null
   const displayPath = usePathDisplay(), path = displayPath(context.workspacePath, context.hostId)
   const source = <>
@@ -131,6 +170,7 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
       <div><dt>Run</dt><dd>{context.runId}</dd></div><div><dt>Project</dt><dd>{context.workspaceName}</dd></div>
       <div><dt>Directory</dt><dd>{path}</dd></div>{context.originAddress ? <div><dt>Origin</dt><dd>{context.originAddress}</dd></div> : null}
     </dl>
+    {request.contentChanged ? <p>Original card content changed. Close and reopen its preview to read the latest observed text.</p> : null}
     <p>Text, positions and Goal links were captured for this preview. Status and usage follow the same confirmed Run and source.</p>
     {request.identity ? <section className="focus-context-hover__workbench" aria-label={`${request.identity.occurrenceCount} confirmed ${request.identity.occurrenceCount === 1 ? 'position' : 'positions'}`}>
       {request.identity.tabs.map(position => <section key={position.occurrenceKey ?? position.tabId} data-focus-occurrence-key={position.occurrenceKey}>
@@ -154,6 +194,15 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
       agentInformationPreview.dismiss(request.token)
     }, 160)
   }
+  function togglePin() {
+    cancelDeparture()
+    reflowAnchor.current = reading.current ? captureReadingAnchor(reading.current) : null
+    agentInformationPreview.pin(request.token)
+  }
+  useLayoutEffect(() => {
+    if (reading.current && reflowAnchor.current) restoreReadingAnchor(reading.current, reflowAnchor.current)
+    reflowAnchor.current = null
+  }, [request.pinned])
   function showMetadata(next: AgentInformationTab) { cancelDeparture(); setTab(next) }
   function showReading() { returnToReading.current = true; setTab(null) }
   useLayoutEffect(() => {
@@ -173,12 +222,24 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
         if (request.enterReading && document.activeElement === request.anchor && !request.anchor.closest('[inert]')) reading.current?.focus({ preventScroll: true })
       }
     }
+    if (request.pinned || !request.anchor.isConnected || request.anchor.closest('[inert]')) {
+      const contain = () => {
+        const bounds = surface.getBoundingClientRect()
+        Object.assign(surface.style, { left: `${Math.max(12, Math.min(bounds.left, window.innerWidth - bounds.width - 12))}px`,
+          top: `${Math.max(12, Math.min(bounds.top, window.innerHeight - bounds.height - 12))}px`, visibility: 'visible' })
+      }
+      contain(); window.addEventListener('resize', contain)
+      return () => { current = false; window.removeEventListener('resize', contain); cancelDeparture() }
+    }
     const stop = autoUpdate(request.anchor, surface, () => { void update() })
     return () => { current = false; stop(); cancelDeparture() }
-  }, [request.token])
+  }, [request.token, request.pinned])
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || wasWindowOverlayDismissed(event)) return
+      if (event.defaultPrevented || wasWindowOverlayDismissed(event)) return
+      if (event.key.toLowerCase() === 'p' && !event.metaKey && !event.ctrlKey && !event.altKey && panel.current?.contains(document.activeElement) &&
+        !(event.target instanceof HTMLElement && event.target.closest('input, textarea, [contenteditable="true"]'))) { event.preventDefault(); togglePin(); return }
+      if (event.key !== 'Escape') return
       if (request.pinned && !panel.current?.contains(document.activeElement)) return
       markWindowOverlayDismissal(event); event.preventDefault()
       if (tab) showReading()
@@ -200,7 +261,7 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
   const host = getWindowOverlayHost()
   if (!host) return null
   return createPortal(<div ref={panel} id={request.id} className="focus-context-hover agent-information-reader" role="region"
-    data-state="open" aria-label={`Full context for ${context.name}`} tabIndex={-1} style={{ visibility: 'hidden' }}
+    data-state="open" data-pinned={request.pinned || undefined} hidden={!visible} aria-label={`Full context for ${context.name}`} tabIndex={-1} style={{ visibility: 'hidden' }}
     onPointerEnter={cancelDeparture} onPointerLeave={leave} onFocus={cancelDeparture} onBlur={event => {
       if (event.relatedTarget instanceof Node && (panel.current?.contains(event.relatedTarget) || event.relatedTarget === request.anchor)) return
       leave()
@@ -210,7 +271,7 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
         ? <WorkbenchTopology tabs={request.identity.tabs} interactive={false} enabled={false} />
         : <AgentAvatar executorId={context.executorId} label={context.name} state={currentContext.state} providerId={context.providerId ?? undefined} size={24} visible={false} />}</span>
       <div className="agent-information-reader__heading"><small title={context.originAddress ?? path}>{context.workspaceName}</small><strong title={context.name}>{context.name}</strong></div>
-      {sameSource ? <FocusContextStateSummary context={currentContext} explanationVisible={Boolean(service)} /> : <span className="focus-context-hover__state">Reading snapshot</span>}
+      {sameSource && visible ? <FocusContextStateSummary context={currentContext} explanationVisible={Boolean(service)} /> : <span className="focus-context-hover__state">Reading snapshot</span>}
     </header>
     {sourceNotice || service ? <div className="agent-information-reader__service" role={sourceNotice ? 'status' : undefined}>
       <InfoIcon size={13} aria-hidden="true" /><p>{sourceNotice ?? service}</p><button type="button" onClick={() => showMetadata('source')}>Source</button>
@@ -218,7 +279,7 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
     <div className="agent-information-reader__body">
       <div ref={reading} className="agent-information-reader__reading" tabIndex={0} aria-label="Original Agent content"
         style={tab ? { visibility: 'hidden' } : undefined} inert={tab !== null}>
-        <HeldReading request={request} enabled={visible && sameSource} />
+        <HeldReading request={request} enabled={visible && sameSource && tab === null} />
       </div>
       {tab ? <div className="agent-information-reader__metadata">
         <div className="agent-information-reader__metadata-heading"><button ref={back} type="button" onClick={showReading} aria-label="Back to original content">←</button><h3>Agent information</h3></div>
@@ -229,6 +290,9 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
       <button type="button" className="agent-information-reader__facts" onClick={() => tab ? showReading() : showMetadata('usage')}
         aria-label="Agent information: usage, Goals, message relationships and source" aria-expanded={tab !== null}>
         <InfoIcon size={14} aria-hidden="true" /><AgentInformationSummary usage={usage} goalLinks={request.goalLinks} />
+      </button>
+      <button type="button" className="agent-information-reader__pin" aria-pressed={request.pinned} aria-keyshortcuts="P" onClick={togglePin} title={request.pinned ? 'Release reading · P' : 'Keep this reading while you work · P'}>
+        <PinIcon size={13} aria-hidden="true" />{request.pinned ? 'Pinned' : 'Pin'}
       </button>
       <button type="button" className="agent-information-reader__open" onClick={() => {
         const original = useAppStore.getState().sessions.find(session => session.id === context.id && session.hostId === context.hostId && session.control.run.runId === context.runId)

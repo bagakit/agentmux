@@ -1,4 +1,4 @@
-import { useCallback, useId, useLayoutEffect, useRef, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { FocusContext } from '../lib/focus-context'
 import type { FocusGoalLinks } from '../lib/focus-goal-links'
 import type { FocusContextIdentity } from '../lib/focus-context-identity'
@@ -10,6 +10,19 @@ import { AgentInformationReader } from './AgentInformationReader'
 /** Mounted once by App, outside transient, filtered and retained surface trees. */
 export function AgentInformationPreviewHost() {
   const request = useSyncExternalStore(agentInformationPreview.subscribe, agentInformationPreview.get, () => null)
+  useEffect(() => {
+    const cancel = () => agentInformationPreview.cancelIntent()
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') cancel() }
+    document.addEventListener('keydown', escape)
+    document.addEventListener('pointerdown', cancel, true)
+    document.addEventListener('visibilitychange', cancel)
+    window.addEventListener('scroll', cancel, true)
+    window.addEventListener('resize', cancel)
+    return () => {
+      cancel(); document.removeEventListener('keydown', escape); document.removeEventListener('pointerdown', cancel, true)
+      document.removeEventListener('visibilitychange', cancel); window.removeEventListener('scroll', cancel, true); window.removeEventListener('resize', cancel)
+    }
+  }, [])
   useLayoutEffect(() => () => {
     const original = agentInformationPreview.get()
     if (original) agentInformationPreview.dismiss(original.token, true)
@@ -46,7 +59,7 @@ export function useAgentInformationPreview(context: FocusContext, requested: boo
         suppressRestoredFocus(); trigger.focus({ preventScroll: true })
       } })
   }
-  function showSoon() { clearTimeout(intent.current); keepOpen(); if (enabled) intent.current = setTimeout(show, 180) }
+  function showSoon() { clearTimeout(intent.current); keepOpen(); if (enabled && agentInformationPreview.schedule(token, () => clearTimeout(intent.current))) intent.current = setTimeout(show, 180) }
   function hideSoon() {
     clearTimeout(intent.current); keepOpen()
     departure.current = setTimeout(() => {
@@ -54,7 +67,7 @@ export function useAgentInformationPreview(context: FocusContext, requested: boo
       close()
     }, 160)
   }
-  useLayoutEffect(() => { close() }, [context.id, context.hostId, context.runId, context.name, context.state, context.detail,
+  useLayoutEffect(() => { agentInformationPreview.noteContent(token, context); close() }, [context.id, context.hostId, context.runId, context.name, context.state, context.detail,
     context.recap?.text, context.recap?.source, context.recap?.origin, context.recap?.reading?.text,
     context.recap?.reading?.truncated, context.workspacePath, context.originAddress, enabled, close])
   useLayoutEffect(() => () => { close() }, [close])
