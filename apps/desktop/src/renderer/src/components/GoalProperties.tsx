@@ -24,7 +24,7 @@ export function GoalCommonProperties({ demand, onUpdate }: Props) {
   return <div className="goals-common-properties" aria-label="Common Goal properties">
     <label>Work status<SelectionField label="Goal work status" value={demand.status} options={DEMAND_STATUS_IDS.map((value, index) => ({ value, label: STATUS_LABELS[index]! }))} onValueChange={status => onUpdate({ status: status as DemandStatus })} /></label>
     <label>Priority<SelectionField label="Goal priority" value={demand.priority} options={['low', 'normal', 'high', 'urgent'].map(value => ({ value, label: value[0]!.toUpperCase() + value.slice(1) }))} onValueChange={priority => onUpdate({ priority: priority as DemandPriority })} /></label>
-    <label>Project<SelectionField label="Goal project" value={demand.projectId ?? ''} options={[{ value: '', label: 'Unassigned' }, ...(unavailableProject ? [{ value: demand.projectId!, label: `${demand.projectName ?? 'Bound Project'} · Unavailable`, disabled: true }] : []), ...projects.map(project => ({ value: project.id, label: project.name }))]}
+    <label>Project<SelectionField key={demand.id} label="Goal project" value={demand.projectId ?? ''} options={[{ value: '', label: 'Unassigned' }, ...(unavailableProject ? [{ value: demand.projectId!, label: `${demand.projectName ?? 'Bound Project'} · Unavailable`, disabled: true }] : []), ...projects.map(project => ({ value: project.id, label: project.name }))]}
       onValueChange={id => { if (!id) onUpdate({ projectId: null, projectName: null }); else { const project = projects.find(project => project.id === id); if (project) onUpdate({ projectId: project.id, projectName: project.name }) } }} /></label>
   </div>
 }
@@ -49,7 +49,7 @@ function GoalMoreProperties({ demand, onUpdate }: Props) {
 
     </div></fieldset>
     <fieldset><legend>Relationships</legend><div className="goals-properties__fields">
-      <label>Parent goal<SelectionField label="Parent goal" value={demand.parentDemandId ?? ''} options={[{ value: '', label: 'None' }, ...Object.values(demands).filter(item => item.id !== demand.id).map(item => ({ value: item.id, label: item.title }))]} onValueChange={parentDemandId => onUpdate({ parentDemandId: parentDemandId || null })} /></label>
+      <label>Parent goal<SelectionField key={demand.id} label="Parent goal" value={demand.parentDemandId ?? ''} options={[{ value: '', label: 'None' }, ...Object.values(demands).filter(item => item.id !== demand.id).map(item => ({ value: item.id, label: item.title }))]} onValueChange={parentDemandId => onUpdate({ parentDemandId: parentDemandId || null })} /></label>
     </div><div className="goals-properties__references">
       {demand.participations?.map(source => <div key={source.id}><strong>{sessionName(source.agentSessionId, source.hostId)}</strong><span>{source.kind} · {source.entryPoint} · {source.hostId}</span><span>{source.agentSessionId}</span>{source.mote ? <span>Mote · {source.mote.topicId} · {source.mote.identityDirectoryPath}</span> : null}<time dateTime={new Date(source.recordedAt).toISOString()}>{new Date(source.recordedAt).toLocaleString()}</time></div>)}
       {demand.alignment ? <span>Goal version · {demand.alignment.revision}</span> : null}
