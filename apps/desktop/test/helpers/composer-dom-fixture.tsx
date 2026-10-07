@@ -2,6 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "../../scripts/lib/fixture-v
 import { act, type ReactNode } from 'react'
 import type { Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './client-ui-render'
+import { createAgentInformationRoot } from './agent-information-root'
 import { afterEach, beforeEach, vi } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../../src/shared/contracts'
 import { useAppStore } from '../../src/renderer/src/store'
@@ -24,7 +25,7 @@ export function composerSession(id = 'agent-1', providerId = 'codex'): Extract<S
 }
 
 /** Real Store + React + rich input. Only native desktop calls are mocked by the individual tests. */
-export function composerDOM() {
+export function composerDOM(options?: { agentInformation?: boolean }) {
   const initial = useAppStore.getState()
   let container: HTMLDivElement
   let overlayHost: HTMLDivElement
@@ -35,7 +36,7 @@ export function composerDOM() {
     overlayHost = document.createElement('div')
     overlayHost.dataset.overlayHost = ''
     document.body.append(container, overlayHost)
-    root = createRoot(container)
+    root = options?.agentInformation ? createAgentInformationRoot(container) : createRoot(container)
     useAppStore.setState({ config: composerConfig, sessions: [composerSession()], error: null,
       agentNames: {}, agentComposerDrafts: { 'agent-1': 'Keep my draft' }, agentSteerQueues: {} })
   })

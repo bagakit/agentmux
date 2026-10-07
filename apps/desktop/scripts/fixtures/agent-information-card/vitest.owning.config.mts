@@ -8,8 +8,8 @@ export default defineConfig({ ...shared, cacheDir: resolve(root, '.tmp/agent-inf
   plugins: [...shared.plugins ?? [], { name: 'actual-shared-agent-information-card', enforce: 'pre', transform(code, id) {
     const path = relative(root, id.split('?')[0]!), mutation = process.env.AGENT_INFORMATION_MUTATION
     const changes = {
-      details: ['AgentInformationPreview.tsx', '<AgentInformationDetails context={context} goalLinks={goalLinks} />', '<span />'],
-      workspace: ['WorkspaceAgentRow.tsx', '{preview.preview}', '{null}'],
+      details: ['AgentInformationReader.tsx', 'goalLinks={request.goalLinks} usage={usage}', 'goalLinks={undefined} usage={undefined}'],
+      workspace: ['WorkspaceAgentRow.tsx', 'useAgentInformationPreview(context, !goalOpen,', 'useAgentInformationPreview(context, false,'],
       host: ['AgentCommunicationRelations.tsx', 'page.hostId !== subject.hostId || ', '']
     } as const
     let served = code
