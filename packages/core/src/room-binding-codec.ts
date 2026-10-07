@@ -13,7 +13,12 @@ function id(value: unknown): string { const result = text(value); if (!/^[A-Za-z
 function revision(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 1) fail(); return value as number }
 export function parseConnectionApplication(value: unknown): ConnectionApplication { const p = object(value, ['domain', 'appId']), domain = text(p.domain); if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail(); return { domain, appId: id(p.appId) } }
 function source(value: unknown) { const p = object(value, ['providerId', 'nativeSessionId']); return { providerId: text(p.providerId), nativeSessionId: text(p.nativeSessionId) } }
-function scope(value: unknown): RoomBindingScope { const p = object(value, ['input', 'publication']); if (!['mentions-and-replies', 'all-messages'].includes(String(p.input)) || p.publication !== 'future-native-user-facing') fail(); return { input: p.input as RoomBindingScope['input'], publication: 'future-native-user-facing' } }
+function scope(value: unknown): RoomBindingScope {
+  const p = object(value, ['input', 'publication'])
+  if ((p.input !== 'mentions-and-replies' && p.input !== 'all-messages') ||
+    (p.publication !== 'future-native-user-facing' && p.publication !== 'future-shared-conversation')) fail()
+  return { input: p.input as RoomBindingScope['input'], publication: p.publication as RoomBindingScope['publication'] }
+}
 function target(p: Record<string, unknown>) { const anchor = object(p.regionAnchor, ['regionId']); return { executionHostId: id(p.executionHostId), agentSessionId: id(p.agentSessionId), regionAnchor: { regionId: id(anchor.regionId) } } }
 export function parseRoomBindingTarget(value: unknown) { return target(object(value, ['executionHostId', 'agentSessionId', 'regionAnchor'])) }
 export function parseConnectionMember(value: unknown): Pick<ConnectionActor, 'idType' | 'userId'> { const p = object(value, ['idType', 'userId']); return { idType: id(p.idType), userId: text(p.userId) } }

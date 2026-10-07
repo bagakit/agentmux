@@ -6,7 +6,7 @@ import { parseConnectionDelivery, parseConnectionDeliveryReceipt, type Connectio
 import { parseConversationChangesPage, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
 
 /** The immutable authorized audience; presentation and current focus are deliberately absent. */
-export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints'>
+export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints' | 'scope'>
 export type PublicationPayload = {
   kind: 'speech'
   text: string
@@ -20,6 +20,8 @@ export type PublicationFailureReason = ConnectionDeliveryReceiptReason
 export type PublicationReceipt = ConnectionDeliveryReceipt
 export type PublicationOperation = ConnectionDelivery & {
   payload: PublicationPayload
+  /** Absent in original stored operations, whose scope remains assistant speech. */
+  publicationScope?: RoomBinding['scope']['publication']
   /** Private receipt correlation; never changes the original operation or platform request key. */
   attempt?: number
   /** Frozen before dispatch; private to this Host, never exposed in public delivery DTOs. */
@@ -28,7 +30,7 @@ export type PublicationOperation = ConnectionDelivery & {
 /** Reuse the original public receipt codec without accepting private request or body fields. */
 const parseReceipt = parseConnectionDeliveryReceipt
 export function publicDelivery(operation: PublicationOperation): ConnectionDelivery {
-  const { payload: _payload, prepared: _prepared, attempt: _attempt, ...delivery } = operation
+  const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, ...delivery } = operation
   return parseConnectionDelivery(delivery)
 }
 type Decision = { recordId: string; revision: string; payload?: PublicationPayload; reason?: 'not-assistant-speech' | 'no-public-text' }
@@ -181,6 +183,7 @@ export class PublicationStore {
           const operationId = 'publication-' + digest([projectionId, ordinal, prior?.operationId ?? null, decision.revision, effect])
           const operation: PublicationOperation = { operationId, projectionId, sourceRevision: decision.revision,
             bindingId: boundary.bindingId, bindingRevision: boundary.revision,
+            publicationScope: boundary.scope.publication,
             reference: { ...ref(boundary), source: { kind: 'native', ...page.source, recordId: decision.recordId } },
             target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },
             payload: payload ?? { kind: 'speech', text: '' }, effect, fragment: { ordinal, count: decision.fragments.length }, state: 'pending',
@@ -209,6 +212,8 @@ export class PublicationStore {
       const first = this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') ORDER BY ordinal LIMIT 1")
         .get(...scopeKey(boundary)))
       if (!first || first.state !== 'pending') return null
+      if ((first.publicationScope ?? 'future-native-user-facing') !== boundary.scope.publication)
+        throw new AgentMuxError('The original publication retains another sharing scope. Inspect its Binding revision without replacing the operation.', 'PUBLICATION_SCOPE_CONFLICT')
       const predecessor = first.predecessorOperationId ? this.inspect(first.predecessorOperationId) : null
       if (predecessor && (predecessor.state !== 'confirmed' || !predecessor.mapping)) return null
       const original = { ...first, ...(predecessor?.mapping && predecessor.effect !== 'withdraw' ? { mapping: predecessor.mapping } : {}) }
