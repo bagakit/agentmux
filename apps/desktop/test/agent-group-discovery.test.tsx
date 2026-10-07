@@ -171,3 +171,59 @@ it('a positively unsent link intent survives a save failure and explicitly conti
   expect((await f.cli(['room', 'link', 'inspect', '--operation-id', intent.input.operationId])).operation.state).toBe('confirmed')
   expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中'); await f.original.unchanged()
 }, 25_000)
+
+it('a known refused link can be explicitly regenerated after repair using the current revision while its old receipt stays inspectable', async () => {
+  const originalNative = native; let attempts = 0
+  native = async request => request.url?.endsWith('/link') && ++attempts === 1 ? { code: 232064, msg: 'Controlled pre-effect permission refusal' } : await originalNative(request)
+  await f.mount(); await f.menu('Bind existing group chat'); await chooseGroup('oc_other'); await f.button('Create join link'); await ready('Join link could not be created'); await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role=dialog]')?.getAttribute('aria-busy')).toBe('false') })
+  const original = Object.values(useAppStore.getState().connectorRoomIntents).find(value => value.method === 'connection.room.link.create')!
+  expect(original, 'known refused original intent remains').toBeDefined()
+  expect((await f.cli(['room', 'link', 'inspect', '--operation-id', original.input.operationId])).operation.state).toBe('refused')
+  await f.button('Close')
+  const credential = await f.services.secrets.store({ operationId: 'repair-original-link-credential', secret: 'controlled-replacement-credential' })
+  await f.services.connections.configure({ operationId: 'repair-original-link-connection', expectedRevision: 1, connection: { ...f.config, credentialRef: credential.credentialRef } })
+  await f.menu('Bind existing group chat'); await ready('Join link could not be created'); await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role=dialog]')?.getAttribute('aria-busy')).toBe('false') })
+  await f.button('Generate a new join link')
+  await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.room.link.create')).toHaveLength(2))
+  const effects = f.calls.filter(call => call.method === 'connection.room.link.create'), latest = effects[1]!.input as { operationId: string }
+  expect(latest.operationId).not.toBe(original.input.operationId)
+  expect(useAppStore.getState().connectorRoomIntents[latest.operationId]).toMatchObject({ replacesOperationId: original.input.operationId })
+  expect(latest).toMatchObject({ connectionId: f.config.connectionId, expectedConnectionRevision: 2, externalConversationId: 'oc_other' }); await ready('Join link ready')
+  expect((await f.cli(['room', 'link', 'inspect', '--operation-id', original.input.operationId])).operation.state).toBe('refused')
+  expect((await f.cli(['room', 'link', 'inspect', '--operation-id', latest.operationId])).operation.state).toBe('confirmed')
+  expect(f.platformCalls.filter(call => call.url?.endsWith('/link'))).toHaveLength(2)
+  expect(Object.keys(useAppStore.getState().connectorRoomIntents)).toContain(original.input.operationId)
+  await f.original.unchanged()
+}, 25_000)
+
+it('a confirmed link is explicitly replaced without a clock inference and its new unknown head remains inspect-only after remount', async () => {
+  await f.mount(); await f.menu('Bind existing group chat'); await chooseGroup('oc_other'); await f.button('Create join link'); await ready('Join link ready'); await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role=dialog]')?.getAttribute('aria-busy')).toBe('false') })
+  const original = Object.values(useAppStore.getState().connectorRoomIntents).find(value => value.method === 'connection.room.link.create')!
+  const originalNative = native
+  native = async request => { if (request.url?.endsWith('/link')) throw new Error('Controlled replacement outcome unknown'); return await originalNative(request) }
+  await f.button('Generate a new join link')
+  await vi.waitFor(async () => { await act(async () => {}); expect(f.calls.filter(call => call.method === 'connection.room.link.create')).toHaveLength(2); expect((f.calls.filter(call => call.method === 'connection.room.link.create')[1]!.result as { state?: string })?.state).toBe('unknown'); expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-busy')).toBe('false') })
+  const latest = f.calls.filter(call => call.method === 'connection.room.link.create')[1]!.input as { operationId: string }
+  expect(latest.operationId).not.toBe(original.input.operationId)
+  expect(useAppStore.getState().connectorRoomIntents[latest.operationId]).toMatchObject({ replacesOperationId: original.input.operationId })
+  const persisted = localStorage.getItem('agentmux-workbench-v1')!
+  await f.dom.render(null); useAppStore.setState({ connectorRoomIntents: {} }); localStorage.setItem('agentmux-workbench-v1', persisted); await useAppStore.persist.rehydrate()
+  expect(useAppStore.getState().connectorRoomIntents[latest.operationId]).toMatchObject({ replacesOperationId: original.input.operationId })
+  const reads = f.calls.filter(call => call.method === 'connection.room.link.inspect' && (call.input as { operationId: string }).operationId === latest.operationId).length
+  await f.mount(); await f.menu('Bind existing group chat')
+  await vi.waitFor(async () => { await act(async () => {}); expect(f.calls.filter(call => call.method === 'connection.room.link.inspect' && call.result && (call.input as { operationId: string }).operationId === latest.operationId).length).toBeGreaterThan(reads) })
+  const fresh = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(button => button.textContent === 'Generate a new join link')
+  if (fresh) { await act(async () => fresh.click()); await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.room.link.create').length).toBeGreaterThan(2)) }
+  expect(f.calls.filter(call => call.method === 'connection.room.link.create')).toHaveLength(2)
+  await ready('Join link result not confirmed')
+  expect([...document.querySelectorAll('button')].some(button => button.textContent === 'Generate a new join link' || button.textContent === 'Create join link' || button.textContent === 'Save and continue')).toBe(false)
+  await f.button('Check link status'); await ready('Join link result not confirmed'); await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role=dialog]')?.getAttribute('aria-busy')).toBe('false') })
+  const previous = [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Previous join link receipt')!
+  expect(previous, 'original link receipt remains reachable').toBeDefined()
+  await act(async () => { previous.querySelector('summary')!.click(); previous.querySelector<HTMLButtonElement>('button')!.click() })
+  await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.room.link.inspect').at(-1)?.input).toEqual({ operationId: original.input.operationId }))
+  expect(f.platformCalls.filter(call => call.url?.endsWith('/link'))).toHaveLength(2)
+  expect((await f.cli(['room', 'link', 'inspect', '--operation-id', original.input.operationId])).operation.state).toBe('confirmed')
+  expect((await f.cli(['room', 'link', 'inspect', '--operation-id', latest.operationId])).operation.state).toBe('unknown')
+  await f.original.unchanged()
+}, 25_000)
