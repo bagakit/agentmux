@@ -8,23 +8,25 @@ import { useAppStore } from '../store'
 import { RegionMenuEntryView } from './RegionContextMenu'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { useFocusStopAgent } from './FocusStopAgent'
+import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeActionStopIcon = semanticIconComponent('action.stop')
 
 
 /** A Context card knows its semantic SID, not which of its Regions to address. */
-export function FocusContextMenu({ context, children, onOpenChange, onRename, onRestoreFocus }: {
-  context: FocusContext; children: ReactNode; onOpenChange(open: boolean): void; onRename(): void; onRestoreFocus(): void
+export function FocusContextMenu({ open, context, children, onOpenChange, onRename, onRestoreFocus }: {
+  open: boolean; context: FocusContext; children: ReactNode; onOpenChange(open: boolean): void; onRename(): void; onRestoreFocus(): void
 }) {
+  const active = useWorkbenchPresentationActive()
   const sessionId = context.id
   const actionOwnsFocus = useRef(false)
   const origin = useRef<HTMLElement | null>(null)
-  const stop = useFocusStopAgent()
+  const stop = useFocusStopAgent(active)
   const actions = agentRosterMenuActions({ sessionId, writeClipboardText: async text => {
     await copyTextToClipboard(text, error => useAppStore.getState().reportError(error))
   } })
-  return <><ContextMenu.Root modal={false} onOpenChange={open => { if (open) actionOwnsFocus.current = false; onOpenChange(open) }}>
+  return <><ContextMenu.Root modal={false} open={open} onOpenChange={open => { if (open) actionOwnsFocus.current = false; onOpenChange(open) }}>
     <ContextMenu.Trigger asChild onContextMenu={event => { origin.current = event.currentTarget }} onKeyDown={event => {
       if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return
       event.preventDefault()
@@ -34,10 +36,11 @@ export function FocusContextMenu({ context, children, onOpenChange, onRename, on
     <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
       <ContextMenu.Content className="tab-context-menu focus-context-menu" data-agent-session-id={sessionId} collisionPadding={8}
         onCloseAutoFocus={event => {
-          const active = document.activeElement
+          if (!active) { event.preventDefault(); return }
+          const activeElement = document.activeElement
           const closing = event.target
-          const laterFocus = active instanceof HTMLElement && active !== document.body &&
-            closing instanceof HTMLElement && !closing.contains(active)
+          const laterFocus = activeElement instanceof HTMLElement && activeElement !== document.body &&
+            closing instanceof HTMLElement && !closing.contains(activeElement)
           if (actionOwnsFocus.current || laterFocus) { event.preventDefault(); actionOwnsFocus.current = false }
           else onRestoreFocus()
         }}>
@@ -49,5 +52,5 @@ export function FocusContextMenu({ context, children, onOpenChange, onRename, on
         <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); stop.requestStop(sessionId, context.name, origin.current) }}><ThemeActionStopIcon size={14} /><span>Stop Agent</span></ContextMenu.Item>
       </ContextMenu.Content>
     </ContextMenu.Portal>
-  </ContextMenu.Root>{stop.dialog}</>
+  </ContextMenu.Root>{active ? stop.dialog : null}</>
 }
