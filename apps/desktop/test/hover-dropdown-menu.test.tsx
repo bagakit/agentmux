@@ -109,7 +109,7 @@ it('Composer tools select actual skill and command references without submitting
   expect(onChooseSkill).toHaveBeenCalledExactlyOnceWith(skill)
   await pointer(find('Commands'), 'pointerover')
   await act(async () => (document.querySelector('[role="menuitem"]') as HTMLElement).click())
-  expect(onCommand).toHaveBeenCalledExactlyOnceWith('/status')
+  expect(onCommand).toHaveBeenCalledExactlyOnceWith('/status', { text: '/status', description: 'Session status' })
   await act(async () => find('Capture').click())
   expect(onCapture).toHaveBeenCalledOnce()
 })
