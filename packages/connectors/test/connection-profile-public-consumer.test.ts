@@ -142,3 +142,19 @@ it('rejects unsafe original Host projections through the real public SDK and kee
   owner.close();await expect(owner.profile!.list({connectionId:'original'})).rejects.toMatchObject({code:'CONNECTION_PROFILE_UNAVAILABLE'})
   expect(shared.prepare('SELECT 1 AS retained').get()).toEqual({retained:1});shared.close()
 },30_000)
+
+
+it('binds a sync receipt avatar digest to the original input bytes through the actual default Host and public SDK',async()=>{
+  const f=await fixture(),sync=ConnectionProfileHost.prototype.sync
+  vi.spyOn(ConnectionProfileHost.prototype,'sync').mockImplementation(async function(this:ConnectionProfileHost,input,context){
+    const operation=await sync.call(this,input,context)
+    return {...operation,desired:{...operation.desired,avatarSha256:'0'.repeat(64)}}
+  })
+  let rejected:unknown
+  try{await f.sdk.call('connection.profile.sync',f.input)}catch(error){rejected=error}
+  expect(rejected,'A different valid digest cannot acknowledge the original avatar bytes').toMatchObject({code:'INVALID_CONNECTION_PROFILE_DATA'})
+  const original=(await f.sdk.call('connection.profile.inspect',{operationId:f.input.operationId})).operation!
+  expect(original.desired.avatarSha256).toBe(createHash('sha256').update(profilePng).digest('hex'))
+  expect(original.patch.state).toBe('confirmed')
+  expect(f.effects.map(e=>[e.kind,e.preclaimed])).toEqual([['upload',true],['patch',true]])
+},30_000)
