@@ -16,6 +16,8 @@ pnpm icons:dev
 
 遇到一图多义，先读实际调用方的 handler、目标和所在工作流，再决定复用或新增语义身份：会话分叉与 Git 工作区创建、消息回到草稿与移动文件夹、单篇 Note 与 Notebook 集合分别核对。同一功能目的地跨 Desktop/Mobile 选择同一语义项，尺寸仍按各自宿主设置。确认含义独立后，再查现有 `IconGlyphId` 是否足够；分开定制不要求分开画图。改接线时保留原控件、可访问名称、命中区和回调，业务状态、权限与原回执不随绘图变更。
 
+通用工具记录使用 `conversation.tool-call`／`conversation.tool-result`，沿原结构的记录种类选择，不能因为标题像命令就借 `object.terminal`；真实终端对象继续沿其原角色。调用与返回的静止、失败和成功边界见[过程层级与详情](../design/presentation/conversation-mode.md#过程层级与详情)。
+
 ## 在产品中使用
 
 React 从公开入口引用，并加载共享样式：
