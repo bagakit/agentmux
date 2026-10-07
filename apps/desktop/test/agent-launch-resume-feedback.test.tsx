@@ -1,8 +1,9 @@
+import { currentNotificationRows, notificationEventRows, toggleNotificationCenter } from './helpers/notification-center'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
-import { mkdtemp, mkdir, readFile, rm, access } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { act } from 'react'
@@ -10,10 +11,9 @@ import { type Root } from 'react-dom/client'
 import '../src/preload/index'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AgentMuxClient, AgentMuxError, AgentMuxMemoryAgentSessionStore, AgentProviderRegistry, defineAgentProvider,
-  AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
+import { AgentMuxClient, AgentMuxError, AgentMuxMemoryAgentSessionStore, AgentProviderRegistry, defineAgentProvider } from '@agentmux/core'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
-import type { AgentMuxPreloadApi, AppConfig } from '../src/shared/contracts'
+import type { AgentMuxPreloadApi, AppConfig, SessionRecoveryResult } from '../src/shared/contracts'
 import type { ConfigStore } from '../src/main/config-store'
 import type { WorkspaceFiles } from '../src/main/workspace-files'
 import { AgentHookServer } from '../../../packages/core/src/hook-server'
@@ -29,7 +29,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), removeListener: vi.fn(), send: vi.fn() },
   webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.directory || _hygiene_fixturePath('isolated-launch'), getAppPath: () => resolve('apps/desktop') },
   ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
-    removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
+    removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   safeStorage: { isEncryptionAvailable: () => false }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
@@ -52,9 +52,10 @@ vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dis
 import { RuntimeController } from '../src/main/runtime-controller'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { registerIpc } from '../src/main/ipc'
+import { NOTES_WORKSPACE_ID, NOTES_WORKSPACE_NAME } from '../src/shared/notes-library'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
-import { executorDetectionKey, useAppStore } from '../src/renderer/src/store'
+import { executorDetectionKey, useAppStore, type NotificationEvent } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
@@ -113,7 +114,7 @@ beforeEach(async () => {
     starts.push(input)
     const run = { runId: `projection-run-${starts.length}`, lifecycleOperationId: input.operationKey,
       program: input.program, args: input.args, workspacePath: input.cwd, pid: 12345,
-      state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0,
+      state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0, nativeService: null,
       firstAvailableByte: 0, acceptedInputBytes: 0 }
     runs.set(run.runId, run); return run
   }
@@ -129,10 +130,11 @@ beforeEach(async () => {
   topics = new ScratchTopics()
   const workspace = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', path: dir, kind: 'folder' as const }
   config = { ...structuredClone(DEFAULT_CONFIG), executors: { fixture: { label: 'Fixture', providerId: provider.id,
-    command: provider.executable, args: [], env: { CODEX_HOME: join(dir, 'home') }, injectAgentMuxGuide: false } }, workspaces: [workspace] }
+    command: provider.executable, args: [], env: { CODEX_HOME: join(dir, 'home') }, injectAgentMuxGuide: false } }, workspaces: [workspace, { id: NOTES_WORKSPACE_ID, name: NOTES_WORKSPACE_NAME, hostId: 'local',
+      path: join(dir, 'notes'), kind: 'folder' }] }
   topicId = (await topics.ensureMote(workspace, 'launcher:projection')).id
   runtime = new RuntimeController(durable, localRuntimeConnector, topics)
-  runtime.commit({ hosts: [{ id: 'local', client: core, executionHost: { kind: 'local', dispose: vi.fn() } as never }],
+  runtime.commit({ hosts: [{ id: 'local', config: config.hosts.find(host => host.id === 'local')!, client: core, executionHost: { kind: 'local', dispose: vi.fn() } as never }],
     removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const sender = Object.assign(new EventEmitter(), { id: 9981, isDestroyed: () => destroyed, send: vi.fn(),
@@ -145,24 +147,42 @@ beforeEach(async () => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return handler!({ sender } as unknown as IpcMainInvokeEvent, ...values)
   })
+  // Finish the private Notes bootstrap before deleting its state in teardown.
+  await api.notesStorage.inspect()
   disposeStore = await useAppStore.getState().initialize()
   const tab = createWorkbenchTab(launcherId, { regionId, kind: 'launcher', workspaceId: workspace.id }, topicId)
   useAppStore.setState({ ...initial, config, activeWorkspaceId: workspace.id, tabs: { [launcherId]: tab },
     layouts: { [workspace.id]: createWorkspaceLayout('projection-group', [launcherId]) },
     sessions: [], timelines: {}, pendingAgentLaunches: {}, agentComposerDrafts: {}, agentSteerQueues: {},
-    error: null, lastError: null, errorNoticeContext: null, errorDismissed: false, noticeReadReceipts: {}, dirtyDocuments: { sibling: true }, documents: { sibling: { content: 'unsaved sibling' } } as never }, true)
+    error: null, lastError: null, errorNoticeContext: null, errorDismissed: false, notificationEvents: [], noticeReadReceipts: {}, dirtyDocuments: { sibling: true }, documents: { sibling: { content: 'unsaved sibling' } } as never }, true)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => {
-  await act(async () => root?.unmount()); container?.remove()
-  disposeStore?.(); disposeStore = undefined
-  const results = await Promise.allSettled([disposeIpc?.(), runtime.dispose()])
-  disposeIpc = undefined
-  useAppStore.setState(initial, true); bridge.invoke.mockReset(); vi.restoreAllMocks(); vi.unstubAllEnvs()
-  await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
-  for (const result of results) if (result.status === 'rejected') failures.push(result.reason)
-  expect(failures).toEqual([])
+  try {
+    await act(async () => root?.unmount()); container?.remove()
+    disposeStore?.(); disposeStore = undefined
+    const results = await Promise.allSettled([disposeIpc?.(), runtime?.dispose()])
+    for (const result of results) if (result.status === 'rejected') failures.push(result.reason)
+    expect(failures).toEqual([])
+  } finally {
+    disposeIpc = undefined
+    useAppStore.setState(initial, true); bridge.invoke.mockReset(); vi.restoreAllMocks(); vi.unstubAllEnvs()
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
+  }
 })
+function lifecycleNotice(owner: { regionId: string } | { subject: import('../src/shared/contracts').AgentSessionControl }) {
+  return useAppStore.getState().notificationEvents.find(record => {
+    const failure = record.context?.lifecycle
+    return failure?.step === 'launch' ? 'regionId' in owner && failure.regionId === owner.regionId
+      : failure?.step === 'resume' && 'subject' in owner && failure.subject.hostId === owner.subject.hostId &&
+        failure.subject.agentSessionId === owner.subject.agentSessionId && failure.subject.run.runId === owner.subject.run.runId
+  })
+}
+function expectCurrent(record: NotificationEvent) {
+  expect(useAppStore.getState().notificationEvents).toContain(record)
+  expect(currentNotificationRows(container).some(row => row.dataset.noticeId === record.id)).toBe(true)
+}
+
 async function launch() {
   await act(async () => useAppStore.getState().launchAgent('fixture', '', 'projection-group', { tabId: launcherId, regionId }))
   const surface = useAppStore.getState().tabs[launcherId]!.regions[regionId]!
@@ -171,8 +191,8 @@ async function launch() {
   return surface.sessionId
 }
 async function pane(id: string) {
-  await act(async () => root.render(<SessionPane sessionId={id} surfaceKind="agent" interactiveResize visible
-    linkOrigin={{ workspaceId: SCRATCH_WORKSPACE_ID, tabGroupId: 'projection-group', tabId: launcherId, regionId }} />))
+  await act(async () => root.render(<><SessionPane sessionId={id} surfaceKind="agent" interactiveResize visible
+    linkOrigin={{ workspaceId: SCRATCH_WORKSPACE_ID, tabGroupId: 'projection-group', tabId: launcherId, regionId }} /><GlobalSystemNotices /></>))
 }
 async function launchDirect(id = 'direct-created') {
   return runtime.launchAgent({ executorId: 'fixture', hostId: 'local', workspacePath: dir,
@@ -195,7 +215,7 @@ async function viewFailure(parent: ParentNode = container) {
   const button = parent.querySelector<HTMLButtonElement>('.service-disclosure__trigger')
   expect(button).not.toBeNull()
   await act(async () => button!.click())
-  expect(parent.querySelector('.service-disclosure__details')?.getAttribute('popover')).toBe('auto')
+  expect(parent.querySelector('.service-disclosure__details')?.getAttribute('popover')).toBe('hint')
 }
 async function launcher() {
   const capability = await core.probeAgent('projection-fixture')
@@ -223,7 +243,7 @@ it.each([
   useAppStore.getState().setAgentComposerDraft(regionId, 'original draft')
   useAppStore.getState().setLauncherNameDraft(regionId, 'agentName', 'Kept Agent')
   const before = useAppStore.getState(), originalStart = kernel.start
-  kernel.start = async () => { throw new AgentMuxError(message, code) }
+  kernel.start = async () => { throw new AgentMuxError(message, code, undefined, { disposition: 'not_applied', confirmedInputBytes: 0 }) }
   // Emulate Electron's documented invoke transport loss; raw text survives, code does not.
   const invoke = bridge.invoke.getMockImplementation()!
   bridge.invoke.mockImplementation(async (channel, ...args) => {
@@ -232,7 +252,7 @@ it.each([
   })
   await launcher()
   const stop = vi.spyOn(core, 'stopAgent')
-  await click('Launch agent')
+  await click('Launch')
   await vi.waitFor(() => expect(container.querySelector('.launch-surface .agent-launch-notice')).not.toBeNull())
   const notice = failureWindow(container.querySelector('.launch-surface')!)
   expect(notice.querySelector('.service-window__step')?.textContent).toBe('Starting this Agent did not complete')
@@ -240,7 +260,7 @@ it.each([
   expect(notice.querySelector('.service-window__mode')?.textContent).toContain('availability is not confirmed')
   expect(notice.querySelector('.service-window__restore')?.textContent).toContain('retry Start agent')
   expect(container.querySelector('.new-tab-error')).toBeNull()
-  expect(useAppStore.getState().error).toBe(message)
+  expect(lifecycleNotice({ regionId })?.message).toBe(message)
   expect(useAppStore.getState().tabs[launcherId]!.regions[regionId]?.kind).toBe('launcher')
   expect(useAppStore.getState().layouts).toEqual(before.layouts)
   expect(useAppStore.getState().agentComposerDrafts[regionId]).toBe('original draft')
@@ -250,9 +270,11 @@ it.each([
   expect(writes).toEqual(['healthy input']); expect(stop).not.toHaveBeenCalled()
   await collapseFailure(container.querySelector('.agent-launch-notice')!)
   expect(container.querySelector('.launch-surface .service-disclosure__summary')).toBeNull()
-  expect(container.querySelector('.notification-item[data-notice-id]')?.textContent).toContain(message)
+  const reported = lifecycleNotice({ regionId })!
+  expectCurrent(reported)
+  expect(currentNotificationRows(container).find(row => row.dataset.noticeId === reported.id)?.textContent).toContain(message)
   const receipts = useAppStore.getState().noticeReadReceipts
-  await act(async () => useAppStore.getState().reportError(new Error(message), useAppStore.getState().errorNoticeContext!))
+  await act(async () => useAppStore.getState().reportError(new Error(message), lifecycleNotice({ regionId })!.context!))
   expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts)
   await viewFailure(container.querySelector('.agent-launch-notice')!)
   expect(failureWindow(container.querySelector('.launch-surface')!).textContent).toContain(message)
@@ -260,30 +282,29 @@ it.each([
   await act(async () => useAppStore.getState().setAgentComposerDraft(regionId, 'latest draft'))
   kernel.start = originalStart
   await click('Retry Start agent', container.querySelector('.agent-launch-notice')!)
+  await act(async () => { await vi.waitFor(() => expect(lifecycleNotice({ regionId })).toBeUndefined()) })
   expect(starts).toHaveLength(2)
   expect(starts[1].args).toContain('latest draft')
-  expect(useAppStore.getState().errorNoticeContext).toBeNull()
-  expect(useAppStore.getState().lastError).toBeNull()
   expect(useAppStore.getState().tabs[launcherId]!.regions[regionId]).toMatchObject({ kind: 'agent', phase: 'attached' })
-  expect(container.querySelector('.notification-item[data-notice-id]')).toBeNull()
+  expect(currentNotificationRows(container).some(row => row.dataset.noticeId === reported.id)).toBe(false)
   expect(stop).not.toHaveBeenCalled()
 })
 
 it('retry start keeps the current cause until it succeeds, and a foreign launcher does not consume it', async () => {
   const originalStart = kernel.start
-  kernel.start = async () => { throw new AgentMuxError('private failure', 'CTXMUX_persistence') }
-  await launcher(); await click('Launch agent')
+  kernel.start = async () => { throw new AgentMuxError('private failure', 'CTXMUX_persistence', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 }) }
+  await launcher(); await click('Launch')
   await vi.waitFor(() => expect(container.querySelector('.launch-surface .agent-launch-notice')).not.toBeNull())
   let resolve!: (value: unknown) => void
   kernel.start = (input: unknown) => new Promise(yes => { resolve = async () => yes(await originalStart(input)) })
   await click('Retry Start agent', container.querySelector('.agent-launch-notice')!)
-  expect(useAppStore.getState().error).toBe('private failure')
+  expect(lifecycleNotice({ regionId })?.message).toBe('private failure')
   expect(failureWindow(container.querySelector('.launch-surface')!).textContent).toContain('private failure')
   expect([...container.querySelectorAll<HTMLButtonElement>('.agent-launch-notice button')].find(button => button.textContent === 'Retry Start agent')!.disabled).toBe(true)
   await act(async () => root.render(<NewTabSurface tabGroupId="projection-group" tabId="foreign" regionId="foreign-region" visible={false} />))
   expect(container.querySelector('.agent-launch-notice')).toBeNull()
   await act(async () => resolve(undefined))
-  expect(useAppStore.getState().errorNoticeContext).toBeNull()
+  expect(lifecycleNotice({ regionId })).toBeUndefined()
 })
 
 it('actual Resume failure reaches this same Session service window and inbox without altering identity or input owners', async () => {
@@ -298,7 +319,7 @@ it('actual Resume failure reaches this same Session service window and inbox wit
   useAppStore.getState().setAgentComposerDraft(id, 'Session draft')
   kernel.start = async () => { throw new AgentMuxError('private resume write failure', 'CTXMUX_persistence') }
   const stop = vi.spyOn(core, 'stopAgent')
-  await pane(id); await click('Resume')
+  await pane(id); await click('Restore original')
   const notice = failureWindow()
   expect(notice.querySelector('.service-window__step')?.textContent).toBe('Resuming this Session did not complete')
   expect(notice.querySelector('.service-window__mode')?.textContent).toContain('private resume write failure')
@@ -308,16 +329,16 @@ it('actual Resume failure reaches this same Session service window and inbox wit
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
   expect(core.agentSession(id).nativeHandle).toMatchObject({ sessionId: 'private-native-handle' })
   expect(useAppStore.getState().agentComposerDrafts[id]).toBe('Session draft')
-  expect(container.querySelector('.composer-mailbox [role="tabpanel"][id$="-system"]')?.textContent).toContain('private resume write failure')
+  expect(currentNotificationRows(container).some(row => row.textContent?.includes('private resume write failure'))).toBe(true)
   await collapseFailure(container.querySelector('.agent-launch-notice')!)
   expect(container.querySelector('.agent-launch-notice .service-disclosure__summary')).toBeNull()
-  expect(container.querySelector('.composer-mailbox [role="tabpanel"][id$="-system"]')?.textContent).toContain('private resume write failure')
+  expect(currentNotificationRows(container).some(row => row.textContent?.includes('private resume write failure'))).toBe(true)
   await viewFailure(container.querySelector('.agent-launch-notice')!)
   kernel.start = originalStart
   await click('Retry Resume', container.querySelector('.agent-launch-notice')!)
   expect(useAppStore.getState().sessions[0]).toMatchObject({ id, processState: 'running' })
   expect(core.agentSession(id).nativeHandle).toMatchObject({ sessionId: 'private-native-handle' })
-  expect(useAppStore.getState().lastError).toBeNull()
+  expect(lifecycleNotice({ subject: session.control })).toBeUndefined()
   expect(container.querySelector('.agent-launch-notice')).toBeNull()
   expect(stop).not.toHaveBeenCalled()
 })
@@ -333,10 +354,11 @@ it('a late old Run rejection cannot replace the current Run feedback', async () 
   await old
   expect(useAppStore.getState().sessions).toEqual([next])
   expect(useAppStore.getState().error).toBeNull()
+  expect(useAppStore.getState().notificationEvents).toHaveLength(0)
 })
 
 it('the actual App offers the same failure through System without a second window-level alarm', async () => {
-  kernel.start = async () => { throw new AgentMuxError('one lifecycle cause', 'CTXMUX_persistence') }
+  kernel.start = async () => { throw new AgentMuxError('one lifecycle cause', 'CTXMUX_persistence', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 }) }
   await expect(useAppStore.getState().launchAgent('fixture', '', 'projection-group', { tabId: launcherId, regionId }))
     .rejects.toThrow('one lifecycle cause')
   // Startup/painting are unrelated to this already-observed failure. Real App and its notice
@@ -351,4 +373,172 @@ it('the actual App offers the same failure through System without a second windo
   await act(async () => useAppStore.getState().reportError(new Error('unrelated actual failure')))
   expect(container.querySelectorAll('.notification-item[data-event-id]')).toHaveLength(1)
   expect(container.querySelector('.notification-item[data-event-id]')?.textContent).toContain('unrelated actual failure')
+  expect(currentNotificationRows(container)).toHaveLength(1)
+  expect(lifecycleNotice({ regionId })?.message).toBe('one lifecycle cause')
+})
+
+
+function addLauncher(tabId: string) {
+  const secondRegionId = initialWorkbenchRegionId(tabId)
+  const tab = createWorkbenchTab(tabId, { regionId: secondRegionId, kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID }, topicId)
+  const tabs = { ...useAppStore.getState().tabs, [tabId]: tab }
+  useAppStore.setState({ tabs, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('projection-group', Object.keys(tabs)) } })
+  return { tabId, regionId: secondRegionId }
+}
+async function twoLaunchers(secondary: { tabId: string; regionId: string }) {
+  await launcher()
+  await act(async () => root.render(<>
+    <div data-launcher="original"><NewTabSurface tabGroupId="projection-group" tabId={launcherId} regionId={regionId} visible={false} /></div>
+    <div data-launcher="secondary"><NewTabSurface tabGroupId="projection-group" {...secondary} visible={false} /></div>
+    <GlobalSystemNotices />
+  </>))
+}
+function launcherSurface(name: string) {
+  const surface = container.querySelector<HTMLElement>(`[data-launcher="${name}"]`)
+  expect(surface).not.toBeNull()
+  return surface!
+}
+it('keeps two actual Launcher failures and their Retry Start entries when ordinary history is read and cleared', async () => {
+  const secondary = addLauncher('secondary-launcher')
+  const sibling = await launchDirect('healthy-sibling')
+  useAppStore.setState({ sessions: [sibling.session!] })
+  useAppStore.getState().setAgentComposerDraft(regionId, 'Original launch draft')
+  useAppStore.getState().setAgentComposerDraft(secondary.regionId, 'Secondary launch draft')
+  const layouts = useAppStore.getState().layouts, originalStart = kernel.start
+  const stop = vi.spyOn(core, 'stopAgent')
+  kernel.start = async () => { throw new AgentMuxError('Controlled launch refusal', 'CTXMUX_io', undefined,
+    { disposition: 'not_applied', confirmedInputBytes: 0 }) }
+  await twoLaunchers(secondary)
+  await click('Launch', launcherSurface('original'))
+  await vi.waitFor(() => expect(lifecycleNotice({ regionId })).toBeDefined())
+  const first = lifecycleNotice({ regionId })!
+  await click('Launch', launcherSurface('secondary'))
+  await vi.waitFor(() => expect(lifecycleNotice({ regionId: secondary.regionId })).toBeDefined())
+  const second = lifecycleNotice({ regionId: secondary.regionId })!
+  expectCurrent(first); expectCurrent(second)
+  expect(currentNotificationRows(container).filter(row => row.dataset.noticeId === first.id || row.dataset.noticeId === second.id)).toHaveLength(2)
+  await act(async () => useAppStore.getState().reportError('Independent clipboard refusal'))
+  expect(notificationEventRows(container)).toHaveLength(1)
+  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  await act(async () => useAppStore.getState().clearReadNotificationEvents())
+  expect(notificationEventRows(container)).toHaveLength(0)
+  expectCurrent(first); expectCurrent(second)
+  for (const name of ['original', 'secondary']) {
+    expect(failureWindow(launcherSurface(name)).textContent).toContain('Controlled launch refusal')
+    expect([...launcherSurface(name).querySelectorAll('button')].find(button => button.textContent === 'Retry Start agent')).toBeDefined()
+  }
+  expect(useAppStore.getState().layouts).toEqual(layouts)
+  expect(useAppStore.getState().agentComposerDrafts).toMatchObject({
+    [regionId]: 'Original launch draft', [secondary.regionId]: 'Secondary launch draft' })
+  await api.sessions.write(sibling.session!.control, 'Healthy Agent remains usable', 'user')
+  expect(writes).toEqual(['Healthy Agent remains usable']); expect(stop).not.toHaveBeenCalled()
+  kernel.start = originalStart
+  await click('Retry Start agent', launcherSurface('original'))
+  await act(async () => { await vi.waitFor(() => expect(lifecycleNotice({ regionId })).toBeUndefined()) })
+  expectCurrent(second)
+  expect(useAppStore.getState().tabs[secondary.tabId]!.regions[secondary.regionId]?.kind).toBe('launcher')
+  expect(useAppStore.getState().agentComposerDrafts[secondary.regionId]).toBe('Secondary launch draft')
+  expect(useAppStore.getState().documents.sibling?.content).toBe('unsaved sibling')
+  expect(stop).not.toHaveBeenCalled()
+})
+
+it('a successful launch retry settles its captured record without clearing a later failure for the same Region', async () => {
+  const originalStart = kernel.start
+  kernel.start = async () => { throw new AgentMuxError('First launch refusal', 'CTXMUX_io', undefined,
+    { disposition: 'not_applied', confirmedInputBytes: 0 }) }
+  await launcher(); await click('Launch')
+  await vi.waitFor(() => expect(lifecycleNotice({ regionId })).toBeDefined())
+  const first = lifecycleNotice({ regionId })!
+  let release!: () => Promise<void>
+  kernel.start = (input: unknown) => new Promise(yes => { release = async () => yes(await originalStart(input)) })
+  await click('Retry Start agent', container.querySelector('.agent-launch-notice')!)
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+  await act(async () => useAppStore.getState().reportError('Later launch observation refusal', first.context!))
+  const later = lifecycleNotice({ regionId })!
+  expect(later).not.toBe(first)
+  expectCurrent(later)
+  await act(async () => release())
+  await vi.waitFor(() => expect(container.querySelector('.launcher-launch-button')?.textContent).toBe('Launch'))
+  expect(lifecycleNotice({ regionId })).toBe(later)
+  expectCurrent(later)
+  expect(useAppStore.getState().notificationEvents).not.toContain(first)
+})
+
+it('keeps two actual Resume failures independent and rejects a late success clearing the newer exact-Run record', async () => {
+  const firstId = await launch()
+  const secondary = addLauncher('secondary-session')
+  await act(async () => useAppStore.getState().launchAgent('fixture', '', 'projection-group', secondary))
+  const secondSurface = useAppStore.getState().tabs[secondary.tabId]!.regions[secondary.regionId]!
+  expect(secondSurface.kind).toBe('agent')
+  if (secondSurface.kind !== 'agent') throw new Error('Secondary Agent Region missing')
+  const secondId = secondSurface.sessionId
+  const inner = core as any
+  for (const id of [firstId, secondId]) {
+    await inner.registry.put({ ...inner.registry.get(id), nativeHandle: {
+      kind: 'provider', providerId: 'projection-fixture', sessionId: `native-${id}` } })
+    const session = useAppStore.getState().sessions.find(value => value.id === id)!
+    runs.get(session.control.run.runId).state = { type: 'exited', code: 0, signal: null }
+    await useAppStore.getState().refreshSession(id)
+    useAppStore.getState().setAgentComposerDraft(id, `Draft for ${id}`)
+  }
+  const firstSession = useAppStore.getState().sessions.find(value => value.id === firstId)!
+  const secondSession = useAppStore.getState().sessions.find(value => value.id === secondId)!
+  if (firstSession.kind !== 'agent' || secondSession.kind !== 'agent') throw new Error('Original Agent controls missing')
+  const tabs = useAppStore.getState().tabs, layouts = useAppStore.getState().layouts
+  const stop = vi.spyOn(core, 'stopAgent')
+  kernel.start = async () => { throw new AgentMuxError('Controlled resume refusal', 'CTXMUX_io', undefined,
+    { disposition: 'not_applied', confirmedInputBytes: 0 }) }
+  await act(async () => root.render(<>
+    <div data-session="original"><SessionPane sessionId={firstId} surfaceKind="agent" visible interactiveResize
+      linkOrigin={{ workspaceId: SCRATCH_WORKSPACE_ID, tabGroupId: 'projection-group', tabId: launcherId, regionId }} /></div>
+    <div data-session="secondary"><SessionPane sessionId={secondId} surfaceKind="agent" visible interactiveResize
+      linkOrigin={{ workspaceId: SCRATCH_WORKSPACE_ID, tabGroupId: 'projection-group', ...secondary }} /></div>
+    <GlobalSystemNotices />
+  </>))
+  const firstPane = container.querySelector<HTMLElement>('[data-session="original"]')!
+  const secondPane = container.querySelector<HTMLElement>('[data-session="secondary"]')!
+  await click('Restore original', firstPane); await click('Restore original', secondPane)
+  const first = lifecycleNotice({ subject: firstSession.control })!
+  const second = lifecycleNotice({ subject: secondSession.control })!
+  expect(first).toBeDefined(); expect(second).toBeDefined()
+  expectCurrent(first); expectCurrent(second)
+  expect(failureWindow(firstPane).textContent).toContain('Controlled resume refusal')
+  expect(failureWindow(secondPane).textContent).toContain('Controlled resume refusal')
+  await act(async () => useAppStore.getState().reportError('Independent file observation refusal'))
+  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  await act(async () => useAppStore.getState().clearReadNotificationEvents())
+  expectCurrent(first); expectCurrent(second)
+  // Controlled transport receipts isolate record settlement after the actual Core refusals above.
+  const firstAttached = { ...firstSession, processState: 'running' as const,
+    status: { ...firstSession.status, state: 'running' as const } }
+  const secondAttached = { ...secondSession, processState: 'running' as const,
+    status: { ...secondSession.status, state: 'running' as const } }
+  let resolve!: (value: SessionRecoveryResult) => void
+  const recover = vi.spyOn(api.sessions, 'recover').mockImplementationOnce(() => new Promise(yes => { resolve = yes }))
+  const pending = useAppStore.getState().recoverSession(firstId)
+  await vi.waitFor(() => expect(resolve).toBeTypeOf('function'))
+  recover.mockRejectedValueOnce(new Error('Later resume refusal'))
+  await act(async () => useAppStore.getState().recoverSession(firstId))
+  const later = lifecycleNotice({ subject: firstSession.control })!
+  expect(later).not.toBe(first)
+  await act(async () => {
+    resolve({ kind: 'reattachable', session: firstAttached })
+    await pending
+  })
+  expect(lifecycleNotice({ subject: firstSession.control })).toBe(later)
+  expectCurrent(later); expectCurrent(second)
+  recover.mockResolvedValueOnce({ kind: 'reattachable', session: firstAttached })
+  await click('Retry Resume', firstPane)
+  expect(lifecycleNotice({ subject: firstSession.control })).toBeUndefined()
+  expectCurrent(second)
+  recover.mockResolvedValueOnce({ kind: 'reattachable', session: secondAttached })
+  await click('Retry Resume', secondPane)
+  expect(lifecycleNotice({ subject: secondSession.control })).toBeUndefined()
+  expect(currentNotificationRows(container).filter(row => row.textContent?.includes('resume refusal'))).toHaveLength(0)
+  expect(useAppStore.getState().tabs).toBe(tabs); expect(useAppStore.getState().layouts).toBe(layouts)
+  expect(useAppStore.getState().agentComposerDrafts).toMatchObject({
+    [firstId]: `Draft for ${firstId}`, [secondId]: `Draft for ${secondId}` })
+  expect(core.agentSession(firstId).nativeHandle).toMatchObject({ sessionId: `native-${firstId}` })
+  expect(core.agentSession(secondId).nativeHandle).toMatchObject({ sessionId: `native-${secondId}` })
+  expect(stop).not.toHaveBeenCalled()
 })
