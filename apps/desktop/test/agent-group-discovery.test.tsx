@@ -147,8 +147,27 @@ it('an unknown original link stays inspect-only after closing, reopening and exp
   if (fresh) { await act(async () => fresh.click()); await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.room.link.create').length).toBeGreaterThan(1)) }
   expect(f.calls.filter(call => call.method === 'connection.room.link.create')).toHaveLength(1)
   expect(f.platformCalls.filter(call => call.url?.endsWith('/link'))).toHaveLength(1)
+  expect([...document.querySelectorAll('button')].some(button => button.textContent === 'Save and continue')).toBe(false)
   await f.button('Check link status'); await ready('Join link result not confirmed')
   expect((await f.cli(['room', 'link', 'inspect', '--operation-id', intent.input.operationId])).operation.state).toBe('unknown')
   expect(f.calls.filter(call => call.method === 'connection.room.link.inspect').every(call => (call.input as { operationId: string }).operationId === intent.input.operationId)).toBe(true)
   expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('Join link ready'); await f.original.unchanged()
+}, 25_000)
+
+it('a positively unsent link intent survives a save failure and explicitly continues with the same original request', async () => {
+  await f.mount(); await f.menu('Bind existing group chat'); await chooseGroup('oc_other')
+  const storage = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('Controlled original storage write failure') })
+  await f.button('Create join link'); await ready('No request was sent')
+  const intent = Object.values(useAppStore.getState().connectorRoomIntents).find(value => value.method === 'connection.room.link.create')!
+  expect(intent, 'exact unsent intent is kept').toBeDefined(); expect(intent.phase).toBe('not-dispatched')
+  expect(f.calls.some(call => call.method === 'connection.room.link.create')).toBe(false)
+  expect(f.platformCalls.some(call => call.url?.endsWith('/link'))).toBe(false)
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Join link has not been sent')
+  storage.mockRestore()
+  await f.button('Save and continue'); await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.room.link.create')).toHaveLength(1)); await ready('Join link ready')
+  const [effect] = f.calls.filter(call => call.method === 'connection.room.link.create')
+  expect(effect?.input).toEqual(intent.input)
+  expect(f.platformCalls.filter(call => call.url?.endsWith('/link'))).toHaveLength(1)
+  expect((await f.cli(['room', 'link', 'inspect', '--operation-id', intent.input.operationId])).operation.state).toBe('confirmed')
+  expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中'); await f.original.unchanged()
 }, 25_000)
