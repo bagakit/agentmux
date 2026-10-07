@@ -1,97 +1,31 @@
-import { activityReadingProps } from '../../../test/helpers/activity-reading-props'
-import { useState } from 'react';
-import { createClientUiRoot } from '../../../test/helpers/client-ui-render';
-import { ActivityView } from '../../../src/renderer/src/components/ActivityView';
-
-import { replyConversationQuestion } from '../../../src/renderer/src/lib/conversation-question';
-import { api } from '../../../src/renderer/src/lib/api';
-import { useAppStore } from '../../../src/renderer/src/store';
-import type { AgentSessionHistoryPage } from '@agentmux/core';
-import type { AgentSessionControl, AppConfig, SessionSnapshot, SessionQuestionReplyInput } from '../../../src/shared/contracts';
-import '../../../src/renderer/src/styles/index.css';
-import './preview.css';
-const scene: {
-  page: AgentSessionHistoryPage;
-  config: AppConfig;
-  sessions: SessionSnapshot[];
-  draft: string;
-} = await (await fetch('/public-scene.json')).json();
-const session = scene.sessions.find(session => session.kind === 'agent')!;
-if (session.kind !== 'agent') throw Error('The actual public scene must retain its Agent Session');
-const control: AgentSessionControl = session.control;
-const submissions: SessionQuestionReplyInput[] = [],
-  copies: string[] = [],
-  forbiddenControls: string[] = [],
-  reads: string[] = [];
-api.sessions.historyPage = async target => {
-  reads.push(target.agentSessionId);
-  return scene.page;
-};
-// Only transport is controlled in the visual scene. The owning test crosses actual Main/Core/FileStore.
-api.sessions.replyQuestion = async (target, input) => {
-  submissions.push(structuredClone(input));
-  return {
-    agentSessionId: target.agentSessionId,
-    source: input.source,
-    recordId: input.recordId,
-    questionIds: input.answers.map(answer => answer.questionId),
-    operationId: input.operationId,
-    outcome: 'submitted'
-  };
-};
-api.ui.writeClipboardText = async text => {
-  copies.push(text);
-};
-for (const action of ['write', 'paste', 'resume', 'recover', 'stop'] as const) api.sessions[action] = async () => {
-  forbiddenControls.push(action);
-  throw Error('This reading preview never controls a Run');
-};
-useAppStore.setState({
-  config: scene.config,
-  sessions: scene.sessions,
-  agentComposerDrafts: {
-    [session.id]: scene.draft
-  },
-  timelines: {}
-});
-Object.assign(window, {
-  questionPreview: {
-    scene,
-    submissions,
-    copies,
-    forbiddenControls,
-    reads
-  }
-});
-function Scene() {
-  const [history, setHistory] = useState(false),
-    [draft, setDraft] = useState(scene.draft);
-  return <main className="question-preview"><header><div><strong>Conversation</strong><small>Original Session · Native questions</small></div><button
-    type="button"
-    aria-pressed={history}
-    onClick={() => setHistory(!history)}
-  >{history ? 'Return to conversation' : 'History'}</button></header><div className="question-preview__reading"><div
-    className="question-preview__surface"
-    inert={history}
-    style={{
-        display: history ? 'none' : 'flex'
-      }}
-  ><ActivityView
-        sessionId={session.id}
-        capability="complete-events"
-        displayState="done"
-        items={[]}
-        nativeHistoryPage={scene.page}
-        onReplyQuestion={input => replyConversationQuestion(control, input)}
-      /></div><div
-        className="question-preview__surface"
-        style={{
-        display: history ? 'flex' : 'none'
-      }}
-      ><ActivityView {...activityReadingProps({ control: control, readingKey: "original-run", label: session.label, visible: history, returnLabel: "Conversation", workspaceRoot: "", openWorkspaceFile: async () => {}, openHttpLink: () => {}, onClose: () => setHistory(false), onReplyQuestion: input => replyConversationQuestion(control, input) })} /></div></div><footer><textarea
-        aria-label="Original draft"
-        value={draft}
-        onChange={event => setDraft(event.target.value)}
-      /></footer></main>;
+import { createRoot } from 'react-dom/client'
+import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
+import { SessionPane } from '../../../src/renderer/src/components/SessionPane'
+import { api } from '../../../src/renderer/src/lib/api'
+import { useAppStore } from '../../../src/renderer/src/store'
+import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
+import type { AgentSessionHistoryPage } from '@agentmux/core'
+import type { AppConfig, SessionSnapshot } from '../../../src/shared/contracts'
+import '../../../src/renderer/src/styles/index.css'
+import './preview.css'
+const scene: { page: AgentSessionHistoryPage; config: AppConfig; sessions: SessionSnapshot[]; draft: string } =
+  (window as unknown as { questionScene?: typeof scene }).questionScene ?? await (await fetch('/public-scene.json')).json()
+const session = scene.sessions.find(session => session.kind === 'agent')!
+if (session.kind !== 'agent') throw Error('The scene must retain its original Agent Session')
+const question = scene.page.items.find(item => item.questionRequest)!, target = { source: scene.page.source, recordId: question.id, turnId: question.turnId! }
+const key = questionReplyKey(session.id, target), copies: string[] = [], forbiddenControls: string[] = [], terminalVisits: unknown[] = []
+const oldAttempt = { phase: 'unknown' as const, hostId: session.control.hostId, input: { ...target, operationId: 'original-operation', expectedRun: session.control.run, afterSubmissionId: 'original-predecessor', answers: [{ questionId: question.questionRequest!.questions[0]!.id, answer: 'Original frozen answer' }] }, diagnostic: { code: 'ORIGINAL_UNKNOWN', message: 'Original reply receipt remains unknown. Check the original terminal before answering.' } }
+api.sessions.historyPage = async () => scene.page
+api.sessions.onEvent = () => () => {}
+api.sessions.attach = async control => {
+  terminalVisits.push(control)
+  const dataBytes = new TextEncoder().encode('Original terminal · original Run\r\nAnswer the original question here.\r\n')
+  return { attachmentId: 'private-attachment', session: { ...session, latestOutputBytes: dataBytes.length }, currentSize: { cols: 80, rows: 24 }, terminal: { type: 'unknown', reason: 'origin_unknown' }, resizeRevision: 0, replay: [{ runId: control.run.runId, startByte: 0, endByte: dataBytes.length, dataBytes }], gap: null, nextCursor: dataBytes.length } as Awaited<ReturnType<typeof api.sessions.attach>>
 }
-createClientUiRoot(document.getElementById('root')!).render(<Scene />);
+api.sessions.detach = async () => {}
+api.ui.writeClipboardText = async text => { if (window.questionPreview.failCopy) throw Error('Clipboard unavailable; answer retained.'); copies.push(text) }
+for (const action of ['write', 'paste', 'resume', 'recover', 'stop', 'replyQuestion'] as const) api.sessions[action] = async () => { forbiddenControls.push(action); throw Error('Question navigation never controls a Run') }
+useAppStore.setState({ config: scene.config, sessions: scene.sessions, agentComposerDrafts: { [session.id]: scene.draft }, timelines: {}, viewModes: { [session.id]: 'activity' }, questionReplies: new URL(location.href).searchParams.has('fresh') ? {} : { [session.id]: { [key]: oldAttempt } }, questionReplyDrafts: {}, focusRegion: () => {}, workbenchSaveWarning: null })
+declare global { interface Window { questionPreview: { failCopy: boolean; copies: string[]; forbiddenControls: string[]; terminalVisits: unknown[]; facts(): unknown; conflict(): void } } }
+window.questionPreview = { failCopy: false, copies, forbiddenControls, terminalVisits, conflict: () => useAppStore.setState(state => ({ sessions: state.sessions.map(current => current.kind === 'agent' ? { ...current, nativeHandle: { kind: 'provider', providerId: scene.page.source.providerId, sessionId: 'changed-native-source' } } : current) })), facts: () => ({ copies, forbiddenControls, terminalVisits, drafts: useAppStore.getState().questionReplyDrafts, attempt: useAppStore.getState().questionReplies[session.id]?.[key], mode: useAppStore.getState().viewModes[session.id], currentSession: useAppStore.getState().sessions.find(current => current.id === session.id) }) }
+createRoot(document.getElementById('root')!).render(<DesktopClientUiProvider><main className="question-preview"><SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible readOnly={false} linkOrigin={{ workspaceId: scene.config.workspaces[0]?.id ?? 'ws', tabGroupId: 'group', tabId: 'tab', regionId: 'region' }}/></main></DesktopClientUiProvider>)

@@ -1,350 +1,95 @@
 // @vitest-environment happy-dom
-import { act } from 'react';
-import type { Root } from 'react-dom/client';
-import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-import { createClientUiRoot } from './helpers/client-ui-render';
-import { fixture, request } from './helpers/native-async-question-fixture';
-import { AgentMuxError } from '@agentmux/core';
-import { agentPromptNotApplied } from '@agentmux/core/prompt-condition';
-import { reduceRuntimeEvent } from '../src/renderer/src/lib/session-state';
-import { RuntimeController } from '../src/main/runtime-controller';
-import { useAppStore } from '../src/renderer/src/store';
-import { api } from '../src/renderer/src/lib/api';
-import type { AgentSessionControl, AppConfig, SessionSnapshot } from '../src/shared/contracts';
-vi.mock('../src/renderer/src/components/TerminalView', () => ({
-  TerminalView: () => <div data-leaf="terminal" />
-}));
-vi.mock('../src/renderer/src/components/AgentSessionComposer', () => ({
-  AgentSessionComposer: () => <textarea aria-label="Original composer" />
-}));
-vi.mock('../src/renderer/src/components/AgentRegionHeader', () => ({
-  AgentRegionHeader: ({
-    onHistory
-  }: {
-    onHistory?: () => void;
-  }) => <header>{onHistory ? <button onClick={onHistory}>History</button> : null}</header>
-}));
-vi.mock('../src/renderer/src/components/SessionResultReview', () => ({
-  SessionResultReview: () => null
-}));
-import * as questionOwner from '../src/renderer/src/lib/conversation-question';
-import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply';
-import { SessionPane } from '../src/renderer/src/components/SessionPane';
-const original = useAppStore.getState(),
-  control: AgentSessionControl = {
-    kind: 'agent',
-    hostId: 'local',
-    agentSessionId: 'question-session',
-    run: {
-      runId: 'question-run'
-    }
-  };
-let root: Root, container: HTMLDivElement;
-async function flush() {
-  await act(async () => {
-    for (let i = 0; i < 10; i++) await Promise.resolve();
-  });
+import { fixtureEpoch as _newTailFixtureEpoch, fixturePath as _newTailFixturePath } from "../../../test/fixture-values.mjs"
+import { act } from 'react'
+import type { Root } from 'react-dom/client'
+import { beforeEach, afterEach, expect, it, vi } from 'vitest'
+import type { AgentSessionHistoryPage } from '@agentmux/core'
+import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider'
+import { createClientUiRoot } from './helpers/client-ui-render'
+import { useAppStore } from '../src/renderer/src/store'
+import { api } from '../src/renderer/src/lib/api'
+import type { AgentSessionControl, AppConfig, SessionSnapshot } from '../src/shared/contracts'
+vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ session }: { session: SessionSnapshot }) => <div data-terminal-session={session.id}/> }))
+vi.mock('../src/renderer/src/components/AgentSessionComposer', () => ({ AgentSessionComposer: () => <textarea aria-label="Original composer"/> }))
+vi.mock('../src/renderer/src/components/AgentRegionHeader', () => ({ AgentRegionHeader: ({ onHistory }: { onHistory?: () => void }) => <header>{onHistory ? <button onClick={onHistory}>History</button> : null}</header> }))
+vi.mock('../src/renderer/src/components/SessionResultReview', () => ({ SessionResultReview: () => null }))
+import { reconcileConversationQuestionReplies } from '../src/renderer/src/lib/conversation-question'
+import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
+import { SessionPane } from '../src/renderer/src/components/SessionPane'
+import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { desktopQuestionReplyState } from '../src/renderer/src/lib/conversation-question'
+const original = useAppStore.getState(), control: AgentSessionControl = { kind: 'agent', hostId: 'original-host', agentSessionId: 'question-session', run: { runId: 'question-run' } }
+const target = { source: { providerId: 'codex', nativeSessionId: 'question-native' }, turnId: 'question-turn', recordId: 'native-question' }
+const page: AgentSessionHistoryPage = { agentSessionId: control.agentSessionId, source: target.source, nextCursor: null, items: [{ id: target.recordId, turnId: target.turnId, kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Original question body' }], questionRequest: { delivery: 'async', questions: [ { id: 'first', prompt: 'Choose a direction', options: [{ id: 'keep', label: 'Keep original' }], acceptsText: true }, { id: 'second', prompt: 'Free text answer', options: [], acceptsText: true } ] } }] }
+const key = questionReplyKey(control.agentSessionId, target)
+const held = { hostId: control.hostId, phase: 'unknown' as const, diagnostic: { code: 'ORIGINAL_UNKNOWN', message: 'Original receipt remains unknown' }, input: { ...target, operationId: 'original-operation', expectedRun: control.run, afterSubmissionId: 'original-predecessor', answers: [{ questionId: 'first', answer: 'Original frozen answer' }] } }
+let root: Root, container: HTMLDivElement
+const pane = () => <SessionPane sessionId={control.agentSessionId} surfaceKind="agent" interactiveResize={false} visible readOnly={false} linkOrigin={{ workspaceId: 'ws', tabGroupId: 'group', tabId: 'tab', regionId: 'region' }}/>
+async function flush() { await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }) }
+async function fill(field: HTMLTextAreaElement, value: string) { await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })) }); await flush() }
+function card() { const values = [...container.querySelectorAll<HTMLElement>('[aria-label="Native asynchronous question"]')].filter(node => !node.closest('[inert]')); expect(values).toHaveLength(1); return values[0]! }
+async function click(selector: string) { await act(async () => card().querySelector<HTMLButtonElement>(selector)!.click()); await flush() }
+async function setup(unknown = false) {
+  const capabilities = new AgentProviderRegistry().catalog().find(provider => provider.id === 'codex')!.capabilities
+  expect(capabilities.asyncQuestionReply).toBe('terminal')
+  const config = { version: 9, hosts: [{ id: control.hostId, kind: 'local', label: 'Private host' }], executors: { codex: { label: 'Private reader', providerId: 'codex', command: 'unused', args: [], env: {}, injectAgentMuxGuide: true } }, workspaces: [{ id: 'ws', name: 'Project', hostId: control.hostId, path: _newTailFixturePath("private/project"), kind: 'folder' }], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: {} } } as AppConfig
+  const session = { id: control.agentSessionId, kind: 'agent', hostId: control.hostId, workspacePath: _newTailFixturePath("private/project"), label: 'Original question agent', providerId: 'codex', executorId: 'codex', agentSessionUpdatedAt: _newTailFixtureEpoch(0, 0, 1), promptSubmissionPredecessor: null, nativeSessionId: target.source.nativeSessionId, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: target.source.nativeSessionId }, createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 1), processState: 'running', status: { state: 'done', source: 'native-hook', observedAt: _newTailFixtureEpoch(0, 0, 1) }, latestOutputBytes: 0, capabilities, control } as Extract<SessionSnapshot, { kind: 'agent' }>
+  const focus = vi.fn(); useAppStore.setState({ config, sessions: [session], agentComposerDrafts: { [control.agentSessionId]: 'ORIGINAL UNSENT' }, viewModes: { [control.agentSessionId]: 'activity' }, timelines: {}, pendingAgentLaunches: {}, runtimeOwnershipWarnings: [], recoveryCandidates: [], agentSteerQueues: {}, questionReplies: unknown ? { [control.agentSessionId]: { [key]: structuredClone(held) } } : {}, questionReplyDrafts: {}, focusRegion: focus, workbenchSaveWarning: null })
+  const reads = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(page), send = vi.spyOn(api.sessions, 'replyQuestion'), copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
+  const write = vi.spyOn(api.sessions, 'write'), resume = vi.spyOn(api.sessions, 'resume'), stop = vi.spyOn(api.sessions, 'stop')
+  await act(async () => root.render(pane())); await flush(); return { reads, send, copy, focus, write, resume, stop }
 }
-const pane = () => <SessionPane sessionId="question-session" surfaceKind="agent" interactiveResize={false}
-  visible={true} readOnly={false} linkOrigin={{ workspaceId: 'ws', tabGroupId: 'group', tabId: 'tab', regionId: 'region' }} />
-async function setup(withRecordedAnswer = false) {
-  const h = await fixture();
-  const originalPage = await h.client.sessionHistoryPage('question-session', h.invocation);
-  const page = withRecordedAnswer ? { ...originalPage, items: [...originalPage.items, { id: 'already-recorded-answer', kind: 'user-message' as const, contentParts: [], questionAnswers: [{ questionId: request.questions[1]!.id, answer: 'Native answer' }] }] } : originalPage;
-  const config: AppConfig = {
-    version: 9,
-    hosts: [{
-      id: 'local',
-      kind: 'local',
-      label: 'Private host'
-    }],
-    executors: {
-      codex: {
-        label: 'Private native reader',
-        providerId: 'codex',
-        command: h.invocation.commandOverride,
-        args: h.invocation.args,
-        env: {},
-        injectAgentMuxGuide: true
-      }
-    },
-    workspaces: [{
-      id: 'ws',
-      name: 'Private project',
-      hostId: 'local',
-      path: h.directory,
-      kind: 'folder'
-    }],
-    appearance: {
-      terminalTheme: 'graphite'
-    },
-    browser: {
-      toolbar: {
-        selectElement: true,
-        screenshot: true,
-        devTools: true,
-        viewport: true,
-        saveBookmark: true,
-        more: true
-      }
-    }
-  };
-  const session: Extract<SessionSnapshot, {
-    kind: 'agent';
-  }> = {
-    id: 'question-session',
-    kind: 'agent',
-    hostId: 'local',
-    workspacePath: h.directory,
-    label: 'Original question agent',
-    providerId: 'codex',
-    executorId: 'codex',
-    agentSessionUpdatedAt: 1,
-    promptSubmissionPredecessor: null,
-    nativeHandle: h.client.agentSession('question-session').nativeHandle,
-    nativeSessionId: h.client.agentSession('question-session').nativeHandle!.sessionId,
-    createdAt: 1,
-    updatedAt: 1,
-    processState: 'running',
-    status: {
-      state: 'done',
-      source: 'native-hook',
-      observedAt: 1
-    },
-    latestOutputBytes: 0,
-    capabilities: {
-      terminal: true,
-      timeline: 'complete-events',
-      permission: 'observe',
-      providerResume: true,
-      replyCorrelation: 'none'
-    },
-    control
-  };
-  useAppStore.setState({
-    config,
-    sessions: [session],
-    agentComposerDrafts: {
-      'question-session': 'ORIGINAL UNSENT'
-    },
-    viewModes: {
-      'question-session': 'activity'
-    },
-    timelines: {},
-    pendingAgentLaunches: {},
-    runtimeOwnershipWarnings: [],
-    recoveryCandidates: [],
-    agentSteerQueues: {}
-  });
-  const reads = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(page);
-  const send = vi.spyOn(api.sessions, 'replyQuestion').mockImplementation((target, input) => h.client.replySessionQuestion({
-    ...input,
-    agentSessionId: target.agentSessionId,
-    ...h.invocation,
-    authorHuman: true,
-    sourceChannel: 'question-reply'
-  }));
-  await act(async () => root.render(pane()));
-  await flush();
-  return {
-    h,
-    page,
-    reads,
-    send
-  };
-}
-async function fill(field: HTMLTextAreaElement, value: string) {
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, value);
-    field.dispatchEvent(new Event('input', {
-      bubbles: true
-    }));
-  });
-  await flush();
-}
-function activeCard() {
-  const cards = [...container.querySelectorAll<HTMLElement>('[aria-label="Native asynchronous question"]')].filter(card => !card.closest('[inert]'));
-  expect(cards).toHaveLength(1);
-  return cards[0]!;
-}
-beforeEach(() => {
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  container = document.createElement('div');
-  document.body.append(container);
-  root = createClientUiRoot(container);
-});
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  useAppStore.setState(original, true);
-  vi.restoreAllMocks();
-});
-it('actual SessionPane→Activity supplies the shared question callback without extra reads or replacing the original body', async () => {
-  const {
-    send,
-    reads
-  } = await setup();
-  const card = activeCard();
-  await fill(card.querySelector('textarea')!, 'Current exact answer');
-  expect(send).not.toHaveBeenCalled();
-  const count = reads.mock.calls.length;
-  const submit = card.querySelector<HTMLButtonElement>('.agent-question__footer button');
-  expect(submit).not.toBeNull();
-  await act(async () => submit!.click());
-  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
-  await vi.waitFor(() => expect(activeCard().dataset.questionState).toBe('submitted'));
-  expect(send.mock.calls[0]![0]).toEqual(control);
-  expect(send.mock.calls[0]![1].answers).toEqual([{
-    questionId: request.questions[1]!.id,
-    answer: 'Current exact answer'
-  }]);
-  expect(reads.mock.calls.length).toBe(count);
-  expect(useAppStore.getState().agentComposerDrafts['question-session']).toBe('ORIGINAL UNSENT');
-});
-it('actual retained Pane receives the scoped unknown intent update, retains an independently edited draft across remount and explicitly retries the original reply', async () => {
-  const { send, reads } = await setup()
-  send.mockRejectedValueOnce(new Error('Original receipt unknown'))
-  await fill(activeCard().querySelector('textarea')!, 'Original frozen answer')
-  await act(async () => activeCard().querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
-  await vi.waitFor(() => expect(activeCard().dataset.questionState).toBe('unknown'))
-  const input = send.mock.calls[0]![1]
-  await fill(activeCard().querySelector('textarea')!, 'Another unsent draft')
+beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container) })
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(original, true); vi.restoreAllMocks() })
+it('actual SessionPane edits two answers, copies plain text and opens the same SID and Region then returns with drafts and unknown intact', async () => {
+  const f = await setup(true), frozen = structuredClone(useAppStore.getState().questionReplies[control.agentSessionId]![key])
+  await click('[data-question-id="first"] button'); await fill(card().querySelector('[aria-label="Your answer: Free text answer"]')!, '  第二题\n保留空白  ')
+  await click('[aria-label="Copy answer: Free text answer"]'); expect(f.copy).toHaveBeenCalledExactlyOnceWith('  第二题\n保留空白  ')
+  const drafts = structuredClone(useAppStore.getState().questionReplyDrafts), count = f.reads.mock.calls.length
+  await click('.agent-question__footer button')
+  expect(useAppStore.getState().viewModes[control.agentSessionId]).toBe('terminal')
+  expect(container.querySelector('[data-terminal-session]')?.getAttribute('data-terminal-session')).toBe(control.agentSessionId)
+  expect(f.focus).toHaveBeenCalledWith('ws', 'tab', 'region', 'pointer', 'group')
+  await act(async () => useAppStore.getState().setViewMode(control.agentSessionId, 'activity')); await flush()
+  expect(card().querySelector<HTMLTextAreaElement>('[aria-label="Your answer: Free text answer"]')!.value).toBe('  第二题\n保留空白  ')
   await act(async () => root.render(<div>Another surface</div>)); await act(async () => root.render(pane())); await flush()
-  expect(activeCard().querySelector('textarea')?.value).toBe('Another unsent draft')
-  expect(activeCard().querySelector('.agent-question__footer button')?.textContent).toContain('Retry original reply')
-  expect(send).toHaveBeenCalledOnce()
-  const count = reads.mock.calls.length
-  await act(async () => activeCard().querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
-  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
-  expect(send.mock.calls[1]![1]).toEqual(input)
-  expect(reads.mock.calls.length).toBe(count)
-  expect(useAppStore.getState().agentComposerDrafts['question-session']).toBe('ORIGINAL UNSENT')
+  expect(useAppStore.getState().questionReplyDrafts).toEqual(drafts); expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]).toEqual(frozen)
+  expect(card().querySelector('.agent-question__original')?.textContent).toContain('original-predecessor'); expect(card().textContent).toContain('Original receipt remains unknown')
+  expect(useAppStore.getState().agentComposerDrafts[control.agentSessionId]).toBe('ORIGINAL UNSENT')
+  for (const action of [f.send, f.write, f.resume, f.stop]) expect(action).not.toHaveBeenCalled()
+  expect(f.reads.mock.calls.length).toBeGreaterThanOrEqual(count); expect(f.reads.mock.calls.every(([target]) => target.agentSessionId === control.agentSessionId)).toBe(true)
 })
-it('actual SessionPane→History reuses the same shared question card and preserves its original Activity body', async () => {
-  const {
-    send
-  } = await setup();
-  const activityCard = activeCard(),
-    body = container.querySelector('[data-native-record-id="native-async-call"] .log-turn__body')!;
-  await fill(activityCard.querySelector('textarea')!, 'History exact answer');
-  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'History')!.click());
-  await flush();
-  const historyCard = activeCard();
-  expect(historyCard).toBe(activityCard);
-  expect(historyCard.querySelector('textarea')!.value).toBe('History exact answer');
-  expect(activityCard.isConnected).toBe(true);
-  expect(body.isConnected).toBe(true);
-  const submit = historyCard.querySelector<HTMLButtonElement>('.agent-question__footer button');
-  expect(submit).not.toBeNull();
-  await act(async () => submit!.click());
-  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
-  expect(send.mock.calls[0]![1]).toMatchObject({
-    answers: [{
-      questionId: request.questions[1]!.id,
-      answer: 'History exact answer'
-    }],
-    recordId: 'native-async-call',
-    turnId: 'question-turn'
-  });
-  expect(body.isConnected).toBe(true);
-  expect(useAppStore.getState().agentComposerDrafts['question-session']).toBe('ORIGINAL UNSENT');
-});
-
-it('actual Pane consumes the live original Core refusal, preserves its new draft and allows only an explicit new operation', async () => {
-  const { h, send, reads } = await setup()
-  const nativeInput = h.inner.kernel.input
-  h.inner.kernel.input = async () => { throw new AgentMuxError('Original Native refused its immutable input', 'CTXMUX_input_cursor_mismatch', 'not_applied') }
-  // Lose the caller's reply, while Core retains the original Native refusal.
-  send.mockImplementationOnce(async (target, input) => {
-    try { return await h.client.replySessionQuestion({ ...input, agentSessionId: target.agentSessionId, ...h.invocation, authorHuman: true }) }
-    catch { throw new Error('Original RPC receipt lost') }
-  })
-  await fill(activeCard().querySelector('textarea')!, 'Original unknown answer')
-  await act(async () => activeCard().querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
-  await vi.waitFor(() => expect(activeCard().dataset.questionState).toBe('unknown'))
-  const input = send.mock.calls[0]![1], exact = h.client.agentSession('question-session')
-  expect(exact.promptCompletionAdmission).toMatchObject({ submissionId: input.operationId, notApplied: true })
-  expect(h.writes).toHaveLength(0)
-  await fill(activeCard().querySelector('textarea')!, 'New explicit answer')
-  const count = reads.mock.calls.length
-  const publish = async (session: typeof exact) => {
-    await act(async () => useAppStore.setState(state => reduceRuntimeEvent(state, { type: 'core', hostId: 'local', event: { type: 'agent-session', session } })))
-    await flush()
+it('actual Pane keeps clipboard and save failures visible without blocking drafts or terminal; late copy cannot mark another Host/Run/source', async () => {
+  const f = await setup(); await fill(card().querySelector('[aria-label="Your answer: Free text answer"]')!, 'Plain answer')
+  f.copy.mockRejectedValueOnce(new Error('Clipboard unavailable')); await click('[aria-label="Copy answer: Free text answer"]'); expect(card().textContent).toContain('Retry copy')
+  await act(async () => useAppStore.setState({ workbenchSaveWarning: 'Disk save unavailable' })); await flush(); expect(card().textContent).toContain('kept in this running app')
+  let resolve!: () => void; f.copy.mockImplementationOnce(() => new Promise<void>(done => { resolve = done })); await click('[aria-label="Copy answer: Free text answer"]')
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.kind === 'agent' ? { ...session, control: { ...session.control, hostId: 'new-host', run: { runId: 'new-run' } } } : session) }))); await flush()
+  await act(async () => resolve()); expect(card().textContent).not.toContain('Copied'); expect(f.send).not.toHaveBeenCalled()
+  await click('.agent-question__footer button'); expect(useAppStore.getState().viewModes[control.agentSessionId]).toBe('terminal')
+})
+it('same-source native answers never settle old unknown or clear diagnostic; only exact whole-operation notApplied can reject and legacy confirmed stays intact', async () => {
+  await setup(true); const frozen = structuredClone(useAppStore.getState().questionReplies[control.agentSessionId]![key])
+  for (const answer of ['Original frozen answer', 'Different native answer']) {
+    const answered = { ...page, items: [...page.items, { id: 'native-answer', kind: 'user-message' as const, contentParts: [], questionAnswers: [{ questionId: 'first', answer }, { questionId: 'second', answer: 'Native second answer' }] }] }
+    await act(async () => root.render(<ActivityView sessionId={control.agentSessionId} capability="complete-events" items={[]} nativeHistoryPage={answered} questionReplyState={target => desktopQuestionReplyState(useAppStore.getState().questionReplies[control.agentSessionId], control.agentSessionId, target)} />)); await flush(); expect(card().textContent).toContain('Answered'); expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]).toEqual(frozen)
   }
-  await publish({ ...exact, promptCompletionAdmission: { ...exact.promptCompletionAdmission!, submissionId: 'another-operation' } })
-  expect(activeCard().dataset.questionState).toBe('unknown')
-  await publish({ ...exact, updatedAt: exact.updatedAt + 1 })
-  await vi.waitFor(() => expect(Object.values(useAppStore.getState().questionReplies['question-session']!)[0]!.phase).toBe('rejected'))
-  expect(activeCard().querySelector('.agent-question__footer button')?.textContent).toContain('Submit reply')
-  expect(activeCard().querySelector('textarea')?.value).toBe('New explicit answer')
-  expect(send).toHaveBeenCalledOnce(); expect(reads.mock.calls.length).toBe(count)
-  const projected = useAppStore.getState().sessions[0]!
-  expect(projected.kind === 'agent' && projected.promptInputNotApplied).toEqual({ submissionId: input.operationId, run: control.run })
-  // Initial host projection consumes the same Core helper as the real-time reducer.
-  const runtime = new RuntimeController(h.store, async () => { throw new Error('No connection side effect') })
-  Object.assign(runtime, { hosts: new Map([['local', { client: h.client, config: { id: 'local', kind: 'local', label: 'Private host' } }]]) })
-  vi.spyOn(runtime as any, 'connectedClient').mockResolvedValue(h.client)
-  vi.spyOn(h.client, 'runtimeProjection').mockResolvedValue({ subjects: [{ kind: 'agent', agentSession: exact, providerId: 'codex', executorId: 'codex',
-    workspacePath: h.directory, hostId: 'local', run: { ...control.run, state: 'running', observedAt: exact.updatedAt, latestOutputBytes: 0, acceptedInputBytes: 0 } }] } as any)
-  const snapshot = await runtime.resolveSession('question-session', useAppStore.getState().config!)
-  expect(snapshot?.kind === 'agent' && snapshot.promptInputNotApplied).toEqual({ submissionId: input.operationId, run: control.run })
-  await act(async () => root.render(<div>Another surface</div>)); await act(async () => root.render(pane())); await flush()
-  expect(activeCard().querySelector('textarea')?.value).toBe('New explicit answer'); expect(send).toHaveBeenCalledOnce()
-  h.inner.kernel.input = nativeInput
-  await act(async () => activeCard().querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
-  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
-  expect(send.mock.calls[1]![1]).toMatchObject({ answers: [{ questionId: request.questions[1]!.id, answer: 'New explicit answer' }], afterSubmissionId: input.operationId })
-  expect(send.mock.calls[1]![1].operationId).not.toBe(input.operationId)
-  await vi.waitFor(() => expect(activeCard().dataset.questionState).toBe('submitted'))
-  // A later unrelated Core admission must clear the old projected negative fact.
-  await publish({ ...exact, updatedAt: exact.updatedAt + 2, promptCompletionAdmission: undefined })
-  expect((useAppStore.getState().sessions[0] as Extract<SessionSnapshot, {kind:'agent'}>).promptInputNotApplied).toBeUndefined()
-  expect(useAppStore.getState().agentComposerDrafts['question-session']).toBe('ORIGINAL UNSENT')
+  for (const fact of [{ submissionId: 'foreign-operation', run: control.run }, { submissionId: held.input.operationId, run: { runId: 'foreign-run' } }]) { reconcileConversationQuestionReplies(control, fact); await flush(); expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]).toEqual(frozen) }
+  reconcileConversationQuestionReplies({ ...control, hostId: 'foreign-host' }, { submissionId: held.input.operationId, run: control.run }); await flush(); expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]).toEqual(frozen)
+  await act(async () => reconcileConversationQuestionReplies(control, { submissionId: held.input.operationId, run: control.run })); await flush(); expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]?.phase).toBe('rejected')
+  const confirmed = { ...held, phase: 'confirmed' as const }; await act(async () => useAppStore.setState({ questionReplies: { [control.agentSessionId]: { [key]: confirmed } } })); reconcileConversationQuestionReplies(control, { submissionId: held.input.operationId, run: control.run }); await flush(); expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]).toBe(confirmed)
 })
 
-it('keeps the actual Activity observation quiet on unrelated rerenders but confirms a newly retained original intent against its unchanged page', async () => {
-  const observe = vi.spyOn(questionOwner, 'observeConversationQuestionAnswers')
-  const { page, reads, send } = await setup(true)
-  const observations = observe.mock.calls.length, readCount = reads.mock.calls.length
-  expect(observations).toBeGreaterThan(0)
-  await act(async () => root.render(pane())); await flush()
-  expect(observe.mock.calls.length).toBe(observations)
-  await act(async () => useAppStore.setState(state => ({ questionReplies: { ...state.questionReplies, foreign: {} },
-    sessions: state.sessions.map(session => ({ ...session, updatedAt: session.updatedAt + 1 })) }))); await flush()
-  expect(observe.mock.calls.length).toBe(observations)
-  const input = { source: page.source, turnId: 'question-turn', recordId: 'native-async-call', operationId: 'late-retained-original',
-    expectedRun: control.run, afterSubmissionId: null, answers: [{ questionId: request.questions[1]!.id, answer: 'Original exact answer' }] }
-  const key = questionReplyKey(control.agentSessionId, input)
-  await act(async () => useAppStore.setState(state => ({ questionReplies: { ...state.questionReplies,
-    [control.agentSessionId]: { [key]: { hostId: control.hostId, input, phase: 'unknown' } } } }))); await flush()
-  await vi.waitFor(() => expect(useAppStore.getState().questionReplies[control.agentSessionId]?.[key]?.phase).toBe('confirmed'))
-  expect(reads.mock.calls.length).toBe(readCount); expect(send).not.toHaveBeenCalled()
-})
-
-it('keeps the first submit-phase zero-byte refusal unknown after real Native payload acceptance and retries only that original input', async () => {
-  const { h, send, reads } = await setup()
-  const nativeInput = h.inner.kernel.input
-  h.inner.kernel.input = async (runId, operation) => {
-    if (operation.data === '\r') throw new AgentMuxError('Submit Native phase refused', 'CTXMUX_input_cursor_mismatch', 'not_applied',
-      { disposition: 'not_applied', confirmedInputBytes: 0 })
-    return nativeInput(runId, operation)
+it('actual Pane distinguishes retained or unknown native sources and a known old reply Run without blocking draft/copy/original terminal', async () => {
+  const f = await setup(); await fill(card().querySelector('[aria-label="Your answer: Free text answer"]')!, 'Kept draft across source changes')
+  expect(card().querySelector('.agent-question__footer button')?.textContent).toContain('Answer in original terminal')
+  for (const change of [{ nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'changed-native-source' } }, { nativeHandle: undefined }]) {
+    await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.kind === 'agent' ? { ...session, ...change } : session) }))); await flush()
+    expect(card().querySelector('.agent-question__footer button')?.textContent).toContain('View original terminal'); expect(card().textContent).toContain('retained question')
+    expect(card().querySelector<HTMLTextAreaElement>('[aria-label="Your answer: Free text answer"]')!.disabled).toBe(false)
+    await click('[aria-label="Copy answer: Free text answer"]'); expect(f.copy.mock.lastCall?.[0]).toBe('Kept draft across source changes')
   }
-  await fill(activeCard().querySelector('textarea')!, 'Original partially accepted answer')
-  await act(async () => activeCard().querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
-  await vi.waitFor(() => expect(send).toHaveBeenCalledOnce())
-  const input = send.mock.calls[0]![1]
-  await vi.waitFor(() => expect(activeCard().dataset.questionState).toBe('unknown'))
-  const exact = h.client.agentSession('question-session')
-  expect(exact.terminalPromptSubmission).toMatchObject({ submissionId: input.operationId,
-    payload: { acknowledged: true }, submit: { notApplied: true, acknowledged: false } })
-  expect(agentPromptNotApplied(exact)).toBeUndefined(); expect(h.writes).toHaveLength(1)
-  expect(h.writes[0]!.data).toContain('Original partially accepted answer')
-  await fill(activeCard().querySelector('textarea')!, 'Another unsent answer')
-  const count = reads.mock.calls.length
-  await act(async () => activeCard().querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
-  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
-  await vi.waitFor(() => expect(activeCard().dataset.questionState).toBe('unknown'))
-  expect(send.mock.calls[1]![1]).toEqual(input); expect(h.writes).toHaveLength(1)
-  expect(activeCard().querySelector('textarea')?.value).toBe('Another unsent answer')
-  expect(reads.mock.calls.length).toBe(count)
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.kind === 'agent' ? { ...session, nativeHandle: { kind: 'provider', providerId: target.source.providerId, sessionId: target.source.nativeSessionId }, control: { ...control, run: { runId: 'new-run' } } } : session), questionReplies: { [control.agentSessionId]: { [key]: { ...held, phase: 'rejected' } } } }))); await flush()
+  expect(card().querySelector('.agent-question__footer button')?.textContent).toContain('View original terminal')
+  await click('.agent-question__footer button'); expect(useAppStore.getState().viewModes[control.agentSessionId]).toBe('terminal'); expect(f.send).not.toHaveBeenCalled(); expect(f.write).not.toHaveBeenCalled()
 })

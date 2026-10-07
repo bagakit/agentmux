@@ -50,24 +50,19 @@ it('the original Desktop Activity card consumes same-source Core question facts 
   expect(useAppStore.getState().agentComposerDrafts['question-session']).toBe('Original unsent draft')
 })
 
-it('the original Desktop card submits one exact Core question target for two immediate clicks', async () => {
+it('the original Desktop Activity card edits without sending and opens the original terminal explicitly', async () => {
   const f = await fixture('unanswered'), page = await f.client.sessionHistoryPage(f.input.agentSessionId, f.invocation)
-  const { container, root } = await mounted()
-  let finish!: () => void
-  const held = new Promise<void>(resolve => { finish = resolve })
-  const send = vi.fn(async (input: ConversationQuestionInput) => { await held; return { agentSessionId: f.input.agentSessionId, source: input.source,
-    recordId: input.recordId, questionIds: input.answers.map((answer: { questionId: string }) => answer.questionId), operationId: 'original-operation', outcome: 'submitted' as const } })
+  const { container, root } = await mounted(), terminal = vi.fn(), edit = vi.fn()
   await act(async () => root.render(<ActivityView sessionId={f.input.agentSessionId} executionHostId="local" items={[]}
-    capability="complete-events" nativeHistoryPage={page} onReplyQuestion={send} />))
+    capability="complete-events" nativeHistoryPage={page} questionReplyRoute="terminal"
+    onOpenQuestionTerminal={terminal} onQuestionDraftChange={edit} />))
   const card = container.querySelector('[aria-label="Native asynchronous question"]')!
-  const choice = [...card.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Keep original')!
-  await act(async () => choice.click())
-  const submit = card.querySelector<HTMLButtonElement>('.agent-question__footer button')!
-  await act(async () => { submit.click(); submit.click() })
-  expect(send).toHaveBeenCalledTimes(1)
-  expect(send.mock.calls[0]![0]).toEqual({ source: f.input.source, turnId: f.input.turnId, recordId: f.input.recordId,
-    answers: [{ questionId: request.questions[0]!.id, answer: 'Keep original' }] })
-  await act(async () => finish())
+  await act(async () => { [...card.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'Keep original')!.click() })
+  expect(edit).toHaveBeenCalledExactlyOnceWith({ source: f.input.source, turnId: f.input.turnId, recordId: f.input.recordId },
+    [{ questionId: request.questions[0]!.id, answer: 'Keep original' }])
+  expect(terminal).not.toHaveBeenCalled(); expect(f.writes).toEqual([])
+  await act(async () => card.querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
+  expect(terminal).toHaveBeenCalledOnce(); expect(f.writes).toEqual([])
 })
 
 it('the original card preserves a typed activity question at the pure presentation boundary', async () => {
