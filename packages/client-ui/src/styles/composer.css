@@ -206,6 +206,16 @@
 
 /* The hit area is constant across modes; collapsed controls are quieter, never shorter. */
 .composer__toolbar :is(.composer-tool, .composer-send, .composer__identity, .composer__context, .composer__mailbox) { height: var(--sp-7); padding-block: 0; flex-shrink: 0; }
+@media (pointer: coarse) {
+  .composer__toolbar :is(.composer-tool, .composer-send, .composer__context, .composer__mailbox) { min-width: 44px; height: 44px; justify-content: center; }
+  .composer__toolbar .composer-agent-identity .agent-avatar { min-width: 44px; min-height: 44px; }
+  .composer:has(.composer-tools[data-mode='collapsed']) { grid-template-columns: max-content minmax(0, 1fr) max-content; }
+  @container composer (max-width: 560px) {
+    .composer:has(.composer-tools[data-mode='collapsed']) .composer__editor { grid-column: 1 / -1; grid-row: 1; }
+    .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div { grid-row: 2; }
+    .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:last-child { grid-column: 2 / -1; justify-self: end; }
+  }
+}
 .composer__mailbox { position: relative; display: inline-flex; align-items: center; gap: var(--sp-1); padding-inline: var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; }
 .composer__mailbox:hover { background: var(--surface-3); }
 .composer__mailbox:focus-visible { outline: 1px solid var(--focus-line); }
