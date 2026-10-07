@@ -4736,11 +4736,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     if (request.operation === 'open.file') return await executeWorkfaceFileOpen({
       get,
+      navigationSelection: () => fileNavigationSelection(get()),
       topics: async () => get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
         ? await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) : [],
       openFile: (...args) => get().openFile(...args),
       closing: tabId => !workbenchViewCloseAllowsView(get().closingWorkbenchViews, tabId), save: saveWorkbenchSelection
-    }, request)
+    }, request, options?.fileOpenIntent, options?.fileInputPolicy)
     if (request.operation === 'space.view') return await executeWorkfaceFileView({
       get, setEditorRegionMode: (...args) => get().setEditorRegionMode(...args),
       closing: tabId => !workbenchViewCloseAllowsView(get().closingWorkbenchViews, tabId), save: saveWorkbenchSelection
@@ -7177,9 +7178,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const choice = { ...placement.selection, ...((placement.split || bookmarkOpened) && exactRegionId ? { tabId: destinationTabId!, regionId: exactRegionId } : {}) }
         if (!choice.tabId || !choice.regionId || !choice.groupId) return
         set({ workbenchSpaceSelection: choice })
-        get().focusRegion(choice.workspaceId, choice.tabId, choice.regionId, 'pointer', choice.groupId)
+        const inputPolicy = placement.inputPolicy ?? 'preserve'
+        get().focusRegion(choice.workspaceId, choice.tabId, choice.regionId, inputPolicy === 'target' ? 'keyboard' : 'pointer', choice.groupId)
         set({ activeWorkspaceId: choice.workspaceId, mainSurface: 'workbench', workbenchSpaceSelection: choice,
-          regionCaretFocus: null, workbenchNavigationInputPolicy: 'preserve' })
+          ...(inputPolicy === 'preserve' ? { regionCaretFocus: null } : {}), workbenchNavigationInputPolicy: inputPolicy })
         result.navigation = 'applied'
         return
       }

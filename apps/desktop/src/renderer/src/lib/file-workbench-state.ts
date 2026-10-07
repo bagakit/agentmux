@@ -98,6 +98,7 @@ export type FileOpenPlacement = {
   /** Insert beside this exact Region, or reuse the same resource in this Tab. */
   split?: { tabId: string; regionId: string; direction: 'left' | 'right' | 'up' | 'down' }
   focus?: boolean
+  inputPolicy?: 'preserve' | 'target'
   fileOnly?: boolean
   selection?: import('@agentmux/core').AgentMuxDesktopSpaceSelection
   onResult?: (result: FileOpenResult) => void
