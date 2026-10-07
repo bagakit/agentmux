@@ -1,4 +1,4 @@
-import type { AgentSessionUserMessageSource } from '@agentmux/core'
+import type { AgentSessionUserMessage, AgentSessionUserMessageSource } from '@agentmux/core'
 import { SemanticIcon } from '../theme/icons.js'
 import { useId, useState, type ReactNode } from 'react'
 import type { ConversationSenderDetails, ConversationSpeaker, DescribeSpeaker } from '../lib/conversation-speaker.js'
@@ -6,11 +6,12 @@ import { useClientUiPlatform } from '../platform.js'
 import { describeConversationInputSource } from '../lib/conversation-input-source.js'
 
 /** Opening this disclosure never changes the message's author. */
-export function ConversationInputDetails({ messageId, source, executionHostId, speaker, declaredAgentSessionId, sourceDeclaration, describeSpeaker, recordedIdentity = false, children }: {
+export function ConversationInputDetails({ messageId, source, publicContent, executionHostId, speaker, declaredAgentSessionId, sourceDeclaration, describeSpeaker, recordedIdentity = false, children }: {
   recordedIdentity?: boolean
   children?: ReactNode
   messageId: string
   source?: AgentSessionUserMessageSource | undefined
+  publicContent?: AgentSessionUserMessage['publicContent'] | undefined
   /** Current receiving session address; not historical sender or execution attribution. */
   executionHostId?: string | undefined
   speaker?: ConversationSpeaker | undefined
@@ -49,6 +50,8 @@ export function ConversationInputDetails({ messageId, source, executionHostId, s
         <dt>来源 Host</dt><dd><code>{origin!.device?.hostId ?? '未记录'}</code></dd>
         <dt>当前执行 Host</dt><dd><code>{executionHostId ?? '未知'}</code></dd>
         <dt>Recorded author</dt><dd>{speaker?.role === 'unknown' ? recordedIdentity ? 'Not recorded' : sourceDeclaration ? 'Not recorded · source declared in message' : 'Not recorded · shown as You' : speaker?.role ?? 'Not recorded'}</dd>
+        {publicContent === undefined ? null : <><dt>User content boundary</dt><dd>{publicContent === 'confirmed' ? 'Recorded separately from generated context' : 'Unconfirmed · original text retained'}</dd>
+          <dt>Sharing</dt><dd>Requires the original audience and sharing authorization</dd></>}
       </dl> : null}
       {speaker?.external ? <dl className="conversation-input-details__facts">
         <dt>External application</dt><dd>{speaker.external.actor.application.domain} · {speaker.external.actor.application.appId}</dd>
