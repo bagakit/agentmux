@@ -131,7 +131,12 @@ Region occupant changes refuse the pending effect while preserving local Agents.
 Unrelated spatial changes do not invalidate an otherwise exact target.
 
 `RoomProvisioningAdapter.create` and `addMembers` are independent effect leaves.
-They receive the frozen application, original operation and distinct attempt IDs.
+They receive a detached original `ConnectionConfig`, original operation and
+distinct attempt IDs. Credentials stay a separate argument from the original
+Host resolver. `RoomProvisioningCallContext` can carry the original caller's
+abort signal through the private adapter and SDK; no signal or authorization
+callback is accepted through JSON. Cancelling an already claimed effect retains
+its original durable operation and any confirmed room or member results.
 Creation returns an exact room ID, authoritative non-application or unknown;
 member results must match every original typed member. An adapter must qualify its
 platform key, failure and partial-member semantics against the native contract.
@@ -414,6 +419,24 @@ credential or application rotation replaces that instance. Each call carries its
 own request signal, independent of another caller or the receiver's lifetime.
 The Client scope contains original connection and application identity alone;
 publication does not invent configuration fields or treat cache reuse as authority.
+
+The same lazy leaf contributes room creation and member invitation. Creation
+uses the official `im.chat.create` method with private ordinary group defaults;
+the native UUID is the original persistent random attempt ID, bounded by the
+platform limit. The platform's finite UUID deduplication window does not
+authorize retrying an unknown original operation. Bot membership follows the
+native creation contract; requested members belong to a separate durable phase.
+[Native creation contract](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/chat/create)
+
+Member invitation groups original IDs by their explicit native namespace,
+serializing at most 50 users or 5 bots per request with `succeed_type: 1`.
+Invalid and nonexistent IDs remain not-applied; approval-pending IDs remain
+unknown. Malformed or failed observations retain earlier exact confirmations and
+leave unconfirmed members unknown. Cancellation reaches the original SDK token
+and effect requests and prevents later batches from starting. Neither leaf
+replays creation or membership, searches by room name, creates a Binding or
+restarts an Agent. The public original operation remains the recovery surface.
+[Native membership contract](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/chat-members/create)
 
 The private dispatcher captures the complete original SDK callback object before
 SDK flattening. Its JSON representation retains all header, event, extension,
