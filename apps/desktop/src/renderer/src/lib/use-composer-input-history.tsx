@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { AgentSessionUserMessage, AgentSessionHistoryResourceRequest } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { useAgentInputHistory, type InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
 import { inputHistoryText } from '@agentmux/client-ui/input-history-text'
-import { InputHistoryList } from '@agentmux/client-ui/components/InputHistoryList'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import type { AgentSessionControl, AgentTimelineSnapshot } from '../../../shared/contracts'
 import { api } from './api'
@@ -26,7 +25,7 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
   insertion: RefObject<ComposerInsertionHandle | null>; timeline?: AgentTimelineSnapshot
 }) {
   const [focused, setFocused] = useState(false), [mailboxOpen, setMailboxOpen] = useState(false)
-  const sid = control?.agentSessionId ?? ''
+  const sid = control?.agentSessionId ?? sessionId
   const scope = JSON.stringify([control?.hostId, sid])
   const latest = useRef({ scope, visible, readOnly })
   latest.current = { scope, visible, readOnly }
@@ -53,44 +52,50 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
     if (!control) throw new Error('原 Agent 资源来源未提供。')
     return api.sessions.historyResource(control, request)
   }, [control?.hostId, sid])
-  async function textForAction(message: AgentSessionUserMessage, filling: boolean) {
-    if (!control || message.agentSessionId !== sid || latest.current.scope !== scope) throw new Error('已切换 Agent，原记录保留。')
-    if (filling && (readOnly || !visible)) throw new Error('当前工作面只读，原记录仍可阅读和复制。')
+  function beginAction(filling: boolean) {
+    if (latest.current.scope !== scope) throw new Error('已切换 Agent，原记录保留。')
+    if (!latest.current.visible) throw new Error('已离开原工作面，原记录与草稿保留。')
+    if (filling && latest.current.readOnly) throw new Error('当前工作面只读，原记录仍可阅读和复制。')
     action.current?.abort()
     const controller = new AbortController(); action.current = controller
-    const draft = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
     const editor = insertion.current
-    const result = await inputHistoryText(message, resourceReader, controller.signal)
+    if (filling && !editor) throw new Error('原编辑器尚未可用，草稿未改变。')
+    return { controller, editor }
+  }
+  function assertCurrent(controller: AbortController, editor?: ComposerInsertionHandle | null) {
     controller.signal.throwIfAborted()
-    if (latest.current.scope !== scope || !latest.current.visible || message.agentSessionId !== sid) throw new Error('已离开原 Agent，草稿未改变。')
-    if (filling && (latest.current.readOnly || (useAppStore.getState().agentComposerDrafts[sessionId] ?? '') !== draft)) {
-      throw new Error('读取期间草稿已改变，新稿已保留。请重新选择回填。')
-    }
-    return { ...result, controller, draft, editor }
+    if (latest.current.scope !== scope || !latest.current.visible) throw new Error('已离开原 Agent，草稿未改变。')
+    if (editor && (latest.current.readOnly || insertion.current !== editor)) throw new Error('原编辑器已改变，当前草稿保留。')
+  }
+  function assertMessage(message: AgentSessionUserMessage) {
+    if (message.agentSessionId !== sid) throw new Error('这条记录不属于原 Agent，草稿未改变。')
   }
   const fill = async (message: AgentSessionUserMessage) => {
-    const result = await textForAction(message, true)
-    result.controller.signal.throwIfAborted()
-    if (latest.current.scope !== scope || !latest.current.visible || latest.current.readOnly ||
-      (useAppStore.getState().agentComposerDrafts[sessionId] ?? '') !== result.draft || insertion.current !== result.editor) {
-      throw new Error('读取期间工作面或草稿已改变，新稿已保留。请重新选择回填。')
-    }
-    if (!result.editor) throw new Error('原编辑器尚未可用，草稿未改变。')
-    result.editor.replace(result.text)
-    return result.attachments ? '已填入正文，尚未发送；附件仍在原记录' : undefined
+    assertMessage(message)
+    const { controller, editor } = beginAction(true)
+    let attachments = false
+    // Capture the maintained caret before reading. The editor maps it through later edits.
+    await editor!.insert(async () => {
+      const result = await inputHistoryText(message, resourceReader, controller.signal)
+      assertCurrent(controller, editor)
+      attachments = result.attachments
+      return result.text
+    }, { separate: true })
+    return attachments ? '已插入正文，尚未发送；附件仍在原记录' : undefined
   }
+  const fillText = async (text: string) => {
+    const { controller, editor } = beginAction(true)
+    await editor!.insert(() => { assertCurrent(controller, editor); return text }, { separate: true })
+  }
+  const fillLocal = async (entry: { text: string }) => fillText(entry.text)
   const copy = async (message: AgentSessionUserMessage) => {
-    const result = await textForAction(message, false)
-    result.controller.signal.throwIfAborted()
-    if (latest.current.scope !== scope || !latest.current.visible) throw new Error('已离开原 Agent，原记录保留。')
+    assertMessage(message)
+    const { controller } = beginAction(false)
+    const result = await inputHistoryText(message, resourceReader, controller.signal)
+    assertCurrent(controller)
     return copyRecordedText(result.text)
   }
-  const render = (onRead: (message: AgentSessionUserMessage) => ReactNode) => <InputHistoryList key={scope} history={history}
-    localEntries={local.map((text, index) => ({ id: `local:${scope}:${index}`, text })).reverse()}
-    onCopy={copy} {...(!readOnly && visible ? { onFill: fill, onFillLocal: (entry: { text: string }) => {
-      if (latest.current.scope !== scope || !latest.current.visible || latest.current.readOnly || !insertion.current) throw new Error('原编辑器暂不可用，草稿未改变。')
-      insertion.current.replace(entry.text)
-    } } : {})}
-    onRead={onRead} />
-  return { render, resourceReader, entries, messages: history.messages, setMailboxOpen, setFocused }
+  return { history, localEntries: local.map((text, index) => ({ id: `local:${scope}:${index}`, text })).reverse(),
+    fill, fillText, fillLocal, copy, canFill: visible && !readOnly, resourceReader,
+    entries, messages: history.messages, setMailboxOpen, setFocused }
 }

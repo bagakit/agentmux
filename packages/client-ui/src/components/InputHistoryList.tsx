@@ -2,14 +2,20 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentSessionUserMessage } from '@agentmux/core'
 import { describeConversationInputSource } from '../lib/conversation-input-source.js'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
+import { semanticIconComponent } from '../theme/icons.js'
 import type { useAgentInputHistory } from '../lib/use-agent-input-history.js'
+
+const SearchIcon = semanticIconComponent('action.search')
+const FillIcon = semanticIconComponent('action.paste')
 
 export type InputHistoryView = ReturnType<typeof useAgentInputHistory>
 export type InputHistoryLocalEntry = { id: string; text: string }
 
 /** Pure presentation: query and actions are injected from the original read/draft owners. */
-export function InputHistoryList({ history, localEntries = [], onRead, onFill, onCopy, onFillLocal }: {
+export function InputHistoryList({ history, localEntries = [], onRead, onFill, onCopy, onFillLocal, beforeRecords, renderRecords }: {
   history: InputHistoryView; localEntries?: readonly InputHistoryLocalEntry[]
+  beforeRecords?: ReactNode
+  renderRecords?(messages: readonly AgentSessionUserMessage[]): ReactNode
   onRead?(message: AgentSessionUserMessage): ReactNode
   onFill?(message: AgentSessionUserMessage): Promise<string | void>
   onCopy(message: AgentSessionUserMessage): Promise<boolean>
@@ -44,17 +50,18 @@ export function InputHistoryList({ history, localEntries = [], onRead, onFill, o
       if (original === generation.current) setAction({ id: entry.id, pending: false, message: '已填入草稿，尚未发送' })
     } catch (error) { if (original === generation.current) setAction({ id: entry.id, pending: false, message: error instanceof Error ? error.message : String(error) }) }
   }
-  return <div className="input-history">
+  return <div className="input-history" data-custom-records={renderRecords ? true : undefined}>
     <form className="input-history__search" onSubmit={event => { event.preventDefault(); history.search() }}>
       <input type="search" aria-label="查询当前 Agent 输入历史" placeholder="查询输入历史" value={history.draftQuery}
         onChange={event => history.setDraftQuery(event.target.value)} onKeyDown={event => {
           if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event)) event.preventDefault()
         }} />
-      <button type="submit">查询</button>
+      <button type="submit" aria-label="查询当前 Agent 输入历史" title="查询当前 Agent 输入历史">{renderRecords ? <SearchIcon size={14} /> : '查询'}</button>
     </form>
     <p className="input-history__coverage" role="status">{history.loading ? '正在读取… ' : ''}
       {history.complete ? '已查完可用记录（本次读取）' : '当前为已读取范围'}{history.examined ? ` · 已检查 ${history.examined} 条` : ''}</p>
-    {history.messages.length ? <ol className="input-history__records" aria-label="当前 Agent 输入历史">
+    {beforeRecords}
+    {renderRecords ? renderRecords(history.messages) : history.messages.length ? <ol className="input-history__records" aria-label="当前 Agent 输入历史">
       {history.messages.map(message => <li key={message.id} data-input-history-id={message.id}>
         <p className="input-history__excerpt">{message.content.slice(0, 320) || '包含资源的输入记录'}</p>
         <div className="input-history__meta"><span title={describeConversationInputSource(message.source).title}>{describeConversationInputSource(message.source).caption}</span>
@@ -74,7 +81,7 @@ export function InputHistoryList({ history, localEntries = [], onRead, onFill, o
         {page.error ? '重试读取' : `继续查找${page.source === 'native' ? '原生' : '发送'}记录`}</button> : null}
     </div>)}</div>
     {local.length ? <details className="input-history__local"><summary>编辑回忆 · {local.length}</summary><p>仅保存了输入正文，不代表已经发送；时间和入口未记录。</p>
-      {local.map(entry => <div key={entry.id}><p>{entry.text.slice(0, 320)}</p>{onFillLocal ? <button type="button" disabled={action?.pending} onClick={() => void fillLocal(entry)}>填入草稿</button> : null}
+      {local.map(entry => <div key={entry.id}><p>{entry.text.slice(0, 320)}</p>{onFillLocal ? <button type="button" disabled={action?.pending} aria-label="填入草稿" title="插入草稿，不发送" onClick={() => void fillLocal(entry)}>{renderRecords ? <FillIcon size={14} /> : '填入草稿'}</button> : null}
         {action?.id === entry.id ? <p role="status">{action.message}</p> : null}</div>)}</details> : null}
   </div>
 }
