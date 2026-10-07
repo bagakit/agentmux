@@ -8,7 +8,7 @@ export function TopicPresence({ cells, agents, tabs = [], onSelectTab }: {
   cells?: readonly TopicRegionCell[] | undefined
   agents: readonly SelectorPresenceAgent[]
   tabs?: readonly WorkbenchTabDetail[]
-  onSelectTab?: (tabId: string) => void
+  onSelectTab?: (tabId: string, groupId?: string) => void
 }) {
   // A Session already represented by any Tab has an identity slot in that Tab. Keep the
   // separate roster for healthy background Agents that have no open Region only.

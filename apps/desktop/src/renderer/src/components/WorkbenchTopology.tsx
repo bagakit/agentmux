@@ -26,6 +26,8 @@ export type WorkbenchRegionDetail = RegionGeometry & {
 
 export type WorkbenchTabDetail = {
   tabId: string
+  /** Original display Group for selecting an exact Tab occurrence. */
+  groupId?: string
   /** Original display occurrence when one Tab is presented in more than one Group. */
   occurrenceKey?: string
   /** Readable context from the original display Workspace and Group. */
@@ -148,7 +150,7 @@ export function WorkbenchRegionMap({
  */
 export function WorkbenchTopology({ tabs, onSelectTab, interactive = true, enabled = true }: {
   tabs: readonly WorkbenchTabDetail[]
-  onSelectTab?: ((tabId: string) => void) | undefined
+  onSelectTab?: ((tabId: string, groupId?: string) => void) | undefined
   /** Readonly embedding inside an existing control adds no nested control or keyboard stop. */
   interactive?: boolean
   /** The parent may suspend this preview while its own menu or editor is open. */
@@ -284,7 +286,7 @@ export function WorkbenchTopology({ tabs, onSelectTab, interactive = true, enabl
             onKeyDown={interactive ? (event) => event.stopPropagation() : undefined}
             onClick={(event) => {
               setInspectorOpen(false)
-              if (interactive) { event.stopPropagation(); onSelectTab?.(tab.tabId) }
+              if (interactive) { event.stopPropagation(); onSelectTab?.(tab.tabId, tab.groupId) }
             }}
           >
             <WorkbenchTabGlyph tab={tab} />

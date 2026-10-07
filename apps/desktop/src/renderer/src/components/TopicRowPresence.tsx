@@ -17,7 +17,7 @@ import type { WorkbenchTabDetail } from './WorkbenchTopology'
 /** Live facts stay on their displayed row; directory ordering never consumes Runtime updates. */
 export const TopicRowPresence = memo(function TopicRowPresence({ workspace, topic, paths, surfaces, active,
   onSelectTab }: { workspace: WorkspaceRecord; topic: ScratchTopicSnapshot; paths: readonly string[];
-  surfaces: readonly TopicTabSurface[]; active: boolean; onSelectTab(topicId: string, tabId: string): Promise<void> }) {
+  surfaces: readonly TopicTabSurface[]; active: boolean; onSelectTab(topicId: string, tabId: string, groupId?: string): Promise<void> }) {
   const subject = useAppStore(useShallow(state => {
     const execution = state.agentFocus?.execution, reference = execution?.reference
     if (!active || !reference || reference.displayWorkspaceId !== workspace.id || !surfaces.some(tab => tab.tabId === reference.tabId && tab.groupId === reference.groupId)) return null
@@ -100,6 +100,7 @@ export const TopicRowPresence = memo(function TopicRowPresence({ workspace, topi
       }) }) : null)
   }, [tabs, sessions, names, timelines, executors, retainedAvatars, workspace.path])
   const presentedTabs = useMemo(() => details.flatMap((detail, index) => detail ? [{ ...detail,
+    groupId: surfaces[index]!.groupId,
     occurrenceKey: JSON.stringify([workspace.id, surfaces[index]?.groupId, detail.tabId]),
     locationLabel: `${workspace.name} · ${groups.includes(surfaces[index]!.groupId) ? `Group ${groups.indexOf(surfaces[index]!.groupId) + 1}` : 'Original Group'}`,
     active: surfaces[index]?.active ?? false,
@@ -120,5 +121,5 @@ export const TopicRowPresence = memo(function TopicRowPresence({ workspace, topi
         label: resolveAgentName({ userName: names[agent.sessionId], firstPrompt: firstPromptFromTimeline(timelines[agent.sessionId]),
           fallback: agent.live!.label }).name, state: topicAgentPresentation(agent).state, onOpen: () => selectSession(agent.sessionId) }))
   }, [tabs, topic, sessions, workspace, executors, names, timelines, selectSession])
-  return <TopicPresence tabs={presentedTabs} agents={agents} onSelectTab={tabId => { void onSelectTab(topic.id, tabId) }} />
+  return <TopicPresence tabs={presentedTabs} agents={agents} onSelectTab={(tabId, groupId) => { void onSelectTab(topic.id, tabId, groupId) }} />
 })
