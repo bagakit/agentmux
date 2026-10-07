@@ -102,7 +102,7 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
   const app = await realpath(resolve(repository, appPath)), packageIdentity = await readPackageIdentity(app)
   const resources = join(app, 'Contents/Resources/app'), core = join(resources, 'node_modules/@agentmux/core')
   const executable = join(app, 'Contents/MacOS/AgentMux'), scope = await createPrivateRuntimeScope(core)
-  const evidence = join(output, 'os-' + randomUUID()), userData = join(scope.directory, 'user-data'), readyPath = join(scope.directory, 'desktop-ready.json')
+  const evidence = join(output, 'os-' + randomUUID()), userData = join(scope.directory, 'user-data')
   await mkdir(evidence, { recursive: true })
   const receipt = { schema: 'agentmux.browser-default-os-proof.v1', status: 'running', app, packageIdentity,
     boundary: 'Exact non-installed production App; read-only OS handlers; explicit-app HTTP(S) routing is not proof of a changed default. Private user data, Scratch, Notes, Core and Runtime. No product replacement or automatic OS setter.', cases: [], images: [] }
@@ -111,8 +111,7 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
   const cleanEnvironment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:AGENTMUX_|CTXMUX_|ELECTRON_)/.test(key)))
   const environment = { ...cleanEnvironment, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_DISABLE_CRASH_REPORTER: '1',
     AGENTMUX_RUNTIME_DIRECTORY: scope.directory, AGENTMUX_STATE_DIRECTORY: join(scope.directory, 'state'),
-    AGENTMUX_AGENT_SESSION_STORE: join(userData, 'agent-sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(scope.directory, 'state/messages.ndjson'),
-    AGENTMUX_DESKTOP_READY_FILE: readyPath }
+    AGENTMUX_AGENT_SESSION_STORE: join(userData, 'agent-sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(scope.directory, 'state/messages.ndjson') }
   const cli = async args => {
     const result = await command(process.execPath, [join(core, 'bin/amux'), '--endpoint', 'unix:' + join(scope.directory, 'control.sock'), ...args], { env: cleanEnvironment })
     const value = JSON.parse(result.stdout); assert.equal(value.ok, true, result.stderr); return value.result
@@ -140,15 +139,18 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     for (const [key, value] of Object.entries(environment).filter(([key]) => key.startsWith('AGENTMUX_'))) launchArgs.push('--env', key + '=' + value)
     launchArgs.push(coldUrl, '--args', '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', '--browser-default-proof=' + scope.directory)
     await command('/usr/bin/open', launchArgs, { env: cleanEnvironment })
-    const ready = await eventually(async () => { const value = JSON.parse(await readFile(readyPath, 'utf8')); return value.packaged && value.executable === executable && value }, 'Exact packaged Main ready receipt')
-    receipt.ready = ready
     const { connectAgentMuxRpc, formatAmuxObjectLink } = await import(pathToFileURL(join(core, 'dist/index.js')).href)
     rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(scope.directory, 'control.sock') } })
+    const bundledRenderer = JSON.parse(await readFile(join(resources, 'out/renderer/release.json'), 'utf8'))
+    receipt.runtime = await eventually(() => scope.observeOwner(), 'Exact private Runtime owner')
     const observation = async () => {
       const result = await rpc.call('app.inspect', {}), value = result.observation
       assert.equal(value.main.package.sourceCommit, packageIdentity.sourceCommit)
+      assert.equal(value.main.package.sourceTree, packageIdentity.sourceTree)
       assert.equal(await realpath(value.main.storage.userData), userData)
       assert.equal(value.main.renderer.kind, 'bundled')
+      assert.equal(value.main.renderer.id, bundledRenderer.id)
+      assert.deepEqual(value.main.renderer.identity, bundledRenderer.identity)
       return value
     }
     const initial = await eventually(async () => { const value = await observation(); return !value.workbench.loading && value }, 'Original workbench initialization')
@@ -156,7 +158,6 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     const initialProcess = await command('/bin/ps', ['-p', String(initial.main.pid), '-o', 'uid=,lstart=,command='], { env: { ...cleanEnvironment, LC_ALL: 'C' } })
     assert.ok(initialProcess.stdout.includes(executable) && initialProcess.stdout.includes('--browser-default-proof=' + scope.directory), 'Actual original Main process must belong to this invocation')
     receipt.mainProcess = initialProcess.stdout.trim()
-    receipt.runtime = await scope.observeOwner()
     const devtools = (await readFile(join(userData, 'DevToolsActivePort'), 'utf8')).trim().split('\n'), port = Number(devtools[0])
     assert.ok(Number.isInteger(port) && port > 0 && port < 65536 && devtools[1].startsWith('/devtools/browser/'), 'Original browser endpoint must be observed')
     const rootTarget = async () => {
