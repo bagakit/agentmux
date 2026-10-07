@@ -1,0 +1,28 @@
+.goal-responsibility { display: grid; gap: var(--sp-3); min-width: 0; padding: var(--sp-3) 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+.goal-responsibility--compact { gap: var(--sp-2); padding: var(--sp-2) 0 0; }
+.goal-responsibility__heading { font-size: var(--fs-body); font-weight: 550; }
+.goal-responsibility__manager, .goal-responsibility__line, .goal-responsibility__next { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+.goal-responsibility__manager > span:first-child, .goal-responsibility__next > span:first-child, .goal-responsibility__pending, .goal-responsibility__binding { color: var(--text-3); }
+.goal-responsibility__agent { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 0; max-width: 100%; padding: 0; border: 0; background: transparent; color: var(--text-2); font: inherit; text-align: left; }
+.goal-responsibility__agent > strong { min-width: 0; max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.goal-responsibility__agent:hover { color: var(--text-1); text-decoration: underline; }
+.goal-responsibility__agent:focus-visible { outline: 1px solid var(--text-2); outline-offset: 2px; border-radius: var(--radius-sm); }
+.goal-responsibility__execution { display: grid; gap: var(--sp-1); min-width: 0; }
+.goal-responsibility__phase { color: var(--text-2); }
+.goal-responsibility__phase--attention, .goal-responsibility__notice { font-weight: 550; color: var(--text-1); }
+.goal-responsibility__reason { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.goal-responsibility__source { color: var(--text-3); min-width: 0; }
+.goal-responsibility__source summary { cursor: pointer; }
+.goal-responsibility__source dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-1) var(--sp-3); }
+.goal-responsibility__source dt, .goal-responsibility__source dd { margin: 0; overflow-wrap: anywhere; }
+.goal-responsibility__evidence { display: block; overflow-wrap: anywhere; }
+
+.goal-patrol { display: grid; gap: var(--sp-2); min-width: 0; }
+.goal-patrol__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.goal-patrol__feedback { display: grid; gap: var(--sp-1); margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.goal-patrol__feedback strong { color: var(--text-1); font-weight: 550; }
+.goal-patrol__source { color: var(--text-3); min-width: 0; }
+.goal-patrol__source summary { cursor: pointer; }
+.goal-patrol__source dl { margin: var(--sp-2) 0; }
+.goal-patrol__source dt { color: var(--text-3); }
+.goal-patrol__source dd { margin: 0 0 var(--sp-2); overflow-wrap: anywhere; }

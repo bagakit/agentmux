@@ -6,6 +6,7 @@ import type { DemandRecord } from '../lib/global-demand-board'
 import { goalDelegationRows } from '../lib/goal-delegation-presentation'
 import { goalStartRows } from '../lib/goal-start-presentation'
 import { GoalStartWork } from './GoalStartWork'
+import { GoalResponsibilitySummary } from './GoalResponsibilitySummary'
 import { GoalContinuationAgent } from './GoalContinuationControl'
 import { applyGoalDelegationResult, beginGoalDelegationRead, refreshGoalDelegations, useGoalDelegationObservation } from '../lib/goal-delegation-work'
 import { useAppStore } from '../store'
@@ -21,7 +22,7 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
   const collecting = useRef(new Set<string>())
   const rows = goalDelegationRows(current)
   const starts = goalStartRows(current)
-  if (compact || !rows.length && !starts.length) return null
+  if (compact || !rows.length && !starts.length) return <GoalResponsibilitySummary demand={current} compact={compact} active={active} />
   async function refresh() {
     await refreshGoalDelegations(demand.id)
     if (!useAppStore.getState().demands[demand.id]?.delegationObservationIssue) setIssue(null)
@@ -61,7 +62,7 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
       if (result.operation === 'focus' && result.navigation.state === 'rejected') setIssue(result.issues.map(item => item.message).join(' '))
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
   }
-  return <section className="goal-delegation" aria-label="Delegated work">
+  return <><GoalResponsibilitySummary demand={current} active={active} /><section className="goal-delegation" aria-label="Delegated work">
     <div className="goal-delegation__heading"><strong>Delegated work</strong><button type="button" className="goals-button" onClick={() => void refresh()}>Refresh reports</button></div>
     {current.delegationObservationIssue || issue ? <p className="goals-service" role="status">{issue ?? current.delegationObservationIssue} Original Agents, tasks and last confirmed reports are kept.</p> : null}
     <GoalStartWork rows={starts} supervisorSessionId={current.supervisorSessionId} active={active} openAgent={openAgent} review={review} />
@@ -100,5 +101,5 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
         </div> : null}
       </details>
     </article>)}
-  </section>
+  </section></>
 }

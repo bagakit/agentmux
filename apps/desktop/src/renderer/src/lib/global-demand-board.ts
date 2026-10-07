@@ -42,6 +42,10 @@ export type DemandRecord = {
   delegationReadCut?: { goalUpdatedAt: number; request: number }
   dispatches?: import('@agentmux/demand').DemandDispatch[]
   startObservations?: import('@agentmux/demand').GoalStartObservation[]
+  progressUpdates?: import('@agentmux/demand').DemandProgress[]
+  patrols?: import('@agentmux/demand').DemandPatrol[]
+  patrolObservations?: import('@agentmux/core/goal-patrol').GoalPatrolObservation[]
+  responsibility?: import('@agentmux/core/goal-responsibility').GoalResponsibilityObservation
   activities?: DemandActivity[]
   decisions?: DemandDecision[]
   alignment?: DemandAlignment
