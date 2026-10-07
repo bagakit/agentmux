@@ -599,11 +599,13 @@ export type FileDocument = {
   path: string
   content: string
   revision: string
-  /** One-time client draft backup; never a canonical Note body or a replay queue. */
+  /** One-time client content backup; never a canonical Note body or a replay queue. */
   noteConversion?: {
     originalContent: string
     originalRevision: string
     source: import('@agentmux/core/notebook-catalog').NoteResource
+    /** Original buffer state at conversion time; absence means it was not recorded. */
+    wasDirty?: boolean
     unconfirmedWrite?: { content: string; expectedRevision: string | null; generation: number; resource: { hostId: string; path: string } }
   } | undefined
   /** Original trusted metadata, bound to this exact Markdown body and resource. */

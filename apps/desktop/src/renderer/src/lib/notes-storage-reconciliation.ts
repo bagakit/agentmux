@@ -9,13 +9,13 @@ import type { FileDocument } from '../../../shared/contracts'
 import { convertLegacyNoteDraft } from '@agentmux/client-ui/note/note-legacy-draft'
 import { newNoteDocument } from '@agentmux/client-ui/note/note-document'
 
-function convertedDocument(document: FileDocument, change: NotesResourceChange, unknown?: Extract<FileWorkbenchState['documentIssues'][string], { kind: 'write-unknown' }>): FileDocument {
+function convertedDocument(document: FileDocument, change: NotesResourceChange, wasDirty: boolean | undefined, unknown?: Extract<FileWorkbenchState['documentIssues'][string], { kind: 'write-unknown' }>): FileDocument {
   if (!change.conversion) return document
   const converted = convertLegacyNoteDraft(document.content, change.noteId)
   if (converted.status === 'unchanged') return document
   return { ...document, ...(converted.status === 'converted' ? { content: converted.content } : {}),
     revision: converted.status === 'converted' && !unknown && document.revision === change.conversion.sourceRevision ? change.conversion.targetRevision : document.revision,
-    noteConversion: document.noteConversion ?? { originalContent: document.content, originalRevision: document.revision, source: change.from,
+    noteConversion: document.noteConversion ?? { originalContent: document.content, originalRevision: document.revision, source: change.from, ...(wasDirty !== undefined ? { wasDirty } : {}),
       ...(unknown ? { unconfirmedWrite: structuredClone(unknown.attempted) } : {}) } }
 }
 /** Relocation changes file resources, preserving the original entities, drafts and layout. */
@@ -34,14 +34,14 @@ export function reconcileNotesStorageResources<T extends FileWorkbenchState>(sta
       const collection = { ...next[field] } as Record<string, unknown>
       if (!conflict && fromKey !== toKey && Object.hasOwn(collection, fromKey)) { collection[toKey] = collection[fromKey]; delete collection[fromKey] }
       if (field === 'documents' && collection[toKey]) collection[toKey] = { ...(collection[toKey] as object), workspaceId: change.to.workspaceId, path: change.to.path }
-      if (field === 'documents' && collection[toKey]) collection[toKey] = convertedDocument(collection[toKey] as FileDocument, change, conflict ? next.documentIssues[toKey]?.kind === 'write-unknown' ? next.documentIssues[toKey] as typeof unknown : undefined : unknown)
-      if (field === 'retainedDocumentDrafts' && collection[toKey]) collection[toKey] = (collection[toKey] as FileDocument[]).map(document => convertedDocument(document, change))
+      if (field === 'documents' && collection[toKey]) collection[toKey] = convertedDocument(collection[toKey] as FileDocument, change, !!next.dirtyDocuments[conflict ? toKey : fromKey], conflict ? next.documentIssues[toKey]?.kind === 'write-unknown' ? next.documentIssues[toKey] as typeof unknown : undefined : unknown)
+      if (field === 'retainedDocumentDrafts' && collection[toKey]) collection[toKey] = (collection[toKey] as FileDocument[]).map(document => convertedDocument(document, change, undefined))
       patch[field] = collection
     }
     if (conflict) {
       const retained = patch.retainedDocumentDrafts as Record<string, typeof next.documents[string][]>
       const alternatives = [...(retained[toKey] ?? []), ...(retained[fromKey] ?? [])]
-      const source = { ...convertedDocument(next.documents[fromKey]!, change, unknown), path: change.to.path }
+      const source = { ...convertedDocument(next.documents[fromKey]!, change, !!next.dirtyDocuments[fromKey], unknown), path: change.to.path }
       if (!alternatives.some(draft => draft.content === source.content)) alternatives.push(source)
       retained[toKey] = alternatives
       for (const field of ['documents', 'dirtyDocuments', 'documentGenerations', 'documentObservationGenerations', 'documentIssues', 'savingDocuments', 'retainedDocumentDrafts'] as const) delete (patch[field] as Record<string, unknown>)[fromKey]
