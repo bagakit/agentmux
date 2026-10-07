@@ -166,10 +166,12 @@ export class NativeOverlaySurfaces {
       .map(projection => projection.view.webContents.getOSProcessId()).filter(pid => pid > 0))]
   }
 
-  hasFocusedProjection(): boolean {
+  // Native document blur precedes the sibling WebContents focus event. The containing
+  // window owns departure; a current attached projection owns the original menu route.
+  hasProjectionInFocusedWindow(): boolean {
     return !this.disposed && !this.window.isDestroyed() && this.window.isFocused() &&
       [...this.projections.values()].some(projection => this.current(projection) && projection.view.getVisible() &&
-        this.window.contentView.children.includes(projection.view) && projection.view.webContents.isFocused())
+        this.window.contentView.children.includes(projection.view))
   }
 
   private async paint(projection: Projection): Promise<void> {
