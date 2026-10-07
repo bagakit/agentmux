@@ -62,7 +62,8 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 describe('Connections settings', () => {
   it('catalog: every navigation projection has the same Connections contributions without authorization guesses', async () => {
     const groups = settingsNavGroups(''), connections = groups.find(group => group.id === 'connections')
-    expect(connections?.items.map(item => item.id), 'Connections group owns environments, devices and chat applications').toEqual(['hosts', 'devices', 'chat-connections'])
+    expect(connections?.items.map(item => item.id), 'Connections group owns environments and devices').toEqual(['hosts', 'devices'])
+    expect(groups.find(group => group.id === 'toolkit')?.items.map(item => item.id), 'Mods owns the original conversation Connector').toContain('chat-connections')
     expect(groups.find(group => group.id === 'resources')!.items.some(item => item.id === 'hosts' || item.id === 'devices')).toBe(false)
     expect(visibleSettingsSections('手机').map(item => item.id)).toContain('devices')
     expect(visibleSettingsSections('ssh').map(item => item.id)).toContain('hosts')

@@ -102,8 +102,8 @@ describe('Settings uses the original connection owner through public service', (
     await vi.waitFor(async () => { await act(async () => {}); expect((await owner.inspect({ connectionId: 'original-application' })).connection?.revision).toBe(3) })
   })
 
-  it('contributes to Connections and stores encrypted credentials before the real configure/list path', async () => {
-    expect(settingsNavGroups('').find(group => group.id === 'connections')!.items.map(item => item.id)).toContain('chat-connections')
+  it('contributes to Mods and stores encrypted credentials before the real configure/list path', async () => {
+    expect(settingsNavGroups('').find(group => group.id === 'toolkit')!.items.map(item => item.id)).toContain('chat-connections')
     expect(settingsNavGroups('扫码').flatMap(group => group.items).map(item => item.id)).toContain('chat-connections')
     await open(); await draft(); await dom.click('[data-connection-editor] .primary-button')
     await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(2)) })
