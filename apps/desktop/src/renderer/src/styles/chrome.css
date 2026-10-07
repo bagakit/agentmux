@@ -141,6 +141,8 @@
 .space-topic-row .project-rail-row__identity strong { font-size: var(--fs-meta); font-weight: 500; }
 .space-topic-row.project-rail-row--active .project-rail-row__identity strong { font-weight: 620; }
 .space-row-action.icon-button { display: none; flex: 0 0 20px; width: 20px; height: var(--rail-row-min); padding: 0; color: var(--text-3); opacity: 0; overflow: hidden; pointer-events: none; }
+/* The original menu invoker must remain focusable after its pointer leaves for a portal/dialog. */
+.space-row-action.icon-button[aria-haspopup="menu"] { display: inline-flex; }
 .space-tree-entry:hover .space-row-action, .space-tree-entry:focus-within .space-row-action, .space-pin--pinned.icon-button { display: inline-flex; opacity: 1; pointer-events: auto; }
 .space-pin--pinned.icon-button { color: var(--text-2); }
 .space-pin--pinned svg { fill: color-mix(in srgb, currentColor 18%, transparent); }
