@@ -8,6 +8,8 @@ import { connectorJourneyFixture } from './fixtures/connector-journey'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import type { RoomReadWire } from '../../../packages/connectors/test/fixtures/room-discovery'
+import { invalidateConnectorTarget } from '../src/renderer/src/lib/connector-room-intent'
+import { composerSession } from './helpers/composer-dom-fixture'
 
 let native: (request: RoomReadWire) => Promise<unknown>
 const f = connectorJourneyFixture({ platform: request => native(request) })
@@ -48,6 +50,35 @@ it('the original Agent menu selects an actual default-Host SDK room, confirms th
   expect(receipt.grants).toMatchObject([{ actor: { application: f.config.application, idType: 'open_id', userId: 'ou_original' }, capabilities: ['input'] }])
   expect(f.platformCalls.some(call => call.method === 'POST')).toBe(false)
   expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
+  await f.original.unchanged()
+}, 25_000)
+
+
+it('the Composer names its exact default-Host audience and keeps that audience and input through a later name observation failure', async () => {
+  const originalNative = native; let failed = false
+  native = async request => {
+    if (request.url?.endsWith('/chats/oc_other')) {
+      if (failed) throw new Error('Controlled name read unavailable')
+      return { code: 0, data: { name: 'Design review', chat_status: 'normal', chat_mode: 'group' } }
+    }
+    return await originalNative(request)
+  }
+  await f.mount(); const editor = document.querySelector<HTMLElement>('[data-workbench-region-id="original-region"] [role="textbox"]')!
+  await f.menu('Bind existing group chat'); await chooseGroup('oc_other'); await consent(); await f.button('Connect group'); await ready('Sharing on'); await f.button('Close')
+  await vi.waitFor(async () => { await act(async () => {}); expect([...document.querySelectorAll('.connector-sharing__group')].every(node => node.textContent?.includes('Design review'))).toBe(true); expect(document.querySelectorAll('.connector-sharing__group')).toHaveLength(2) })
+  const binding = (await f.services.connections.bindings!.list({})).bindings[0]!, counts = f.calls.length
+  await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, ...Array.from({ length: 250 }, (_, index) => composerSession('unrelated-name-' + index))] })))
+  await act(async () => {}); expect(f.calls).toHaveLength(counts)
+  failed = true
+  await api.connections.call('connection.binding.pause', { operationId: 'pause-named-audience', bindingId: binding.bindingId, expectedRevision: binding.revision })
+  await act(async () => { editor.focus(); invalidateConnectorTarget(binding) })
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.connector-sharing')?.textContent).toContain('Sharing paused · Design review'); expect(document.querySelector('.connector-sharing')?.textContent).toContain('Group name unconfirmed') })
+  expect(document.querySelector('[data-workbench-region-id="original-region"] [role="textbox"]')).toBe(editor); expect(document.activeElement).toBe(editor)
+  expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
+  expect(f.calls.filter(call => call.method === 'connection.room.get').every(call => (call.input as { externalConversationId: string }).externalConversationId === 'oc_other')).toBe(true)
+  await act(async () => document.querySelector<HTMLButtonElement>('.connector-sharing__group')!.click())
+  await ready('Shared group details'); expect(document.querySelector('.agent-connector-pairing__agent [data-executor-id]')?.getAttribute('data-executor-id')).toBe(f.session.kind === 'agent' ? f.session.executorId : null)
+  expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).binding).toMatchObject({ externalConversationId: 'oc_other', state: 'paused' })
   await f.original.unchanged()
 }, 25_000)
 
