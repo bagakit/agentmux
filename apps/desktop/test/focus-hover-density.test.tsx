@@ -59,12 +59,13 @@ it('retains a distinct Tab title and original proportional geometry rather than 
 
 it.each(['unknown', 'permission'] as const)('keeps necessary service directly readable with its full source: %s', async kind => {
   const detail = kind === 'permission' ? 'Permission required · original edit request' : 'Activity not confirmed · original input readiness unknown'
+  if (kind === 'permission') useAppStore.setState({ sessions: [{ ...session, status: { state: 'waiting', source: 'native-hook', observedAt: Date.now(), detail } }] })
   const context = { ...base(), ...(kind === 'permission' ? { bucket: 'attention' as const, state: 'waiting' as const } : {}), stateLabel: detail.split(' · ')[0]!, detail, detailKind: 'service' as const, recap, detailIsRecap: false }
   await open(context)
   const service = preview().querySelector('.agent-information-reader__service p')!
   expect(service.textContent).toBe(kind === 'permission' ? detail : 'Current activity unconfirmed · Run running')
   expect(preview().querySelector('header')?.textContent).not.toContain(detail.split(' · ')[0])
-  expect(preview().querySelector('.focus-context-hover__state')?.getAttribute('aria-label')).toContain(detail.split(' · ')[0])
+  expect(preview().querySelector('.focus-context-hover__state')?.getAttribute('aria-label')).toContain(kind === 'permission' ? 'Needs reply' : detail.split(' · ')[0])
   await source(); expect(preview().querySelector('.agent-information-reader__metadata')!.textContent).toContain(detail)
 })
 

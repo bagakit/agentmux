@@ -3,6 +3,7 @@ import { act, createElement } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { useAppStore } from '../src/renderer/src/store'
+import { msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
 import { api } from '../src/renderer/src/lib/api'
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
 import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
@@ -126,4 +127,46 @@ it('pauses an invisible pinned window and resumes only its original source witho
   await ready(); await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__close')!.click())
   await act(async () => { visibility = 'hidden'; document.dispatchEvent(new Event('visibilitychange')); visibility = 'visible'; document.dispatchEvent(new Event('visibilitychange')) })
   expect(panel()).toBeNull()
+})
+
+
+it('expires a visible pinned work signal at the Core boundary without changing the held text or reading demand', async () => {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+  try {
+    const status = { state: 'working' as const, source: 'native-hook' as const, observedAt: Date.now(), stateEnteredAt: Date.now() }
+    const working = { ...agent, status, semanticStatus: status }
+    useAppStore.setState({ sessions: [working], timelines: { [agent.id]: timeline } })
+    await dom.render(<WorkspaceAgentRow context={context(working)} percent={null} onOpen={onOpen} />)
+    await act(async () => { row().focus(); for (let n = 0; n < 12; n++) await Promise.resolve() })
+    await pin()
+    const original = panel(), prose = original.querySelector('.focus-context-hover__recap p'), reads = vi.mocked(api.sessions.historyPage).mock.calls.length
+    expect(original.querySelector('.focus-context-hover__state-label')?.textContent).toContain('Working')
+    await act(async () => vi.advanceTimersByTime(msUntilSemanticStatusStale(status, Date.now()) + 1000))
+    expect(panel()).toBe(original); expect(panel().textContent).toContain('Work signal expired')
+    expect(panel().querySelector('.focus-context-hover__state-label')?.textContent).not.toContain('Working')
+    expect(panel().querySelector('.focus-context-hover__recap p')).toBe(prose)
+    expect(api.sessions.historyPage).toHaveBeenCalledTimes(reads)
+  } finally { vi.useRealTimers() }
+})
+
+
+it('restores original text selection after metadata but yields to a later selection outside that text', async () => {
+  await open(); await ready(); await pin()
+  const prose = panel().querySelector('.focus-context-hover__recap p')!, range = document.createRange()
+  range.selectNodeContents(prose); window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
+  const selected = window.getSelection()!.toString()
+  const metadata = () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__facts')!
+  const back = () => panel().querySelector<HTMLButtonElement>('[aria-label="Back to original content"]')!
+  await act(async () => metadata().click())
+  window.getSelection()!.removeAllRanges()
+  await act(async () => back().click())
+  expect(window.getSelection()!.toString()).toBe(selected)
+  await act(async () => metadata().click())
+  const foreign = panel().querySelector('.agent-information-reader__metadata')!, later = document.createRange()
+  later.selectNodeContents(foreign); window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(later)
+  await act(async () => document.dispatchEvent(new Event('selectionchange')))
+  window.getSelection()!.removeAllRanges()
+  await act(async () => back().click())
+  expect(window.getSelection()!.toString()).toBe('')
+  expect(panel().querySelector('.focus-context-hover__recap p')).toBe(prose)
 })
