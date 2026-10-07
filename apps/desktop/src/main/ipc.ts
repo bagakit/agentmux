@@ -1,3 +1,4 @@
+import { goalRoleInputNote } from './goal-role-input.js'
 import { createPublicationConversationPort, createHostedIngressCorePort } from '@agentmux/connectors'
 import { createDesktopConnections } from './connector-host.js'
 import { registerConnectorIpc } from './connector-ipc.js'
@@ -1553,6 +1554,13 @@ export async function registerIpc(args: {
       effectiveAuthorHuman = true
     }
     if (sourceChannel !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    if (goalPmo || goalDispatch || goalContinuation) {
+      const goalId = goalPmo?.goalId ?? goalDispatch?.goalId ?? goalContinuation!.goalId
+      const original = await args.runtime.inspectGoalAttention({ hostId: session.hostId, supervisorAgentSessionId: session.agentSessionId,
+        supervisorRunId: session.run.runId, operationId })
+      agentMuxNote = goalRoleInputNote(agentMuxNote, { role: goalPmo ? 'manager' : 'executor', goalId,
+        agentSessionId: session.agentSessionId, runId: session.run.runId, source: { kind: goalPmo ? 'goal-discussion' : goalContinuation ? 'goal-native-continuation' : 'goal-start', operationId } }, original)
+    }
     const submitOriginal = async () => {
       if (goalContinuation) {
         assertManualPromptSenderTrusted(event.sender, args.window.webContents)

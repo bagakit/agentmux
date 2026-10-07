@@ -1,3 +1,4 @@
+import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { isDeepStrictEqual } from 'node:util'
 import { prepareGoalDelegationMaterials } from './goal-delegation-materials.js'
 import type { FileReadParams, FileReadResult } from '@agentmux/core/files'
@@ -76,6 +77,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
             operationId: intent.operationId, sourceMessageId: intent.sourceMessageId, threadId: intent.threadId,
             ownerAgentSessionId: intent.ownerAgentSessionId, workerAgentSessionId: intent.workerAgentSessionId,
             hostId: intent.hostId, alignmentRevision: intent.alignmentRevision, criterionIds: intent.criterionIds,
+            roleGuidance: goalRoleGuidance({ role: 'executor', goalId: input.goalId, agentSessionId: intent.workerAgentSessionId, runId: intent.workerRunId, source: { kind: 'goal-delegation', operationId: intent.operationId, sourceMessageId: intent.sourceMessageId, threadId: intent.threadId } }),
             next: 'Use goal report --input FILE to return every delegated criterion with evidence, gap or unknown under this original dispatch. For a question/block, reply to the original source and record message dispatch report --kind question|escalation. A report is pending collection and human acceptance; exiting or worker_done does not complete the Goal.' })
           intent = { ...intent, requestText: request.intent.text, text: intent.text + '\n\n[AgentMux delegation]\n' + coordination }
         }

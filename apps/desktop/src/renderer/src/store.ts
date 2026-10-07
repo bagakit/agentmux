@@ -1,3 +1,4 @@
+import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { defaultNoteCanvasLayout, mergeNoteCanvasLayout, noteCanvasScopeKey, restoreNoteCanvasLayouts, type NoteCanvasLayout, type NoteCanvasScope } from './lib/note-canvas-state'
 import { projectInputReceipt as retainInputReceipt } from '@agentmux/client-ui/input-receipt-projection'
 import { restoredQuestionReplies, type DesktopQuestionReplies, type DesktopQuestionReplyAttempt, type DesktopQuestionDrafts } from './lib/conversation-question-intent'
@@ -3404,6 +3405,7 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
   )
   const pmoNote = (fresh = false): string => [
       MOTE_COORDINATION_ROLE,
+      goalRoleGuidance({ role: 'manager', goalId: demandId, source: { kind: fresh ? 'goal-pmo-launch' : 'goal-discussion', ...(intent.creationOperationId ? { operationId: intent.creationOperationId } : {}) } }),
       prompt?.trim(),
       projectContext,
       executionContext,
