@@ -212,6 +212,14 @@ their owning definitions are [the binding contract](../core/src/room-binding-con
 and [codec](../core/src/room-binding-codec.ts). Administration requires an actual
 transport-approved user or device, never an author identity supplied in JSON.
 
+The publication scope is an original consent fact. Existing
+`future-native-user-facing` bindings keep assistant speech; broader
+`future-shared-conversation` consent requires an explicit relink, exact expected
+revision and fresh source cut. Reading or reusing an existing binding cannot
+expand its scope. The same Outbox freezes scope before dispatch, retaining old
+pending and unknown effects. The broader consent choice does not by itself
+qualify native public content, a sender identity, media or complete parity.
+
 ```sh
 amux agent conversation checkpoint --host local --session original-agent
 amux connection bind --input binding.json
