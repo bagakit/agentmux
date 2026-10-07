@@ -12,7 +12,7 @@ const ThemeStatusIdleIcon = semanticIconComponent('status.idle')
 
 /** Shapes express the existing Focus state; they do not classify the Session again. */
 export function FocusContextStateMark({ context }: { context: FocusContext }) {
-  const unknown = context.bucket === 'idle' && (context.state === 'running' || context.activitySemantic === 'unknown' || context.activitySemantic === 'unsupported')
+  const unknown = context.bucket === 'idle' && (context.activitySemantic === 'unknown' || context.activitySemantic === 'unsupported' || context.activitySemantic === undefined && context.state === 'running')
   const [kind, Icon]: [string, SemanticIconComponent] = context.bucket === 'attention' ? context.state === 'error' ? ['error', ThemeStatusWarningIcon] : ['attention', ThemeObjectConversationIcon]
     : context.bucket === 'working' ? ['working', ThemeStatusWorkingIcon]
       : context.bucket === 'results' ? ['results', ThemeStatusCompletedIcon]

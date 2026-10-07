@@ -1049,6 +1049,8 @@ export type SessionSnapshot = SessionSnapshotBase & (
       agentSessionUpdatedAt: number
       /** Durable native semantic fact, independent of the current Run's display status. */
       semanticStatus?: AgentStatus
+      /** Live Core activity observation; it never represents task completion. */
+      currentActivity?: AgentMuxAgentSession['currentActivity']
       continuity?: AgentMuxAgentSession['continuity']
       /** Core-owned terminal capability fact; absent means no active degradation marker. */
       terminalCapability?: AgentTerminalCapabilityState

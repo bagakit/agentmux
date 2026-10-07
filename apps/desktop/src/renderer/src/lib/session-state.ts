@@ -754,6 +754,7 @@ export function projectRuntimeEvent(
       completedInteractionResponse: _completedInteractionResponse,
       interactionResponseUnavailableReason: _interactionResponseUnavailableReason,
       semanticStatus: _semanticStatus,
+      currentActivity: _currentActivity,
       terminalCapability: _terminalCapability,
       terminalPromptDelivery: _terminalPromptDelivery,
       terminalOutputChannel: _terminalOutputChannel,
@@ -798,6 +799,9 @@ export function projectRuntimeEvent(
       // An accepted snapshot may clear an idle epoch without a new observation.
       ...(core.session.semanticStatus
         ? { semanticStatus: structuredClone(core.session.semanticStatus) }
+        : {}),
+      ...(core.session.currentActivity
+        ? { currentActivity: structuredClone(core.session.currentActivity) }
         : {}),
       ...(core.session.continuity ? { continuity: structuredClone(core.session.continuity) } : {}),
       ...(core.session.terminalCapability
