@@ -17,6 +17,8 @@ import { ResolvedAgentAvatar } from './AgentAvatar'
 import { ConnectorRoomPeople, ConnectorRoomSelection, roomName, useConnectorRoomFacts } from './ConnectorRoomSelection'
 import { ConnectorRoomJoinLink, ConnectorRoomJoinReceipt } from './ConnectorRoomJoinLink'
 import { ConnectorDeliveryDetails } from './ConnectorDeliveryDetails'
+import { parseMotePreferencesReadResult, type MoteConnectionRef } from '@agentmux/core/mote-preferences'
+import { moteConnectionChoice, type AgentMoteConnectionSource } from '../lib/mote-connection-default'
 
 const CloseIcon = semanticIconComponent('action.close')
 const AgentIcon = semanticIconComponent('object.agent')
@@ -24,7 +26,7 @@ const GroupIcon = semanticIconComponent('object.conversation')
 const ConnectIcon = semanticIconComponent('navigation.forward')
 
 type Fact = RoomProvisioningOperation | RoomBindingOperation | RoomLinkOperation | null
-export type AgentConnectorTarget = { target: RoomBindingTarget; session: AgentNativeSourceReference; name: string; connectionId?: string
+export type AgentConnectorTarget = { target: RoomBindingTarget; session: AgentNativeSourceReference; name: string; connectionId?: string; mote?: AgentMoteConnectionSource
   identity?: Pick<ComponentProps<typeof ResolvedAgentAvatar>, 'providerId' | 'appearance' | 'executorId'> }
 /** A bounded form over original public owners. It retains submitted correlations, never another receipt store. */
 export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
@@ -34,6 +36,11 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   const [changingGroup, setChangingGroup] = useState(false), [accessOpen, setAccessOpen] = useState(false)
   const mote = useContext(MoteWorkfaceContext), settings = useContext(SettingsNavigation)
   const [connections, setConnections] = useState<ConnectionRecord[]>([]), [bindings, setBindings] = useState<RoomBinding[]>([])
+  const [loaded, setLoaded] = useState(false)
+  const [moteDefault, setMoteDefault] = useState<{ status: 'loading' | 'ready' | 'unconfirmed'; ref: MoteConnectionRef | null; issue: string | null }>(() =>
+    original.mote && 'target' in original.mote ? { status: 'loading', ref: null, issue: null }
+      : { status: original.mote ? 'unconfirmed' : 'ready', ref: null, issue: original.mote && 'issue' in original.mote ? original.mote.issue : null })
+  const initialized = useRef(!!original.connectionId), explicitlySelected = useRef(false)
   const [connectionId, setConnectionId] = useState(original.connectionId ?? ''), [name, setName] = useState(original.name + ' · AgentMux')
   const [group, setGroup] = useState(''), [members, setMembers] = useState(''), [memberType, setMemberType] = useState('')
   const [scope, setScope] = useState<'mentions-and-replies' | 'all-messages'>('mentions-and-replies'), [confirmed, setConfirmed] = useState(false)
@@ -100,20 +107,56 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   }
   async function refresh() {
     const token = epoch.current
-    const [apps, audience] = await Promise.all([api.connections.call('connection.ls', {}), api.connections.call('connection.binding.ls', { executionHostId: target.executionHostId, agentSessionId: target.agentSessionId })])
+    const [apps, audience] = await Promise.allSettled([api.connections.call('connection.ls', {}), api.connections.call('connection.binding.ls', { executionHostId: target.executionHostId, agentSessionId: target.agentSessionId })])
     if (epoch.current !== token) return
-    setConnections(apps.connections); setBindings(audience.bindings)
-    const enabled = apps.connections.filter(item => item.config.enabled)
-    setConnectionId(current => current || (enabled.length === 1 ? enabled[0]!.config.connectionId : ''))
-    const selected = connectionId || (enabled.length === 1 ? enabled[0]!.config.connectionId : '')
-    const originalBinding = audience.bindings.find(item => item.connectionId === selected)
-    if (originalBinding) {
-      const inspected = await api.connections.call('connection.binding.inspect', { bindingId: originalBinding.bindingId, revision: originalBinding.revision })
-      if (epoch.current === token) setActors({ bindingId: originalBinding.bindingId, revision: originalBinding.revision, grants: inspected.grants })
-    }
+    if (apps.status === 'fulfilled') setConnections(apps.value.connections)
+    if (audience.status === 'fulfilled') setBindings(audience.value.bindings)
+    // A failed binding read must not hide otherwise readable saved bots. Automatic
+    // initialization still waits for the original bindings; manual choice stays available.
+    setLoaded(apps.status === 'fulfilled' && audience.status === 'fulfilled')
+    if (apps.status === 'rejected' || audience.status === 'rejected') throw new Error([apps, audience].flatMap(result => result.status === 'rejected' ? [presentError(result.reason)] : []).join(' '))
     for (const intent of Object.values(useAppStore.getState().connectorRoomIntents)) if (sameConnectorTarget(intent.target, target)) await inspect(intent)
   }
   useEffect(() => { const token = {}; epoch.current = token; void refresh().catch(error => { if (epoch.current === token) setIssue(presentError(error)) }); return () => { epoch.current = {} } }, [identity])
+  useEffect(() => {
+    const source = original.mote
+    if (!source || !('target' in source) || original.connectionId || mode === 'details') return
+    const token = epoch.current, input = { kind: 'connection' as const, target: source.target }
+    void api.motePreferences.read(input).then(value => {
+      if (epoch.current !== token) return
+      const saved = parseMotePreferencesReadResult(value, input)
+      setMoteDefault({ status: saved.status, ref: saved.values?.connection ?? null, issue: saved.issue })
+    }).catch(error => { if (epoch.current === token) setMoteDefault({ status: 'unconfirmed', ref: null, issue: presentError(error) }) })
+  }, [identity])
+  useEffect(() => {
+    if (initialized.current || !loaded) return
+    const retained = Object.values(intents).filter(intent => sameConnectorTarget(intent.target, target))
+    const originalIds = new Set([...bindings.map(item => item.connectionId), ...retained.flatMap(intent => 'connectionId' in intent.input ? [intent.input.connectionId] : [])])
+    if (originalIds.size > 1) return
+    let selected = originalIds.size === 1 ? [...originalIds][0] : undefined
+    if (!selected) {
+      if (moteDefault.status !== 'ready') return
+      if (moteDefault.ref) {
+        const choice = moteConnectionChoice(moteDefault.ref, connections)
+        if (choice.issue) return
+        selected = choice.record!.config.connectionId
+      } else {
+        const enabled = connections.filter(item => item.config.enabled)
+        selected = enabled.length === 1 ? enabled[0]!.config.connectionId : undefined
+      }
+    }
+    initialized.current = true
+    if (selected) setConnectionId(selected)
+  }, [loaded, connections, bindings, moteDefault, intents])
+  useEffect(() => {
+    if (!binding) return
+    const token = epoch.current
+    let active = true
+    void api.connections.call('connection.binding.inspect', { bindingId: binding.bindingId, revision: binding.revision }).then(inspected => {
+      if (active && epoch.current === token) setActors({ bindingId: binding.bindingId, revision: binding.revision, grants: inspected.grants })
+    }).catch(error => { if (active && epoch.current === token) setIssue(presentError(error)) })
+    return () => { active = false }
+  }, [binding?.bindingId, binding?.revision])
   async function work(action: () => Promise<void>) {
     if (flight.current) return
     flight.current = true; setBusy(true); setIssue('')
@@ -185,12 +228,19 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   </section>
   const applicationChoice = <SelectionField id={fieldId + '-application'} label="Group application" value={connectionId} disabled={busy}
     triggerLabel={connection ? 'Change' : 'Choose'} className="agent-connector-source__change"
-    onValueChange={value => { setConnectionId(value); setGroup(''); setConfirmed(false) }} options={[{ value: '', label: 'Choose an application…' }, ...connections.map(item => ({ value: item.config.connectionId, label: item.config.label, disabled: !item.config.enabled, description: item.config.application.domain + ' · ' + item.config.application.appId }))]} />
+    onValueChange={value => { initialized.current = true; explicitlySelected.current = true; setConnectionId(value); setGroup(''); setConfirmed(false) }} options={[{ value: '', label: 'Choose an application…' }, ...connections.map(item => ({ value: item.config.connectionId, label: item.config.label, disabled: !item.config.enabled, description: item.config.application.domain + ' · ' + item.config.application.appId }))]} />
   const application = <div className="agent-connector-source">
     <span className="agent-connector-source__label">Using</span><strong title={connection?.config.label ?? connectionId}>{connection?.config.label ?? (connectionId ? 'Saved application' : 'Choose an application')}</strong>{applicationChoice}
   </div>
   const canCreate = mode === 'create' && !binding && !roomIntent
   const canConnect = !bindingPending && (binding ? changingGroup : mode !== 'create' || !!created)
+  const previousActivity = !!original.connectionId || bindings.length > 0 || Object.values(intents).some(intent => sameConnectorTarget(intent.target, target))
+  const defaultChoice = moteDefault.ref ? moteConnectionChoice(moteDefault.ref, connections) : null
+  const defaultNote = !explicitlySelected.current && !previousActivity && mode !== 'details'
+    ? moteDefault.status === 'loading' ? 'Checking this Mote’s default bot. You can choose a bot now.'
+      : moteDefault.issue ?? (defaultChoice?.issue ? `Saved default ${moteDefault.ref!.application.appId}: ${defaultChoice.issue}`
+        : moteDefault.ref && original.mote && 'name' in original.mote ? `Default bot for ${original.mote.name}` : null)
+    : null
 
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}>
     <Dialog.Portal container={resolveOverlayContainer()}><Dialog.Overlay className="dialog-scrim" />
@@ -215,6 +265,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
             </div>
           </section>
           {application}
+          {defaultNote ? <p className="agent-connector-note" role="status" data-mote-bot-source>{defaultNote}</p> : null}
           {showingCurrentBinding && binding ? <><section className="agent-connector-status" aria-label="Group connection status"><div><strong>{binding.state === 'active' ? 'Sharing on' : 'Sharing paused'}</strong><span>New {binding.scope.publication === 'future-shared-conversation' ? 'conversation content' : 'replies and questions'}</span></div><button className="agent-connector-text-action" disabled={busy || binding.state === 'paused'} onClick={pause}>Pause sharing</button><p className="agent-connector-note" aria-label="Group member access">{approvedMembers === null ? 'Member access not confirmed' : approvedMembers === 0 ? 'No members approved to use this Agent' : approvedMembers + (approvedMembers === 1 ? ' member approved to use this Agent' : ' members approved to use this Agent')}</p></section><ConnectorDeliveryDetails key={JSON.stringify([binding.bindingId, binding.revision])} binding={binding} /></> : null}
           {bindingPending || binding && changingGroup ? <p className="agent-connector-note" role="status">{bindingPending ? 'The group change is not confirmed. Check its original status.' : 'Your current group stays connected until you confirm this change.'}</p> : null}
           {audience ? <ConnectorRoomPeople facts={roomFacts} onSelect={showingCurrentBinding ? (idType, userId) => { setActorType(idType); setActorId(userId); setAccessOpen(true) } : undefined} /> : null}

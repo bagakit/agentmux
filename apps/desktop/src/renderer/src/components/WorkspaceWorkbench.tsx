@@ -785,7 +785,7 @@ function WorkbenchRegionContent({
   const reportError = useAppStore((state) => state.reportError)
   const [confirmingClose, setConfirmingClose] = useState(false)
   const surface = tab.regions[node.regionId]
-  const connector = useAgentConnectorMenu(node.regionId, surface ? addressableAgentSessionId(surface) : null)
+  const connector = useAgentConnectorMenu(node.regionId, surface ? addressableAgentSessionId(surface) : null, tab.id)
   const regionCount = Object.keys(tab.regions).length
   // 焦点是**一次**判定，两个消费者：CSS 类名（画环）与原生视图的让位量（browser 那格要按环宽内缩，
   // 否则窗口级层把环的三边物理盖掉）。见 region-focus.ts——分开各算一次时未聚焦的 browser 区
