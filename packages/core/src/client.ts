@@ -1,3 +1,4 @@
+import { missingExecutableCause } from './executable-diagnostics.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { parseConversationCheckpoint, parseConversationChangesPage, type ConversationCheckpoint, type ConversationChangesPage } from './conversation-changes.js'
 import type { AgentConversationReadPage } from './conversation.js'
@@ -671,7 +672,7 @@ async function classifyExecutable(executable: string): Promise<AgentMuxExecutorP
     }
   }
   if (unknown) return { executable, availability: 'check-failed', cause: unknown }
-  return { executable, availability: 'missing', ...(notFile ? { cause: notFile } : {}) }
+  return { executable, availability: 'missing', cause: notFile ?? missingExecutableCause(executable) }
 }
 
 async function hasExecutable(executable: string): Promise<boolean> {
@@ -710,7 +711,7 @@ async function executorUnavailableError(
   }
   return new AgentMuxError(result.cause
     ? `The configured ${label} executable is not available: ${result.cause.message}`
-    : `${label} is not installed on this host.`, 'AGENT_NOT_FOUND', 'executor-missing')
+    : missingExecutableCause(executable).message, 'AGENT_NOT_FOUND', 'executor-missing')
 }
 
 type AgentInputObservation = {

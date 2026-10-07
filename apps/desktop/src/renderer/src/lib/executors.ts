@@ -27,6 +27,10 @@ export function executorsForHost(config: AppConfig | null | undefined, hostId: s
         : item.availability === 'available' ? 'ready' : item.availability === 'missing' ? 'missing'
           : item.availability === 'check-failed' ? 'error' : 'idle',
       input: { executorId: item.executorId, providerId: item.providerId, command: item.command, host },
+      ...(item.availability === 'missing' ? { result: {
+        input: { executorId: item.executorId, providerId: item.providerId, command: item.command, host },
+        executable: item.command, availability: 'missing' as const, ...(item.cause ? { cause: item.cause } : {})
+      } } : {}),
       ...(inventory.detail || item.cause ? { detail: inventory.detail ?? `${item.cause!.code}: ${item.cause!.message}` } : {}),
       ...(inventory.observedAt === undefined ? {} : { observedAt: inventory.observedAt })
     } }))

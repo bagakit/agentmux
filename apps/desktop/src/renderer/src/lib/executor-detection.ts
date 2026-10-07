@@ -30,12 +30,16 @@ export function currentExecutorDetection(
   return executorDetectionMatches(check?.input, executorId, executor, host) ? check : undefined
 }
 
+export function missingExecutableLabel(cause?: { code: string }): string {
+  return cause && cause.code !== 'EXECUTABLE_NOT_FOUND' ? 'Not available' : 'Not found'
+}
+
 export function executorDetectionLabel(check: ExecutorDetectionState | undefined): string {
   switch (check?.state) {
     case 'ready': return 'Available'
     case 'checking': return 'Checking'
     case 'error': return 'Check failed'
-    case 'missing': return check.result?.availability === 'missing' && check.result.cause ? 'Not available' : 'Not installed'
+    case 'missing': return missingExecutableLabel(check.result?.availability === 'missing' ? check.result.cause : undefined)
     default: return 'Not checked'
   }
 }

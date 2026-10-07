@@ -153,3 +153,26 @@
 
 .host-projects .settings-resource-search input { padding-inline: var(--sp-3); }
 .host-projects .settings-resource-search input:focus-visible { outline-offset: -1px; }
+
+.settings-executor-preview {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+}
+.settings-executor-preview > span { font-size: var(--fs-meta); color: var(--text-2); }
+.settings-executor-preview small { margin-left: var(--sp-2); color: var(--text-3); }
+.settings-executor-preview code { font-size: var(--fs-body); white-space: pre-wrap; overflow-wrap: anywhere; }
+.settings-executor-preview p { margin: 0; font-size: var(--fs-meta); color: var(--text-3); }
+
+.settings-host-executor-actions {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--sp-4); padding-block: var(--sp-4);
+}
+.settings-host-executor-actions .agent-guide-toggle {
+  display: flex; align-items: center; gap: var(--sp-2);
+  color: var(--text-2); font-size: var(--fs-body);
+}
+.settings-host-executor-actions input { width: 14px; height: 14px; margin: 0; }
