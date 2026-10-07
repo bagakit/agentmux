@@ -6,7 +6,7 @@ import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-inser
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
-import { useAppStore, warmTerminalKey } from '../store'
+import { lifecycleNotification, notificationEventIdentity, useAppStore, warmTerminalKey } from '../store'
 import { useWorkbenchBrowserPresentation, useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { mainRegionReference } from '../lib/desktop-focus-navigation'
 import { currentHostCheck } from '../lib/host-check'
@@ -29,7 +29,6 @@ import { AgentComposerTools } from './AgentComposerTools'
 import { ComposerReferenceTool } from '@agentmux/client-ui/components/ComposerReferenceTool'
 import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
-import { lifecycleFailureBelongsTo } from '../lib/agent-lifecycle-feedback'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { LauncherSecondarySurfaces } from './LauncherSecondarySurfaces'
 import { LauncherMoteAction } from './LauncherMoteAction'
@@ -280,8 +279,9 @@ export function NewTabSurface({
       if (kind === 'agent' && regionId && tabId) {
         const state = useAppStore.getState()
         if (state.tabs[tabId]?.regions[regionId]?.kind !== 'launcher') return
-        if (state.error !== presentError(cause) || !lifecycleFailureBelongsTo(state.errorNoticeContext?.lifecycle, { regionId })) {
-          state.reportError(cause, { kind: 'indeterminate', lifecycle: { step: 'launch', regionId, tabId } })
+        const context = { kind: 'indeterminate' as const, lifecycle: { step: 'launch' as const, regionId, tabId } }
+        if (lifecycleNotification(state.notificationEvents, { regionId })?.id !== notificationEventIdentity(presentError(cause), context)) {
+          state.reportError(cause, context)
         }
       } else setError(presentError(cause))
     } finally {

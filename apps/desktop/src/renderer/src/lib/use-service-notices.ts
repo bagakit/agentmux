@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useAppStore } from '../store'
 import type { RenderableServiceNotice } from './service-window-notice'
+import { compactNotificationIdentity } from './notification-read-identity'
 
 export type ServiceNoticeItem = {
   id: string
@@ -17,7 +18,9 @@ export type ServiceNoticeItem = {
 
 const EMPTY_RECEIPTS: Readonly<Record<string, string>> = Object.freeze({})
 export function serviceNoticeFingerprint(item: ServiceNoticeItem): string {
-  return JSON.stringify([item.occurrence, item.notice.kind, item.cause ?? item.notice.notice])
+  const cause = item.cause ?? item.notice.notice
+  return JSON.stringify([item.occurrence, item.notice.kind,
+    compactNotificationIdentity(typeof cause === 'string' ? cause : JSON.stringify(cause))])
 }
 
 /** Only acknowledgement is persisted. Only a complete, available owner projection may prune receipts. */

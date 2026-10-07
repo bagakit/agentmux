@@ -1,10 +1,8 @@
-import { useAppStore } from '../store'
-import { useRef } from 'react'
-import { agentLifecycleFailureNotice, lifecycleFailureBelongsTo, type AgentLifecycleFeedbackOwner } from '../lib/agent-lifecycle-feedback'
+import { lifecycleNotification, useAppStore } from '../store'
+import { agentLifecycleFailureNotice, lifecycleFeedbackOwnerKey, type AgentLifecycleFeedbackOwner } from '../lib/agent-lifecycle-feedback'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
-import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 
-/** Launcher and Session project the one existing error owner; dismissal only acknowledges it. */
+/** Local recovery and the global inbox consume the same source-owned failure record. */
 export function AgentLifecycleFeedback({ owner, retry, busy = false, refreshObservation, visible = true }: {
   owner: AgentLifecycleFeedbackOwner
   retry(): void
@@ -12,19 +10,16 @@ export function AgentLifecycleFeedback({ owner, retry, busy = false, refreshObse
   refreshObservation?(): void
   visible?: boolean
 }) {
-  const failure = useAppStore(state => state.errorNoticeContext?.lifecycle)
-  const message = useAppStore(state => state.error ?? state.lastError)
+  const record = useAppStore(state => lifecycleNotification(state.notificationEvents, owner))
+  const failure = record?.context?.lifecycle
+  const message = record?.message
   const loading = useAppStore(state => state.loading)
-  const retained = useRef<{ identity: string; failure: NonNullable<typeof failure>; message: string } | null>(null)
-  const identity = JSON.stringify(owner)
-  if (retained.current?.identity !== identity) retained.current = null
-  if (!loading && !message && !failure) retained.current = null
-  if (message && failure && lifecycleFailureBelongsTo(failure, owner)) retained.current = { identity, failure, message }
-  const current = 'subject' in owner ? retained.current : message && failure && lifecycleFailureBelongsTo(failure, owner) ? { failure, message } : null
+  const identity = lifecycleFeedbackOwnerKey(owner)
+  const current = message && failure ? { failure, message } : null
   const notice = current ? agentLifecycleFailureNotice(current.failure, current.message) : null
   return <div className={current ? 'agent-launch-notice' : 'service-disclosure-home'}>
     <ServiceWindowNotice notice={notice} disclosure={{ scope: `local:lifecycle:${identity}`, id: 'lifecycle',
-      cause: current ? JSON.stringify([current.failure.step, errorIdentity(current.message)]) : '', visible, available: !loading || Boolean(current) }}
+      cause: record?.id ?? '', visible, available: !loading || Boolean(current) }}
       {...(current && notice ? { summary: { step: notice.notice.step,
       mode: current.failure.step === 'launch' ? 'Agent availability unconfirmed; draft and workbench kept.'
         : `Run last observed ${current.failure.lastProcessState}; availability unconfirmed. Session, workbench and draft kept.`,

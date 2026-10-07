@@ -108,8 +108,6 @@ export function AgentSessionComposer({
   const executors = useObservedAppStore('composer', visible, consumerScope, (state) => state.config?.executors)
   const session = useObservedAppStore('composer', visible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
   const nativeService = useRunService(session)
-  const lifecycleFailure = useObservedAppStore('composer', visible, consumerScope, state => state.errorNoticeContext?.lifecycle)
-  const lifecycleMessage = useObservedAppStore('composer', visible, consumerScope, state => state.error ?? state.lastError)
   const viewModeSelector = useMemo(() => createSessionViewModeSelector(sessionId), [sessionId])
   const viewMode = useObservedAppStore('composer', visible, consumerScope, viewModeSelector)
   const setViewMode = useAppStore.getState().setViewMode
@@ -268,7 +266,7 @@ export function AgentSessionComposer({
   }
 
   const notices: ServiceNoticeItem[] = sessionServiceNotices(session, queuedEntries, sendingId,
-    { message: lifecycleMessage, failure: lifecycleFailure }, nativeService).map(notice => notice.id === 'timeline-observation'
+    nativeService).map(notice => notice.id === 'timeline-observation'
       ? { ...notice, action: { label: 'Retry work history', run: () => { void useAppStore.getState().resyncTimeline(sessionId, { observationOnly: true }) } } }
       : notice.id === 'interaction-receipt' && onOpenTerminal
         ? { ...notice, action: { label: 'Open terminal', run: onOpenTerminal } }

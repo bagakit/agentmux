@@ -4,12 +4,11 @@ import { steerEntryTargetsRun, steerQueueCanEverDrain } from './agent-steer-queu
 import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, hookIngressServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from './service-window-notice'
 import type { ServiceNoticeItem } from './use-service-notices'
-import { agentLifecycleFailureNotice, lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './agent-lifecycle-feedback'
 import { observeAgentSession, activityObservationPresentation } from './agent-observation'
 
 /** Both inboxes project the same current owners; reading a notice never settles its cause. */
 export function sessionServiceNotices(session: SessionSnapshot | undefined, queue: readonly AgentSteerQueueEntry[] = [], sendingId?: string,
-  lifecycleError?: { message: string | null; failure: AgentLifecycleFailure | undefined }, nativeService = session?.nativeService,
+  nativeService = session?.nativeService,
   observationAvailable = true): ServiceNoticeItem[] {
   const notices: ServiceNoticeItem[] = []
   if (session) {
@@ -88,11 +87,6 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
       restore: failure.recovery
     } }
   })
-  if (lifecycleError?.message && lifecycleError.failure && lifecycleFailureBelongsTo(lifecycleError.failure, { subject: session.control })) {
-    notices.push({ id: 'recovery', occurrence: JSON.stringify(identity),
-      cause: JSON.stringify([lifecycleError.failure.step, errorIdentity(lifecycleError.message)]),
-      notice: agentLifecycleFailureNotice(lifecycleError.failure, lifecycleError.message) })
-  }
   const connectionTime = session.terminalCapability?.reason === 'handshake-timeout' ? session.terminalCapability.observedAt
     : session.terminalOutputChannel?.reason === 'reattach-failed' ? session.terminalOutputChannel.observedAt
     : session.status.state === 'disconnected' ? session.status.observedAt : undefined

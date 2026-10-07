@@ -95,7 +95,8 @@ import { create } from 'zustand'
 import { currentExecutorDetection, executorDetectionMatches, executorDetectionKey } from './lib/executor-detection'
 export { executorDetectionKey } from './lib/executor-detection'
 import { executorsForHost } from './lib/executors'
-import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/agent-lifecycle-feedback'
+import { lifecycleFeedbackOwnerKey, type AgentLifecycleFailure, type AgentLifecycleFeedbackOwner } from './lib/agent-lifecycle-feedback'
+import { compactNotificationIdentity, ownedNotificationIdentity, normalizeNotificationReadReceipts } from './lib/notification-read-identity'
 import { persist } from 'zustand/middleware'
 import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveyCollectionAfterClose, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
@@ -454,29 +455,71 @@ export type ErrorNoticeContext = {
   startupProviderCatalog?: { warningMessage: string }
 }
 
-/** Window-local event history; acknowledgement never changes a domain owner's facts. */
+/** Window-local notifications: source-owned current failures and ordinary event history. */
 export type NotificationEvent = { id: string; message: string; context: ErrorNoticeContext | null }
 
-export function notificationEventIdentity(message: string, context: ErrorNoticeContext | null | undefined): string {
+export function notificationSourceOwner(context: ErrorNoticeContext | null | undefined): string | undefined {
+  const failure = context?.lifecycle
+  if (failure) return lifecycleFeedbackOwnerKey(failure.step === 'launch' ? { regionId: failure.regionId } : { subject: failure.subject })
   const subject = context?.subject
-  return JSON.stringify([context?.kind ?? 'indeterminate', context?.cause,
-    subject?.hostId, subject?.kind, subject?.kind === 'agent' ? subject.agentSessionId : undefined,
-    subject?.run.runId, context?.lifecycle, context?.startupSessionSnapshot?.sessionIds,
-    context?.startupProviderCatalog ? 'provider-catalog' : undefined, errorIdentity(message)])
+  if (context?.cause) return JSON.stringify([context.cause, subject?.hostId,
+    subject?.kind === 'agent' ? subject.agentSessionId : undefined, subject?.run.runId])
 }
 
-function resolvedNativeIdentityNotice(state: Pick<AppState, 'sessions' | 'errorNoticeContext'>):
-  Partial<Pick<AppState, 'error' | 'lastError' | 'errorNoticeContext' | 'errorDismissed'>> {
-  const notice = state.errorNoticeContext, subject = notice?.subject
-  if (notice?.cause !== 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' || subject?.kind !== 'agent') return {}
-  const matches = state.sessions.filter(session => session.kind === 'agent' &&
+export function notificationEventIdentity(message: string, context: ErrorNoticeContext | null | undefined): string {
+  const owner = notificationSourceOwner(context)
+  if (owner) return ownedNotificationIdentity(owner, context?.kind ?? 'indeterminate', errorIdentity(message))
+  const subject = context?.subject
+  return compactNotificationIdentity(JSON.stringify([context?.kind ?? 'indeterminate', context?.cause,
+    subject?.hostId, subject?.kind, subject?.kind === 'agent' ? subject.agentSessionId : undefined,
+    subject?.run.runId, context?.lifecycle, context?.startupSessionSnapshot?.sessionIds,
+    context?.startupProviderCatalog ? 'provider-catalog' : undefined, errorIdentity(message)]))
+}
+
+type NotificationProjection = { current: NotificationEvent[]; history: NotificationEvent[]; owners: Map<string, NotificationEvent> }
+const notificationProjections = new WeakMap<readonly NotificationEvent[], NotificationProjection>()
+/** One derived index per immutable record collection; it owns no Runtime or recovery facts. */
+export function projectNotifications(records: readonly NotificationEvent[]): NotificationProjection {
+  let projection = notificationProjections.get(records)
+  if (!projection) {
+    projection = { current: [], history: [], owners: new Map() }
+    for (const record of records) {
+      const owner = notificationSourceOwner(record.context)
+      if (owner) { projection.current.push(record); projection.owners.set(owner, record) }
+      else projection.history.push(record)
+    }
+    notificationProjections.set(records, projection)
+  }
+  return projection
+}
+
+export function lifecycleNotification(records: readonly NotificationEvent[], owner: AgentLifecycleFeedbackOwner): NotificationEvent | undefined {
+  return projectNotifications(records).owners.get(lifecycleFeedbackOwnerKey(owner))
+}
+
+function nativeIdentityNoticeResolved(sessions: readonly SessionSnapshot[], notice: ErrorNoticeContext | null | undefined): boolean {
+  const subject = notice?.subject
+  if (notice?.cause !== 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' || subject?.kind !== 'agent') return false
+  const matches = sessions.filter(session => session.kind === 'agent' &&
     session.hostId === subject.hostId && session.id === subject.agentSessionId &&
     session.control.run.runId === subject.run.runId)
   const current = matches.length === 1 ? matches[0] : undefined
   if (current?.kind !== 'agent' || current.nativeHandle?.kind !== 'provider' ||
     current.nativeHandle.providerId !== current.providerId || current.nativeHandlePersistence !== 'confirmed' ||
-    current.nativeSourceObservation || current.observedNativeHandle) return {}
-  return { error: null, lastError: null, errorNoticeContext: null, errorDismissed: false }
+    current.nativeSourceObservation || current.observedNativeHandle) return false
+  return true
+}
+
+function resolvedNativeIdentityNotices(state: Pick<AppState, 'sessions' | 'notificationEvents'>, observed?: SessionControl):
+  Partial<Pick<AppState, 'notificationEvents'>> {
+  const projection = projectNotifications(state.notificationEvents)
+  const owner = observed?.kind === 'agent' ? notificationSourceOwner({ kind: 'indeterminate',
+    cause: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', subject: observed }) : undefined
+  const record = owner ? projection.owners.get(owner) : undefined
+  const candidates = observed ? (record ? [record] : [])
+    : projection.current.filter(item => item.context?.cause === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
+  const resolved = new Set(candidates.filter(item => nativeIdentityNoticeResolved(state.sessions, item.context)))
+  return resolved.size ? { notificationEvents: state.notificationEvents.filter(item => !resolved.has(item)) } : {}
 }
 
 // Persistent user intent uses one operation ID across retries and restarts. Run binding prevents
@@ -2381,12 +2424,11 @@ function startSessionMembershipResync(
           }
           entry.endpointWarnings.clear()
           const next = { ...reconciled, localHome: snapshot.localHome ?? state.localHome, sessionNameMetadata: snapshot.sessionNameMetadataWarning ? state.sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], state.sessionNameMetadata), sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
-          return { ...next, ...resolvedNativeIdentityNotice({ ...state, ...next }) }
+          return { ...next, ...resolvedNativeIdentityNotices({ ...state, ...next }) }
         })
         for (const pending of events) {
           if (pending.event.event.type === 'run-service') runServiceProjection.apply(pending.event)
-          if (pending.nativeIdentityNotice && resolvedNativeIdentityNotice({ sessions: useAppStore.getState().sessions,
-            errorNoticeContext: pending.nativeIdentityNotice }).errorNoticeContext === null) continue
+          if (pending.nativeIdentityNotice && nativeIdentityNoticeResolved(useAppStore.getState().sessions, pending.nativeIdentityNotice)) continue
           const diagnostic = runtimeDiagnosticNotice(useAppStore.getState(), pending.event)
           if (diagnostic) useAppStore.getState().reportError(diagnostic.message, { kind: 'indeterminate', summary: diagnostic.summary,
             ...(diagnostic.subject ? { subject: diagnostic.subject } : {}), ...(diagnostic.cause ? { cause: diagnostic.cause } : {}) })
@@ -3792,8 +3834,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   notificationEvents: [],
   clearReadNotificationEvents() {
     const read = get().noticeReadReceipts['global:events'] ?? {}
-    set(state => ({ notificationEvents: state.notificationEvents.filter(event => read[event.id] !== event.id),
-      ...(state.error !== null && state.notificationEvents.some(event => event.id === notificationEventIdentity(state.error!, state.errorNoticeContext) && read[event.id] === event.id)
+    set(state => ({ notificationEvents: state.notificationEvents.filter(event => notificationSourceOwner(event.context) || read[event.id] !== 'read'),
+      ...(state.error !== null && projectNotifications(state.notificationEvents).history.some(event => event.id === notificationEventIdentity(state.error!, state.errorNoticeContext) && read[event.id] === 'read')
         ? { errorDismissed: true } : {}) }))
   },
   workbenchSaveWarning: null,
@@ -8264,8 +8306,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       !workbenchViewCloseAllowsView(live.closingWorkbenchViews, tabId))) {
       throw new Error('The original PMO display position changed before creation. The Goal and original request are kept.')
     }
-    const priorFailure = lifecycleFailureBelongsTo(state.errorNoticeContext?.lifecycle, { regionId })
-      ? state.errorNoticeContext : null
+    const priorFailure = lifecycleNotification(state.notificationEvents, { regionId })
     const pendingSurface: AgentWorkbenchSurface = {
       regionId,
       kind: 'agent',
@@ -8402,8 +8443,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (requestedNames.tabName) await commitDisplayName({ kind: 'tab', id: tabId }, requestedNames.tabName, names?.nameSource ?? 'launch', requestedTabNameRevision)
         .catch(error => get().reportWorkbenchSaveFailure(error))
       if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
-      if (priorFailure && get().errorNoticeContext === priorFailure) {
-        set({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
+      if (priorFailure && get().notificationEvents.includes(priorFailure)) {
+        set(current => ({ notificationEvents: current.notificationEvents.filter(item => item !== priorFailure) }))
       }
     } catch (error) {
       const ownerFailure = error as { controlFailure?: import('@agentmux/core').AgentMuxControlFailure } | null
@@ -10122,8 +10163,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // original Host/directory before recovery; the commit below intentionally needs an attached
     // view owner. Existing durable Regions keep their layout/focus during background resync.
     if (!options?.preserveView && !hasAttachedSessionView(get().tabs, sessionId)) get().selectSession(sessionId)
-    const priorFailure = current.kind === 'agent' && lifecycleFailureBelongsTo(before.errorNoticeContext?.lifecycle, { subject: current.control })
-      ? before.errorNoticeContext : null
+    const priorFailure = current.kind === 'agent' ? lifecycleNotification(before.notificationEvents, { subject: current.control }) : undefined
     try {
       let recovery: SessionRecoveryResult
       try {
@@ -10145,8 +10185,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           return
         }
         set((state) => removeSessionProjection(state, sessionId))
-        if (priorFailure && get().errorNoticeContext === priorFailure) {
-          set({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
+        if (priorFailure && get().notificationEvents.includes(priorFailure)) {
+          set(state => ({ notificationEvents: state.notificationEvents.filter(item => item !== priorFailure) }))
         }
         return
       }
@@ -10189,8 +10229,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ownerStillCurrent
       ) {
         set((state) => ({ ...projectRecoveredSession(state, sessionId, session), ...(options?.preserveView ? { agentFocus: state.agentFocus } : {}) }))
-        if (priorFailure && get().errorNoticeContext === priorFailure) {
-          set({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
+        if (priorFailure && get().notificationEvents.includes(priorFailure)) {
+          set(state => ({ notificationEvents: state.notificationEvents.filter(item => item !== priorFailure) }))
         }
         if ((recovery.kind === 'reattachable' || recovery.kind === 'resumed') && recovery.advisory &&
           get().sessions.some(item => item.id === sessionId && sessionOwnsControl(item, session.control)))
@@ -10419,7 +10459,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const next = core.type === 'agent-timeline' && eventSourceId
         ? reconcileDeliveredSteers({ ...state, ...projected }, eventSourceId)
         : projected
-      return core.type === 'agent-session' ? { ...next, ...resolvedNativeIdentityNotice({ ...state, ...next }) } : next
+      return core.type === 'agent-session' ? { ...next, ...resolvedNativeIdentityNotices({ ...state, ...next }, {
+        kind: 'agent', hostId: event.hostId, agentSessionId: core.session.agentSessionId, run: core.session.run
+      }) } : next
     })
     if (core.type === 'agent-timeline' && eventSourceId && get().agentSteerQueues[eventSourceId] !== pendingBefore &&
       !observationRefresh && !agentSteerDrains.has(eventSourceId)) void get().flushAgentSteerQueue(eventSourceId)
@@ -10483,38 +10525,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   reportError(error, context) {
     const message = presentError(error)
-    // Replayed runtime events and polling can report the same transient failure repeatedly. Once the
-    // user dismissed that failure, do not resurrect it until a different one arrives or they explicitly
-    // reopen it.
-    //
-    // The key is the failure's IDENTITY, not the presented string. Whole-string equality looked right and
-    // was wrong: the prompt-readiness refusal appends `Diagnostic: … latestOutputBytes=<cursor>`, and that
-    // cursor grows with every byte the Agent prints. So a still-generating Agent produced a *new* string
-    // each time, `===` never matched, and the dismissed banner came back on every retry (field report
-    // prior observation). The user dismissed the cause; the code was comparing the presentation.
-    //
-    // Both sides go through `errorIdentity` on every comparison — the newest message and the one we
-    // remembered. Storing a precomputed key beside `lastError` would be the same defect one level up: two
-    // places deciding identity, drifting the first time a write site forgets one of them.
-    const current = get()
-    const previousSubject = current.errorNoticeContext?.subject
-    const subject = context?.subject
-    if (current.errorDismissed && current.lastError !== null
-      && (current.errorNoticeContext?.kind ?? 'indeterminate') === (context?.kind ?? 'indeterminate')
-      && current.errorNoticeContext?.startupSessionSnapshot === context?.startupSessionSnapshot
-      && current.errorNoticeContext?.cause === context?.cause
-      && previousSubject?.hostId === subject?.hostId
-      && previousSubject?.kind === subject?.kind
-      && (previousSubject?.kind === 'agent' ? previousSubject.agentSessionId : undefined)
-        === (subject?.kind === 'agent' ? subject.agentSessionId : undefined)
-      && previousSubject?.run.runId === subject?.run.runId
-      && current.errorNoticeContext?.lifecycle?.step === context?.lifecycle?.step
-      && (current.errorNoticeContext?.lifecycle?.step !== 'launch' ||
-        context?.lifecycle?.step === 'launch' && current.errorNoticeContext.lifecycle.regionId === context.lifecycle.regionId)
-      && errorIdentity(current.lastError) === errorIdentity(message)) return
-    const event: NotificationEvent = { id: notificationEventIdentity(message, context), message, context: context ?? null }
-    // Lifecycle/current-source warnings already have an exact current-owner projection in the inbox.
-    const retainEvent = !context?.lifecycle && !context?.cause && !context?.startupSessionSnapshot && !context?.startupProviderCatalog
+    const owner = notificationSourceOwner(context)
+    if (owner) {
+      const current = get(), prior = projectNotifications(current.notificationEvents).owners.get(owner)
+      const record: NotificationEvent = { id: notificationEventIdentity(message, context), message, context: context! }
+      // The failed operation owns this current record. Unrelated errors cannot replace it,
+      // and a later record cannot be settled by an older operation's successful receipt.
+      set({ notificationEvents: [...(prior ? current.notificationEvents.filter(item => item !== prior) : current.notificationEvents), record] })
+      return
+    }
+    // Acknowledging the cleared latest event suppresses only the same exact notification identity.
+    // Current source-owned failures above are settled solely by their original operation/identity owner.
+    const current = get(), id = notificationEventIdentity(message, context)
+    if (current.errorDismissed && current.lastError !== null &&
+      notificationEventIdentity(current.lastError, current.errorNoticeContext) === id) return
+    const event: NotificationEvent = { id, message, context: context ?? null }
+    // Startup retains its original producer reference; other failures have an independent record.
+    const retainEvent = !context?.startupSessionSnapshot && !context?.startupProviderCatalog
     const existing = current.notificationEvents.find(item => item.id === event.id)
     const notificationEvents = !retainEvent ? current.notificationEvents
       : existing ? current.notificationEvents.map(item => item === existing ? event : item)
@@ -10584,6 +10611,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const local = (persisted ?? {}) as Partial<PersistedAppState>
     if (!Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons') && Object.hasOwn(local, 'spaceObjectIcons')) retainedSpaceIconHandoff = local.spaceObjectIcons
     const state = { ...current, ...persisted as Partial<AppState> }
+    state.noticeReadReceipts = normalizeNotificationReadReceipts(state.noticeReadReceipts)
     // Old Chromium reads never overwrite acknowledged names or clear tombstones.
     if (current.nameAuthorityRevision > 0) {
       state.agentNames = current.agentNames
