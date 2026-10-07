@@ -27,13 +27,16 @@ function message(error: unknown): string {
  * error 是「还没问」。徽标据此决定画不画，而不是把两种情况都当成 0/0——0/0 在这个域里有意义
  * （已同步），不能拿来当「不知道」的占位。
  */
-export function useGitAheadBehind(workspaceId: string | null): GitAheadBehindRequestState & {
+export function useGitAheadBehind(workspaceId: string | null, active = true): GitAheadBehindRequestState & {
   refresh: () => Promise<boolean>
 } {
   const [state, setState] = useState<GitAheadBehindRequestState | null>(null)
   const requestId = useRef(0)
+  const autoRead = useRef<object | null>(null)
+  const scope = useRef<object>({})
 
   const refresh = useCallback(async () => {
+    autoRead.current = scope.current
     if (!workspaceId) {
       setState(null)
       return false
@@ -68,9 +71,14 @@ export function useGitAheadBehind(workspaceId: string | null): GitAheadBehindReq
   }, [workspaceId])
 
   useEffect(() => {
-    void refresh()
+    scope.current = {}
+    autoRead.current = null
     return () => { requestId.current += 1 }
   }, [refresh])
+  useEffect(() => {
+    if (active && autoRead.current !== scope.current) void refresh()
+    if (!active) autoRead.current = null
+  }, [active, refresh])
 
   const visible = state?.workspaceId === workspaceId
     ? state

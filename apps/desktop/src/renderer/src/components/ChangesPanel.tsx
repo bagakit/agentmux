@@ -14,6 +14,9 @@ import { beginPrLaunch, type PrLaunchPlan } from '../lib/pr-launch'
 import { useAppStore } from '../store'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { PrLaunchSurface } from './PrLaunchSurface'
+import { gitWorkspaceKey } from '../features/git/history/GitHistoryContext'
+import { workspaceZoneContext } from '../lib/workspace-zone-context'
+import { openWorkspaceZoneFile } from '../lib/workspace-zone-file-actions'
 
 
 
@@ -53,15 +56,18 @@ const CHANGE_MARK: Record<GitChangeClass, string> = {
  *   - `commit`：与第一族同形，但忙态是自己的（一次提交不属于任何一行）。
  * 三族折成一套 try/catch 会让远端那族的分类白做，所以下面的忙态与出错口刻意按族分开。
  */
-export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
-  const { status, loading, error: loadError, refresh } = useGitStatus(workspace.id)
+export function ChangesPanel({ workspace, active = true }: { workspace: WorkspaceRecord; active?: boolean }) {
+  const { status, loading, error: loadError, refresh } = useGitStatus(workspace.id, active)
   const openFileDiff = useAppStore((state) => state.openFileDiff)
   const createPullRequest = useAppStore((state) => state.createPullRequest)
   const prReadiness = usePrReadiness(workspace.id)
   const [busyPath, setBusyPath] = useState<string | null>(null)
   const [busyRemote, setBusyRemote] = useState<GitRemoteVerb | null>(null)
   const [committing, setCommitting] = useState(false)
-  const [commitMessage, setCommitMessage] = useState('')
+  const draftKey = gitWorkspaceKey(workspace)
+  const commitMessage = useAppStore(state => state.gitCommitDrafts[draftKey] ?? '')
+  const setGitCommitDraft = useAppStore(state => state.setGitCommitDraft)
+  const setCommitMessage = (message: string) => setGitCommitDraft(draftKey, message)
   const [actionError, setActionError] = useState<string | null>(null)
   // 成功回执与失败横幅刻意是两个状态：远端动作成功时那句话是回执不是错误，去的地方不同
   // （见 git-remote-outcome.ts 里 GitRemoteOutcome 分两个形状的理由）。折成一个会让调用方自己再判一次。
@@ -197,7 +203,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     setCommitting(true)
     try {
       await lookup.bridge.commit(workspace.id, commitMessage.trim())
-      setCommitMessage('')
+      if (useAppStore.getState().gitCommitDrafts[draftKey] === commitMessage) setCommitMessage('')
       await refresh()
     } catch (cause) {
       setActionError(presentError(cause))
@@ -313,7 +319,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
             type="button"
             className="change-row__identity change-row__identity--button"
             title={`Open diff for ${change.path}`}
-            onClick={() => void openFileDiff(documentPath)}
+            onClick={() => void openChangeDiff(documentPath)}
           >
             <strong>{name}</strong>
             {dir ? <small>{dir}</small> : null}
@@ -389,10 +395,27 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     )
   }
 
+  async function openChangeDiff(path: string): Promise<void> {
+    const state = useAppStore.getState()
+    const display = state.config?.workspaces.find(value => value.id === state.activeWorkspaceId)
+    if (display) {
+      const context = workspaceZoneContext(state, display)
+      if (context.selectedZoneId && context.resource?.id === workspace.id && context.resource.hostId === workspace.hostId && context.resource.path === workspace.path) {
+        await openWorkspaceZoneFile(display, path, 'diff')
+        return
+      }
+      if (state.workbenchSpaceSelection?.zoneId) {
+        setActionError('The original Changes resource is no longer the selected Zone. Its data is retained; open Changes in the intended Zone before opening this diff.')
+        return
+      }
+    }
+    await openFileDiff(path, workspace.id)
+  }
+
   return (
     <section className="branches-panel changes-panel">
       <header className="branches-header branches-header--tools" aria-label="Change actions">
-        <span className="source-control-count" aria-label="Changed file count">{repo ? repo.changes.length : 0} files</span>
+        <span className="source-control-count" aria-label="Changed file count">{repo ? `${repo.changes.length} files` : loading ? 'Checking changes…' : loadError ? 'Changes unavailable' : status?.kind === 'not-a-git-repository' ? 'No Git repository' : 'Changes unknown'}</span>
         <button type="button" title="Refresh changes" onClick={() => void refresh()} disabled={loading}>
           {loading ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
         </button>

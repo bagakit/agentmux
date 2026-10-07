@@ -8,7 +8,8 @@ import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { useShallow } from 'zustand/react/shallow'
 import { createWorkspaceAgentContextsSelector, FOCUS_BUCKETS, groupFocusContexts, focusNeutralGroupSummary, type FocusBucket } from '../lib/focus-context'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { memo, useContext, useMemo } from 'react'
+import { memo, useContext, useEffect, useMemo, useState } from 'react'
+import { gitWorkspaceKey } from '../features/git/history/GitHistoryContext'
 import type {
   SessionSnapshot,
   WorkspaceRecord
@@ -24,6 +25,8 @@ import { contextUsedPercent } from '../lib/agent-usage'
 import { agentRegionExecution, useAppStore } from '../store'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { WorkspaceFilesTool } from './WorkspaceFilesTool'
+import { WorkspaceGitTool } from './WorkspaceGitTool'
+import { useWorkspaceZoneContext } from '../lib/workspace-zone-context'
 import { SidebarToggleChrome, WindowSidebarLayoutContext } from './TopRowChrome'
 
 const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
@@ -31,6 +34,7 @@ const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 const ThemeActionCreateAgentIcon = semanticIconComponent('action.create-agent')
+const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
 
 
 type ToolDefinition<T extends string> = {
@@ -41,8 +45,9 @@ type ToolDefinition<T extends string> = {
 }
 
 const WORKSPACE_TOOL_META: Record<WorkspaceTool, Omit<ToolDefinition<WorkspaceTool>, 'id'>> = {
-  'files-branches': { label: 'Files + Branches', description: 'Browse the selected worktree', icon: ThemeObjectRepositoryIcon },
-  agents: { label: 'Agents', description: 'Find Agents that remain available after their Tab closes', icon: ThemeObjectAgentIcon }
+  'files-branches': { label: 'Files + Zones', description: 'Browse files and continue a Zone workface', icon: ThemeObjectRepositoryIcon },
+  agents: { label: 'Agents', description: 'Find Agents that remain available after their Tab closes', icon: ThemeObjectAgentIcon },
+  git: { label: 'Git', description: 'Review changes, branches and repository history', icon: ThemeObjectBranchIcon }
 }
 
 const AGENT_GROUP_LABELS: Record<FocusBucket, string> = { attention: 'Needs You', working: 'Working', results: 'Results', idle: 'Idle / Unknown' }
@@ -123,6 +128,25 @@ function ConnectedWorkspaceAgentsTool({ workspace, onOpen }: {
   return <WorkspaceAgentsTool workspace={workspace} sessions={sessions} onOpen={onOpen} />
 }
 
+function WorkspaceGitSlot({ workspace, visible }: { workspace: WorkspaceRecord; visible: boolean }) {
+  const context = useWorkspaceZoneContext(workspace)
+  const [retained, setRetained] = useState<WorkspaceRecord[]>([])
+  const resource = context.resource
+  useEffect(() => {
+    if (visible && resource) setRetained(previous => previous.some(value => gitWorkspaceKey(value) === gitWorkspaceKey(resource)) ? previous : [...previous, resource])
+  }, [resource, visible])
+  const resources = visible && resource ? [...retained.filter(value => gitWorkspaceKey(value) !== gitWorkspaceKey(resource)), resource] : retained
+  return <>
+    {resources.map(value => {
+      const active = Boolean(resource && gitWorkspaceKey(value) === gitWorkspaceKey(resource))
+      return <div className="workspace-tool-slot" hidden={!active} key={gitWorkspaceKey(value)}>
+        <WorkspaceGitTool workspace={value} visible={visible && active} />
+      </div>
+    })}
+    {!resource ? <div className="surface-inline-error" role="status">{context.issue}</div> : null}
+  </>
+}
+
 export function SurfaceToolDock({
   workspace,
   visible = true
@@ -143,6 +167,9 @@ export function SurfaceToolDock({
   // re-skinned as `Files + Topics` (see contentSlotPresentation), so the tool set never diverges
   // and the global workspaceTool is never mutated.
   const isScratch = Boolean(workspace && isScratchWorkspaceId(workspace.id))
+  const [lastFolder, setLastFolder] = useState<WorkspaceRecord | null>(workspace && !isScratch ? workspace : null)
+  useEffect(() => { if (workspace && !isScratch) setLastFolder(workspace) }, [workspace, isScratch])
+  const gitWorkspace = workspace && !isScratch ? workspace : lastFolder
   const { tools: workspaceToolIds, effective: effectiveWorkspaceTool } = resolveWorkspaceTools({
     workspaceTool,
     isScratch
@@ -197,8 +224,15 @@ export function SurfaceToolDock({
         ) : null}
       </header>
       <div className="surface-tool-content">
-        {selectedTool === 'files-branches' && workspace ? (
-          <WorkspaceFilesTool workspace={workspace} isScratch={isScratch} visible={visible} />
+        {workspace ? (
+          <div className="workspace-tool-slot" hidden={selectedTool !== 'files-branches'}>
+            <WorkspaceFilesTool workspace={workspace} isScratch={isScratch} visible={visible && selectedTool === 'files-branches'} />
+          </div>
+        ) : null}
+        {gitWorkspace ? (
+          <div className="workspace-tool-slot" hidden={selectedTool !== 'git' || isScratch}>
+            <WorkspaceGitSlot workspace={gitWorkspace} visible={visible && selectedTool === 'git' && !isScratch} />
+          </div>
         ) : null}
         {visible && effectiveWorkspaceTool === 'agents' && workspace ? (
           <ConnectedWorkspaceAgentsTool

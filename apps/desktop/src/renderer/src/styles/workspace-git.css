@@ -1,0 +1,18 @@
+.surface-tool-content { display: flex; flex-direction: column; }
+.workspace-tool-slot { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.workspace-tool-slot[hidden] { display: none; }
+.surface-tool-dock[hidden] { display: none; }
+.workspace-zone-content { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
+.workspace-zone-content > .workspace-zones-panel, .workspace-tool-explorer > .workspace-zones-panel { flex: 1; height: auto; min-height: 0; }
+.workspace-git-tool { flex: 1; min-height: 0; }
+.workspace-git-panel { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.workspace-git-panel[hidden] { display: none; }
+.workspace-git-context { flex-shrink: 0; min-height: 34px; grid-template-columns: auto minmax(0, 1fr) auto; }
+.workspace-git-context > em { color: var(--text-3); }
+.workspace-git-context > svg { flex: 0 0 auto; color: var(--text-3); }
+.workspace-git-path { padding: 0 var(--sp-3) var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.workspace-changes-summary { display: flex; flex: 0 0 auto; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2) var(--sp-3); border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
+.workspace-changes-summary > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-changes-summary > small { color: var(--text-3); font-size: var(--fs-meta); }
+.workspace-changes-summary:hover { background: var(--hl); color: var(--text); }
+.workspace-changes-summary:focus-visible { outline: 1px solid var(--green); outline-offset: -2px; }

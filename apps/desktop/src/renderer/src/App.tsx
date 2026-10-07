@@ -1,4 +1,5 @@
 import { GitHistoryProvider } from './features/git/history/GitHistoryContext'
+import { workspaceZoneContext } from './lib/workspace-zone-context'
 import { observeNotebookLibrary } from './lib/notebook-library'
 import { ExecutorIdentityContext } from './components/AgentAvatar'
 import { SettingsNavigation, type SettingsNavigationRequest } from './components/SettingsNavigation'
@@ -366,6 +367,7 @@ function DesktopApp() {
   const executorIdentity = useMemo(() => ({ config, onPanelVisibilityChange: onAgentPanelVisibilityChange }), [config, onAgentPanelVisibilityChange])
   const nativeOverlayWarning = useNativeOverlayChrome()
   const workspace = config?.workspaces.find((item) => item.id === activeWorkspaceId)
+  const gitWorkspace = useAppStore(state => workspace ? workspaceZoneContext(state, workspace).resource : null)
   const initialTheme = api.ui.initialTheme
   useLayoutEffect(() => {
     const saved = useAppStore.getState().config?.appearance
@@ -530,7 +532,7 @@ function DesktopApp() {
   }
 
   return (
-    <GitHistoryProvider workspace={workspace}>
+    <GitHistoryProvider workspace={gitWorkspace}>
     <SettingsNavigation.Provider value={settingsNavigation}>
     <WindowSidebarLayoutContext.Provider value={windowSidebars}>
     <ExecutorIdentityContext.Provider value={executorIdentity}>
@@ -551,13 +553,13 @@ function DesktopApp() {
           </header>
         ) : null}
         <div className="workbench-shell">
-            {toolsVisible ? (
               <div
                 ref={containerRef}
+                hidden={!toolsVisible}
                 className={`surface-tool-dock ${isResizing ? 'surface-tool-dock--resizing' : ''}`}
                 data-surface-tool-dock
               >
-                <SurfaceToolDock workspace={workspace} visible={workbenchVisible} />
+                <SurfaceToolDock workspace={workspace} visible={workbenchVisible && toolsVisible} />
                 <div
                   className="surface-tool-width-handle"
                   role="separator"
@@ -579,7 +581,6 @@ function DesktopApp() {
                   }}
                 />
               </div>
-            ) : null}
             <section className="workspace-main-surface" data-desktop-surface={desktopSurface[mainSurface]}>
               {!workspace && mainSurface === 'workbench' ? (
                 <section className="welcome">

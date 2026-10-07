@@ -9,14 +9,15 @@ import {
 
 export const TOOL_DOCK_DEFAULT_WIDTH = 300
 export const TOOL_DOCK_MIN_WIDTH = 236
-// 180px compact window chrome + 4px grid gap + two 28px workspace-tool
+// 180px compact window chrome + 4px grid gap + three 28px workspace-tool
 // buttons and the Agent create action + two 1px gaps + 4px end padding.
-export const TOOL_DOCK_COLLAPSED_RAIL_MIN_WIDTH = 274
+export const TOOL_DOCK_COLLAPSED_RAIL_MIN_WIDTH = 302
 export const TOOL_DOCK_MAX_WIDTH = 440
 
 export const WORKSPACE_TOOL_IDS = [
   'files-branches',
-  'agents'
+  'agents',
+  'git'
 ] as const
 
 export type WorkspaceTool = (typeof WORKSPACE_TOOL_IDS)[number]
@@ -38,8 +39,7 @@ export function resolveWorkspaceTools(input: {
   // to a real project); it is re-skinned as `Files + Topics`, not removed. `isScratch` is retained
   // in the signature so callers keep a single source of truth for the flag even though the tool
   // set no longer diverges.
-  void input.isScratch
-  const tools: readonly WorkspaceTool[] = WORKSPACE_TOOL_IDS
+  const tools: readonly WorkspaceTool[] = input.isScratch ? WORKSPACE_TOOL_IDS.filter(tool => tool !== 'git') : WORKSPACE_TOOL_IDS
   const effective = tools.includes(input.workspaceTool) ? input.workspaceTool : tools[0]!
   return { tools, effective }
 }
@@ -89,7 +89,7 @@ export function contentSlotPresentation(isScratch: boolean): ContentSlotPresenta
     // the topic is the first-class view.
     return { label: 'Files + Topics', showTopics: true, fileTreeDefaultSize: 38, fileTreeMinSize: 20, explorerCollapsedByDefault: true }
   }
-  return { label: 'Files + Branches', showTopics: false, fileTreeDefaultSize: 68, fileTreeMinSize: 34, explorerCollapsedByDefault: false }
+  return { label: 'Files + Zones', showTopics: false, fileTreeDefaultSize: 68, fileTreeMinSize: 34, explorerCollapsedByDefault: false }
 }
 
 export type AgentSessionSnapshot = Extract<SessionSnapshot, { kind: 'agent' }>
