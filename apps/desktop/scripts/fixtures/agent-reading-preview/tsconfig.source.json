@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.renderer.json",
+  "compilerOptions": {
+    "paths": {
+      "@agentmux/core/note-history": [
+        "../../../../../packages/core/src/note-history.ts"
+      ]
+    }
+  },
+  "include": [
+    "../../../src/renderer/src/global.d.ts",
+    "../../../src/renderer/src/lib/session-user-messages.ts",
+    "../../../test/session-user-message-source.test.tsx",
+    "./vitest.source.config.mts"
+  ]
+}
