@@ -34,7 +34,7 @@ const tests = async mutation => {
 }
 const baseline = await tests();console.log(JSON.stringify({baseline}))
 const mutations=[]
-for(const name of ['main-turn','child-turn','projection']){mutations.push(await tests(name));console.log(JSON.stringify({mutation:name,result:'assertion-red'}))}
+for(const name of ['main-turn','child-turn','child-source','projection']){mutations.push(await tests(name));console.log(JSON.stringify({mutation:name,result:'assertion-red'}))}
 const restored = await tests()
 const callers = {}
 for(const symbol of ['projectCurrentActivity(', 'agentHasActiveSubagents(', 'claudeNativeActivity(', 'currentActivity: session.currentActivity']){
