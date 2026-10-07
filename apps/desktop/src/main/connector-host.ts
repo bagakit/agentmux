@@ -2,7 +2,7 @@ import { chmod, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from '@agentmux/core'
-import { ConnectionHost, RoomBindingHost, PublicationHost, DurableIngressHost, ConnectionReceivers, type DurableIngressOptions, type PublicationConversationPort, type RoomBindingHostOptions, type ConnectionAdapter } from '@agentmux/connectors'
+import { ConnectionHost, RoomBindingHost, PublicationHost, DurableIngressHost, ConnectionReceivers, createBuiltinConnectionAdapters, type DurableIngressOptions, type PublicationConversationPort, type RoomBindingHostOptions, type ConnectionAdapter } from '@agentmux/connectors'
 import type { ConnectionPort } from '@agentmux/core/connections'
 import { DesktopConnectorSecrets, type CredentialEncryption } from './connector-secrets.js'
 
@@ -18,6 +18,7 @@ export type DesktopConnectionServices = {
 type LiveServices = { database: DatabaseSync; connections: ConnectionHost; secrets: DesktopConnectorSecrets; bindings?: RoomBindingHost; publication?: PublicationHost; ingress?: DurableIngressHost; receivers?: ConnectionReceivers }
 /** Optional failure stays local. A later exact operation retries storage on the same Host and database. */
 export async function createDesktopConnections(options: { directory: string; encryption: CredentialEncryption; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; ingress?: Pick<DurableIngressOptions, 'core'> }): Promise<DesktopConnectionServices> {
+  const adapters = options.adapters ?? createBuiltinConnectionAdapters()
   let live: LiveServices | undefined, opening: Promise<LiveServices> | undefined, closed = false
   const ensure = async (): Promise<LiveServices> => {
     if (closed) throw new AgentMuxError('The original connection owner is closed.', 'CONNECTION_STORAGE_UNAVAILABLE')
@@ -29,7 +30,7 @@ export async function createDesktopConnections(options: { directory: string; enc
         const path = join(options.directory, 'connections.sqlite')
         database = new DatabaseSync(path); await chmod(path, 0o600)
         const secrets = new DesktopConnectorSecrets(database, options.encryption)
-        const connections = new ConnectionHost({ database, secrets, ...(options.adapters ? { adapters: options.adapters } : {}) })
+        const connections = new ConnectionHost({ database, secrets, adapters })
         const bindings = options.bindings ? new RoomBindingHost({ ...options.bindings, connections }) : undefined
         if (bindings) connections.bindings = bindings
         publication = bindings && options.publication ? new PublicationHost({ connections, bindings, conversation: options.publication }) : undefined
