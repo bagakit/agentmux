@@ -272,7 +272,13 @@ export class NativeOverlaySurfaces {
       this.window.webContents.sendInputEvent({ ...event, x: event.x + bounds.x, y: event.y + bounds.y })
       if (event.type === 'mouseDown') this.window.webContents.focus()
     } else if (event.type === 'keyDown' || event.type === 'rawKeyDown' || event.type === 'keyUp' || event.type === 'char') {
-      this.window.webContents.sendInputEvent(event)
+      // Electron observes DOM key names but sendInputEvent requires an Accelerator.
+      const { key } = input as Electron.Input
+      const { modifiers = [] } = input
+      const arrows: Record<string, string> = { ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right' }
+      // The real control may close and remove this focused image projection.
+      this.window.webContents.focus()
+      this.window.webContents.sendInputEvent({ type: event.type, keyCode: arrows[key] ?? key, modifiers })
     } else return
     // Related native hover/focus styles can change without a DOM mutation. One frame per projection,
     // driven only by actual input, never a window/session polling loop.
