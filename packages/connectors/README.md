@@ -257,6 +257,20 @@ inspection reads the original Core receipt without dispatch. Raw payloads and
 transport proofs remain private to the Host. An unavailable optional intake owner
 limits these reads only; the original connection and Agents remain available.
 
+An authenticated parent reference is an original platform identity, not proof
+that the message replies to this application. A registered adapter can qualify
+that exact parent after the complete event is committed and acknowledged. The
+bounded read runs before the original Core claim; a missing or failed lookup
+keeps the same received body with a safe `addressing` observation. Its result
+does not rewrite immutable event facts or redelivery identity. Current binding
+and actor authority are checked again before input. A late lookup cannot claim
+input after its observation timed out.
+
+Unsupported authenticated content retains its complete private payload and a
+durable `INGRESS_CONTENT_UNSUPPORTED` refusal before ACK. Its empty text
+projection is never submitted to the Agent. This refusal limits this message
+format only and leaves the original Agent and local input available.
+
 ## Registered receiving transports
 
 A `ConnectionAdapter` can contribute an `ingress` authenticator and a `transport`.
