@@ -161,6 +161,8 @@ beforeEach(async () => {
     scratchTopics: { listTopics: async () => [], setNameAudit: () => {} } as unknown as ScratchTopics,
     workspaceFiles: { dispose: async () => {}, read: vi.fn(), listFiles: vi.fn(), observe: async () => () => {} } as unknown as WorkspaceFiles })
   expect(fixture.handlers.has('sessions:submitPrompt')).toBe(true)
+  // Finish the actual private bootstrap before teardown can remove its files.
+  expect((await api.notesStorage.inspect()).directory).toBe(join(fixture.directory, 'notes'))
 })
 afterEach(async () => {
   try {
@@ -293,7 +295,7 @@ it('keeps an acknowledged exact crash read and treats another current Run as a n
   expect(notificationEventRows(element)).toHaveLength(1)
   expect(notificationTrigger(element).getAttribute('aria-expanded')).toBe('false')
   expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts)
-  expect(receipts['global:events']?.[firstId]).toBe(firstId)
+  expect(receipts['global:events']?.[firstId]).toBe('read')
   await toggleNotificationCenter(element, 'open')
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
   await toggleNotificationCenter(element, 'closed')
