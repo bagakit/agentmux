@@ -269,23 +269,26 @@
   color: var(--text-3);
   font-size: var(--fs-micro);
 }
-/* 回到最新。它只在脱离跟随时出现——正在跟随时视口已经在最新处，按钮会是个白点。
-   浮在滚动区之上而不占据文档流，否则它一出现整条 feed 就会跳一下。 */
+/* A single latest action belongs to the reading workface, outside its scroll content. */
+.activity-feed__latest-layer { position: absolute; z-index: 3; inset-inline-end: 12px; bottom: 8px; display: flex; align-items: center; gap: var(--sp-3); max-width: calc(100% - 24px); border-radius: 999px; background: var(--surface-2); box-shadow: var(--elev-1); pointer-events: none; }
+.activity-feed__latest-held { padding-inline-start: var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
 .activity-feed__jump {
-  position: sticky;
-  bottom: var(--sp-4);
-  left: 50%;
-  transform: translateX(-50%);
-  padding:var(--sp-2) var(--sp-5);
-  border: 1px solid var(--line);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 28px;
+  padding: var(--sp-1) var(--sp-3);
+  border: 0;
   border-radius: 999px;
   color: var(--text);
   background: var(--surface-2);
-  box-shadow: var(--elev-1);
   font-size: var(--fs-meta);
   cursor: pointer;
+  pointer-events: auto;
 }
 .activity-feed__jump:hover { background: var(--surface-3); }
+.activity-feed__jump:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+@media (pointer: coarse) { .activity-feed__jump { min-height: 44px; } }
 /* 「在进行」。一个正在工作的窗格显示成空，比慢更糟——用户会以为没发出去，然后再发一遍。
    动画只是修饰：文字本身就说明了状态，因此 prefers-reduced-motion 下停掉点的跳动不损失信息。 */
 .activity-working {
