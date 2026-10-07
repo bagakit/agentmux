@@ -2,7 +2,7 @@ import type { ProviderConversationChangesContext, ProviderConversationChangesPag
 import { stat } from 'node:fs/promises'
 import { AgentMuxError } from '../errors.js'
 import { NativeJsonlHistoryReader, readNativeConversationChanges } from '../native-jsonl-history-reader.js'
-import { SESSION_HISTORY_MAX_PAGE_BYTES } from '../session-history.js'
+import { normalizeSessionHistoryMetrics, SESSION_HISTORY_MAX_PAGE_BYTES } from '../session-history.js'
 import { isNativeText, nativeJsonStringify, type NativeHistoryContentPart, type NativeHistoryItem } from '../native-history-value.js'
 import { codexQuestionAnswers } from './codex-question.js'
 import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPage,
@@ -11,6 +11,26 @@ import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPag
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value)
   ? value as Record<string, unknown> : {}
 const text = (value: unknown) => isNativeText(value) ? value : value === undefined ? '' : nativeJsonStringify(value)
+
+function metrics(record: Record<string, unknown>, payload: Record<string, unknown>, nativeSessionId: string): Pick<NativeHistoryItem, 'metrics' | 'metricsDiagnostic'> {
+  if (record.type === 'event_msg' && (payload.type === 'task_complete' || payload.type === 'turn_aborted')) return normalizeSessionHistoryMetrics({
+    turnId: payload.turn_id,
+    metrics: { scope: 'turn', status: payload.type === 'task_complete' ? 'completed' : 'interrupted',
+      ...(payload.duration_ms === undefined ? {} : { durationMs: payload.duration_ms }) }
+  })
+  if (record.type !== 'token_usage_record') return {}
+  const sameSource = (payload.thread_id === undefined || payload.thread_id === nativeSessionId) &&
+    (payload.session_id === undefined || payload.session_id === nativeSessionId)
+  if (!sameSource) return { metricsDiagnostic: { code: 'NATIVE_HISTORY_METRICS_SOURCE_UNCONFIRMED',
+    message: 'Native usage identifies another source. Its original record remains readable; usage is unknown for this conversation.' } }
+  // This record reports a cumulative whole-turn snapshot. Keep each native snapshot,
+  // never sum them or replace them with token_count.info.last_token_usage (one response).
+  const usage = object(payload.turn_token_usage)
+  return normalizeSessionHistoryMetrics({ turnId: payload.turn_id, metrics: { scope: 'turn', usage: {
+    inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, totalTokens: usage.total_tokens,
+    cachedInputTokens: usage.cached_input_tokens, reasoningOutputTokens: usage.reasoning_output_tokens
+  } } })
+}
 
 function systemMessage(payload: Record<string, unknown>): { kind: 'system-message'; title: string } | undefined {
   if (payload.role === 'system' || payload.role === 'developer') return { kind: 'system-message', title: 'System instructions' }
@@ -36,7 +56,7 @@ function contentParts(content: unknown): NativeHistoryContentPart[] {
   })
 }
 
-function item(record: Record<string, unknown>, start: number): NativeHistoryItem | null {
+function item(record: Record<string, unknown>, start: number, nativeSessionId: string): NativeHistoryItem | null {
   const payload = object(record.payload), type = payload.type
   if (record.type === 'session_meta' || record.type === 'turn_context') return null
   let kind: NativeHistoryItem['kind'] = 'activity', parts: NativeHistoryContentPart[], title: string | undefined
@@ -66,8 +86,11 @@ function item(record: Record<string, unknown>, start: number): NativeHistoryItem
     : payload.content) : undefined
   const timestamp = Date.parse(String(record.timestamp)), id = typeof payload.id === 'string' && payload.id ? payload.id : `codex-record:${start}`
   return { id, kind, contentParts: parts,
+    ...metrics(record, payload, nativeSessionId),
+    ...(kind === 'assistant-message' && payload.phase === 'final_answer' ? { messagePhase: 'final' as const }
+      : kind === 'assistant-message' && payload.phase === 'commentary' ? { messagePhase: 'progress' as const } : {}),
     ...(questionAnswers === undefined ? {} : { questionAnswers }),
-    ...(typeof payload.turn_id === 'string' ? { turnId: payload.turn_id } : {}),
+    ...(typeof payload.turn_id === 'string' && payload.turn_id.length > 0 ? { turnId: payload.turn_id } : {}),
     ...(Number.isFinite(timestamp) ? { timestamp } : {}),
     ...(title ? { title } : kind === 'activity' ? { title: String(type ?? record.type) } : {}) }
 }
@@ -140,7 +163,7 @@ export async function readCodexSavedSessionHistoryPage(context: AgentProviderSes
     while (items.length < context.limit) {
       const entry = await reader.readPrevious()
       if (!entry) break
-      const converted = item(entry.value, entry.start)
+      const converted = item(entry.value, entry.start, context.source.nativeSessionId)
       if (converted) items.push(converted)
     }
     const nextCursor = await reader.nextCursor()
@@ -154,7 +177,7 @@ export async function readCodexSavedSessionHistoryRecord(context: AgentProviderS
   const reader = await open({ ...context, limit: 1 })
   try {
     for (let entry = await reader.readPrevious(); entry; entry = await reader.readPrevious()) {
-      const converted = item(entry.value, entry.start)
+      const converted = item(entry.value, entry.start, context.source.nativeSessionId)
       if (converted?.id === context.recordId && (context.turnId === undefined || converted.turnId === context.turnId)) {
         await reader.verifyUnchanged()
         return fitQuestionAnswerProjection({ ...context, limit: 1 }, [await reader.materializeItem(converted)], null)[0]!
@@ -167,6 +190,6 @@ export async function readCodexSavedSessionHistoryRecord(context: AgentProviderS
 /** Resume the same saved rollout and original record converter after a durable cut. */
 export async function readCodexSavedConversationChanges(context: ProviderConversationChangesContext): Promise<ProviderConversationChangesPage> {
   const reader = await open(context)
-  try { return await readNativeConversationChanges(reader, context, item) }
+  try { return await readNativeConversationChanges(reader, context, (record, start) => item(record, start, context.source.nativeSessionId)) }
   finally { await reader.close() }
 }

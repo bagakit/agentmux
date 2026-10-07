@@ -4,7 +4,7 @@ import { rpcRecord } from './rpc-data.js'
 import { decodeBase64, encodeBase64 } from './hosted-value.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { normalizeSessionHistoryPage } from './session-history.js'
+import { normalizeSessionHistoryMetrics, normalizeSessionHistoryPage, sessionHistoryWithoutMetrics } from './session-history.js'
 import { normalizeAgentTimelineMutation } from './session-timeline.js'
 import type { AgentSessionHistoryItem, AgentTimelineItem, AgentSessionHistorySource, AgentSessionUserMessage } from './types.js'
 
@@ -74,12 +74,16 @@ export function parseAgentSessionHistoryReadPage(value: unknown, input: AgentSes
     const source = rpcRecord(page.nativeSource, ['providerId', 'nativeSessionId'], 'CONTROL_PROTOCOL_ERROR')
     if (!text(source.providerId) || !text(source.nativeSessionId)) return bad()
   } else if (page.nativeSource !== undefined) return bad()
+  const items: AgentSessionHistoryReadEntry[] = []
   for (const entry of page.items) {
     const row = rpcRecord(entry, undefined, 'CONTROL_PROTOCOL_ERROR')
     if (row.kind === 'item') {
       rpcRecord(row, ['kind', 'item'], 'CONTROL_PROTOCOL_ERROR')
       const item = rpcRecord(row.item, undefined, 'CONTROL_PROTOCOL_ERROR')
       if (!text(item.id) || input.source === 'captured' && item.agentSessionId !== input.agentSessionId) return bad()
+      const { metrics: _metrics, metricsDiagnostic: _diagnostic, ...original } = item
+      items.push(input.source === 'native' ? { kind: 'item', item: { ...original, ...normalizeSessionHistoryMetrics(item) } as AgentSessionHistoryItem }
+        : row as AgentSessionHistoryReadEntry)
     } else if (row.kind === 'fragment') {
       rpcRecord(row, ['kind', 'itemId', 'encoding', 'sha256', 'offsetBytes', 'totalBytes', 'dataBase64'], 'CONTROL_PROTOCOL_ERROR')
       if (!text(row.itemId) || row.encoding !== 'json-utf8-base64' || typeof row.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(row.sha256) ||
@@ -88,10 +92,11 @@ export function parseAgentSessionHistoryReadPage(value: unknown, input: AgentSes
       let bytes: Uint8Array
       try { bytes = decodeBase64(row.dataBase64) } catch { return bad() }
       if (!bytes.length || encodeBase64(bytes) !== row.dataBase64 || bytes.length + (row.offsetBytes as number) > (row.totalBytes as number)) return bad()
+      items.push(row as AgentSessionHistoryReadEntry)
     } else return bad()
   }
   if (page.availability === 'empty' && page.items.length) return bad()
-  return page as AgentSessionHistoryReadPage
+  return { ...page, items } as AgentSessionHistoryReadPage
 }
 
 /** Normalizers own record semantics; wire validation must also reject discarded or rewritten fields. */
@@ -117,6 +122,7 @@ function parseTextHistoryPage(value: unknown, input: AgentSessionHistoryReadInpu
   const nativeSource = input.source === 'native' ? rpcRecord(page.nativeSource, ['providerId', 'nativeSessionId'], 'CONTROL_PROTOCOL_ERROR') : undefined
   if (input.source === 'captured' && page.nativeSource !== undefined || nativeSource && (!text(nativeSource.providerId) || !text(nativeSource.nativeSessionId))) return bad()
   const ids = new Set<string>()
+  const items: AgentSessionHistoryReadEntry[] = []
   for (const value of page.items) {
     const entry = rpcRecord(value, ['kind', 'item'], 'CONTROL_PROTOCOL_ERROR')
     if (entry.kind !== 'item') return bad()
@@ -128,13 +134,15 @@ function parseTextHistoryPage(value: unknown, input: AgentSessionHistoryReadInpu
         if (item.agentSessionId !== input.agentSessionId) return bad()
         const normalized = normalizeAgentTimelineMutation({ type: 'append', agentSessionId: input.agentSessionId, item })
         if (normalized.type !== 'append' || !sameOriginal(normalized.item, item)) return bad()
+        items.push(entry as AgentSessionHistoryReadEntry)
       } else {
         const normalized = normalizeSessionHistoryPage(nativeSource as AgentSessionHistorySource, { source: nativeSource, items: [item], nextCursor: null }, 1)
-        if (!sameOriginal(normalized.items[0], item)) return bad()
+        if (!sameOriginal(sessionHistoryWithoutMetrics(normalized).items[0], sessionHistoryWithoutMetrics({ items: [item] }).items[0])) return bad()
+        items.push({ kind: 'item', item: normalized.items[0]! })
       }
     } catch { return bad() }
   }
-  return page as AgentSessionHistoryReadPage
+  return { ...page, items } as AgentSessionHistoryReadPage
 }
 
 export function parseUserMessageHistoryPage(value: unknown, input: AgentSessionHistoryReadInput): AgentSessionHistoryReadPage {

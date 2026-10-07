@@ -4,6 +4,7 @@ import type { ProviderConversationChangesContext, ProviderConversationChangesPag
 // exact ordered content/resources, neutral unknown activities and native UUID identity.
 import { AgentMuxError } from '../errors.js'
 import { NativeJsonlHistoryReader, readNativeConversationChanges } from '../native-jsonl-history-reader.js'
+import { normalizeSessionHistoryMetrics } from '../session-history.js'
 import {
   isNativeText,
   nativeJsonStringify,
@@ -117,6 +118,16 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
     id: typeof record.uuid === 'string' && record.uuid ? record.uuid : `claude-record:${start}`,
     kind,
     contentParts: message || queuedInput && kind === 'user-message' ? parts(content) : [{ kind: 'text', text: nativeJsonStringify(record) }],
+    // Native message.usage covers this response, even when several responses share a turn.
+    // Claude does not report one total_tokens value here; preserve that absence.
+    ...(record.type === 'assistant' && message?.usage !== undefined ? normalizeSessionHistoryMetrics({
+      metrics: { scope: 'response', usage: {
+        inputTokens: object(message.usage)?.input_tokens,
+        outputTokens: object(message.usage)?.output_tokens,
+        totalTokens: object(message.usage)?.total_tokens,
+        cachedInputTokens: object(message.usage)?.cache_read_input_tokens
+      } }
+    }) : {}),
     ...(kind === 'system-message' ? { title: 'System instructions' } : queuedInput && kind === 'user-message' ? { title: '运行中追加' } :
       kind === 'activity' ? { title: typeof record.type === 'string' ? `Claude ${record.type}` : 'Claude activity' } : {}),
     ...(turnId !== undefined ? { turnId } : {}),

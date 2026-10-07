@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { normalizeSessionHistoryPage } from './session-history.js'
+import { normalizeSessionHistoryPage, sessionHistoryWithoutMetrics } from './session-history.js'
 import { parseSessionHistoryResourceOptions, parseProviderSessionHistoryResourceReadResult } from './session-history-resource.js'
 import type { AgentNativeResumeSource, AgentProviderSessionHistoryPage, AgentSessionHistoryResourceRequest,
   AgentProviderSessionHistoryResourceReadResult } from './types.js'
@@ -57,8 +57,10 @@ export function parseNativeHistoryResult(value: unknown, input: AgentMuxRpcNativ
     const { hostId: _host, executorId: _executor, nativeSource: _native, ...body } = p
     const normalized = normalizeSessionHistoryPage({ providerId: input.source.nativeHandle.providerId,
       nativeSessionId: input.source.nativeHandle.sessionId }, body, input.limit ?? 30)
-    if (!isDeepStrictEqual(normalized, body)) throw new Error('Native history page changed during validation.')
-    return p as AgentMuxRpcNativeHistoryResult
+    if (!isDeepStrictEqual(sessionHistoryWithoutMetrics(normalized), sessionHistoryWithoutMetrics({ ...body, items: body.items as unknown[] }))) {
+      throw new Error('Native history page changed during validation.')
+    }
+    return { ...p, ...normalized } as AgentMuxRpcNativeHistoryResult
   } catch {
     throw new AgentMuxError('Native history result is malformed or belongs to another source.', 'CONTROL_PROTOCOL_ERROR')
   }

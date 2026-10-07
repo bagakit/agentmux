@@ -2,7 +2,7 @@ import type { AgentTurnUsage, AgentUsageCapability } from './types.js'
 import { open } from 'node:fs/promises'
 
 /**
- * 从 Provider 自己拥有格式的 transcript 里，抽出**最近一个 turn** 的真实 token 用量。
+ * 从 Provider 自己拥有格式的 transcript 里，抽出**最近一次响应** 的真实 token 用量。
  *
  * 为什么这份知识关在这里、且只被 hook 命令进程调用：Provider 的 transcript schema 是 Provider 的私产，
  * 哪天 codex 改了 rollout 格式、claude 改了 message 记录形状，坏的应该是这一个纯函数，而不是 Core 的会话
@@ -11,7 +11,7 @@ import { open } from 'node:fs/promises'
  * 轮询、零新增通道。
  *
  * 两种 transcript 都是 JSONL（一行一条 JSON），用量记录都在末尾附近，所以只解析**最后若干行**就够，
- * 不整文件读。取数一律「最后一条带用量的记录」——那就是本 turn 收敛后的累计值。
+ * 不整文件读。取数一律「最后一条带用量的记录」——只代表最后一次响应，不能冒充整轮累计。
  */
 
 /** 只回扫这么多行。用量记录紧贴 turn 末尾，几十行足够跨过收尾时追加的 last-prompt/atis-latch 等噪音。 */
@@ -61,6 +61,7 @@ function extractClaudeUsage(tail: readonly string[], observedAt: number): AgentT
     // 两个核心字段都在才算一条可信记录；缺一个就说明这不是我们要的用量记录，继续往前找。
     if (input === null || output === null) continue
     return {
+      scope: 'response',
       inputTokens: input,
       outputTokens: output,
       totalTokens: input + output,
@@ -72,9 +73,8 @@ function extractClaudeUsage(tail: readonly string[], observedAt: number): AgentT
 
 /**
  * codex rollout（`~/.codex/sessions/.../rollout-*.jsonl`）：`type:"event_msg"` 且
- * `payload.type:"token_count"` 的记录带 `payload.info.last_token_usage`（本 turn 增量）与
- * `total_token_usage`（会话累计）。取 `last_token_usage`——它才是"这一 turn 花了多少"，与 claude 的
- * per-turn 口径对齐。字段：`{input_tokens, output_tokens, total_tokens, ...}`，codex 自带 `total_tokens`
+ * `payload.type:"token_count"` 的记录带 `payload.info.last_token_usage`（最后一次模型请求）与
+ * `total_token_usage`（会话累计）。这里只取响应级 `last_token_usage`，不能把它称为整轮。字段：`{input_tokens, output_tokens, total_tokens, ...}`，codex 自带 `total_tokens`
  * 就用它报的，不自行相加。
  */
 function extractCodexUsage(tail: readonly string[], observedAt: number): AgentTurnUsage | null {
@@ -98,6 +98,7 @@ function extractCodexUsage(tail: readonly string[], observedAt: number): AgentTu
     const total = finiteNonNegative((last as Record<string, unknown>).total_tokens)
     if (input === null || output === null) continue
     return {
+      scope: 'response',
       inputTokens: input,
       outputTokens: output,
       // codex 报了单一 total 就用它；没报（老格式）时退回 in+out，绝不为凑字段编数。
@@ -110,7 +111,7 @@ function extractCodexUsage(tail: readonly string[], observedAt: number): AgentTu
 }
 
 /**
- * 按 Provider 声明的 transcript 格式，从整段 transcript 文本里抽出最近一 turn 的真实用量。
+ * 按 Provider 声明的 transcript 格式，从整段 transcript 文本里抽出最近一次响应的真实用量。
  *
  * 抽不到（文件为空、格式不符、末尾还没有用量记录）就返回 `null`——缺席如实上报，绝不合成一个 0。
  * 传入的是**已读好的文本**而非路径：读文件的 IO 留给调用方（hook 命令进程），本函数保持纯粹、可直接
@@ -159,6 +160,7 @@ export function parseTurnUsage(value: unknown): AgentTurnUsage | null {
   }
   const context = record.context as Record<string, unknown> | undefined
   return { inputTokens, outputTokens, totalTokens, observedAt,
+    ...(record.scope === 'response' ? { scope: 'response' as const } : {}),
     ...(context && typeof context === 'object' ? nativeContext(context.capacityTokens, context.usedTokens) : {}) }
 }
 
@@ -167,7 +169,7 @@ export function parseTurnUsage(value: unknown): AgentTurnUsage | null {
 const TAIL_READ_BYTES = 256 * 1024
 
 /**
- * 读 transcript **尾部**并抽出最近一 turn 的用量——hook 命令进程在收尾事件上调用的那一步。
+ * 读 transcript **尾部**并抽出最近一次响应的用量——hook 命令进程在收尾事件上调用的那一步。
  *
  * 只 `read` 文件末尾 {@link TAIL_READ_BYTES} 字节（seek 到 `size - TAIL_READ_BYTES`），不 `readFile` 整份：
  * 这是「计数开销可忽略」的关键，一次 turn 收尾只多一次有界的尾部读。任何 IO 失败（文件不存在、无权限、
