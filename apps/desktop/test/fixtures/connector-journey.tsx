@@ -100,6 +100,9 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
   async function button(label: string) {
     let item: HTMLButtonElement | undefined
     await vi.waitFor(async () => { await act(async () => {}); item = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(node => node.textContent?.trim() === label); expect(item, label).toBeDefined(); expect(item!.disabled, label + ' is an eligible original action').toBe(false) }, { timeout: 6000 })
+    const folded: HTMLDetailsElement[] = []
+    for (let parent = item!.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement && !parent.open) folded.push(parent)
+    for (const details of folded.reverse()) { await act(async () => details.querySelector('summary')!.click()); expect(details.open).toBe(true) }
     await act(async () => item!.click())
   }
   async function cli(args: string[]) {
