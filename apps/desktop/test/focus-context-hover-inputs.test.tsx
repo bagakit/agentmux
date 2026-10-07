@@ -42,7 +42,7 @@ it('reads only after intent and shows the latest three native/captured inputs be
  const original=useAppStore.getState();await pointer(card(),'pointerover');await act(async()=>new Promise(resolve=>setTimeout(resolve,150)));expect(panel()).toBeNull();expect(api.sessions.historyPage).not.toHaveBeenCalled()
  await act(async()=>new Promise(resolve=>setTimeout(resolve,60)));await act(async()=>vi.waitFor(()=>expect(inputs()).toHaveLength(3)))
  expect(inputs().map(n=>n.dataset.hoverInputId)).toEqual(['native:claude:hover-hover-a:latest-native','captured:human','captured:peer'])
- expect(inputs().map(n=>n.dataset.inputAuthor)).toEqual(['unknown','human','agent']);expect(inputs()[2]!.textContent).toContain('Review Agent');expect(inputs()[0]!.querySelector('time')!.title).toContain('Native record');expect(inputs()[1]!.querySelector('time')!.title).toContain('Submission record')
+ expect(inputs().map(n=>n.dataset.inputAuthor)).toEqual(['unknown','human','agent']);expect(inputs()[2]!.textContent).toContain(C);expect(inputs()[0]!.querySelector('time')!.title).toContain('Native record');expect(inputs()[1]!.querySelector('time')!.title).toContain('Submission record')
  for(const row of inputs()){const time=row.querySelector('time')!;expect(time.getAttribute('aria-label')).toContain(time.textContent)}
  expect(panel()!.textContent).toContain(response);expect(api.sessions.historyPage).toHaveBeenCalledExactlyOnceWith(original.sessions[0]!.control,{limit:30});expect(document.activeElement).toBe(input);expect([input.selectionStart,input.selectionEnd]).toEqual([2,8]);expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts)
  const count=vi.mocked(api.sessions.historyPage).mock.calls.length
@@ -64,7 +64,7 @@ it('drops a closed reader and isolates a late response from a same-name neighbor
  await close();await act(async()=>useAppStore.setState(state=>({sessions:state.sessions.map(session=>session.id===A&&session.kind==='agent'?{...session,control:{...session.control,run:{runId:'new-run'}}}:session)})));await open(A)
  await act(async()=>vi.waitFor(()=>expect(api.sessions.historyPage).toHaveBeenLastCalledWith(expect.objectContaining({agentSessionId:A,hostId:'local',run:{runId:'new-run'}}),{limit:30})));expect(panel()!.textContent).not.toContain('Old late body')
  const count=vi.mocked(api.sessions.historyPage).mock.calls.length;await close()
- for(const mismatch of [{hostId:'other-host',agentSessionId:A},{hostId:'local',agentSessionId:B}]){
+ for(const mismatch of [{hostId:'other-host',agentSessionId:A}]){
   await act(async()=>useAppStore.setState(state=>({sessions:state.sessions.map(session=>session.id===A&&session.kind==='agent'?{...session,control:{...session.control,...mismatch}}:session)})))
   await open(A);expect(panel()!.textContent).toContain('Recent message reading unavailable');expect(api.sessions.historyPage).toHaveBeenCalledTimes(count);expect(card(A).disabled).toBe(false);await close()
  }

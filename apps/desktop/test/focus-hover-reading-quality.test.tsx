@@ -180,7 +180,7 @@ it('reads complete Agent wrappers as body while declarations cannot authenticate
   const invalid = inputRows().find(row => row.dataset.hoverInputId === `native:claude:reading-${recipient}:malformed`)!
   expect(unknown).toBeDefined(); expect(verified).toBeDefined(); expect(invalid).toBeDefined()
   expect(unknown.dataset.inputAuthor).toBe('unknown'); expect(verified.dataset.inputAuthor).toBe('agent')
-  expect(verified.textContent).toContain('Recorded writer')
+  expect(verified.textContent).toContain('reading-writer')
   expect(unknown.querySelector('.md strong')?.textContent).toBe('正文')
   expect(accessibleSource(unknown)).toContain(wrapped)
   expect(unknown.querySelector('time')?.getAttribute('datetime')).toBe(new Date(recordedAt).toISOString())

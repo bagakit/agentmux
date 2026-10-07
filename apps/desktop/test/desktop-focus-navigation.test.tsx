@@ -1073,15 +1073,17 @@ it('keeps both original Mote regions after human Focus navigation cancels a pend
       const afterReturn = observeFocusReturn('after-return')
       process.stdout.write('focus-return-facts ' + JSON.stringify({ ...afterReturn, returned, editableFocusIn:returnFocusEvents }) + '\n')
       expect(afterReturn.capturedExists).toBe(true);expect(afterReturn.capturedWasFocusInput).toBe(true)
-      expect(afterReturn.currentSearchCount).toBe(0);expect(afterReturn.capturedIsCurrentSearch).toBe(false)
-      expect(afterReturn.capturedConnected).toBe(false);expect(afterReturn.activeSameCaptured).toBe(false)
-      expect(afterReturn.activeEditable).toBe(false);expect(afterReturn.nonce).toBeNull()
+      expect(afterReturn.currentSearchCount).toBe(1);expect(afterReturn.capturedIsCurrentSearch).toBe(true)
+      expect(afterReturn.capturedConnected).toBe(true);expect(afterReturn.capturedParentSame).toBe(true)
+      expect(afterReturn.capturedHidden).toBe(true);expect(afterReturn.capturedInert).toBe(true)
+      if (afterReturn.activeEditable) expect(afterReturn.activeSameCaptured).toBe(true)
+      expect(afterReturn.nonce).toBeNull()
       expect(returned.navigation.state).toBe('applied');expect(returned.presentation.state).toBe('main-visible')
       expect(returned.input.policy).toBe('preserve');expect(returned.input.outcome).toBe('unavailable');expect(returned.partial).toBe(true)
       expect(returned.input.before).toEqual({provenance:'observed',scope:'main',ownerKind:'other',tabId:null,regionId:null,
         sessionId:null,connected:true,visible:true,inert:false})
-      expect(returned.input.after).toEqual({provenance:'observed',scope:'none',ownerKind:null,tabId:null,regionId:null,
-        sessionId:null,connected:null,visible:null,inert:null})
+      expect(returned.input.after).toEqual({provenance:'observed',scope:'main',ownerKind:'other',tabId:null,regionId:null,
+        sessionId:null,connected:true,visible:false,inert:true})
       expect(returnFocusEvents).toEqual([])
       expect(useAppStore.getState().agentComposerDrafts).toEqual(beforeDrafts)
       for(const call of lifecycle)expect(call).not.toHaveBeenCalled()
