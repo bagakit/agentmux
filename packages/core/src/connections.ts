@@ -16,3 +16,6 @@ export * from './connection-enrollment-codec.js'
 
 export type * from './connection-profile-contract.js'
 export * from './connection-profile-codec.js'
+
+export type * from './connection-service-contract.js'
+export * from './connection-service-codec.js'

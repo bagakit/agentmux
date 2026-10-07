@@ -1,3 +1,4 @@
+import { isConnectionServiceMethod, parseConnectionServiceParams } from './connection-service-codec.js'
 import { isConnectionProfileMethod, parseConnectionProfileParams } from './connection-profile-codec.js'
 import { isConnectionEnrollmentMethod, parseConnectionEnrollmentParams } from './connection-enrollment-codec.js'
 import { isConnectionDeliveryMethod, parseConnectionDeliveryParams } from './connection-delivery-codec.js'
@@ -401,6 +402,14 @@ export class AgentMuxRpcService {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       const owner = this.ports.connections
       const administration = { actor: { kind: context.principal.kind as 'user' | 'device', id: context.principal.id }, assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.() } }
+      if (isConnectionServiceMethod(method)) {
+        const service = owner.service
+        if (!service) throw new AgentMuxError('Connector service policy is unavailable on this Host. Existing connection management and Agents remain available.', 'CONTROL_UNAVAILABLE')
+        const result = method === 'connection.service.get' ? await service.get()
+          : method === 'connection.service.configure' ? await service.configure(parseConnectionServiceParams(method, params))
+          : await service.inspect(parseConnectionServiceParams(method, params))
+        return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
+      }
       if (isConnectionProfileMethod(method)) {
         const profile = owner.profile
         if (!profile) throw new AgentMuxError('Profile operations are unavailable on this Host. Existing connections remain available.', 'CONTROL_UNAVAILABLE')

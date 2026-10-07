@@ -71,6 +71,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     const binding = this.readExact(bindingId, revision), current = this.readCurrent(bindingId)
     const result = (reason: NonNullable<RoomPublicationAuthority['reason']>): RoomPublicationAuthority => ({ binding, authorized: false, reason })
     if (!binding || !current) return result('missing')
+    if (!this.options.connections.readService().enabled) return result('service-disabled')
     if (current.revision !== revision) return result('binding-revised')
     if (binding.state !== 'active') return result('paused')
     const connection = this.options.connections.readConfiguration(binding.connectionId)

@@ -60,6 +60,11 @@ export async function createDesktopConnections(options: { directory: string; enc
     get ingress() { return live?.ingress ?? null },
     get database() { return live?.database ?? null },
     connections: {
+      service: {
+        get: async () => (await ensure()).connections.service.get(),
+        configure: async input => { const owner = await ensure(); const result = await owner.connections.service.configure(input); owner.receivers?.refresh(); owner.publication?.refresh(); return result },
+        inspect: async input => (await ensure()).connections.service.inspect(input)
+      },
       profile: {
         get: async (input, context) => (await ensure()).connections.profile!.get(input, context),
         sync: async (input, context) => (await ensure()).connections.profile!.sync(input, context),
