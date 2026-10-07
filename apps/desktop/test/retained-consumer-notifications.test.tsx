@@ -56,8 +56,9 @@ for (const count of [1, 32, 100]) it(`production mounted ${count} retained Pane/
     agentComposerDrafts: Object.fromEntries(ids.map(id => [id, `Draft ${id}`])),
     viewModes: Object.fromEntries(ids.map(id => [id, 'terminal' as const])), tabs: { [browserTab.id]: browserTab },
     timelines: {}, recoveryCandidates: [], pendingAgentLaunches: {}, scratchTopicSnapshots: {} })
-  const scene = (reveal: boolean) => <>{ids.map((id, n) => <SessionPane key={id} sessionId={id} surfaceKind="agent"
-    interactiveResize={false} visible={reveal && n === 0} linkOrigin={{ workspaceId: 'workspace' }} />)}</>
+  const scene = (reveal: boolean | 'visited') => <>{ids.map((id, n) => <SessionPane key={id} sessionId={id} surfaceKind="agent"
+    interactiveResize={false} visible={reveal === 'visited' || reveal && n === 0} linkOrigin={{ workspaceId: 'workspace' }} />)}</>
+  await dom.render(scene('visited'))
   await dom.render(scene(false))
   const editors = [...dom.container.querySelectorAll<HTMLElement>('.ProseMirror')]
   expect(editors).toHaveLength(count)
@@ -248,17 +249,20 @@ it('direct production Pane retains Activity body, reading Range and original edi
   expect(controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0])
 })
 
-it('hidden Composer still refreshes shared service and configuration facts without closing healthy input', async () => {
+it('a visited hidden Composer still refreshes its service and shared configuration facts without closing healthy input', async () => {
   const session = composerSession('shared-own')
   useAppStore.setState({ sessions: [session], error: null, lastError: null, errorNoticeContext: null,
     agentComposerDrafts: { [session.id]: 'Original editable draft' }, lastActiveFileByWorkspace: { workspace: _hygiene_fixturePath("repo/related.ts") } })
-  await dom.render(<AgentSessionComposer sessionId={session.id} visible={false} />)
+  await dom.render(<AgentSessionComposer sessionId={session.id} visible />)
   const editor = dom.container.querySelector('.ProseMirror')
+  expect(editor).not.toBeNull()
+  await dom.render(<AgentSessionComposer sessionId={session.id} visible={false} />)
   const notices = () => dom.container.querySelector('button[aria-label^="Mailbox:"]')?.getAttribute('aria-label')
-  expect(notices()).toContain('Notices 0 need attention')
-  await act(async () => useAppStore.setState({ error: 'Controlled recovery observation failed',
-    errorNoticeContext: { kind: 'indeterminate', lifecycle: { step: 'resume', subject: session.control, lastProcessState: 'running' } } }))
   expect(notices()).toContain('Notices 1 need attention')
+  await act(async () => useAppStore.setState({ sessions: [{ ...session, timelineObservation: {
+    run: session.control.run, code: 'HISTORY_READ_FAILED', message: 'Controlled history observation failed'
+  } }] }))
+  expect(notices()).toContain('Notices 2 need attention')
   expect(dom.container.querySelector('.ProseMirror')).toBe(editor)
   expect(editor?.getAttribute('contenteditable')).toBe('true')
   expect(dom.draft(session.id)).toBe('Original editable draft')

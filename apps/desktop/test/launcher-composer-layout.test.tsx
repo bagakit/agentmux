@@ -118,6 +118,7 @@ describe('D2: 启动页 message tool 整个可见框都可编辑', () => {
 
   it('打字能落进草稿——输入不是死的（JS 侧回归护栏）', async () => {
     await mountLauncher()
+    await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible />)
     expect(dom.draft('region')).toBe('')
     // 经真实 TipTap 编辑器写入内容，走 onUpdate → onValueChange → launcherPromptBinding.set。
     await act(async () => { editor().commands.insertContent('查一下登录为什么 500') })
