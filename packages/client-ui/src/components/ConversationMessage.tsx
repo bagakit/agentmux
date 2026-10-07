@@ -172,11 +172,12 @@ export function ConversationMessage({
   const [systemContextOpen, setSystemContextOpen] = useState(false)
   const systemContentId = useId()
   const agentReference = conversationAgentReference(recordedSpeaker, prefix)
-  const described = agentReference ? describeSpeaker?.(agentReference.speaker) : undefined
+  const recordedUnknown = recordedIdentity && recordedSpeaker?.role === 'unknown'
+  const described = agentReference && !recordedUnknown ? describeSpeaker?.(agentReference.speaker) : undefined
   const referenceName = described?.name && described.name !== agentReference?.speaker.id ? described.name : undefined
   const senderName = referenceName ?? (agentReference?.declared ? prefix?.packet?.name : name && name !== agentReference?.speaker.id ? name : undefined) ?? 'Agent'
-  const avatarSpeaker = agentReference?.speaker ?? (isDeclaredSender ? recordedSpeaker : speaker)
-  const displayProvider = agentReference
+  const avatarSpeaker = recordedUnknown ? recordedSpeaker : agentReference?.speaker ?? (isDeclaredSender ? recordedSpeaker : speaker)
+  const displayProvider = recordedUnknown ? undefined : agentReference
     ? described?.providerId ?? (!agentReference.declared && agentReference.speaker.id === conversationSessionId ? providerId : undefined)
     : providerId
   const displayName = recordedSpeaker?.role === 'unknown'
@@ -321,7 +322,7 @@ export function ConversationMessage({
       data-message-bubble={messagePhase !== 'progress' && !compact && !isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human' || speaker?.role === 'external') ? 'true' : undefined}
     >
       <span className="log-turn__node" aria-hidden="true">
-        {avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12)}
+        {avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12)}
       </span>
       <div className="log-turn__head">
         <div className="log-turn__title">
@@ -333,7 +334,7 @@ export function ConversationMessage({
             <span className="log-turn__system-title">{recordTitle || '系统记录'}</span>
             {systemSummary ? <span className="log-turn__system-summary">{systemSummary}</span> : null}
           </button> : <span className="log-turn__sender">
-            <span className="log-turn__who">{agentReference ? senderName : isDeclaredSender ? prefix.packet?.name ?? prefix.sourceLabel : displayName}</span>
+            <span className="log-turn__who">{recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.packet?.name ?? prefix.sourceLabel : displayName}</span>
             {agentReference ? <span className="log-turn__sender-id" data-copy-state={idCopyState}>
               <code>{agentReference.speaker.id}</code>
               <button type="button" className="log-turn__id-copy" title={idCopyState === 'copied' ? 'Agent ID copied' : idCopyState === 'failed' ? 'Copy Agent ID failed; retry' : 'Copy Agent ID'}

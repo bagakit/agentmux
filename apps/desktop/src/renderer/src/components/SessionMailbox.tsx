@@ -19,7 +19,7 @@ import { MailboxEmpty, MailboxRecordRow, MailboxTime, MailboxSourceNotice as Sou
 import { MailboxCollaboration } from './MailboxCollaboration'
 import { ConversationMessage, type ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
 import type { ConversationHistoryResourceReader } from '@agentmux/client-ui/components/ConversationResourceImage'
-import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
+import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { speakerOf } from '../lib/conversation-speaker'
 import type { ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import type { RevealMailboxMessage } from '../lib/mailbox-message-navigation'
@@ -80,16 +80,28 @@ function MessageHistory({ mailboxOrigin, items, incoming, selectedKey, onOpen, o
   renderNavigation: (item: MailboxDisplayItem) => ReactNode
 }) {
   // Only the current reading page mounts. Rows read bounded prefixes, never full Markdown.
-  const sessions = useAppStore(state => state.sessions)
-  const names = useAppStore(state => state.agentNames)
   const recent = useMemo(() => [...items].sort((a, b) => latestFirst(
     a.message.recordedAt, b.message.recordedAt)), [items])
-  const authorLabel = (item: MailboxDisplayItem) => {
-    const author = item.message.author.kind === 'agent' ? item.message.author.agentSessionId : undefined
-    return author ? reading?.describeSpeaker?.({ role: 'agent', id: author }).name || names?.[author] || sessions.find(s => s.id === author)?.label || `Agent ${author.slice(0, 8)}`
-      : item.message.author.kind === 'external' ? `${item.message.author.actor.userId} · ${item.message.author.actor.application.domain}`
-      : item.message.author.kind === 'human' ? 'Human' : 'Author unknown'
+  const identities = useMemo(() => {
+    const result = new Map<string, { speaker: ConversationSpeaker; name: string; avatar: ReactNode }>()
+    for (const { message } of recent) {
+      const speaker = speakerOf(message) as ConversationSpeaker
+      const key = `${speaker.role}:${speaker.id}`
+      if (result.has(key)) continue
+      const described = speaker.role === 'agent' ? reading?.describeSpeaker?.(speaker, 18) : undefined
+      const name = described?.name || (message.author.kind === 'agent' ? `Agent ${message.author.agentSessionId.slice(0, 8)}`
+        : message.author.kind === 'external' ? `${message.author.actor.userId} · ${message.author.actor.application.domain}`
+        : message.author.kind === 'human' ? 'Human' : 'Author unknown')
+      result.set(key, { speaker, name, avatar: described?.avatar ?? <ConversationMessageAvatar speaker={speaker} name={name}
+        size={18} providerId={described?.providerId} project={described?.project} /> })
+    }
+    return result
+  }, [recent, reading?.describeSpeaker])
+  const identity = (item: MailboxDisplayItem) => {
+    const speaker = speakerOf(item.message) as ConversationSpeaker
+    return identities.get(`${speaker.role}:${speaker.id}`)!
   }
+  const authorLabel = (item: MailboxDisplayItem) => identity(item).name
   const time = (item: MailboxDisplayItem) => item.message.recordedAt
   const state = (item: MailboxDisplayItem) => item.message.deliveryStatus
   const selected = selectedKey ? recent.find(item => messageKey(item) === selectedKey) : undefined
@@ -118,8 +130,7 @@ function MessageHistory({ mailboxOrigin, items, incoming, selectedKey, onOpen, o
   </article>}</MailboxLocationContext>
   return recent.length ? <ol className="composer-mailbox__messages" aria-label={incoming ? 'Recent Agent messages' : 'Recent outgoing messages'}>
     {recent.map(item => <li key={messageKey(item)}><MailboxRecordRow recordKey={messageKey(item)} label={authorLabel(item)} text={item.message.content}
-      avatar={<ConversationSpeakerAvatar speaker={speakerOf(item.message) as ConversationSpeaker} name={authorLabel(item)} size={18}
-        {...(reading?.describeSpeaker?.(speakerOf(item.message) as ConversationSpeaker).providerId ? { providerId: reading.describeSpeaker(speakerOf(item.message) as ConversationSpeaker).providerId! } : {})} />}
+      avatar={identity(item).avatar}
       metadata={<>{time(item) === undefined ? null : <MailboxTime value={time(item)} />}
         {state(item) !== 'complete' && !(item.message.source.kind === 'native') ? <span className="composer-mailbox__risk">Delivery not confirmed</span> : null}</>}
       onOpen={onOpen} /><div className="composer-mailbox__record-actions">{renderNavigation(item)}</div></li>)}
