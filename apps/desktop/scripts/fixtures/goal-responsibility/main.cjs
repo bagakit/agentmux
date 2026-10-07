@@ -137,7 +137,12 @@ app.whenReady().then(async () => {
       assert.equal(restored.snapshotId, previous.final.snapshotId)
       assert.deepEqual(preserved(restored), preserved(previous.final), 'The second process must retain original layout, drafts and Session/Run identities.')
       assert.deepEqual(restored.goal.patrols, previous.final.goal.patrols, 'The second process must read original patrol feedback.')
-      assert.deepEqual(restored.calls, previous.final.calls, 'Relaunch cannot repeat any saved patrol input.')
+      assert.deepEqual(restored.calls.slice(0, previous.final.calls.length), previous.final.calls, 'Relaunch must retain the exact original operation history.')
+      const readOnlyRefreshes = restored.calls.slice(previous.final.calls.length)
+      for (const call of readOnlyRefreshes)
+        assert.deepEqual(call, { kind: 'recorded-request', method: 'goal.delegations', params: { goalId: restored.goal.id } }, 'Relaunch may only append reads of the exact original Goal delegation.')
+      assert.deepEqual(restored.calls.filter(call => call.method === 'goal.patrol'), previous.final.calls.filter(call => call.method === 'goal.patrol'), 'Relaunch cannot repeat any saved patrol input.')
+      result.restoreReadOnlyRefreshes = readOnlyRefreshes
       await openDetail()
       await dimensions(1280, 'light'); await capture('relaunch-1280-light', 1280, 'light')
       await dimensions(620, 'dark'); await capture('relaunch-620-dark', 620, 'dark')
