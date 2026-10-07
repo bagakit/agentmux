@@ -22,6 +22,8 @@ pnpm icons:build
 node apps/desktop/scripts/icon-review/build.mjs --out .local/icon-review/site
 ```
 
+静态浏览器构建显式固定生产 `NODE_ENV`，让 React 的 JSX runtime 不依赖 Node 全局变量；不在页面注入 `process`。发布前执行真实产物的无 Node 启动回归，并在发布地址实际核对目录就绪和交互，资源请求成功不能替代页面启动。
+
 构建消费共享 `getSemanticIconCatalog`，页面使用 `createSemanticIconElement`、共享 sprite、根主题 runtime 和原主题文件 schema。生成文件留本机，用 Pageville 原 `agentmux-icon-matrix` 页面身份发布新版本。
 
 可选 `--context <先前 catalog.json>` 只保留同语义 ID 的中文审阅说明；图形、默认映射、目录与当前引用重新取自源码。静态引用是审阅线索，不证明某一 Run 状态或全部动态消费。
