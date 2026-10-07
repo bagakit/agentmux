@@ -12,9 +12,9 @@ export const correlationParent = (source: 'user' | 'protocol' | 'paste' = 'user'
 export const flushInput = async () => { for (let i = 0; i < 80; i++) await Promise.resolve() }
 export function inputDeferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
 /** Actual SDK, Hosted service/client and value codec; only native I/O and transport ports are controlled. */
-export async function inputCorrelationCore() {
+export async function inputCorrelationCore(providerId: 'codex' | 'traex' = 'codex') {
   const store = new AgentMuxMemoryAgentSessionStore()
-  await store.compareAndSwap(null, { kind: 'agent', agentSessionId: 'private-agent', providerId: 'codex', executorId: 'private',
+  await store.compareAndSwap(null, { kind: 'agent', agentSessionId: 'private-agent', providerId, executorId: 'private',
     hostId: 'local', workspacePath: fixturePath("private/fixture"), run: { runId: 'original' }, retiredRuns: [],
     hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token', createdAt: 1, updatedAt: 1 })
   const core = new AgentMuxClient({ store }), inner = core as any
