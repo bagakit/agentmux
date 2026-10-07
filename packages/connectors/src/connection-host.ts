@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { ConnectionEnrollmentHost } from './connection-enrollment.js'
 import { createRoomDiscovery } from './room-discovery.js'
 import { AgentMuxError } from '@agentmux/core'
 import { parseConnectionConfig, parseConnectionObservation, parseConnectionParams, parseConnectionRecord, type ConnectionConfig, type ConnectionConfigureInput, type ConnectionInspectInput, type ConnectionInspectResult, type ConnectionObservation, type ConnectionOperation, type ConnectionPort, type ConnectionRecord } from '@agentmux/core/connections'
@@ -15,6 +16,7 @@ export interface WritableSecretPort extends SecretPort {
 }
 export interface ConnectionAdapter {
   readonly adapterId: string
+  readonly enrollment?: import('./connection-enrollment-adapter.js').ConnectionEnrollmentAdapter
   readonly publication?: import('./publication-adapter.js').PublicationAdapter
   readonly rooms?: import('./room-provisioning-adapter.js').RoomProvisioningAdapter
   readonly roomDiscovery?: import('./room-discovery-adapter.js').RoomDiscoveryAdapter
@@ -31,6 +33,7 @@ function unavailable(reason: 'credential-missing' | 'adapter-unavailable' | 'che
 }
 /** Optional original Host owner. Configuration and its operation receipt commit in one SQLite transaction. */
 export class ConnectionHost implements ConnectionPort {
+  enrollment?: import('@agentmux/core/connections').ConnectionEnrollmentPort
   rooms?: import('@agentmux/core/connections').RoomPort
   bindings?: import('@agentmux/core/connections').RoomBindingsPort
   delivery?: import('@agentmux/core/connections').ConnectionDeliveryPort
@@ -40,6 +43,8 @@ export class ConnectionHost implements ConnectionPort {
   private readonly adapters: Map<string, ConnectionAdapter>
   private readonly observations = new Map<string, { revision: number; value: ConnectionObservation }>()
   private readonly closeRoomDiscovery: () => void
+  private enrollmentHost: ConnectionEnrollmentHost | undefined
+  private enrollmentClosed = false
   constructor(private readonly options: ConnectionHostOptions) {
     let ownedDatabase: DatabaseSync | undefined
     try {
@@ -55,6 +60,17 @@ export class ConnectionHost implements ConnectionPort {
     if (this.adapters.size !== (options.adapters?.length ?? 0)) { if (!options.database) this.database.close(); throw new AgentMuxError('Connection adapter IDs must be unique.', 'INVALID_CONNECTION_DATA') }
     const discovery = createRoomDiscovery(this, options.secrets)
     this.rooms = discovery.port; this.closeRoomDiscovery = discovery.close
+    const enrollment = (): ConnectionEnrollmentHost => {
+      if (this.enrollmentClosed) throw new AgentMuxError('The original enrollment owner is closed. Inspect the original operation on its Host.', 'CONNECTION_ENROLLMENT_UNAVAILABLE')
+      if (this.enrollmentHost) return this.enrollmentHost
+      const secrets = options.secrets as Partial<import('./connection-enrollment-adapter.js').EnrollmentSecrets>
+      try {
+        return this.enrollmentHost = new ConnectionEnrollmentHost({ connections: this, ...(typeof secrets.store === 'function' && typeof secrets.inspect === 'function' && typeof secrets.assertAvailable === 'function' ? { secrets: secrets as import('./connection-enrollment-adapter.js').EnrollmentSecrets } : {}) })
+      } catch {
+        throw new AgentMuxError('Application enrollment storage is unavailable. Existing connections remain available; retry this original enrollment after restoring storage access.', 'CONNECTION_ENROLLMENT_UNAVAILABLE')
+      }
+    }
+    this.enrollment = { begin: async (input, context) => enrollment().begin(input, context), advance: async (input, context) => enrollment().advance(input, context), inspect: async input => enrollment().inspect(input), list: async input => enrollment().list(input) }
   }
   private read(connectionId: string, includeReceiver = true): ConnectionRecord | null {
     const row = this.database.prepare('SELECT config_json, revision FROM connection_configuration WHERE connection_id = ?').get(connectionId)
@@ -138,6 +154,7 @@ export class ConnectionHost implements ConnectionPort {
     const config = this.readConfiguration(connectionId)?.config
     return config?.enabled ? this.adapters.get(config.adapterId)?.publication ?? null : null
   }
+  enrollmentAdapters(): ConnectionAdapter[] { return [...this.adapters.values()].filter(a => a.enrollment) }
   registeredAdapter(adapterId: string): ConnectionAdapter | undefined { return this.adapters.get(adapterId) }
   ingressAuthenticators(): import('./durable-ingress.js').IngressAuthenticator[] {
     return [...this.adapters.values()].flatMap(adapter => {
@@ -151,5 +168,5 @@ export class ConnectionHost implements ConnectionPort {
     const config = this.readConfiguration(connectionId)?.config
     return config?.enabled ? this.options.secrets.resolve(config.credentialRef) : null
   }
-  close(): void { this.closeRoomDiscovery(); if (!this.options.database) this.database.close() }
+  close(): void { this.enrollmentClosed = true; this.enrollmentHost?.close(); this.closeRoomDiscovery(); if (!this.options.database) this.database.close() }
 }
