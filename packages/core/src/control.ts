@@ -12,7 +12,7 @@ import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
-import type { AgentMuxBrowserTarget } from './browser-targets.js'
+import type { AgentMuxBrowserMode, AgentMuxBrowserTarget } from './browser-targets.js'
 import type { BrowserDefaultPayload, BrowserDefaultResult } from './browser-default.js'
 export * from './browser-default.js'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './space-control.js'
@@ -139,7 +139,7 @@ export type AgentMuxAgentRegion = AgentMuxRegionBase & {
   executorId: AgentExecutorId
 }
 export type AgentMuxTerminalRegion = AgentMuxRegionBase & { kind: 'terminal'; runId: string }
-export type AgentMuxBrowserRegion = AgentMuxRegionBase & { kind: 'browser'; browserId: string }
+export type AgentMuxBrowserRegion = AgentMuxRegionBase & { kind: 'browser'; browserId: string; mode?: AgentMuxBrowserMode }
 export type AgentMuxFileRegion = AgentMuxRegionBase & { kind: 'file'; path: string }
 export type AgentMuxLauncherRegion = AgentMuxRegionBase & { kind: 'launcher' }
 /** An addressable read-only surface; its domain data belongs to the host client. */
@@ -260,6 +260,8 @@ export type AgentMuxControlOpenTerminalRequest = RequestBase & {
 }
 export type AgentMuxControlOpenBrowserRequest = RequestBase & {
   operation: 'open.browser'; url: string; destination: AgentMuxOpenDestination; caller?: AgentMuxControlCaller
+  /** A new private page gets its own temporary website session; existing pages never switch mode. */
+  mode?: AgentMuxBrowserMode
 }
 export type AgentMuxMessageTarget =
   | AgentMuxSelfAnchor

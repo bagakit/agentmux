@@ -329,14 +329,14 @@ export function BrowserProfilesPanel({
           {browsers.map((browser) => (
             <label key={browser.browserId}>
               <span><strong>{browser.title || 'New Browser'}</strong><small>{browser.url}</small></span>
-              <select
+              {browser.profileId === null ? <span>Private session</span> : <select
                 aria-label={`Profile for ${browser.title || browser.url}`}
                 value={browser.profileId}
                 disabled={profiles === null || busy !== null}
                 onChange={(event) => void switchProfile(browser.browserId, event.target.value)}
               >
                 {profiles?.map((profile) => <option key={profile.id} value={profile.id}>{profile.label}</option>)}
-              </select>
+              </select>}
             </label>
           ))}
         </div>

@@ -1,8 +1,12 @@
+export type AgentMuxBrowserMode = 'normal' | 'private'
+
 /** One addressable page, with its actual transport capabilities. No host UI or profile object. */
 export type AgentMuxBrowserTarget = {
   id: string
   workspaceId: string | null
   source: 'embedded' | 'external'
+  /** Only present when the original page owner knows its storage mode. */
+  mode?: AgentMuxBrowserMode
   status: 'ready' | 'disconnected' | 'revoked' | 'closed' | 'unavailable'
   url: string
   title: string

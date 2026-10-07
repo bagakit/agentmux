@@ -1263,10 +1263,11 @@ export const CONTROL_RESPONSE_CHANNEL = 'control:response'
 
 export type BrowserSnapshot = {
   id: string
+  mode: import('@agentmux/core').AgentMuxBrowserMode
   /** Current document artwork reported by Chromium, fetched through this original Profile session; transient. */
   faviconDataUrl?: string | undefined
   navigationId: string
-  profileId: string
+  profileId: string | null
   url: string
   title: string
   loading: boolean
@@ -1915,7 +1916,7 @@ export type AgentMuxDesktopApi = {
     /** Forget only the answer displayed on this row; a newer answer is a conflict. */
     forgetAppLinkScheme(scheme: string, expected: AppLinkSchemeChoice): Promise<void>
     /** Ensure this Browser identity: existing owners keep their actual URL/Profile; absent owners open url. */
-    create(id: string, url: string, workspaceId: string | null, rememberedProfileId?: string): Promise<BrowserSnapshot>
+    create(id: string, url: string, workspaceId: string | null, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode): Promise<BrowserSnapshot>
     navigate(id: string, url: string): Promise<BrowserSnapshot>
     back(id: string): Promise<BrowserSnapshot>
     forward(id: string): Promise<BrowserSnapshot>
@@ -2016,7 +2017,8 @@ export type AgentMuxDesktopApi = {
     /** Rebuild a previously released native page from the retained Region projection. */
     restore(id: string, input: {
       workspaceId: string | null
-      profileId: string
+      profileId: string | null
+      mode?: import('@agentmux/core').AgentMuxBrowserMode
       viewport: BrowserViewport
     }): Promise<BrowserSnapshot>
     close(id: string): Promise<void>

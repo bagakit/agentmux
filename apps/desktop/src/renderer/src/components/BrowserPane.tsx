@@ -56,11 +56,11 @@ import {
 } from '../lib/browser-bounds-sync'
 import { observeBrowserStageGeometry } from '../lib/browser-stage-geometry'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
+import type { BrowserWorkbenchSurface, WorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { BrowserPresentationStage, useBrowserPresentationCapture, type WorkbenchBrowserPresentation } from './BrowserPresentationStage'
 import { WorkbenchPresentationContext, useWorkbenchBrowserPresentation, type WorkbenchViewTarget } from '../lib/workbench-presentation'
-import { sameWorkbenchProjectionSelection, type WorkbenchProjection } from '../lib/workbench-projection'
+import { sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { spatialCatalog, zoneContext } from '../lib/space-agent-control'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
@@ -162,6 +162,7 @@ function useBrowserOwnerConnection({ tab, released = false, onControlConfirmatio
     void api.browser.restore(tab.browserId, {
       workspaceId: tab.workspaceId,
       profileId: tab.profileId,
+      mode: tab.mode,
       viewport: tab.viewport
     }).then((browser) => {
       if (browser.id !== tab.browserId) throw new Error('The Browser restore returned a different page identity. The original page and address are kept; retry its connection.')
@@ -304,15 +305,16 @@ function BrowserPaneContent({
   const [menuOpen, setMenuOpen] = useState(false)
   const [managementOpen, setManagementOpen] = useState(false)
   const [managementVisited, setManagementVisited] = useState(false)
-  const research = useRef<{ url: string; preparation: SurveyBrowserPreparation | null } | null>(null)
+  const research = useRef<{ url: string; mode: BrowserSnapshot['mode']; preparation: SurveyBrowserPreparation | null } | null>(null)
+  const privateCreation = useRef<{ source: WorkbenchProjectionSelection; reference: WorkbenchProjectionSelection; zoneId: string; launcher: WorkbenchSurface } | null>(null)
   async function startResearch(): Promise<void> {
     if (busy) return
     const before = useAppStore.getState()
-    if (!research.current) research.current = { url: tab.url, preparation: null }
+    if (!research.current) research.current = { url: tab.url, mode: tab.mode, preparation: null }
     const pending = research.current
     setBusy(true); setAddressError(null)
     try {
-      const created = await before.createSurveyBrowser({ workspaceId: tab.workspaceId, url: pending.url,
+      const created = await before.createSurveyBrowser({ workspaceId: tab.workspaceId, url: pending.url, mode: pending.mode,
         preparation: pending.preparation, onPrepared(value) { pending.preparation = value } })
       research.current = null
       const current = useAppStore.getState()
@@ -329,6 +331,50 @@ function BrowserPaneContent({
       }
     } catch (cause) { setAddressError(`Research could not open: ${presentError(cause)}. The original page and research target are kept; retry here.`) }
     finally { setBusy(false) }
+  }
+  async function newPrivatePage(target?: WorkbenchViewTarget): Promise<void> {
+    const reference = target?.reference ?? primaryPresentation.reference
+    if (!reference) throw new Error('The exact Browser display is unconfirmed. Your current page is kept; reopen its original view to create a private page.')
+    const before = useAppStore.getState(), origin = before.tabs[reference.tabId]
+    const source = origin?.regions[reference.regionId]
+    if (!origin || source?.kind !== 'browser' || source.browserId !== tab.browserId) throw new Error('The original Browser display changed. Your page is kept.')
+    const workspace = before.config?.workspaces.find(workspace => workspace.id === tab.workspaceId)
+    const topics = scratchTopicsForWorkspace(before.scratchTopicSnapshots, workspace) ?? []
+    const zoneId = privateCreation.current?.zoneId ?? spatialCatalog(before, topics).tabs.find(item => item.tabId === origin.id)?.zoneId
+    if (!zoneId) throw new Error('The original Browser Zone is unconfirmed. Your page is kept; recover that same display before creating another page.')
+    if (!privateCreation.current) {
+      const tabId = before.openLauncher({ workspaceId: tab.workspaceId, displayWorkspaceId: reference.displayWorkspaceId,
+        tabGroupId: reference.groupId, zoneId, reveal: false })
+      const pending = tabId ? useAppStore.getState().tabs[tabId] : undefined
+      if (!pending) throw new Error('The exact display Group is still restoring. Existing pages are kept.')
+      const regionId = pending.layout.activeRegionId
+      privateCreation.current = { source: reference, reference: { ...reference, tabId: pending.id, regionId }, zoneId, launcher: pending.regions[regionId]! }
+    }
+    const prepared = privateCreation.current, next = prepared.reference
+    const pending = useAppStore.getState().tabs[next.tabId]?.regions[next.regionId]
+    if (!sameWorkbenchProjectionSelection(prepared.source, reference) || !pending ||
+      pending !== prepared.launcher && !(pending.kind === 'browser' && pending.browserId === next.regionId && pending.mode === 'private')) {
+      throw new Error('The original private page preparation changed. Its exact reference and your page are kept.')
+    }
+    if (pending === prepared.launcher) await before.createBrowser(next.groupId, { tabId: next.tabId, regionId: next.regionId }, 'about:blank', undefined,
+      tab.workspaceId, next.displayWorkspaceId, 'private')
+    const confirmed = useAppStore.getState().tabs[next.tabId]?.regions[next.regionId]
+    if (confirmed?.kind !== 'browser' || confirmed.browserId !== next.regionId || confirmed.mode !== 'private') {
+      throw new Error('The original private Browser has not confirmed attachment. Its preparation is kept; recover that same page.')
+    }
+    privateCreation.current = null
+    const current = useAppStore.getState()
+    if (current.mainSurface !== before.mainSurface || current.workbenchSpaceSelection !== before.workbenchSpaceSelection || current.surveyZoneSelection !== before.surveyZoneSelection) return
+    if ((target?.surface ?? primaryPresentation.surface) === 'survey') {
+      current.setSurveyZoneSelection({ zoneId, selection: [next], active: next })
+    } else current.selectMainRegion(next, before.workbenchSpaceSelection)
+  }
+  async function startPrivatePage(target?: WorkbenchViewTarget): Promise<void> {
+    await runCommand(async () => {
+      setAddressError(null)
+      try { await newPrivatePage(target) }
+      catch (cause) { setAddressError(`Private page could not open: ${presentError(cause)}. The original page and exact preparation are kept; retry here.`) }
+    })
   }
   const screenshotEditor = useRef<ScreenshotEditorHandle>(null)
   const [screenshotBusy, setScreenshotBusy] = useState(false)
@@ -1008,7 +1054,7 @@ function BrowserPaneContent({
             <strong>Page could not be loaded</strong>
             <span>{tab.error}</span>
             <button className="small-button" type="button" onClick={() => void run(async () => {
-              const browser = await api.browser.create(tab.browserId, tab.url, tab.workspaceId, tab.profileId || undefined)
+              const browser = await api.browser.create(tab.browserId, tab.url, tab.workspaceId, tab.profileId || undefined, tab.mode)
               return browser.error ? await api.browser.reload(tab.browserId) : browser
             })}><ThemeActionRefreshIcon size={12} /> Retry</button>
           </div>
@@ -1023,7 +1069,8 @@ function BrowserPaneContent({
                 onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }} onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
               <button type="submit" aria-label="Search or open page" disabled={busy || !address.trim()}><ThemeActionOpenExternalIcon size={16} /></button>
             </form>
-          </BrowserStartPage> : <div className="browser-empty"><ThemeObjectBrowserIcon size={25} /><strong>New browser tab</strong><span>Search or enter an address above to begin.</span></div>
+            {tab.mode === 'private' ? <p className="browser-private-notice" role="status"><strong>{tab.privateSessionEnded ? 'Temporary data has ended' : 'Private browsing'}</strong><span>Website data stays in this session and ends when you close this page. It does not hide your network identity. Explicit saves, downloads and Agent operation records are retained normally.</span></p> : null}
+          </BrowserStartPage> : <div className="browser-empty"><ThemeObjectBrowserIcon size={25} /><strong>{tab.mode === 'private' ? tab.privateSessionEnded ? 'Temporary data has ended' : 'Private browsing' : 'New browser tab'}</strong><span>{tab.mode === 'private' ? 'This is a new private session. Website data ends when you close it. Your network identity is not hidden; explicit saves, downloads and Agent operation records are retained normally.' : 'Search or enter an address above to begin.'}</span></div>
         ) : __AGENTMUX_WEB_PREVIEW__ ? (
           <div className="browser-preview"><ThemeObjectBrowserIcon size={25} /><strong>{tab.title || tab.url}</strong><span>{tab.url}</span><small>Web Preview represents the Main-owned WebContentsView here.</small></div>
         ) : null}
@@ -1037,6 +1084,7 @@ function BrowserPaneContent({
           addressInput.current?.submit()
         }}
       >
+        {tab.mode === 'private' ? <span className="browser-private-badge" aria-label="Private session" title="Temporary website data ends when this page closes. Network identity is not hidden; explicit saves, downloads and Agent operation records follow their normal retention.">Private</span> : null}
         <button
           type="button"
           aria-label="Open in external browser"
@@ -1162,6 +1210,9 @@ function BrowserPaneContent({
               <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5} collisionPadding={8}>
                 {regionSplitItems ? <>{regionSplitItems}<DropdownMenu.Separator className="browser-menu__separator" /></> : null}
                 <DropdownMenu.Label className="browser-menu__label">Page</DropdownMenu.Label>
+                <DropdownMenu.Item className="browser-menu__item" aria-label="New private page" disabled={busy} onSelect={() => void startPrivatePage(presentation?.target)}>
+                  <ThemeObjectBrowserIcon size={12} /><span>New private page</span>
+                </DropdownMenu.Item>
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Back" disabled={!tab.canGoBack || busy} onSelect={() => void run(() => api.browser.back(tab.browserId))}>
                   <ThemeNavigationBackIcon size={12} /><span>Back</span>
                 </DropdownMenu.Item>
@@ -1211,7 +1262,7 @@ function BrowserPaneContent({
         <code title={currentBookmark.path}>{currentBookmark.path}</code>
         <button type="button" className="small-button" disabled={busy} onClick={openSavedBookmark}>Open bookmark</button>
       </p> : null}
-      {addressError ? <p className="browser-address-error" role="alert">{addressError}{research.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startResearch()}>Retry same research</button> : null}</p> : null}
+      {addressError ? <p className="browser-address-error" role="alert">{addressError}{research.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startResearch()}>Retry same research</button> : null}{privateCreation.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startPrivatePage()}>Retry same private page</button> : null}</p> : null}
       {inputHistoryNotice ? <p className="browser-address-error" role="status">{inputHistoryNotice}</p> : null}
       <BrowserOperationWarning activity={browserActivity} />
       {/* 页面与详情共享布局，正常并排，极窄 Pane 沿 SSOT 改为有限高度阅读区。

@@ -1269,7 +1269,8 @@ type AppState = {
     url?: string,
     bookmarkOrigin?: { path: string; binary: boolean },
     requestedWorkspaceId?: string,
-    requestedDisplayWorkspaceId?: string
+    requestedDisplayWorkspaceId?: string,
+    mode?: import('@agentmux/core').AgentMuxBrowserMode
   ): Promise<void>
   openHttpLink(origin: OpenHttpLinkOrigin, url: string, destination: OpenDestination, presentation?: Pick<WorkbenchPresentation, 'surface' | 'onSelectRegion'>): Promise<void>
   /**
@@ -4390,7 +4391,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           browserIndex += 1
           set({ startupProgress: { step: 'browsers', current: browserIndex, total: browserSurfaces.length } })
           try {
-            const browser = await api.browser.create(surface.browserId, surface.url, surface.workspaceId, surface.profileId || undefined)
+            const browser = await api.browser.create(surface.browserId, surface.url, surface.workspaceId, surface.profileId || undefined, surface.mode)
             get().applyBrowserEvent({ type: 'updated', browser })
           } catch (error) {
             // Failure to acquire a native owner is not a user close. Keep the current durable Region
@@ -4954,7 +4955,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                   processState: matched?.processState ?? null }
               }
               case 'browser': return { ...base, kind: surface.kind, browserId: surface.browserId,
-                url: surface.url, title: surface.title, profileId: surface.profileId, navigationId: surface.navigationId,
+                url: surface.url, title: surface.title, profileId: surface.profileId, mode: surface.mode, navigationId: surface.navigationId,
                 error: surface.error, loading: surface.loading }
               case 'file': return { ...base, kind: surface.kind, path: surface.path }
               case 'git': return { ...base, kind: surface.kind, scope: surface.scope, selection: surface.selection }
@@ -5756,7 +5757,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw primary
     }
     try {
-      const browser = await api.browser.create(browserId, request.url, workspace.id)
+      const browser = await api.browser.create(browserId, request.url, workspace.id, undefined, request.mode)
       createdBrowserId = browser.id
       if (browser.id !== browserId) await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Browser owner returned another Browser identity.'))
       if (signal?.aborted) await cleanup(controlCancellation(signal))
@@ -5778,7 +5779,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!attached) await cleanup(controlFailure('CONTROL_OWNER_LOST', 'Control Region owner disappeared during Browser creation.'))
       return {
         operation: request.operation,
-        region: { tabId: plan.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'browser', browserId }
+        region: { tabId: plan.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'browser', browserId, mode: browser.mode }
       }
     } catch (error) {
       rollback(plan.launcher)
@@ -9029,7 +9030,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     void open().then(() => { release(); resolveOpening() }, error => { release(); rejectOpening(error) })
     return flight.promise
   },
-  async createBrowser(tabGroupId, launcher, url = 'about:blank', bookmarkOrigin, requestedWorkspaceId, requestedDisplayWorkspaceId) {
+  async createBrowser(tabGroupId, launcher, url = 'about:blank', bookmarkOrigin, requestedWorkspaceId, requestedDisplayWorkspaceId, mode) {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
     const launcherSurface = launcherTab && launcher
@@ -9067,7 +9068,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get().selectMainRegion({ displayWorkspaceId: displayWorkspaceId!, groupId: tabGroupId, tabId, regionId }, state.workbenchSpaceSelection)
     }
     try {
-      const browser = await api.browser.create(regionId, url, workspaceId)
+      const browser = await api.browser.create(regionId, url, workspaceId, undefined, mode)
       const surface: BrowserWorkbenchSurface = {
         ...browser,
         regionId,

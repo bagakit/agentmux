@@ -1,4 +1,6 @@
 import { NOTE_FILE_EXTENSION } from '../../../shared/note-format'
+import * as Menu from '@radix-ui/react-dropdown-menu'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { recordNotebookChanges, retryNotebookRecoveries, useNotebookLibrary } from '../lib/notebook-library'
 import { surveyExplorationName } from '../lib/survey-exploration-name'
@@ -42,6 +44,7 @@ import { directoryIdentity } from '../../../shared/space-addresses'
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeActionEditNoteIcon = semanticIconComponent('action.edit-note')
 const ThemeFileTextIcon = semanticIconComponent('file.text')
 const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
@@ -244,14 +247,17 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     setError(null)
   }
 
-  async function openBrowser(input = 'about:blank', newItem = false): Promise<void> {
+  const [createMenuOpen, setCreateMenuOpen] = useState(false)
+  useEffect(() => { if (!visible) setCreateMenuOpen(false) }, [visible])
+
+  async function openBrowser(input = 'about:blank', newItem = false, mode?: 'private'): Promise<void> {
     if (opening) return
     const before = useAppStore.getState()
     const startedIntent = intent.current
     setOpening(true); setError(null)
     try {
       const preparation = await before.createSurveyBrowser({ workspaceId: newItem ? SCRATCH_WORKSPACE_ID : workspace?.id ?? SCRATCH_WORKSPACE_ID, url: input,
-        preparation: newItem ? null : failedCreation.current, onPrepared(value) { failedCreation.current = value } })
+        ...(mode === undefined ? {} : { mode }), preparation: newItem ? null : failedCreation.current, onPrepared(value) { failedCreation.current = value } })
       const reference = preparation.reference, current = useAppStore.getState()
       failedCreation.current = null
       setCreationNotice(null)
@@ -406,7 +412,14 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       </aside>
       {locationChoice ? <SurveyPanelChoices mode="button" open visible={visible && !controlsCoverPage} choices={locationChoice.choices} facts={useAppStore.getState()}
         onOpenChange={open => { if (!open) setLocationChoice(null) }} onSelect={reference => locationChoice.kind === 'note' ? newItemNote(locationChoice.zoneId, reference) : newItemAgent(locationChoice.zoneId, reference)} /> : null}
-      <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New browser" disabled={opening} onClick={() => void openBrowser('about:blank', true)}><ThemeActionCreateBrowserIcon size={16} /><span>New browser</span></button></div>
+      <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New browser" disabled={opening} onClick={() => void openBrowser('about:blank', true)}><ThemeActionCreateBrowserIcon size={16} /><span>New browser</span></button>
+        <Menu.Root modal={false} open={visible && !controlsCoverPage && createMenuOpen} onOpenChange={setCreateMenuOpen}>
+          <Menu.Trigger asChild><button type="button" className="survey-icon-button" aria-label="New browser options" title="New browser options" disabled={opening}><ThemeNavigationDisclosureIcon size={12} /></button></Menu.Trigger>
+          <Menu.Portal container={resolveOverlayContainer()}><Menu.Content className="tab-context-menu" align="start" side="top" sideOffset={4} collisionPadding={8}>
+            <Menu.Item className="tab-context-menu__item" onSelect={() => void openBrowser('about:blank', true, 'private')}><ThemeObjectBrowserIcon size={14} /><span>New private page</span></Menu.Item>
+          </Menu.Content></Menu.Portal>
+        </Menu.Root>
+      </div>
       <div className="survey-item-actions" role="group" aria-label="Current exploration actions">{options}
         {currentBrowser && currentBrowser.url !== 'about:blank' && currentPanel ? <button type="button" className="survey-tab-view" aria-label="Save to Recall" title="Save this finding to Recall" onClick={saveToRecall}>
           <ThemeActionOpenExternalIcon size={14} />{sidebarCollapsed ? null : <span>Save to Recall…</span>}

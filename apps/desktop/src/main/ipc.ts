@@ -581,7 +581,7 @@ export async function registerIpc(args: {
     }
     else throw new Error('Browser input history requires its original Browser or Workspace.')
     workspace(config, scope.workspaceId)
-    browserProfiles.resolvePartition(scope.profileId)
+    if (scope.profileId !== null) browserProfiles.resolvePartition(scope.profileId)
     return scope
   }
   const requireInputHistoryScope = (target: BrowserInputHistoryTarget, expected: BrowserInputHistoryScope): BrowserInputHistoryScope => {
@@ -1726,10 +1726,10 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:stopSharingExternal', event)
     externalBridge.stopSharing(id)
   })
-  handle('browser:create', async (id: string, url: string, workspaceId: unknown, rememberedProfileId?: string) => {
+  handle('browser:create', async (id: string, url: string, workspaceId: unknown, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode) => {
     const verifiedWorkspaceId = verifiedBrowserWorkspace(config.workspaces, workspaceId)
-    await browserProfiles.initialize()
-    return await browsers.create(id, url, verifiedWorkspaceId, rememberedProfileId)
+    if (mode !== 'private') await browserProfiles.initialize()
+    return await browsers.create(id, url, verifiedWorkspaceId, rememberedProfileId, mode)
   })
   handle('browser:navigate', async (id: string, url: string) => await browsers.navigate(id, url))
   handle('browser:back', async (id: string) => await browsers.back(id))
@@ -1765,19 +1765,23 @@ export async function registerIpc(args: {
   })
   handleWithEvent('browser:listInputHistory', async (event, target: BrowserInputHistoryTarget) => {
     requireTrustedSender('browser:listInputHistory', event)
-    return await browserInputHistory.list(resolveInputHistoryScope(target))
+    const scope = resolveInputHistoryScope(target)
+    return scope.profileId === null ? { scope, entries: [] } : await browserInputHistory.list(scope)
   })
   handleWithEvent('browser:recordInputHistory', async (event, target: BrowserInputHistoryTarget, text: string) => {
     requireTrustedSender('browser:recordInputHistory', event)
-    return await browserInputHistory.record(resolveInputHistoryScope(target), text)
+    const scope = resolveInputHistoryScope(target)
+    return scope.profileId === null ? { scope, entries: [], outcome: 'private' } : await browserInputHistory.record(scope, text)
   })
   handleWithEvent('browser:removeInputHistory', async (event, target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope, text: string) => {
     requireTrustedSender('browser:removeInputHistory', event)
-    return await browserInputHistory.remove(requireInputHistoryScope(target, scope), text)
+    const actual = requireInputHistoryScope(target, scope)
+    return actual.profileId === null ? { scope: actual, entries: [] } : await browserInputHistory.remove(actual, text)
   })
   handleWithEvent('browser:clearInputHistory', async (event, target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope) => {
     requireTrustedSender('browser:clearInputHistory', event)
-    return await browserInputHistory.clear(requireInputHistoryScope(target, scope))
+    const actual = requireInputHistoryScope(target, scope)
+    return actual.profileId === null ? { scope: actual, entries: [] } : await browserInputHistory.clear(actual)
   })
   handle('browser:openDevTools', (id: string) => browsers.openDevTools(id))
   handle('browser:setViewport', (id: string, viewport: BrowserViewport) => browsers.setViewport(id, viewport))
@@ -1981,10 +1985,10 @@ export async function registerIpc(args: {
   handle('browser:release', async (id: string) => await browsers.release(id))
   handle('browser:restore', async (
     id: string,
-    input: { workspaceId: unknown; profileId: string; viewport: BrowserViewport }
+    input: { workspaceId: unknown; profileId: string | null; mode?: import('@agentmux/core').AgentMuxBrowserMode; viewport: BrowserViewport }
   ) => {
     const verifiedWorkspaceId = verifiedBrowserWorkspace(config.workspaces, input.workspaceId)
-    await browserProfiles.initialize()
+    if (input.mode !== 'private' && input.profileId !== null) await browserProfiles.initialize()
     return await browsers.restore(id, { ...input, workspaceId: verifiedWorkspaceId })
   })
   handle('browser:close', (id: string) => browsers.close(id))

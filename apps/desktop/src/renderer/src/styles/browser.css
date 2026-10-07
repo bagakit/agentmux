@@ -102,6 +102,9 @@
 .browser-toolbar input { min-width: 0; flex: 1; border: 0; padding: 0; outline: 0; color: var(--text-2); background: transparent; font: var(--fs-meta) "SFMono-Regular", monospace; }
 .browser-toolbar input.ui-input:focus-visible { outline: none; }
 .browser-toolbar__empty-address { flex: 1; min-width: 0; color: var(--text-3); font-size: var(--fs-meta); }
+.browser-private-badge { flex: none; padding: 2px 5px; border-radius: var(--radius-sm); background: var(--wash-2); color: var(--text-2); font-size: var(--fs-meta); }
+.browser-private-notice { display: grid; gap: var(--sp-2); max-width: 460px; margin: var(--sp-3) auto 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.browser-private-notice strong { color: var(--text-2); }
 .browser-address-history { position: fixed; z-index: var(--layer-popover); overflow: auto; padding: var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font: var(--fs-micro)/1.5 var(--font-sans); pointer-events: auto; box-shadow: var(--elev-2); }
 .browser-address-history > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-1) var(--sp-2); color: var(--text-3); }
 .browser-address-history ul { margin: 0; padding: 0; list-style: none; }

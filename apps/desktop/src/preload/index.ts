@@ -594,7 +594,7 @@ const api: AgentMuxPreloadApi = {
       return () => ipcRenderer.off('browser:targetsChanged', wrapped)
     },
     forgetAppLinkScheme: (scheme, expected) => ipcRenderer.invoke('browser:forgetAppLinkScheme', scheme, expected),
-    create: (id: string, url: string, workspaceId: string | null, rememberedProfileId?: string) => ipcRenderer.invoke('browser:create', id, url, workspaceId, rememberedProfileId),
+    create: (id: string, url: string, workspaceId: string | null, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode) => ipcRenderer.invoke('browser:create', id, url, workspaceId, rememberedProfileId, mode),
     navigate: (id: string, url: string) => ipcRenderer.invoke('browser:navigate', id, url),
     back: (id: string) => ipcRenderer.invoke('browser:back', id),
     forward: (id: string) => ipcRenderer.invoke('browser:forward', id),
@@ -659,7 +659,7 @@ const api: AgentMuxPreloadApi = {
       return () => ipcRenderer.off(BROWSER_PRESENTATION_EVENT_CHANNEL, wrapped)
     },
     release: (id: string) => ipcRenderer.invoke('browser:release', id),
-    restore: (id: string, input: { workspaceId: string | null; profileId: string; viewport: BrowserViewport }) =>
+    restore: (id: string, input: { workspaceId: string | null; profileId: string | null; mode?: import('@agentmux/core').AgentMuxBrowserMode; viewport: BrowserViewport }) =>
       ipcRenderer.invoke('browser:restore', id, input),
     close: (id: string) => ipcRenderer.invoke('browser:close', id),
     onEvent(listener: (event: BrowserEvent) => void) {

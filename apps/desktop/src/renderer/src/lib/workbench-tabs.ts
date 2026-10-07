@@ -84,6 +84,8 @@ export type LauncherWorkbenchSurface = {
 }
 
 export type BrowserWorkbenchSurface = BrowserSnapshot & {
+  /** Client recovery notice; no previous private address or website state is retained. */
+  privateSessionEnded?: true
   /** Exact Main unavailable event; transient, cleared by its next confirmed snapshot. */
   nativeOwnerUnavailable?: true
   regionId: string

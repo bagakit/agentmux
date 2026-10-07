@@ -6,6 +6,11 @@ const capabilityExamples = () => (['observe', 'act', 'wait'] as const)
 export const AGENTMUX_BROWSER_TARGET_GUIDE = `First inspect the exact Tab/Region and read its typed Browser id with
 \`amux space inspect --tab TAB\` or \`amux space inspect --region REGION\`.
 Use \`amux browser targets\` to discover original available Browser targets.
+Use \`amux browser open --url URL --private\` with an exact placement to create
+one separate temporary website session. Check its returned mode and target identity.
+Closing ends that session; app restart preserves its Region as an empty private page.
+Private mode does not hide network identity or erase explicit saves, downloads or
+Agent operation records. Existing Browser modes and normal Profiles stay unchanged.
 If the target is absent, unavailable or driving is refused, report that exact result.
 Do not guess another Browser or use GUI input to get around that result.
 Opening a Browser preserves the current Workbench selection and eligible input;

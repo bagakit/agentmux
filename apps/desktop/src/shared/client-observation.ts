@@ -42,7 +42,7 @@ const region = z.discriminatedUnion('kind', [
     selection: z.object({ commitOid: id, parentOid: nullableId }).strict().nullable() }).strict(),
   z.object({ ...regionBase, kind: z.literal('git-diff'), comparison }).strict(),
   z.object({ ...regionBase, kind: z.literal('browser'), browserId: id, url: z.string(), title: z.string(),
-    profileId: z.string(), navigationId: z.string(), error: z.string().nullable(), loading: z.boolean() }).strict()
+    profileId: z.string().nullable(), mode: z.enum(['normal', 'private']).optional(), navigationId: z.string(), error: z.string().nullable(), loading: z.boolean() }).strict()
 ])
 export const desktopWorkbenchObservationSchema = z.object({
   loading: z.boolean(),
