@@ -16,6 +16,11 @@ it('the original Agent menu creates a dedicated group through actual IPC/Core/Ho
   await f.mount(); expect(f.original.create).not.toHaveBeenCalled()
   await f.menu('Create group chat'); await ready('Create group chat')
   expect(f.original.create).not.toHaveBeenCalled(); expect(f.original.addMembers).not.toHaveBeenCalled()
+  const pairing = document.querySelector('[aria-label="Agent and group conversation"]')!
+  expect(pairing.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Original Mote Agent')
+  expect(pairing.querySelector('[data-executor-id]')?.getAttribute('data-executor-id')).toBe(f.session.kind === 'agent' ? f.session.executorId : null)
+  expect(pairing.querySelector('[aria-label="Group name"]')).not.toBeNull()
+  expect(document.querySelector('[aria-label="Group application"]')?.textContent).toContain('Change')
   const invite = [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Invite people (optional)')!
   expect(invite.open).toBe(false)
   expect(document.querySelector('[aria-label="Group name"]')?.closest('details')).toBeNull()
@@ -54,9 +59,11 @@ it('the original Agent menu creates a dedicated group through actual IPC/Core/Ho
 
 it('an unknown original create stays inspect-only across closing, reopening and explicit observation', async () => {
   f.original.create.mockResolvedValue({ kind: 'unknown' })
-  await f.mount(); await f.menu('Create group chat'); await f.button('Create group'); await ready('Creation not confirmed')
+  await f.mount(); await f.menu('Create group chat'); await f.fill('Group name', 'Original unknown group'); await f.button('Create group'); await ready('Creation not confirmed')
   const [original] = Object.values(useAppStore.getState().connectorRoomIntents)
   await f.button('Close'); await f.menu('Create group chat'); await ready('Creation not confirmed')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="Group name"]')?.value).toBe('Original unknown group')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="Group name"]')?.disabled).toBe(true)
   await f.button('Check status'); await ready('Creation not confirmed')
   await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-busy')).toBe('false') })
   // An accidental fresh-create button is exercised, so withdrawal cannot hide behind Core dedup.
