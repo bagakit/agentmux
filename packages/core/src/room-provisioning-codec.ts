@@ -45,7 +45,7 @@ function membership(value: unknown, original: RoomMember[]): RoomMembershipState
   if (p.state !== 'settled' || p.reason !== undefined || !Array.isArray(p.results) || p.results.length !== original.length) fail()
   const results = (p.results as unknown[]).map((entry, index) => {
     const e = object(entry, ['member', 'state']), member = parseConnectionMember(e.member)
-    if (JSON.stringify(member) !== JSON.stringify(original[index]) || !['joined', 'not-applied', 'unknown'].includes(String(e.state))) fail()
+    if (JSON.stringify(member) !== JSON.stringify(original[index]) || typeof e.state !== 'string' || !['joined', 'not-applied', 'unknown'].includes(e.state)) fail()
     return { member, state: e.state as 'joined' | 'not-applied' | 'unknown' }
   })
   return { state: 'settled', attemptId: id(p.attemptId), results }
