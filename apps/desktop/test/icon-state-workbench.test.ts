@@ -47,8 +47,8 @@ it('projects every authored state design into the actual workbench, plays only t
   document.querySelector<HTMLElement>('[data-close="motion-dialog"]')!.click()
   document.querySelector<HTMLElement>('[data-motion-glyph="content-stream"]')!.click()
   const carrier=document.querySelector<HTMLElement>('#authored-demo .semantic-icon-motion')!
-  document.getElementById('pause-motion')!.click();expect(carrier.style.animationPlayState).toBe('paused')
-  document.getElementById('pause-motion')!.click();expect(carrier.style.animationPlayState).toBe('running')
+  document.getElementById('pause-motion')!.click();expect(carrier.style.animationPlayState).toBe('paused');expect(carrier.style.getPropertyValue('--icon-motion-play-state')).toBe('paused')
+  document.getElementById('pause-motion')!.click();expect(carrier.style.animationPlayState).toBe('running');expect(carrier.style.getPropertyValue('--icon-motion-play-state')).toBe('running')
   document.querySelector<HTMLElement>('[data-close="motion-dialog"]')!.click()
   expect(review().exportTheme()).toBe(before)
   expect(review().buildPacket().summary.changed_roles).toBe(0)
