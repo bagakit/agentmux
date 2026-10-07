@@ -109,6 +109,57 @@ describe('local progressive AgentMux module skills', () => {
     expect((await readdir(root, { recursive: true })).sort()).toEqual(originalFiles)
   })
 
+  it('actual compiled Mote skill and PMO manual retain cooperation, memory and delivery duties offline', async () => {
+    const dead = `unix:${join(root, 'never-started.sock')}`
+    // The live trap proves zero connections; the dead address also proves no reachable owner is needed.
+    for (const selectedEndpoint of [endpoint, dead]) {
+      const mote = await run(['--endpoint', selectedEndpoint, 'mote', '--skill'])
+      expect(mote.code, mote.stderr).toBe(0); expect(mote.stderr).toBe('')
+      for (const duty of [
+        'before asking for a persona', 'source, date and evidence links',
+        'save with that revision/CAS and read back', 'source-only withdrawal marker',
+        'existing discussions keep their earlier context', 'authorized secure storage path',
+        'do not persist the secret', 'amux mote playbook pmo', 'amux goal --skill'
+      ]) expect(mote.stdout, duty).toContain(duty)
+
+      const pmo = await run(['--endpoint', selectedEndpoint, 'mote', 'playbook', 'pmo'])
+      expect(pmo.code, pmo.stderr).toBe(0); expect(pmo.stderr).toBe('')
+      const result = JSON.parse(pmo.stdout)
+      expect(result).toMatchObject({ ok: true, operation: 'mote.playbook.pmo', result: { readOnly: true, format: 'markdown' } })
+      const manual = result.result.document as string
+      for (const duty of [
+        'Keep that original ID', 'Registration does not\ncreate a directory or instructions',
+        'initial-instruction path', 'bind the actual Executor and Session',
+        'Implement personally only when the user explicitly asks',
+        'collect\nthe original delegated reports', 'manual names, manual clears, launch names',
+        'do not complete\nthe business Goal', 'amux goal --skill'
+      ]) expect(manual, duty).toContain(duty)
+      expect(manual).toContain(goalRoleGuidance({ role: 'manager' }))
+      expect(manual).not.toContain('## Executor responsibilities')
+    }
+    expect(connections).toBe(0)
+    expect((await readdir(root, { recursive: true })).sort()).toEqual(originalFiles)
+  })
+
+  it('PMO operational references use the actual registered command syntax', () => {
+    const manual = agentMuxPmoPlaybook().document
+    const lines = manual.split('\n').filter(line => line.startsWith('amux '))
+    expect(lines.length).toBeGreaterThan(0)
+    const referenced = new Set<string>()
+    for (const line of lines) {
+      const command = AGENTMUX_CLI_COMMANDS.find(item => {
+        const prefix = 'amux ' + item.method.replaceAll('.', ' ')
+        return line === prefix || line.startsWith(prefix + ' ')
+      })
+      expect(command, line).toBeDefined()
+      expect(line).toBe(`amux ${command!.method.replaceAll('.', ' ')}${command!.usage ? ' ' + command!.usage : ''}`)
+      referenced.add(command!.method)
+    }
+    for (const method of ['goal.create', 'goal.inspect', 'goal.update', 'settings.workspaces.register',
+      'agent.open', 'goal.delegate', 'goal.report', 'goal.collect', 'agent.rename', 'space.rename'])
+      expect(referenced.has(method), method).toBe(true)
+  })
+
   it('rejects only invalid local module reads and preserves literal --skill command data', async () => {
     for (const module of ['not-registered', '__proto__', 'constructor', 'goal.inspect', 'Goal']) {
       expect(agentMuxModuleSkill(module)).toBeNull()

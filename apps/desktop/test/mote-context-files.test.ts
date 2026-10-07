@@ -9,7 +9,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { DEFAULT_MOTE_AGENT_INSTRUCTIONS, DEFAULT_TOPIC_AGENT_INSTRUCTIONS, DEFAULT_MOTE_MEMORY } from '../src/shared/topic-agent-instructions'
-import { AGENTMUX_GOAL_SKILL_ENTRY, goalRoleGuidanceContract } from '@agentmux/core/goal-role-guidance'
+import { goalRoleGuidanceContract } from '@agentmux/core/goal-role-guidance'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 
 vi.mock('electron', () => ({ nativeImage: {}, app: { getPath: () => _hygiene_fixturePath("not-used-by-this-test") } }))
@@ -115,7 +115,6 @@ it.each(['original-custom', 'compact-default'] as const)('delivers %s guide thro
   else {
     // The default file is a discoverable entry, while the full contract stays with the Goal owner.
     // Compare against the independent canonical module, not a second copy of the entry's prose.
-    expect(text).toContain(AGENTMUX_GOAL_SKILL_ENTRY)
     expect(text).not.toContain(goalRoleGuidanceContract())
     expect(text).not.toContain('## Executor responsibilities')
     expect(text).not.toContain('## Management responsibilities')
@@ -135,6 +134,10 @@ it.each(['original-custom', 'compact-default'] as const)('delivers %s guide thro
     expect(create.mock.calls[0]![0]).toMatchObject({ prompt: 'Original human request', workspacePath: mote.physicalDirectoryPath })
     expect(create.mock.calls[0]![0].agentMuxNote).toContain(text)
     expect(create.mock.calls[0]![0].agentMuxNote).toContain(memory)
+    if (kind === 'compact-default') {
+      expect(create.mock.calls[0]![0].agentMuxNote).toContain('mote --skill')
+      expect(create.mock.calls[0]![0].agentMuxNote).toContain('mote playbook pmo')
+    }
     const saved = f.core.agentSession(result.created.agentSessionId)
     const timeline = await f.core.sessionTimeline(result.created.agentSessionId)
     const system = timeline.items.filter(item => item.kind === 'system_message').map(item => item.content).join('\n\n')
