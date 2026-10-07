@@ -284,7 +284,7 @@ describe('WorkbenchTabMarks：算出来的标记真被画出来', () => {
     // 稳定产品语义与数量同时核对，主题可替换图形而不改 Region 标记含义。
     expect(html).toContain('data-semantic-icon="object.terminal"')
     expect(html).toContain('data-semantic-icon="object.browser"')
-    expect(html).toContain('data-semantic-icon="file.code"')
+    expect(html).toContain('data-semantic-icon="object.file"')
     // 三个 <svg> 恰好，多一个少一个都红：既守「都画了」也守「没多画」。
     expect(html.match(/<svg/g)).toHaveLength(3)
   })
@@ -337,23 +337,23 @@ describe('WorkbenchTabMarks：算出来的标记真被画出来', () => {
     expect(html.match(/<svg/g)).toHaveLength(2)
   })
 
-  it('被驱动的 Browser 画的不是地球——它与旁边闲着的那个一眼分得开', () => {
+  it('被驱动的 Browser 画的不是地球——保留窗口轮廓且与旁边闲着的那个分得开', () => {
     // 纯函数那一族只能证「算出来是两个标记」。这一条证**画出来真的不一样**：让渲染对 driving
     // 视而不见（两支都返回 Globe2），纯函数那边照样全绿，而用户看到的是两个一模一样的地球。
     const html = render(tabWith(browserSurface('region-0', true), browserSurface('region-1', false)))
-    expect(html).toContain('data-semantic-icon="object.agent"')
+    expect(html).toContain('data-semantic-icon="object.agent-controlled-browser"')
     expect(html).toContain('data-semantic-icon="object.browser"')
     expect(html.match(/<svg/g)).toHaveLength(2)
-    // 悬停也要说得出来：图标本身不自带含义，标签上没有别的地方能解释这只 Bot 是什么意思。
+    // 悬停也要说得出来：图标本身不自带含义，标签上没有别的地方能解释Browser 控制标记是什么意思。
     expect(html).toContain('role="img" aria-label="Agent driving" title="Agent driving"')
   })
 
-  it('反向：没在被驱动的 Browser 画地球，不画 Bot', () => {
-    // 少了这一半，一个「browser 一律画 Bot」的实现会让上面那条绿——而那等于每个浏览器看起来
+  it('反向：没在被驱动的 Browser 画地球，不画 Agent 控制标记', () => {
+    // 少了这一半，一个「browser 一律画控制标记」的实现会让上面那条绿——而那等于每个浏览器看起来
     // 都在被 Agent 操作。
     const html = render(tabWith(browserSurface('region-0', false)))
     expect(html).toContain('data-semantic-icon="object.browser"')
-    expect(html).not.toContain('data-semantic-icon="object.agent"')
+    expect(html).not.toContain('data-semantic-icon="object.agent-controlled-browser"')
   })
 })
 

@@ -15,7 +15,8 @@ const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 
 it('discovers the exact shared semantic catalog through the actual Main owner, public RPC and compiled CLI without changing configuration', async () => {
-  const f = await configOwnerFixture(), bytes = await f.bytes(), catalog = getSemanticIconCatalog()
+  const originalTheme = { ...themeValue(structuredClone(GRAPHITE_THEME)), icons: { 'file.locked': { kind: 'glyph' as const, glyph: 'file-lock' as const }, 'object.agent': { kind: 'paths' as const, paths: [{ d: 'M4 4H20V20H4Z' }] } } }
+  const f = await configOwnerFixture({ appearance: { terminalTheme: 'graphite', customThemes: { 'custom.retained-original': originalTheme } } }), bytes = await f.bytes(), catalog = getSemanticIconCatalog()
   expect(catalog.groups.length).toBeGreaterThan(0); expect(catalog.icons.length).toBeGreaterThan(0); expect(catalog.glyphs.length).toBeGreaterThan(0)
   const seen: AgentMuxControlRequest[] = []
   const directory = await mkdtemp(join(tmpdir(), 'settings-icon-catalog-'))
@@ -30,12 +31,16 @@ it('discovers the exact shared semantic catalog through the actual Main owner, p
   expect(discovered).toMatchObject({ resource: 'themes', iconCatalog: catalog, issues: [] })
   if (discovered.resource !== 'themes') throw new Error('Expected a theme catalog response.')
   expect(discovered.iconCatalog).toEqual(catalog)
+  const expected = { 'action.fork-conversation': 'git-fork', 'object.relationships': 'topology-nodes', 'object.collaboration': 'message-history', 'action.move-to-draft': 'draft-return', 'navigation.space': 'layers', 'navigation.focus': 'focus', 'navigation.goals': 'target', 'navigation.recall': 'book-open', 'object.agent-controlled-browser': 'browser-agent', 'conversation.history-window': 'clock-3', 'action.configure-reconnect': 'clock-3', 'action.upgrade-host': 'arrow-up', 'action.arrange-graph': 'graph-arrange', 'git.pull': 'download', 'git.push': 'upload', 'git.discard-changes': 'trash-2', 'action.collect-sources': 'notebook-text' }
+  for (const [id, defaultGlyph] of Object.entries(expected)) expect(discovered.iconCatalog.icons.find(icon => icon.id === id), `public semantic discovery: ${id}`).toMatchObject({ id, defaultGlyph, label: expect.any(String), description: expect.any(String) })
+
   const cli = await runCompiledObjectCli(['settings', 'themes', 'ls'], objectCliEnvironment(directory))
   expect(cli.code, cli.stderr).toBe(0)
   expect(JSON.parse(cli.stdout)).toMatchObject({ ok: true, operation: 'settings.themes.ls', result: { iconCatalog: catalog } })
   expect(JSON.parse(cli.stdout).result.iconCatalog).toEqual(discovered.iconCatalog)
   expect(seen).toHaveLength(2)
   expect(seen.every(request => request.operation === 'settings.resource.list' && request.resource === 'themes')).toBe(true)
+  expect(f.owner.current.appearance.customThemes?.['custom.retained-original']).toEqual(originalTheme)
   expect(await f.bytes()).toBe(bytes); expect(f.save).not.toHaveBeenCalled(); expect(f.publish).not.toHaveBeenCalled()
 }, 30_000)
 

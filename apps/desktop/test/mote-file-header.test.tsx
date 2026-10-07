@@ -64,7 +64,7 @@ it('does not load shared Scratch when the selected object root has never been co
 })
 it('retains ordinary collection with a clear source and destination journey', async () => {
   await render(ordinaryTopicId)
-  expect(container.querySelector('[aria-label="Collect sources in a knowledge topic"]')).not.toBeNull()
+  expect(container.querySelector('[aria-label="Collect sources in a knowledge topic"] [data-semantic-icon="action.collect-sources"]')).not.toBeNull()
   const call = vi.spyOn(api.topics, 'call').mockResolvedValue({ topics: [], unavailable: [] } as never)
   await act(async () => root.render(createElement(DesktopClientUiProvider, null, createElement(WindowOverlayHost),
     createElement(TopicKnowledgeCapture, { target: { title: 'design.md', sources: [{ kind: 'file', hostId: 'local', workspaceId: 'project', path: 'design.md', revision: 'sha256:' + 'a'.repeat(64) }] as never }, onClose: vi.fn() }))))

@@ -39,7 +39,7 @@ const files: readonly [string, SemanticIconId][] = [
   ['analysis.ipynb', 'file.notebook'], ['flow.mmd', 'file.diagram'],
   ['slides.ppt', 'file.presentation'], ['slides.pptx', 'file.presentation'], ['theme.css', 'file.stylesheet'],
   ['server.key', 'file.key'], ['server.pem', 'file.key'], ['server.crt', 'file.key'],
-  ['client.p12', 'file.locked'], ['client.pfx', 'file.locked'], ['report.svg', 'file.image']
+  ['client.p12', 'file.key'], ['client.pfx', 'file.key'], ['report.svg', 'file.image']
 ]
 function themeWithPaths(names: readonly SemanticIconId[]): ThemeDocument {
   const theme = structuredClone(GRAPHITE_THEME)
