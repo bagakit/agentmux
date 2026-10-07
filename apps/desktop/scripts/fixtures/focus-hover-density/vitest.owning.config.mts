@@ -7,12 +7,12 @@ const root = resolve(import.meta.dirname, '../../../../..')
 export default defineConfig({ ...shared, cacheDir: resolve(root, '.tmp/focus-hover-refinement/vitest-cache'),
   plugins: [...shared.plugins ?? [], { name: 'actual-focus-hover-density', enforce: 'pre', transform(code, id) {
     const path = relative(root, id.split('?')[0]!)
-    if (!['apps/desktop/src/renderer/src/components/AgentInformationPreview.tsx', 'apps/desktop/src/renderer/src/components/WorkbenchTopology.tsx'].includes(path)) return
-    const needle = '<WorkbenchTabGlyph tab={tab} />'
+    if (!['apps/desktop/src/renderer/src/components/AgentInformationReader.tsx', 'apps/desktop/src/renderer/src/components/WorkbenchTopology.tsx'].includes(path)) return
+    const needle = '<WorkbenchTabGlyph tab={position} />'
     let served = code
-    if (process.env.AGENTMUX_HOVER_MUTATION && path.endsWith('AgentInformationPreview.tsx')) {
+    if (process.env.AGENTMUX_HOVER_MUTATION && path.endsWith('AgentInformationReader.tsx')) {
       if (code.split(needle).length !== 2) throw Error('One exact original Hover glyph consumer required')
-      served = code.replace(needle, '<WorkbenchTabGlyph tab={{ ...tab, highlightedRegionIds: [] }} />')
+      served = code.replace(needle, '<WorkbenchTabGlyph tab={{ ...position, highlightedRegionIds: [] }} />')
     }
     if (process.env.AGENTMUX_HOVER_LOADED) appendFileSync(process.env.AGENTMUX_HOVER_LOADED, JSON.stringify({ path,
       sourceSha256: createHash('sha256').update(readFileSync(resolve(root, path))).digest('hex'),

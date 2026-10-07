@@ -25,7 +25,7 @@ vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () =
 vi.mock('../src/renderer/src/lib/use-focus-hierarchy', () => ({ useFocusHierarchy: () => ({ facts: { topics: {}, worktrees: [] }, errors: [] }) }))
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 
-const dom = composerDOM(), workspace = composerConfig.workspaces[0]!
+const dom = composerDOM({ agentInformation: true }), workspace = composerConfig.workspaces[0]!
 const agent = { ...composerSession('focus-subject'), executorId: 'configured',
   status: { state: 'done' as const, source: 'native-hook' as const, observedAt: _newTailFixtureEpoch(0, 0, 1) } }
 const neighbor = composerSession('focus-neighbor', 'claude')
@@ -49,6 +49,10 @@ async function refreshCoreGraph(hostId?: string) {
   }
   vi.spyOn(api.spatial, 'read').mockResolvedValue({ schemaVersion: 1, revision: 1, graph })
   await initializeSpatialControlFixture()
+}
+async function openSource() {
+  await act(async () => fullPreview()!.querySelector<HTMLButtonElement>('.agent-information-reader__facts')!.click())
+  await act(async () => [...fullPreview()!.querySelectorAll<HTMLButtonElement>('.agent-information-details__tabs button')].find(button => button.textContent === 'Source')!.click())
 }
 async function mount() { await dom.render(<ExecutorIdentityContext.Provider value={{ config: useAppStore.getState().config }}><GlobalFocusSurface /></ExecutorIdentityContext.Provider>) }
 async function query(value: string) {
@@ -114,7 +118,9 @@ describe('mounted Focus consumes original workbench identity', () => {
     expect(fullPreview()!.querySelector('.workbench-topology__inspector-regions')).toBeNull()
     expect(fullPreview()!.textContent).toContain(originalReply)
     expect(fullPreview()!.querySelector('.focus-context-hover__recap small')?.textContent).toContain('Latest reply')
+    await openSource()
     expect(fullPreview()!.querySelector('.focus-context-hover__workbench')?.getAttribute('aria-label')).toBe('1 confirmed position')
+    await act(async () => fullPreview()!.querySelector<HTMLButtonElement>('[aria-label="Back to original content"]')!.click())
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })))
     expect(fullPreview()).toBeNull()
   })
@@ -211,7 +217,8 @@ describe('mounted Focus consumes original workbench identity', () => {
     expect(card().querySelectorAll('.workbench-topology__tab-chip')).toHaveLength(2)
     expect(card().querySelector('.focus-context__position')?.getAttribute('aria-label')).toBe('3 confirmed positions')
     await act(async () => card().focus())
-    expect(fullPreview()!.querySelectorAll('[data-subject-region="true"]')).toHaveLength(3)
+    await openSource()
+    expect(fullPreview()!.querySelectorAll('.focus-context-hover__workbench [data-subject-region="true"]')).toHaveLength(3)
     expect(fullPreview()!.querySelector('.focus-context-hover__workbench')?.getAttribute('aria-label')).toBe('3 confirmed positions')
   })
 
@@ -229,6 +236,7 @@ describe('mounted Focus consumes original workbench identity', () => {
     await act(async () => chips[1]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
     expect(topologyPreview()!.textContent).toContain('Project · Group 1')
     await act(async () => card().focus())
+    await openSource()
     const maps = [...fullPreview()!.querySelectorAll<HTMLElement>('[data-focus-occurrence-key]')]
     expect(maps).toHaveLength(2)
     expect(maps.map(map => map.dataset.focusOccurrenceKey)).toEqual([other.id, reference.groupId].map(group => JSON.stringify([workspace.id, group, tab.id])))

@@ -2,7 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import { type Root } from 'react-dom/client'
-import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+import { createAgentInformationRoot as createRoot } from './helpers/agent-information-root'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryPage, AgentSessionHistoryObservation, AgentTimelineItem } from '@agentmux/core'
 import { api } from '../src/renderer/src/lib/api'

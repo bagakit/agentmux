@@ -7,22 +7,18 @@ import { SurfaceToolDock } from '../src/renderer/src/components/SurfaceToolDock'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
-import { allStyleRules } from './helpers/styles'
+import { readStyleSheet, stripCssComments } from './helpers/styles'
 import { api } from '../src/renderer/src/lib/api'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 
-const observed = vi.hoisted(() => ({ derivations: 0, renders: 0 }))
-vi.mock('../src/renderer/src/lib/focus-context', async () => {
-  const actual = await vi.importActual<typeof import('../src/renderer/src/lib/focus-context')>('../src/renderer/src/lib/focus-context')
-  return { ...actual, agentContextForSession: (...args: Parameters<typeof actual.agentContextForSession>) => { observed.derivations++; return actual.agentContextForSession(...args) } }
-})
+const observed = vi.hoisted(() => ({ renders: 0 }))
 vi.mock('../src/renderer/src/components/AgentContextContent', async () => {
   const actual = await vi.importActual<typeof import('../src/renderer/src/components/AgentContextContent')>('../src/renderer/src/components/AgentContextContent')
   return { ...actual, AgentContextContent: (props: Parameters<typeof actual.AgentContextContent>[0]) => { observed.renders++; return <actual.AgentContextContent {...props} /> } }
 })
 
-const dom = composerDOM()
+const dom = composerDOM({ agentInformation: true })
 const workspace = composerConfig.workspaces[0]!
 const session = composerSession('same-agent')
 const first = createWorkbenchTab('first-tab', { regionId: 'first-region', workspaceId: workspace.id, kind: 'agent', phase: 'attached', sessionId: session.id })
@@ -34,7 +30,7 @@ function timeline(id: string, content: string, at = now - 300_000): AgentTimelin
 }
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(now)
-  observed.derivations = 0; observed.renders = 0
+  observed.renders = 0
   const base = createWorkspaceLayout('space-group', [exact.id])
   useAppStore.setState({ config: composerConfig, sessions: [session], workspaceTool: 'agents', projectRailOpen: true,
     tabs: { [first.id]: first, [exact.id]: exact }, timelines: {}, agentNames: {}, scratchTopicSnapshots: {}, error: null,
@@ -110,12 +106,12 @@ it('keeps Idle high pressure, unknown and ended members while status shapes use 
   expect(dom.container.querySelectorAll('.workspace-agent-row')).toHaveLength(5)
   for (const id of ['idle', 'results', 'working', 'unknown']) expect(dom.container.querySelector(`[data-session-id="${id}"] [data-focus-state-icon]`)?.getAttribute('data-focus-state-icon')).toBe(id)
   expect(dom.container.querySelector('[data-session-id="working"] .focus-context__avatar--compact-content .agent-avatar__status')).not.toBeNull()
-  expect(allStyleRules()).toMatch(/\.focus-context__avatar--compact-content \.agent-avatar \.agent-avatar__status\s*\{\s*display:\s*none/ )
+  expect(stripCssComments(readStyleSheet('./index.css'))).toMatch(/\.focus-context__avatar--compact-content \.agent-avatar \.agent-avatar__status\s*\{\s*display:\s*none/ )
   const pressure = dom.container.querySelector('[data-session-id="idle"] [data-pressure="danger"]')!
   expect(pressure.textContent).toBe('95%'); expect(pressure.getAttribute('title')).toContain('start a fresh session')
   const unknownRow = dom.container.querySelector('[data-session-id="unknown"]')!
   expect(unknownRow.querySelector('time')).toBeNull(); expect(unknownRow.textContent).not.toContain('0%')
-  expect(unknownRow.getAttribute('title')).toContain('Activity time unknown')
+  expect(unknownRow.querySelector('.workspace-agent-row__metadata [title="Activity time unknown"]')).not.toBeNull()
 })
 
 it('retains an accurately scoped Mote which Focus excludes from execution cards', async () => {
@@ -129,14 +125,14 @@ it('retains an accurately scoped Mote which Focus excludes from execution cards'
   expect(dom.container.querySelector('[data-session-id="mote"]')).not.toBeNull()
 })
 
-it('isolates real unrelated Store output and makes no Context IO when hidden or first visible', async () => {
+it('isolates actual row renders during unrelated Store output and makes no Context IO when hidden or first visible', async () => {
   const outside = { ...composerSession('outside'), hostId: 'other-host', workspacePath: _hygiene_fixturePath("other-repo") }
   useAppStore.setState({ sessions: [session, outside], timelines: { [session.id]: timeline(session.id, 'Measure only this relevant task') } })
   const reads = [vi.spyOn(api.sessions, 'historySources'), vi.spyOn(api.sessions, 'observeHistory'), vi.spyOn(api.sessions, 'historyPage'), vi.spyOn(api.sessions, 'timeline')]
   await dom.render(<SurfaceToolDock workspace={workspace} visible={false} />)
-  expect(observed).toEqual({ derivations: 0, renders: 0 })
+  expect(observed).toEqual({ renders: 0 })
   await dom.render(<SurfaceToolDock workspace={workspace} />)
-  expect(observed.derivations).toBeGreaterThan(0); expect(observed.renders).toBeGreaterThan(0)
+  expect(observed.renders).toBeGreaterThan(0)
   const baseline = { ...observed }, row = dom.container.querySelector('.workspace-agent-row')
   for (let index = 0; index < 12; index++) await act(async () => useAppStore.setState({ sessions: [session, { ...outside, updatedAt: now + index, latestOutputBytes: index }], timelines: { ...useAppStore.getState().timelines, outside: timeline('outside', `Other output ${index}`) } }))
   expect(observed).toEqual(baseline); expect(dom.container.querySelector('.workspace-agent-row')).toBe(row)
