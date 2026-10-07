@@ -314,3 +314,80 @@ The integration fixture starts the actual Node Host and original Desktop
 connection composition with a signed HTTP protocol and replay ledger. Native
 connect and ordered byte I/O are controlled test ports; those leaves do not claim
 a production webhook listener, live native CLI acknowledgement or platform delivery.
+
+## Feishu low-level adapter
+
+`FeishuAdapter`, imported from `@agentmux/connectors/adapters/feishu`, implements
+the existing connection test and private ingress
+verification ports using the pinned official `@larksuiteoapi/node-sdk` release.
+It constructs `Client`, `WSClient` and `EventDispatcher` directly. The SDK's
+high-level Channel, in-memory message deduplication, chat queues and response
+policy are not used. The inspected low-level WebSocket handler awaits the event
+handler before constructing its success ACK, and reports handler failure with a
+failed ACK. [Official SDK](https://github.com/larksuite/node-sdk)
+
+The generic connector entry does not load this SDK. Hosts select this adapter
+subpath when composing an enabled Feishu connection.
+
+A Feishu connection uses `adapterId: "feishu"` and a canonical application
+**hostname**: `open.feishu.cn` or `open.larksuite.com`. The leaf constructs the
+corresponding official HTTPS endpoint and accepts only a TLS WebSocket endpoint
+returned by its authenticated discovery request. It does not accept a caller's
+arbitrary domain alias, connection-host override or transport agent. Bot identity
+comes from the authenticated `bot/v3/info` response, independently of receiving
+or group delivery observations.
+
+The adapter retains Core's original bounded App ID contract. A syntax guard in
+one SDK release does not become a platform identity rule: receiver startup reads
+the SDK's actual lifecycle result, while configuration and independently working
+REST authentication remain available.
+
+A trusted Host passes its original connection read port to `FeishuAdapter`,
+registers that adapter with `ConnectionHost` and `DurableIngressHost`, resolves
+the credential through its own secret port, then calls
+`openReceiver(config, credential, ingress)`. The returned handle owns that
+issuer/application receiver and provides `observation()` and `close()`. Close
+the receiver before releasing its connection owner. A second local receiver for
+the same issuer/application fails explicitly, including through a different
+connection alias or adapter instance. Configuration revisions invalidate old
+callbacks; the Host closes the old handle before explicitly reopening it.
+`withClient` provides an exception-safe official Client call for other adapter
+leaves without introducing an outbound queue or send policy.
+
+The private dispatcher captures the complete original SDK callback object before
+SDK flattening. Its JSON representation retains all header, event, extension,
+message content and parent/thread fields. The SDK has already decoded the wire
+JSON; this retained payload does not claim byte-for-byte wire whitespace or
+repeated JSON keys. An asynchronous call-local witness binds that exact payload
+to the original receiver, application and current configuration. Only witnesses
+minted inside the private SDK callback are accepted by `verify`; copying a JSON
+object, `authenticated: true`, an App ID or visible text cannot mint one. Witnesses
+expire when that callback finishes and are never stored or returned over RPC.
+
+For accepted human group messages, the SDK handler awaits `ingress.receive` and
+its complete durable transaction before returning. A failed transaction propagates
+a safe failure to the SDK, so a later delivery of that same event can still be
+admitted. There is no adapter-local seen set. Scheduling original Core input is
+a separate Host action after durable admission, preserving ACK time for storage.
+Platform bot senders and direct chats are outside this human-group receiver's
+scope; authored text never determines that distinction.
+
+The text projection keeps the original text exactly and fixes actor identity to
+the platform's `open_id` namespace. A mention qualifies only when the typed
+mention ID equals the authenticated bot's original open ID. An arbitrary parent
+or thread ID does not establish a reply to that bot. The parent remains retained
+for the Host's separate dispatch-time qualification; this leaf does not perform
+a network reply lookup before ACK. Unsupported content formats fail explicitly
+instead of fabricating a text body or acknowledging an unretained message.
+
+The leaf reports authentication, transport and durable-receiving observations
+separately; none certifies delivery to a particular group. SDK log arguments are
+contained because they can include credentials, short-lived connection tickets
+and raw payloads. SDK exceptions are replaced with safe codes without retaining
+an unsafe cause. These failures affect the connection operation only and do not
+stop or replace the original Agent.
+
+The SDK protocol samples and original Core/CLI/Mailbox consumer tests use
+controlled network ports. They do not certify real application credentials,
+platform subscription permissions, a live group, generic Host startup composition
+or final end-to-end reply support.
