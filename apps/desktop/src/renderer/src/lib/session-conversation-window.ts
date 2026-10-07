@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { AgentSessionHistoryPage, AgentSessionHistorySource } from '@agentmux/core'
+import type { AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessage } from '@agentmux/core'
 import { api } from './api'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import type { SessionHistoryReference } from '../../../shared/contracts'
@@ -7,6 +7,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { readSessionConversationPage } from './session-user-messages'
 import { nativeBindingKey, type AgentNativeSourceFacts } from '../../../shared/agent-native-source'
 import { projectConversationRecordSequence } from '@agentmux/client-ui/conversation-record-sequence'
+import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 
 type ReadingAnchor = { kind: 'record' | 'group' | 'segment'; id: string; offset: number }
 export type ConversationReading = {
@@ -99,7 +100,7 @@ function rangeIntersectsElement(range: Range, el: HTMLElement): boolean {
 }
 
 /** Check real retained nodes before replacing any displayed raw record, including a cross-page Range. */
-export function protectsConversationWindow(viewport: HTMLElement | null, next: AgentSessionHistoryPage, preserveAnchor = true, currentOriginal?: AgentSessionHistoryPage, projection?: ConversationWindowProjection): boolean {
+export function protectsConversationWindow(viewport: HTMLElement | null, next: AgentSessionHistoryPage, preserveAnchor = true, currentOriginal?: AgentSessionHistoryPage, projection?: ConversationWindowProjection, nativeInputs?: readonly AgentSessionUserMessage[]): boolean {
   if (!viewport) return false
   const retained = new Set(next.items.map(item => item.id))
   // Entering the original window can leave unselected context outside that window.
@@ -115,6 +116,14 @@ export function protectsConversationWindow(viewport: HTMLElement | null, next: A
   }
   const selection = viewport.ownerDocument.defaultView?.getSelection()
   if (!selection || selection.isCollapsed || !selection.rangeCount) return false
+  // Taking over a fallback input moves it to another parent even if its raw ID is retained.
+  const inputKeys = new Set(nativeInputs?.filter(message => message.agentSessionId === next.agentSessionId
+    && message.source.kind === 'native' && message.source.providerId === next.source.providerId
+    && message.source.nativeSessionId === next.source.nativeSessionId)
+    .map(message => conversationMessageSourceKey(message.agentSessionId, message.source)))
+  if (next.items.length && inputKeys.size) for (const row of viewport.querySelectorAll<HTMLElement>('.activity-log .log-turn[data-message-source-key]')) {
+    if (inputKeys.has(row.dataset.messageSourceKey) && rangeIntersectsElement(selection.getRangeAt(0), row)) return true
+  }
   for (const row of viewport.querySelectorAll<HTMLElement>('[data-native-record-id]')) {
     if ((!sameSource(row) || !retained.has(row.dataset.nativeRecordId!)) && rangeIntersectsElement(selection.getRangeAt(0), row)) return true
   }
