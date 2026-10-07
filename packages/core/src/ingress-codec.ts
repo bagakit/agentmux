@@ -3,7 +3,7 @@ import { rpcRecord } from './rpc-data.js'
 import { parseConnectionActor } from './room-binding-codec.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { parseAgentInputSubmissionReceipt } from './agent-input-receipt-codec.js'
-import type { ConnectionIngressMethod, ConnectionIngressParamsMap, ConnectionIngressRecord, ConnectionIngressResultMap } from './ingress-contract.js'
+import type { ConnectionIngressAddressing, ConnectionIngressMethod, ConnectionIngressParamsMap, ConnectionIngressRecord, ConnectionIngressResultMap } from './ingress-contract.js'
 
 export const INGRESS_RPC_METHODS = { 'connection.ingress.inspect': 'long', 'connection.ingress.ls': 'long', 'connection.ingress.authority': 'long' } as const
 export const isIngressMethod = (value: unknown): value is ConnectionIngressMethod => typeof value === 'string' && Object.hasOwn(INGRESS_RPC_METHODS, value)
@@ -12,12 +12,20 @@ const object = (value: unknown, fields: string[]) => rpcRecord(value, fields, 'I
 function text(value: unknown): string { if (typeof value !== 'string' || !value.trim() || value.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(value)) fail(); return value as string }
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 export const CONNECTION_INGRESS_AUTHORITY_CODES = ['INGRESS_CLAIM_UNAVAILABLE', 'INGRESS_CONNECTION_UNAVAILABLE', 'INGRESS_BINDING_UNAVAILABLE', 'INGRESS_ACTOR_NOT_AUTHORIZED', 'INGRESS_INPUT_OUTSIDE_SCOPE', 'INGRESS_ADDRESSING_UNCONFIRMED', 'INGRESS_AUTHORITY_REVISED', 'INGRESS_STORAGE_UNCONFIRMED'] as const satisfies readonly import('./ingress-contract.js').ConnectionIngressAuthorityCode[]
+function addressing(value: unknown): ConnectionIngressAddressing {
+  const p = object(value, ['replyToMessageId', 'state', 'selection', 'reason']), replyToMessageId = text(p.replyToMessageId)
+  if (p.state === 'confirmed' && ['reply', 'message'].includes(String(p.selection)) && p.reason === undefined) return { replyToMessageId, state: 'confirmed', selection: p.selection as 'reply' | 'message' }
+  if (p.selection !== undefined) fail()
+  if (p.state === 'unknown' && p.reason === 'reply-unconfirmed') return { replyToMessageId, state: 'unknown', reason: 'reply-unconfirmed' }
+  if (p.state === 'unavailable' && ['adapter-unavailable', 'credential-missing'].includes(String(p.reason))) return { replyToMessageId, state: 'unavailable', reason: p.reason as 'adapter-unavailable' | 'credential-missing' }
+  return fail()
+}
 export function parseConnectionIngressRecord(value: unknown): ConnectionIngressRecord {
-  const p = object(value, ['ingressId', 'connectionId', 'application', 'eventId', 'externalMessageId', 'externalConversationId', 'actor', 'body', 'state', 'code', 'input'])
+  const p = object(value, ['ingressId', 'connectionId', 'application', 'eventId', 'externalMessageId', 'externalConversationId', 'actor', 'body', 'state', 'code', 'input', 'addressing'])
   const actor = parseConnectionActor(p.actor), app = object(p.application, ['domain', 'appId'])
   const application = { domain: text(app.domain), appId: text(app.appId) }
   if (!equal(actor.application, application) || typeof p.body !== 'string' || p.state !== 'received' && p.state !== 'refused' && p.state !== 'claimed') fail()
-  const base = { ingressId: text(p.ingressId), connectionId: text(p.connectionId), application, eventId: text(p.eventId), externalMessageId: text(p.externalMessageId), externalConversationId: text(p.externalConversationId), actor, body: p.body as string }
+  const base = { ingressId: text(p.ingressId), connectionId: text(p.connectionId), application, eventId: text(p.eventId), externalMessageId: text(p.externalMessageId), externalConversationId: text(p.externalConversationId), actor, body: p.body as string, ...(p.addressing === undefined ? {} : { addressing: addressing(p.addressing) }) }
   if (p.state === 'refused') { if (p.input !== undefined) fail(); return { ...base, state: 'refused', code: text(p.code) } }
   if (p.code !== undefined) fail()
   if (p.state === 'received') { if (p.input !== undefined) fail(); return { ...base, state: 'received' } }
