@@ -12,6 +12,7 @@
 | AgentSession、native handle、captured Timeline、输入和交互回执 | Core；[`AgentMuxClient`](../../packages/core/src/client.ts)、[`AgentSessionStore`](../../packages/core/src/agent-session-store.ts) |
 | 通用 Run、PTY ordered bytes 与 Replay | ctxmux；Core 经 [`CtxmuxRunAdapter`](../../packages/core/src/ctxmux-run-adapter.ts) 消费，字节到画面见[Terminal Runtime](terminal-runtime.md) |
 | 消息和过程的共同呈现 | `client-ui`；[`ConversationView`](../../packages/client-ui/src/components/ConversationView.tsx)、[`ConversationRecordSequence`](../../packages/client-ui/src/components/ConversationRecordSequence.tsx)、[`ConversationMessage`](../../packages/client-ui/src/components/ConversationMessage.tsx) |
+| 用户命名阅读点及原操作回执 | Core；[`ConversationLandmarkStore`](../../packages/core/src/conversation-landmark-store.ts) 保存纯 [`ConversationLandmark`](../../packages/core/src/conversation-landmarks.ts) 元数据，正文与可达性仍归原记录 owner |
 | 草稿、阅读窗口、DOM 选区、展开、可见性和导航 | 各客户端；宿主通过 props 与 [`ClientUiPlatform`](../../packages/client-ui/src/platform.tsx) 注入能力 |
 
 [`projectConversationRecords`](../../packages/core/src/conversation.ts) 是对已接受页和 Timeline 的纯投影，没有 Reader、缓存或新的对话生命周期。native 记录身份由 Host、AgentSession、Provider、nativeSessionId、recordId 限定；captured 使用同一 Host／AgentSession 下的 captured recordId。相同正文或同裸 ID 不关联两种来源。`conversationItemRef` 仅在调用方提供执行 Host 时返回完整引用；缺 Host 不补当前焦点，也不隐藏正文。UI 的 [`conversation-records`](../../packages/client-ui/src/lib/conversation-records.ts) adapter 只添加 speaker 呈现。
