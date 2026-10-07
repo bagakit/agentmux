@@ -89,6 +89,11 @@ Settings 再打开时，原已访问分区的编辑字段、滚动与未保存�
 
 Surface、文字与状态 token 的唯一基础规则见[《主题与样式 SSOT 规范》](shared-rules.md#主题与样式-ssot-规范)，Settings 的两层内容与侧栏选中预算见[《密度预算》](shared-rules.md#密度预算)。本页不另定义 S0–S3 用途表。
 
+### Executor 启动配置阅读
+
+可执行文件与参数在当前 Executor 详情中相邻呈现，参数不藏在高级环境与权限折叠中。简短说明区分单一程序路径和参数；只读启动预览使用可换行等宽文字，长路径、带引号与空参数可辨且不撑宽窄窗，不抢占名称和配置主体。未完成参数的预览提示就地保留草稿。行为边界沿[分区、资源与配置生效](../behavior/settings-and-observation.md#分区资源与配置生效)。
+
+
 ## 紧凑状态与输入工具行
 - 全窗 running／error 摘要沿[Focus 唯一入口](focus-context.md#中断恢复与导航)使用紧凑状态图形与计数，状态栏不再重复 Agent 汇总；局部 Activity 与非 Agent 的资源、系统通知保持各自入口。
 - Activity 菜单减少行高和留白，在有限宽度内优先 provider、活动摘要、idle 时长。
