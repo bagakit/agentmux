@@ -1,11 +1,11 @@
 import { AgentMuxError, parseFileReadParams, parseFileCreateParams, type FileCreateParams, type FileCreateResult, parseFileWriteParams, type FileWriteParams, type FileWriteResult, type FileWriteContext, parseFileListParams, type AgentMuxRpcFilesOwner, type FileReadParams, type FileReadResource, type FileReadResult, type FileListParams, type FileListResult } from '@agentmux/core'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
-import type { WorkspaceRecord } from '../shared/contracts'
+import type { WorkspaceRecord, WorkspaceFileRestoreInput, WorkspaceFileUndoInput, WorkspaceFileWriteResult } from '../shared/contracts'
 import { SCRATCH_WORKSPACE_ID, type ScratchDirectoryFact } from '../shared/scratch-topics'
 import { zoneFileResource } from '../shared/zone-file-resource'
 import type { WorkspaceFiles } from './workspace-files'
 import type { WorkspaceFileReadBudget } from '../shared/workspace-file-bytes'
-import { parseFileHistoryParams, type FileHistoryParams, type FileHistoryResult } from '@agentmux/core/files'
+import { parseFileHistoryParams, type FileHistoryParams, type FileHistoryResult, parseFileRestoreParams, parseFileUndoParams, type FileRestoreParams, type FileRestoreResult, type FileUndoParams, type FileUndoResult } from '@agentmux/core/files'
 import type { NoteHistoryQuery, NoteHistorySnapshot } from '@agentmux/core/note-history'
 
 /** Resolve once from original spatial/resource facts, then delegate to original Files. */
@@ -17,6 +17,8 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
     files: Pick<WorkspaceFiles, 'read' | 'listFiles'> & {
       write(workspace: WorkspaceRecord, input: Parameters<WorkspaceFiles['write']>[1], context?: FileWriteContext): ReturnType<WorkspaceFiles['write']>
       history?(workspace: WorkspaceRecord, input: Omit<NoteHistoryQuery, 'resource'> & { path: string }): Promise<NoteHistorySnapshot>
+      restore?(workspace: WorkspaceRecord, input: WorkspaceFileRestoreInput, context?: FileWriteContext): Promise<WorkspaceFileWriteResult>
+      undo?(workspace: WorkspaceRecord, input: WorkspaceFileUndoInput, context?: FileWriteContext): Promise<WorkspaceFileWriteResult>
     }
   }) {}
   async history(input: FileHistoryParams): Promise<FileHistoryResult> {
@@ -74,6 +76,24 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
     try {
       return { resource, result: await this.ports.files.write(workspace, { path: resource.path, content: params.content, expectedRevision: null }, context) }
     } catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_CREATE_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
+  }
+  async restore(input: FileRestoreParams, context?: FileWriteContext): Promise<FileRestoreResult> {
+    const params = parseFileRestoreParams(input), resolved = await this.resolve(params)
+    if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_RESTORE_UNCONFIRMED', message: resolved.message } }
+    const { resource, workspace } = resolved
+    if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => resource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) throw new AgentMuxError('The original restore mapping changed. Read the exact file before deciding another operation.', 'FILE_RESOURCE_MISMATCH')
+    if (!this.ports.files.restore) return { resource, result: { status: 'error', code: 'CONTROL_UNAVAILABLE', message: 'The original restore owner is unavailable. Original files, history and Agents remain available.' } }
+    try { return { resource, result: await this.ports.files.restore(workspace, { path: resource.path, noteId: params.noteId, expectedRevision: params.expectedRevision, operationId: params.operationId, eventId: params.eventId }, context) } }
+    catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_RESTORE_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
+  }
+  async undo(input: FileUndoParams, context?: FileWriteContext): Promise<FileUndoResult> {
+    const params = parseFileUndoParams(input), resolved = await this.resolve(params)
+    if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_UNDO_UNCONFIRMED', message: resolved.message } }
+    const { resource, workspace } = resolved
+    if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => resource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) throw new AgentMuxError('The original undo mapping changed. Read the exact file before deciding another operation.', 'FILE_RESOURCE_MISMATCH')
+    if (!this.ports.files.undo) return { resource, result: { status: 'error', code: 'CONTROL_UNAVAILABLE', message: 'The original undo owner is unavailable. Original files, history and Agents remain available.' } }
+    try { return { resource, result: await this.ports.files.undo(workspace, { path: resource.path, noteId: params.noteId, expectedRevision: params.expectedRevision, operationId: params.operationId, batchId: params.batchId, batchLastEventId: params.batchLastEventId }, context) } }
+    catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_UNDO_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
   }
   private async resolve(params: FileReadParams): Promise<{ resource: FileReadResource; workspace: WorkspaceRecord } | { message: string }> {
     const unknown = (message: string) => ({ message })

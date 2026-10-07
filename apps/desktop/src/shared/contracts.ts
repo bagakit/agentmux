@@ -639,9 +639,11 @@ export type WorkspaceFileWriteInput = {
   baseContent?: string
   operationId?: string
 }
+export type WorkspaceFileRestoreInput = { path: string; noteId: string; expectedRevision: string; operationId: string; eventId: string }
+export type WorkspaceFileUndoInput = Omit<WorkspaceFileRestoreInput, 'eventId'> & { batchId: string; batchLastEventId: string }
 
 export type WorkspaceFileWriteResult =
-  ( { status: 'written'; revision: string; content?: string; noteAttribution?: import('@agentmux/core').NoteWriteAttribution; noteProvenance?: import('@agentmux/core/note-provenance').NoteProvenanceSnapshot; noteTitleProjection?: import('@agentmux/core/note-title').NoteTitleProjection }
+  ( { status: 'written'; revision: string; content?: string; contentUnavailable?: string; noteAttribution?: import('@agentmux/core').NoteWriteAttribution; noteProvenance?: import('@agentmux/core/note-provenance').NoteProvenanceSnapshot; noteTitleProjection?: import('@agentmux/core/note-title').NoteTitleProjection }
   | { status: 'conflict'; observedRevision: string | null; noteConflict?: import('@agentmux/core/files').NoteWriteConflict; noteConflictUnavailable?: string }
   | { status: 'error'; code: string; message: string }
   | { status: 'unknown'; code: string; message: string }) & { noteHistory?: import('@agentmux/core/note-history').NoteHistoryReceipt }

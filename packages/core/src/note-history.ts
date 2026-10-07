@@ -4,11 +4,14 @@ import { noteProvenanceResourceKey, parseNoteProvenanceWrite, type NoteProvenanc
 import type { NoteResource, NotebookActor } from './notebook-catalog.js'
 
 export type NoteHistoryStatus = 'prepared' | 'committed' | 'unconfirmed' | 'not-applied'
+/** Immutable selection behind a restoration or selective undo, held in the original event. */
+export type NoteHistorySource = { eventId: string } | { batchId: string; lastEventId: string }
 /** An edit event is not a body digest: restoring identical bytes is another event. */
 export type NoteHistoryRecord = {
   eventId: string; sequence: number; batchId: string; noteId: string; resource: NoteResource; originalResource: NoteResource
   status: NoteHistoryStatus; at: number; actor: NotebookActor | null; parentEventId: string | null
   operation: 'edit' | 'restore' | 'undo'; requestFingerprint: string
+  source?: NoteHistorySource
   baseRevision: string | null; revision: string; beforeContent: string | null; content: string
   provenance?: NoteProvenanceWrite
 }
@@ -30,6 +33,17 @@ export function noteHistoryRevision(content: string): string {
 }
 const invalid = (message: string): never => { throw new AgentMuxError(message, 'NOTE_HISTORY_INVALID') }
 const id = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && !/[\0\r\n]/u.test(value)
+export function parseNoteHistorySource(operation: NoteHistoryRecord['operation'], source: unknown): NoteHistorySource | undefined {
+  if (operation === 'edit') {
+    if (source !== undefined) invalid('An ordinary edit cannot claim a restoration source.')
+    return
+  }
+  if (!source || typeof source !== 'object' || Array.isArray(source)) invalid('The original history action source is required.')
+  const value = source as Record<string, unknown>, fields = Object.keys(value)
+  if (operation === 'restore' && fields.length === 1 && fields[0] === 'eventId' && id(value.eventId)) return { eventId: value.eventId }
+  if (operation === 'undo' && fields.length === 2 && fields.every(key => key === 'batchId' || key === 'lastEventId') && id(value.batchId) && id(value.lastEventId)) return { batchId: value.batchId, lastEventId: value.lastEventId }
+  return invalid('The original history source does not match its operation.')
+}
 export function parseNoteHistoryQuery(value: NoteHistoryQuery): NoteHistoryQuery {
   if (!id(value.noteId)) invalid('History requires the original Note identity.')
   noteProvenanceResourceKey(value.resource)
@@ -46,6 +60,8 @@ export function parseNoteHistoryRecord(value: NoteHistoryRecord): NoteHistoryRec
       !Number.isSafeInteger(value.at) || value.at < 0 || !['prepared', 'committed', 'unconfirmed', 'not-applied'].includes(value.status) ||
       !['edit', 'restore', 'undo'].includes(value.operation) || typeof value.content !== 'string' || noteHistoryRevision(value.content) !== value.revision ||
       (value.beforeContent === null ? value.baseRevision !== null : typeof value.beforeContent !== 'string' || noteHistoryRevision(value.beforeContent) !== value.baseRevision)) invalid('The original history event, body or baseline cannot be confirmed.')
+  const source = parseNoteHistorySource(value.operation, value.source)
+  if (source && ('eventId' in source ? source.eventId : source.lastEventId) === value.eventId) invalid('A history action cannot select its own new event.')
   if (value.actor !== null && (!['user', 'agent', 'device'].includes(value.actor.kind) || !id(value.actor.id))) invalid('The original history actor is invalid.')
   if (value.provenance !== undefined) {
     const provenance = parseNoteProvenanceWrite(value.provenance)

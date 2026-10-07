@@ -3,8 +3,8 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { parseNoteProvenanceSnapshot, noteProvenanceResourceKey, type NoteProvenanceSnapshot } from './note-provenance.js'
-import { readNoteMarkdownHeader } from './note-format.js'
-import type { FileHistoryParams, FileHistoryResult } from './public-rpc-file-history.js'
+import { NOTE_FILE_EXTENSION, readNoteMarkdownHeader } from './note-format.js'
+import { parseFileHistoryParams, type FileHistoryParams, type FileHistoryResult } from './public-rpc-file-history.js'
 export { parseFileHistoryParams, parseFileHistoryResult, type FileHistoryParams, type FileHistoryResult } from './public-rpc-file-history.js'
 
 /** The original Files owner and resource, independent of display occurrences. */
@@ -32,12 +32,17 @@ export type FileWriteParams = Omit<FileReadParams, 'maxBytes' | 'expectedResourc
 /** Create one absent file at the exact original read mapping; never overwrite existing bytes. */
 export type FileCreateParams = Omit<FileWriteParams, 'expectedRevision' | 'baseContent' | 'operationId'> & { expectedRevision: null }
 export type FileCreateResult = FileWriteResult
+/** A new revision selected from immutable history, without caller-supplied body or author. */
+export type FileRestoreParams = Omit<FileHistoryParams, 'limit' | 'before' | 'includeContent' | 'eventId'> & { expectedRevision: string; operationId: string; eventId: string }
+export type FileUndoParams = Omit<FileRestoreParams, 'eventId'> & { batchId: string; batchLastEventId: string }
+export type FileRestoreResult = FileWriteResult
+export type FileUndoResult = FileWriteResult
 /** Host-internal authority, never accepted from a File request body. */
 export type FileWriteContext = { actor?: import('./notebook-catalog.js').NotebookActor | undefined }
 export type NoteWriteAttribution = { status: 'recorded' } | { status: 'unconfirmed'; reason: string }
 export type NoteWriteConflict = { reason: 'overlap' | 'identity' | 'invalid-structure'; baseContent: string; currentContent: string; proposedContent: string }
 export type FileWriteReceipt =
-  ( { status: 'written'; revision: string; content?: string; noteAttribution?: NoteWriteAttribution; noteProvenance?: NoteProvenanceSnapshot; noteTitleProjection?: import('./note-title.js').NoteTitleProjection }
+  ( { status: 'written'; revision: string; content?: string; contentUnavailable?: string; noteAttribution?: NoteWriteAttribution; noteProvenance?: NoteProvenanceSnapshot; noteTitleProjection?: import('./note-title.js').NoteTitleProjection }
   | { status: 'conflict'; observedRevision: string | null; noteConflict?: NoteWriteConflict; noteConflictUnavailable?: string }
   | { status: 'error' | 'unknown'; code: string; message: string }) & { noteHistory?: import('./note-history.js').NoteHistoryReceipt }
 export type FileWriteResult = { resource: FileReadResource | null; result: FileWriteReceipt }
@@ -60,13 +65,14 @@ export interface AgentMuxRpcFileUploadsOwner {
   upload(params: FileUploadParams): Promise<FileUploadResult>
   inspect(params: FileUploadIdentity): Promise<FileUploadResult>
 }
-export type FileParameterMap = { 'file.read': FileReadParams; 'file.list': FileListParams; 'file.history': FileHistoryParams; 'file.write': FileWriteParams; 'file.create': FileCreateParams;
+export type FileParameterMap = { 'file.read': FileReadParams; 'file.list': FileListParams; 'file.history': FileHistoryParams; 'file.write': FileWriteParams; 'file.create': FileCreateParams; 'file.restore': FileRestoreParams; 'file.undo': FileUndoParams;
   'file.upload': FileUploadParams; 'file.upload.inspect': FileUploadIdentity }
-export type FileResultMap = { 'file.read': FileReadResult; 'file.list': FileListResult; 'file.history': FileHistoryResult; 'file.write': FileWriteResult; 'file.create': FileCreateResult;
+export type FileResultMap = { 'file.read': FileReadResult; 'file.list': FileListResult; 'file.history': FileHistoryResult; 'file.write': FileWriteResult; 'file.create': FileCreateResult; 'file.restore': FileRestoreResult; 'file.undo': FileUndoResult;
   'file.upload': FileUploadResult; 'file.upload.inspect': FileUploadResult }
 export type FileMethod = keyof FileParameterMap
-export interface AgentMuxRpcFilesOwner { read(params: FileReadParams): Promise<FileReadResult>; list(params: FileListParams): Promise<FileListResult>; history?(params: FileHistoryParams): Promise<FileHistoryResult>; write(params: FileWriteParams, context?: FileWriteContext): Promise<FileWriteResult>; create(params: FileCreateParams, context?: FileWriteContext): Promise<FileCreateResult> }
-export const AGENTMUX_RPC_FILE_METHODS = { 'file.read': 'short', 'file.list': 'long', 'file.history': 'long', 'file.write': 'long', 'file.create': 'long', 'file.upload': 'long', 'file.upload.inspect': 'long' } as const
+export interface AgentMuxRpcFilesOwner { read(params: FileReadParams): Promise<FileReadResult>; list(params: FileListParams): Promise<FileListResult>; history?(params: FileHistoryParams): Promise<FileHistoryResult>; write(params: FileWriteParams, context?: FileWriteContext): Promise<FileWriteResult>; create(params: FileCreateParams, context?: FileWriteContext): Promise<FileCreateResult>;
+  restore?(params: FileRestoreParams, context?: FileWriteContext): Promise<FileRestoreResult>; undo?(params: FileUndoParams, context?: FileWriteContext): Promise<FileUndoResult> }
+export const AGENTMUX_RPC_FILE_METHODS = { 'file.read': 'short', 'file.list': 'long', 'file.history': 'long', 'file.write': 'long', 'file.create': 'long', 'file.restore': 'long', 'file.undo': 'long', 'file.upload': 'long', 'file.upload.inspect': 'long' } as const
 export function isFileMethod(value: unknown): value is FileMethod { return typeof value === 'string' && Object.hasOwn(AGENTMUX_RPC_FILE_METHODS, value) }
 
 const uploadFields = ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'name', 'mimeType', 'byteLength', 'revision'] as const
@@ -239,9 +245,22 @@ export function parseFileCreateParams(value: unknown): FileCreateParams {
   if (p.expectedRevision !== null) invalid('File creation requires explicit expected absence (null).', 'INVALID_CONTROL_REQUEST')
   return p as FileCreateParams
 }
-function parseFileMutationResult(value: unknown, params: FileWriteParams | FileCreateParams): FileWriteResult {
+function parseFileHistoryMutationParams(value: unknown, undo: boolean): FileRestoreParams | FileUndoParams {
+  const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'noteId', 'expectedRevision', 'operationId', ...(undo ? ['batchId', 'batchLastEventId'] : ['eventId'])], code)
+  const { expectedRevision, operationId, eventId, batchId, batchLastEventId, ...target } = p
+  parseFileHistoryParams(target)
+  revision(expectedRevision, code); string(operationId, code)
+  if (undo) { string(batchId, code); string(batchLastEventId, code) }
+  else string(eventId, code)
+  if ((undo ? batchLastEventId : eventId) === operationId) invalid('A history action requires a new operation distinct from its selected event.', code)
+  return p as FileRestoreParams | FileUndoParams
+}
+export function parseFileRestoreParams(value: unknown): FileRestoreParams { return parseFileHistoryMutationParams(value, false) as FileRestoreParams }
+export function parseFileUndoParams(value: unknown): FileUndoParams { return parseFileHistoryMutationParams(value, true) as FileUndoParams }
+function parseFileMutationResult(value: unknown, params: FileWriteParams | FileCreateParams | FileRestoreParams | FileUndoParams): FileWriteResult {
+  const historyAction = 'noteId' in params
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['resource', 'result'], code), r = rpcRecord(p.result, undefined, code)
-  const keys = r.status === 'written' ? ['status', 'revision', 'content', 'noteAttribution', 'noteProvenance', 'noteTitleProjection'] : r.status === 'conflict' ? ['status', 'observedRevision', 'noteConflict', 'noteConflictUnavailable']
+  const keys = r.status === 'written' ? ['status', 'revision', 'content', 'contentUnavailable', 'noteAttribution', 'noteProvenance', 'noteTitleProjection'] : r.status === 'conflict' ? ['status', 'observedRevision', 'noteConflict', 'noteConflictUnavailable']
     : r.status === 'error' || r.status === 'unknown' ? ['status', 'code', 'message'] : null
   if (!keys) invalid('The original File write status is invalid.', code)
   rpcRecord(r, [...keys, 'noteHistory'], code)
@@ -261,9 +280,18 @@ function parseFileMutationResult(value: unknown, params: FileWriteParams | FileC
   if (p.resource !== null && ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => (p.resource as Record<string, unknown>)[key] !== (params.expectedResource as unknown as Record<string, unknown>)[key])) invalid('The original File mapping changed.', code)
   if (r.status === 'written') {
     revision(r.revision, code)
-    if ('operationId' in params && params.operationId !== undefined && (typeof r.content !== 'string' ||
+    const unavailable = r.contentUnavailable !== undefined
+    if (unavailable && (!(historyAction || 'content' in params && params.path.endsWith(NOTE_FILE_EXTENSION) && readNoteMarkdownHeader(params.content).status === 'valid') ||
+        'baseContent' in params && params.baseContent !== undefined && params.operationId === undefined ||
+        typeof r.contentUnavailable !== 'string' || !r.contentUnavailable.length || r.content !== undefined ||
+        r.noteProvenance !== undefined || r.noteAttribution !== undefined || r.noteTitleProjection !== undefined)) invalid('Unavailable canonical content requires an original Note operation without inline content or its dependent metadata.', code)
+    if ('operationId' in params && params.operationId !== undefined && (typeof r.content !== 'string' && !unavailable ||
         !r.noteHistory || (r.noteHistory as Record<string, unknown>).eventId !== params.operationId)) invalid('The original Note edit requires its canonical saved content and operation receipt.', code)
     if (r.content !== undefined && (typeof r.content !== 'string' || fileUploadRevision(new TextEncoder().encode(r.content)) !== r.revision)) invalid('The canonical saved content does not match its revision.', code)
+    if (historyAction && !unavailable) {
+      const header = readNoteMarkdownHeader(r.content as string)
+      if (header.status !== 'valid' || header.noteId !== params.noteId) invalid('The canonical history action belongs to another original Note.', code)
+    }
     if (r.noteAttribution !== undefined) {
       const attribution = rpcRecord(r.noteAttribution, ['status', 'reason'], code)
       if (attribution.status !== 'recorded' && attribution.status !== 'unconfirmed' || attribution.status === 'recorded' && attribution.reason !== undefined || attribution.status === 'unconfirmed' && (typeof attribution.reason !== 'string' || !attribution.reason)) invalid('The Note write attribution is unconfirmed.', code)
@@ -271,21 +299,21 @@ function parseFileMutationResult(value: unknown, params: FileWriteParams | FileC
     if (r.noteTitleProjection !== undefined) {
       let projection: import('./note-title.js').NoteTitleProjection
       try { projection = parseNoteTitleProjection(r.noteTitleProjection) } catch { return invalid('The original Note title projection receipt is malformed.', code) }
-      const saved = readNoteMarkdownHeader((r.content as string | undefined) ?? params.content)
+      const saved = readNoteMarkdownHeader((r.content as string | undefined) ?? ('content' in params ? params.content : ''))
       if (saved.status !== 'valid' || saved.noteId !== projection.noteId) invalid('The title projection belongs to another original Note identity.', code)
       const original = p.resource as FileReadResource
       if (noteProvenanceResourceKey(projection.resource) !== noteProvenanceResourceKey({ hostId: original.hostId, workspaceId: original.workspaceId, workspacePath: original.workspacePath, path: original.path })) invalid('The title projection belongs to another original file write.', code)
     }
-    if (r.noteProvenance !== undefined) validateFileNoteProvenance(r.noteProvenance, r.revision, p.resource as FileReadResource, (r.content as string | undefined) ?? params.content)
+    if (r.noteProvenance !== undefined) validateFileNoteProvenance(r.noteProvenance, r.revision, p.resource as FileReadResource, (r.content as string | undefined) ?? ('content' in params ? params.content : ''))
   }
   else if (r.status === 'conflict') {
     if (r.observedRevision !== null) revision(r.observedRevision, code)
-    if (r.noteConflictUnavailable !== undefined && (!('baseContent' in params) || params.baseContent === undefined || r.noteConflict !== undefined ||
+    if (r.noteConflictUnavailable !== undefined && (!(historyAction || 'baseContent' in params && params.baseContent !== undefined) || r.noteConflict !== undefined ||
         typeof r.noteConflictUnavailable !== 'string' || !r.noteConflictUnavailable.length)) invalid('Unavailable conflict content requires an enhanced Note conflict and a nonempty diagnostic, without inline content.', code)
     if (r.noteConflict !== undefined) {
       const conflict = rpcRecord(r.noteConflict, ['reason', 'baseContent', 'currentContent', 'proposedContent'], code)
-      if (!('baseContent' in params) || params.baseContent === undefined || !['overlap', 'identity', 'invalid-structure'].includes(conflict.reason as string) ||
-          conflict.baseContent !== params.baseContent || conflict.proposedContent !== params.content || typeof conflict.currentContent !== 'string' ||
+      if (!['overlap', 'identity', 'invalid-structure'].includes(conflict.reason as string) || typeof conflict.baseContent !== 'string' || typeof conflict.proposedContent !== 'string' ||
+          !historyAction && (!('baseContent' in params) || params.baseContent === undefined || conflict.baseContent !== params.baseContent || !('content' in params) || conflict.proposedContent !== params.content) || typeof conflict.currentContent !== 'string' ||
           fileUploadRevision(new TextEncoder().encode(conflict.currentContent)) !== r.observedRevision) invalid('The Note conflict must retain the exact original base, current and proposed content.', code)
     }
   }
@@ -295,3 +323,5 @@ function parseFileMutationResult(value: unknown, params: FileWriteParams | FileC
 
 export function parseFileWriteResult(value: unknown, params: FileWriteParams): FileWriteResult { return parseFileMutationResult(value, params) }
 export function parseFileCreateResult(value: unknown, params: FileCreateParams): FileCreateResult { return parseFileMutationResult(value, params) }
+export function parseFileRestoreResult(value: unknown, params: FileRestoreParams): FileRestoreResult { return parseFileMutationResult(value, params) }
+export function parseFileUndoResult(value: unknown, params: FileUndoParams): FileUndoResult { return parseFileMutationResult(value, params) }

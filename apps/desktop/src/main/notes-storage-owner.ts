@@ -43,7 +43,7 @@ export class NotesStorageOwner {
     if (this.config.current.workspaces.some(workspace => workspace.id !== NOTES_WORKSPACE_ID && workspaceLocationKey(workspace.hostId, workspace.path) === workspaceLocationKey('local', input.directory))) throw Object.assign(new Error('This directory already belongs to another Workspace. Choose a separate Notes directory; the original files and workspace are kept.'), { code: 'NOTES_STORAGE_INPUT_INVALID' })
     return this.reconcile(await this.storage.change(input))
   }
-  async write<T>(workspace: WorkspaceRecord, input: WorkspaceFileWriteInput, save: (owner: WorkspaceRecord) => Promise<T>): Promise<T> {
+  async write<T>(workspace: WorkspaceRecord, input: Pick<WorkspaceFileWriteInput, 'path'>, save: (owner: WorkspaceRecord) => Promise<T>): Promise<T> {
     if (workspace.id !== NOTES_WORKSPACE_ID && !/\.note\.(?:json|md)$/u.test(input.path)) return save(workspace)
     return this.storage.withLock(async () => {
       const current = await this.inspect()
