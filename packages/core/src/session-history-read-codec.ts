@@ -161,14 +161,16 @@ export function parseUserMessageHistoryPage(value: unknown, input: AgentSessionH
   if (input.source === 'captured' && page.nativeSource !== undefined || nativeSource &&
     (typeof nativeSource.providerId !== 'string' || !nativeSource.providerId || typeof nativeSource.nativeSessionId !== 'string' || !nativeSource.nativeSessionId)) return bad()
   for (const value of page.userMessages) {
-    const message = rpcRecord(value, ['id', 'rawId', 'agentSessionId', 'turnId', 'source', 'author', 'content', 'contentParts', 'questionAnswers', 'questionDiagnostic', 'recordedAt', 'deliveryStatus'], 'CONTROL_PROTOCOL_ERROR')
+    const message = rpcRecord(value, ['id', 'rawId', 'agentSessionId', 'turnId', 'source', 'author', 'publicContent', 'content', 'contentParts', 'questionAnswers', 'questionDiagnostic', 'recordedAt', 'deliveryStatus'], 'CONTROL_PROTOCOL_ERROR')
     if (typeof message.id !== 'string' || !message.id || typeof message.rawId !== 'string' || !message.rawId || message.agentSessionId !== input.agentSessionId || typeof message.content !== 'string' ||
       !Array.isArray(message.contentParts) || message.recordedAt !== undefined && (!Number.isSafeInteger(message.recordedAt) || (message.recordedAt as number) < 0) ||
       message.deliveryStatus !== undefined && !['complete', 'failed', 'unverified'].includes(String(message.deliveryStatus))) return bad()
+    if (message.publicContent !== undefined && message.publicContent !== 'confirmed' && message.publicContent !== 'unknown') return bad()
     const source = rpcRecord(message.source, input.source === 'native' ? ['kind', 'providerId', 'nativeSessionId', 'recordId'] : ['kind', 'submissionId', 'channel', 'device'], 'CONTROL_PROTOCOL_ERROR')
     const author = rpcRecord(message.author, undefined, 'CONTROL_PROTOCOL_ERROR')
     try { if (author.kind === 'external') parseAgentExternalMessageAuthor(author); else rpcRecord(author, ['kind', 'agentSessionId'], 'CONTROL_PROTOCOL_ERROR') } catch { return bad() }
     if (input.source === 'native') {
+      if (message.publicContent === 'confirmed') return bad()
       if (source.kind !== 'native' || source.providerId !== nativeSource!.providerId || source.nativeSessionId !== nativeSource!.nativeSessionId || source.recordId !== message.rawId || author.kind !== 'unknown' || author.agentSessionId !== undefined || message.deliveryStatus !== undefined) return bad()
     } else {
       if (source.kind !== 'captured' || source.submissionId !== message.rawId || !['human', 'agent', 'external', 'unknown'].includes(String(author.kind)) ||

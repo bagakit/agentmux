@@ -1087,6 +1087,8 @@ export type AgentSessionUserMessage = {
   turnId?: string
   source: AgentSessionUserMessageSource
   author: AgentSessionUserMessageAuthor
+  /** Original user-content boundary only; absence is unknown. Not sharing authority, safety or identity. */
+  publicContent?: 'confirmed' | 'unknown'
   content: string
   contentParts: AgentSessionHistoryContentPart[]
   /** Existing Provider reply facts; the original contentParts remain complete for Copy. */
@@ -1859,6 +1861,8 @@ export type AgentTimelineItem = {
   sourceDevice?: AgentOperationDevice
   sourceChannel?: AgentMessageChannel
   content?: string
+  /** Set by the original userContent writer, never inferred from legacy content or author. Not sharing authority. */
+  publicContent?: 'confirmed'
   toolName?: string
   toolInput?: string
   /**

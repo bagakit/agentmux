@@ -179,6 +179,10 @@ function normalizeItem(value: unknown): AgentTimelineItem {
     throw new AgentMuxError('Timeline item authorHuman is invalid.', 'INVALID_AGENT_TIMELINE')
   }
   const authorAgent = optionalField(source, 'authorAgentSessionId')
+  if (source.publicContent !== undefined && (source.publicContent !== 'confirmed' || source.kind !== 'user_message' ||
+    source.source !== 'user' || typeof source.content !== 'string' || !source.content)) {
+    throw new AgentMuxError('Timeline user-content boundary is invalid.', 'INVALID_AGENT_TIMELINE')
+  }
   if (source.authorExternal !== undefined && (authorAgent.authorAgentSessionId !== undefined || source.authorHuman === true)) throw new AgentMuxError('External attribution cannot claim another author.', 'INVALID_AGENT_TIMELINE')
   if (source.activityState !== undefined && source.kind !== 'lifecycle') {
     throw new AgentMuxError('Activity state requires a lifecycle item.', 'INVALID_AGENT_TIMELINE')
@@ -193,6 +197,7 @@ function normalizeItem(value: unknown): AgentTimelineItem {
     updatedAt,
     title: text(source.title, 'Timeline item title'),
     ...optionalField(source, 'content'),
+    ...(source.publicContent === undefined ? {} : { publicContent: 'confirmed' as const }),
     ...authorAgent,
     ...(source.authorExternal === undefined ? {} : { authorExternal: parseAgentExternalMessageAuthor(source.authorExternal) }),
     ...(source.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(source.sourceDevice) }),
