@@ -28,6 +28,9 @@ Choose Provider-native collaboration or an independent Session from the user's p
 Keep original operation, Session, Run and resource identities; a new display is not a new task.
 
 agent output reads ordered original bytes; closing the reader does not stop the Agent.
+Typed agent history --kind user-message reads expose publicContent independently of recorded
+authors. A content boundary grants no sharing authorization; read the leaf help for its exact
+confirmed and unknown meanings. Original text and copyable parts remain complete.
 agent conversation operations read source-qualified records, while original history/resource
 reads retain their own provenance and cursor. Status prose is not permission or input proof.
 Ordinary input must use the original public input/message owner and returned admission facts.
