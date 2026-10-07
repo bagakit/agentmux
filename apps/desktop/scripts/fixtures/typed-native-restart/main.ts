@@ -3,7 +3,7 @@ import { localRuntimeConnector } from '../../../test/helpers/local-runtime-conne
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
-import { AgentMuxError, AgentMuxFileAgentSessionStore } from '@agentmux/core'
+import { AgentMuxError, AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore } from '@agentmux/core'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 const [html, privateRoot, phase, preload, evidence, nodeExecutable] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
@@ -13,23 +13,38 @@ process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state'
 process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local' as const, label: 'Private proof' }],
   executors: { codex: { label: 'Private CLI fixture', providerId: 'codex', command: nodeExecutable,
-    args: [path.join(privateRoot, 'fake-codex-cli.mjs')], env: { AGENTMUX_FAKE_PERMISSION_REQUEST: '1', AGENTMUX_FAKE_READY_MODE: 'before' }, injectAgentMuxGuide: false } },
+    args: [path.join(privateRoot, 'fake-codex-cli.mjs')], env: { AGENTMUX_FAKE_PERMISSION_REQUEST: '1', AGENTMUX_FAKE_READY_MODE: 'before',
+      AGENTMUX_FAKE_NATIVE_RECORD: '1', CODEX_HOME: path.join(privateRoot, 'codex'),
+      AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY: path.join(privateRoot, 'codex', 'sessions') }, injectAgentMuxGuide: false } },
   workspaces: [{ id: 'native-workspace', hostId: 'local', name: 'Private proof', path: path.join(privateRoot, 'workspace'), kind: 'folder' as const }],
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
+const spatial = new AgentMuxSpatialStateStore(path.join(privateRoot, 'spatial.json'))
 const runtime = new RuntimeController(store, localRuntimeConnector)
-const calls: { operation: string; args: any[] }[] = []
+const calls: { operation: string; args: any[]; result?: unknown }[] = []
 const result: Record<string, any> = { passed: false, phase, pid: process.pid }
 let win: BrowserWindow
+let releaseSpatial: (() => void) | undefined
 let armed = false
 const client = () => (runtime as any).hosts.get('local').client
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 ipcMain.handle('native-proof:request', async (_event, operation, ...args) => {
-  calls.push({ operation, args })
+  const call: (typeof calls)[number] = { operation, args }
+  calls.push(call)
+  const observed = async (read: () => Promise<unknown>) => {
+    const value = await read()
+    call.result = structuredClone(value)
+    return value
+  }
   switch (operation) {
     case 'setup': return { phase, config, ids: phase === 'restore' ? JSON.parse(await fs.readFile(path.join(privateRoot, 'ids.json'), 'utf8')) : null }
     case 'launch': return runtime.launchAgent({ hostId: 'local', executorId: 'codex', workspacePath: config.workspaces[0].path }, config as any)
-    case 'snapshot': return runtime.snapshot(config as any)
+    case 'snapshot': return observed(() => runtime.snapshot(config as any))
+    case 'providers': return observed(() => runtime.providerCatalog(args[0]))
+    case 'history-sources': return observed(() => runtime.sessionHistorySources(args[0]))
+    case 'spatial-read': return observed(() => spatial.readForLayout())
+    case 'spatial-commit': return observed(() => spatial.commit(args[0]))
+    case 'spatial-retain-labels': return observed(() => spatial.retainDisplayLabels(args[0]))
     case 'attach': return runtime.attachSession(win.webContents.id, args[0], args[1], config as any)
     case 'replay': return runtime.readSessionReplay(win.webContents.id, args[0], args[1])
     case 'detach': return runtime.detachSession(win.webContents.id, args[0])
@@ -75,6 +90,19 @@ app.whenReady().then(async () => {
       webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, preload } })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) process.stderr.write(`Renderer: ${message}\n`) })
     runtime.attach(win.webContents)
+    releaseSpatial = spatial.subscribe(state => {
+      ;(result.spatialChanges ??= []).push(structuredClone(state))
+      if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+        // The private preload has one event channel. This envelope is transport
+        // only; the Renderer separates it before the production Runtime reducer.
+        win.webContents.send('agentmux:session-event', { kind: 'native-proof-spatial-state', state })
+      }
+    })
+    if (phase === 'restore') {
+      const expected = JSON.parse(await fs.readFile(path.join(privateRoot, 'expected.json'), 'utf8'))
+      result.spatialBeforeRenderer = await spatial.readForLayout()
+      assert.deepEqual(result.spatialBeforeRenderer, expected.spatial, 'Restart must read the original confirmed Core spatial document before Renderer startup')
+    }
     await win.loadFile(html)
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -83,6 +111,11 @@ app.whenReady().then(async () => {
     result.initial = await state()
     result.originalRun = (await client().listRuns()).find((run: any) => run.runId === ids.run.runId)
     assert.ok(result.originalRun?.pid)
+    result.initialSpatial = await spatial.readForLayout()
+    const originalRegion = result.initialSpatial?.graph.regions.find((region: any) => region.tabId === ids.tabId && region.regionId === ids.regionId)
+    assert.equal(originalRegion?.agentSessionId, ids.sessionId)
+    assert.equal(originalRegion.runId, ids.run.runId)
+    assert.deepEqual(originalRegion.execution, { hostId: result.initial.session.hostId, cwd: result.initial.session.workspacePath })
     if (phase === 'seed') {
       assert.equal(calls.filter(call => call.operation === 'launch').length, 1)
       assert.equal(result.initial.session.interactionResponseUnavailableReason, undefined, 'Protocol replies cannot mark a request unconfirmed')
@@ -97,6 +130,7 @@ app.whenReady().then(async () => {
         await delay(30)
       } while (Date.now() < deadline)
       assert.ok(extraSession?.pendingInteraction)
+      await until(`window.nativeExtraState(${JSON.stringify(extraSession.id)}).session?.control.run.runId === ${JSON.stringify(extraSession.control.run.runId)} && window.nativeExtraState(${JSON.stringify(extraSession.id)}).session?.pendingInteraction?.id === ${JSON.stringify(extraSession.pendingInteraction.id)}`)
       await win.webContents.executeJavaScript(`window.nativeObserveExtra(${JSON.stringify(extraSession)}); true`)
       const extraState = () => win.webContents.executeJavaScript(`window.nativeExtraState(${JSON.stringify(extraSession.id)})`)
       await until(`window.nativeExtraState(${JSON.stringify(extraSession.id)}).cards.length === 2`)
@@ -162,17 +196,22 @@ app.whenReady().then(async () => {
     assert.equal(result.saved.drafts[ids.sessionId], 'Keep this unsent draft')
     assert.ok(calls.some(call => call.operation === 'write' && call.args[2] === 'user'))
     assert.equal(result.saved.session.processState, 'running')
-    if (phase === 'seed') await fs.writeFile(path.join(privateRoot, 'expected.json'), JSON.stringify(result.saved))
     result.persisted = { agentSessionId: result.persisted.agentSessionId, run: result.persisted.run, pendingInteraction: result.persisted.pendingInteraction }
     await win.webContents.executeJavaScript('window.nativeFlush()')
+    result.finalSpatial = await spatial.readForLayout()
+    if (phase === 'seed') await fs.writeFile(path.join(privateRoot, 'expected.json'), JSON.stringify({ ...result.saved, spatial: result.finalSpatial }))
     result.calls = calls
     result.passed = true
   } catch (error: any) {
     result.failure = { name: error.name, message: error.message, stack: error.stack }
     result.calls = calls
-    if (win && !win.isDestroyed()) result.observationAtFailure = await state().catch(() => null)
+    if (win && !win.isDestroyed()) {
+      result.observationAtFailure = await state().catch(() => null)
+      result.liveAtFailure = await win.webContents.executeJavaScript('window.nativeLiveReady()').catch(() => null)
+    }
     result.storeAtFailure = (await store.load().catch(() => [])).map((one: any) => ({ agentSessionId: one.agentSessionId, run: one.run, pendingInteraction: one.pendingInteraction }))
   } finally {
+    releaseSpatial?.()
     await runtime.dispose().catch(error => { result.cleanupFailure = String(error); result.passed = false })
     await fs.writeFile(path.join(evidence, `${phase}.json`), JSON.stringify(result, null, 2))
     if (win && !win.isDestroyed()) win.destroy()
