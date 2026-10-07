@@ -213,3 +213,26 @@
   .connector-record__action { display: none; }
   .connector-editor-actions > button { min-height: 36px; }
 }
+
+/* The original application workface also owns its platform confirmation. */
+.connector-enrollment__identity { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin: 0; }
+.connector-enrollment__identity strong { color: var(--text); font-size: var(--fs-body); font-weight: 550; overflow-wrap: anywhere; }
+.connector-enrollment__identity > span { color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.connector-enrollment__confirmation { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-6); }
+.connector-enrollment__confirmation > div:last-child { min-width: 0; flex: 1 1 180px; }
+.connector-enrollment__code { width: 232px; max-width: 100%; flex: none; line-height: 0; }
+.connector-enrollment__code svg { display: block; max-width: 100%; height: auto; }
+.connector-enrollment__public-code { overflow-wrap: anywhere; margin: 0 0 var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
+.connector-enrollment__public-code strong { display: block; margin-top: var(--sp-2); color: var(--text); font-family: var(--font-mono); font-size: var(--fs-title); }
+.connector-enrollment > .connector-optional { padding-top: var(--sp-4); }
+.connector-enrollment .settings-field { display: grid; gap: var(--sp-2); margin-top: var(--sp-4); font-size: var(--fs-body); }
+.connector-enrollment .settings-field small { color: var(--text-3); font-size: var(--fs-meta); }
+.connector-enrollment__history { border-top: 1px solid var(--line-soft); padding-top: var(--sp-4); }
+.connector-enrollment__history > summary { padding-block: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); cursor: pointer; }
+.connector-enrollment__previous { display: grid; gap: var(--sp-1); width: 100%; padding: var(--sp-4) var(--sp-3); border: 0; border-bottom: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
+.connector-enrollment__previous strong { font-size: var(--fs-body); font-weight: 550; overflow-wrap: anywhere; }
+.connector-enrollment__previous span { color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.connector-enrollment__previous:hover { background: var(--surface-1); }
+.connector-enrollment__previous:focus-visible, .connector-enrollment__history > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+
+.connector-enrollment .connector-diagnostics > .small-button { margin-top: var(--sp-4); }
