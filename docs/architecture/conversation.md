@@ -2,6 +2,8 @@
 
 本文说明当前源码怎样把原生记录、Core 捕获记录和客户端阅读面接起来。必须满足的结果归[对话行为 SSOT](../design/behavior/conversation-mode.md)，视觉归[对话呈现 SSOT](../design/presentation/conversation-mode.md)，字段与读取合同归[公共协议](../specs/conversation-protocol.md)；这里的接线说明不代表构建、安装或运行验收已通过。
 
+[连续统一的对话列表](../design/behavior/conversation-mode.md#连续统一的对话列表)是接线的产品约束：不同来源经薄适配进入共同消息、过程与载荷组件，分页和观察只更新所属阅读窗口。来源分隔与标签是列表中的呈现，不构成另一套消息实现。下文分别说明实际消费者与尚未闭合的能力，不能用共享组件的存在代替完整列表体验已经成立的证明。
+
 ## 记录、身份与唯一 owner
 
 | 事实 | 当前 owner 与源码入口 |
@@ -36,13 +38,21 @@ flowchart LR
   Pane --> Activity["ActivityView / 阅读窗口"]
   Activity --> View["ConversationView / RecordSequence"]
   View --> Message["ConversationMessage / Trace / Resource"]
+  Activity --> Captured["captured 原记录适配"]
+  Captured --> Message
+  Captured --> Process["共同 RecordedSteps / ToolRow / Payload"]
+  View --> Process
   Pane --> Composer["AgentSessionComposer / Mailbox"]
   Composer --> Message
 ```
 
 [`SessionPane`](../../apps/desktop/src/renderer/src/components/SessionPane.tsx) 以实际可见阅读面计算 `activityDemand`，从 [`useSessionUserMessages`](../../apps/desktop/src/renderer/src/lib/session-user-messages.ts) 取得近期原生页、输入投影和观察结果。后者按 Host／Session／Run 共享近期读取需求，`fetchSessionHistoryPage` 先取得观察再首读；隐藏消费者释放需求，已有正文与服务窗仍由宿主保留。
 
-[`ActivityView`](../../apps/desktop/src/renderer/src/components/ActivityView.tsx) 使用 [`useSessionConversationWindow`](../../apps/desktop/src/renderer/src/lib/session-conversation-window.ts) 持有已提交窗口、返回位置与阅读锚点；更早／较新页仍调用同一 `readSessionConversationPage`，`protectsConversationWindow` 检查选区与已读节点。窗口是客户端阅读状态，事实仍来自 Core／Provider。当前 Activity 和 History 把已提交 page 交给同一 `ConversationView`，captured supplement 保持独立来源；退休 Session 的只读入口也使用 `ActivityView`。
+[`ActivityView`](../../apps/desktop/src/renderer/src/components/ActivityView.tsx) 使用 [`useSessionConversationWindow`](../../apps/desktop/src/renderer/src/lib/session-conversation-window.ts) 持有已提交窗口、返回位置与阅读锚点；更早／较新页仍调用同一 `readSessionConversationPage`，`protectsConversationWindow` 检查选区与已读节点。窗口是客户端阅读状态，事实仍来自 Core／Provider。当前 Activity 和 History 把已提交 page 交给同一 `ConversationView`；captured 原文在同一阅读面常显，保独立记录及来源，不再以总详情隐藏。退休 Session 的只读入口也使用 `ActivityView`。
+
+captured 输入沿既有 `AgentSessionUserMessage` 交共同 Message，captured 回复及系统原文经 [`CapturedConversationMessage`](../../packages/client-ui/src/components/CapturedConversationMessage.tsx) 薄适配到同一 Message，并在原消息详情保采集来源与原记录身份。Activity 的 Row／Run 只适配原 Timeline 事件：与 native 过程消费相同 [`RecordedStepsCard`／`RecordedToolRow`](../../packages/client-ui/src/components/WorkflowObservation.tsx)，使用紧凑呈现；参数和结果交共同 [`ConversationToolPayload`](../../packages/client-ui/src/components/ConversationToolPayload.tsx)，编辑 diff 保原只读预览和完整原参数。Provider 专有的 native metrics／collaboration 与 captured 的原分组仍由各自准确适配表达，不能将 Timeline 强制转换成 native parts。
+
+原生分页尾 marker 与当前已呈现内容尾分别供分页、latest／follow 使用；captured 正文追加或增长也参与显示变化判定。可见 captured 段沿原 segment key 参与锚点、精确定位和图片可见性门，不持第二份正文。现有公共 Timeline 尚无通用 captured→native record 的准确关联，客户端既不按正文／时间删除副本，也不从内部 ID 解出一个回执键；查看消息详情不会产生接纳或执行事实。
 
 `ConversationView` 给每条消息传入原 source／record／turn 和 ordered parts。`ConversationRecordSequence` 组织过程披露，宿主注入共同 [`NativeProcessObservation`](../../packages/client-ui/src/components/NativeProcessObservation.tsx)；Message 对 text、reasoning、tool、resource 使用同一套正文与 trace 组件。Gallery 使用这些生产组件的隔离输入，不能成为生产数据来源。
 
@@ -50,9 +60,9 @@ flowchart LR
 
 ## Mobile、样式与宿主差异
 
-[`MobileConversationSurface`](../../apps/mobile/src/conversation/MobileConversationSurface.tsx) 使用 [`useHostedConversation`](../../apps/mobile/src/conversation/use-hosted-conversation.ts) 通过 Hosted SDK 读取原 Host 的 Timeline／native page 并观察相关来源；native、captured 消息和过程分别消费同一 `ConversationView`、`ConversationMessage` 与 `NativeProcessObservation`。连接、草稿和未确认操作归本端既有 owner，原生读取失败不自动撤销普通输入。
+[`MobileConversationSurface`](../../apps/mobile/src/conversation/MobileConversationSurface.tsx) 使用 [`useHostedConversation`](../../apps/mobile/src/conversation/use-hosted-conversation.ts) 通过 Hosted SDK 读取原 Host 的 Timeline／native page 并观察相关来源；原生消息／过程消费共同 `ConversationView` 与 `NativeProcessObservation`，captured 输入／回复消费共同 Message 及 Captured adapter；本端尚未呈现 captured 工具／lifecycle 过程。captured 正文同样常显，并保原作者、来源及失败／未确认状态；没有额外的总来源折叠。连接、草稿和未确认操作归本端既有 owner，原生读取失败不自动撤销普通输入。
 
-Mobile 自己持有单页阅读状态，没有使用 Desktop 的连续窗口 Hook。当前 `readingProps` 未向主 `ConversationView` 注入 `readHistoryResource` 和执行 Host；同组件却为 `MobileMailbox` 单独注入资源 reader。因此主对话的原生 image／deferred-text part 会落入 Message 的引用分支，无法据此宣称两端资源能力已一致；缺 Host 的记录也没有完整 `ConversationItemRef`。这说明接线范围，不删减[共同阅读要求](../design/behavior/conversation-mode.md#共同阅读组件与完整原生内容)。
+Mobile 自己持有单页阅读状态，没有使用 Desktop 的连续窗口 Hook。当前 `readingProps` 向共同消息传入所选 Session 的准确执行 Host，但未向主 `ConversationView` 注入 `readHistoryResource`；同组件却为 `MobileMailbox` 单独注入资源 reader。因此主对话的原生 image／deferred-text part 会落入 Message 的引用分支，无法据此宣称两端资源能力已一致。这说明接线范围，不删减[共同阅读要求](../design/behavior/conversation-mode.md#共同阅读组件与完整原生内容)。
 
 两端样式来自共同 [`client-ui/styles`](../../packages/client-ui/src/styles/index.css)：Desktop 在 [`styles/index.css`](../../apps/desktop/src/renderer/src/styles/index.css) 分项导入，Mobile 在 [`main.tsx`](../../apps/mobile/src/main.tsx) 导入整包，再由 [`conversation.css`](../../apps/mobile/src/conversation/conversation.css) 覆盖触控尺寸、气泡和容器。其中对共享 `.log-turn` 的气泡、padding、字号和消息间距的直接覆写，与[共享样式 owner](../design/presentation/shared-rules.md#样式表的组织)要求存在差异；不能把共享组件的 import 当作两端布局和视觉已经统一的证明。触控和外层容器适配与共同消息本身的样式职责须分别核对。
 

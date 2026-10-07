@@ -46,6 +46,7 @@
 
 - AgentMux 是 Agent-first、terminal-first 的桌面 Client。Agent 状态、用户输入、终端输出和恢复动作必须靠近它们影响的 View。
 - 同一信息只在最合适的位置显示一次。Tab 保留工作面上下文，Region 标明其中 Agent 的身份；低频 ID、Host 和时间进入 tooltip 或 context menu；Activity 拥有最近消息。
+- 对话模式遵守[连续统一的对话列表](conversation-mode.md#连续统一的对话列表)原则，完整要求由该专题唯一维护。
 - 界面层级由 Surface、明度、局部高光和紧凑密度建立，不靠连续边框、重复标题或极小字号制造“专业感”。
 - 选择、键盘、拖拽、菜单和可访问性交互使用维护中的成熟依赖与平台模式。
 - Desktop 只组合 Core 的公共能力。所有 Agent 生命周期都经过 `packages/core`；所有 PTY、进程、Run、Replay 和 Attachment 事实都由 ctxmux 持有。
