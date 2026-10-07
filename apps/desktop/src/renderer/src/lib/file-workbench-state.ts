@@ -492,8 +492,9 @@ export function reduceDocumentRead(
         ? { dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
           ...(result.document.noteProvenance ? { documents: { ...state.documents, [key]: { ...current,
             noteProvenance: result.document.noteProvenance,
-            noteWriteAttribution: result.document.noteProvenance.status === 'recorded' ? { status: 'recorded' as const }
-              : { status: 'unconfirmed' as const, reason: result.document.noteProvenance.reason } } } } : {}) }
+            // A read may reconcile an existing write receipt, but cannot invent one.
+            ...(current.noteWriteAttribution?.status === 'unconfirmed' && result.document.noteProvenance.status === 'recorded'
+              ? { noteWriteAttribution: { status: 'recorded' as const } } : {}) } } } : {}) }
         : {}),
       ...(clearsIssue ? { documentIssues: withoutIssue(state.documentIssues, key) } : {})
     }
