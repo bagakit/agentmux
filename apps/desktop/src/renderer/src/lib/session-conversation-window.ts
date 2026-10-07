@@ -169,7 +169,7 @@ export function protectsConversationWindow(viewport: HTMLElement | null, next: A
   return false
 }
 
-export function restoreConversationAnchor(viewport: HTMLElement, anchor: ReadingAnchor): void {
+export function restoreConversationAnchor(viewport: HTMLElement, anchor: ReadingAnchor, tailSpace?: HTMLElement | null): void {
   const row = anchor.kind === 'segment'
     ? [...viewport.querySelectorAll<HTMLElement>('[data-segment-key]')].find(node => node.dataset.segmentKey === anchor.id)
     : anchor.kind === 'record'
@@ -178,7 +178,19 @@ export function restoreConversationAnchor(viewport: HTMLElement, anchor: Reading
       ?.querySelector<HTMLElement>(':scope > .wf-head[aria-expanded="false"]')
   if (!row) return
   const bounds = viewport.getBoundingClientRect(), rect = row.getBoundingClientRect()
-  if (bounds.height > 0 && rect.height > 0) viewport.scrollTop += rect.top - bounds.top - anchor.offset
+  if (bounds.height <= 0 || rect.height <= 0) return
+  const target = viewport.scrollTop + rect.top - bounds.top - anchor.offset
+  viewport.scrollTop = target
+  if (tailSpace && (viewport.scrollTop < target || tailSpace.style.height)) {
+    // A folded, underfilled page otherwise clamps the accepted Earlier anchor at zero.
+    // Keep only the blank extent needed for this position, outside both reading tails.
+    const end = viewport.scrollTop + tailSpace.getBoundingClientRect().top - bounds.top
+      + (Number.parseFloat(getComputedStyle(viewport).paddingBottom) || 0)
+    const height = Math.min(viewport.clientHeight, Math.max(0, target + viewport.clientHeight - end))
+    const value = height ? `${height}px` : ''
+    if (tailSpace.style.height !== value) tailSpace.style.height = value
+    viewport.scrollTop = target
+  }
 }
 
 function sameSource(a: AgentSessionHistoryPage, b: AgentSessionHistoryPage): boolean {

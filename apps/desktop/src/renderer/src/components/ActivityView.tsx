@@ -454,6 +454,9 @@ export function ActivityView({
   const returnRef = useRef<HTMLButtonElement>(null)
   const earlierRef = useRef<HTMLDivElement>(null)
   const nativeTailRef = useRef<HTMLDivElement>(null)
+  const readingSpaceRef = useRef<HTMLDivElement>(null)
+  const earlierSpaceAllowed = useRef(false)
+  const earlierCommitPending = useRef(false)
   const physicalScrollRef = useRef<ScrollGeometry | null>(null)
   const edgeRef = useRef({ earlier: false, newer: false })
   const [rulerWindow, setRulerWindow] = useState<RulerWindow>('24h')
@@ -462,6 +465,8 @@ export function ActivityView({
     const keepAnchor = intent === 'earlier' || intent === 'newer' || (intent !== 'current' && !followRef.current.following)
     if (protectsConversationWindow(feedEl, page, keepAnchor, currentOriginal, projection, userMessages)) return false
     anchorRef.current = keepAnchor && feedEl ? captureReadingAnchor(feedEl) : null
+    if (intent === 'earlier') earlierCommitPending.current = true
+    if (!keepAnchor) clearEarlierSpace()
     if (intent === 'current') {
       followRef.current = { ...followRef.current, following: true }
       edgeRef.current.earlier = false; edgeRef.current.newer = false
@@ -479,9 +484,10 @@ export function ActivityView({
       event.stopPropagation(); conversationReading.onClose()
     }
   }
-  useEffect(() => {
+  useLayoutEffect(() => {
     edgeRef.current = { earlier: false, newer: false }
     physicalScrollRef.current = null
+    clearEarlierSpace()
   }, [sessionId, conversationReading?.identity, conversationReading?.reference.hostId])
   const nativeHistoryPage = readingWindow.page
   useEffect(() => {
@@ -497,14 +503,18 @@ export function ActivityView({
   const items = readingWindow.captured ?? observedItems
   const readingEnabled = conversationReading?.enabled !== false
   useLayoutEffect(() => {
-    if (conversationReading?.enabled && feedEl && anchorRef.current) restoreConversationAnchor(feedEl, anchorRef.current)
+    if (earlierCommitPending.current) {
+      earlierCommitPending.current = false
+      earlierSpaceAllowed.current = true
+    }
+    if (conversationReading?.enabled && feedEl && anchorRef.current) restoreReadingPosition(feedEl, anchorRef.current)
     else if (conversationReading?.enabled && feedEl && followRef.current.following) pinToBottom()
     if (conversationReading?.enabled && feedEl) markProgrammaticReadingScroll(feedEl)
   }, [nativeHistoryPage, feedEl, conversationReading?.enabled])
   useLayoutEffect(() => {
     // Error and transient newer notices can move a retained body before a page commits.
     if (conversationReading?.enabled && feedEl && anchorRef.current) {
-      restoreConversationAnchor(feedEl, anchorRef.current)
+      restoreReadingPosition(feedEl, anchorRef.current)
       markProgrammaticReadingScroll(feedEl)
     }
   }, [readingWindow.error, readingWindow.newerOutside, feedEl, conversationReading?.enabled])
@@ -514,7 +524,7 @@ export function ActivityView({
     if (!content) return
     let active = true
     const observer = new ResizeObserver(() => {
-      if (active && anchorRef.current) { restoreConversationAnchor(feedEl, anchorRef.current); markProgrammaticReadingScroll(feedEl) }
+      if (active && anchorRef.current) { restoreReadingPosition(feedEl, anchorRef.current); markProgrammaticReadingScroll(feedEl) }
     })
     observer.observe(content)
     return () => { active = false; observer.disconnect() }
@@ -628,7 +638,17 @@ export function ActivityView({
     return { scrollTop: el.scrollTop, scrollHeight: readingHeight(el), clientHeight: el.clientHeight }
   }
 
+  function clearEarlierSpace(): void {
+    earlierSpaceAllowed.current = false
+    earlierCommitPending.current = false
+    if (readingSpaceRef.current) readingSpaceRef.current.style.height = ''
+  }
+  function restoreReadingPosition(viewport: HTMLElement, anchor: NonNullable<typeof anchorRef.current>): void {
+    restoreConversationAnchor(viewport, anchor, earlierSpaceAllowed.current ? readingSpaceRef.current : null)
+  }
+
   const pinToBottom = (): void => {
+    clearEarlierSpace()
     const el = feedEl ?? logRef.current?.closest('.activity-feed')
     if (el instanceof HTMLElement) { el.scrollTop = Math.max(0, readingHeight(el) - el.clientHeight); markProgrammaticReadingScroll(el) }
   }
@@ -703,6 +723,11 @@ export function ActivityView({
         : onScroll(followRef.current, geometry)
       if (geometry.scrollTop > Math.max(0, geometry.scrollHeight - geometry.clientHeight) + FOLLOW_THRESHOLD_PX)
         followRef.current = { ...followRef.current, following: false }
+      if (followRef.current.following && earlierSpaceAllowed.current) {
+        clearEarlierSpace()
+        followRef.current = { ...followRef.current, lastScrollTop: el.scrollTop }
+        markProgrammaticReadingScroll(el)
+      }
       setShowJump(shouldShowJumpToLatest(followRef.current))
       if (!programmatic && !layoutClamp && direction) requestReadingEdge(direction, el)
     }
@@ -1212,6 +1237,7 @@ export function ActivityView({
         <div className="activity-log">{placed.filter(({ entry }) => !nativeSupplement(entry)).map(renderPlaced)}</div>
       </details> : null}
       {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator active={activitySemantic === 'active'} /> : null}
+      <div ref={readingSpaceRef} data-conversation-reading-space aria-hidden="true" />
     </div>
   ))
 }
