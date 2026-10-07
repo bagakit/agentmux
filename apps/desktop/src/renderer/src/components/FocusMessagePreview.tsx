@@ -36,7 +36,8 @@ export type FocusMessageReader = {
 const readPastedImage = (path: string) => api.ui.readPastedImage(path)
 
 /** One inspected recorded message. Current Context facts never become its historical author or Run. */
-export function FocusMessagePreview({ message, sender, recipient, recipientName, workspaceRoot, lane, hierarchy, interactive, anchor, reader, describeSpeaker, timeFormatters, onSelect, onReveal, onClose, onMouseEnter, onMouseLeave }: {
+export function FocusMessagePreview({ autoFocus = true, message, sender, recipient, recipientName, workspaceRoot, lane, hierarchy, interactive, anchor, reader, describeSpeaker, timeFormatters, onSelect, onReveal, onClose, onMouseEnter, onMouseLeave }: {
+  autoFocus?: boolean
   describeSpeaker: FocusDescribeSpeaker
   message: ConversationRecord | undefined; sender: FocusContext | undefined; recipient: FocusContext | undefined
   lane: FocusProjectLane | undefined; hierarchy: FocusHierarchyFacts | undefined
@@ -50,6 +51,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
   const element = useRef<HTMLDivElement>(null)
   const previewId = useId()
   const returnFocus = useRef(true)
+  const focusIntent = useRef(autoFocus); focusIntent.current = autoFocus
   const [navigationFeedback, setNavigationFeedback] = useState<{ kind: 'pending' | 'unavailable'; message: string } | null>(null)
   const revealGeneration = useRef(0)
   const inspectedMessage = useRef(message?.id)
@@ -106,7 +108,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
       Object.assign(surface.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
       if (!positioned) {
         positioned = true
-        if (interactive && (document.activeElement === previous || document.activeElement === document.body)) surface.focus()
+        if (interactive && focusIntent.current && (document.activeElement === previous || document.activeElement === document.body)) surface.focus()
       }
     }
     const stopPosition = autoUpdate(reference, surface, () => { void update() })

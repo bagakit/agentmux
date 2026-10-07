@@ -1,6 +1,6 @@
 import { civilClock } from "../lib/civil-clock"
 import { TextInput } from '@agentmux/client-ui/input'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { resolveOverlayContainer } from './WindowOverlayHost'
@@ -18,11 +18,14 @@ const MODES: Array<{ value: FocusRulerMode; label: string; description: string }
 ]
 export type FocusDateChoice = { value: string; candidates: Array<{ instant: number; offset: number }> }
 
-export function FocusTimelineRulerSettings({ preferences, onChange, dateChoice, onSelectDate, onCancelDate }: {
-  preferences: FocusRulerPreferences; onChange(value: FocusRulerPreferences): void
+export function FocusTimelineRulerSettings({ active = true, preferences, onChange, dateChoice, onSelectDate, onCancelDate }: {
+  active?: boolean; preferences: FocusRulerPreferences; onChange(value: FocusRulerPreferences): void
   dateChoice: FocusDateChoice | null; onSelectDate(instant: number): void; onCancelDate(): void
 }) {
   const [open, setOpen] = useState(false)
+  const dormantClose = useRef(false)
+  if (!active) dormantClose.current = true
+  useEffect(() => { if (!active) { setOpen(false); onCancelDate() } }, [active])
   const [draft, setDraft] = useState(preferences)
   const [interval, setInterval] = useState(String(preferences.intervalMinutes))
   const [phase, setPhase] = useState(civilClock(23, 0))
@@ -31,17 +34,18 @@ export function FocusTimelineRulerSettings({ preferences, onChange, dateChoice, 
     if (!next) { setOpen(false); onCancelDate(); return }
     setDraft(preferences); setInterval(String(preferences.intervalMinutes))
     setPhase(`${String(Math.floor(preferences.phaseMinutes / 60)).padStart(2, '0')}:${String(preferences.phaseMinutes % 60).padStart(2, '0')}`)
+    dormantClose.current = false
     setOpen(true)
   }
   const minutes = Number(interval)
   const phaseValid = /^([01]\d|2[0-3]):[0-5]\d$/.test(phase)
   const intervalValid = interval.trim() !== '' && Number.isInteger(minutes) && minutes >= 1 && minutes <= 1440
   const valid = draft.mode !== 'uniform' || (intervalValid && phaseValid)
-  return <Dialog.Root open={open || dateChoice !== null} onOpenChange={begin}>
+  return <Dialog.Root open={active && (open || dateChoice !== null)} onOpenChange={begin}>
     <Dialog.Trigger asChild><button data-focus-window-control type="button" className="icon-button" aria-label="Focus timeline settings" title="Time ruler and time zone"><ThemeActionAdjustIcon size={12} /></button></Dialog.Trigger>
     <Dialog.Portal container={resolveOverlayContainer()}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
-      <Dialog.Content className="dialog-surface focus-ruler-settings" onPointerDownCapture={event => event.stopPropagation()}>
+      <Dialog.Content onCloseAutoFocus={event => { if (dormantClose.current) event.preventDefault() }} className="dialog-surface focus-ruler-settings" onPointerDownCapture={event => event.stopPropagation()}>
         <header><Dialog.Title>{dateChoice ? 'Choose this clock time' : 'Timeline settings'}</Dialog.Title><Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close timeline settings"><ThemeActionCloseIcon size={14} /></button></Dialog.Close></header>
         <Dialog.Description>{dateChoice ? `${dateChoice.value.replace('T', ' ')} occurs twice in this time zone. Choose its UTC offset.` : 'Set the grid and time zone used throughout this timeline.'}</Dialog.Description>
         {dateChoice ? <div className="focus-ruler-settings__dates">{dateChoice.candidates.map(candidate => <button type="button" className="small-button" key={candidate.instant} onClick={() => { onSelectDate(candidate.instant); setOpen(false) }}>{focusUtcOffset(candidate.offset)}<span>{new Date(candidate.instant).toISOString().replace('T', ' ').replace('.000Z', ' UTC')}</span></button>)}</div> : <>
