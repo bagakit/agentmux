@@ -23,7 +23,7 @@ beforeEach(() => {
   vi.stubGlobal('Highlight', TestHighlight)
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
 })
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); highlights.clear(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+afterEach(async () => { window.getSelection()?.removeAllRanges(); await act(async () => root.unmount()); host.remove(); highlights.clear(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 const render = async (value: ReactNode) => { await act(async () => root.render(value)); await tick() }
 const button = (label: string) => host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!
 const click = async (element: HTMLElement) => { expect(element).not.toBeNull(); await act(async () => { element.focus(); element.click() }); await tick() }
@@ -38,14 +38,39 @@ function item(id: string, content: string): AgentTimelineItem {
   return { id, agentSessionId: 'reading-session', kind: 'assistant_message', title: 'Answer', content, source: 'native-hook', status: 'complete', createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 1) }
 }
 const activity = (items = [item('answer', 'alpha **beta** and alpha beta')], sessionId = 'reading-session', enabled = true) =>
-  <ActivityView sessionId={sessionId} executionHostId="reader-host" items={items} capability="complete-events" conversationReading={enabled ? undefined : { enabled: false } as never} />
+  <ActivityView sessionId={sessionId} executionHostId="reader-host" items={items} capability="complete-events" {...(!enabled ? { conversationReading: { enabled: false } as never } : {})} />
 const file = (path = fixturePath('reading.md'), content = 'alpha **beta**\n\n[alpha beta](https://example.test/read)', visible = true, open = vi.fn()) =>
   <SourceFilePreview kind="markdown" regionId="original-file-region" workspaceId="original-workspace" workspaceRoot={fixturePath('workspace')} path={path} content={content} visible={visible} openReference={vi.fn()} openHttpLink={open} />
 const current = () => [...highlights.entries()].find(([name]) => name.endsWith('-current'))?.[1].values().next().value as Range | undefined
 
+it('keeps a stable find icon in the original ruler and preserves the pointer selection and opener across disclosure', async () => {
+  await render(activity())
+  await act(async () => { host.querySelector<HTMLDetailsElement>('details.activity-feed__observations')!.open = true }); await tick()
+  const trigger = host.querySelector<HTMLButtonElement>('.activity-ruler__actions button.reading-find__trigger')!
+  expect(trigger).not.toBeNull(); expect(trigger.textContent).not.toContain('Find')
+  expect(host.querySelector('[role="search"]')).toBeNull()
+  const paragraph = host.querySelector<HTMLElement>('.log-turn__body p')!
+  paragraph.tabIndex = -1; paragraph.focus()
+  const range = document.createRange(); range.selectNodeContents(paragraph.firstChild!)
+  window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
+  const pointer = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+  await act(async () => { trigger.dispatchEvent(pointer); trigger.click() }); await tick()
+  expect(pointer.defaultPrevented).toBe(true)
+  expect(host.querySelector('.reading-find__trigger')).toBe(trigger)
+  expect(trigger.getAttribute('aria-expanded')).toBe('true')
+  expect(document.activeElement).toBe(host.querySelector('input[type="search"]'))
+  expect(window.getSelection()!.getRangeAt(0)).toBe(range)
+  await click(button('Close find'))
+  expect(host.querySelector('.reading-find__trigger')).toBe(trigger)
+  expect(trigger.getAttribute('aria-expanded')).toBe('false')
+  expect(host.querySelector('[role="search"]')).toBeNull()
+  expect(document.activeElement).toBe(paragraph)
+  expect(host.querySelector('.log-turn__body p')).toBe(paragraph)
+})
+
 it('finds across inline Markdown in the original Activity body, preserving text nodes, Range and the selected hit on unrelated insertions', async () => {
   await render(activity())
-  await act(async () => { host.querySelector('details.activity-feed__observations')!.open = true }); await tick()
+  await act(async () => { host.querySelector<HTMLDetailsElement>('details.activity-feed__observations')!.open = true }); await tick()
   const paragraph = host.querySelector('.log-turn__body p')!, text = paragraph.firstChild!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5)
   window.getSelection()!.addRange(range)
@@ -109,7 +134,7 @@ it('cleans highlights and rejects retained handlers across same-text file A-B-A,
 
 it('does not intercept editable Ctrl+F or IME Escape/Enter and keeps separate simultaneous workface highlights', async () => {
   await render(<>{activity()}<div style={{ height: 400 }}>{file()}</div></>)
-  await act(async () => { host.querySelector('details.activity-feed__observations')!.open = true }); await tick()
+  await act(async () => { host.querySelector<HTMLDetailsElement>('details.activity-feed__observations')!.open = true }); await tick()
   await click(button('Find in loaded conversation')); await query('alpha')
   const firstNames = [...highlights.keys()]
   expect(firstNames).toHaveLength(2)
@@ -130,8 +155,8 @@ it('does not intercept editable Ctrl+F or IME Escape/Enter and keeps separate si
 
 it('opening find is an explicit reading intent that stops the original Activity follow owner before any match navigation', async () => {
   let height = 1200
-  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function () { return this.classList.contains('activity-feed') ? height : 0 })
-  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function () { return this.classList.contains('activity-feed') ? 300 : 0 })
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('activity-feed') ? height : 0 })
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('activity-feed') ? 300 : 0 })
   await render(activity())
   const viewport = host.querySelector<HTMLElement>('.activity-feed')!
   expect(viewport.scrollTop).toBe(900)
@@ -144,7 +169,7 @@ it('opening find is an explicit reading intent that stops the original Activity 
 
 it('removes old match counts and highlights when the last original Activity body leaves the loaded window', async () => {
   await render(activity())
-  await act(async () => { host.querySelector('details.activity-feed__observations')!.open = true }); await tick()
+  await act(async () => { host.querySelector<HTMLDetailsElement>('details.activity-feed__observations')!.open = true }); await tick()
   await click(button('Find in loaded conversation')); await query('alpha beta'); expect(count()).toBe('1 / 2')
   await render(activity([])); expect(count()).toBe('0 / 0'); expect(current()).toBeUndefined()
   expect(button('Next match').disabled).toBe(true)
