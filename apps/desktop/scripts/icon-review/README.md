@@ -1,6 +1,22 @@
-# 图标语义演示页
+# 图标语义工作台
 
-从仓库根目录构建：
+长期开发入口，从仓库根目录运行：
+
+```sh
+pnpm icons:dev
+```
+
+打开输出的 `http://127.0.0.1:4186/` 即可预览当前源码。修改目录、字形、共享呈现或消费源码会自动刷新，沿原语义 ID 恢复草稿；存储失败时保留内存修改并提示先导出。`--open` 可打开系统浏览器，`--port` 可指定端口（占用时不自动漂移），`--context` 仅提供旧注释；`--help` 查看入口。进程停止后该开发 URL 暂不可用，重新运行同一命令即可继续。
+
+开发使用和扩展步骤见[语义图标指南](../../../../docs/guides/semantic-icons.md)。`catalog.mjs` 的 `createReviewCatalog` 同时供开发服务和静态构建投影当前共享 owner；Vite 加载原生预览与主题运行时，不维护第二目录。
+
+构建可分享的静态快照：
+
+```sh
+pnpm icons:build
+```
+
+指定输出路径：
 
 ```sh
 node apps/desktop/scripts/icon-review/build.mjs --out .local/icon-review/site
