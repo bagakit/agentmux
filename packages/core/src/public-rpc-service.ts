@@ -1,4 +1,6 @@
 import { isConnectionServiceMethod, parseConnectionServiceParams } from './connection-service-codec.js'
+import { isMoteConnectionMethod, parseMoteConnectionParams, parseMoteConnectionResult } from './mote-connection-codec.js'
+import type { MoteConnectionPort, MoteConnectionMethod } from './mote-connection-contract.js'
 import { isConnectionProfileMethod, parseConnectionProfileParams } from './connection-profile-codec.js'
 import { isConnectionEnrollmentMethod, parseConnectionEnrollmentParams } from './connection-enrollment-codec.js'
 import { isConnectionDeliveryMethod, parseConnectionDeliveryParams } from './connection-delivery-codec.js'
@@ -90,6 +92,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   }
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
+  moteConnections?: MoteConnectionPort
   connections?: ConnectionPort
   goalDelegations?: GoalDelegationsOwner
   moteContext?: import('./diagnostic-evidence.js').AgentMuxMoteContextEvidencePort
@@ -196,7 +199,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | ScheduleMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | ScheduleMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -395,6 +398,18 @@ export class AgentMuxRpcService {
   }
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
+    if (isMoteConnectionMethod(method)) {
+      if (context.caller !== undefined || !context.principal || !['user','device'].includes(context.principal.kind)) throw new AgentMuxError('Mote bot operations require a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
+      const input = parseMoteConnectionParams(method, params), owner = this.ports.moteConnections
+      if (!owner) throw new AgentMuxError('Mote bot operations are unavailable on this Host. Original files and Agents remain available.', 'CONTROL_UNAVAILABLE')
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      const administration = { actor: { kind: context.principal.kind as 'user'|'device', id: context.principal.id }, ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.() } }
+      const result = method === 'space.mote.connection.create' ? await owner.create(parseMoteConnectionParams(method, params), administration)
+        : method === 'space.mote.connection.sync' ? await owner.sync(parseMoteConnectionParams(method, params), administration)
+        : method === 'space.mote.connection.advance' ? await owner.advance(parseMoteConnectionParams(method, params), administration)
+        : method === 'space.mote.connection.ls' ? await owner.list(parseMoteConnectionParams(method, params)) : await owner.inspect(parseMoteConnectionParams(method, params))
+      return parseMoteConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
+    }
     if (isConnectionMethod(method)) {
       if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Connection administration requires a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
       const input = parseConnectionParams(method, params)
