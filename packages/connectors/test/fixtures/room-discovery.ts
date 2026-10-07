@@ -9,6 +9,9 @@ import { createDesktopConnections } from '../../../../apps/desktop/src/main/conn
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../core/test/helpers/object-cli-rpc.js'
 import { feishuConfig } from './feishu.js'
 
+// Client consumer fixtures control the SDK's transport without adding it to the client package.
+export { defaultHttpInstance }
+
 export type RoomReadWire = { url?: string; method?: string; params?: Record<string, unknown>; data?: Record<string, unknown>; signal?: AbortSignal }
 export async function roomDiscoveryFixture(effect?: (request: RoomReadWire) => Promise<unknown>) {
   const root = await mkdtemp(join(tmpdir(), 'rd-')), calls: RoomReadWire[] = []
@@ -18,7 +21,8 @@ export async function roomDiscoveryFixture(effect?: (request: RoomReadWire) => P
   const directory = join(root, 'original-connections'), socketPath = join(root, 'rooms.sock')
   const native = async (request: RoomReadWire) => {
     if (request.url?.includes('/auth/v3/')) return { code: 0, tenant_access_token: 'fixture-tenant-token', app_access_token: 'fixture-app-token', expire: 3600 }
-    calls.push({ url: request.url, method: request.method, params: request.params, data: request.data, signal: request.signal })
+    calls.push({ ...(request.url === undefined ? {} : { url: request.url }), ...(request.method === undefined ? {} : { method: request.method }),
+      ...(request.params === undefined ? {} : { params: request.params }), ...(request.data === undefined ? {} : { data: request.data }), ...(request.signal === undefined ? {} : { signal: request.signal }) })
     if (effect) return await effect(request)
     if (request.url?.endsWith('/members')) return { code: 0, data: { items: [{ member_id_type: 'open_id', member_id: 'ou_original', name: 'Original member' }], has_more: false } }
     if (request.url?.endsWith('/link')) return { code: 0, data: { share_link: 'https://applink.feishu.cn/client/chat/chatter/add_by_link?link_token=fixture-join', expire_time: String(_newTailFixtureEpoch(2) / 1_000), is_permanent: false } }

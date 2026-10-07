@@ -15,13 +15,16 @@ import { SettingsNavigation } from '../../src/renderer/src/components/SettingsNa
 import { composerConfig, composerDOM, composerSession } from '../helpers/composer-dom-fixture'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../../packages/core/test/helpers/object-cli-rpc.js'
+import { feishuConfig } from '../../../../packages/connectors/test/fixtures/feishu.js'
+import { defaultHttpInstance, type RoomReadWire } from '../../../../packages/connectors/test/fixtures/room-discovery.js'
 
 /** Production Renderer, IPC, public Core and Desktop Host; only encryption/adapter/terminal leaves are controlled. */
-export function connectorJourneyFixture() {
+export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown> } = {}) {
   const dom = composerDOM(), settings = vi.fn()
   let original: Awaited<ReturnType<typeof roomProvisioningFixture>>, services: Awaited<ReturnType<typeof createDesktopConnections>>
   let server: InstanceType<typeof core.AgentMuxControlServer>, calls: { method: ConnectionMethod; input: unknown; result?: unknown }[]
   let forward: <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]) => Promise<ConnectionResultMap[M]>
+  let platformCalls: RoomReadWire[], connectionConfig = config
   beforeEach(async () => {
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
     // Use the original startup/hydration owner to admit real UI intent persistence.
@@ -31,11 +34,17 @@ export function connectorJourneyFixture() {
     await useAppStore.persist.rehydrate()
     const stopStartup = await useAppStore.getState().initialize(); stopStartup()
     original = await roomProvisioningFixture()
+    platformCalls = []; connectionConfig = options.platform ? feishuConfig : config
+    if (options.platform) vi.spyOn(defaultHttpInstance, 'request').mockImplementation(async input => {
+      if (input.url?.includes('/auth/v3/')) return { code: 0, tenant_access_token: 'fixture-tenant-token', app_access_token: 'fixture-app-token', expire: 3600 }
+      platformCalls.push({ url: input.url, method: input.method, params: input.params, data: input.data } as RoomReadWire)
+      return await options.platform!(input as RoomReadWire)
+    })
     vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
-    services = await createDesktopConnections({ directory: join(original.root, 'ui-connections'), adapters: [original.adapter], bindings: { spatial: original.spatial, checkpoint: original.checkpoint },
+    services = await createDesktopConnections({ directory: join(original.root, 'ui-connections'), ...(options.platform ? {} : { adapters: [original.adapter] }), bindings: { spatial: original.spatial, checkpoint: original.checkpoint },
       encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() } })
     const secret = await services.secrets.store({ operationId: 'ui-credential', secret: 'controlled-host-credential' })
-    await services.connections.configure({ operationId: 'ui-configure', expectedRevision: null, connection: { ...config, credentialRef: secret.credentialRef } })
+    await services.connections.configure({ operationId: 'ui-configure', expectedRevision: null, connection: { ...connectionConfig, credentialRef: secret.credentialRef } })
     const socketPath = join(original.root, 'ui.sock')
     server = new core.AgentMuxControlServer({ socketPath, connections: services.connections, spatialState: original.spatial, coreClients: () => [{ hostId: 'local', client: original.client }] })
     await server.start()
@@ -59,7 +68,8 @@ export function connectorJourneyFixture() {
       await mkdir(directory, { recursive: true })
       await writeFile(join(directory, createHash('sha256').update(test).digest('hex').slice(0, 12) + '.json'), JSON.stringify({
         test, scope: 'Mounted original Workbench/menu/Composer through trusted IPC and compiled public Core/CLI into the original Desktop Host. Adapter, encryption and terminal rendering are controlled; no real platform or provider qualification.',
-        publicCalls: calls, originalRoomRequests: original.create.mock.calls.map(call => call[0]), originalMemberRequests: original.addMembers.mock.calls.map(call => call[0]),
+        publicCalls: calls, platformBoundary: options.platform ? 'Original default adapter registry and official SDK; HTTP I/O only is controlled.' : 'Controlled room adapter.', platformCalls,
+        originalRoomRequests: original.create.mock.calls.map(call => call[0]), originalMemberRequests: original.addMembers.mock.calls.map(call => call[0]),
         retainedClientIntents: useAppStore.getState().connectorRoomIntents, originalDraft: useAppStore.getState().agentComposerDrafts['original-agent']
       }, null, 2) + '\n')
     }
@@ -77,7 +87,7 @@ export function connectorJourneyFixture() {
     await vi.waitFor(async () => { await act(async () => {}); item = [...document.querySelectorAll<HTMLElement>(context ? '.region-context-menu [role="menuitem"]' : '.agent-region-menu[data-owner-region-id="' + regionId + '"] [role="menuitem"]')].find(node => node.textContent?.trim() === label); expect(item, 'actual ' + label + ' action').toBeDefined() }, { timeout: 6000 })
     await act(async () => item!.click())
     await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')).not.toBeNull() })
-    await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value, document.querySelector('[role="dialog"]')?.textContent).toBe(config.connectionId) }, { timeout: 6000 })
+    await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value, document.querySelector('[role="dialog"]')?.textContent).toBe(connectionConfig.connectionId) }, { timeout: 6000 })
   }
   async function fill(label: string, value: string) {
     const input = document.querySelector<HTMLInputElement | HTMLTextAreaElement>('[aria-label="' + label + '"]')!
@@ -93,5 +103,5 @@ export function connectorJourneyFixture() {
     expect(output.code, output.stdout + output.stderr).toBe(0)
     return JSON.parse(output.stdout).result
   }
-  return { dom, mount, menu, fill, button, cli, settings, get original() { return original }, get services() { return services }, get calls() { return calls }, get forward() { return forward }, get session() { return useAppStore.getState().sessions[0]! } }
+  return { dom, mount, menu, fill, button, cli, settings, get config() { return connectionConfig }, get platformCalls() { return platformCalls }, get original() { return original }, get services() { return services }, get calls() { return calls }, get forward() { return forward }, get session() { return useAppStore.getState().sessions[0]! } }
 }
