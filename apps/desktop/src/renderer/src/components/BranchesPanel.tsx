@@ -145,6 +145,8 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
   // 只会改到其中一处，那正是本仓「读的 key 与写的 key 必须只判一次」栽过的形状：按钮说要丢弃、
   // 请求里却没带。
   const removalPrompt = removal === null ? null : worktreeRemovalPrompt(removal)
+  const pendingCloseouts = config?.workspaces.filter(item => item.closeout?.targetWorkspaceId === workspace.id) ?? []
+  const closedWorkspaceIds = useMemo(() => new Set(config?.workspaces.filter(item => item.closeout).map(item => item.id)), [config?.workspaces])
   const { snapshot, loading, error: loadError, refresh } = useWorkspaceBranches(workspace.id, active)
   // ahead/behind 是 **HEAD** 相对它自己 upstream 的事实，不是逐分支的——所以下面只把它画在
   // `isCurrent` 那一行。画到别的行上会是谎：那些分支各有各的 upstream，这一个计数说不了它们的事。
@@ -174,6 +176,7 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
   }
 
   const matches = snapshot?.kind === 'git-repository' ? snapshot.branches.filter((branch) => {
+    if (branch.workspaceId && closedWorkspaceIds.has(branch.workspaceId)) return false
     if (search.filter === 'current' && !branch.isCurrent) return false
     if (search.filter === 'pinned' && !pinnedBranches.includes(branch.name)) return false
     if (search.filter === 'worktree' && !branchHasWorktree(branch)) return false
@@ -543,6 +546,18 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
         <BranchComparisonPanel key={JSON.stringify([workspace.id, snapshot.hostId, snapshot.repoPath])} workspaceId={workspace.id} branches={snapshot.branches} />
       ) : null}
       <div ref={list} className="branches-scroll" hidden={comparisonOpen && snapshot?.kind === 'git-repository'} onKeyDown={navigateRows}>
+        {pendingCloseouts.length > 0 && <details className="worktree-cleanup" open>
+          <summary>Cleanup pending <span>{pendingCloseouts.length}</span></summary>
+          <div className="worktree-cleanup__list">{pendingCloseouts.map(item => <div className="worktree-cleanup__item" key={item.id}>
+            <div className="worktree-cleanup__identity"><strong title={item.name}>{item.name}</strong>
+            <button type="button" className="small-button" disabled={removing} aria-label={`Retry cleanup for ${item.name}`} onClick={() => setRemoval({
+              workspaceId: item.id, branch: item.branch ?? item.name, path: item.path,
+              stage: item.closeout!.retention === 'uncommitted-changes'
+                ? { kind: 'blocked', retention: 'uncommitted-changes', reason: item.closeout!.reason } : { kind: 'confirm' }
+            })}>Retry cleanup</button></div>
+            <p>{item.closeout!.reason}</p>
+          </div>)}</div>
+        </details>}
         {bound.length > 0 ? <div className={`branch-group${worktreesExpanded ? ' branch-group--expanded' : ''}`} data-branch-group="worktrees">
           <button className="branch-group__heading" type="button" aria-expanded={worktreesExpanded} onClick={() => setWorktreesExpanded(expanded => !expanded)}>
             <ThemeNavigationDownIcon size={12} /><span>Worktrees</span><span className="branch-group__count">{bound.length}</span>

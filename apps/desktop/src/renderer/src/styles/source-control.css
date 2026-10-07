@@ -42,6 +42,16 @@
 .branch-group__heading[aria-expanded="false"] > svg { transform: rotate(-90deg); }
 .branch-group__count { margin-left: auto; font-weight: 400; font-variant-numeric: tabular-nums; }
 .branch-group__rows { min-height: 0; padding-right: var(--sp-4); overflow: auto; overscroll-behavior: contain; }
+.worktree-cleanup { flex: 0 0 auto; min-width: 0; margin-bottom: var(--sp-2); }
+.worktree-cleanup > summary { padding: var(--sp-1) var(--sp-2); color: var(--text-2); font-size: var(--fs-micro); cursor: pointer; }
+.worktree-cleanup > summary > span { margin-left: var(--sp-2); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.worktree-cleanup__list { max-height: min(28vh, 240px); overflow: auto; overscroll-behavior: contain; }
+.worktree-cleanup__item { min-width: 0; padding: var(--sp-2); }
+.worktree-cleanup__identity { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.worktree-cleanup__identity > strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: var(--fs-micro); font-weight: 550; }
+.worktree-cleanup__identity > button { flex-shrink: 0; }
+.worktree-cleanup__item > p { margin: var(--sp-1) 0 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; overflow-wrap: anywhere; }
+.worktree-cleanup :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .branch-row { position: relative; gap: var(--sp-2); width: 100%; min-width: 0; display: flex; align-items: center; min-height: 30px; padding:var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
 .branch-row__open { flex: 1; min-width: 0; display: flex; padding: 0; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
 .branch-row:hover { color: var(--text-2); background: var(--surface-2); }
