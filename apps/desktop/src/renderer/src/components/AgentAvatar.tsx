@@ -7,6 +7,7 @@ import type { AgentAvatarAppearance, AppConfig } from '../../../shared/contracts
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store'
 import { sessionPresentationById } from '../lib/session-presentation'
+import { observeAgentSession } from '../lib/agent-observation'
 import { attentionAccentFor } from '../lib/attention-event'
 import { PRESENCE_MARK_CORNERS } from '../lib/presence-mark-corner'
 import { AgentAvatarBadgeIcon } from './AgentAvatarBadgeIcon'
@@ -40,9 +41,9 @@ export function ResolvedAgentAvatar({ label, providerId, state, appearance, exec
   </span>
 }
 
-function AgentAvatarFace({ provider, displayState, avatar, count, size, mark, tintMark = true }: {
+function AgentAvatarFace({ provider, displayState, avatar, count, size, mark, tintMark = true, active = false }: {
   provider?: AgentProviderId | undefined; displayState?: AgentDisplayState | undefined
-  avatar?: AgentAvatarAppearance | undefined; count?: number | undefined; size: number; mark?: ReactNode; tintMark?: boolean
+  avatar?: AgentAvatarAppearance | undefined; count?: number | undefined; size: number; mark?: ReactNode; tintMark?: boolean; active?: boolean
 }) {
   const filterId = useId().replace(/:/g, '')
   const attention = displayState ? attentionAccentFor(displayState) : null
@@ -56,7 +57,7 @@ function AgentAvatarFace({ provider, displayState, avatar, count, size, mark, ti
         : <span className="agent-avatar__mark">{artwork}</span>}
     </span>
     {displayState === 'working'
-      ? <span className="agent-avatar__status agent-avatar__status--working" data-corner={PRESENCE_MARK_CORNERS.status} aria-label="Working" role="img"><SemanticIcon name="status.working" size={10} strokeWidth={2.4} /></span>
+      ? <span className="agent-avatar__status agent-avatar__status--working" data-corner={PRESENCE_MARK_CORNERS.status} aria-label="Working" role="img"><SemanticIcon name="status.working" animation={active ? 'work' : 'none'} size={10} strokeWidth={2.4} /></span>
       : attention !== null || displayState === 'disconnected' ? <span className="agent-avatar__status status__dot" data-corner={PRESENCE_MARK_CORNERS.status} aria-hidden="true" /> : null}
     {count && count > 1 ? <span className="agent-avatar__count" data-corner={PRESENCE_MARK_CORNERS.count} aria-hidden="true">{count}</span> : null}
   </>
@@ -94,7 +95,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     const entry = sessionId ? sessionPresentationById(store.sessions).get(sessionId) : undefined
     return entry?.kind === 'agent' ? {
       executorId: entry.executorId, providerId: entry.providerId, label: entry.label,
-      state: entry.status.state, detail: entry.status.detail
+      state: entry.status.state, detail: entry.status.detail, active: observeAgentSession(entry, Date.now()).semantic === 'active'
     } : null
   }))
   const resolvedExecutorId = executorId ?? session?.executorId
@@ -316,7 +317,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     return () => observer.disconnect()
   }, [Boolean(position), Boolean(actionDisclosure)])
 
-  const face = <AgentAvatarFace provider={provider} displayState={displayState} avatar={avatar} count={count} size={size} mark={identityMark ?? disclosure?.mark} tintMark={identityMark === undefined} />
+  const face = <AgentAvatarFace provider={provider} displayState={displayState} avatar={avatar} count={count} size={size} mark={identityMark ?? disclosure?.mark} tintMark={identityMark === undefined} active={session?.active === true} />
   const overlayHost = getWindowOverlayHost()
   return <>
     <Element ref={trigger} className={`agent-avatar${inlineLabel !== undefined ? ' agent-avatar--inline' : ''}${displayState ? ` status status--${displayState}` : ''}`}

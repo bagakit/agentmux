@@ -38,7 +38,7 @@ type ObservedToolProps = {
 
 export function WorkflowStatusGlyph({ status, size = 12, recorded = false }: { status: 'running' | 'completed' | 'failed' | 'killed' | 'paused' | 'queued'; size?: number; recorded?: boolean }) {
   return <SemanticIcon name={status === 'running' ? recorded ? 'status.running' : 'status.working' : `status.${status}`}
-    size={size} className={`wf-ico wf-ico--${status}`} />
+    size={size} animation={status === 'running' && !recorded ? 'work' : 'none'} className={`wf-ico wf-ico--${status}`} />
 }
 
 export function RecordedStepsCard({ observation, compact = false, expanded, onExpandedChange, children }: ObservationProps) {

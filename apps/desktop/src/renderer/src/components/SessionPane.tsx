@@ -55,6 +55,7 @@ import { SessionTakeoverSurface } from './SessionTakeoverSurface'
 import { takeoverExecution } from '../lib/session-takeover'
 import { executionHostProjection, regionExecutionHost } from '../lib/region-execution-host'
 import { SessionActivityPresentation } from './SessionActivityPresentation'
+import { observeAgentSession } from '../lib/agent-observation'
 import { useWorkbenchBrowserPresentation, workbenchSessionStageHostId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { agentDisplayName } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
@@ -944,7 +945,8 @@ export function SessionPane({
       windowIncomplete: userMessagesWindowIncomplete,
       hasMore: hasEarlierUserRecords, onRetry: () => { void refreshUserMessages() }, onReadEarlier: openHistory },
     capability: session.kind === 'agent' ? session.capabilities.timeline : 'unavailable',
-    displayState: session.status.state, workspaceRoot: fileContext.workspaceRoot, homeDir: fileContext.homeDir,
+    displayState: session.status.state, activitySemantic: session.kind === 'agent' ? observeAgentSession(session, Date.now()).semantic : 'unsupported',
+    workspaceRoot: fileContext.workspaceRoot, homeDir: fileContext.homeDir,
     fileReferenceNotice,
     ...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {}),
     readPastedImage, readHistoryResource, openHttpLink: onProseLinkClick,
@@ -966,8 +968,8 @@ export function SessionPane({
     activityLifetime.current.opened = true
     activityContent.current = <ActivityView {...activityProps} revealRequest={revealRequest?.displayId === null ? revealRequest : null} />
   }
-  const presentedActivity = activityContent.current && conversationReading
-    ? cloneElement(activityContent.current, { conversationReading }) : activityContent.current
+  const presentedActivity = activityContent.current
+    ? cloneElement(activityContent.current, { ...(conversationReading ? { conversationReading } : {}), activitySemantic: activityProps.activitySemantic ?? 'unknown' }) : null
   const resultReview = session.kind === 'agent'
     ? <SessionResultReview sessionId={session.id} items={timeline} origin={linkOrigin} visible={visible} surfaceAnchor={resultSurfaceAnchor} />
     : null

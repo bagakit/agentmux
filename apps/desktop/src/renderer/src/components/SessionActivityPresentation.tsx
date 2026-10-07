@@ -67,8 +67,8 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
       {...(activity.conversationReading ? { conversationReading: { ...activity.conversationReading, enabled: visible && eligible, opened: false, onClose: undefined } } : {})} />
   }
   const reading = activity?.conversationReading ?? presented.current.content?.props.conversationReading
-  const content = presented.current.content && reading
-    ? cloneElement(presented.current.content, { conversationReading: { ...reading, enabled: visible && eligible, opened: false, onClose: undefined } }) : presented.current.content
+  const content = presented.current.content
+    ? cloneElement(presented.current.content, { activitySemantic: activity?.activitySemantic ?? 'unknown', ...(reading ? { conversationReading: { ...reading, enabled: visible && eligible, opened: false, onClose: undefined } } : {}) }) : null
   const hostId = workbenchSessionStageHostId(target, regionId)
   return <StableWorkbenchView kind="region" homeId={`${hostId}:parked`} targetId={hostId}
     active={target.active} visible={visible} retainedRegionId={regionId} reference={{ ...reference, regionId }}
