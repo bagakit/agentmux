@@ -1,4 +1,4 @@
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { MoteIcon } from './MoteIcon'
 import { useState } from 'react'
