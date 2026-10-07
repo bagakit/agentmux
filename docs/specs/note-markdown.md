@@ -21,7 +21,7 @@ note-id: "original-note-id"
 
 保留原始观察。 ^paragraph1
 
-参见 [相关发现](note:otherNote#targetBlock)<!--amux-ref:occurrence1--> ^paragraph2
+参见 [[相关发现]]<!--amux-ref:occurrence1;query=%E7%9B%B8%E5%85%B3%E5%8F%91%E7%8E%B0;target=note:otherNote--> ^paragraph2
 ```
 
 段落／标题支持尾部 `^blockID`，也支持紧随原块的独立锚点行；canonical serializer 使用独立行。
@@ -38,12 +38,14 @@ note-id: "original-note-id"
 
 原始 `[[页面]]`、`[[页面 #标题]]` 和 `[[页面 #^blockID]]` 可直接写入正文。
 原 writer 只把唯一且已确认的目标绑定为稳定 ID。代码、反斜线转义和未完成 token 保持字面文本。
-已有绑定不会因改名或同名页面重新解析。
+已有绑定不会因改名或同名页面重新解析。已绑定链接在原编辑器中也是可直接选择、输入和撤销的普通 wiki 文本；
+普通点击定位输入，Ctrl／⌘-click 打开准确目标。编辑 query 撤销该 occurrence 的旧 target，并更换查询代次；
+迟到的旧查询不能重新附着目标，删除语法保留普通文字和原块。
 
 | 形式 | 表达 |
 | --- | --- |
-| `[label](note:noteID)<!--amux-ref:R-->` | 已绑定页面与 occurrence |
-| `[label](note:noteID#blockID)<!--amux-ref:R-->` | 已绑定块与 occurrence |
+| `[[query]]<!--amux-ref:R;query=encoded-query;target=note:noteID-->` | 已绑定页面与 occurrence |
+| `[[query]]<!--amux-ref:R;query=encoded-query;target=note:noteID#blockID-->` | 已绑定块与 occurrence |
 | `[[query]]<!--amux-ref:R-->` | 有稳定 occurrence 的未绑定查询 |
 | `::note-ref{#sourceBlock ref="R" target="note:noteID#blockID"}` | 结构化块引用 |
 | `::note-embed{#sourceBlock ref="R" target="note:noteID#blockID"}` | 在原位置嵌入目标块 |
@@ -51,6 +53,12 @@ note-id: "original-note-id"
 这些标记保存字段，不包含隐藏的 JSON／base64 内容树。粗体、斜体、删除线、代码、列表、引用和换行使用 Markdown；
 下划线、非标准链接属性、列表类型等原 schema 字段使用有限 HTML／comment 扩展。
 当前编辑 schema 不支持的表格、图片、task list 或未知结构保持原 Source 并明确解析问题，不能静默压平或删除。
+
+绑定标记的 `query` 是选定目标时的查询快照，使用上述 comment 字段编码。普通文件工具只改可见 query 后，
+parser 发现快照不符便将该 occurrence 读成未绑定，再由原 writer 按新 query 确认；旧目标 ID 不能锁住新文字。
+未改 query 的目标改名仍保准确绑定。原 `[label](note:ID#block)<!--amux-ref:R-->` 可读取，下一次规范保存统一写 wiki 形式；
+显式旧 JSON 转换将原 atom 的文字展开为可编辑内容，必要的 wiki 字面转义保全任意原 label、target 和 occurrence。
+两者都消费同一 schema／codec，不保另一条可写正文格式。
 
 ## 元数据与公共消费
 
@@ -68,7 +76,8 @@ note-id: "original-note-id"
 `notebook graph` 提供页面层级、incoming／outgoing 与准确 source／target；原始文本 occurrence 的位置是当前保存修订内的
 block inline PM UTF16 offset，不是 Markdown 字节位置。它不是跨文件原子快照；未读、歧义和未锚定状态不能被空边列表代签。
 `notebook apply` 的 `follow/unfollow` 只改变可信调用者自己的持久关注，不表示在线或通知授权。
-完整 Agent 操作指引由 [CLI Note guide](../../packages/core/src/agentmux-cli-note-guide.ts) 随 `amux --skill` 提供。
+完整 Agent 操作指引由 [CLI Note guide](../../packages/core/src/agentmux-cli-note-guide.ts) 持有，
+经 `amux --skill` 的模块目录发现，再由 `amux notebook --skill`／Notebook help 读取。
 
 ## 持久正文历史
 
