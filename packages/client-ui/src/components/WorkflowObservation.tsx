@@ -11,6 +11,7 @@ type ObservationProps = {
     recordedTime?: WorkflowRecordedTime
     label?: string
     elapsed?: string
+    metrics?: ReactNode
     streaming?: boolean
   }
   compact?: boolean
@@ -56,14 +57,15 @@ export function RecordedStepsCard({ observation, compact = false, expanded, onEx
         {recordedTime && !compact ? <span className="log-fold__time" title={recordedTime.offset}>
           <span>{recordedTime.from}</span><span aria-hidden="true">–</span><span>{recordedTime.to}</span>
         </span> : null}
-        <span className="log-fold__steps">{observation.stepCount} {compact ? '步' : 'steps'}</span>
+        {observation.metrics}
+        <span className="log-fold__steps">{observation.stepCount} {compact ? observation.metrics ? '条已加载记录' : '步' : observation.metrics ? 'loaded records' : 'steps'}</span>
         {observation.elapsed ? <span className="log-fold__elapsed">{observation.elapsed}</span> : null}
         {status === 'running' ? <span className="wf-chip" title="Last recorded operation status"><WorkflowStatusGlyph status="running" recorded />Recorded running</span> : null}
         {status === 'interrupted' ? <span className="wf-chip"><WorkflowStatusGlyph status="killed" recorded />Interrupted</span> : null}
         {status === 'failed' ? <span className="wf-chip log-row__chip--failed"><WorkflowStatusGlyph status="failed" />Failed</span> : null}
         {observation.streaming ? <span className="wf-chip"><SemanticIcon name="status.streaming" size={12} className="wf-ico" />Streaming</span> : null}
         {status === 'complete' ? <span className="wf-observation__recorded">Recorded</span> : null}
-        {status === undefined ? <span className="wf-observation__recorded">{compact ? '状态未记录' : 'Status not recorded'}</span> : null}
+        {status === undefined && !observation.metrics ? <span className="wf-observation__recorded">{compact ? '状态未记录' : 'Status not recorded'}</span> : null}
       </span>
     </button>
     {observation.counts ? <div className="wf-observation__summary" aria-label="Recorded step states">
