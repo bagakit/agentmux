@@ -114,7 +114,10 @@ const workspaceSchema = z
     path: z.string().min(1),
     kind: z.enum(WORKSPACE_KINDS),
     repoPath: z.string().min(1).optional(),
-    branch: z.string().min(1).optional()
+    branch: z.string().min(1).optional(),
+    closeout: z.object({ targetWorkspaceId: z.string().min(1), operationId: z.string().min(1),
+      cleanup: z.literal('pending'), reason: z.string().min(1),
+      retention: z.enum(['uncommitted-changes', 'git-failed', 'record-not-withdrawn']).optional() }).strict().optional()
   })
   .strict()
 

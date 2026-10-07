@@ -93,7 +93,7 @@ export function worktreeRemovalPrompt(request: WorktreeRemovalRequest): Worktree
     // 没拿到就不说：宁可少一句，也不能因为「还没问到」而默认说一句安心话。真正查不出来的那一档有它
     // 自己的措辞（`branchRetentionNote(branch, null)`），会作为一个正常的 note 送进来。
     description: appendNote(
-      `The checkout at this location goes away. Branch ${request.branch} itself is untouched and stays available.`,
+      `The workface moves into this project's default workspace. Original Agents, history and drafts stay available. Directory cleanup waits while original resources still use it. Branch ${request.branch} itself is untouched and stays available.`,
       request.note
     ),
     subject: request.path,
@@ -138,7 +138,7 @@ export function nextAfterWorktreeRemoval(
   request: WorktreeRemovalRequest,
   outcome: RemoveWorktreeOutcome
 ): WorktreeRemovalNext {
-  if (outcome.status === 'removed') return { kind: 'done' }
+  if (outcome.status === 'removed' || outcome.status === 'closed') return { kind: 'done' }
   if (request.stage.kind === 'blocked') return { kind: 'failed', reason: outcome.reason }
   // 只有脏树那一档能问出第二个问题。判据落在 `retention` 而不是 `reason` 的措辞上：按文本猜分类会在
   // git 换句话时静默失效，而分类本身是服务层在失败现场定的。

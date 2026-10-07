@@ -31,11 +31,13 @@ export function reseatActiveWorkspaceId(
   for (const candidate of candidates) {
     if (
       typeof candidate === 'string' &&
-      config.workspaces.some((workspace) => workspace.id === candidate)
+      config.workspaces.some((workspace) => workspace.id === candidate && !workspace.closeout)
     ) return candidate
   }
-  const scratch = config.workspaces.find((workspace) => isScratchWorkspaceId(workspace.id))
-  return scratch?.id ?? config.workspaces[0]?.id ?? null
+  const closing = config.workspaces.find(workspace => workspace.id === candidates[0])?.closeout
+  if (closing && config.workspaces.some(workspace => workspace.id === closing.targetWorkspaceId && !workspace.closeout)) return closing.targetWorkspaceId
+  const scratch = config.workspaces.find((workspace) => isScratchWorkspaceId(workspace.id) && !workspace.closeout)
+  return scratch?.id ?? config.workspaces.find(workspace => !workspace.closeout)?.id ?? null
 }
 
 /**
