@@ -144,13 +144,16 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       let timer: ReturnType<typeof setTimeout> | undefined
       const controller = new AbortController()
       try {
-        const credential = await this.options.connections.resolvePublicationCredential(record.connectionId)
-        if (!credential) addressing = { replyToMessageId, state: 'unavailable', reason: 'credential-missing' }
-        else {
-          const timeout = new Promise<'unknown'>(resolve => { timer = setTimeout(() => { controller.abort(); resolve('unknown') }, 5_000); timer.unref?.() })
-          const selection = await Promise.race([authenticator.qualifyReply(structuredClone(connection.config), structuredClone(event), raw, credential, controller.signal), timeout])
-          if (selection === 'reply' || selection === 'message') addressing = { replyToMessageId, state: 'confirmed', selection }
+        const unknown = { replyToMessageId, state: 'unknown' as const, reason: 'reply-unconfirmed' as const }
+        const timeout = new Promise<typeof addressing>(resolve => { timer = setTimeout(() => { controller.abort(); resolve(unknown) }, 5_000); timer.unref?.() })
+        const observe = async (): Promise<typeof addressing> => {
+          const credential = await this.options.connections.resolvePublicationCredential(record.connectionId)
+          if (controller.signal.aborted) return unknown
+          if (!credential) return { replyToMessageId, state: 'unavailable', reason: 'credential-missing' }
+          const selection = await authenticator.qualifyReply!(structuredClone(connection.config), structuredClone(event), raw, credential, controller.signal)
+          return !controller.signal.aborted && (selection === 'reply' || selection === 'message') ? { replyToMessageId, state: 'confirmed', selection } : unknown
         }
+        addressing = await Promise.race([observe(), timeout])
       } catch { /* A parent read failure is an observation gap, never an outside-scope verdict. */ }
       finally { if (timer) clearTimeout(timer); controller.abort() }
     }
