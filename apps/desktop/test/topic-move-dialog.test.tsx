@@ -181,7 +181,7 @@ describe('whole Topic transfer through the original Host and Core owners', () =>
 })
 
 describe('Topic action menus use actual Radix items and original actions', () => {
-  function actions() { return { pinned: true, onCopyPath: vi.fn(), onRename: vi.fn(), onReveal: vi.fn(), onTogglePin: vi.fn(), onEditWiki: vi.fn(), onMove: vi.fn(), onChangeIcon: vi.fn(), onToggleWiki: vi.fn(), onResetWiki: vi.fn(), wikiEnabled: true } }
+  function actions() { return { pinned: true, onCopyPath: vi.fn(), onCopyLink: vi.fn(), onRename: vi.fn(), onReveal: vi.fn(), onTogglePin: vi.fn(), onEditWiki: vi.fn(), onMove: vi.fn(), onChangeIcon: vi.fn(), onToggleWiki: vi.fn(), onResetWiki: vi.fn(), wikiEnabled: true } }
   async function openActions() {
     const trigger = button('Actions for Original Topic'); trigger.focus()
     await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
@@ -192,7 +192,7 @@ describe('Topic action menus use actual Radix items and original actions', () =>
     const a = actions(); let invoker: Element | null = null
     a.onMove.mockImplementation(() => { invoker = document.activeElement })
     await mount(createElement(TopicActionsMenu, { title: 'Original Topic', ...a })); const trigger = await openActions()
-    expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual(['Move to category…', 'Change icon…', 'Unpin Topic', 'Rename Topic', 'Reveal in Files', 'Copy Topic Path', 'Edit Topic Wiki', 'Disable Topic Wiki', 'Restore default Topic Wiki'])
+    expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual(['Move to category…', 'Change avatar…', 'Unpin Topic', 'Rename Topic', 'Copy Topic link', 'Reveal in Files', 'Copy Topic Path', 'Edit Topic Wiki', 'Disable Topic Wiki', 'Restore default Topic Wiki'])
     await click(document.querySelector('[role="menuitem"]')!); await settle(() => a.onMove.mock.calls.length === 1)
     expect(invoker).toBe(trigger)
     expect(a.onReveal).not.toHaveBeenCalled(); expect(a.onTogglePin).not.toHaveBeenCalled()
@@ -217,7 +217,7 @@ describe('Topic action menus use actual Radix items and original actions', () =>
     const row = host.querySelector<HTMLElement>('[role="button"]')!; row.focus()
     await act(async () => row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true })))
     await settle(() => !!document.querySelector('[role="menu"]'))
-    expect(document.querySelectorAll('[role="menuitem"]')).toHaveLength(9)
+    expect(document.querySelectorAll('[role="menuitem"]')).toHaveLength(10)
     expect(document.querySelector('[role="menuitem"]')!.textContent).toBe('Move to category…')
     await click(document.querySelector('[role="menuitem"]')!); await settle(() => a.onMove.mock.calls.length === 1)
     expect(opened).not.toHaveBeenCalled(); expect(document.activeElement).toBe(row)
