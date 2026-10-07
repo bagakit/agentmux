@@ -29,9 +29,9 @@ beforeEach(() => {
   vi.spyOn(api.notebooks, 'resolve').mockImplementation(async params => params.mode === 'search' ? search(params.query) : lookup(params.text, params.select?.blockId))
 })
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks() })
-function Harness({ note = newNoteDocument('', 'source', 'source-block'), active = true, open = vi.fn(), identity = 'original-resource' }: { note?: NoteDocument; active?: boolean; open?: (link: any) => void; identity?: string }) {
+function Harness({ note = newNoteDocument('', 'source', 'source-block'), active = true, open = vi.fn(), identity = 'original-resource', issue = vi.fn(), changed = vi.fn() }: { note?: NoteDocument; active?: boolean; open?: (link: any) => void; identity?: string; issue?: (message: string | null) => void; changed?: (raw: string) => void }) {
   const [content, setContent] = useState(note)
-  return <NoteBlockEditor note={content} active={active} sourceIdentity={identity} knowledge={noteKnowledge([])} onChange={raw => { latest = raw; const read = readNoteDocument(raw); if (read.status === 'valid') setContent(read.note) }} onOpen={() => {}} onSave={() => {}} onIssue={() => {}} onOpenLink={open} />
+  return <NoteBlockEditor note={content} active={active} sourceIdentity={identity} knowledge={noteKnowledge([])} onChange={raw => { latest = raw; changed(raw); const read = readNoteDocument(raw); if (read.status === 'valid') setContent(read.note) }} onOpen={() => {}} onSave={() => {}} onIssue={issue} onOpenLink={open} />
 }
 async function mount(element: React.ReactNode = <Harness />) { await act(async () => root.render(element)) }
 function editor(): Editor { return host.querySelector<HTMLElement & { editor: Editor }>('.note-block-content')!.editor }
@@ -122,19 +122,38 @@ it('coalesces ordinary query keystrokes and cancels only their superseded lookup
 })
 
 it('keeps an active composition editable and cannot bind its stale precomposition query', async () => {
+  const issue = vi.fn(), changed = vi.fn()
   const requests: { finish(result: NotebookResolveResult): void }[] = []
   vi.mocked(api.notebooks.resolve).mockImplementation(() => new Promise(resolve => { requests.push({ finish: resolve }) }))
-  await mount(); await type('[[Before]]'); await vi.waitFor(() => expect(requests).toHaveLength(1))
+  await mount(<Harness issue={issue} changed={changed} />); await type('[[Before]]'); await vi.waitFor(() => expect(requests).toHaveLength(1))
+  issue.mockClear(); changed.mockClear()
   await act(async () => {
     editor().view.dom.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
     editor().commands.insertContentAt({ from: linkPosition() + 3, to: linkPosition() + 3 + 'Before'.length }, '共同知识')
   })
   expect(editor().getText()).toBe('[[共同知识]]')
+  expect(issue).not.toHaveBeenCalled(); expect(changed).not.toHaveBeenCalled()
   await act(async () => requests[0]!.finish(lookup('Before')))
   expect(links()[0].target).toBeNull()
   await act(async () => editor().view.dom.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '共同知识' })))
   await vi.waitFor(() => expect(links()[0].text).toBe('共同知识'))
   expect(links()[0].target).toBeNull(); expect(readNoteDocument(latest).status).toBe('valid')
+  expect(changed).toHaveBeenLastCalledWith(latest); expect(latest).toContain('[[共同知识]]'); expect(issue.mock.calls.every(([message]) => message === null)).toBe(true)
+})
+
+it('publishes the final ordinary Chinese draft after composition without a wiki normalization step or false issue', async () => {
+  const issue = vi.fn(), changed = vi.fn()
+  await mount(<Harness note={newNoteDocument('Start ', 'source', 'source-block')} issue={issue} changed={changed} />)
+  await act(async () => {
+    editor().view.focus(); editor().commands.setTextSelection(editor().state.doc.content.size - 1)
+    editor().view.dom.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+    editor().commands.insertContent('共同知识')
+  })
+  expect(changed).not.toHaveBeenCalled(); expect(issue).not.toHaveBeenCalled()
+  await act(async () => editor().view.dom.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '共同知识' })))
+  await vi.waitFor(() => expect(changed).toHaveBeenCalled())
+  expect(latest).toContain('Start 共同知识'); expect(readNoteDocument(latest).status).toBe('valid')
+  expect(issue.mock.calls.every(([message]) => message === null)).toBe(true)
 })
 
 it('uses actual plain paste inside saved wiki text and tokenizes later text after the expanded inline node', async () => {
