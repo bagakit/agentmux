@@ -170,10 +170,16 @@ it.each(['question', 'permission'] as const)('retains an unknown original synchr
   })
   expect(f.respond).toHaveBeenCalledOnce(); const frozen = saved().responses[0][1].original
   expect(frozen.input).toMatchObject({ expectedRequest: request, operationId: expect.any(String), expectedRun: { runId: RUN_ID } })
+  const inlineStatus = view.element.querySelector('[data-original-response]')!
+  expect(inlineStatus.closest('[data-request-id]')).not.toBeNull()
+  expect(view.element.querySelectorAll('[data-original-response]')).toHaveLength(1)
+  expect(view.element.textContent).not.toContain('Check original response')
   await paste(view.element, 'New unsent draft remains')
   await unmount(view.element)
   const restored = await mount(f.surface())
   await vi.waitFor(() => expect(restored.element.querySelector('[data-original-response]')).not.toBeNull())
+  expect(restored.element.querySelectorAll('[data-original-response]')).toHaveLength(1)
+  expect(restored.element.querySelector('[data-original-response]')!.closest('[data-request-id]')).not.toBeNull()
   expect(editor(restored.element).textContent).toContain('New unsent draft remains')
   expect(f.respond).toHaveBeenCalledOnce()
   if (kind === 'permission') await completeNativeRequest(f.core)
@@ -181,9 +187,11 @@ it.each(['question', 'permission'] as const)('retains an unknown original synchr
     receiptId: 'controlled-sync-completion', agentSessionId: sid, providerId: 'claude', runId: RUN_ID,
     payload: { session_id: source.nativeSessionId, hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion', tool_call_id: request.nativeToolCallId }
   }, new AbortController().signal)
+  await vi.waitFor(() => expect(restored.element.querySelector('[data-request-id]')).toBeNull())
+  expect(restored.element.querySelectorAll('[data-original-response]')).toHaveLength(1)
   await click(button(restored.element, '查询原答复回执'))
   await vi.waitFor(() => expect(saved().responses[0][1].phase).toBe('confirmed'))
-  await vi.waitFor(() => expect(restored.element.textContent).toContain('Core 已记录原请求完成'))
+  await vi.waitFor(() => expect(restored.element.textContent).toContain('原请求已确认完成'))
   expect(f.inspect).toHaveBeenCalledWith({ agentSessionId: sid, operationId: frozen.input.operationId })
   expect(f.writes).toHaveLength(1); expect(f.respond).toHaveBeenCalledOnce()
   expect(saved().responses[0][1].original).toEqual(frozen)
