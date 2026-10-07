@@ -22,7 +22,7 @@ vi.mock('node:fs/promises', async (original) => {
 // probeExecutorAvailability 的三态判据，跑**真的** classifyExecutable（走真文件系统与真 PATH 解析），
 // 不是 mock。要害在于把两件被 boolean `installed` 折在一起的事分开：
 //   - check-failed：命令是相对名、PATH 又是空的 → 一个候选都算不出 → 我们没查成（环境退化）。
-//   - missing：命令解析到了一条具体路径，但那条路径上没有可执行文件 → 查成了，确实没装。
+//   - missing：配置的可执行文件未找到，不能推断软件未安装。
 //   - available：解析到的路径上有可执行文件。
 // 这正是那次「PATH 退化被误报成 Not Installed」要防的分岔。启动闸仍是 `=== 'available'`，check-failed
 // 一样拒绝启动，无回归——那条由 hasExecutable 保证，本文件只钉发现侧的三态区分。
@@ -50,6 +50,20 @@ function connectedClient(): AgentMuxClient {
 }
 
 describe('AgentMuxClient.probeExecutorAvailability', () => {
+  it('keeps paths with spaces literal and diagnoses a whole command line without splitting it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-spaced-executable-')); roots.push(root)
+    const bin = join(root, 'wrapper with spaces')
+    await writeFile(bin, '#!/bin/sh\n'); await chmod(bin, 0o755)
+    const client = probeClient()
+    expect(await client.probeExecutorAvailability('codex', bin)).toEqual({ executable: bin, availability: 'available' })
+    const commandLine = bin + ' --model "literal model"'
+    const missing = await client.probeExecutorAvailability('codex', commandLine)
+    expect(missing).toMatchObject({ availability: 'missing', cause: { code: 'EXECUTABLE_NOT_FOUND' } })
+    expect(missing.cause!.message).toContain(JSON.stringify(commandLine))
+    expect(missing.cause!.message).toContain('args')
+    expect(missing.cause!.message).not.toContain('not installed')
+  })
+
   it('reports available when the resolved command is executable', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-probe-avail-'))
     roots.push(root)
@@ -62,12 +76,12 @@ describe('AgentMuxClient.probeExecutorAvailability', () => {
     expect((await client.probeAgent('codex', bin)).installed).toBe(true)
   })
 
-  it('reports missing when the resolved command exists as a path but is not executable', async () => {
+  it('reports the exact configured executable when lookup finds no file', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-probe-missing-'))
     roots.push(root)
-    // 绝对路径（含 '/'）→ 候选非空，但文件不存在 → 查成了，确实没装。
+    // 绝对路径（含 '/'）→ 候选非空，但文件不存在 → 只确认配置文件不存在。
     await expect(probeClient().probeExecutorAvailability('codex', join(root, 'does-not-exist')))
-      .resolves.toEqual({ executable: join(root, 'does-not-exist'), availability: 'missing' })
+      .resolves.toMatchObject({ executable: join(root, 'does-not-exist'), availability: 'missing', cause: { code: 'EXECUTABLE_NOT_FOUND', message: expect.stringContaining(JSON.stringify(join(root, 'does-not-exist'))) } })
   })
 
   it('reports check-failed when a relative command has no PATH candidates to probe', async () => {
@@ -153,12 +167,15 @@ describe('启动闸拒绝时的理由：查不成 ≠ 没装', () => {
     throw new Error('createAgent 没有抛错——闸门没拦住，这条用例失去意义')
   }
 
-  it('查成了、确实没装 → 照旧说「没装」', async () => {
+  it('a missing configured file does not claim that software is not installed', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-gate-missing-'))
     roots.push(root)
-    // 绝对路径 → 候选非空 → 文件不在 → missing。
+    // 绝对路径 → 候选非空 → 文件不在 → missing，不证明软件未安装。
     const error = await launchError(join(root, 'does-not-exist'))
-    expect(error.message).toContain('is not installed on this host')
+    expect(error.message).toContain('Configured executable')
+    expect(error.message).toContain(JSON.stringify(join(root, 'does-not-exist')))
+    expect(error.message).toContain('args')
+    expect(error.message).not.toContain('not installed')
   })
 
   it('PATH 退化、根本没查成 → 不许说「没装」，要说查不成并指向环境', async () => {

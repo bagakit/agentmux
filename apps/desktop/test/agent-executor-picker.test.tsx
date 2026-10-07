@@ -31,7 +31,7 @@ it('shows the original Provider and honest availability and keeps configuration 
   expect(trigger.textContent).toContain('Research partner'); expect(trigger.title).toContain('Available')
   await key(trigger, 'ArrowDown')
   const menu = document.querySelector<HTMLElement>('[role="menu"]')!
-  expect(menu.textContent).toContain('Codex · Available'); expect(menu.textContent).toContain('Claude · Check failed'); expect(menu.textContent).toContain('Codex · Not installed')
+  expect(menu.textContent).toContain('Codex · Available'); expect(menu.textContent).toContain('Claude · Check failed'); expect(menu.textContent).toContain('Codex · Not found')
   expect(menu.querySelector('[aria-checked="true"]')?.dataset.value).toBe('ready')
   await key(menu, 'q'); expect(document.activeElement?.textContent).toContain('Quiet colleague')
   await key(document.activeElement as HTMLElement, 'Enter')
@@ -46,7 +46,7 @@ it('retains an unavailable saved configuration by exact ID and permits clearing 
 it('can save an installed-later preference without pretending that a missing command can run', async () => {
   const { trigger, changed } = await mount()
   await chooseField(trigger, 'missing'); expect(changed).toHaveBeenCalledExactlyOnceWith('missing')
-  expect(trigger.dataset.value).toBe('missing'); expect(trigger.title).toContain('Not installed')
+  expect(trigger.dataset.value).toBe('missing'); expect(trigger.title).toContain('Not found')
 })
 it('a removed option cannot manufacture a new selection and a disabled field cannot change one', async () => {
   const changed = vi.fn()

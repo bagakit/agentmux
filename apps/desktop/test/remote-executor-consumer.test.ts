@@ -1,7 +1,7 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { expect, it } from 'vitest'
 import { executorsForHost } from '../src/renderer/src/lib/executors'
-import { executorDetectionKey } from '../src/renderer/src/lib/executor-detection'
+import { executorDetectionKey, executorDetectionLabel } from '../src/renderer/src/lib/executor-detection'
 import type { AppConfig } from '../src/shared/contracts'
 import type { HostExecutorInventoryState } from '../src/renderer/src/store'
 
@@ -32,4 +32,16 @@ it('a failed refresh retains known choices with a visible error, while an unobse
   expect(executorsForHost(config, 'remote', {}, failed)).toMatchObject([{ command: _hygiene_fixturePath("remote/bin/claude"), detection: { state: 'error', detail: 'SSH connection failed' } }])
   expect(executorsForHost(config, 'remote', {}, undefined)).toEqual([])
   expect(executorsForHost(config, 'remote', {}, { ...previous, input: { ...remote, hostname: 'another.invalid' } })).toEqual([])
+})
+
+it('keeps the original structured missing cause through the remote choice and label consumers', () => {
+  const current = inventory('missing')
+  const descriptor = current.result!.executors[0]!
+  descriptor.cause = { code: 'EXECUTABLE_NOT_FILE', message: 'Configured path is a directory.' }
+  const choices = executorsForHost(config, 'remote', {}, current)
+  expect(choices).toHaveLength(1)
+  expect(choices[0]!.detection!.result).toMatchObject({ input: { host: remote }, cause: descriptor.cause })
+  expect(executorDetectionLabel(choices[0]!.detection)).toBe('Not available')
+  descriptor.cause = { code: 'EXECUTABLE_NOT_FOUND', message: 'Configured executable was not found.' }
+  expect(executorDetectionLabel(executorsForHost(config, 'remote', {}, current)[0]!.detection)).toBe('Not found')
 })
