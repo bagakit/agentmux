@@ -47,7 +47,7 @@ function applyPreview() {
   $('#preview-theme').value=draft.preview.themeId;$('#preview-mode').value=draft.preview.mode;
 }
 function renderSamples() {
-  const items=[['status.working','工作产出'],['status.streaming','内容流入'],['status.browser-running','浏览器执行'],['object.activity','工作记录']];
+  const items=[['status.working','工作产出'],['status.streaming','内容流入'],['status.browser-running','浏览器执行'],['object.activity','工作记录'],['status.waiting','操作等待']];
   $('#semantic-samples').innerHTML=items.map(([id,label])=>`<button type="button" data-sample="${id}" aria-label="编辑 ${id}"><span class="sample-icons">${ThemeBridge.semanticMarkup(id,12,'',samplePresentation)}${ThemeBridge.semanticMarkup(id,24,'',samplePresentation)}</span><strong>${label}</strong><small>${id}</small></button>`).join('');
 }
 function toast(message) {
@@ -254,7 +254,7 @@ function renderDrafts() {
   $('#reset-all').disabled=!entries.length;
 }
 function attachEvents() {
-  const animationLabels={none:'静态',work:'写写停停',stream:'轻轻浮动',execute:'小步探看',spin:'旋转等待'};
+  const animationLabels={none:'静态',work:'写写停停',stream:'轻轻浮动',execute:'小步探看',wait:'流沙等待',spin:'旋转加载'};
   $('#preview-animation').innerHTML=ThemeBridge.ICON_ANIMATIONS.map(value=>`<option value="${value}">${animationLabels[value]}</option>`).join('');
   $('#preview-animation').addEventListener('change',event=>{samplePresentation.animation=event.target.value;renderSamples();});
   $('#preview-color').addEventListener('input',event=>{samplePresentation.color=event.target.value;renderSamples();$('#inherit-color').disabled=false;});

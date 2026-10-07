@@ -1,5 +1,5 @@
 /** Instance presentation only. Callers own whether the represented work is currently active. */
-export const ICON_ANIMATIONS = ['none', 'work', 'stream', 'execute', 'spin'] as const
+export const ICON_ANIMATIONS = ['none', 'work', 'stream', 'execute', 'wait', 'spin'] as const
 export type IconAnimation = typeof ICON_ANIMATIONS[number]
 export type SemanticIconPresentation = {
   size?: number | undefined
