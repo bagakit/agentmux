@@ -313,6 +313,23 @@ inspection reads the original Core receipt without dispatch. Raw payloads and
 transport proofs remain private to the Host. An unavailable optional intake owner
 limits these reads only; the original connection and Agents remain available.
 
+Authenticated native actions use a separate `kind: 'action'` receipt in this same
+ingress owner. Its original event ID identifies one action: two events on the
+same source message remain two intakes, and exact redelivery returns the original
+receipt. Conflicting content under one action event ID cannot replace the retained
+payload. Action receipts and complete raw payloads commit together in the original
+event row; existing message rows and their identities remain unchanged. Bounded
+message/action pages share the original intake sequence and continuation.
+
+Action receipts are explicitly `refused` with `INGRESS_ACTION_UNSUPPORTED`.
+They retain available operator, external conversation, source message and opaque
+action reference facts; absent facts stay absent. They contain no fabricated
+message body, message author or input claim. Discovery and inspection use the
+commands above, with `inputReceipt: null` and `observation: 'not-started'`.
+Dispatch, rejoin and recovery cannot turn these receipts into Agent input, and an
+action reference is neither authorization nor a question target. Ordinary local
+Agent input remains available.
+
 An authenticated parent reference is an original platform identity, not proof
 that the message replies to this application. A registered adapter can qualify
 that exact parent after the complete event is committed and acknowledged. The
@@ -455,6 +472,17 @@ admitted. There is no adapter-local seen set. Scheduling original Core input is
 a separate Host action after durable admission, preserving ACK time for storage.
 Platform bot senders and direct chats are outside this human-group receiver's
 scope; authored text never determines that distinction.
+
+The same private SDK dispatcher also receives `card.action.trigger`. It awaits
+complete durable retention before returning an empty callback response, which
+acknowledges intake rather than answer completion. The adapter projects a native
+operator `open_id` and exact context IDs only when present, and keeps every other
+field in private raw. The Host records the generic unsupported action receipt
+described above. Native card presentation does not establish question or
+permission qualification; callback values, temporary update tokens and visible
+labels cannot authorize an answer. This receiver does not publish interactive
+controls or update cards through callback responses.
+[Native card callback contract](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/card-callback-communication)
 
 The text projection keeps the original text exactly and fixes actor identity to
 the platform's `open_id` namespace. A mention qualifies only when the typed
