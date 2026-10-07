@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 
@@ -29,6 +29,23 @@ if (process.argv.includes('--prompt-preparation-stage')) {
 if (process.argv.includes('--demand-collaboration') && !process.env.AGENTMUX_DEMAND_COLLABORATION_BUILD_RECEIPT) {
   const { runPendingEditRestart } = await import('./pending-edit-restart-proof.mjs')
   process.exit(await runPendingEditRestart(process.argv.slice(2), 'demand-collaboration'))
+}
+
+// Observe this exact worker before Core/Provider modules can resolve home-based owners.
+if (process.env.AGENTMUX_PENDING_EDIT_BUILD_RECEIPT) {
+  const buildPath = process.env.AGENTMUX_PENDING_EDIT_BUILD_RECEIPT
+  const build = JSON.parse(await readFile(buildPath, 'utf8'))
+  if (build.privateHome) {
+    const nodeHome = (await import('node:os')).homedir()
+    assert.equal(build.privateHome.path, join(build.privateRoot, 'home'))
+    assert.equal(process.env.HOME, build.privateHome.path)
+    assert.equal(nodeHome, build.privateHome.path)
+    await writeFile(join(dirname(buildPath), 'worker-home.json'), JSON.stringify({
+      pid: process.pid, privateRoot: build.privateRoot, sourceCommit: build.sourceCommit,
+      home: process.env.HOME, nodeHome, beforeCoreImports: true,
+      workerSHA256: createHash('sha256').update(await readFile(import.meta.filename)).digest('hex')
+    }, null, 2) + '\n')
+  }
 }
 
 // Resolve legacy proof dependencies only after the isolated build dispatch.
@@ -147,8 +164,8 @@ async function launch(label) {
   const readyFile = join(root, `ready-${label}.json`)
   // The full App's original manifest owns app.getAppPath() and its resources.
   // Direct legacy index.js launch gives a different root and is kept for old modes.
-  if (demandCollaborationProof) assert.equal(JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8')).main, './out/main/index.js')
-  const child = spawn(require('electron'), [demandCollaborationProof ? desktopRoot : join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
+  if (demandCollaborationProof || pendingEditProof) assert.equal(JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8')).main, './out/main/index.js')
+  const child = spawn(require('electron'), [demandCollaborationProof || pendingEditProof ? desktopRoot : join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
     env: { ...process.env, ...fixtureEnvironment, AGENTMUX_DESKTOP_READY_FILE: readyFile }
   })
@@ -212,8 +229,8 @@ async function seedWorkbench(seed, graph) {
   const reportPath = join(root, 'seed-report.json')
   // The full App's original manifest owns app.getAppPath() and its resources.
   // Direct legacy index.js launch gives a different root and is kept for old modes.
-  if (demandCollaborationProof) assert.equal(JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8')).main, './out/main/index.js')
-  const child = spawn(require('electron'), [demandCollaborationProof ? desktopRoot : join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
+  if (demandCollaborationProof || pendingEditProof) assert.equal(JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8')).main, './out/main/index.js')
+  const child = spawn(require('electron'), [demandCollaborationProof || pendingEditProof ? desktopRoot : join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, ...fixtureEnvironment,
       AGENTMUX_DESKTOP_RECOVERY_REPORT: reportPath, AGENTMUX_DESKTOP_RECOVERY_SEED: JSON.stringify(seed),
       AGENTMUX_DESKTOP_READY_FILE: join(root, 'seed-ready.json'), AGENTMUX_DESKTOP_EXIT_AFTER_READY: '1' }
@@ -490,9 +507,9 @@ try {
   if (swapNameProof) swapFixture = seedSwapRegions(seed, { session, peers: swapPeers, tabId, agentRegionId, fileRegionId, workspaceId, identityName, tabs: seedWorkbenchData.tabs })
   if (goalsAlignmentProof) goalsFixture = await createGoalsRestartFixture({ root, userData, workspaceId, session })
   const adapter = await loadSeedSpatialAdapter()
-  // Only the new mode binds baseline topology to the original Core create result.
+  // These owning modes bind baseline topology to the original Core create result.
   // No inferred display Host, synthetic status or new Goal/role receipt is seeded.
-  const baselineSessions = demandCollaborationProof ? [{ id: session.agentSessionId, kind: 'agent', hostId: session.hostId, workspacePath: session.workspacePath, providerId: session.providerId, executorId: session.executorId, control: { kind: 'agent', hostId: session.hostId, agentSessionId: session.agentSessionId, run: session.run } }] : []
+  const baselineSessions = demandCollaborationProof || pendingEditProof ? [{ id: session.agentSessionId, kind: 'agent', hostId: session.hostId, workspacePath: session.workspacePath, providerId: session.providerId, executorId: session.executorId, control: { kind: 'agent', hostId: session.hostId, agentSessionId: session.agentSessionId, run: session.run } }] : []
   const graph = adapter({ config: JSON.parse(await readFile(join(userData, 'agentmux.config.json'), 'utf8')), sessions: baselineSessions, ...seedWorkbenchData, spaceZoneBindings: {}, spatialRequests: {} }, [])
   await seedWorkbench(seed, graph)
   const first = await launch('first')
@@ -508,7 +525,7 @@ try {
   if(identityMenuProof) assert.deepEqual(before.identity,{name:identityName,stored:identityName,more:1})
   assert.equal(before.draft, oldDraft); assert.equal(before.splitPercent, 70)
   assert.deepEqual(before.queued.map(entry => entry.operationId), ['private-queue-first', 'private-queue-unknown', 'private-queue-last'])
-  if (!demandCollaborationProof) assert.deepEqual(before.queued.map(entry => entry.errorCode), Array(3).fill('AGENT_EXECUTION_NOT_REQUESTED'))
+  if (!demandCollaborationProof && !pendingEditProof) assert.deepEqual(before.queued.map(entry => entry.errorCode), Array(3).fill('AGENT_EXECUTION_NOT_REQUESTED'))
   else assert.ok(before.queued.every(entry => entry.errorCode === undefined || entry.errorCode === 'AGENT_EXECUTION_NOT_REQUESTED'), 'The current queue has no known failed input; original input cursors independently prohibit automatic replay')
   let queueBeforeMove = before.queued
   if (pendingEditProof || demandCollaborationProof) {
@@ -524,6 +541,8 @@ try {
       const core = await readRecoverySpatialState(first.cdp)
       const projected = await surface(first.cdp)
       const original = core.graph.regions.find(region => region.regionId === agentRegionId)
+      if (pendingEditProof) surfaceDiagnostic = { stage: 'pending-edit-pre-edit-publication', core, projected,
+        expectedAgentSessionId: session.agentSessionId, expectedRunId: session.run.runId, originalRunBirth: ownedRunProcess }
       if (original?.agentSessionId !== session.agentSessionId || original.runId !== session.run.runId ||
           !isDeepStrictEqual(core.graph.tabLayouts, before.workbench.graph.tabLayouts)) return null
       // Core ACK hydration enriches home bindings with their authoritative
@@ -581,7 +600,7 @@ try {
       return original.call(this, name, value)
     }
     window.agentmux.sessions.onEvent(event => {
-      if (${demandCollaborationProof} && event.event.type === 'agent-session' && event.event.session.agentSessionId === ${JSON.stringify(session.agentSessionId)} && event.event.session.nativeSourceObservation?.state === 'unknown' && event.event.session.nativeSourceObservation?.reason === 'native-witness-unavailable' && event.event.session.run.runId === ${JSON.stringify(session.run.runId)}) window.__crashProof.hooks.push({ at: Date.now(), observedAt: event.event.session.nativeSourceObservation.observedAt, observation: 'native-source-unknown', runId: event.event.session.run.runId })
+      if (${demandCollaborationProof || pendingEditProof} && event.event.type === 'agent-session' && event.event.session.agentSessionId === ${JSON.stringify(session.agentSessionId)} && event.event.session.nativeSourceObservation?.state === 'unknown' && event.event.session.nativeSourceObservation?.reason === 'native-witness-unavailable' && event.event.session.run.runId === ${JSON.stringify(session.run.runId)}) window.__crashProof.hooks.push({ at: Date.now(), observedAt: event.event.session.nativeSourceObservation.observedAt, observation: 'native-source-unknown', runId: event.event.session.run.runId })
       if (event.event.type === 'agent-status' && event.event.agentSessionId === ${JSON.stringify(session.agentSessionId)} && event.event.evidence.source === 'native-hook')
         window.__crashProof.hooks.push({ at: Date.now(), observedAt: event.event.evidence.observedAt })
     })
@@ -626,7 +645,7 @@ setInterval(tick,100);
       pressureProducer.completedRequests++; pressureProducer.launchedRequests = Math.max(pressureProducer.launchedRequests, post.launchedRequests)
       pressureProducer.skippedTicks = Math.max(pressureProducer.skippedTicks, post.skippedTicks); pressureProducer.inFlightAfterLastCompletion = post.inFlight }
   } })
-  await waitFor(demandCollaborationProof ? 'real unknown native-source observation preserves the original cat Run in Renderer' : 'real native-hook status reaches Renderer', () => first.cdp.evaluate('window.__crashProof.hooks.length >= 2'))
+  await waitFor(demandCollaborationProof || pendingEditProof ? 'real unknown native-source observation preserves the original cat Run in Renderer' : 'real native-hook status reaches Renderer', () => first.cdp.evaluate('window.__crashProof.hooks.length >= 2'))
   if (messageContextProof) messageBefore = await readMessageContext(first.cdp)
   // Keyboard activation exercises actual native popover and React buttons without changing Agent
   // MRU focus through an unrelated pointer event. It does not grant permission to send old intent.
@@ -644,10 +663,8 @@ setInterval(tick,100);
   ])
   const readLast = "Array.from(document.querySelectorAll('.composer-outbox li')).find(row => row.querySelector('.composer-mailbox__preview')?.textContent === 'Private last pending intent')?.querySelector('.composer-mailbox__row')"
   await activateButton(first.cdp, readLast)
-  const selectedLastDetail = demandCollaborationProof
+  const selectedLastDetail = demandCollaborationProof || pendingEditProof
     ? "document.querySelector('.composer-outbox__inline[data-record-key=\"queue:private-queue-last\"] [data-message-id=\"queue:private-queue-last\"] .log-turn__body')?.textContent.trim() === 'Private last pending intent'"
-    : pendingEditProof
-    ? "document.querySelector('.composer-outbox[data-record-key=\"queue:private-queue-last\"] [data-message-id=\"queue:private-queue-last\"] .log-turn__body')?.textContent.trim() === 'Private last pending intent'"
     : "document.querySelector('.composer-outbox .composer-mailbox__full-text')?.textContent === 'Private last pending intent'"
   await waitFor('selected original queue detail', () => first.cdp.evaluate(selectedLastDetail))
   const moveLastUp = pendingEditProof || demandCollaborationProof
@@ -655,14 +672,14 @@ setInterval(tick,100);
     : "Array.from(document.querySelectorAll('.composer-outbox__actions button')).find(button => button.textContent === 'Move up')"
   await activateButton(first.cdp, moveLastUp)
   await activateButton(first.cdp, moveLastUp)
-  if (!demandCollaborationProof) await activateButton(first.cdp, "document.querySelector('.composer-mailbox__back button')")
+  if (!demandCollaborationProof && !pendingEditProof) await activateButton(first.cdp, "document.querySelector('.composer-mailbox__back button')")
   const expectedQueue = [queueBeforeMove[2], queueBeforeMove[0], queueBeforeMove[1]]
   await waitFor('actual outbox reordered', async () => (await surface(first.cdp)).outbox.map(row => row.text).join('|') === expectedQueue.map(entry => entry.text).join('|'))
   await activateButton(first.cdp, "document.querySelector('.composer-mailbox button[aria-label=\"Close mailbox\"]')")
   await waitFor('mailbox closed', () => first.cdp.evaluate("document.querySelector('.composer-mailbox').getClientRects().length === 0"))
   // Focus the already-active Agent editor without a pointer event that would change its MRU time.
   await first.cdp.evaluate(`(() => { const e = document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]'); e.focus(); const s = getSelection(); s.selectAllChildren(e); return true })()`)
-  if (demandCollaborationProof) {
+  if (demandCollaborationProof || pendingEditProof) {
     await first.cdp.evaluate(`(async () => { const e = document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]');e.focus();await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));e.focus();getSelection().selectAllChildren(e);return true })()` )
     await waitFor('actual original composer owns input focus after mailbox close', () => first.cdp.evaluate(`document.activeElement === document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]')`))
   }
@@ -849,7 +866,7 @@ setInterval(tick,100);
   const restoredExpectedWorkbench = goalsCtaProof ? goalsEntryFixture.expectedWorkbench : expectedWorkbench
   const restoredExpectedFocus = goalsCtaProof ? goalsEntryFixture.expectedFocus : swapNameProof ? immediatelyBeforeCrash.focus : before.focus
   if (goalsCtaProof) await assertPrivateRunOutsideElectronGroup(second.child.pid, goalsEntryFixture.retry.process.pid)
-  if (!demandCollaborationProof) assert.deepEqual(second.origin, first.origin, 'Both real processes must use the exact same browser storage origin')
+  if (!demandCollaborationProof && !pendingEditProof) assert.deepEqual(second.origin, first.origin, 'Both real processes must use the exact same browser storage origin')
   else {
     assert.equal(second.origin.origin, first.origin.origin, 'Original browser storage origin remains exact')
     for (const observed of [first.origin, second.origin]) {
@@ -870,9 +887,10 @@ setInterval(tick,100);
     probeDigest: hash(await readFile(import.meta.filename)), desktopMainDigest: hash(await readFile(join(desktopRoot, 'out/main/index.js'))),
     rendererIdentity,
     storeSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/store.ts'))), writerSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/lib/persisted-ui-writer.ts'))),
-    fixture: { userData, origin: first.origin, ...(demandCollaborationProof ? { applicationEntry: desktopRoot, originalManifestMain: './out/main/index.js', manifestSha256: hash(await readFile(join(desktopRoot, 'package.json'))), storageOrigins: [first.origin, second.origin] } : {}), ordinaryLaunchSeedControlsAbsent: true, callerAgentEnvironmentIsolated: goalsCtaProof || messageContextProof || pendingEditProof, syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
+    fixture: { userData, origin: first.origin, ...(demandCollaborationProof || pendingEditProof ? { applicationEntry: desktopRoot, originalManifestMain: './out/main/index.js', manifestSha256: hash(await readFile(join(desktopRoot, 'package.json'))), storageOrigins: [first.origin, second.origin] } : {}), ordinaryLaunchSeedControlsAbsent: true, callerAgentEnvironmentIsolated: goalsCtaProof || messageContextProof || pendingEditProof, syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
     first: { pid: first.child.pid, signal: first.child.signalCode, producerPid: producer.pid, activeWindowMs: crashAt-lastEditAt,
       rendererHookEvents: hooks.length, maxEventGapMs: maximumPressureGap, successfulHookPosts: acknowledgements.filter(item => item.status === 204).length,
+      rendererObservationKinds: [...new Set(hooks.map(event => event.observation ?? 'native-hook'))],
       unloadEvents: observer.unloads, actualLocalStorageWrites: observer.writes, draftWasWrittenBeforeCrash: immediatelyBeforeCrash.draft === newDraft,
       newLayoutWasWrittenBeforeCrash: JSON.stringify(immediatelyBeforeCrash.workbench) === JSON.stringify(expectedWorkbench),
       movedQueueWasWrittenBeforeCrash: JSON.stringify(immediatelyBeforeCrash.queued) === JSON.stringify(expectedQueue) },
@@ -881,7 +899,7 @@ setInterval(tick,100);
       exactAgentFocusRestored: JSON.stringify(restored.focus) === JSON.stringify(restoredExpectedFocus), visibleRegions: restored.regions, activeRegions: restored.activeRegions,
       regionVisibility: restored.regionVisibility,
       exactMovedQueueRestored: JSON.stringify(restored.queued) === JSON.stringify(expectedQueue), queuedDigest: hash(JSON.stringify(restored.queued)) },
-    limitations: [demandCollaborationProof ? 'Complete private product App; actual Core test-fixture CLI emits native records for new PMOs. The retained cat Run has an honest unknown native-source observation. No user history/native CLI/configuration is touched.' : 'Private synthetic Agent/PTY and ordinary UserPromptSubmit hook ingress only; no user history, native CLI or production app touched.',
+    limitations: [demandCollaborationProof ? 'Complete private product App; actual Core test-fixture CLI emits native records for new PMOs. The retained cat Run has an honest unknown native-source observation. No user history/native CLI/configuration is touched.' : pendingEditProof ? 'Private synthetic Agent/PTY; current Core reports native-witness-unavailable through real UserPromptSubmit ingress. No native working/history, user Run, user CLI or user configuration is certified.' : 'Private synthetic Agent/PTY and ordinary UserPromptSubmit hook ingress only; no user history, native CLI or production app touched.',
       demandCollaborationProof ? 'Ordinary scoped recovery under real unknown-source observations; no fixture-issued post-edit storage flush, unload or quit before SIGKILL. Actual product navigation/save-triggered flush requests are retained. Producer cadence qualification does not certify native working or native history.' : ordinaryRecoveryProof ? 'Ordinary scoped recovery; no fixture/manual post-edit storage flush, unload or quit before SIGKILL. The live producer pressure is observed separately in pressureQualification; recovery passed does not certify uninterrupted stress.'
         : 'No fixture/manual post-edit storage flush, unload, quit or quiet-event interval before SIGKILL; actual production write-triggered platform requests remain active.',
       'Historical queue admission times are synthetic seeded facts; actual first-admission clock behavior is separately bound by the owning source test.',
@@ -1015,7 +1033,7 @@ setInterval(tick,100);
   })
   await attempt(async () => {
     if (swapNameProof) cleanup.swapPeerRuns = await cleanupSwapPeers(root, swapPeers)
-    if (!demandCollaborationProof) await stopProbeProcesses(process.pid + 1_000_000_000, root)
+    if (!demandCollaborationProof && !pendingEditProof) await stopProbeProcesses(process.pid + 1_000_000_000, root)
     else {
       // macOS can briefly report ?E after SIGKILL. Retry the original identity-checked
       // observation; no unfamiliar state authorizes signalling or counts as absence.

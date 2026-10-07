@@ -2,7 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
@@ -16,8 +16,11 @@ const packages = ['core', 'demand', 'client-ui', 'layout', 'relay']
 /** A new restart mode reuses the real harness; only its build tree is private. */
 export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
   assert.ok(['pending-edit', 'steer-recovery', 'prompt-preparation-stage', 'demand-collaboration'].includes(mode), 'Only the owning private proof modes may use this build')
+  const inactiveWindow = arguments_.includes('--inactive-window')
+  assert.ok(!inactiveWindow || mode === 'pending-edit', 'Non-activating windows belong only to the explicit private pending-edit proof')
   const demandCollaboration = mode === 'demand-collaboration'
-  const packages = demandCollaboration ? ['core', 'demand', 'client-ui', 'layout', 'relay', 'identity', 'git'] : ['core', 'demand', 'client-ui', 'layout', 'relay']
+  const packages = inactiveWindow ? ['core', 'demand', 'client-ui', 'layout', 'relay', 'identity', 'git', 'diagnostic-evidence', 'connectors']
+    : demandCollaboration ? ['core', 'demand', 'client-ui', 'layout', 'relay', 'identity', 'git'] : ['core', 'demand', 'client-ui', 'layout', 'relay']
   const steerRecovery = mode === 'steer-recovery', phaseCapture = mode === 'prompt-preparation-stage'
   assert.ok(!demandCollaboration || arguments_.every(a => a === '--demand-collaboration' || a.startsWith('--receipt-path=') || a.startsWith('--probe-root=') || a.startsWith('--demand-collaboration-source-ref=')), 'Demand collaboration has an explicit bounded test-only mode')
   assert.ok(!phaseCapture || !arguments_.some(a => a === '--steer-recovery' || a === '--pending-edit'), 'Finite phase capture has a distinct scope')
@@ -41,10 +44,13 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
   // The inner real harness has Unix sockets below this tree. macOS's per-user
   // tmpdir prefix would exceed sockaddr_un's path limit after that nesting.
   const privateRoot = await realpath(await mkdtemp(join(process.platform === 'darwin' ? _hygiene_fixturePath("tmp") : tmpdir(), demandCollaboration ? 'amx-dc-' : phaseCapture ? 'amx-ps-' : steerRecovery ? 'amx-sr-' : 'amx-pe-')))
+  const privateHome = join(privateRoot, 'home')
   await mkdir(evidence, { recursive: true })
   const requestedReceipt = arguments_.find(value => value.startsWith('--receipt-path='))?.slice('--receipt-path='.length)
   const receiptPath = requestedReceipt ? resolve(root, requestedReceipt) : join(evidence, 'receipt.json')
   const buildReceiptPath = join(evidence, 'build.json')
+  const inactiveWindowDirectory = join(evidence, 'inactive-windows')
+  if (inactiveWindow) await mkdir(inactiveWindowDirectory, { recursive: true })
   const sourceArchivePath = join(evidence, 'source.tar')
   const requestedSourceRef = arguments_.find(value => value.startsWith('--' + mode + '-source-ref='))?.slice(('--' + mode + '-source-ref=').length) ?? (phaseCapture ? 'refs/heads/main' : undefined)
   assert.ok(!demandCollaboration || requestedSourceRef, 'Demand collaboration requires an immutable full integrated SourceRef')
@@ -134,7 +140,8 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
     }
     const directories = ['apps/desktop/src', 'apps/desktop/browser-extension', 'apps/desktop/scripts', 'apps/desktop/brand', 'apps/desktop/native', 'apps/desktop/resources', 'apps/host/src',
       'packages/core/src', 'packages/core/scripts', 'packages/core/bin', 'packages/core/vendor',
-      'packages/demand/src', 'packages/demand/bin', 'packages/relay/src', 'packages/client-ui/src', 'packages/layout/src', 'patches', ...(demandCollaboration ? ['packages/git/src', 'packages/identity/src', 'packages/core/test/fixtures'] : [])]
+      'packages/demand/src', 'packages/demand/bin', 'packages/relay/src', 'packages/client-ui/src', 'packages/layout/src', 'patches', ...(demandCollaboration || inactiveWindow ? ['packages/git/src', 'packages/identity/src'] : []),
+      ...(demandCollaboration ? ['packages/core/test/fixtures'] : []), ...(inactiveWindow ? ['packages/core/native', 'packages/diagnostic-evidence/src', 'packages/connectors/src', 'apps/desktop/vendor/drawio/v32.4.1'] : [])]
     for (const directory of directories) {
       if (!requestedSourceRef) {
         try { await cp(join(root, directory), join(privateRoot, directory), { recursive: true }) }
@@ -144,7 +151,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
       catch (error) { if (!(directory === 'apps/desktop/brand' && error.code === 'ENOENT')) throw error }
     }
     for (const path of ['package.json', 'tsconfig.base.json', 'tsconfig.shared.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps/desktop/package.json', 'apps/desktop/electron.vite.config.ts',
-      'apps/host/package.json', ...packages.flatMap(pkg => ['package.json', 'tsconfig.json', 'tsconfig.build.json'].map(name => 'packages/' + pkg + '/' + name))]) {
+      'apps/host/package.json', ...(inactiveWindow ? ['test/fixture-values.mjs'] : []), ...packages.flatMap(pkg => ['package.json', 'tsconfig.json', 'tsconfig.build.json'].map(name => 'packages/' + pkg + '/' + name))]) {
       try { const bytes = await readFile(join(requestedSourceRef ? privateRoot : root, path)); await mkdir(dirname(join(privateRoot, path)), { recursive: true }); await writeFile(join(privateRoot, path), bytes); build.sources[path] = sha(bytes) }
       catch (error) { if (error.code !== 'ENOENT') throw error }
     }
@@ -297,14 +304,15 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
       build.fixtureResourceSnapshot = { path: bannerPath, sourceCommit: build.sourceCommit, sha256: sha(stdout),
         reason: 'Concurrent shared-tree resource deletion while production imports still reference this bitmap; private fixture only, no shared restoration.' }
     }
-    if (demandCollaboration) for (const [pkg, config] of [['identity', 'tsconfig.json'], ['git', 'tsconfig.build.json']]) {
+    if (demandCollaboration || inactiveWindow) for (const [pkg, config] of [['identity', 'tsconfig.json'], ['git', 'tsconfig.build.json'], ...(inactiveWindow ? [['diagnostic-evidence', 'tsconfig.json']] : [])]) {
       await command('private-' + pkg + '-build', process.execPath, [require.resolve('typescript/bin/tsc'), '-p', 'packages/' + pkg + '/' + config], privateRoot)
       await record(join(privateRoot, 'packages', pkg, 'dist'), build.compiled)
     }
     await command('private-demand-build', process.execPath, [require.resolve('typescript/bin/tsc'), '-p', 'packages/demand/tsconfig.build.json'], privateRoot)
     await command('private-relay-build', process.execPath, [require.resolve('typescript/bin/tsc'), '-p', 'packages/relay/tsconfig.json'], privateRoot)
     await command('private-core-build', process.execPath, [join(privateRoot, 'packages/core/scripts/build.mjs')], privateRoot)
-    if (demandCollaboration) { await command('private-client-ui-build', process.execPath, [require.resolve('typescript/bin/tsc'), '-p', 'packages/client-ui/tsconfig.build.json'], privateRoot); await record(join(privateRoot, 'packages/client-ui/dist'), build.compiled) }
+    if (demandCollaboration || inactiveWindow) { await command('private-client-ui-build', process.execPath, [require.resolve('typescript/bin/tsc'), '-p', 'packages/client-ui/tsconfig.build.json'], privateRoot); await record(join(privateRoot, 'packages/client-ui/dist'), build.compiled) }
+    if (inactiveWindow) { await command('private-connectors-build', process.execPath, [require.resolve('typescript/bin/tsc'), '-p', 'packages/connectors/tsconfig.json'], privateRoot); await record(join(privateRoot, 'packages/connectors/dist'), build.compiled) }
     await record(join(privateRoot, 'packages/demand/dist'), build.compiled)
     await record(join(privateRoot, 'packages/relay/dist'), build.compiled)
     build.workspaceConsumers = {}
@@ -344,12 +352,47 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
     await command('private-workspace-helper-build', process.execPath, [join(privateRoot, 'apps/desktop/scripts/build-workspace-move-helper.mjs')], privateRoot)
     if (demandCollaboration) build.workspaceHelper = { sourceSha256: build.sources['apps/desktop/native/workspace-move.c'], builderSha256: build.sources['apps/desktop/scripts/build-workspace-move-helper.mjs'], binarySha256: sha(await readFile(join(privateRoot, 'apps/desktop/resources/bin/agentmux-workspace-move'))) }
     const closurePath = join(evidence, 'desktop-source-closure.json')
+    const inactiveCompilerReceipt = join(evidence, 'inactive-window-compiler-input.json')
     const config = join(privateRoot, 'apps/desktop/restart-proof.vite.config.mjs')
+    let inactiveInput = null
+    if (inactiveWindow) {
+      const owner = 'apps/desktop/src/main/index.ts', original = await readFile(join(privateRoot, owner), 'utf8')
+      const constructor = 'const window = new BrowserWindow({\n      ...windowConstructorGeometry(persistedGeometry),'
+      const placement = '    workbenchWindow = window'
+      assert.equal(original.split(constructor).length - 1, 1, 'One exact private workbench window constructor')
+      assert.equal(original.split(placement).length - 1, 1, 'One exact private workbench window owner')
+      const presentation = `    window.show = () => window.showInactive()
+    window.focus = () => {}
+    let privateWindowFocusedEver = window.isFocused()
+    const recordPrivateWindow = async () => writeFile(${JSON.stringify(inactiveWindowDirectory)} + '/window-' + process.pid + '.json', JSON.stringify({
+      pid: process.pid, id: window.id, focused: window.isFocused(), focusedEver: privateWindowFocusedEver,
+      home: process.env.HOME, nodeHome: (await import('node:os')).homedir(),
+      focusable: window.isFocusable(), visible: window.isVisible(), kind: 'test-only-nonactivating-workbench'
+    }))
+    window.on('focus', () => { privateWindowFocusedEver = true; void recordPrivateWindow() })
+    window.webContents.on('did-finish-load', () => { void recordPrivateWindow() })
+    window.showInactive()
+    await recordPrivateWindow()
+`
+      const source = original.replace(constructor, constructor + '\n      show: false, focusable: false,')
+        .replace(placement, presentation + placement)
+      inactiveInput = { owner: join(privateRoot, owner), source }
+      build.privateWindowOverlay = { owner, originalSHA256: sha(original), compilerInputSHA256: sha(source),
+        observationDirectory: inactiveWindowDirectory, sharedSourceWritten: false,
+        scope: 'Only private BrowserWindow presentation: construct hidden/nonfocusable, showInactive, ignore OS-focus requests. Original Core/Renderer/recovery code remains unchanged.' }
+    }
     await writeFile(config, `import actual from './electron.vite.config.ts';import{readFile,writeFile}from'node:fs/promises';import{createHash}from'node:crypto';import{relative}from'node:path';
-const root=${JSON.stringify(privateRoot)},loaded={};
-const plugin=()=>({name:'private-restart-source-identity',enforce:'pre',async load(id){if(id.startsWith(root+'/')&&!id.includes('/node_modules/')&&!id.includes('?')){try{loaded[relative(root,id)]=createHash('sha256').update(await readFile(id)).digest('hex')}catch{}}},async closeBundle(){await writeFile(${JSON.stringify(closurePath)},JSON.stringify(loaded,null,2))}});
+const root=${JSON.stringify(privateRoot)},loaded={},inactiveInput=${JSON.stringify(inactiveInput)};
+const plugin=()=>({name:'private-restart-source-identity',enforce:'pre',async load(id){if(id.startsWith(root+'/')&&!id.includes('/node_modules/')&&!id.includes('?')){try{loaded[relative(root,id)]=createHash('sha256').update(await readFile(id)).digest('hex')}catch{}}if(inactiveInput&&id===inactiveInput.owner){await writeFile(${JSON.stringify(inactiveCompilerReceipt)},JSON.stringify({owner:relative(root,id),originalSHA256:loaded[relative(root,id)],compilerInputSHA256:createHash('sha256').update(inactiveInput.source).digest('hex')}));return inactiveInput.source}},async closeBundle(){await writeFile(${JSON.stringify(closurePath)},JSON.stringify(loaded,null,2))}});
 export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key,{...value,plugins:[plugin(),...(value.plugins??[])]}]));\n`)
     await command('private-desktop-build', process.execPath, [join(root, 'apps/desktop/node_modules/electron-vite/bin/electron-vite.js'), 'build', '--config', config], join(privateRoot, 'apps/desktop'))
+    if (inactiveWindow) {
+      const applied = JSON.parse(await readFile(inactiveCompilerReceipt, 'utf8'))
+      assert.equal(applied.owner, build.privateWindowOverlay.owner)
+      assert.equal(applied.originalSHA256, build.privateWindowOverlay.originalSHA256)
+      assert.equal(applied.compilerInputSHA256, build.privateWindowOverlay.compilerInputSHA256)
+      build.privateWindowOverlay.appliedCompilerReceipt = inactiveCompilerReceipt
+    }
     build.desktopSourceClosure = JSON.parse(await readFile(closurePath, 'utf8'))
     for (const path of ['apps/desktop/src/main/index.ts', 'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/lib/api.ts',
       'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx']) {
@@ -361,10 +404,13 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
     await record(join(privateRoot, 'apps/desktop/out'), build.compiled)
     await record(join(privateRoot, 'packages/core/dist'), build.compiled)
     assert.ok(Object.keys(build.compiled).length > 100)
+    await mkdir(privateHome, { recursive: true, mode: 0o700 })
+    build.privateHome = { path: privateHome, source: 'test-process-env', parentEnvironmentMutated: false,
+      scope: 'Set before loading the entire worker; Core/Provider setup and all private Electron descendants inherit this HOME.' }
     await writeFile(buildReceiptPath, JSON.stringify(build, null, 2))
-    const args = arguments_.filter(value => !value.startsWith('--receipt-path=') && !value.startsWith('--probe-root=') && !value.startsWith('--' + mode + '-source-ref=') && !value.startsWith('--startup-first-send-product-manifest=') && !value.startsWith('--startup-first-send-product-manifest-sha='))
+    const args = arguments_.filter(value => value !== '--inactive-window' && !value.startsWith('--receipt-path=') && !value.startsWith('--probe-root=') && !value.startsWith('--' + mode + '-source-ref=') && !value.startsWith('--startup-first-send-product-manifest=') && !value.startsWith('--startup-first-send-product-manifest-sha='))
     const lines = []
-    const executionEnvironment = { ...process.env, [environmentKey]: buildReceiptPath }
+    const executionEnvironment = { ...process.env, HOME: privateHome, [environmentKey]: buildReceiptPath }
     delete executionEnvironment.ELECTRON_RUN_AS_NODE
     outcome = await runProbeProcess(process.execPath, [join(privateRoot, 'apps/desktop/scripts', worker), ...args,
       '--probe-root=' + privateRoot, '--receipt-path=' + receiptPath], { cwd: privateRoot, temporaryRoot: privateRoot,
@@ -374,6 +420,37 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
     assert.equal(outcome.exitCode, 0)
     const result = JSON.parse(await readFile(receiptPath, 'utf8'))
     assert.equal(result.passed, true); assert.equal(result[resultField]?.passed, true)
+    if (mode === 'pending-edit') {
+      const observed = JSON.parse(await readFile(join(evidence, 'worker-home.json'), 'utf8'))
+      assert.equal(observed.pid, outcome.originalPid)
+      assert.equal(observed.privateRoot, privateRoot); assert.equal(observed.sourceCommit, sourceCommit)
+      assert.equal(observed.home, privateHome); assert.equal(observed.nodeHome, privateHome)
+      assert.equal(observed.beforeCoreImports, true)
+      assert.equal(observed.workerSHA256, build.sources['apps/desktop/scripts/verify-workbench-persistence-restart.mjs'])
+      build.privateHome.startupObservation = observed
+    }
+    if (inactiveWindow) {
+      const files = (await readdir(inactiveWindowDirectory)).filter(file => file.startsWith('window-') && file.endsWith('.json'))
+      assert.ok(files.length >= 3, 'Seed plus two real App processes report private window identity')
+      build.privateWindowObservations = await Promise.all(files.map(async file => JSON.parse(await readFile(join(inactiveWindowDirectory, file), 'utf8'))))
+      assert.ok(build.privateWindowObservations.every(window => window.focusable === false && window.focusedEver === false && window.visible === true),
+        'Every actual private App window stays visible without taking OS focus')
+      assert.ok(build.privateWindowObservations.every(window => window.home === privateHome && window.nodeHome === privateHome),
+        'Every actual private App resolves HOME and homedir() inside this proof root')
+      build.privateHome.appConnectorDirectories = build.privateWindowObservations.map(window => ({
+        pid: window.pid, path: join(window.nodeHome, '.agentmux', 'connectors'),
+        basis: 'Observed post-hydration Main homedir plus exact ipc.ts connector owner',
+        ownerSourceSHA256: build.sources['apps/desktop/src/main/ipc.ts']
+      }))
+      const databasePath = join(privateHome, '.agentmux', 'connectors', 'connections.sqlite')
+      try {
+        const metadata = await stat(databasePath)
+        build.privateHome.connectorDatabase = { path: databasePath, isFile: metadata.isFile(), size: metadata.size }
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+        build.privateHome.connectorDatabase = { path: databasePath, exists: false }
+      }
+    }
   } catch (error) { failure = error }
   finally {
     const differenceField = requestedSourceRef ? 'capturedSourceVsSharedWorkingAtCompletion' : 'sharedSourceChangesDuringProof'
