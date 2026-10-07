@@ -97,7 +97,11 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     for (const details of folded.reverse()) { await act(async () => details.querySelector('summary')!.click()); expect(details.open).toBe(true) }
     await act(async () => { Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) })
   }
-  async function button(label: string) { const item = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(node => node.textContent?.trim() === label); expect(item, label).toBeDefined(); await act(async () => item!.click()) }
+  async function button(label: string) {
+    let item: HTMLButtonElement | undefined
+    await vi.waitFor(async () => { await act(async () => {}); item = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(node => node.textContent?.trim() === label); expect(item, label).toBeDefined(); expect(item!.disabled, label + ' is an eligible original action').toBe(false) }, { timeout: 6000 })
+    await act(async () => item!.click())
+  }
   async function cli(args: string[]) {
     const output = await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'connection', ...args], objectCliEnvironment(original.root))
     expect(output.code, output.stdout + output.stderr).toBe(0)
