@@ -8,6 +8,7 @@ import { feishuFailure, feishuIdentity, readFeishuMessage, projectFeishuMessage 
 import { feishuParentAddressing } from './reply.js'
 import { readFeishuAction } from './action.js'
 import { FeishuPublicationAdapter } from './publication.js'
+import { createFeishuProfile } from './profile.js'
 import { createFeishuEnrollment } from './enrollment.js'
 import { createFeishuRooms } from './rooms.js'
 import { createFeishuRoomDiscovery } from './room-discovery.js'
@@ -26,6 +27,7 @@ const safeLogger: Logger = { error: muted, warn: muted, info: muted, debug: mute
 
 export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   readonly adapterId = 'feishu'
+  readonly profile = createFeishuProfile((config, credential, call, signal) => this.withClient(config, credential, call, signal))
   readonly enrollment = createFeishuEnrollment()
   readonly publication = new FeishuPublicationAdapter(this)
   readonly ingress = this
