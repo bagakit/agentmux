@@ -32,7 +32,7 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
     try {
       if (!pending.current) {
         const operationId = crypto.randomUUID(), connectionId = selected?.config.connectionId ?? crypto.randomUUID()
-        pending.current = { operationId, expectedRevision: selected?.revision ?? null, connection: { connectionId, adapterId: 'lark', application: { domain, appId }, label, enabled, credentialRef: selected?.config.credentialRef ?? '' } }
+        pending.current = { operationId, expectedRevision: selected?.revision ?? null, connection: { connectionId, adapterId: selected?.config.adapterId ?? 'feishu', application: { domain, appId }, label, enabled, credentialRef: selected?.config.credentialRef ?? '' } }
       }
       const input = pending.current
       // Reconcile the original config first. A lost response never creates a new operation.
