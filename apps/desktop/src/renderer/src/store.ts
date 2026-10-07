@@ -5242,7 +5242,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (request.target.kind === 'goal') {
           if (!Object.hasOwn(get().demands, request.target.goalId)) throw new DesktopFocusFailure({ step: 'target', code: 'GOAL_UNKNOWN',
             message: 'The exact Goal is not currently in the complete Demand projection.', recovery: 'List Goals and choose an existing Demand ID.' })
-          // Explicit Goal selection keeps its identity; only a unique confirmed association navigates Work.
+          // Viewing a Goal never selects its associated execution workface.
           get().setSelectedDemand(request.target.goalId)
           set({ mainSurface: 'board', regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy })
         } else if (request.target.kind === 'surface') {
@@ -6489,13 +6489,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const state = get()
     const choice = state.workbenchSpaceSelection ?? (mainSurface !== 'survey' && mainSurface !== 'recall' && state.activeWorkspaceId
       ? workbenchObjectLayout(state, state.activeWorkspaceId).choice : null)
-    const surface = choice?.tabId && choice.regionId ? state.tabs[choice.tabId]?.regions[choice.regionId] : undefined
-    const confirmed = choice && projectWorkbenchSpaceSelection(state.layouts[choice.workspaceId], state.tabs, workbenchSelectionCatalog(state), choice).confirmed
-    const linked = confirmed && surface && isSessionSurface(surface)
-      ? Object.values(state.demands).filter(demand => demand.sessionIds.includes(surface.sessionId)) : []
     set({ mainSurface, workbenchNavigationInputPolicy: null, regionCaretFocus: null,
-      ...(choice && !state.workbenchSpaceSelection ? { workbenchSpaceSelection: choice } : {}),
-      ...(mainSurface === 'board' && linked.length === 1 ? { selectedDemandId: linked[0]!.id } : {}) })
+      ...(choice && !state.workbenchSpaceSelection ? { workbenchSpaceSelection: choice } : {}) })
   },
   selectMainRegion(reference, expected) {
     const state = get()
@@ -6584,21 +6579,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   setSelectedDemand(id) {
-    const state = get(), demand = id ? state.demands[id] : undefined
-    if (demand) {
-      try {
-        const catalog = workbenchSelectionCatalog(state)
-        const candidates = [...new Map(catalog.locations.filter(location => {
-          const surface = state.tabs[location.tabId]?.regions[location.regionId]
-          return surface && isSessionSurface(surface) && demand.sessionIds.includes(surface.sessionId)
-        }).map(location => [JSON.stringify([location.spaceId, location.zoneId, location.displayWorkspaceId,
-          location.groupId, location.tabId, location.regionId]), location])).values()]
-        if (candidates.length === 1) {
-          const exact = candidates[0]!
-          get().selectMainRegion(exact, state.workbenchSpaceSelection)
-        }
-      } catch (error) { state.reportError(error, { kind: 'indeterminate' }) }
-    }
     set({ selectedDemandId: id })
   },
   setDemandArrangement(arrangement) {
