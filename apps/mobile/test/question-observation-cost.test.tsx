@@ -68,16 +68,20 @@ it.each([1, 1000])('the actual Surface Session event reads only its one original
     return local
   })
   const f = fixture()
+  const session = f.sessions.get(sid)!
+  f.sessions.set(sid, { ...session, promptCompletionAdmission: { operationId: 'unrelated-phase', submissionId: 'unrelated-refused-operation',
+    startByte: 0, endByte: 10, notApplied: true, intent: { run: session.run, ownerInstanceId: 'owner', prompt: 'unrelated',
+      plan: { kind: 'single-phase', data: 'unrelated' } } } })
   f.setPage({ ...history(), nextCursor: null, items: [{ id: target.recordId, turnId: target.turnId, kind: 'assistant-message', contentParts: [],
     questionRequest: { delivery: 'async', questions: [{ id: 'original-question', prompt: 'Original question', options: [], acceptsText: true }] } }] })
   Object.assign(f.client, { runtimeOwnerIdentity: () => ({ runtimeId: 'original-runtime' }) })
   const metrics: { globalEntries: number; currentLookups: number }[] = []
-  const observe = replyOwner.observeMobileQuestionAnswers
-  vi.spyOn(replyOwner, 'observeMobileQuestionAnswers').mockImplementation((local, ...args) => {
+  const reconcile = replyOwner.reconcileMobileQuestionReplies
+  vi.spyOn(replyOwner, 'reconcileMobileQuestionReplies').mockImplementation((local, ...args) => {
     const metric = { globalEntries: 0, currentLookups: 0 }, iterator = local.questions[Symbol.iterator], get = local.questions.get
     local.questions[Symbol.iterator] = function* () { for (const entry of iterator.call(this)) { metric.globalEntries++; yield entry } }
     local.questions.get = function (entryKey) { metric.currentLookups++; return get.call(this, entryKey) }
-    try { return observe(local, ...args) }
+    try { return reconcile(local, ...args) }
     finally { local.questions[Symbol.iterator] = iterator; local.questions.get = get; metrics.push(metric) }
   })
   await mount(<MobileConversationSurface client={f.client} agentSessionId={sid} connection={{ state: 'connected', message: 'connected' }} platform={createBrowserPlatform()} />)
