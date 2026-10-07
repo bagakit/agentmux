@@ -91,7 +91,7 @@ describe('independent input and activity retention in the same timeline', () => 
       .toEqual([...tools, ...inputs])
   }, 30_000)
 
-  it('reopens and compacts a large mixed snapshot', async () => {
+  it('reopens and appends to a large mixed snapshot without compacting retained bodies', async () => {
     const { path, timelinePath } = await fileStore()
     const history = [...items('sent', 30, 'user_message'), ...items('tool', 30)]
       .map((entry) => ({ ...entry, content: 'x'.repeat(100 * 1024) }))
@@ -103,7 +103,9 @@ describe('independent input and activity retention in the same timeline', () => 
     expect((await reopened.loadTimeline(agentSessionId)).items).toEqual(history)
     const next = item('after-restart', 'user_message')
     await reopened.applyTimelineMutation({ type: 'append', agentSessionId, item: next })
-    expect((await readFile(timelinePath, 'utf8')).trim().split('\n')).toHaveLength(1)
+    const saved = await readFile(timelinePath, 'utf8')
+    expect(saved.startsWith(document)).toBe(true)
+    expect(saved.trim().split('\n')).toHaveLength(2)
     expect((await new AgentMuxFileAgentSessionStore(path).loadTimeline(agentSessionId)).items)
       .toEqual([...history, next])
   }, 30_000)
