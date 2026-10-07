@@ -46,6 +46,24 @@ it('delays a short native idle but exposes persistent unreported responsibility 
   expect(observeGoalExecution(f.goal, f.facts(noStart), now)).toMatchObject({ phase: 'unknown', alert: 'unknown' })
 })
 
+it('independent native idle does not reuse an old task start or claim its outcome', async () => {
+  const f = await fixture(), now = Date.now(), current = status('worker', 'working', now - 120_000)
+  current.session.currentActivity = { state: 'idle', source: 'native-hook', run: current.session.run,
+    nativeSessionId: 'native-main', nativeTurnId: 'current-turn', sourceId: 'current-source', sequence: 2,
+    hookReceiptId: 'current-complete', observedAt: now }
+  current.observation = observeAgent({ process: 'running', status: current.session.semanticStatus!,
+    currentActivity: current.session.currentActivity, timelineCapability: 'complete-events',
+    awaitingRequest: false, terminalCapabilityUnverified: false }, now)
+  expect(current.observation.semantic).toBe('idle')
+  expect(goalResponsibilityBasis(current).stateEnteredAt).toBeNull()
+  const row = observeGoalExecution(f.goal, f.facts(current), now)
+  expect(row).toMatchObject({ phase: 'unknown', alert: 'unknown' })
+  expect(row.stateSince).toBeUndefined()
+  expect(row.reason).toContain('task outcome are unconfirmed')
+  expect(row.reason).not.toContain('turn ended')
+  expect(current.session.semanticStatus!.state).toBe('working')
+})
+
 it('Core active, awaiting input, error, stale and wrong Run remain distinct without reading display text', async () => {
   const f = await fixture(), now = Date.now()
   expect(observeGoalExecution(f.goal, f.facts(status('worker', 'working')), now)).toMatchObject({ phase: 'executing', alert: null })
