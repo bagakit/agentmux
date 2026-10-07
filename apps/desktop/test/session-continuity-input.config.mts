@@ -1,0 +1,41 @@
+import { resolve } from 'node:path'
+import { defineConfig, defaultExclude } from 'vitest/config'
+import owning from '../../../vitest.config'
+const root = resolve(import.meta.dirname, '../../..')
+const inputOwner = 'packages/core/src/agent-session-continuity-input.ts'
+const mutations: Record<string, { file?: string; before: string; after: string }> = {
+  'selected-body': { before: 'continuation: part(inputs.continuation)', after: "continuation: part('Changed continuation body')" },
+  'input-trigger': { file: 'packages/core/src/client.ts',
+    before: "receipt.recoveryInputs = { reminder: receipt.trigger !== 'input' && admission?.kind === 'resume'",
+    after: "receipt.recoveryInputs = { reminder: admission?.kind === 'resume'" },
+  'unknown-replay': { before: "const phase = accepted ? 'accepted' : notApplied ? 'not-applied' : 'unknown'", after: `const phase = accepted ? 'accepted' : notApplied ? 'not-applied' : 'unknown'
+    if (phase === 'unknown') await this.deps.submit({ agentSessionId: id, expectedRun: delivery.key.expectedRun, afterSubmissionId: null,
+      operationId: delivery.key.submissionId, prompt: delivery.continuation.text, agentMuxNote: delivery.reminder.text }, {})` },
+  'atomic-claim': { before: "if (value.phase !== 'waiting') throw new AgentMuxError", after: 'if (false) throw new AgentMuxError' },
+  'frozen-receipt': { before: `if (!claim?.intent || !isDeepStrictEqual(claim.inputKey, delivery.key) || record.run.runId !== delivery.key.expectedRun.runId ||
+      claim.intent.prompt !== composed.text || claim.intent.message?.userContent !== (delivery.continuation.text.trim() ? delivery.continuation.text : undefined) ||
+      claim.intent.message?.systemContext !== composed.systemContext) {`, after: 'if (false) {' },
+  'latest-pointer': { before: 'const operation = this.deps.read(id).continuityOperations?.[operationId], delivery = operation?.recoveryDelivery',
+    after: 'const operation = this.deps.read(id).continuity, delivery = operation?.recoveryDelivery' },
+  'handshake-credit': { before: '? handshake.inputByteRange.endByte : start', after: '? start : start' },
+  'new-user-priority': { before: 'if (session.promptCompletionAdmission !== undefined) throw new AgentMuxError', after: 'if (false) throw new AgentMuxError' },
+  'native-target': { before: '!isDeepStrictEqual(session.nativeHandle, operation.nativeTarget)', after: 'false' },
+  'native-idle': { before: "evidence.state === 'working'", after: 'false' },
+  'dispose-observer': { before: 'this.controller.abort(); this.operations.clear();', after: 'this.operations.clear();' },
+  'live-projection': { file: 'apps/desktop/src/renderer/src/lib/session-state.ts',
+    before: '...(core.session.continuityOperations ? { continuityOperations: structuredClone(core.session.continuityOperations) } : {}),', after: '' },
+  'persistent-notice': { file: 'apps/desktop/src/renderer/src/lib/session-service-notices.ts',
+    before: 'if (delivery && delivery.key.expectedRun.runId === session.control.run.runId &&',
+    after: 'if (false && delivery && delivery.key.expectedRun.runId === session.control.run.runId &&' }
+}
+const mutation = process.env.AGENTMUX_CONTINUITY_INPUT_MUTATION ? mutations[process.env.AGENTMUX_CONTINUITY_INPUT_MUTATION] : undefined
+if (process.env.AGENTMUX_CONTINUITY_INPUT_MUTATION && !mutation) throw new Error('Unknown continuity input mutation')
+export default defineConfig({ ...owning, root,
+  plugins: mutation ? [{ name: 'loaded-continuity-input-mutation', enforce: 'pre', transform(code, id) {
+    if (id.split('?')[0] !== resolve(root, mutation.file ?? inputOwner)) return
+    if (code.split(mutation.before).length !== 2) throw new Error('The actual input owner mutation must match exactly once')
+    return { code: code.replace(mutation.before, mutation.after), map: null }
+  } }] : [],
+  test: { ...owning.test, exclude: defaultExclude,
+    include: ['packages/core/test/session-continuity-input.test.ts', 'apps/desktop/test/session-continuity-notices.test.tsx', 'apps/desktop/test/session-continuity-live-projection.test.ts'], passWithNoTests: false, maxWorkers: 1 }
+})
