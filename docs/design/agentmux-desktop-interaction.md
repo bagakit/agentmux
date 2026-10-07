@@ -14,6 +14,7 @@
 | Mote／Work／Know 产品分组、空间模型及 Space 入口、实体寻址与导航布局 | [空间、导航与工作面](behavior/spaces-and-layout.md#空间模型) |
 | Launcher 的环境、工具开合、草稿、Mote 创建委托与 Resume | [Launcher 工作起点](behavior/workface-launcher.md) |
 | Recall 的 Notebook、页面、块知识与可设置笔记目录 | [Recall 与笔记目录](behavior/knowledge-workflows.md#recallnotebook-与块知识) |
+| Note 中 Agent 与人的协同编辑、并发与历史回滚 | [Note 协同编辑](behavior/knowledge-workflows.md#note-中-agent-与人的协同编辑) |
 | Survey 的浏览探索与向 Recall／Topic 输送成果 | [Survey 工作流](behavior/knowledge-workflows.md#survey临时-zone-工作面与知识入口) |
 | Topics 的分类、主题、讨论、知识沉淀与本地承接 | [Topics 知识库的层级与沉淀](behavior/spaces-and-layout.md#topics-知识库的层级与沉淀) |
 | 持久 Mote、PMO、快捷面和原协调上下文 | [Mote 与 PMO 协调](behavior/motes-and-coordination.md) |
