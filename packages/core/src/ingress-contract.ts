@@ -2,6 +2,13 @@ import type { ConnectionActor, ConnectionApplication } from './connections-contr
 import type { AgentExternalMessageAuthor } from './external-author.js'
 import type { AgentInputSubmissionReceipt } from './agent-input-wait.js'
 
+/** A platform parent reference is retained even while its application author is unknown. */
+export type ConnectionIngressAddressing = { replyToMessageId: string } & (
+  | { state: 'confirmed'; selection: 'reply' | 'message' }
+  | { state: 'unknown'; reason: 'reply-unconfirmed' }
+  | { state: 'unavailable'; reason: 'adapter-unavailable' | 'credential-missing' }
+)
+
 /** Original external intake facts. Claim means a Core call may have happened, never delivery. */
 export type ConnectionIngressRecord = {
   ingressId: string
@@ -12,6 +19,7 @@ export type ConnectionIngressRecord = {
   externalConversationId: string
   actor: ConnectionActor
   body: string
+  addressing?: ConnectionIngressAddressing
   state: 'received' | 'refused' | 'claimed'
   code?: string
   input?: {
