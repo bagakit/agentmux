@@ -1,6 +1,6 @@
 import type { JSONContent } from '@tiptap/core'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
-import { parseNoteWikiQuery, scanNoteWikiLinks, type NoteLinkTarget, type NoteWikiQuery, type NoteWikiToken } from '@agentmux/core/note-links'
+import { parseNoteWikiQuery, scanNoteWikiLinks, type NoteInlineLinkAttributes, type NoteLinkTarget, type NoteWikiQuery, type NoteWikiToken } from '@agentmux/core/note-links'
 import type { NoteGraphTarget } from '@agentmux/core/notebook-observation'
 import type { NoteDocument } from './note-document.js'
 import { NOTE_BLOCK_TYPES } from './note-content-schema.js'
@@ -8,7 +8,19 @@ import { NOTE_BLOCK_TYPES } from './note-content-schema.js'
 export type PendingNoteWikiLink = { referenceId: string; text: string; query: NoteWikiQuery }
 export type IndexedNoteReference = { blockId: string; target: NoteGraphTarget; mode: 'reference' | 'embed' | 'link'; occurrence:
   | { kind: 'stored'; referenceId: string } | { kind: 'text'; from: number; to: number } }
-/** ProseMirror textContent omits inline atoms; shared indexes must preserve their visible label. */
+/** The visible wiki syntax is ordinary text, including its editable delimiters. */
+export function noteInlineLinkContent(attrs: NoteInlineLinkAttributes): JSONContent {
+  return { type: 'noteLink', attrs, content: [{ type: 'text', text: `[[${attrs.text}]]` }] }
+}
+/** Former bound Markdown labels were arbitrary text, rather than wiki queries. */
+export function noteWikiQueryForLabel(text: string): string {
+  return parseNoteWikiQuery(text).status === 'valid' ? text : text.replace(/[\\#\[\]^]/gu, '\\$&')
+}
+export function noteInlineQuery(text: string): string | null {
+  const tokens = scanNoteWikiLinks(text), token = tokens[0]
+  return tokens.length === 1 && token?.from === 0 && token.to === text.length ? token.text : null
+}
+/** Shared indexes include the same text that a person can select and edit. */
 export function noteSemanticText(node: ProseMirrorNode): string {
   return node.textBetween(0, node.content.size, '', leaf => leaf.type.name === 'noteLink' ? `[[${String(leaf.attrs.text)}]]` : leaf.type.name === 'hardBreak' ? '\n' : '')
 }
@@ -28,7 +40,7 @@ function runs(children: readonly JSONContent[], accept: (run: readonly JSONConte
 export function noteWikiTextTokens(content: readonly JSONContent[]): readonly NoteWikiToken[] {
   const offsets: number[] = []
   let offset = 0
-  for (const node of content) { offsets.push(offset); offset += node.type === 'text' ? node.text?.length ?? 0 : 1 }
+  for (const node of content) { offsets.push(offset); offset += node.type === 'text' ? node.text?.length ?? 0 : node.type === 'noteLink' ? 2 + (node.content ?? []).reduce((size, child) => size + (child.text?.length ?? 0), 0) : 1 }
   const tokens: NoteWikiToken[] = []
   runs(content, (_run, start, found) => tokens.push(...found.map(token => ({ ...token, from: offsets[start]! + token.from, to: offsets[start]! + token.to }))))
   return tokens
@@ -53,7 +65,7 @@ export function prepareNoteWikiLinks(note: NoteDocument, allocateReferenceId: ()
       let offset = 0
       for (const token of tokens) {
         slice(offset, token.from)
-        const link: JSONContent = { type: 'noteLink', attrs: { referenceId: allocateReferenceId(), text: token.text, target: null } }
+        const link = noteInlineLinkContent({ referenceId: allocateReferenceId(), text: token.text, target: null })
         let markOffset = 0
         const first = run.find(part => { const start = markOffset; markOffset += part.text?.length ?? 0; return token.from >= start && token.from < markOffset })
         if (first?.marks?.length) link.marks = structuredClone(first.marks)
@@ -77,7 +89,7 @@ export function prepareNoteWikiLinks(note: NoteDocument, allocateReferenceId: ()
 export function bindNoteWikiLink(note: NoteDocument, input: { referenceId: string; text: string; target: NoteLinkTarget }): NoteDocument {
   let changed = false
   function visit(node: JSONContent): JSONContent {
-    if (node.type === 'noteLink' && node.attrs?.referenceId === input.referenceId && node.attrs.text === input.text && node.attrs.target === null) {
+    if (node.type === 'noteLink' && node.attrs?.referenceId === input.referenceId && node.attrs.text === input.text && node.attrs.target === null && node.content?.map(child => child.text ?? '').join('') === `[[${input.text}]]`) {
       changed = true; return { ...node, attrs: { ...node.attrs, target: { ...input.target } } }
     }
     return node.content ? { ...node, content: node.content.map(visit) } : node
@@ -92,7 +104,10 @@ export function indexNoteReferences(tree: ProseMirrorNode): readonly IndexedNote
     if (NOTE_BLOCK_TYPES.some(type => type === node.type.name) && typeof node.attrs.blockId !== 'string') owner = undefined
     if (typeof node.attrs.blockId === 'string') owner = { blockId: node.attrs.blockId, start: absolute + 1 }
     if (owner && node.type.name === 'blockReference') references.push({ blockId: owner.blockId, mode: node.attrs.mode, occurrence: { kind: 'stored', referenceId: node.attrs.referenceId }, target: { kind: 'block', ...node.attrs.target } })
-    if (owner && node.type.name === 'noteLink') references.push({ blockId: owner.blockId, mode: 'link', occurrence: { kind: 'stored', referenceId: node.attrs.referenceId }, target: node.attrs.target === null ? { kind: 'unbound', text: node.attrs.text } : { kind: node.attrs.target.blockId ? 'block' : 'page', ...node.attrs.target } })
+    if (node.type.name === 'noteLink') {
+      if (owner) references.push({ blockId: owner.blockId, mode: 'link', occurrence: { kind: 'stored', referenceId: node.attrs.referenceId }, target: node.attrs.target === null ? { kind: 'unbound', text: node.attrs.text } : { kind: node.attrs.target.blockId ? 'block' : 'page', ...node.attrs.target } })
+      return
+    }
     if (node.type.name === 'codeBlock') return
     if (owner && node.inlineContent) {
       const children: JSONContent[] = []
