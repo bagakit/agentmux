@@ -72,6 +72,9 @@ export function ToolkitPopover({ children, label = false, onVisibleChange, focus
     }
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return
+      // A focused local reader consumes its first Escape before the floating owner closes.
+      const local = event.target instanceof Element ? event.target.closest('[data-toolkit-local-escape]') : null
+      if (local && b.contains(local) && local === document.activeElement) return
       // A passive reader closes without consuming the focused input owner's cancellation.
       if (origin.current === 'hover' && !b.contains(document.activeElement)) { markWindowOverlayDismissal(event); close(); return }
       // 可见浮窗拥有本次 Escape；capture 先于原 Settings 的关闭处理，IME 始终归原输入。

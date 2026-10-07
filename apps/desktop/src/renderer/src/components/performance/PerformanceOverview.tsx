@@ -4,6 +4,7 @@ import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import type { MetricsSource, RunUsage, ToolkitAgentCard as AgentCard, ToolkitAgentCardField } from '@agentmux/core/control'
 import type { ToolkitMetricsSnapshot } from '../../../../shared/toolkit'
 import { PerformanceAttribution, cpuCoreLabel } from './PerformanceAttribution'
+import { PerformanceTrend } from './PerformanceTrend'
 
 import { ToolkitAgentCard, toolkitAgentCardKey, useToolkitAgentCards, type ToolkitAgentCardFacts } from '../toolkit/ToolkitAgentCards'
 
@@ -36,24 +37,9 @@ function SourceNote({ source }: { source: MetricsSource<unknown> | undefined }) 
     {source.reason ? ` · ${source.reason}` : ''}
   </p>
 }
-function Sparkline({ values, color, label }: { values: (number | null)[]; color: string; label: string }) {
-  const valid = values.filter((n): n is number => n !== null && Number.isFinite(n))
-  const max = valid.length ? Math.max(1, ...valid) * 1.12 : 1
-  let d = '', connected = false
-  for (let i = 0; i < values.length; i++) {
-    const value = values[i]
-    if (value == null || !Number.isFinite(value)) { connected = false; continue }
-    const x = values.length > 1 ? i / (values.length - 1) * 180 : 180, y = 42 - value / max * 34
-    d += `${connected ? 'L' : 'M'}${x.toFixed(2)},${y.toFixed(2)} `; connected = true
-  }
-  return <svg className="performance-trend" viewBox="0 0 180 48" role="img" aria-label={label} style={{ color }}>
-    <path className="performance-trend__baseline" d="M0 43H180" />
-    {valid.length > 1 ? <path d={d} /> : <text x="0" y="32">Collecting history</text>}
-  </svg>
-}
-function Metric({ label, value, hint, values, color }: { label: string; value: string; hint: string; values?: (number | null)[]; color: string }) {
-  return <section className="performance-metric"><span className="performance-metric__label">{label}</span><strong>{value}</strong>
-    {values ? <Sparkline values={values} color={color} label={`${label} · ${hint} · this observation`} /> : null}<small>{hint}</small></section>
+function Metric({ label, value, hint, points, color, sourceKey, unit = '%' }: { label: string; value: string; hint: string; points?: { id: string; at: number; value: number | null }[]; color: string; sourceKey?: string; unit?: '%' | 'KiB' }) {
+  return <section className="performance-metric"><span className="performance-metric__label">{label}</span><strong>{value}</strong><small>{hint}</small>
+    {points ? <PerformanceTrend key={sourceKey} points={points} color={color} label={label} unit={unit} /> : null}</section>
 }
 function Facts({ children }: { children: React.ReactNode }) { return <dl className="performance-facts">{children}</dl> }
 function RunRow({ run, card, fields, facts, onToggle, basis }: { run: RunUsage; card: AgentCard | null | undefined; fields: readonly ToolkitAgentCardField[]; facts: ToolkitAgentCardFacts | undefined; onToggle(key: string, open: boolean): void; basis: string | undefined }) {
@@ -78,8 +64,9 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
   const openRuns = useRef(new Set<string>())
   const list = useRef<HTMLDivElement>(null)
   const [runTrend, setRunTrend] = useState<{ key: string; lastSourceAt: number | null; points: { at: number; cpu: number | null; rss: number | null }[] }>({ key: '', lastSourceAt: null, points: [] })
-  const [appTrend, setAppTrend] = useState<{ executionId: string | null; lastSourceAt: number | null; resumePending: boolean; points: ToolkitMetricsSnapshot['trend'] }>({ executionId: null, lastSourceAt: null, resumePending: false, points: [] })
+  const [appTrend, setAppTrend] = useState<{ key: string; lastSourceAt: number | null; resumePending: boolean; points: ToolkitMetricsSnapshot['trend'] }>({ key: '', lastSourceAt: null, resumePending: false, points: [] })
   const observation = snapshot?.observation
+  const observationKey = JSON.stringify([snapshot?.executionId, snapshot?.run?.hostId, snapshot?.run?.runId, observation?.scope.hostId])
   const app = observation?.app.data
   const runs = observation?.process.data ?? []
   const ranked = useMemo(() => [...runs].sort((a, b) => ((sort === 'cpu' ? b.cpuPercent : b.rssKib) ?? -1) - ((sort === 'cpu' ? a.cpuPercent : a.rssKib) ?? -1) || runKey(a).localeCompare(runKey(b))), [runs, sort])
@@ -115,13 +102,13 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
     setAppTrend(previous => {
       const incoming = snapshot.trend.slice(-60)
       const numeric = (point: ToolkitMetricsSnapshot['trend'][number]) => point.appCpuPercent !== null || point.appRssKib !== null
-      if (previous.executionId !== snapshot.executionId) {
+      if (previous.key !== observationKey) {
         let lastSourceAt: number | null = null
         for (let index = incoming.length - 1; index >= 0; index--) {
           const point = incoming[index]!
           if (numeric(point)) { lastSourceAt = point.observedAt; break }
         }
-        return { executionId: snapshot.executionId, lastSourceAt, resumePending: paused, points: incoming }
+        return { key: observationKey, lastSourceAt, resumePending: paused, points: incoming }
       }
       if (paused) {
         if (previous.resumePending) return previous
@@ -131,7 +118,7 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
       const fresh = incoming.filter(point => numeric(point) && (previous.lastSourceAt === null || point.observedAt > previous.lastSourceAt))
       if (previous.resumePending) {
         const latest = fresh.at(-1)
-        return latest ? { executionId: snapshot.executionId, lastSourceAt: latest.observedAt, resumePending: false,
+        return latest ? { key: observationKey, lastSourceAt: latest.observedAt, resumePending: false,
           points: [...previous.points, latest].slice(-60) } : previous
       }
       let anchor = -1
@@ -148,10 +135,10 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
           lastSourceAt = point.observedAt; points.push(point)
         } else if (points.length && numeric(points.at(-1)!)) points.push(point)
       }
-      return points.length === previous.points.length ? previous : { executionId: snapshot.executionId, lastSourceAt, resumePending: false, points: points.slice(-60) }
+      return points.length === previous.points.length ? previous : { key: observationKey, lastSourceAt, resumePending: false, points: points.slice(-60) }
     })
-  }, [snapshot?.executionId, snapshot?.trend, paused])
-  const trend = appTrend.points
+  }, [observationKey, snapshot?.trend, paused])
+  const trend = appTrend.key === observationKey ? appTrend.points : []
   const selectScope = (next: typeof scope) => { setScope(next); setAll(false) }
   const lock = () => setLockedOrder(previous => previous ?? ranked.map(runKey))
   const toggleRun = (key: string, open: boolean) => {
@@ -164,7 +151,7 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
   useEffect(() => {
     const source = observation?.process, at = source?.observedAt
     if (!selectedRun || !source || !observation) return
-    const key = JSON.stringify([snapshot?.executionId, selectedRun])
+    const key = JSON.stringify([observationKey, selectedRun])
     const gap = paused || scope !== 'runs' || source.state !== 'available' || !activeRun || at == null
     setRunTrend(previous => {
       const points = previous.key === key ? previous.points : []
@@ -178,8 +165,9 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
       if (lastSourceAt === at) return previous
       return { key, lastSourceAt: at!, points: [...points, { at: at!, cpu: activeRun!.cpuPercent, rss: activeRun!.rssKib }].slice(-60) }
     })
-  }, [observation?.process, observation?.observedAt, activeRun, selectedRun, paused, scope, snapshot?.executionId])
-  const selectedTrend = activeRun && runTrend.key === JSON.stringify([snapshot?.executionId, selectedRun]) ? runTrend.points : []
+  }, [observation?.process, observation?.observedAt, activeRun, selectedRun, paused, scope, observationKey])
+  const runSourceKey = JSON.stringify([observationKey, selectedRun])
+  const selectedTrend = activeRun && runTrend.key === runSourceKey ? runTrend.points : []
   const renderRuntimeFacts = () => <>
     <SourceNote source={observation?.runtime} />
     {observation?.runtime.data?.length === 0 ? <p className="performance-empty">No connected Runtime</p> : null}
@@ -210,8 +198,8 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
     <div className="performance-body">
       {error || snapshot?.reason ? <p className="performance-state" data-tone="warning">{error ?? snapshot?.reason}</p> : null}
       {scope !== 'runtime' ? <>
-        {scope === 'app' ? <div className="performance-metrics"><Metric label="CPU" value={cpu(app?.cpuPercent)} hint={`${cpuCoreLabel(app?.cpuPercent, observation?.units.cpuBasis)} · 10s reading peak`} values={trend.map(p => p.appCpuPercent)} color="var(--green)" />
-          <Metric label="Resident memory" value={memory(app?.rssKib)} hint="Latest · RSS" values={trend.map(p => p.appRssKib)} color="var(--blue)" /></div>
+        {scope === 'app' ? <div className="performance-metrics"><Metric label="CPU" value={cpu(app?.cpuPercent)} hint={`${cpuCoreLabel(app?.cpuPercent, observation?.units.cpuBasis)} · 10s reading peak`} points={trend.map(p => ({ id: JSON.stringify(p), at: p.observedAt, value: p.appCpuPercent }))} sourceKey={observationKey} color="var(--green)" />
+          <Metric label="Resident memory" value={memory(app?.rssKib)} hint="Latest · RSS" points={trend.map(p => ({ id: JSON.stringify(p), at: p.observedAt, value: p.appRssKib }))} sourceKey={observationKey} unit="KiB" color="var(--blue)" /></div>
           : <><div className="performance-run-summary" data-run-totals><ThemeObjectRunsIcon size={14} /><span>All tracked Runs</span>
             <small>{totals ? `${totals.coverage.observedRoots} / ${totals.coverage.trackedRuns} roots observed` : 'Coverage unavailable'}</small></div>
             <div className="performance-metrics" data-run-total-values><Metric label="Total CPU" value={cpu(totals?.cpuPercent)} hint={`${cpuCoreLabel(totals?.cpuPercent, observation?.units.cpuBasis)} · 10s peak of batch sums`} color="var(--green)" />
@@ -219,8 +207,8 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
             <p className="performance-note">Observed local Run processes · RSS includes shared pages. Each CPU batch is summed before its 10s peak; row peaks can occur at different times.</p>
             {totals && totals.coverage.missingRoots > 0 ? <p className="performance-state" data-tone="warning">{totals.coverage.missingRoots} tracked roots missing · complete totals unavailable</p> : null}
             {activeRun ? <><div className="performance-run-summary"><span title={activeRun.runId}>Selected Run · {activeRun.runId}</span></div>
-              <div className="performance-metrics performance-metrics--run"><Metric label="Selected CPU" value={cpu(activeRun.cpuPercent)} hint={`${cpuCoreLabel(activeRun.cpuPercent, observation?.units.cpuBasis)} · 10s reading peak`} values={selectedTrend.map(point => point.cpu)} color="var(--green)" />
-              <Metric label="Selected resident memory" value={memory(activeRun.rssKib)} hint="Latest · root + descendants" values={selectedTrend.map(point => point.rss)} color="var(--blue)" /></div></> : null}</>}
+              <div className="performance-metrics performance-metrics--run"><Metric label="Selected CPU" value={cpu(activeRun.cpuPercent)} hint={`${cpuCoreLabel(activeRun.cpuPercent, observation?.units.cpuBasis)} · 10s reading peak`} points={selectedTrend.map(point => ({ id: JSON.stringify(point), at: point.at, value: point.cpu }))} sourceKey={runSourceKey} color="var(--green)" />
+              <Metric label="Selected resident memory" value={memory(activeRun.rssKib)} hint="Latest · root + descendants" points={selectedTrend.map(point => ({ id: JSON.stringify(point), at: point.at, value: point.rss }))} sourceKey={runSourceKey} unit="KiB" color="var(--blue)" /></div></> : null}</>}
         <SourceNote source={source} />
         {scope === 'app' && app && app.cpuPercent === null ? <p className="performance-state">CPU unavailable · waiting for a valid interval</p> : null}
         {scope === 'app' ? <PerformanceAttribution observation={observation} paused={paused} /> : <>
