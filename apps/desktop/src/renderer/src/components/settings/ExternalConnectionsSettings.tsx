@@ -49,6 +49,10 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
     setSelected(record); setLabel(record?.config.label ?? ''); setAppId(record?.config.application.appId ?? ''); setDomain(record?.config.application.domain ?? 'open.feishu.cn'); setEnabled(record?.config.enabled ?? true); setSecret(''); setIssue(''); setSaveNotice(''); setView(record ? 'edit' : 'new')
   }
   const saved = (record: ConnectionRecord, notice: string) => {
+    generation.current++
+    setRecords(current => current.some(item => item.config.connectionId === record.config.connectionId)
+      ? current.map(item => item.config.connectionId === record.config.connectionId && item.revision <= record.revision ? record : item)
+      : [...current, record])
     pending.current = null; setSaveAbsent(false); setSelected(record); setLabel(record.config.label); setAppId(record.config.application.appId); setDomain(record.config.application.domain); setEnabled(record.config.enabled); setSecret(''); setSaveNotice(notice); setIssue(''); setView('saved')
   }
   const save = async () => {
@@ -76,7 +80,7 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
         if (!input.connection.credentialRef) throw new Error('The application credential is not confirmed. Check this save before continuing.')
         record = (await api.connections.call('connection.configure', input)).connection
       }
-      if (epoch === generation.current) { saved(record, 'Application saved.'); await read(epoch) }
+      if (epoch === generation.current) { saved(record, 'Application saved.'); await read() }
     } catch (error) { if (epoch === generation.current) setIssue(`Save result not confirmed. Check this same save before continuing. ${presentError(error)}`) }
     finally { writing.current = false; setBusy(false) }
   }
@@ -87,7 +91,7 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
     try {
       const result = await api.connections.call('connection.inspect', { operationId: pending.current.operationId })
       if (epoch === generation.current) {
-        if (result.operation) { saved(result.connection ?? result.operation.connection, 'The original application save is confirmed.'); await read(epoch) }
+        if (result.operation) { saved(result.connection ?? result.operation.connection, 'The original application save is confirmed.'); await read() }
         else { setSaveAbsent(true); setIssue('This save is not recorded yet. Continue the same save when you are ready.'); }
       }
     } catch (error) { if (epoch === generation.current) setIssue(`The original save is still not confirmed. ${presentError(error)}`) }
