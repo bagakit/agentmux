@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
 import { AgentContextUsage } from '../src/renderer/src/components/AgentContextUsage'
+import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 let host: HTMLDivElement, root: Root
@@ -34,7 +35,7 @@ it('opens a passive native hover reader from the exact chip without changing inp
   expect(chip().getAttribute('aria-expanded')).toBe('true'); expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
   expect(card().textContent).toContain('25% used'); expect(card().textContent).toContain('75% remaining'); expect(card().textContent).toContain('750 remaining')
   expect([...card().querySelectorAll('dd')].map(node => node.textContent)).toEqual(['230', '20', '250'])
-  expect(card().textContent).toContain('not a breakdown of the context window')
+  expect(card().textContent).toContain('Latest report · scope unrecorded')
 })
 
 it('allows crossing the gap into the reader and closes only a departed preview', async () => {
@@ -94,7 +95,7 @@ it('preserves native panel and reading nodes across same-source compaction and m
   expect(card()).toBe(original); expect(isOpen()).toBe(true); expect(card().textContent).toContain('10% used'); expect(window.getSelection()!.toString()).toBe('Context window')
   const { context: _context, ...unreported } = usage
   await render(<AgentContextUsage source="session/A/run" usage={unreported} />)
-  expect(card()).toBe(original); expect(isOpen()).toBe(true); expect(chip().textContent).toContain('—'); expect(card().textContent).toContain('Unavailable'); expect(card().textContent).not.toContain('% remaining')
+  expect(card()).toBe(original); expect(isOpen()).toBe(true); expect(chip().textContent).toContain('—'); expect(card().textContent).toContain('Used tokens and capacity not reported'); expect(card().textContent).not.toContain('% remaining')
 })
 
 it('closes on the first frame of another Session or Run and rejects the old hover and timer', async () => {
@@ -116,6 +117,29 @@ it('releases the overlay and cannot open from an unmounted retained handler', as
 it('gives each chip and panel its own anchor in a multi-Agent workface', async () => {
   await render(<><AgentContextUsage source="A" usage={usage} /><AgentContextUsage source="B" usage={usage} /></>)
   const chips = [...host.querySelectorAll<HTMLButtonElement>('.composer__context')], cards = [...host.querySelectorAll<HTMLDivElement>('.composer__context-card')]
-  expect(chips[0]!.style.anchorName).not.toBe(chips[1]!.style.anchorName)
-  for (let i = 0; i < 2; i++) expect(cards[i]!.style.positionAnchor).toBe(chips[i]!.style.anchorName)
+  expect(Reflect.get(chips[0]!.style, 'anchorName')).not.toBe(Reflect.get(chips[1]!.style, 'anchorName'))
+  for (let i = 0; i < 2; i++) expect(Reflect.get(cards[i]!.style, 'positionAnchor')).toBe(Reflect.get(chips[i]!.style, 'anchorName'))
+})
+
+it('uses the shared scope-separated usage body in the actual Composer reader without adding history or Agent operations', async () => {
+  const ports = [vi.spyOn(api.sessions, 'historyPage'), vi.spyOn(api.sessions, 'timeline'), vi.spyOn(api.sessions, 'readHistory'), vi.spyOn(api.sessions, 'submitPrompt')]
+  const sample = { scope: 'response' as const, inputTokens: 29, outputTokens: 7, totalTokens: 43,
+    observedAt: fixtureEpoch(1), context: { usedTokens: 43, capacityTokens: 256 },
+    cumulative: { scope: 'native-session' as const, inputTokens: 400, outputTokens: 90, totalTokens: 523 } }
+  await render(<AgentContextUsage source="sample/run" usage={sample} />); native()
+  const draft = document.createElement('textarea'); host.append(draft); draft.value = 'Original unsent draft'; draft.focus()
+  await pointer(chip(), 'pointerover')
+  expect(card().querySelector('.agent-usage-details')).not.toBeNull()
+  expect([...card().querySelectorAll('[data-agent-usage-scope="native-session"] dd')].map(node => node.textContent)).toEqual(['400', '90', '523'])
+  expect([...card().querySelectorAll('[data-agent-usage-scope="response"] dd')].map(node => node.textContent)).toEqual(['29', '7', '43'])
+  expect(chip().textContent).toContain('17%'); expect(card().textContent).toContain('83% remaining'); expect(card().textContent).toContain('213 remaining')
+  expect(card().querySelectorAll('[popover]')).toHaveLength(0); expect(document.activeElement).toBe(draft); expect(draft.value).toBe('Original unsent draft')
+  const body = card().querySelector('.agent-usage-details'), heading = card().querySelector('h3')!
+  const selection = document.createRange(); selection.selectNodeContents(heading); window.getSelection()!.addRange(selection)
+  await render(<AgentContextUsage source="sample/run" usage={{ ...sample, context: { usedTokens: 20, capacityTokens: 256 } }} />)
+  expect(card().querySelector('.agent-usage-details')).toBe(body); expect(window.getSelection()!.toString()).toBe('Context window')
+  expect(card().textContent).toContain('92% remaining'); expect(card().textContent).toContain('236 remaining')
+  await render(<AgentContextUsage source="sample/run" visible={false} usage={sample} />)
+  expect(isOpen()).toBe(false); expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
+  for (const port of ports) expect(port).not.toHaveBeenCalled()
 })
