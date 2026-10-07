@@ -19,7 +19,7 @@ import type {
 
 const fixture = vi.hoisted(() => ({
   git: { status: null as GitStatusResult | null, loading: false, error: null as string | null },
-  state: { openFileDiff: vi.fn() }
+  state: { openFileDiff: vi.fn(), gitCommitDrafts: {}, setGitCommitDraft: vi.fn() }
 }))
 
 // useGitStatus 靠 useEffect 取数，而 renderToStaticMarkup **不跑 effect**——真用它就永远只能渲染出

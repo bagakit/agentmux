@@ -26,7 +26,7 @@ vi.mock('monaco-editor', () => ({
 }))
 import { useAppStore } from '../src/renderer/src/store'
 import { GitHistoryProvider } from '../src/renderer/src/features/git/history/GitHistoryContext'
-import { ProjectSourceControl } from '../src/renderer/src/components/ProjectFilesTool'
+import { WorkspaceGitTool } from '../src/renderer/src/components/WorkspaceGitTool'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { api } from '../src/renderer/src/lib/api'
 
@@ -150,7 +150,7 @@ it.each([{ path: _hygiene_fixturePath("other") }, { hostId: 'another-host' }])('
 
 it('shares the actual sidebar reading window with explicit repository history and returns it without rereading', async () => {
   element = document.createElement('div'); document.body.append(element); root = createRoot(element)
-  const frame = <GitHistoryProvider workspace={workspace}><ProjectSourceControl workspace={workspace} visible>{content => <aside data-sidebar>{content}</aside>}</ProjectSourceControl><WorkspaceWorkbench workspaceId="repo" /></GitHistoryProvider>
+  const frame = <GitHistoryProvider workspace={workspace}><aside data-sidebar><WorkspaceGitTool workspace={workspace} visible /></aside><WorkspaceWorkbench workspaceId="repo" /></GitHistoryProvider>
   await act(async () => root!.render(frame))
   await click('[role="tab"][data-surface-mode="history"]')
   await vi.waitFor(() => expect(element.querySelector('[data-sidebar] [data-history-oid]')).not.toBeNull())
@@ -175,7 +175,7 @@ it('keeps the selected sidebar range when a commit detail explicitly opens repos
   first.snapshot.refs = [{ kind: 'local', name: reference, oid: details().snapshot.commitOid }]
   history.mockImplementation(async (_id?: string, input?: any) => ({ ...first, snapshot: { ...first.snapshot, selectedRef: input?.ref ?? null } }))
   element = document.createElement('div'); document.body.append(element); root = createRoot(element)
-  await act(async () => root!.render(<GitHistoryProvider workspace={workspace}><ProjectSourceControl workspace={workspace} visible>{content => <aside data-sidebar>{content}</aside>}</ProjectSourceControl><WorkspaceWorkbench workspaceId="repo" /></GitHistoryProvider>))
+  await act(async () => root!.render(<GitHistoryProvider workspace={workspace}><aside data-sidebar><WorkspaceGitTool workspace={workspace} visible /></aside><WorkspaceWorkbench workspaceId="repo" /></GitHistoryProvider>))
   await click('[role="tab"][data-surface-mode="history"]')
   await vi.waitFor(() => expect(element.querySelector('[data-sidebar] [data-history-oid]')).not.toBeNull())
   const referenceSelect = element.querySelector<HTMLSelectElement>('[aria-label="History reference"]')!
@@ -242,7 +242,7 @@ it.each(['View repository history', 'Locate commit in history'])('keeps an in-fl
   let finish!: (value: GitHistoryResult) => void
   history.mockResolvedValueOnce(longPage()).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
   element = document.createElement('div'); document.body.append(element); root = createRoot(element)
-  await act(async () => root!.render(<GitHistoryProvider workspace={workspace}><ProjectSourceControl workspace={workspace} visible>{content => <aside data-sidebar>{content}</aside>}</ProjectSourceControl><WorkspaceWorkbench workspaceId="repo" /></GitHistoryProvider>))
+  await act(async () => root!.render(<GitHistoryProvider workspace={workspace}><aside data-sidebar><WorkspaceGitTool workspace={workspace} visible /></aside><WorkspaceWorkbench workspaceId="repo" /></GitHistoryProvider>))
   await click('[role="tab"][data-surface-mode="history"]')
   await vi.waitFor(() => expect(element.querySelector('[data-history-oid]')).not.toBeNull())
   const select = element.querySelector<HTMLSelectElement>('[aria-label="History reference"]')!

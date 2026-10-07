@@ -42,8 +42,9 @@ describe('Space tool actions on the real dock and Store', () => {
     expect(buttons.map(button => ({
       label: button.getAttribute('aria-label'), pressed: button.getAttribute('aria-pressed')
     }))).toEqual([
-      { label: 'Files + Branches', pressed: 'false' },
-      { label: 'Agents', pressed: 'true' }
+      { label: 'Files + Zones', pressed: 'false' },
+      { label: 'Agents', pressed: 'true' },
+      { label: 'Git', pressed: 'false' }
     ])
     for (const button of buttons) expect(button.title).toContain(`${button.getAttribute('aria-label')} — `)
     expect(header.textContent).toBe('')
@@ -93,7 +94,7 @@ describe('Space tool actions on the real dock and Store', () => {
     await render()
     expect(dom.container.querySelector('.surface-tool-create')).toBeNull()
     expect([...dom.container.querySelectorAll<HTMLButtonElement>('.explorer-header__actions button')]
-      .map(button => button.title)).toEqual(['New file', 'New folder', 'Refresh explorer'])
+      .map(button => button.title)).toEqual(['New file', 'New folder', 'Refresh explorer', 'Collapse all folders', 'Explorer options'])
     expect(dom.container.querySelector('.workspace-tool-context > span')?.getAttribute('title')).toBe(workspace.path)
     expect(dom.container.querySelector('.workspace-tool-context small')).toBeNull()
     expect(useAppStore.getState().tabs[retained.id]).toEqual(retained)
