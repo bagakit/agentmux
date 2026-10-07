@@ -2054,6 +2054,9 @@ type SessionMembershipEventBuffer = {
   sequence: number
 }
 type SessionMembershipResync = SessionMembershipEventBuffer & {
+  generation: number
+  historyReading: boolean
+  historyObservation?: { sources: readonly AgentSessionHistoryDescriptor[]; warnings: RuntimeEndpointWarning[]; sequence: number }
   recoverSavedAgents: boolean
   restoredHostIds: Set<string>
   startupNotice: ErrorNoticeContext | null
@@ -2064,6 +2067,8 @@ const MAX_STARTUP_OBSERVATION_ATTEMPTS = 4
 let regionCaretFocusNonce = 0
 let sessionMembershipResync: SessionMembershipResync | null = null
 let runtimeSubscriptionCount = 0
+let sessionObservationGeneration = 0
+let startupHistoryReadSequence = 0
 
 function sessionMembershipEventBuffer(): SessionMembershipEventBuffer {
   return { events: [], retainedFacts: new Map(), timelineGaps: new Set(), endpointWarnings: new Map(), overflowed: false, sequence: 0 }
@@ -2127,6 +2132,8 @@ function drainSessionMembershipEvents(entry: SessionMembershipEventBuffer): Buff
 }
 
 function cancelSessionMembershipResync(): void {
+  sessionObservationGeneration++
+  startupRecoveryReaders.clear()
   const entry = sessionMembershipResync
   sessionMembershipResync = null
   entry?.cancelDelay?.()
@@ -2228,6 +2235,57 @@ function runtimeEndpointWarningsAfterMetadataRead(warnings: RuntimeEndpointWarni
   return [...(warnings ?? []).filter(warning => warning.scope !== 'observation' || warning.step !== step), ...observed]
 }
 
+/** Optional history metadata settles only its original notice; it cannot hold live membership. */
+async function readStartupHistorySources(entry: SessionMembershipResync): Promise<void> {
+  const sequence = ++startupHistoryReadSequence
+  entry.historyReading = true
+  try {
+    const observed = await api.sessions.historySources({ observation: true })
+    if (entry.generation !== sessionObservationGeneration || sequence !== startupHistoryReadSequence) return
+    entry.historyObservation = { ...observed, sequence }
+    useAppStore.setState(state => {
+      const warnings = { runtimeEndpointWarnings: runtimeEndpointWarningsAfterMetadataRead(
+        state.runtimeEndpointWarnings, 'Reading retained History sources', observed.warnings) }
+      const notice = entry.startupNotice, source = notice?.startupSessionSnapshot
+      if (!source || state.errorNoticeContext !== notice) return warnings
+      const references = persistedSessionSurfaceIds(projectPersistedWorkbench(state))
+      const retired = retiredHistoryReferenceIds(observed.sources, state.tabs, state.config)
+      const unresolved = source.sessionIds.filter(id => references.has(id) && !retired.has(id))
+      if (unresolved.length === source.sessionIds.length) return warnings
+      if (unresolved.length === 0) {
+        const { startupSessionSnapshot: _settled, ...retained } = notice
+        const updated = { ...retained, summary: startupNoticeSummary(source.remainingMessage) }
+        entry.startupNotice = updated
+        return { ...warnings, error: source.remainingMessage, lastError: source.remainingMessage,
+          errorNoticeContext: source.remainingMessage ? updated : null }
+      }
+      const updated = { ...notice, summary: startupNoticeSummary(source.remainingMessage, unresolved.length),
+        startupSessionSnapshot: { ...source, sessionIds: unresolved } }
+      entry.startupNotice = updated
+      const message = [source.remainingMessage, source.failureMessage, missingSavedRuntimeFactsNotice(unresolved.length)].filter(Boolean).join(' ')
+      return { ...warnings, error: message, lastError: message, errorNoticeContext: updated }
+    })
+  } catch (error) {
+    if (entry.generation === sessionObservationGeneration && sequence === startupHistoryReadSequence)
+      useAppStore.getState().reportError(error, { kind: 'indeterminate', summary: 'Reading retained History sources failed. Original Sessions and recovery remain available.' })
+  } finally { entry.historyReading = false }
+}
+
+// These are only outstanding Desktop readers. Core still owns recovery identity and serialization.
+const startupRecoveryReaders = new Map<string, Promise<unknown>>()
+
+function dispatchStartupRecovery(session: Extract<SessionSnapshot, { kind: 'agent' }>, mote: boolean): void {
+  const key = JSON.stringify(session.control)
+  if (startupRecoveryReaders.has(key)) return
+  const generation = sessionObservationGeneration
+  const current = () => generation === sessionObservationGeneration
+  const job = mote ? recoverMoteConversationAtStartup(session) : useAppStore.getState().recoverSession(session.id, undefined, { stillCurrent: current })
+  startupRecoveryReaders.set(key, job)
+  void job.catch(error => { if (current()) useAppStore.getState().reportError(error, { kind: 'indeterminate', subject: session.control,
+    summary: 'Restoring this original Session failed. Other Sessions remain available.' }) })
+    .finally(() => { if (startupRecoveryReaders.get(key) === job) startupRecoveryReaders.delete(key) })
+}
+
 function settleStartupProviderCatalog(entry: SessionMembershipResync, catalog: AppState['providerCatalog'], warnings: RuntimeEndpointWarning[]): void {
   useAppStore.setState(state => {
     const notice = entry.startupNotice, producer = notice?.startupProviderCatalog
@@ -2273,6 +2331,8 @@ function startSessionMembershipResync(
   }
   const entry: SessionMembershipResync = {
     ...sessionMembershipEventBuffer(),
+    generation: sessionObservationGeneration,
+    historyReading: false,
     cancelDelay: null,
     recoverSavedAgents: options.recoverSavedAgents === true,
     restoredHostIds: new Set(options.restoredHostId ? [options.restoredHostId] : []),
@@ -2325,6 +2385,14 @@ function startSessionMembershipResync(
         if (sessionMembershipResync !== entry) return
         if (snapshotResult.status === 'rejected') {
           const ownsStartupNotice = entry.startupNotice && useAppStore.getState().errorNoticeContext === entry.startupNotice
+          const notice = entry.startupNotice, source = notice?.startupSessionSnapshot
+          if (ownsStartupNotice && source && !source.failureMessage) {
+            const failureMessage = `Reading saved Session facts failed: ${presentError(snapshotResult.reason)}`
+            const updated = { ...notice, startupSessionSnapshot: { ...source, failureMessage } }
+            entry.startupNotice = updated
+            const message = [source.remainingMessage, failureMessage, missingSavedRuntimeFactsNotice(source.sessionIds.length)].filter(Boolean).join(' ')
+            useAppStore.setState({ error: message, lastError: message, errorNoticeContext: updated })
+          }
           if (ownsStartupNotice && startupObservationAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS) {
             await delaySessionMembershipRead(entry, retryDelay)
             retryDelay = Math.min(1000, retryDelay * 2)
@@ -2343,19 +2411,11 @@ function startSessionMembershipResync(
         }
         if (providerObservation) snapshot = { ...snapshot, runtimeEndpointWarnings: runtimeEndpointWarningsAfterMetadataRead(
           snapshot.runtimeEndpointWarnings, 'Reading Provider catalog', providerObservation.warnings) }
-        let historySources: readonly AgentSessionHistoryDescriptor[] = []
+        if (entry.historyObservation?.sequence === startupHistoryReadSequence) snapshot = { ...snapshot,
+          runtimeEndpointWarnings: runtimeEndpointWarningsAfterMetadataRead(snapshot.runtimeEndpointWarnings,
+            'Reading retained History sources', entry.historyObservation.warnings) }
         const restoredHistory = useAppStore.getState().runtimeEndpointWarnings?.some(warning => warning.scope === 'observation'
           && warning.step === 'Reading retained History sources' && entry.restoredHostIds.has(warning.hostId))
-        if (entry.startupNotice?.startupSessionSnapshot || restoredHistory && historyAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS) {
-          historyAttempts++
-          try {
-            const observed = await api.sessions.historySources({ observation: true })
-            historySources = observed.sources
-            snapshot = { ...snapshot, runtimeEndpointWarnings: runtimeEndpointWarningsAfterMetadataRead(
-              snapshot.runtimeEndpointWarnings, 'Reading retained History sources', observed.warnings) }
-          }
-          catch { /* A failed metadata read cannot settle the original unknown-facts notice. */ }
-        }
         if (sessionMembershipResync !== entry) return
         // Recheck after the metadata await too. Loss requires another canonical cut,
         // but cannot discard the useful facts from this completed read.
@@ -2414,7 +2474,7 @@ function startSessionMembershipResync(
           let resolvedStartupNotice: Partial<AppState> = {}
           if (source && state.errorNoticeContext === notice && !readOverflowed) {
             const currentReferences = persistedSessionSurfaceIds(projectPersistedWorkbench(projected))
-            const retiredReferences = retiredHistoryReferenceIds(historySources, projected.tabs, state.config)
+            const retiredReferences = retiredHistoryReferenceIds(entry.historyObservation?.sources ?? [], projected.tabs, state.config)
             const confirmedReferences = startupSnapshotConfirmedSessionIds(snapshot, state.tabs, state.config)
             const unresolved = source.sessionIds.filter(id => currentReferences.has(id) && !retiredReferences.has(id) && !confirmedReferences.has(id))
             if (unresolved.length === 0) {
@@ -2451,6 +2511,10 @@ function startSessionMembershipResync(
           const next = { ...reconciled, localHome: snapshot.localHome ?? state.localHome, sessionNameMetadata: snapshot.sessionNameMetadataWarning ? state.sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], state.sessionNameMetadata), sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
           return { ...next, ...resolvedNativeIdentityNotices({ ...state, ...next }) }
         })
+        if (!entry.historyReading && historyAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS && (entry.startupNotice?.startupSessionSnapshot || restoredHistory)) {
+          historyAttempts++
+          void readStartupHistorySources(entry)
+        }
         for (const pending of events) {
           if (pending.event.event.type === 'run-service') runServiceProjection.apply(pending.event)
           if (pending.nativeIdentityNotice && nativeIdentityNoticeResolved(useAppStore.getState().sessions, pending.nativeIdentityNotice)) continue
@@ -2464,8 +2528,7 @@ function startSessionMembershipResync(
           if (!current || attemptedStartupRecovery.has(candidate.agentSessionId)) continue
           const recoveryState = useAppStore.getState()
           if (current.kind === 'agent' && deferScratchConversationRecovery(recoveryState.tabs, recoveryState.config, current.id)) {
-            await recoverMoteConversationAtStartup(current)
-            if (sessionMembershipResync !== entry) return
+            dispatchStartupRecovery(current, true)
             continue
           }
           const decision = agentStartupRecoveryDecision({
@@ -2476,8 +2539,7 @@ function startSessionMembershipResync(
           })
           if (decision.kind !== 'resume') continue
           attemptedStartupRecovery.add(candidate.agentSessionId)
-          await useAppStore.getState().recoverSession(candidate.agentSessionId)
-          if (sessionMembershipResync !== entry) return
+          if (current.kind === 'agent') dispatchStartupRecovery(current, false)
         }
         for (const sessionId of Object.keys(useAppStore.getState().agentSteerQueues)) {
           const current = useAppStore.getState(), session = current.sessions.find((item) => item.id === sessionId)
@@ -2508,18 +2570,15 @@ function startSessionMembershipResync(
         const retryStartupSnapshot = entry.startupNotice?.startupSessionSnapshot
           && useAppStore.getState().errorNoticeContext === entry.startupNotice
           && startupObservationAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS
-        const retryRestoredHistory = historyAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS && useAppStore.getState().runtimeEndpointWarnings?.some(warning => warning.scope === 'observation'
-          && warning.step === 'Reading retained History sources' && entry.restoredHostIds.has(warning.hostId))
-        if (!membershipGap && entry.events.length === 0 && !entry.overflowed && !retryProvider && !retryPartialProvider && !retryStartupSnapshot && !retryRestoredHistory && !providerRefreshed && !restoredProviderRead) return
+        if (!membershipGap && entry.events.length === 0 && !entry.overflowed && !retryProvider && !retryPartialProvider && !retryStartupSnapshot && !providerRefreshed && !restoredProviderRead) return
         // One owner/one read, with a yield and capped backoff under sustained pressure.
         await delaySessionMembershipRead(entry, retryDelay)
         retryDelay = Math.min(1000, retryDelay * 2)
       }
     } catch (error) {
-      // A best-effort retry launched after an initial startup outage must not replace the richer
-      // service-window warning that already explains the failed step. Event-driven resyncs still
-      // surface their failure through the ordinary Store error channel.
-      if (options.reportFailure !== false) useAppStore.getState().reportError(error)
+      // reportError retains an unfinished startup source and records this independent failure.
+      useAppStore.getState().reportError(error, { kind: 'indeterminate',
+        summary: 'Reading the original Session snapshot failed. The saved workface is retained; reconnect or refresh to retry.' })
     } finally {
       if (sessionMembershipResync === entry) sessionMembershipResync = null
     }

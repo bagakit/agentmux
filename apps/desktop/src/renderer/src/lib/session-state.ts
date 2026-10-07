@@ -518,6 +518,15 @@ export function projectRuntimeEndpointSessions(
   return changed ? projected : sessions
 }
 
+/** A repeated ended-Run observation does not resolve a failed Core recovery attempt. */
+function retainContinuityFailure(previous: SessionSnapshot['status'], incoming: SessionSnapshot['status'], running: boolean): SessionSnapshot['status'] {
+  if (running || !previous.continuity || incoming.continuity) return incoming
+  return { ...incoming, state: 'error', continuity: previous.continuity,
+    ...(previous.detail === undefined ? {} : { detail: previous.detail }),
+    ...(previous.continuityReason === undefined ? {} : { continuityReason: previous.continuityReason }),
+    ...(previous.continuityConflict === undefined ? {} : { continuityConflict: previous.continuityConflict }) }
+}
+
 /** Merge positive membership facts; exact removal/retirement receipts own deletion. */
 export function reduceAgentMembershipSnapshot(
   state: SessionProjectionState,
@@ -532,20 +541,29 @@ export function reduceAgentMembershipSnapshot(
     return sessions === state.sessions ? state : { ...state, sessions }
   }
   const canonicalById = new Map(canonicalAgents.map((session) => [session.id, session]))
-  const existingIds = new Set(state.sessions.map((session) => session.id))
-  const sessions = state.sessions.map((session) => canonicalById.get(session.id) ?? session)
-  for (const session of canonicalAgents) {
-    if (!existingIds.has(session.id)) sessions.push(session)
-  }
   const timelines = { ...state.timelines }
   for (const session of canonicalAgents) {
     const incoming = snapshot.timelines[session.id]
     if (!incoming && session.timelineObservation && sameRun(session.timelineObservation.run, session.control.run)) continue
     if (!incoming || incoming.agentSessionId !== session.id) {
-      throw new Error(`Runtime snapshot is missing the matching Timeline for Agent Session: ${session.id}`)
+      canonicalById.set(session.id, { ...session, timelineObservation: {
+        run: { ...session.control.run }, code: incoming ? 'TIMELINE_IDENTITY_MISMATCH' : 'TIMELINE_OBSERVATION_FAILED',
+        message: `Runtime snapshot is missing the matching Timeline for Agent Session: ${session.id}`
+      } })
+      continue
     }
     const current = timelines[session.id]
     if (!current || incoming.revision >= current.revision) timelines[session.id] = incoming
+  }
+  const existingIds = new Set(state.sessions.map((session) => session.id))
+  const sessions = state.sessions.map(session => {
+    const incoming = canonicalById.get(session.id)
+    return incoming && session.kind === 'agent' && sameRun(session.control.run, incoming.control.run)
+      ? { ...incoming, status: retainContinuityFailure(session.status, incoming.status, incoming.processState === 'running') }
+      : incoming ?? session
+  })
+  for (const [id, session] of canonicalById) {
+    if (!existingIds.has(id)) sessions.push(session)
   }
   return { ...state, sessions: projectRuntimeEndpointSessions(sessions, snapshot.runtimeEndpointWarnings), timelines }
 }
@@ -697,7 +715,7 @@ export function projectRuntimeEvent(
                   core.state === 'running' &&
                   isAgentActivityStatusSource(item.status.source)
                     ? {}
-                    : { status: processStatus }
+                    : { status: retainContinuityFailure(item.status, processStatus, core.state === 'running') }
                 )
               }
             })()
@@ -712,13 +730,13 @@ export function projectRuntimeEvent(
     if (!item || !acceptsAgentEvidence(item, core.evidence) ||
       core.evidence.observedAt < item.status.observedAt || item.status.state === 'disconnected') return { state }
     const updatedAt = Math.max(item.updatedAt, core.evidence.observedAt)
-    const status: SessionSnapshot['status'] = {
+    const status: SessionSnapshot['status'] = retainContinuityFailure(item.status, {
       state: agentDisplayState(core.state),
       source: core.evidence.source,
       observedAt: core.evidence.observedAt,
       ...(core.detail === undefined ? {} : { detail: core.detail }),
       ...(core.failure ? { failure: structuredClone(core.failure) } : {})
-    }
+    }, item.processState === 'running')
     // Compare the actual projection, including removed optional facts, before replacing
     // its collection. A rejected or repeated observation must not wake unrelated consumers.
     const statusKeys = Object.keys(status) as (keyof typeof status)[]
