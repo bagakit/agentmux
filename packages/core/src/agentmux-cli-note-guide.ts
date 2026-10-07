@@ -3,7 +3,8 @@ export const AGENTMUX_NOTE_GUIDE = `## Notes: read, edit, follow and inspect rel
 Notes are original Markdown .note.md files, organized by the durable Notebook catalog.
 Markdown is the only saved body; the editor tree is in-memory, not another JSON document.
 You can edit an authorized Note through file.read and file.write. notebook.apply changes
-organization, sources and your own follow relationship, not the body. No App/page needs to be open.
+organization, sources and your own follow relationship. A rename-page writes the original
+file's title header first and then publishes its catalog projection. No App/page needs to be open.
 
 Start with amux notebook ls, then amux notebook inspect --note NOTE_ID --content.
 The content observation gives the exact resource, saved Markdown, revision, stable blockIds
@@ -18,6 +19,7 @@ A minimal Note body is:
     ---
     schema: agentmux.note.md.v1
     note-id: stable-note-id
+    title: Original knowledge
     ---
 
     Original text. ^block1
@@ -32,6 +34,11 @@ Ordinary new paragraphs may omit an anchor: reading does not mint IDs; the origi
 allocates missing stable block IDs only when you explicitly save. Duplicated IDs are ambiguous,
 not permission to pick one copy. A block stays inside its original file when referenced;
 extracting an independent Note is a separate explicit content operation.
+The readable title belongs in this original header; it is not derived from the filename.
+An existing file title wins over an older catalog projection. A rename changes only this
+header, preserving body bytes and block authors. Inspect notebook --operation-id OP_ID after
+an unknown rename: committed file history, current file title and catalog projection are
+separate facts. Retrying an old committed B rename after C must keep C, not rewrite B.
 
 Inline [[Page]] and [[Page #heading-or-block]] queries are accepted in ordinary Markdown.
 Code, escaped wiki syntax and unfinished tokens stay literal. The original writer only binds
@@ -82,7 +89,7 @@ Activity batches group reading without deleting revisions. A paginated batch lis
 in that window, not necessarily the entire batch. eventId identifies an edit, not its content hash;
 returning to identical bytes does not reuse an old event or its latest author. parentEventId is
 the confirmed parent when known; null keeps uncertainty. originalResource retains the original
-event location, while resource follows the confirmed current mapping after a directory move.
+event location, while resource follows the confirmed current mapping after a file or directory move.
 A Note write can return noteHistory separately from its body result. prepared/unconfirmed events
 do not prove that a body write committed, even if its bytes match. Keep the original eventId and
 inspect that same event plus file.read; never replay a body merely to repair history metadata.
@@ -101,6 +108,19 @@ as bindings. Such edges retain query and their original occurrence. Existing tar
 Reading never rewrites a source or allocates persistent IDs. Unanchored blocks make the graph
 partial; an empty edge list with unread or unassigned sources does not prove no links.
 Graph/search indexes are derived from Markdown, never a second body or relationship authority.
+
+Rebuild knowledge from original files without a catalog using amux notebook scan --workspace
+WORKSPACE_ID --path DIRECTORY [--query TEXT]. Read the exact CLI help for optional budgets.
+The original Files owner includes ignored
+files, skips symlinks, and reports per-file status, revisions, titles, duplicate identities,
+outline, references, backlinks, graph and full-text hits from the same Markdown parser.
+An unanchored text hit has blockId:null; it is searchable but not a confirmed stable target.
+complete/partial/unknown describes this physical observation. A missing title, duplicate ID,
+unread file or budget exhaustion cannot establish a unique name target or absence of links.
+Default limits are 200 files, 200 directories and 4 MiB of accepted source bytes; max limits
+are 20000 files/directories and 64 MiB. Cancellation and budgets stop subsequent reads;
+they cannot cancel a directory listing already in progress. Scanning never registers pages,
+rewrites files or restores catalog organization, followers, authors or history from body text.
 
 Existing JSON Notes and the old catalog are explicit one-time conversion inputs. The original
 storage owner keeps backups, exact IDs, authors, followers and committed resourceChanges with

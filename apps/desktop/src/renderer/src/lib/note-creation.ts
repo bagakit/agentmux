@@ -90,3 +90,6 @@ export function noteCreationTarget(state: Parameters<typeof spatialCatalog>[0], 
   const { directoryPath, relativeDirectory } = zoneFileResource(workspace, zone, '', topics)
   return { workspaceId: workspace.id, hostId: workspace.hostId, workspacePath: workspace.path, directoryPath, relativeDirectory, zoneId: zone.zoneId, sourceSpaceId, displayWorkspaceId, groupId: input.groupId }
 }
+
+/** Shared initial display title, also carried by the original Markdown file. */
+export function noteCreationTitle(draft: string): string { return draft.trim().split('\n')[0]?.slice(0, 100).trim() || 'Untitled note' }

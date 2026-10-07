@@ -5,7 +5,7 @@ import { gzipSync, gunzipSync } from 'node:zlib'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from './errors.js'
 import { durableWriteFile } from './durable-write.js'
-import { emptyNotebookState, notebookFingerprint, parseNotebookState, type NotebookState } from './notebook-catalog.js'
+import { emptyNotebookState, notebookFingerprint, parseNotebookState, type NotebookState, type NoteResource } from './notebook-catalog.js'
 import { noteProvenanceResourceKey, parseNoteProvenanceWrite, type NoteAuthorship, type NoteProvenanceQuery, type NoteProvenanceSnapshot, type NoteProvenanceWrite } from './note-provenance.js'
 import { noteHistoryRevision, noteHistorySnapshot, parseNoteHistoryRecord, parseNoteHistoryQuery, type NoteHistoryRecord, type NoteHistoryEntry, type NoteHistoryQuery, type NoteHistorySnapshot } from './note-history.js'
 
@@ -289,13 +289,55 @@ export async function replaceNotebookDatabase(path: string, value: NotebookDatab
   } catch (error) { try { db.exec('ROLLBACK') } catch {} throw error } finally { db.close() }
   await syncNotebookDatabase(path)
 }
-/** A single SQLite transaction; the full original Note body never enters this database. */
-export async function writeNotebookDatabase(path: string, update: { state?: NotebookState; provenance?: NoteProvenanceWrite }): Promise<void> {
+type NoteMetadataRelocation = { noteId: string; from: NoteResource; to: NoteResource }
+/** Move only the exact original's metadata. Content blobs and original request identities stay untouched. */
+function relocateNoteMetadata(db: DatabaseSync, move: NoteMetadataRelocation, next: NotebookState): void {
+  const from = noteProvenanceResourceKey(move.from), to = noteProvenanceResourceKey(move.to)
+  const raw = db.prepare('SELECT json FROM notebook_state WHERE id=1').get()?.json
+  const before = typeof raw === 'string' ? parseNotebookState(JSON.parse(raw)) : undefined
+  if (!before?.pages[move.noteId] || !next.pages[move.noteId] ||
+      noteProvenanceResourceKey(before.pages[move.noteId]!.resource) !== from || noteProvenanceResourceKey(next.pages[move.noteId]!.resource) !== to)
+    throw failure('The original Note relocation and catalog resources cannot be confirmed.')
+  if (from === to) return
+  const history = hasHistory(db)
+  if (db.prepare('SELECT 1 FROM provenance WHERE note_id=? AND resource=? LIMIT 1').get(move.noteId, to) ||
+      history && db.prepare('SELECT 1 FROM note_history_event WHERE note_id=? AND resource=? LIMIT 1').get(move.noteId, to))
+    throw new AgentMuxError('The destination already has trusted metadata for this Note. Both original records and the catalog are retained; inspect this same file move before retrying.', 'NOTE_METADATA_RELOCATION_CONFLICT')
+  const attribution = db.prepare('SELECT note_id,resource,revision,json FROM provenance WHERE note_id=? AND resource=?').all(move.noteId, from)
+  const putAttribution = db.prepare('UPDATE provenance SET resource=?,json=? WHERE note_id=? AND resource=? AND revision=?')
+  for (const row of attribution) {
+    const value = provenanceRow(row)
+    value.resource = structuredClone(move.to)
+    putAttribution.run(to, JSON.stringify(value), move.noteId, from, value.revision)
+  }
+  if (history) {
+    const rows = db.prepare('SELECT * FROM note_history_event WHERE note_id=? AND resource=? ORDER BY sequence').all(move.noteId, from)
+    const put = db.prepare('UPDATE note_history_event SET resource=?,json=? WHERE sequence=?')
+    for (const row of rows) {
+      const { sequence, ...value } = historyMetadata(row)
+      if (value.provenance) {
+        const provenance = parseNoteProvenanceWrite(value.provenance)
+        if (provenance.noteId !== move.noteId || noteProvenanceResourceKey(provenance.resource) !== from || provenance.revision !== value.revision)
+          throw failure('The original moved history attribution cannot be confirmed.')
+        value.provenance = { ...provenance, resource: structuredClone(move.to) }
+      }
+      value.resource = structuredClone(move.to)
+      put.run(to, JSON.stringify(value), sequence)
+    }
+  }
+}
+/** Catalog, scoped metadata relocation and attribution share one original SQLite transaction. */
+export async function writeNotebookDatabase(path: string, update: { state?: NotebookState; provenance?: NoteProvenanceWrite; relocation?: NoteMetadataRelocation }): Promise<void> {
   const { DatabaseSync } = await import('node:sqlite')
   const acknowledged = await identity(path), db = new DatabaseSync(path)
   try {
     configure(db); validateIdentity(db, acknowledged); db.exec('BEGIN IMMEDIATE')
-    if (update.state) db.prepare('UPDATE notebook_state SET json=? WHERE id=1').run(JSON.stringify(parseNotebookState(update.state)))
+    const state = update.state && parseNotebookState(update.state)
+    if (update.relocation) {
+      if (!state) throw failure('A Note metadata relocation requires its original catalog transaction.')
+      relocateNoteMetadata(db, update.relocation, state)
+    }
+    if (state) db.prepare('UPDATE notebook_state SET json=? WHERE id=1').run(JSON.stringify(state))
     if (update.provenance) {
       const value = parseNoteProvenanceWrite(update.provenance)
       const resource = noteProvenanceResourceKey(value.resource)

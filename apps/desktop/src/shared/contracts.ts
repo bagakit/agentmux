@@ -641,7 +641,7 @@ export type WorkspaceFileWriteInput = {
 }
 
 export type WorkspaceFileWriteResult =
-  ( { status: 'written'; revision: string; content?: string; noteAttribution?: import('@agentmux/core').NoteWriteAttribution; noteProvenance?: import('@agentmux/core/note-provenance').NoteProvenanceSnapshot }
+  ( { status: 'written'; revision: string; content?: string; noteAttribution?: import('@agentmux/core').NoteWriteAttribution; noteProvenance?: import('@agentmux/core/note-provenance').NoteProvenanceSnapshot; noteTitleProjection?: import('@agentmux/core/note-title').NoteTitleProjection }
   | { status: 'conflict'; observedRevision: string | null; noteConflict?: import('@agentmux/core/files').NoteWriteConflict; noteConflictUnavailable?: string }
   | { status: 'error'; code: string; message: string }
   | { status: 'unknown'; code: string; message: string }) & { noteHistory?: import('@agentmux/core/note-history').NoteHistoryReceipt }

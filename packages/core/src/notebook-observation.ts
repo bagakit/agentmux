@@ -32,6 +32,7 @@ export type NotebookGraph = {
   references: NoteGraphReference[]
 }
 export type NotebookObservationPort = {
+  scan?(params: import('./note-corpus.js').NoteCorpusParams, options?: { signal?: AbortSignal }): Promise<import('./note-corpus.js').NoteCorpusResult>
   resolve(state: NotebookState, params: NotebookResolveParams, options?: { signal?: AbortSignal }): Promise<NotebookResolveResult>
   content(state: NotebookState, noteId: string, options?: { maxBytes?: number; signal?: AbortSignal }): Promise<NoteContentObservation>
   graph(state: NotebookState, params: NotebookGraphParams, options?: { signal?: AbortSignal }): Promise<NotebookGraph>

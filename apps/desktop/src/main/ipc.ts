@@ -33,6 +33,7 @@ import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from 
 import { homedir } from 'node:os'
 import { FileUploadOwner } from './file-upload-owner.js'
 import { GitPublicControl } from './git-public-control.js'
+import { NoteTitleFileWriter } from './note-title-file-writer.js'
 import { createNotebookObservationServices } from './notebook-observation-requests.js'
 import { FileReadOwner } from './file-read-owner.js'
 import { MoteConnectionPreferences } from './mote-connection-preferences.js'
@@ -793,7 +794,24 @@ export async function registerIpc(args: {
   handle('files:list', async (workspaceId: string, path?: string, limit?: number) =>
     await files.listFiles(workspace(config, workspaceId), path, limit)
   )
-  const notebookStore = new AgentMuxNotebookStore(undefined, notesStorageOwner.storage)
+  const titleWorkspace = (resource: import('@agentmux/core').NoteResource) => {
+    const current = config.workspaces.find(item => item.id === resource.workspaceId)
+    return current?.hostId === resource.hostId && current.path === resource.workspacePath ? { ...current } : undefined
+  }
+  const notebookStore: AgentMuxNotebookStore = new AgentMuxNotebookStore(undefined, notesStorageOwner.storage, { title: {
+    inspect: operationId => noteTitleWriter.inspect(operationId),
+    write: intent => {
+      const original = titleWorkspace(intent.resource)
+      return original ? noteTitleWriter.write(original, intent) : Promise.resolve({ status: 'unavailable' as const, operationId: intent.operationId, reason: 'The exact original Host/Workspace is unavailable; no title write was issued.' })
+    },
+    current: async (noteId, resource) => {
+      const original = titleWorkspace(resource)
+      if (!original) return { status: 'unknown' as const, noteId, resource, reason: 'The exact original Host/Workspace mapping is unavailable.' }
+      const observed = await noteTitleWriter.current(original, noteId, resource)
+      return titleWorkspace(resource) ? observed : { status: 'unknown' as const, noteId, resource, reason: 'The original Host/Workspace mapping changed during this title read.' }
+    }
+  } })
+  const noteTitleWriter: NoteTitleFileWriter = new NoteTitleFileWriter(files, notebookStore)
   const notebookObservation = createNotebookObservationServices(notebookStore, { files, workspace: id => config.workspaces.find(item => item.id === id) }, () => notesStorageReady)
   const noteFileWriter = new NoteFileWriter(files, { state: async () => { await notesStorageReady; return notebookStore.read() }, owner: notebookObservation.owner }, notebookStore)
   const publicFiles = new FileReadOwner({ files: { read: noteFileWriter.read.bind(noteFileWriter), listFiles: files.listFiles.bind(files), history: noteFileWriter.history.bind(noteFileWriter), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),

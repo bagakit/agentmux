@@ -4,9 +4,11 @@ import { basename, dirname, isAbsolute, join } from 'node:path'
 import { durableWriteFile } from './durable-write.js'
 import { AgentMuxNotesStorage, defaultNotesDirectory, withNotesStorageFileLock } from './notes-storage.js'
 import { AgentMuxError } from './errors.js'
-import { applyNotebookChange, emptyNotebookState, type NotebookActor, type NotebookObservation, type NotebookState, type NotebookWrite } from './notebook-catalog.js'
+import { applyNotebookChange, emptyNotebookState, notebookFingerprint, parseNotebookState, type NoteResource, type NotebookActor, type NotebookObservation, type NotebookState, type NotebookWrite } from './notebook-catalog.js'
 import { NOTEBOOK_DATABASE_NAME, initializeNotebookDatabase, readNotebookDatabase, readNotebookProvenance, writeNotebookDatabase, readNotebookHistory, writeNotebookHistory, readNotebookHistoryProvenance, readNotebookHistoryOperation } from './notebook-database.js'
 import { parseNoteProvenanceWrite, type NoteProvenanceQuery, type NoteProvenanceSnapshot, type NoteProvenanceWrite } from './note-provenance.js'
+import { parseNoteFileTitle, parseNoteTitleIntent, parseNoteTitleOperation, type NoteTitlePort, type NoteTitleIntent, type NoteTitleOperation, type NoteFileTitle, type NoteTitleProjection, type NoteTitleInspection } from './note-title.js'
+import { noteProvenanceResourceKey } from './note-provenance.js'
 import { parseNoteHistoryQuery, parseNoteHistoryRecord, type NoteHistoryQuery, type NoteHistoryRecord, type NoteHistorySnapshot } from './note-history.js'
 export * from './notes-storage.js'
 export * from './notebook-catalog.js'
@@ -30,7 +32,7 @@ export class AgentMuxNotebookStore {
   private currentPath: string
   private legacyPath: string
   get path(): string { return this.currentPath }
-  constructor(path?: string, storage = new AgentMuxNotesStorage()) {
+  constructor(path?: string, storage = new AgentMuxNotesStorage(), private readonly options: { title?: NoteTitlePort } = {}) {
     this.storage = path === undefined ? storage : null
     this.currentPath = sqlitePath(path ?? join(defaultNotesDirectory(), NOTEBOOK_DATABASE_NAME))
     this.legacyPath = path?.endsWith('.json') ? path : join(dirname(this.currentPath), 'notebooks.json')
@@ -72,10 +74,131 @@ export class AgentMuxNotebookStore {
       throw new AgentMuxError('The Notebook directory could not be read. Original bytes, Note files and work surfaces are kept; restore or repair this same catalog.', 'NOTEBOOK_READ_UNCONFIRMED', error instanceof Error ? error.message : String(error))
     }
   }
-  async apply(input: NotebookWrite, actor: NotebookActor): Promise<NotebookState> {
+  /** Ownership presence only; an unavailable original owner remains authoritative. */
+  hasTitleOwner(): boolean { return this.options.title !== undefined }
+  /** Trusted file/history actions share the original reentrant owner lease, including explicit-path hosts. */
+  async runWithWriteLease<T>(work: () => Promise<T>): Promise<T> {
     await this.ready()
-    const run = () => this.write(input, actor)
-    return this.storage ? this.storage.withLock(run) : run()
+    return this.storage ? this.storage.withLock(work) : this.withWriteLock(work)
+  }
+  async apply(input: NotebookWrite, actor: NotebookActor): Promise<NotebookState> {
+    const original = structuredClone(input), originalActor = structuredClone(actor)
+    const run = () => original?.change?.kind === 'rename-page' ? this.renamePage(original, originalActor) : this.write(original, originalActor)
+    return this.runWithWriteLease(run)
+  }
+  private titleFailure(message: string, code = 'NOTE_TITLE_OPERATION_UNCONFIRMED'): never {
+    throw new AgentMuxError(message + ' Run notebook inspect --operation-id with this same operation; original files, history and other work are retained.', code)
+  }
+  private async originalCatalog() {
+    if (this.storage && await this.storage.databaseEstablished() && !await readNotebookDatabase(this.path, false)) throw new AgentMuxError('The confirmed original SQLite directory is missing. Original files are retained.', 'NOTEBOOK_READ_UNCONFIRMED')
+    return initializeNotebookDatabase(this.path, this.legacyPath, !!this.storage && await this.storage.catalogEstablished())
+  }
+  private async publishCatalog(before: NotebookState, next: NotebookState): Promise<NotebookState> {
+    if (next === before) return before
+    await durableWriteFile(this.path + '.previous', JSON.stringify(before) + '\n', { requireDirectorySync: true })
+    await writeNotebookDatabase(this.path, { state: next })
+    if (this.storage) await this.storage.confirmCatalog()
+    this.emit({ state: next }); return next
+  }
+  private async fileTitle(noteId: string, resource: NoteResource): Promise<NoteFileTitle> {
+    if (!this.options.title) return { status: 'unknown', noteId, resource: structuredClone(resource), reason: 'The original Host title reader is unavailable.' }
+    try {
+      const current = parseNoteFileTitle(await this.options.title.current(noteId, structuredClone(resource)))
+      if (current.noteId !== noteId || noteProvenanceResourceKey(current.resource) !== noteProvenanceResourceKey(resource)) throw new Error('The original title reader returned another Note or resource.')
+      return current
+    } catch (error) { return { status: 'unknown', noteId, resource: structuredClone(resource), reason: error instanceof Error ? error.message : String(error) } }
+  }
+  private assertTitleRequest(operation: Extract<NoteTitleOperation, { status: 'recorded' }>, input: NotebookWrite, actor: NotebookActor): void {
+    if (input.change.kind !== 'rename-page' || operation.intent.noteId !== input.change.noteId || operation.intent.title !== input.change.title.trim() || notebookFingerprint(operation.intent.actor) !== notebookFingerprint(actor)) this.titleFailure('This operation belongs to another original title request or author.', 'NOTE_TITLE_OPERATION_CONFLICT')
+  }
+  private async renamePage(input: NotebookWrite, actor: NotebookActor): Promise<NotebookState> {
+    if (!this.options.title) this.titleFailure('The original Host title writer is unavailable; no metadata-only rename was applied.', 'NOTE_TITLE_UNAVAILABLE')
+    const change = input.change
+    if (change.kind !== 'rename-page' || typeof input.operationId !== 'string' || !input.operationId || /[\0\r\n]/u.test(input.operationId) || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0 ||
+        Object.keys(input).some(key => !['operationId','expectedRevision','change'].includes(key)) || Object.keys(change).some(key => !['kind','noteId','title'].includes(key)) || typeof change.noteId !== 'string' || !change.noteId || typeof change.title !== 'string' || !change.title.trim() || /[\0\r\n]/u.test(change.title)) throw new AgentMuxError('An exact original Note title intent is required.', 'NOTEBOOK_INPUT_INVALID')
+    // Inspect the original file operation before a new catalog CAS. A committed file write is
+    // already applied even when its catalog publication failed or the file later changed again.
+    let operation = parseNoteTitleOperation(await this.options.title.inspect(input.operationId), input.operationId)
+    if (operation.status === 'absent') {
+      await this.locate(true)
+      const intent = await this.withWriteLock(async () => {
+        const before = await this.originalCatalog()
+        applyNotebookChange(before.state, input, actor, Date.now()) // validate the exact new catalog CAS without publishing a title
+        if (Object.hasOwn(before.state.operations, input.operationId)) this.titleFailure('This original metadata operation has no confirmed file title event; it was not replayed.')
+        const page = before.state.pages[change.noteId]!
+        return parseNoteTitleIntent({ operationId: input.operationId, noteId: change.noteId, resource: page.resource, title: change.title.trim(), actor })
+      })
+      // The original async owner lease is reentrant. Default storage releases the inner
+      // catalog lock here; an explicit-path Host reuses its outer catalog lease.
+      operation = parseNoteTitleOperation(await this.options.title.write(intent), input.operationId)
+    }
+    if (operation.status !== 'recorded') this.titleFailure(operation.status === 'different-operation' ? 'This identity belongs to a different original operation.' : 'The original file title outcome is unavailable; no replay was attempted.', operation.status === 'different-operation' ? 'NOTE_TITLE_OPERATION_CONFLICT' : 'NOTE_TITLE_OPERATION_UNCONFIRMED')
+    this.assertTitleRequest(operation, input, actor)
+    if (operation.history.status !== 'committed') this.titleFailure('The original title event is ' + operation.history.status + '; current file bytes do not prove it committed.', operation.history.status === 'not-applied' ? 'NOTE_TITLE_NOT_APPLIED' : 'NOTE_TITLE_OPERATION_UNCONFIRMED')
+    try {
+      await this.locate(true)
+      return await this.withWriteLock(async () => {
+        const before = await this.originalCatalog(), page = before.state.pages[operation.intent.noteId]
+        if (!page || noteProvenanceResourceKey(page.resource) !== noteProvenanceResourceKey(operation.resource)) this.titleFailure('The original title event and current catalog resource cannot be reconciled.', 'NOTE_TITLE_PROJECTION_UNCONFIRMED')
+        const existing = before.state.operations[input.operationId], fingerprint = notebookFingerprint(input.change)
+        if (existing && (existing.fingerprint !== fingerprint || notebookFingerprint(existing.actor) !== notebookFingerprint(actor))) this.titleFailure('This catalog identity already records another request or actor.', 'NOTE_TITLE_OPERATION_CONFLICT')
+        const current = await this.fileTitle(page.noteId, page.resource)
+        if (current.status !== 'read') this.titleFailure('The file title operation committed, but its current original title is not confirmed.', 'NOTE_TITLE_PROJECTION_UNCONFIRMED')
+        if (existing && page.title === current.title) return before.state
+        const next = parseNotebookState(before.state)
+        next.pages[page.noteId]!.title = current.title
+        // This is an observation/acknowledgement, not a second rename journal or forged author trail.
+        next.operations[input.operationId] = { fingerprint, actor: structuredClone(actor) }
+        next.revision++
+        return this.publishCatalog(before.state, next)
+      })
+    } catch (error) {
+      if (error instanceof AgentMuxError && ['NOTE_TITLE_OPERATION_CONFLICT', 'NOTE_TITLE_PROJECTION_UNCONFIRMED'].includes(error.code)) throw error
+      this.titleFailure('The original file title committed, but catalog publication is unconfirmed: ' + (error instanceof Error ? error.message : String(error)), 'NOTE_TITLE_PROJECTION_UNCONFIRMED')
+    }
+  }
+  /** Host-internal best effort projection after a body write. It cannot change the body receipt. */
+  async refreshFileTitle(noteId: string, resource: NoteResource): Promise<NoteTitleProjection> {
+    const original = structuredClone(resource)
+    if (!this.options.title) return { status: 'unconfirmed', noteId, resource: original, code: 'host-unavailable', message: 'The original Host title reader is unavailable.' }
+    try {
+      await this.ready()
+      const run = async (): Promise<NoteTitleProjection> => {
+        await this.locate(true)
+        return this.withWriteLock(async () => {
+          const before = await this.originalCatalog(), page = before.state.pages[noteId]
+          if (!page) return { status: 'not-registered', noteId, resource: original }
+          if (noteProvenanceResourceKey(page.resource) !== noteProvenanceResourceKey(original)) return { status: 'unconfirmed', noteId, resource: original, code: 'resource-mismatch', message: 'This Note belongs to another confirmed catalog resource.' }
+          const current = await this.fileTitle(noteId, original)
+          if (current.status !== 'read') return { status: 'unconfirmed', noteId, resource: original, code: 'source-unconfirmed', message: 'The current original file title is ' + current.status + '.' }
+          let revision = before.state.revision
+          if (page.title !== current.title) {
+            const next = parseNotebookState(before.state)
+            next.pages[noteId]!.title = current.title; next.revision++
+            revision = (await this.publishCatalog(before.state, next)).revision
+          }
+          return { status: 'projected', noteId, resource: original, revision: current.revision, title: current.title, catalogRevision: revision }
+        })
+      }
+      return this.storage ? await this.storage.withLock(run) : await run()
+    } catch (error) { return { status: 'unconfirmed', noteId, resource: original, code: 'catalog-unavailable', message: error instanceof Error ? error.message : String(error) } }
+  }
+  /** Typed, read-only recovery facts. Prepared/unknown history never becomes committed from a digest. */
+  async inspectTitleOperation(operationId: string): Promise<NoteTitleInspection> {
+    let operation: NoteTitleOperation
+    try { operation = this.options.title ? parseNoteTitleOperation(await this.options.title.inspect(operationId), operationId) : { status: 'unavailable', operationId, reason: 'The original Host title operation reader is unavailable.' } }
+    catch (error) { operation = { status: 'unavailable', operationId, reason: error instanceof Error ? error.message : String(error) } }
+    if (operation.status !== 'recorded') return { operation, file: null, projection: null }
+    const file = await this.fileTitle(operation.intent.noteId, operation.resource)
+    let projection: NoteTitleProjection
+    try {
+      const state = await this.read(), page = state.pages[operation.intent.noteId]
+      projection = !page ? { status: 'not-registered', noteId: operation.intent.noteId, resource: operation.resource }
+        : noteProvenanceResourceKey(page.resource) !== noteProvenanceResourceKey(operation.resource) ? { status: 'unconfirmed', noteId: operation.intent.noteId, resource: operation.resource, code: 'resource-mismatch', message: 'The catalog page names another original resource.' }
+        : file.status === 'read' && page.title === file.title ? { status: 'projected', noteId: file.noteId, resource: file.resource, revision: file.revision, title: file.title, catalogRevision: state.revision }
+        : { status: 'unconfirmed', noteId: operation.intent.noteId, resource: operation.resource, code: 'projection-mismatch', message: 'The current file title and catalog projection are not confirmed equal.' }
+    } catch (error) { projection = { status: 'unconfirmed', noteId: operation.intent.noteId, resource: operation.resource, code: 'catalog-unavailable', message: error instanceof Error ? error.message : String(error) } }
+    return { operation, file, projection }
   }
   private async write(input: NotebookWrite, actor: NotebookActor): Promise<NotebookState> {
     await this.locate(true)
@@ -84,7 +207,10 @@ export class AgentMuxNotebookStore {
       const before = await initializeNotebookDatabase(this.path, this.legacyPath, !!this.storage && await this.storage.catalogEstablished())
       const next = applyNotebookChange(before.state, input, actor, Date.now())
       if (next !== before.state) await durableWriteFile(this.path + '.previous', JSON.stringify(before.state) + '\n', { requireDirectorySync: true })
-      await writeNotebookDatabase(this.path, { state: next })
+      const relocation = next !== before.state && input.change.kind === 'relocate'
+        ? { noteId: input.change.noteId, from: before.state.pages[input.change.noteId]!.resource, to: next.pages[input.change.noteId]!.resource }
+        : undefined
+      await writeNotebookDatabase(this.path, { state: next, ...(relocation ? { relocation } : {}) })
       if (this.storage) await this.storage.confirmCatalog()
       this.emit({ state: next }); return next
     })

@@ -7,7 +7,7 @@ import { api } from './api'
 import { useLauncherState } from './launcher-state'
 import { refreshNotebookLibrary } from './notebook-library'
 import type { NoteCreationReceipt } from './note-creation'
-import { noteCreationResourceMatches } from './note-creation'
+import { noteCreationResourceMatches, noteCreationTitle } from './note-creation'
 import { createNoteWithAvailableName } from './note-names'
 import { prepareNotebookWorkface } from './recall-notebooks'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -65,7 +65,7 @@ async function save(target: SurveyRecallCapture, notebookId: string, draft: stri
       receipt = { ...receipt, target: { ...receipt.target, zoneId: face.zoneId } }; publish()
     }
     if (!resourceCurrent()) throw new Error('The Notes resource changed before this save. The original capture and target are kept.')
-    const content = serializeNoteDocument(newNoteDocument(receipt.draft, receipt.noteId, receipt.blockIds[0]!))
+    const content = serializeNoteDocument(newNoteDocument(receipt.draft, receipt.noteId, receipt.blockIds[0]!, noteCreationTitle(receipt.draft)))
     receipt = { ...receipt, status: 'pending', issue: undefined }; publish()
     const named = await createNoteWithAvailableName(new Date(receipt.createdAt), async name => {
       if (!resourceCurrent()) return { status: 'error', code: 'NOTE_RESOURCE_CHANGED', message: 'The original Notes resource changed. No new write was issued; reconnect it to continue this capture.' }

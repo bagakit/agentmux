@@ -26,6 +26,7 @@ import { DeliveryAttemptStore } from './delivery-attempt-store.js'
 import { parseDeliveryAttempt, validateDeliveryLogId, type DeliveryAttemptLookup } from './delivery-attempt.js'
 import { parseAgentContextParams, readAgentContext, forwardAgentContextParams, forwardAgentContextPage } from './agent-context.js'
 
+import { parseNoteCorpusParams, parseNoteCorpusResult } from './note-corpus.js'
 import { parseNotebookObservationParams, type NotebookObservationPort } from './notebook-observation.js'
 import { parseNotebookResolveParams } from './note-links.js'
 import { inspectNotebook } from './notebook-catalog.js'
@@ -163,6 +164,7 @@ const NATIVE_FIELDS = {
   'goal.patrol.continue': ['goalId', 'patrolOperationId', 'operationId', 'expectedRunId'],
   'goal.patrol.report': ['goalId', 'patrolOperationId', 'report'],
   'settings.appearance.watch': [],
+  'notebook.scan': ['workspaceId','path','maxFiles','maxDirectories','maxBytes','query','limit'],
   'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId','content','maxBytes'], 'notebook.graph': ['notebookId','noteId','maxBytes'], 'notebook.resolve': ['mode','query','limit','text','select','maxBytes'], 'notebook.apply': ['expectedRevision','operationId','change'],
   'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval','removedProjectGroupIds'],
   'space.resolve': ['tabId','regionId','direction'],
@@ -991,7 +993,21 @@ export class AgentMuxRpcService {
     const fields = NATIVE_FIELDS[method as keyof typeof NATIVE_FIELDS]
     if (!fields) throw new AgentMuxError('Unknown RPC method.', 'RPC_METHOD_NOT_FOUND')
     rpcRecord(p, fields)
-    const needsNoteReader = method === 'notebook.graph' || method === 'notebook.resolve' || method === 'notebook.inspect' && p.content === true
+    const needsTitleOwner = !this.notebooks.hasTitleOwner() && (method === 'notebook.inspect' && typeof p.operationId === 'string' ||
+      method === 'notebook.apply' && p.change !== null && typeof p.change === 'object' && !Array.isArray(p.change) && (p.change as Record<string, unknown>).kind === 'rename-page')
+    let unavailableTitleObservation: string | undefined
+    if (needsTitleOwner && this.ports.forwardControl) {
+      // The headless Host borrows the same Desktop file/history owner; it never
+      // creates a metadata-only title success or retries an unavailable local owner elsewhere.
+      try { return parseRpcNativeResult(method, await this.ports.forwardControl(method, p as AgentMuxRpcParams<M>, context), p, context.caller) as AgentMuxRpcResult<M> }
+      catch (error) {
+        context.signal?.throwIfAborted()
+        if (method !== 'notebook.inspect' || error instanceof AgentMuxError && error.code === 'CONTROL_PERMISSION_DENIED') throw error
+        // File-title observation cannot remove an independently healthy catalog read.
+        unavailableTitleObservation = error instanceof Error ? error.message : String(error)
+      }
+    }
+    const needsNoteReader = method === 'notebook.scan' || method === 'notebook.graph' || method === 'notebook.resolve' || method === 'notebook.inspect' && p.content === true
     if (needsNoteReader && !this.ports.notebookObservation && this.ports.forwardControl) {
       // Core keeps its original durable catalog available independently of Desktop.
       // Saved bodies and relationships borrow the original Host file reader.
@@ -1005,11 +1021,18 @@ export class AgentMuxRpcService {
         context.signal?.throwIfAborted(); await context.assertCurrent?.()
         result = await this.landmarks.apply(parseConversationLandmarkWrite(p), actor); break
       }
+      case 'notebook.scan': {
+        const input = parseNoteCorpusParams(p)
+        if (!this.ports.notebookObservation?.scan) throw new AgentMuxError('The original Host corpus reader is unavailable. Catalog, editing and Agents remain available; reconnect this same Host to retry this read.', 'CONTROL_UNAVAILABLE')
+        result = parseNoteCorpusResult(await this.ports.notebookObservation.scan(input, context.signal ? { signal: context.signal } : undefined), input); break
+      }
       case 'notebook.ls': result = {state:await this.notebooks.read()}; break
       case 'notebook.inspect': {
         const input = parseNotebookObservationParams(p, true), state = await this.notebooks.read()
         const storage = this.notebooks.storage ? await this.notebooks.storage.inspect(input.operationId) : undefined
         result = { ...inspectNotebook(state, input), ...(storage ? { storageOperation: storage.operation, resourceChanges: storage.resourceChanges, conversionIssues: storage.conversionIssues } : {}),
+          ...(input.operationId ? { titleOperation: unavailableTitleObservation === undefined ? await this.notebooks.inspectTitleOperation(input.operationId)
+            : { operation: { status: 'unavailable', operationId: input.operationId, reason: unavailableTitleObservation }, file: null, projection: null } } : {}),
           ...(input.content ? { content: this.ports.notebookObservation
             ? await this.ports.notebookObservation.content(state, input.noteId!, { ...(input.maxBytes === undefined ? {} : { maxBytes: input.maxBytes }), ...(context.signal ? { signal: context.signal } : {}) })
             : (() => { throw new AgentMuxError('The original Host Note reader is unavailable. Directory and Agent capabilities remain available; retry this observation when the Host reconnects.', 'CONTROL_UNAVAILABLE') })() } : {}) }; break
