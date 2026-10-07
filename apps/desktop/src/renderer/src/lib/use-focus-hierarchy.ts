@@ -40,7 +40,7 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
     retry(value => value + 1)
   }, [scratchScope?.id, scratchError])
   useEffect(() => {
-    let active = true
+    let attached = true
     const jobs = scopes.map((scope, index) => {
       if (isScratchWorkspaceId(scope.id)) return Promise.resolve<Snapshot>({ id: scope.id,
         ...(scratchTopics ? { topics: scratchTopics } : {}), ...(scratchError ? { error: `${scope.name}: ${scratchError}` } : {}) })
@@ -57,7 +57,7 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
       return job
     })
     void Promise.all(jobs).then(snapshots => {
-      if (!active) return
+      if (!attached) return
       setErrors(snapshots.flatMap(snapshot => snapshot.error ? [snapshot.error] : []))
       setFacts(previous => {
         const topics = { ...previous.topics }
@@ -73,7 +73,7 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
         requests.current.delete(key); failedRequests.current.delete(key)
       }
     })
-    return () => { active = false }
+    return () => { attached = false }
     // Immutable signature includes each owned scope and its revision; byte/state changes don't query again.
   }, [signature, scratchTopics, scratchError, retrySequence])
   return { facts, errors, refresh }
