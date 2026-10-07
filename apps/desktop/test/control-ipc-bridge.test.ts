@@ -186,7 +186,7 @@ describe('Control 等待预算只有一处', () => {
       expect(
         delay,
         `setTimeout 的延时位写着 \`${delay}\`，不是从 @agentmux/core/control 那一处取的`
-      ).toBe("agentMuxControlTimeoutMs(request.operation === 'continuous-progress.observeInput' ? 'inspect.region' : request.operation === 'metrics.renderer' ? 'metrics.get' : request.operation)")
+      ).toBe("agentMuxControlTimeoutMs(request.operation === 'continuous-progress.observeInput' ? 'inspect.region' : request.operation === 'metrics.renderer' ? 'metrics.get' : request.operation === 'browser.openFromSystem' ? 'open.browser' : request.operation)")
     }
     // 自检：抽取器真的找到了那个调用点，否则上面那个循环跑零次、恒绿。
     expect(delays.length, 'setTimeout 延时位抽取器一个都没找到，上面那条守卫是死代码').toBe(1)
