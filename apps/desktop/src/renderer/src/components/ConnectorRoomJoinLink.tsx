@@ -5,8 +5,8 @@ import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 
 /** Joining and Agent access remain separate facts; this view never guesses the local person's account. */
-export function ConnectorRoomJoinLink({ submitted, operation, pending, canContinue, onCreate, onInspect, onContinue }: {
-  submitted: boolean; operation: RoomLinkOperation | null; pending: boolean; canContinue: boolean; onCreate(): void; onInspect(): void; onContinue(): void
+export function ConnectorRoomJoinLink({ submitted, operation, pending, canContinue, onCreate, onInspect, onContinue, onRegenerate }: {
+  submitted: boolean; operation: RoomLinkOperation | null; pending: boolean; canContinue: boolean; onCreate(): void; onInspect(): void; onContinue(): void; onRegenerate(): void
 }) {
   const [feedback, setFeedback] = useState('')
   const link = operation?.state === 'confirmed' ? operation.link : null
@@ -26,6 +26,7 @@ export function ConnectorRoomJoinLink({ submitted, operation, pending, canContin
           <p className="agent-connector-note">Valid until {new Date(link.expiresAtUnixSeconds * 1000).toLocaleString()}</p></> : null}
         <button className="agent-connector-text-action" disabled={pending} onClick={onInspect}>Check link status</button>
         {canContinue ? <button className="small-button" disabled={pending} onClick={onContinue}>Save and continue</button> : null}
+        {operation?.state === 'confirmed' || operation?.state === 'refused' ? <button className="small-button" disabled={pending} onClick={onRegenerate}>Generate a new join link</button> : null}
         <details className="agent-connector-disclosure"><summary>Join link receipt</summary><div className="agent-connector-fields">
           {operation ? <><span>{operation.input.externalConversationId}</span><code>{operation.operationId}</code><span>{operation.state}{operation.state === 'refused' ? ' · ' + operation.reason : ''}</span></> : <span>The original operation is kept. Its result is unknown.</span>}
         </div></details>
