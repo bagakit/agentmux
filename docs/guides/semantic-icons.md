@@ -12,7 +12,7 @@ pnpm icons:dev
 
 打开命令输出的地址即可浏览当前源码目录、搜索功能与语义 ID、比较主题及编辑预览。开发服务监听原目录、字形、共享呈现和消费源码；变更后自动刷新，浏览器草稿按原语义身份恢复。默认固定 loopback 端口，端口占用时明确报错；可用 `pnpm icons:dev --port 4187` 指定另一端口，或加 `--open` 在系统浏览器打开。不同 origin 的草稿不共享，可用页面导入/导出迁移。
 
-先找相同产品含义，再选 `SemanticIconId`。两个含义恰好使用相同图形时仍保留各自身份。例如历史记录使用 `object.activity`，当前产出使用 `status.working`。页面中的源码引用只用于定位消费，动态前缀候选不证明实际覆盖或运行事实。
+先找相同产品含义，再选 `SemanticIconId`。两个含义恰好使用相同图形时仍保留各自身份。例如历史记录使用 `object.activity`，当前产出使用 `status.working`。恢复原 Session 用 `action.resume-session`，重启终端用 `action.restart-terminal`，恢复默认配置用 `action.restore-defaults`；这三种操作分别定制，不能因为都有“恢复”字样就共用一个 ID。Topic、Tab、Zone、Region 也各有对象身份。页面中的源码引用只用于定位消费，动态前缀候选不证明实际覆盖或运行事实。
 
 ## 在产品中使用
 
@@ -49,7 +49,7 @@ container.append(node)
 ## 添加新含义或新图形
 
 1. 先检查 [SEMANTIC_ICON_CATALOG](../../packages/client-ui/src/theme/icon-catalog.ts)。只有新的产品含义才新增稳定 ID，并填写准确 `label` 与默认 `glyph`；复用现有类别前缀。不要为尺寸、颜色或动画新增 ID。
-2. 默认图形已在库中时直接引用 `IconGlyphId`。确需项目自绘时，在 [AUTHORED_ICON_GLYPHS](../../packages/client-ui/src/theme/icon-authored.ts) 登记数据式 24 单位 SVG 几何，核对静态单色、小尺寸、主题笔触与授权来源；原 [ICON_GLYPHS](../../packages/client-ui/src/theme/icon-glyphs.ts) 自动聚合库字形与自绘，并派生完整类型。不要在业务组件粘贴第二份路径，也不要手工维护工作台的自绘名单。
+2. 默认图形已在库中时直接引用 `IconGlyphId`。确需项目自绘时，在 [AUTHORED_ICON_GLYPHS](../../packages/client-ui/src/theme/icon-authored.ts) 登记数据式 24 单位 SVG 几何，核对静态单色、小尺寸、主题笔触与授权来源；原 [ICON_GLYPHS](../../packages/client-ui/src/theme/icon-glyphs.ts) 自动聚合库字形与自绘，并派生完整类型。同族使用一致的轮廓尺度、端点和留白；对象先画可辨轮廓，动作增加最少的方向或操作提示，避免用装饰、字面谐义或另一操作的惯用符号代替语义。不要在业务组件粘贴第二份路径，也不要手工维护工作台的自绘名单。
 3. [getSemanticIconCatalog](../../packages/client-ui/src/theme/icon-catalog-metadata.ts) 从目录派生元数据；只有新增类别或上下文描述时才修改其分组信息。`SemanticIconId`、glyph ID 类型也从原目录派生，无须另写 ID 清单。
 4. 接到真实产品调用方并检查内置主题的显式覆盖。目录默认、主题覆盖和本次实例呈现分别由各自 owner 持有；主题文件中的 `icons[id]` 可选择登记 glyph 或合法 paths，解析与导出沿原 [schema](../../packages/client-ui/src/theme/schema.ts)。
 5. 在工作台核对新语义、默认图形、浅深主题与实际小尺寸，再在真实消费界面核对含义、对齐及状态变化。测试与变异沿[测试策略](../testing/strategy.md#任务验收与假绿防护)，视觉改动沿[看图验收](agent-visual-e2e-review.md)。
