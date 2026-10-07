@@ -43,12 +43,10 @@ export function searchAgentMuxMetadata(query: string, input: AgentMuxSearchMetad
     ? fact[target.kind].has(targetId(target))
     : [...fact.agent, ...fact.region, ...fact.tab, ...fact.space, ...fact.zone, ...fact.ids].some(id => id.includes(raw)) || fact.text.some(value => value.toLocaleLowerCase().includes(text))))
   const agents = new Map<string, Identity>()
-  const hostsBySession = new Map<string, Set<string>>()
   const agent = (id: string, host: string, kind: 'agent' | 'terminal' = 'agent') => {
     const key = JSON.stringify([host, kind, id]); let fact = agents.get(key)
     if (!fact) {
       fact = identity(); add(fact.ids, id); agents.set(key, fact)
-      if (kind === 'agent') { const hosts = hostsBySession.get(id) ?? new Set<string>(); hosts.add(host); hostsBySession.set(id, hosts) }
     }
     return fact
   }
@@ -112,8 +110,7 @@ export function searchAgentMuxMetadata(query: string, input: AgentMuxSearchMetad
       const space = spaces.get(id); add(fact.space, id); add(fact.ids, space?.projectId, space?.topicId); fact.text.push(space?.name ?? '')
     }
     const occurrences = locationsByRegion.get(JSON.stringify([region.tabId, region.regionId])) ?? []
-    const hosts = region.agentSessionId ? hostsBySession.get(region.agentSessionId) : undefined
-    const host = region.execution?.hostId ?? (hosts?.size === 1 ? hosts.values().next().value : undefined)
+    const host = region.execution?.hostId
     const row = region.agentSessionId && host !== undefined ? agents.get(JSON.stringify([host, 'agent', region.agentSessionId])) : undefined
     if (row) for (const key of ['agent', 'region', 'tab', 'space', 'zone', 'ids'] as const) for (const id of fact[key]) row[key].add(id)
     if (row) for (const location of occurrences) add(row.ids, location.workspaceId, location.displayWorkspaceId, location.groupId)

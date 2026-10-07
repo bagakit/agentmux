@@ -7,6 +7,16 @@ import { focusProjectKey, type FocusProjectLane, type FocusRetainedProject } fro
 export const focusSearchContextKey = agentMuxSearchSessionKey
 export type FocusSearchLocation = AgentMuxSearchLocation
 
+/** The structural catalog has no execution authority. Read each original Agent
+ * Region once at the surface; unknown stays unknown, independent of SID count. */
+export function focusSearchCatalog(catalog: AgentMuxSpaceCatalog, executionFor: (reference: {
+ tabId: string; regionId: string; agentSessionId: string
+}) => AgentMuxSpaceCatalog['regions'][number]['execution']): AgentMuxSpaceCatalog {
+ return { ...catalog, regions: catalog.regions.map(region => region.kind === 'agent' && region.agentSessionId
+  ? { ...region, execution: executionFor({ tabId: region.tabId, regionId: region.regionId, agentSessionId: region.agentSessionId }) }
+  : region) }
+}
+
 /** Adapt already observed client facts; Core owns every matching and identity rule. */
 export function searchFocus(query: string, input: {
  rows: readonly FocusContext[]; lanes: readonly FocusProjectLane[]; catalog: AgentMuxSpaceCatalog
