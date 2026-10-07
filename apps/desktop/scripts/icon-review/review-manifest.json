@@ -1,0 +1,65 @@
+{
+  "page_id": "agentmux-icon-matrix",
+  "scene": "human-evidence-review",
+  "template_id": "evidence-review-console",
+  "explanation_foundation": "native",
+  "operator_mode": "reviewer",
+  "review_mode": "adjudication",
+  "reveal_policy": "source facts and agent-authored descriptions visible; no agent verdict supplied",
+  "primary_interaction_surface": "page",
+  "feedback_transport": "manual_round_trip",
+  "projection_contract_ref": "agentmux.icon-review.v1",
+  "projection_version": 2,
+  "mechanisms": [
+    "case-inventory",
+    "human-judgment-guidance",
+    "result-capture",
+    "evidence-context",
+    "local-session-state",
+    "interaction-result-packet"
+  ],
+  "style": "ide-verification-console",
+  "components": [
+    "category-directory",
+    "glyph-gallery",
+    "semantic-matrix",
+    "role-inspector",
+    "glyph-picker",
+    "draft-store",
+    "copy-result-control"
+  ],
+  "artifacts": [
+    "case-catalog",
+    "page-manifest",
+    "report-export",
+    "agent-handoff-packet"
+  ],
+  "data_contract_refs": [
+    "agentmux.icon-review.v1",
+    "catalog.json"
+  ],
+  "runtime_assumptions": [
+    "Pageville loopback host",
+    "browser localStorage",
+    "self-contained assets; no external requests"
+  ],
+  "known_limitations": [
+    "浏览器草稿和主题预览只作用在此页；导出后手动导入设置",
+    "源码引用是构建时静态线索，不是 Runtime 状态或完整动态调用证明"
+  ],
+  "history_retention_policy": "append-only user edit events; original source snapshot preserved; reset is an explicit revert event",
+  "evaluation_contract_id": "icon-semantic-review",
+  "evaluation_contract_version": 1,
+  "decision_question": "Does this icon communicate this exact semantic role; what icon, function, meaning or note should change?",
+  "downstream_effect": "Export proposes exact semantic-ID edits; agent acts only on later authorized implementation request.",
+  "information_architecture": "Left categories; center visual gallery or semantic matrix; right one role's source evidence and editable proposal. Source details progressive disclosure.",
+  "workflow": "Find icon → choose semantic role → change fields → local saved signal → copy/download canonical packet. Import can resume the same page.",
+  "control_surface_map": "Header: import/copy/export. Center: search/category filter/modified filter/gallery-vs-matrix. Inspector: role selector, glyph picker, 3 text fields, per-role restore. Draft drawer: global restore with confirm. No duplicate view switch.",
+  "reference_intent": "direct_execute; data_context = current SVG geometry and semantic catalog; host_context = existing AgentMux Graphite/Mint system typography and density. No generated image required.",
+  "visual_decomposition": "Neutral warm light shell, dark graphite text, muted mint selection with check marker, narrow-radius controls, clear row baselines, generous central real SVG preview. No marketing cards or decorative charts.",
+  "frontend_architecture": "原静态HTML/CSS/JS + 项目共享catalog/native projection/theme runtime/schema；Vite构建，无独立图标映射owner。",
+  "capability_route": "Reuse project's own glyph geometry. Native input/dialog/select and DOM; no new framework or dependencies.",
+  "mobile_interaction_plan": "Single-pane inventory; categories via select; details as modal full-height sheet with labeled close. Minimum 40px controls; no horizontal page overflow; picker single overlay with searchable icon grid.",
+  "hardening": "Visible browser-local save/error state; source-backed glyphs and agent-generated descriptions distinguished; failed copy uses export fallback; malformed imports validated before write; new source snapshot is surfaced without discarding drafts; histories exported; disabled storage keeps edits in memory and explicit export route.",
+  "public_capability_judgment": "复用原主题文件schema与Settings导入；任务内离线审阅页不新增JSON-RPC/CLI或保存owner。"
+}
