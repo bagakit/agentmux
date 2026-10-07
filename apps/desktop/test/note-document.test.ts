@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { type NoteDocument, newNoteDocument, readNoteDocument, serializeNoteDocument, NOTE_SCHEMA } from '../src/shared/note-document'
+import { readLegacyNoteDocument } from '@agentmux/client-ui/note/note-legacy-document'
+import { parseNoteWikiQuery } from '@agentmux/core/note-links'
 describe('canonical Note content schema', () => {
+  it('explicitly converts arbitrary former bound labels into readable editable queries without losing targets or occurrences', () => {
+    const original = newNoteDocument('', 'legacy-note', 'legacy-block')
+    original.content.content![0]!.content = [{ type: 'noteLink', attrs: { referenceId: 'original-reference', text: 'Literal [brackets] #', target: { noteId: 'original-target', blockId: 'exact-block' } } }]
+    const raw = JSON.stringify(original), converted = readLegacyNoteDocument(raw)
+    expect(converted.status).toBe('valid'); if (converted.status !== 'valid') throw Error(converted.message)
+    const bytes = serializeNoteDocument(converted.note), read = readNoteDocument(bytes)
+    expect(read.status).toBe('valid'); if (read.status !== 'valid') throw Error(read.message)
+    const link = read.note.content.content![0]!.content![0]!
+    expect(link.attrs).toMatchObject({ referenceId: 'original-reference', target: { noteId: 'original-target', blockId: 'exact-block' } })
+    expect(parseNoteWikiQuery(link.attrs!.text)).toEqual({ status: 'valid', query: { page: 'Literal [brackets] #' } })
+    expect(link.content![0]!.text).toBe(`[[${link.attrs!.text}]]`)
+    expect(JSON.stringify(original)).toBe(raw)
+  })
   it('keeps one body identity independent of its name and represents draft line breaks',()=>{
     const note=newNoteDocument('one\ntwo','note-id','block-id')
     expect(note).toEqual({schema:NOTE_SCHEMA,noteId:'note-id',content:{type:'doc',content:[{type:'paragraph',attrs:{blockId:'block-id'},content:[{type:'text',text:'one'},{type:'hardBreak'},{type:'text',text:'two'}]}]}})

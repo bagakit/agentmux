@@ -173,6 +173,8 @@ it('converts two original JSON Notes before the executable CLI reads, edits and 
   expect(finalNote.note.noteId).toBe(source.noteId)
   expect(finalNote.note.content.content!.map(block => block.attrs!.blockId)).toEqual(['source-block', 'pinned-block', 'original-embed-block'])
   expect(finalNote.note.content.content![1]!.content![1]!.attrs).toEqual({ referenceId: 'original-inline-ref', text: 'Target finding', target: boundTarget })
+  expect(finalNote.note.content.content![1]!.content![1]!.content).toEqual([{ type: 'text', text: '[[Target finding]]' }])
+  expect(finalMd).toContain('[[Target finding]]<!--amux-ref:original%2Dinline%2Dref;query=Target%20finding;target=note:target%2Dnote#target%2Dblock-->')
   expect(finalNote.note.content.content![2]!.attrs).toMatchObject({ blockId: 'original-embed-block', referenceId: 'original-embed-ref', mode: 'embed', target: boundTarget })
   const graph = await cli('notebook.graph', ['notebook', 'graph', '--note', source.noteId])
   expect(graph.completeness).toBe('complete'); expect(graph.references).toHaveLength(2)

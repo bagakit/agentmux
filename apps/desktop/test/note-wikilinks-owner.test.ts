@@ -1,3 +1,4 @@
+import { noteInlineLinkContent } from '@agentmux/client-ui/note/note-wikilinks'
 import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
@@ -98,6 +99,34 @@ it('keeps stable bound IDs through title and heading changes instead of retarget
   expect((await f.services.owner.graph(await f.store.read(), {})).references[0]!.resolution).toBe('missing')
 })
 
+it('releases the old exact ID when source wiki text changes and saves the new relation through the original CLI writer', async () => {
+  const f = await fixture(); await f.add('second', 'Second')
+  await f.save('[[Research]] and [[Source #^source-block]]')
+  const before = await f.cli(['file', 'read', '--zone', 'original-zone', '--path', 'source.note.md', '--host', 'local', '--workspace', 'notes', '--workspace-path', f.root])
+  const source = before.result.document.content as string
+  expect(source).toContain('[[Research]]<!--amux-ref:'); expect(source).toContain(';query=Research;target=note:target-->')
+  const original = nodes(parsed(source), 'noteLink'), edited = source.replace('[[Research]]', '[[Second]]')
+  const changed = nodes(parsed(edited), 'noteLink')
+  expect(changed[0]!.attrs!.target).toBeNull(); expect(changed[0]!.attrs!.referenceId).toBe(original[0]!.attrs!.referenceId)
+  expect(changed[1]!.attrs!.target).toEqual({ noteId: 'source', blockId: 'source-block' })
+  const receipt = await f.cli(['file', 'write', '--zone', 'original-zone', '--path', 'source.note.md', '--resource', JSON.stringify(before.resource), '--expected-revision', before.result.document.revision], edited)
+  expect(receipt.result.status).toBe('written')
+  expect(nodes(parsed(receipt.result.content), 'noteLink').map(node => node.attrs!.target)).toEqual([{ noteId: 'second' }, { noteId: 'source', blockId: 'source-block' }])
+  const graph: NotebookGraph = await f.cli(['notebook', 'graph', '--note', 'source'])
+  expect(graph.references.map(reference => reference.target)).toEqual([{ kind: 'page', noteId: 'second' }, { kind: 'block', noteId: 'source', blockId: 'source-block' }])
+  expect(graph.references.map(reference => reference.occurrence.kind === 'stored' && reference.occurrence.referenceId)).toEqual(original.map(node => node.attrs!.referenceId))
+})
+
+it('reads original bound Markdown without losing its identity and writes only readable wiki syntax', () => {
+  const source = '---\nschema: agentmux.note.md.v1\nnote-id: original\n---\n\nBefore [Former title](note:kept%2Dnote#kept%2Dblock)<!--amux-ref:kept%2Doccurrence--> after ^kept%2Dparagraph\n'
+  const read = parsed(source), link = nodes(read, 'noteLink')[0]!
+  expect(link).toMatchObject({ attrs: { referenceId: 'kept-occurrence', text: 'Former title', target: { noteId: 'kept-note', blockId: 'kept-block' } }, content: [{ type: 'text', text: '[[Former title]]' }] })
+  const canonical = json(read)
+  expect(canonical).toContain('[[Former title]]<!--amux-ref:kept%2Doccurrence;query=Former%20title;target=note:kept%2Dnote#kept%2Dblock-->')
+  expect(canonical).not.toContain('[Former title](note:')
+  expect(nodes(parsed(canonical), 'noteLink')[0]).toEqual(link)
+})
+
 it('preserves a cross-mark token starting format through the actual writer without inheriting its unrelated bold prefix', async () => {
   const f = await fixture(), source = await f.files.read(f.workspace, 'source.note.md'); if (source.status !== 'read') throw Error('Original source unavailable')
   const note = newNoteDocument('', 'source', 'source-block')
@@ -188,7 +217,7 @@ it('uses the actual Renderer/preload/Main resolver transport and cancels only it
 it('resolves the complete visible heading and block excerpt including inline atom text through the original owner and CLI', async () => {
   const f = await fixture()
   f.target.content.content!.push({ type: 'heading', attrs: { blockId: 'linked-heading', level: 2 }, content: [
-    { type: 'text', text: 'Before ' }, { type: 'noteLink', attrs: { referenceId: 'heading-label-link', text: 'Source', target: { noteId: 'source' } } }, { type: 'text', text: ' after' }
+    { type: 'text', text: 'Before ' }, noteInlineLinkContent({ referenceId: 'heading-label-link', text: 'Source', target: { noteId: 'source' } }), { type: 'text', text: ' after' }
   ] })
   await writeFile(join(f.root, 'target.note.md'), json(f.target))
   const result = await f.cli(['notebook', 'resolve', '--link', '[[Research #Before \\[\\[Source\\]\\] after]]'])

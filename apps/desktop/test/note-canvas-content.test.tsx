@@ -1,6 +1,7 @@
 import { recordMarkdownProvenance } from './helpers/note-markdown-provenance'
 import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { noteInlineLinkContent } from '@agentmux/client-ui/note/note-wikilinks'
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { EventEmitter } from 'node:events'
@@ -33,9 +34,9 @@ const body = (id: string, text: string, references = false) => serializeNoteDocu
     ...[0, 1, 2].map(index => ({ type: 'blockReference', attrs: { blockId: 'source-reference-' + index, referenceId: 'original-reference-' + index, mode: index === 2 ? 'embed' : 'reference', target: { noteId: 'target', blockId: 'target-block' } } })),
     { type: 'paragraph', attrs: { blockId: 'source-inline' }, content: [
       { type: 'text', text: 'Original closed source links to ' },
-      { type: 'noteLink', attrs: { referenceId: 'page-link', text: 'Original target', target: { noteId: 'target' } } },
+      noteInlineLinkContent({ referenceId: 'page-link', text: 'Original target', target: { noteId: 'target' } }),
       { type: 'text', text: ' and ' },
-      { type: 'noteLink', attrs: { referenceId: 'heading-link', text: 'Original target #Heading', target: { noteId: 'target', blockId: 'target-block' } } },
+      noteInlineLinkContent({ referenceId: 'heading-link', text: 'Original target #Heading', target: { noteId: 'target', blockId: 'target-block' } }),
       { type: 'text', text: ' plus [[Unconfirmed page]]' },
     ] },
   ] : []

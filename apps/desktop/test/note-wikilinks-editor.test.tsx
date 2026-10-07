@@ -1,3 +1,4 @@
+import { noteInlineLinkContent } from '@agentmux/client-ui/note/note-wikilinks'
 import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { fixtureEpoch as _tailRefreshFixtureEpoch, fixturePath as _tailRefreshFixturePath } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
@@ -37,6 +38,7 @@ function editor(): Editor { return host.querySelector<HTMLElement & { editor: Ed
 async function type(text: string) { await act(async () => { editor().view.focus(); editor().commands.insertContent(text) }) }
 async function key(key: string, extra: KeyboardEventInit = {}) { await act(async () => editor().view.dom.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra }))) }
 function links() { const list: any[] = []; editor().state.doc.descendants(node => { if (node.type.name === 'noteLink') list.push(node.attrs) }); return list }
+function linkPosition(index = 0) { const positions: number[] = []; editor().state.doc.descendants((node, pos) => { if (node.type.name === 'noteLink') { positions.push(pos); return false } }); return positions[index]! }
 async function waitOptions() { await vi.waitFor(async () => { await act(async () => {}); expect(host.querySelector('[role="option"]')).not.toBeNull() }) }
 
 it('converts actual typed and plain pasted wiki syntax while preserving original blocks and canonical identity', async () => {
@@ -59,6 +61,97 @@ it('uses real keyboard completion and undo without rewriting surrounding text or
   await act(async () => editor().commands.undo())
   expect(links()).toHaveLength(0); expect(editor().getText()).toContain('[[Sha')
   expect(editor().getJSON().content![0]!.attrs!.blockId).toBe('source-block')
+})
+
+it('edits a saved binding as ordinary text, releases only its target, and undoes the actual query change', async () => {
+  vi.mocked(api.notebooks.resolve).mockImplementation(() => new Promise(() => {}))
+  const note = newNoteDocument('Lead ', 'source', 'source-block')
+  note.content.content![0]!.content!.push(noteInlineLinkContent({ referenceId: 'original-occurrence', text: 'Old title', target: { noteId: 'original-page', blockId: 'original-block' } }), { type: 'text', text: ' tail' })
+  await mount(<Harness note={note} />)
+  const link = host.querySelector('[data-note-inline-link]')!
+  expect(link.querySelector('[contenteditable="false"]')).toBeNull()
+  expect(link.querySelector('[data-node-view-content]')?.textContent).toBe('[[Old title]]')
+  const start = linkPosition() + 3
+  await act(async () => { editor().view.focus(); editor().commands.setTextSelection({ from: start, to: start + 'Old title'.length }); editor().commands.insertContent('New title') })
+  expect(editor().getText()).toBe('Lead [[New title]] tail')
+  expect(links()).toEqual([{ referenceId: expect.any(String), text: 'New title', target: null }])
+  expect(links()[0].referenceId).not.toBe('original-occurrence')
+  expect(latest).toContain('[[New title]]<!--amux-ref:')
+  expect(latest).not.toContain('target=note:original')
+  await act(async () => editor().commands.undo())
+  expect(editor().getText()).toBe('Lead [[Old title]] tail')
+  expect(links()[0]).toEqual({ referenceId: 'original-occurrence', text: 'Old title', target: { noteId: 'original-page', blockId: 'original-block' } })
+  await act(async () => editor().commands.redo())
+  expect(editor().getText()).toBe('Lead [[New title]] tail'); expect(links()[0].target).toBeNull()
+  await act(async () => editor().view.dispatch(editor().state.tr.delete(linkPosition() + 1, linkPosition() + 2)))
+  expect(links()).toHaveLength(0); expect(editor().getText()).toBe('Lead [New title]] tail')
+  expect(readNoteDocument(latest).status).toBe('valid')
+})
+
+it('rejects late binding results across query A to B to A while preserving the newest occurrence', async () => {
+  const requests: { text: string; signal: AbortSignal | undefined; finish(result: NotebookResolveResult): void }[] = []
+  vi.mocked(api.notebooks.resolve).mockImplementation((params, options) => params.mode === 'search' ? Promise.resolve(search(params.query)) : new Promise(resolve => { requests.push({ text: params.text, signal: options?.signal, finish: resolve }) }))
+  await mount(); await type('[[First]]')
+  await vi.waitFor(() => expect(requests).toHaveLength(1))
+  const original = links()[0].referenceId
+  async function replaceQuery(text: string) { await act(async () => editor().commands.insertContentAt({ from: linkPosition() + 3, to: linkPosition() + 1 + editor().state.doc.nodeAt(linkPosition())!.content.size - 2 }, text)) }
+  await replaceQuery('Second'); await vi.waitFor(() => expect(requests).toHaveLength(2))
+  expect(requests[0]!.signal?.aborted).toBe(true)
+  await replaceQuery('First'); await vi.waitFor(() => expect(requests).toHaveLength(3))
+  expect(links()[0].referenceId).not.toBe(original)
+  await act(async () => requests[0]!.finish(lookup('First')))
+  expect(links()[0].target).toBeNull()
+  await act(async () => requests[2]!.finish({ ...lookup('First'), result: { status: 'resolved', target: { noteId: 'latest-target', blockId: 'latest-block' } } } as NotebookResolveResult))
+  expect(links()[0].target).toEqual({ noteId: 'latest-target', blockId: 'latest-block' })
+})
+
+it('coalesces ordinary query keystrokes and cancels only their superseded lookup generation', async () => {
+  vi.mocked(api.notebooks.resolve).mockImplementation(() => new Promise(() => {}))
+  const note = newNoteDocument('', 'source', 'source-block')
+  note.content.content![0]!.content = [noteInlineLinkContent({ referenceId: 'initial', text: 'Start', target: { noteId: 'previous' } })]
+  await mount(<Harness note={note} />)
+  await act(async () => {
+    const from = linkPosition() + 3
+    editor().commands.insertContentAt({ from, to: from + 5 }, 'T')
+    editor().commands.insertContentAt(from + 1, 'a')
+    editor().commands.insertContentAt(from + 2, 'rget')
+  })
+  await vi.waitFor(() => expect(api.notebooks.resolve).toHaveBeenCalledTimes(1))
+  expect(vi.mocked(api.notebooks.resolve).mock.calls[0]![0]).toEqual({ mode: 'resolve', text: 'Target' })
+  expect(editor().getText()).toBe('[[Target]]')
+})
+
+it('keeps an active composition editable and cannot bind its stale precomposition query', async () => {
+  const requests: { finish(result: NotebookResolveResult): void }[] = []
+  vi.mocked(api.notebooks.resolve).mockImplementation(() => new Promise(resolve => { requests.push({ finish: resolve }) }))
+  await mount(); await type('[[Before]]'); await vi.waitFor(() => expect(requests).toHaveLength(1))
+  await act(async () => {
+    editor().view.dom.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+    editor().commands.insertContentAt({ from: linkPosition() + 3, to: linkPosition() + 3 + 'Before'.length }, '共同知识')
+  })
+  expect(editor().getText()).toBe('[[共同知识]]')
+  await act(async () => requests[0]!.finish(lookup('Before')))
+  expect(links()[0].target).toBeNull()
+  await act(async () => editor().view.dom.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '共同知识' })))
+  await vi.waitFor(() => expect(links()[0].text).toBe('共同知识'))
+  expect(links()[0].target).toBeNull(); expect(readNoteDocument(latest).status).toBe('valid')
+})
+
+it('uses actual plain paste inside saved wiki text and tokenizes later text after the expanded inline node', async () => {
+  vi.mocked(api.notebooks.resolve).mockImplementation(() => new Promise(() => {}))
+  const note = newNoteDocument('Before ', 'source', 'source-block')
+  note.content.content![0]!.content!.push(noteInlineLinkContent({ referenceId: 'bound', text: 'Original', target: { noteId: 'old' } }), { type: 'text', text: ' after ' })
+  await mount(<Harness note={note} />)
+  const transfer = new DataTransfer(); transfer.setData('text/plain', 'Pasted target')
+  await act(async () => {
+    editor().view.focus(); editor().commands.setTextSelection({ from: linkPosition() + 3, to: linkPosition() + 3 + 'Original'.length })
+    editor().view.dom.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }))
+  })
+  expect(editor().getText()).toBe('Before [[Pasted target]] after '); expect(links()[0].target).toBeNull()
+  await act(async () => editor().commands.setTextSelection(editor().state.doc.content.size - 1))
+  await type('[[Following]]')
+  expect(links().map(link => link.text)).toEqual(['Pasted target', 'Following'])
+  expect(readNoteDocument(latest).status).toBe('valid')
 })
 
 it('cancels suggestions without swallowing input, ignores code/escaped tokens, and leaves composition to IME', async () => {
@@ -120,7 +213,7 @@ it('shows same-title candidates separately and only confirms an explicitly chose
 
 it('renders stored and raw links through the real shared reader without minting or mutating source', async () => {
   const raw = newNoteDocument('Raw [[共享页面]] and ', 'reader-note', 'reader-block')
-  raw.content.content![0]!.content!.push({ type: 'noteLink', attrs: { referenceId: 'existing-occurrence', text: 'Old title', target: { noteId: 'original-id' } } })
+  raw.content.content![0]!.content!.push(noteInlineLinkContent({ referenceId: 'existing-occurrence', text: 'Old title', target: { noteId: 'original-id' } }))
   const source = serializeNoteDocument(raw), open = vi.fn()
   await mount(<NoteReader content={source} workspaceId="notes" path="reader.note.md" revision="saved-revision" onOpenLink={open} />)
   const literal = host.querySelector<HTMLElement>('[data-note-wiki-text]')!; expect(literal).not.toBeNull()

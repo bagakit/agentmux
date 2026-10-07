@@ -1,3 +1,4 @@
+import { noteInlineLinkContent } from '@agentmux/client-ui/note/note-wikilinks'
 // @vitest-environment happy-dom
 import { fixtureEpoch as _newTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { act } from 'react'
@@ -135,7 +136,7 @@ it('assigns a new occurrence identity on author paste without changing the origi
   await dom.render(<NoteBlockEditor note={note} knowledge={noteKnowledge([])} onChange={onChange} onIssue={issue} onSave={()=>{}} onOpen={()=>{}} />)
   const editor=(dom.container.querySelector('.note-block-content') as HTMLElement&{editor:Editor}).editor
   expect(onChange).not.toHaveBeenCalled()
-  await expect(act(async()=>{editor.commands.insertContentAt(10,{type:'noteLink',attrs:{referenceId:null,text:'Original target',target:{noteId:'target',blockId:'exact'}}})})).resolves.toBeUndefined()
+  await expect(act(async()=>{editor.commands.insertContentAt(10,{...noteInlineLinkContent({referenceId:'pasted',text:'Original target',target:{noteId:'target',blockId:'exact'}}),attrs:{referenceId:null,text:'Original target',target:{noteId:'target',blockId:'exact'}}})})).resolves.toBeUndefined()
   expect(onChange).toHaveBeenCalled()
   const read=readNoteDocument(onChange.mock.lastCall![0]);expect(read.status).toBe('valid');if(read.status!=='valid')throw Error(read.message)
   expect(read.note.content.content![0]!.attrs?.blockId).toBe('retained-block')
@@ -146,7 +147,7 @@ it('assigns a new occurrence identity on author paste without changing the origi
 it.each(['  leading and trailing  ', 'soft newline  \n  stays text', ' ', 'bold whitespace', 'query'])('preserves exact whitespace and inline query characters (%s)',text=>{
  const note=newNoteDocument(text,'characters','exact-block')
  if(text==='bold whitespace')note.content.content![0]!.content=[{type:'text',text:' marked ',marks:[{type:'bold'},{type:'italic'}]}]
- if(text==='query')note.content.content![0]!.content=[{type:'noteLink',attrs:{referenceId:'query-id',text:'Page \\# literal *stars*',target:null}}]
+ if(text==='query')note.content.content![0]!.content=[noteInlineLinkContent({referenceId:'query-id',text:'Page \\# literal *stars*',target:null})]
  const bytes=serializeNoteDocument(note),read=readNoteDocument(bytes)
  expect(read.status,bytes+(read.status==='invalid'?read.message:'')).toBe('valid');if(read.status!=='valid')throw Error(read.message)
  expect(canonical(read.note)).toEqual(canonical(note))
