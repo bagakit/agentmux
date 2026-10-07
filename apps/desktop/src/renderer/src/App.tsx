@@ -587,7 +587,7 @@ function DesktopApp() {
                   <div className="eyebrow">Terminal-first agent workbench</div>
                   <h1>Bring a workspace.<br />Keep the agents visible.</h1>
                   <p>Add a local folder from the sidebar, or configure an SSH host and remote path.</p>
-                  <button className="primary-button" onClick={() => setSettingsRoute({ section: 'hosts' })}>Configure a host</button>
+                  <button className="primary-button" onClick={() => openSettings('hosts')}>Configure a host</button>
                 </section>
               ) : null}
               {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface onSelectReference={selectSurveyReference} visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} viewTargets={viewTargets}
