@@ -84,6 +84,7 @@
 @import '@agentmux/client-ui/styles/conversation-tool-trace.css';
 @import '@agentmux/client-ui/styles/conversation-tool-payload.css';
 @import '@agentmux/client-ui/styles/content-copy.css';
+@import '@agentmux/client-ui/styles/conversation-trace-feedback.css';
 @import '@agentmux/client-ui/styles/conversation-native-thread.css';
 @import '@agentmux/client-ui/styles/conversation-metrics.css';
 @import './workflow.css';
