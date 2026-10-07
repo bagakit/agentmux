@@ -9,6 +9,10 @@
 .note-source-choices .note-backlink { padding: 10px 12px; border-radius: var(--radius-sm); }
 .note-source-choices .note-backlink:hover, .note-source-choices .note-backlink:focus-visible { background: var(--surface-2); }
 .note-source-choices .note-backlink span { overflow-wrap: anywhere; }
+.note-conversion-backup { flex: none; padding: 6px 16px; border-bottom: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-meta); }
+.note-conversion-backup summary { cursor: pointer; }
+.note-conversion-backup__content { max-height: 240px; overflow: auto; padding-top: 8px; color: var(--text-2); }
+.note-conversion-backup__content code, .note-conversion-backup__content pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .note-directory-sources { flex: none; width: 100%; max-width: var(--note-content-width, 760px); margin: 0 auto; padding: var(--sp-3) var(--sp-8); color: var(--text-2); font-size: var(--fs-meta); }
 .note-directory-sources summary { cursor: pointer; }
 .note-directory-sources summary span { margin-left: 8px; color: var(--text-3); }

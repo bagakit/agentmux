@@ -8246,7 +8246,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const document = state.documents[key], drafts = state.retainedDocumentDrafts[key]
       if (!document || !drafts?.length) return state
       const [selected, ...remaining] = drafts
-      return { documents: { ...state.documents, [key]: { ...document, content: selected!.content } },
+      return { documents: { ...state.documents, [key]: { ...document, content: selected!.content,
+        ...(selected!.noteConversion ? { noteConversion: selected!.noteConversion } : {}) } },
         retainedDocumentDrafts: { ...state.retainedDocumentDrafts, [key]: [...remaining, document] },
         dirtyDocuments: { ...state.dirtyDocuments, [key]: true },
         documentGenerations: { ...state.documentGenerations, [key]: (state.documentGenerations[key] ?? 0) + 1 } }

@@ -8,7 +8,9 @@ import type { NotesStorageSnapshot } from '@agentmux/core/notebook-store'
 /** Alternate buffers are user input, independent of any observed disk revision. */
 export function RetainedDocumentDraftNotice({ tabId, surface }: { tabId: string; surface: FileWorkbenchSurface }) {
   const key = documentKey(surface.workspaceId, surface.path)
-  const count = useAppStore(state => state.retainedDocumentDrafts[key]?.length ?? 0)
+  const retainedDrafts = useAppStore(state => state.retainedDocumentDrafts[key])
+  const count = retainedDrafts?.length ?? 0
+  const retainedUnknown = retainedDrafts?.some(draft => draft.noteConversion?.unconfirmedWrite) ?? false
   const conversion = useAppStore(state => state.documents[key]?.noteConversion)
   const workspace = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === surface.workspaceId))
   const { active } = useWorkbenchBrowserPresentation()
@@ -36,8 +38,17 @@ export function RetainedDocumentDraftNotice({ tabId, surface }: { tabId: string;
   {observationIssue ? <p className="editor-file-notice" role="status">{observationIssue}</p> : null}{count ? <div className="editor-file-notice" role="status">
     <span>{count === 1 ? 'Another draft was kept after the directory changed.' : `${count} other drafts were kept after the directory changed.`} Choosing it keeps your current draft too. Save to write the selected draft.</span>
     <button type="button" className="small-button" onClick={() => useDraft(tabId, surface.regionId)}>Use kept draft</button>
-  </div> : null}{conversion ? <details className="editor-file-notice"><summary>Original draft before Markdown conversion</summary>
-    <div><code>{conversion.source.workspaceId} / {conversion.source.path} · {conversion.originalRevision}</code><pre>{conversion.originalContent}</pre>
-      {conversion.unconfirmedWrite ? <><p>This original save outcome remains unknown. Conversion and later saves do not confirm or replay it.</p><code>{conversion.unconfirmedWrite.expectedRevision}</code><pre>{conversion.unconfirmedWrite.content}</pre></> : null}
-    </div></details> : null}</>
+  </div> : null}
+  {conversion?.unconfirmedWrite || retainedUnknown ? <p className="editor-file-notice note-conversion-unknown" role="status">
+    The original save outcome remains unknown. Reading this file or saving later edits does not confirm or replay it. {conversion?.unconfirmedWrite ? 'Its original input is kept below.' : 'A kept draft contains its original input; choose Use kept draft to inspect it.'}
+  </p> : null}{conversion ? <>
+    <details className={`note-conversion-backup${conversion.wasDirty === true ? ' note-conversion-backup--unsaved' : ''}`}>
+      <summary>{conversion.wasDirty === true ? 'Unsaved draft kept before Markdown conversion' : conversion.wasDirty === false ? 'Backup before Markdown conversion' : 'Content kept before Markdown conversion'}</summary>
+      <div className="note-conversion-backup__content">
+        <p>{conversion.wasDirty === true ? 'This buffer had unsaved changes when it was converted. Its original content is kept here.' : conversion.wasDirty === false ? 'This is the original content kept during conversion. It does not indicate a failed conversion or unsaved changes.' : 'The original content is kept here. Whether it had unsaved changes at conversion time was not recorded.'}</p>
+        <code>{conversion.source.workspaceId} / {conversion.source.path} · {conversion.originalRevision}</code><pre>{conversion.originalContent}</pre>
+        {conversion.unconfirmedWrite ? <><p>Input from the unconfirmed original save</p><code>{conversion.unconfirmedWrite.expectedRevision}</code><pre>{conversion.unconfirmedWrite.content}</pre></> : null}
+      </div>
+    </details>
+  </> : null}</>
 }
