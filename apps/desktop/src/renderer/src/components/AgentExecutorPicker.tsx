@@ -58,7 +58,7 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
       </button> : null}
       {!executors.length ? <div className="agent-catalog__empty">No Agent is configured.
         {settings ? <button type="button" className="small-button" onClick={() => settings.open('agents')}>Configure an Agent</button> : ' Add one in Settings to launch here.'}
-      </div> : !available.length ? <div className="agent-catalog__empty">Configured Agent commands were not found on this host. Recheck after installation.</div> : null}
+      </div> : !available.length ? <div className="agent-catalog__empty">Configured executables are unavailable on this host. Check their configuration and unavailable details, then refresh.</div> : null}
     </div>
     {showUnavailable ? <div className="launcher-unavailable-agents">{unavailable.map(executor => <span key={executor.id} title={executor.detection?.detail}>
       <span inert aria-hidden="true"><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={14} /></span>
