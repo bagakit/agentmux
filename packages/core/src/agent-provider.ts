@@ -50,7 +50,6 @@ import type {
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryRecordContext,
   AgentSessionHistoryItem,
-  AgentProviderSessionQuestionReplyContext,
   AgentProviderSessionHistoryPage,
   AgentProviderSessionHistoryObservationContext,
   AgentSessionHistoryObservationHandle,
@@ -112,37 +111,6 @@ export type AgentProviderPreparedPromptTransport = Readonly<{
   verifyCurrentTransport(context: AgentProviderPromptExecutionContext): Promise<boolean>
 }>
 
-/** Ephemeral qualification from the existing screen owner, never a second input journal. */
-export type AgentInteractionTargetFrame = Readonly<{
-  run: Readonly<AgentMuxRunRef>
-  outputThroughByte: number
-  geometryRevision: number
-  evidenceGeneration: number
-}>
-
-export type AgentProviderInteractionResponseContext = AgentProviderPromptExecutionContext & Readonly<{
-  agentSessionId: string
-  run: Readonly<AgentMuxRunRef>
-  inputByte: number
-  signal: AbortSignal
-  observeTarget(inspect: (screen: AgentTerminalScreenSnapshot) => boolean): Promise<AgentInteractionTargetFrame>
-}>
-
-export type AgentProviderPreparedInteractionResponse = Readonly<{
-  plan: AgentMuxInteractionInputPlan
-  target: Readonly<{
-    agentSessionId: string
-    run: Readonly<AgentMuxRunRef>
-    requestId: string
-    nativeToolCallId: string
-    nativeSourceId: string
-    inputByte: number
-    frame: AgentInteractionTargetFrame
-  }>
-  inspectCurrentTarget(screen: AgentTerminalScreenSnapshot): boolean
-  /** Re-read the same native invocation/source immediately before a new input claim. */
-  verifyCurrentTarget(context: AgentProviderPromptExecutionContext): Promise<boolean>
-}>
 export type AgentProviderSessionStatusContext = AgentProviderPromptExecutionContext & { signal: AbortSignal }
 export type AgentProviderSessionStatusObservationContext = AgentProviderSessionStatusContext & {
   onStatus(status: AgentProviderSessionStatus): void
@@ -172,7 +140,6 @@ export type AgentProvider = {
   readSessionHistoryPage?(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage>
   readConversationChanges?(context: ProviderConversationChangesContext): Promise<ProviderConversationChangesPage>
   readSessionHistoryRecord?(context: AgentProviderSessionHistoryRecordContext): Promise<AgentSessionHistoryItem>
-  prepareSessionQuestionReply?(context: AgentProviderSessionQuestionReplyContext): Promise<string>
   observeSessionHistory?(context: AgentProviderSessionHistoryObservationContext): Promise<AgentSessionHistoryObservationHandle>
   /** Managed configuration is contributed by this object; null means the exact context is unavailable. */
   planManagedHooks?(context: AgentManagedHookPlanContext): AgentManagedHookPlan | null
@@ -182,7 +149,7 @@ export type AgentProvider = {
   buildResumeLaunch(context: AgentProviderResumeContext): AgentLaunchPlan
   buildForkLaunch?(context: AgentProviderForkContext): AgentLaunchPlan
   resolveLaunchArgv(selections: LaunchOptionSelection): string[]
-  planPromptInput(prompt: string, context?: { execution?: AgentPromptExecution; intent?: 'question-reply'; terminalScreen?: AgentTerminalScreenSnapshot }): AgentPromptInputPlan
+  planPromptInput(prompt: string, context?: { execution?: AgentPromptExecution }): AgentPromptInputPlan
   /** Provider owns native terminal decoding; unavailable refuses only this immediate operation. */
   inspectPromptExecution?(screen: AgentTerminalScreenSnapshot, strategy?: NonNullable<AgentCatalogEntry['capabilities']['promptExecution']>['immediate']): AgentPromptExecutionContext
   /** Complete current composer reason only; this observation never authorizes input. */
@@ -190,11 +157,6 @@ export type AgentProvider = {
   verifyPromptExecutionTransport?(context: AgentProviderPromptExecutionContext): Promise<boolean>
   preparePromptExecutionTransport?(context: AgentProviderPromptExecutionContext & { signal: AbortSignal }): Promise<AgentProviderPreparedPromptTransport | null>
   readPromptExecutionEvidence?(context: AgentProviderPromptExecutionContext): Promise<AgentPromptExecutionEvidence | null>
-  prepareInteractionResponse?(
-    context: AgentProviderInteractionResponseContext,
-    request: Readonly<AgentMuxInteractionRequest>,
-    response: Readonly<AgentMuxInteractionResponse>
-  ): Promise<AgentProviderPreparedInteractionResponse | null>
   observeSessionStatus?(context: AgentProviderSessionStatusObservationContext): Promise<{ dispose(): void }>
   planInteractionResponse(
     request: AgentMuxInteractionRequest,
@@ -222,7 +184,6 @@ export type AgentProviderDefinition = {
   readSessionHistoryPage?: (context: AgentProviderSessionHistoryContext) => Promise<AgentProviderSessionHistoryPage>
   readConversationChanges?: AgentProvider['readConversationChanges']
   readSessionHistoryRecord?: (context: AgentProviderSessionHistoryRecordContext) => Promise<AgentSessionHistoryItem>
-  prepareSessionQuestionReply?: (context: AgentProviderSessionQuestionReplyContext) => Promise<string>
   observeSessionHistory?: (context: AgentProviderSessionHistoryObservationContext) => Promise<AgentSessionHistoryObservationHandle>
   planManagedHooks?: (context: AgentManagedHookPlanContext) => AgentManagedHookPlan | null
   inspectHookActivation?: (context: AgentProviderHookActivationContext) => Promise<AgentProviderHookActivation>
@@ -238,13 +199,12 @@ export type AgentProviderDefinition = {
     prompt: string | undefined,
     args: readonly string[]
   ) => string[]
-  planPromptInput?: (prompt: string, context?: { execution?: AgentPromptExecution; intent?: 'question-reply'; terminalScreen?: AgentTerminalScreenSnapshot }) => AgentPromptInputPlan
+  planPromptInput?: (prompt: string, context?: { execution?: AgentPromptExecution }) => AgentPromptInputPlan
   inspectPromptExecution?: (screen: AgentTerminalScreenSnapshot, strategy?: NonNullable<AgentCatalogEntry['capabilities']['promptExecution']>['immediate']) => AgentPromptExecutionContext
   inspectPromptPreparationWait?: AgentProvider['inspectPromptPreparationWait']
   verifyPromptExecutionTransport?: (context: AgentProviderPromptExecutionContext) => Promise<boolean>
   preparePromptExecutionTransport?: AgentProvider['preparePromptExecutionTransport']
   readPromptExecutionEvidence?: (context: AgentProviderPromptExecutionContext) => Promise<AgentPromptExecutionEvidence | null>
-  prepareInteractionResponse?: AgentProvider['prepareInteractionResponse']
   observeSessionStatus?: (context: AgentProviderSessionStatusObservationContext) => Promise<{ dispose(): void }>
   interaction?: AgentTerminalInteractionProtocol
   posture?: PostureControlDeclaration
@@ -402,7 +362,6 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.verifyPromptExecutionTransport ? { verifyPromptExecutionTransport: definition.verifyPromptExecutionTransport } : {}),
     ...(definition.preparePromptExecutionTransport ? { preparePromptExecutionTransport: definition.preparePromptExecutionTransport } : {}),
     ...(definition.readPromptExecutionEvidence ? { readPromptExecutionEvidence: definition.readPromptExecutionEvidence } : {}),
-    ...(definition.prepareInteractionResponse ? { prepareInteractionResponse: definition.prepareInteractionResponse } : {}),
     ...(definition.observeSessionStatus ? { observeSessionStatus: definition.observeSessionStatus } : {}),
     ...(definition.discoverNativeSession ? { discoverNativeSession: definition.discoverNativeSession } : {}),
     ...(definition.listNativeSessions ? { listNativeSessions: definition.listNativeSessions } : {}),
@@ -410,7 +369,6 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.readConversationChanges ? { readConversationChanges: definition.readConversationChanges } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
     ...(definition.readSessionHistoryRecord ? { readSessionHistoryRecord: definition.readSessionHistoryRecord } : {}),
-    ...(definition.prepareSessionQuestionReply ? { prepareSessionQuestionReply: definition.prepareSessionQuestionReply } : {}),
     ...(definition.observeSessionHistory ? { observeSessionHistory: definition.observeSessionHistory } : {}),
     ...(definition.planManagedHooks ? { planManagedHooks: definition.planManagedHooks } : {}),
     ...(definition.inspectHookActivation ? { inspectHookActivation: definition.inspectHookActivation } : {}),

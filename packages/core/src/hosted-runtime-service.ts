@@ -15,7 +15,7 @@ import { decodeHostedValue, encodeHostedValue, hostedTransfer, AGENTMUX_HOSTED_T
 
 const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory', 'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource',
-  'clientPerformanceDiagnostics', 'respondAgentInteraction', 'inspectAgentInteractionOperation',
+  'clientPerformanceDiagnostics', 'respondAgentInteraction', 'inspectAgentInteractionOperation', 'replySessionQuestion',
   'listHostExecutors', 'configureHostExecutor',
   'readDeliveryAttempt', 'inspectAgentPromptSubmission', 'inspectAgentInput', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId',
   'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',

@@ -1622,7 +1622,6 @@ export async function registerIpc(args: {
   handleWithEvent('sessions:replyQuestion', async (event, session: AgentSessionControl,
     input: import('../shared/contracts.js').SessionQuestionReplyInput) => {
     assertManualPromptSenderTrusted(event.sender, args.window.webContents)
-    pauseUserProgress(session, 'Paused for your question reply.')
     return await args.runtime.replyQuestion(session, input, config)
   })
   handle('sessions:submitMessage', async (session: AgentSessionControl, message: Parameters<RuntimeController['submitMessage']>[1]) => sessionInputWriteResult(async () => {
