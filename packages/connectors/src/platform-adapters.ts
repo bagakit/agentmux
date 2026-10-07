@@ -1,5 +1,6 @@
 import { AgentMuxError } from '@agentmux/core'
 import type { ConnectionAdapter } from './connection-host.js'
+import { FeishuPublicationAdapter } from './adapters/feishu/publication.js'
 
 /** Built-in leaves stay unloaded until the original Host tests or starts an enabled connection. */
 export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] {
@@ -10,6 +11,7 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
   })
   const adapter: ConnectionAdapter = {
     adapterId: 'feishu',
+    publication: new FeishuPublicationAdapter({ withClient: async (config, credential, call, signal) => (await feishu()).withClient(config, credential, call, signal) }),
     test: async (config, credential) => (await feishu()).test(config, credential),
     ingress: {
       adapterId: 'feishu',
