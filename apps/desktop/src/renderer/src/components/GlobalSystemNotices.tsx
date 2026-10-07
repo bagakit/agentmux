@@ -1,4 +1,4 @@
-import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { autoUpdate, computePosition, offset, shift, size, type VirtualElement } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { notificationEventIdentity, projectNotifications, useAppStore } from '../store'
@@ -13,7 +13,6 @@ import { agentLifecycleFailureNotice } from '../lib/agent-lifecycle-feedback'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { SettingsNavigation } from './SettingsNavigation'
 import { runtimeEndpointNotice } from '../lib/runtime-endpoint-notice'
-import { findWorkbenchRegion } from '../lib/workbench-tabs'
 
 const ThemeStatusUnreadIcon = semanticIconComponent('status.unread')
 const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
@@ -45,6 +44,9 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const desktopNavigationNotice = useAppStore(state => state.desktopNavigationNotice)
   const events = useAppStore(state => state.notificationEvents)
   const projection = projectNotifications(events)
+  const hasLaunchFailures = projection.current.some(record => record.context?.lifecycle?.step === 'launch')
+  const launcherTabs = useMemo(() => new Map(hasLaunchFailures
+    ? Object.values(tabs).flatMap(tab => Object.keys(tab.regions).map(regionId => [regionId, tab] as const)) : []), [tabs, hasLaunchFailures])
   const currentError = useAppStore(state => state.error)
   const errorDismissed = useAppStore(state => state.errorDismissed)
   const errorContext = useAppStore(state => state.errorNoticeContext)
@@ -229,11 +231,11 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
         }
         const subject = lifecycle?.step === 'resume' ? lifecycle.subject : record.context?.subject
         const session = subject?.kind === 'agent' ? sessionsByIdentity.get(JSON.stringify([subject.hostId, subject.agentSessionId])) : undefined
-        const launcher = lifecycle?.step === 'launch' ? findWorkbenchRegion(tabs, lifecycle.regionId) : null
+        const launcher = lifecycle?.step === 'launch' ? launcherTabs.get(lifecycle.regionId) : undefined
         const location = lifecycle?.step === 'launch'
-          ? `Region ${lifecycle.regionId} · ${launcher?.tab.name ?? (launcher ? 'New Tab' : 'Original location unavailable')}` : undefined
+          ? `Region ${lifecycle.regionId} · ${launcher?.name ?? (launcher ? 'New Tab' : 'Original location unavailable')}` : undefined
         const source = lifecycle?.step === 'launch'
-          ? `${location} · ${launcher ? 'Tab' : 'Reported Tab'} ${launcher?.tab.id ?? lifecycle.tabId}`
+          ? `${location} · ${launcher ? 'Tab' : 'Reported Tab'} ${launcher?.id ?? lifecycle.tabId}`
           : subject?.kind === 'agent' ? `Host ${subject.hostId} · Session ${subject.agentSessionId} · Run ${subject.run.runId}` : undefined
         return <NotificationItem key={record.id} noticeId={record.id} kind={notice.kind}
           title={location ? `${location} · ${notice.notice.step}` : notice.notice.step}
