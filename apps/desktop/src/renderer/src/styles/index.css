@@ -67,6 +67,7 @@
 @import './mote-context-status.css';
 @import './status-prompts.css';
 @import './agent-region-header.css';
+@import './agent-connector.css';
 @import './session-connecting.css';
 @import '@agentmux/client-ui/styles/composer.css';
 @import '@agentmux/client-ui/styles/input-history.css';
