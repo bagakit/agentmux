@@ -19,7 +19,7 @@ export async function deliverContinuousProgress(
   const condition = validateAgentPromptCondition(pending.condition)
   try {
     await runtime.submitPrompt({ kind: 'agent', agentSessionId: observation.session.agentSessionId,
-      hostId: observation.session.hostId, run: condition.expectedRun }, pending.prompt, operationId, condition,
+      hostId: loop.hostId, run: condition.expectedRun }, pending.prompt, operationId, condition,
     { ...(pending.futureIntent ? { futureIntent: pending.futureIntent } : { completionId: pending.id }),
       ...(pending.inputByte !== undefined ? { inputByte: pending.inputByte } : {}), isCurrent, signal },
     undefined, undefined, pending.agentMuxNote)
