@@ -150,7 +150,7 @@ it('global and lifecycle consumers retain their complete three facts, polite ARI
   expect(global.querySelector('.service-window__restore')!.textContent).toContain('Check your shell startup scripts')
   expect(global.getAttribute('aria-live')).toBe('polite')
   expect(container.querySelector('.notification-item__action')).toBeNull()
-  await act(async () => useAppStore.setState({ error: 'Original lifecycle cause', errorDismissed: false, errorNoticeContext: { kind: 'indeterminate', lifecycle: failure } }))
+  await act(async () => useAppStore.getState().reportError('Original lifecycle cause', { kind: 'indeterminate', lifecycle: failure }))
   const retry = vi.fn()
   await act(async () => root.render(<AgentLifecycleFeedback owner={{ subject: session.control }} retry={retry} />))
   const expected = agentLifecycleFailureNotice(failure, 'Original lifecycle cause')

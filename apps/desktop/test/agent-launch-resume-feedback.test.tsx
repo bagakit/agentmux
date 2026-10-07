@@ -416,6 +416,12 @@ it('keeps two actual Launcher failures and their Retry Start entries when ordina
   await vi.waitFor(() => expect(lifecycleNotice({ regionId: secondary.regionId })).toBeDefined())
   const second = lifecycleNotice({ regionId: secondary.regionId })!
   expectCurrent(first); expectCurrent(second)
+  const firstRow = currentNotificationRows(container).find(row => row.dataset.noticeId === first.id)!
+  const secondRow = currentNotificationRows(container).find(row => row.dataset.noticeId === second.id)!
+  expect(firstRow.querySelector('.notification-item__title')?.textContent).toContain(regionId)
+  expect(secondRow.querySelector('.notification-item__title')?.textContent).toContain(secondary.regionId)
+  expect(firstRow.textContent).toContain(`Tab ${launcherId}`)
+  expect(secondRow.textContent).toContain(`Tab ${secondary.tabId}`)
   expect(currentNotificationRows(container).filter(row => row.dataset.noticeId === first.id || row.dataset.noticeId === second.id)).toHaveLength(2)
   await act(async () => useAppStore.getState().reportError('Independent clipboard refusal'))
   expect(notificationEventRows(container)).toHaveLength(1)

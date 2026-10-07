@@ -2,6 +2,7 @@
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { createJSONStorage } from 'zustand/middleware'
 import { createWorkspaceLayout } from '@agentmux/layout'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 vi.mock('../src/renderer/src/components/WorkspaceWorkbench', () => ({ WorkspaceWorkbench: () => null }))
@@ -74,7 +75,7 @@ it('keeps repeated observations read while distinct subjects and Runs remain ind
   await act(async () => useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: original.control }))
   expect(notificationEventRows(container)).toHaveLength(1)
   expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts)
-  expect(receipts['global:events']?.[firstId]).toBe(firstId)
+  expect(receipts['global:events']?.[firstId]).toBe('read')
   expect(notificationTrigger(container).getAttribute('aria-label')).toBe('System notifications: 0 unread, 0 current, 1 recent events')
   await act(async () => {
     useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: healthy.control })
@@ -96,6 +97,50 @@ it('preserves acknowledged identities through a new window observation before th
   await act(async () => useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: original.control }))
   expect(notificationEventRows(container)).toHaveLength(1)
   expect(notificationTrigger(container).getAttribute('aria-label')).toBe('System notifications: 0 unread, 0 current, 1 recent events')
+})
+
+it('hydrates actual saved reading facts without persisting diagnostic bodies or reviving unread events', async () => {
+  const options = useAppStore.persist.getOptions()
+  const legacyId = JSON.stringify(['process-degraded', null, original.control.hostId, 'agent', original.id,
+    original.control.run.runId, null, null, null, diagnostic])
+  const saved = new Map([[options.name, JSON.stringify({ state: {
+    noticeReadReceipts: { 'global:events': { [legacyId]: legacyId } }
+  }, version: options.version })]])
+  useAppStore.persist.setOptions({ storage: createJSONStorage(() => ({
+    getItem: name => saved.get(name) ?? null,
+    setItem: (name, value) => { saved.set(name, value) }, removeItem: name => { saved.delete(name) }
+  }))! })
+  try {
+    await act(async () => { await useAppStore.persist.rehydrate() })
+    await act(async () => useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: original.control }))
+    const event = useAppStore.getState().notificationEvents[0]!
+    expect(notificationTrigger(container).getAttribute('aria-label')).toBe('System notifications: 0 unread, 0 current, 1 recent events')
+    expect(event.message).toBe(diagnostic)
+    expect(useAppStore.getState().noticeReadReceipts['global:events']?.[event.id]).toBe('read')
+    const persisted = saved.get(options.name)!
+    expect(persisted).not.toContain(diagnostic)
+    expect(JSON.parse(persisted).state).not.toHaveProperty('notificationEvents')
+    expect(event.id).toMatch(/^sha256:[a-f0-9]{64}$/)
+  } finally { useAppStore.persist.setOptions(options) }
+})
+
+it('hydrates an acknowledged native owner and keeps current failures through ordinary history clearing', async () => {
+  const options = useAppStore.persist.getOptions()
+  const context = { kind: 'indeterminate' as const, cause: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' as const, subject: original.control }
+  const canonical = JSON.stringify(['indeterminate', context.cause, original.control.hostId, 'agent', original.id,
+    original.control.run.runId, null, null, null, diagnostic])
+  const legacy = { 'global:workflow': { current: JSON.stringify([null, 'indeterminate', canonical]) } }
+  await act(async () => { useAppStore.setState(options.merge!({ noticeReadReceipts: legacy }, useAppStore.getState()), true) })
+  await act(async () => useAppStore.getState().reportError(diagnostic, context))
+  const owned = useAppStore.getState().notificationEvents[0]!
+  expect(currentNotificationRows(container).find(row => row.dataset.noticeId === owned.id)?.textContent).toContain(diagnostic)
+  expect(notificationTrigger(container).getAttribute('aria-label')).toBe('System notifications: 0 unread, 1 current, 0 recent events')
+  await act(async () => useAppStore.getState().reportError('Independent event after identity failure'))
+  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  await act(async () => useAppStore.getState().clearReadNotificationEvents())
+  expect(useAppStore.getState().notificationEvents).toEqual([owned])
+  expect(notificationEventRows(container)).toHaveLength(0)
+  expect(currentNotificationRows(container).find(row => row.dataset.noticeId === owned.id)).toBeDefined()
 })
 
 it('acknowledges and clears only read events while current problems, healthy Sessions, drafts and focus remain', async () => {
