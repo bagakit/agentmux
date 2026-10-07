@@ -38,6 +38,12 @@ match the reviewed values when it accepts approval. Managed
 Agents and devices cannot approve source trust. Opening a remote Agent never silently
 trusts a key or copies the caller capability to the target Host.
 
+Executor command is one literal executable name or path on the target Host; paths may
+contain spaces and must not be shell-quoted. Put launch arguments in the separate args
+array, preserving each argument, including empty strings. Do not put a whole shell command
+line in command. A missing executable reports the configured lookup failure, not proof that
+the software is uninstalled. Changing configuration affects subsequent launches, not healthy Runs.
+
 Executor refresh takes exact Executor and Host IDs and only checks availability. Available
 means a regular executable was found; missing means no usable executable; check-failed
 retains cause.code/message. It does not launch, stop, resume, save configuration or imply

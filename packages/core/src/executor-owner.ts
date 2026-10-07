@@ -1,3 +1,4 @@
+import { missingExecutableCause } from './executable-diagnostics.js'
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, mkdir, readFile, stat } from 'node:fs/promises'
@@ -88,7 +89,7 @@ async function probeCommand(config: AgentExecutorConfig, environment: NodeJS.Pro
     }
   }
   if (relative || unknown) return { availability: 'check-failed', cause: (relative ?? unknown)! }
-  return { availability: 'missing', ...(missing ? { cause: missing } : {}) }
+  return { availability: 'missing', cause: missing ?? missingExecutableCause(config.command) }
 }
 
 /** Durable Executor configurations belong to the semantic Host that will run them. */

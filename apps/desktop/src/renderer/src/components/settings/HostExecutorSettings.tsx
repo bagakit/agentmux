@@ -1,3 +1,5 @@
+import { missingExecutableLabel } from '../../lib/executor-detection'
+import { ExecutorLaunchPreview } from './ExecutorLaunchPreview'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -79,18 +81,22 @@ export function HostExecutorSettings({ config, active }: { config: AppConfig; ac
         <label><span>Executor ID</span><TextInput aria-label="Host Executor ID" value={executorId} onChange={event => setExecutorId(event.target.value)} /></label>
         <label><span>Name</span><TextInput aria-label="Host Executor name" value={label} onChange={event => setLabel(event.target.value)} /></label>
         <label><span>Provider</span><select aria-label="Host Executor Provider" value={providerId} onChange={event => setProviderId(event.target.value)}>{providers.map(provider => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>
-        <label><span>Command on this Host</span><TextInput aria-label="Host Executor command" placeholder="command or wrapper path" value={command} onChange={event => setCommand(event.target.value)} /></label>
-        <label><span>Arguments</span><ComposerTextarea aria-label="Host Executor arguments" value={args} onValueChange={setArgs} /></label>
+        <label><span>Executable on this Host</span><TextInput aria-label="Host Executor command" placeholder="executable name or absolute path" value={command} onChange={event => setCommand(event.target.value)} /></label>
+        <p className="settings-group-note">One executable name or path on this Host, without arguments or shell quotes. Paths may contain spaces.</p>
+        <label><span>Arguments <small>shell-style quoting</small></span><ComposerTextarea aria-label="Host Executor arguments" value={args} onValueChange={setArgs} /></label>
+        <ExecutorLaunchPreview command={command} args={args} />
         <label><span>Environment JSON</span><ComposerTextarea aria-label="Host Executor environment" value={env} onValueChange={setEnv} /></label>
       </div>
+      <div className="settings-host-executor-actions">
       <label className="agent-guide-toggle"><input type="checkbox" checked={guide} onChange={event => setGuide(event.target.checked)} /><span>Inject AgentMux guide</span></label>
       <button className="primary-button" disabled={saving} onClick={() => void register()}>{saving ? 'Saving…' : 'Register command'}</button>
+      </div>
     </section> : <div className="settings-resource-split">
       <SettingsResourceLibrary label="Host Executors" selectedId={selected} query={query} onQuery={setQuery} onSelect={setSelected} focusRequest={null}
         items={descriptors.filter(item => `${item.label} ${item.executorId} ${item.command}`.toLowerCase().includes(query.toLowerCase())).map(item => ({ id: item.executorId, name: item.label,
           detail: `${agentProviderLabel(item.providerId)} · ${item.executorId}`,
           mark: <AgentAvatar executorId={item.executorId} providerId={item.providerId} label={item.label} size={22} />,
-          status: <span>{inventory?.state === 'error' ? 'Check failed' : item.availability === 'available' ? 'Available' : item.availability === 'missing' ? 'Not found' : item.availability === 'check-failed' ? 'Check failed' : 'Not checked'}</span>
+          status: <span>{inventory?.state === 'error' ? 'Check failed' : item.availability === 'available' ? 'Available' : item.availability === 'missing' ? missingExecutableLabel(item.cause) : item.availability === 'check-failed' ? 'Check failed' : 'Not checked'}</span>
         }))} />
       <div className="settings-resource-editor">{selectedExecutor ? <section className="agent-settings-card"><header className="agent-settings-card__header"><AgentAvatar executorId={selectedExecutor.executorId} providerId={selectedExecutor.providerId} label={selectedExecutor.label} size={22} /><strong>{selectedExecutor.label}</strong></header>
         <dl className="settings-executor-identity"><div><dt>Host</dt><dd>{host?.label ?? hostId}</dd></div><div><dt>Command</dt><dd><code>{selectedExecutor.command}</code></dd></div><div><dt>Resolved executable</dt><dd><code>{selectedExecutor.executable ?? 'Not confirmed'}</code></dd></div><div><dt>Source</dt><dd>{selectedExecutor.source === 'registered' ? 'Registered on this Host' : 'Provider default'}</dd></div></dl>
