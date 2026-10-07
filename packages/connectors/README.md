@@ -675,6 +675,15 @@ certify live credentials, platform permissions or delivery to a real group.
 
 ## Application enrollment
 
+Desktop Settings → Connections → Feishu & Lark consumes this same public
+service. **Create and connect a bot** opens the platform confirmation without
+asking the user to copy credentials. **Connect an existing bot** keeps the
+original credential-entry path. Opening Settings only reads local progress;
+checking platform confirmation is an explicit action on the original setup.
+Closing and reopening keeps that setup available, including earlier entries.
+After the application is saved, **View connection** opens its original details;
+the Agent menu separately creates or connects its group.
+
 `connection.enrollment.ls` discovers locally retained enrollment operations and
 implemented issuer capabilities. `inspect` reads one original operation without
 contacting the platform. `begin` is an explicit application-creation intent;
