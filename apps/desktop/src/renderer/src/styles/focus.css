@@ -495,3 +495,25 @@
 @container (max-width: 400px) { .focus-search-history-trigger > span { display: none; } }
 .focus-history-coverage { font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .focus-history-coverage > summary { color: var(--text-muted); cursor: pointer; }
+
+/* A secondary Goal control shares only the heading budget; original prose stays full width. */
+.focus-context-card { position: relative; min-width: 0; border-radius: var(--radius-sm); }
+.focus-context-group__cards > .focus-context-card { max-width: 320px; }
+.focus-context-group[data-focus-sparse='true'] > .focus-context-group__cards > .focus-context-card { max-width: none; }
+.focus-context-card > .focus-context { height: 100%; }
+.focus-context-card:hover > .focus-context { background: var(--surface-2); color: var(--text); }
+.focus-context-card > .focus-context.is-selected { background: var(--surface-3); }
+.focus-goal__space, .focus-goal__trigger { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 18px; height: 18px; padding: 0 2px; gap: 2px; box-sizing: border-box; }
+.focus-goal__space { position: relative; visibility: hidden; }
+.focus-goal__trigger { position: absolute; top: var(--sp-1); right: calc(var(--sp-2) + 21px); border: 0; border-radius: 4px; background: transparent; color: var(--text-3); cursor: pointer; }
+.focus-goal__trigger:hover, .focus-goal__trigger[data-state='open'] { color: var(--text); background: var(--surface-3); }
+.focus-goal__trigger:focus-visible { outline: 1px solid var(--green); outline-offset: 1px; }
+.focus-goal__count { font-size: 10px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.focus-goal__unknown { position: absolute; top: -2px; right: -2px; display: grid; place-items: center; width: 9px; height: 9px; border-radius: 50%; background: var(--surface-2); color: var(--text-2); font-size: 8px; line-height: 1; font-weight: 600; }
+.focus-goal__menu { width: 340px; max-width: calc(100vw - 24px); max-height: min(440px, 65vh); overflow-y: auto; }
+.focus-goal__menu .focus-goal__item { align-items: flex-start; }
+.focus-goal__item > span { display: grid; min-width: 0; gap: 4px; }
+.focus-goal__item strong { font-weight: 600; overflow-wrap: anywhere; }
+.focus-goal__item small { display: block; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.focus-goal__roles { display: grid; gap: 4px; color: var(--text-2); font-size: var(--fs-micro); }
+.focus-goal__roles[data-goal-roles='unconfirmed'] { padding-top: 4px; border-top: 1px solid var(--line); color: var(--text-3); }
