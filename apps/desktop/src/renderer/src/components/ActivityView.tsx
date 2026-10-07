@@ -739,9 +739,7 @@ export function ActivityView({
   // 新内容到达时贴底。追加与原地变长都算"新内容"——流式回答最常见的形态正是后者（尾项没换，
   // 只是变长了）。只有仍在跟随时才贴，否则会把已经滚上去的读者拽回来。
   useEffect(() => {
-    if (!readingEnabled) return
-    const geometry = feedGeometry()
-    if (!geometry || readingWindow.historical) return
+    if (!readingEnabled || readingWindow.historical) return
     const page = nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null
     const nativeTail = page?.items.at(-1)
     const observedTail = unifiedItems.at(-1)
@@ -753,7 +751,7 @@ export function ActivityView({
       itemCount: unifiedItems.length + (page?.items.length ?? 0),
       lastItemId: JSON.stringify([nativeTail ? [page!.source.providerId, page!.source.nativeSessionId, nativeTail.id] : null, observedTail?.id ?? null]),
       lastItemLength: nativeLength + (observedTail?.content?.length ?? 0)
-    }, geometry)
+    })
     followRef.current = decision.state
     if (decision.scrollToBottom) pinToBottom()
     setShowJump(shouldShowJumpToLatest(followRef.current))
