@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { moteQuickBaseline, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult,
-  sameMotePreferencesTarget, type MotePreferencesTarget, type MotePreferencesReadResult, type MoteQuickDefaults, type MotePreferencesDestination } from '@agentmux/core/mote-preferences'
+  sameMotePreferencesTarget, type MotePreferencesTarget, type MoteQuickPreferencesReadResult, type MoteQuickDefaults, type MotePreferencesDestination } from '@agentmux/core/mote-preferences'
 import { getDeviceWorkface, DeviceWorkfaceRecordChangedError, type DeviceWorkfaceStore } from '../recovery/device-workface'
 import { moteQuickDraftKey, parseMoteQuickDraft, parseMoteQuickScope, MoteQuickDraftInvalidError, MoteQuickDraftCapacityError,
   type MoteQuickDraft, type MoteQuickScope, type MoteQuickAttempt } from '../recovery/mote-quick-drafts'
@@ -36,7 +36,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
   const flight = useRef(false), adopting = useRef(false), changed = useRef(!!saved), conflicted = useRef(false)
   const [busy, setBusy] = useState(false), [adoptionBusy, setAdoptionBusy] = useState(false), [notice, setNotice] = useState('')
   const [storageIssue, setStorageIssue] = useState(''), [memoryOnly, setMemoryOnly] = useState(false)
-  const [read, setRead] = useState<MotePreferencesReadResult | null>(null), [copies, setCopies] = useState<Editable[]>([])
+  const [read, setRead] = useState<MoteQuickPreferencesReadResult | null>(null), [copies, setCopies] = useState<Editable[]>([])
   const [destination, setDestination] = useState<MotePreferencesDestination | null>(null)
   const latest = useRef({ client, visible, onSaved }); latest.current = { client, visible, onSaved }
   const readEpoch = useRef(0)

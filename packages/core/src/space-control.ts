@@ -283,7 +283,7 @@ export type AgentMuxSpaceControlRequest = Base & (
 )
 export type AgentMuxSpaceControlResult =
   | ({ operation: 'space.mote.preferences.read' } & import('./mote-preferences.js').MotePreferencesReadResult)
-  | ({ operation: 'space.mote.preferences.save'; requestId: string } & Omit<import('./mote-preferences.js').MotePreferencesSaveResult, 'operationId'>)
+  | ({ operation: 'space.mote.preferences.save'; requestId: string } & import('./mote-preferences.js').MotePreferencesSaveControlResult)
   | ({ operation: 'agent.view' } & AgentMuxAgentViewReport)
   | ({ operation: 'space.view' } & AgentMuxFileViewReport)
   | ({ operation: 'file.format' } & AgentMuxFileFormatReport)
