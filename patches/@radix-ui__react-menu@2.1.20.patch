@@ -1,0 +1,116 @@
+diff --git a/dist/index.js b/dist/index.js
+index 36e8941b97d6746e986422f9aeefacdff84604d8..492feeeb944f648ef56f4193a79fcbe26359bce2 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -113,27 +113,38 @@ var usePopperScope = (0, import_react_popper.createPopperScope)();
+ var useRovingFocusGroupScope = (0, import_react_roving_focus.createRovingFocusGroupScope)();
+ var [MenuProvider, useMenuContext] = createMenuContext(MENU_NAME);
+ var [MenuRootProvider, useMenuRootContext] = createMenuContext(MENU_NAME);
++// Keyboard modality belongs to this document, not to every retained menu.
++var menuKeyboardModality = { current: false };
++var menuKeyboardObservers = 0;
++function handleMenuPointer() {
++  menuKeyboardModality.current = false;
++}
++function handleMenuKeyDown() {
++  menuKeyboardModality.current = true;
++  document.addEventListener("pointerdown", handleMenuPointer, { capture: true, once: true });
++  document.addEventListener("pointermove", handleMenuPointer, { capture: true, once: true });
++}
++function observeMenuKeyboardModality() {
++  if (menuKeyboardObservers++ === 0) {
++    document.addEventListener("keydown", handleMenuKeyDown, { capture: true });
++  }
++  return () => {
++    if (--menuKeyboardObservers === 0) {
++      document.removeEventListener("keydown", handleMenuKeyDown, { capture: true });
++      document.removeEventListener("pointerdown", handleMenuPointer, { capture: true });
++      document.removeEventListener("pointermove", handleMenuPointer, { capture: true });
++      menuKeyboardModality.current = false;
++    }
++  };
++}
+ var Menu = (props) => {
+   const { __scopeMenu, open = false, children, dir, onOpenChange, modal = true } = props;
+   const popperScope = usePopperScope(__scopeMenu);
+   const [content, setContent] = React.useState(null);
+-  const isUsingKeyboardRef = React.useRef(false);
++  const isUsingKeyboardRef = menuKeyboardModality;
+   const handleOpenChange = (0, import_react_use_callback_ref.useCallbackRef)(onOpenChange);
+   const direction = (0, import_react_direction.useDirection)(dir);
+-  React.useEffect(() => {
+-    const handleKeyDown = () => {
+-      isUsingKeyboardRef.current = true;
+-      document.addEventListener("pointerdown", handlePointer, { capture: true, once: true });
+-      document.addEventListener("pointermove", handlePointer, { capture: true, once: true });
+-    };
+-    const handlePointer = () => isUsingKeyboardRef.current = false;
+-    document.addEventListener("keydown", handleKeyDown, { capture: true });
+-    return () => {
+-      document.removeEventListener("keydown", handleKeyDown, { capture: true });
+-      document.removeEventListener("pointerdown", handlePointer, { capture: true });
+-      document.removeEventListener("pointermove", handlePointer, { capture: true });
+-    };
+-  }, []);
++  React.useEffect(observeMenuKeyboardModality, []);
+   React.useEffect(() => {
+     if (!open) {
+       return;
+diff --git a/dist/index.mjs b/dist/index.mjs
+index c3cbde4ff184b07ddaf6b952c9cba720e3192fb4..acfb19fa4cd3f08e13df47ed95903155268c7ba5 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -46,27 +46,38 @@ var usePopperScope = createPopperScope();
+ var useRovingFocusGroupScope = createRovingFocusGroupScope();
+ var [MenuProvider, useMenuContext] = createMenuContext(MENU_NAME);
+ var [MenuRootProvider, useMenuRootContext] = createMenuContext(MENU_NAME);
++// Keyboard modality belongs to this document, not to every retained menu.
++var menuKeyboardModality = { current: false };
++var menuKeyboardObservers = 0;
++function handleMenuPointer() {
++  menuKeyboardModality.current = false;
++}
++function handleMenuKeyDown() {
++  menuKeyboardModality.current = true;
++  document.addEventListener("pointerdown", handleMenuPointer, { capture: true, once: true });
++  document.addEventListener("pointermove", handleMenuPointer, { capture: true, once: true });
++}
++function observeMenuKeyboardModality() {
++  if (menuKeyboardObservers++ === 0) {
++    document.addEventListener("keydown", handleMenuKeyDown, { capture: true });
++  }
++  return () => {
++    if (--menuKeyboardObservers === 0) {
++      document.removeEventListener("keydown", handleMenuKeyDown, { capture: true });
++      document.removeEventListener("pointerdown", handleMenuPointer, { capture: true });
++      document.removeEventListener("pointermove", handleMenuPointer, { capture: true });
++      menuKeyboardModality.current = false;
++    }
++  };
++}
+ var Menu = (props) => {
+   const { __scopeMenu, open = false, children, dir, onOpenChange, modal = true } = props;
+   const popperScope = usePopperScope(__scopeMenu);
+   const [content, setContent] = React.useState(null);
+-  const isUsingKeyboardRef = React.useRef(false);
++  const isUsingKeyboardRef = menuKeyboardModality;
+   const handleOpenChange = useCallbackRef(onOpenChange);
+   const direction = useDirection(dir);
+-  React.useEffect(() => {
+-    const handleKeyDown = () => {
+-      isUsingKeyboardRef.current = true;
+-      document.addEventListener("pointerdown", handlePointer, { capture: true, once: true });
+-      document.addEventListener("pointermove", handlePointer, { capture: true, once: true });
+-    };
+-    const handlePointer = () => isUsingKeyboardRef.current = false;
+-    document.addEventListener("keydown", handleKeyDown, { capture: true });
+-    return () => {
+-      document.removeEventListener("keydown", handleKeyDown, { capture: true });
+-      document.removeEventListener("pointerdown", handlePointer, { capture: true });
+-      document.removeEventListener("pointermove", handlePointer, { capture: true });
+-    };
+-  }, []);
++  React.useEffect(observeMenuKeyboardModality, []);
+   React.useEffect(() => {
+     if (!open) {
+       return;
