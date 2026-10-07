@@ -14,3 +14,8 @@
 .connector-sharing { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; color: var(--text-3); font-size: var(--fs-micro); }
 .connector-sharing__group { min-width: 0; padding: var(--sp-1) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); font: inherit; text-align: left; overflow-wrap: anywhere; }
 .connector-sharing__group:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+
+.agent-connector-disclosure { min-width: 0; font-size: var(--fs-small); color: var(--text-2); }
+.agent-connector-disclosure > summary { cursor: pointer; padding-block: var(--sp-2); }
+.agent-connector-disclosure > .agent-connector-fields, .agent-connector-disclosure > .agent-connector-receipt { margin-top: var(--sp-3); }
+.agent-connector-group { margin: 0; color: var(--text); overflow-wrap: anywhere; }
