@@ -25,7 +25,7 @@ export function AnnotationNotes({ notes, selected, draft, busy, onSelect, onDraf
         disabled={busy} onChange={event => onTemplate((event.target.value || undefined) as NoteTemplate | undefined)}>
         {templates.map(template => <option value={template.id} key={template.id}>{template.label}</option>)}
       </select></label><button type="button" onClick={onLocate}>Locate</button></div>
-      <label><span>{'Note ' + selected.number}</span><ComposerTextarea aria-label="Note text" value={draft} maxLength={1000} disabled={busy}
+      <label><span>{'Note ' + selected.number}</span><ComposerTextarea aria-label="Note text" value={draft} disabled={busy}
         placeholder={templates.find(template => template.id === (selected.template ?? ''))!.hint} onValueChange={onDraft} onBlur={onCommit} /></label>
     </> : <span className="image-annotation-editor__hint">Select a number to add context</span>}
   </aside>

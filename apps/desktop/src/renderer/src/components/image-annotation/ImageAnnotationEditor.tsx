@@ -22,7 +22,7 @@ const icon = semanticIconComponent
 const CancelIcon = icon('action.cancel'), ClipboardIcon = icon('object.clipboard'), CheckIcon = icon('status.copied')
 const ZoomInIcon = icon('action.zoom-in'), ZoomOutIcon = icon('action.zoom-out')
 type Size = { width: number; height: number; dpr: number }
-type TextDraft = { shape: TextShape; existing: boolean }
+type TextDraft = { shape: TextShape; existing: boolean; edited: boolean }
 type TransformGesture = { original: ScreenshotShape; start: ScreenshotPoint; handle?: SelectionHandleId }
 
 export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, documentStatus,
@@ -228,8 +228,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   }
   function beginText(shape?: TextShape, at: ScreenshotPoint = { x: 0, y: 0 }) {
     resetGesture()
-    const draft: TextDraft = shape ? { shape, existing: true } : { shape: { id: crypto.randomUUID(), kind: 'text', color,
-      at, text: '', fontSize: fontSize / viewRef.current.scale }, existing: false }
+    const draft: TextDraft = shape ? { shape, existing: true, edited: false } : { shape: { id: crypto.randomUUID(), kind: 'text', color,
+      at, text: '', fontSize: fontSize / viewRef.current.scale }, existing: false, edited: false }
     textDraftRef.current = draft; setPendingText(draft)
   }
   function onPointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
@@ -312,18 +312,18 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   function finishText(value: string, cancelled = false) {
     const draft = textDraftRef.current
     textDraftRef.current = null; setPendingText(null)
-    if (!draft || cancelled) return
-    const text = value.trim().slice(0, 500)
+    if (!draft || cancelled || !draft.edited) return
+    const text = value
     if (draft.existing) {
-      if (!text) edit(doc => removeShapes(doc, new Set([draft.shape.id])))
+      if (text !== draft.shape.text && !text.trim()) edit(doc => removeShapes(doc, new Set([draft.shape.id])))
       else if (text !== draft.shape.text) edit(doc => replaceShape(doc, { ...draft.shape, text }))
-    } else if (text) edit(doc => commitShape(doc, { ...draft.shape, text }))
+    } else if (text.trim()) edit(doc => commitShape(doc, { ...draft.shape, text }))
   }
-  function commitNote() { if (selectedNote && noteDraft !== selectedNote.note) edit(doc => replaceShape(doc, { ...selectedNote, note: noteDraft.trim().slice(0, 1000) })) }
+  function commitNote() { if (selectedNote && noteDraft !== selectedNote.note) edit(doc => replaceShape(doc, { ...selectedNote, note: noteDraft })) }
   function setTemplate(template: NoteTemplate | undefined) {
     if (!selectedNote) return
     const { template: _previous, ...note } = selectedNote
-    edit(doc => replaceShape(doc, { ...note, note: noteDraft.trim().slice(0, 1000), ...(template ? { template } : {}) }))
+    edit(doc => replaceShape(doc, { ...note, note: noteDraft, ...(template ? { template } : {}) }))
   }
   function locateNote() {
     if (!selectedNote) return
@@ -334,12 +334,13 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   function complete(action: 'png' | 'context' | 'save' = 'png') {
     const base = imageRef.current
     if (!base || !loaded) return
-    let shapes = selectedNote ? documentState.shapes.map(shape => shape.id === selectedNote.id ? { ...selectedNote, note: noteDraft.trim().slice(0, 1000) } : shape) : documentState.shapes
+    let shapes = selectedNote ? documentState.shapes.map(shape => shape.id === selectedNote.id ? { ...selectedNote, note: noteDraft } : shape) : documentState.shapes
     const draft = textDraftRef.current
     if (draft) {
-      const text = textInputRef.current?.value.trim().slice(0, 500) ?? draft.shape.text
-      if (draft.existing) shapes = text ? shapes.map(shape => shape.id === draft.shape.id ? { ...draft.shape, text } : shape) : shapes.filter(shape => shape.id !== draft.shape.id)
-      else if (text) shapes = [...shapes, { ...draft.shape, text }]
+      // A single-line input normalizes line breaks even before the user edits it.
+      const text = draft.edited ? textInputRef.current?.value ?? draft.shape.text : draft.shape.text
+      if (draft.existing && draft.edited && text !== draft.shape.text) shapes = text.trim() ? shapes.map(shape => shape.id === draft.shape.id ? { ...draft.shape, text } : shape) : shapes.filter(shape => shape.id !== draft.shape.id)
+      else if (!draft.existing && text.trim()) shapes = [...shapes, { ...draft.shape, text }]
     }
     const input = { image: base, shapes, crop: documentState.crop, displayWidth: image.width, displayHeight: image.height }
     if (action === 'context') onCopyContext?.(input)
@@ -401,13 +402,13 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
             onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={cancelGesture}
             onLostPointerCapture={() => { if (currentGestureRef.current || cropRef.current || eraseRef.current || panRef.current) cancelGesture() }}
             onDoubleClick={event => { if (!busy && tool === 'select') { const shape = hit(point(event)); if (shape?.kind === 'text') beginText(shape) } }} />
-          {pendingText ? <TextInput key={pendingText.shape.id} ref={textInputRef} className="image-annotation-editor__text" aria-label="Screenshot text" defaultValue={pendingText.shape.text} maxLength={500}
+          {pendingText ? <TextInput key={pendingText.shape.id} ref={textInputRef} className="image-annotation-editor__text" aria-label="Screenshot text" defaultValue={pendingText.shape.text}
             aria-description="Edit the content here. Its position and text size stay on the image."
             style={{ left: Math.max(0, Math.min(size.width - textEditorWidth, view.x + pendingText.shape.at.x * scale)),
               top: Math.max(0, Math.min(size.height - textEditorHeight, view.y + pendingText.shape.at.y * scale)),
               width: textEditorWidth, height: textEditorHeight, maxHeight: Math.max(1, size.height), minWidth: 0, minHeight: 0, maxWidth: 'none',
               color: 'var(--text)', fontSize: textEditorFont, lineHeight: 1.4, fontFamily: SCREENSHOT_TEXT_FONT }}
-            onPointerDown={event => event.stopPropagation()} onChange={() => onEdited?.()} onBlur={event => finishText(event.currentTarget.value)} onKeyDown={event => {
+            onPointerDown={event => event.stopPropagation()} onChange={() => { if (textDraftRef.current) textDraftRef.current = { ...textDraftRef.current, edited: true }; onEdited?.() }} onBlur={event => finishText(event.currentTarget.value)} onKeyDown={event => {
               event.stopPropagation(); if (isImeOwnedKeyboardEvent(event)) return
               if (event.key === 'Enter') { event.preventDefault(); finishText(event.currentTarget.value) }
               else if (event.key === 'Escape') { event.preventDefault(); finishText('', true) }
