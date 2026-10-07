@@ -42,6 +42,8 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   const created = room && 'creation' in room && room.creation.state === 'created' ? room.creation.externalConversationId : null
   const binding = bindings.find(item => item.connectionId === connectionId)
   const audience = mode === 'create' && !binding ? created ?? '' : group
+  const approvedMembers = binding && actors?.bindingId === binding.bindingId && actors.revision === binding.revision
+    ? new Set(actors.grants.filter(grant => grant.state === 'active').map(grant => JSON.stringify([grant.actor.application.domain, grant.actor.application.appId, grant.actor.idType, grant.actor.userId]))).size : null
   useEffect(() => { setGroup(binding?.externalConversationId ?? ''); setConfirmed(false); setChangingGroup(false) }, [connectionId, binding?.bindingId])
   const frozenRoom = roomIntent?.method === 'connection.room.create' ? roomIntent.input : null
   async function inspect(intent: ConnectorRoomIntent) {
@@ -146,7 +148,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
           <Dialog.Description className="agent-connector-identity"><AgentIcon size={13} aria-hidden="true" /><span>{original.name}</span></Dialog.Description></div>
           <button type="button" className="icon-button" aria-label="Close group setup" onClick={onClose}><CloseIcon size={15} /></button></header>
         <div className="agent-connector-dialog__body">
-          {binding ? <><section className="agent-connector-fields"><h3>Connected group</h3><p className="agent-connector-group">{binding.externalConversationId}</p><p className="agent-connector-note">{binding.state === 'active' ? 'Sharing on' : 'Sharing paused'}</p><button className="small-button" disabled={busy || binding.state === 'paused'} onClick={pause}>Pause sharing</button></section><ConnectorDeliveryDetails key={binding.bindingId + binding.revision} binding={binding} /></> : application}
+          {binding ? <><section className="agent-connector-fields"><h3>Connected group</h3><p className="agent-connector-group">{binding.externalConversationId}</p><p className="agent-connector-note">{binding.state === 'active' ? 'Sharing on' : 'Sharing paused'}</p><p className="agent-connector-note" aria-label="Group member access">{approvedMembers === null ? 'Member access not confirmed' : approvedMembers === 0 ? 'No members approved' : approvedMembers + (approvedMembers === 1 ? ' member approved' : ' members approved')}</p><button className="small-button" disabled={busy || binding.state === 'paused'} onClick={pause}>Pause sharing</button></section><ConnectorDeliveryDetails key={binding.bindingId + binding.revision} binding={binding} /></> : application}
           {mode === 'create' && !binding ? <fieldset disabled={busy || !!roomIntent} className="agent-connector-fields" aria-label="New dedicated group">
             <label className="agent-connector-field">Group name<TextInput aria-label="Group name" value={frozenRoom?.name ?? name} onChange={event => setName(event.target.value)} /></label>
             <details className="agent-connector-disclosure"><summary>Invite people (optional)</summary><div className="agent-connector-fields">
@@ -188,7 +190,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
           {issue ? <p role="status" className="surface-inline-error">{issue}</p> : null}
         </div><footer className="agent-connector-dialog__footer">
           {issue || relevant.length ? <button className="agent-connector-text-action" disabled={busy} onClick={() => void work(refresh)}>Refresh</button> : null}
-          <button className="small-button" onClick={onClose}>Close</button>
+          <button className="small-button" onClick={onClose}>{!binding && !relevant.length ? 'Cancel' : 'Close'}</button>
           {canCreate ? <button className="primary-button" disabled={busy || !connection || !name.trim() || !!members && !memberType.trim()} onClick={createRoom}>{busy ? 'Creating…' : 'Create group'}</button> : canConnect ? <button className="primary-button" disabled={busy || !connection?.config.enabled || !confirmed || !audience.trim() || session.nativeHandle?.kind !== 'provider'} onClick={bind}>{binding ? 'Change group' : 'Connect group'}</button> : null}
         </footer>
       </Dialog.Content></Dialog.Portal>
