@@ -171,6 +171,18 @@ it('authenticated Hosted preserves ordinary input and the original terminal rout
     controlledLeaves: ['Provider history, observation and original ordinary-input plan', 'screen read', 'ctxmux process transport'], claims: ['no physical-device or vendor Native qualification', 'async reply is unsupported; terminal navigation dispatches no input'] })
 }, 15000)
 
+it('an unaddressable synchronous question opens its original terminal without answering or saving an operation', async () => {
+  const request: AgentMuxInteractionRequest = { kind: 'question', id: 'manual-original-request', agentSessionId: sid,
+    nativeToolCallId: 'manual-native-question', evidence: { source: 'native-hook', observedAt: _historyTailFixtureEpoch(0, 0, 1), hookReceiptId: 'manual-original-hook', run: { runId: RUN_ID } },
+    questions: [{ id: 'manual-question', prompt: 'Answer in the original Session', options: [{ id: 'keep', label: 'Keep original work' }] }] }
+  const f = await authenticatedFixture(request), view = await mount(f.surface())
+  await vi.waitFor(() => expect(view.element.querySelector('[data-request-id="manual-original-request"]')).not.toBeNull())
+  await click(button(view.element, 'Open terminal'))
+  expect(f.openTerminal).toHaveBeenCalledOnce()
+  expect(f.respond).not.toHaveBeenCalled(); expect(f.reply).not.toHaveBeenCalled(); expect(f.writes).toEqual([])
+  expect(saved().responses).toEqual([])
+}, 15000)
+
 it.each(['question', 'permission'] as const)('retains a historical synchronous %s operation through remount and queries its Core receipt after native completion without input', async kind => {
   const request: AgentMuxInteractionRequest = kind === 'permission' ? permission('exact-sync-permission') : {
     kind: 'question', id: 'exact-sync-question', agentSessionId: sid, nativeToolCallId: 'sync-native-call',
