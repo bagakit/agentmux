@@ -10,7 +10,7 @@ const tools = 'apps/desktop/src/renderer/src/components/AgentComposerTools.tsx'
 const quote = String.fromCharCode(96)
 const mutations = {
   filter: [tools, 'skills.filter(skill => ' + quote + '\u0024{skill.name} \u0024{skill.description} \u0024{skill.source}' + quote + '.toLocaleLowerCase().includes(query))', 'skills'],
-  command: [tools, 'commands.filter(command => ' + quote + '\u0024{command.text} \u0024{command.description}' + quote + '.toLocaleLowerCase().includes(query))', 'commands'],
+  command: [tools, 'commands.filter(command => ' + quote + '\u0024{command.text} \u0024{command.label ?? \'\'} \u0024{command.description}' + quote + '.toLocaleLowerCase().includes(query))', 'commands'],
   insertion: [tools, 'onChooseSkill(skill)', 'undefined'],
   ime: [tools, 'if (isImeOwnedKeyboardEvent(event)) event.stopPropagation()', 'if (false) event.stopPropagation()'],
   reopen: [tools, "if (!open) setQuery('')", "if (false) setQuery('')"],
@@ -19,7 +19,7 @@ const mutations = {
   session: ['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', '<AgentComposer key={sessionId}', '<AgentComposer key="shared"'],
   hover: ['apps/desktop/src/renderer/src/components/HoverDropdownMenu.tsx', 'if (!event.defaultPrevented) menu.hover.current = false\n      }}\n      onPointerDownOutside', 'if (false) menu.hover.current = false\n      }}\n      onPointerDownOutside'],
   trigger: ['apps/desktop/src/renderer/src/components/HoverDropdownMenu.tsx', 'menu.hover.current = false\n          menu.content.current?.focus()', 'void 0'],
-  disabled: [tools, 'key={command.text} disabled={disabled}', 'key={command.text}']
+  disabled: [tools, 'key={command.id ?? command.text} disabled={disabled}', 'key={command.id ?? command.text}']
 } as const
 export default defineConfig({ ...original, esbuild: { jsx: 'automatic' },
   resolve: { ...original.resolve, conditions: ['browser', 'module', 'development|production'] },

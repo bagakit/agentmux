@@ -141,10 +141,15 @@ it('switching exact Session invalidates its old query and discovery through orig
 })
 
 it('original Launcher command menu queries descriptions and inserts only its explicit command', async () => {
+  vi.spyOn(useAppStore.getState(), 'prewarmTerminal').mockResolvedValue(undefined)
+  vi.spyOn(useAppStore.getState(), 'releaseWarmTerminal').mockResolvedValue(undefined)
+  vi.spyOn(useAppStore.getState(), 'detectExecutors').mockResolvedValue(undefined)
   useAppStore.setState({ tabs: { launcher: createWorkbenchTab('launcher', { regionId: 'region', kind: 'launcher', workspaceId: 'workspace' }) }, activeWorkspaceId: 'workspace', agentComposerDrafts: { region: 'Launch draft' } })
   useAppStore.setState({ providerCatalog: [createCodexProvider(defineAgentProvider).catalog] })
-  await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={false} />)
+  await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" />)
   await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('.agent-pick')].find(button => button.textContent?.includes('Codex'))!.click())
+  const originalEditor = dom.container.querySelector<HTMLElement & { editor: Editor }>('.tiptap')!.editor
+  await act(async () => originalEditor.commands.setTextSelection(1))
   const draft = dom.draft('region'); await open('command'); expect(items().length).toBeGreaterThan(1)
   const target = items().find(item => item.textContent?.includes('/status'))!
   expect(target).toBeDefined(); const text = target.querySelector('span')!.firstChild!.textContent!
