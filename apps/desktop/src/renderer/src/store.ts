@@ -95,7 +95,7 @@ import { create } from 'zustand'
 
 import { currentExecutorDetection, executorDetectionMatches, executorDetectionKey } from './lib/executor-detection'
 export { executorDetectionKey } from './lib/executor-detection'
-import { executorsForHost } from './lib/executors'
+import { executorsForHost, hostExecutorInventoryMatches } from './lib/executors'
 import { lifecycleFeedbackOwnerKey, type AgentLifecycleFailure, type AgentLifecycleFeedbackOwner } from './lib/agent-lifecycle-feedback'
 import { compactNotificationIdentity, ownedNotificationIdentity, normalizeNotificationReadReceipts } from './lib/notification-read-identity'
 import { persist } from 'zustand/middleware'
@@ -382,7 +382,7 @@ import {
   createWriteFencedStorage,
   registerUnloadFlush
 } from './lib/persisted-ui-writer'
-import type { StartupProgress } from './lib/startup-progress'
+import type { StartupAgentAvailability, StartupProgress } from './lib/startup-progress'
 
 type ViewMode = SessionViewMode
 
@@ -982,6 +982,8 @@ type AppState = {
   editorRegionDiffs: Record<string, EditorRegionDiffState | undefined>
   loading: boolean
   startupProgress: StartupProgress
+  startupAgentAvailability: StartupAgentAvailability | null
+  continueStartup(): void
   error: string | null
   /** Last transient error remains available after dismissal/navigation for a deliberate reopen. */
   lastError: string | null
@@ -1674,7 +1676,10 @@ export function executorAvailabilityFromCheckState(state: AsyncCheckState | unde
 }
 
 const detectionRequestIds = new Map<string, symbol>()
+const pendingExecutorDetections = new Map<string, { input: ExecutorDetectionInput; promise: Promise<void> }>()
+let startupAvailabilityEpoch = 0
 const hostExecutorRequests = new Map<string, symbol>()
+const pendingHostExecutorDiscoveries = new Map<string, { input: HostConfig; promise: Promise<void> }>()
 const hostCheckRequestIds = new Map<string, number>()
 const timelineResyncs = new Map<string, { requested: boolean; reconcileRequested: boolean; hostId: string | undefined; promise: Promise<void> }>()
 
@@ -3925,6 +3930,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   toolDockWidth: TOOL_DOCK_DEFAULT_WIDTH,
   loading: true,
   startupProgress: { step: 'saved-workspace' },
+  startupAgentAvailability: null,
+  continueStartup() {
+    const check = get().startupAgentAvailability
+    if (check?.waiting) set({ startupAgentAvailability: { ...check, waiting: false } })
+  },
   runtimeOwnershipWarnings: undefined,
   runtimeEndpointWarnings: undefined,
   environmentWarning: undefined,
@@ -3992,6 +4002,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const pendingBrowserEvents: BrowserEvent[] = []
     let booting = true
     let observing = true
+    const availabilityEpoch = ++startupAvailabilityEpoch
+    let disposeStartupProgress = () => {}
     let pendingNotesStorage: NotesStorageSnapshot | null = null
     const disposeNotesStorage = api.notesStorage.onChange(snapshot => {
       pendingNotesStorage = snapshot
@@ -4028,6 +4040,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     runtimeSubscriptionCount += 4
     const disposeRuntimeSubscriptions = (): void => {
       observing = false
+      disposeStartupProgress()
       disposeCoreSpatial?.();disposeCoreSpatial=null
       if (runtimeSubscriptionCount === 0) return
       runtimeSubscriptionCount -= 4
@@ -4152,10 +4165,26 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ...(avatarHandoff.warning ? [avatarHandoff.warning] : [])
       ].join(' ')
       const startupError = [otherStartupError, emptySessionSnapshotWarning].filter(Boolean).join(' ')
+      // Check the original visible workface's execution Host, rather than every saved remote.
+      const restoredSelection = mainRegionReference(restoredUi.workbenchSpaceSelection)
+      const selectedRegion = restoredSelection?.displayWorkspaceId === restoredUi.activeWorkspaceId ? restoredSelection : null
+      const initialLayout = restoredUi.activeWorkspaceId ? workbench.layouts[restoredUi.activeWorkspaceId] : undefined
+      const initialTabId = selectedRegion?.tabId ?? (initialLayout ? initialLayout.groups.find(group => group.id === initialLayout.activeGroupId)?.activeTabId : undefined)
+      const initialTab = initialTabId ? workbench.tabs[initialTabId] : undefined
+      const initialRegion = initialTab?.regions[selectedRegion?.regionId ?? initialTab.layout.activeRegionId]
+      const initialWorkspaceId = initialRegion?.workspaceId ?? initialTab?.workspaceId ?? restoredUi.activeWorkspaceId
+      const initialWorkspace = config.workspaces.find(workspace => workspace.id === initialWorkspaceId)
+      const initialHost = config.hosts.find(host => host.id === initialWorkspace?.hostId)
+      const availabilityTargets = Object.entries(config.executors).map(([id, executor]) => ({ id, providerId: executor.providerId, command: executor.command }))
+      const startupAgents: StartupAgentAvailability | null = initialHost ? {
+        hostId: initialHost.id, current: 0, total: initialHost.kind === 'local' ? Object.keys(config.executors).length : null,
+        pending: true, waiting: config.startup?.skipAgentAvailabilityCheckWait !== true
+      } : null
       set({
         restoredWorkbench: null,
         config,
         sessions: visibleSessions,
+        startupAgentAvailability: startupAgents,
         pendingAgentLaunches: {},
         agentFocus: restoredAgentFocus,
         ...restoredUi,
@@ -4174,6 +4203,43 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         } : null,
         errorDismissed: false
       })
+      // These observations run in parallel with recovery. Only the splash may wait;
+      // durable projection, input routes, the boot buffer and persistence keep their original boundary.
+      if (initialHost) {
+        const updateProgress = () => {
+          if (!observing || availabilityEpoch !== startupAvailabilityEpoch) return
+          const state = get(), check = state.startupAgentAvailability
+          if (!check?.pending || check.hostId !== initialHost.id) return
+          let current = 0, total: number | null = null
+          if (initialHost.kind === 'local') {
+            total = availabilityTargets.length
+            current = availabilityTargets.filter(({ id, ...executor }) => {
+              const detection = currentExecutorDetection(state.executorDetections[executorDetectionKey(initialHost.id, id)], id, executor, initialHost)
+              return detection && ['ready', 'missing', 'error'].includes(detection.state)
+            }).length
+          } else {
+            const inventory = state.hostExecutorInventories[initialHost.id]
+            if (hostExecutorInventoryMatches(inventory, initialHost) && inventory.result) {
+              total = inventory.result.executors.length
+              current = inventory.state === 'checking' ? 0 : total
+            }
+          }
+          if (current !== check.current || total !== check.total) set({ startupAgentAvailability: { ...check, current, total } })
+        }
+        disposeStartupProgress = useAppStore.subscribe((state, previous) => {
+          if (state.executorDetections !== previous.executorDetections ||
+              state.hostExecutorInventories[initialHost.id] !== previous.hostExecutorInventories[initialHost.id]) updateProgress()
+        })
+        void get().detectExecutors(initialHost.id).catch(error => {
+          if (observing && availabilityEpoch === startupAvailabilityEpoch) get().reportError(error)
+        }).finally(() => {
+          disposeStartupProgress()
+          if (!observing || availabilityEpoch !== startupAvailabilityEpoch) return
+          updateProgress()
+          const check = get().startupAgentAvailability
+          if (check?.hostId === initialHost.id) set({ startupAgentAvailability: { ...check, pending: false } })
+        })
+      }
       // Publication releases the boot buffer before any optional reader can wait.
       booting = false
       void providerRead.then(result => {
@@ -4858,7 +4924,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const presentation = readDesktopPresentation(selection, state.tabs)
       const sessions = sessionPresentationById(state.sessions)
       const observation: DesktopWorkbenchObservation = {
-        loading: state.loading, startupProgress: state.startupProgress,
+        loading: state.loading, startupProgress: state.startupProgress, startupAgentAvailability: state.startupAgentAvailability,
         activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface,
         focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId },
         desktop: { selection, ...presentation,
@@ -6850,50 +6916,66 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const host = get().config?.hosts.find(host => host.id === hostId)
     if (!host) return
     const prior = get().hostExecutorInventories[hostId]
-    if (prior?.state === 'checking' && configValuesEqual(prior.input, host)) return
+    const pending = pendingHostExecutorDiscoveries.get(hostId)
+    if (pending && configValuesEqual(pending.input, host)) { await pending.promise; return }
     const request = Symbol(), input = structuredClone(host)
     hostExecutorRequests.set(hostId, request)
     const retained = prior && configValuesEqual(prior.input, input) ? prior.result : undefined
     set(state => ({ hostExecutorInventories: { ...state.hostExecutorInventories, [hostId]: {
-      input, state: 'checking', ...(retained ? { result: retained } : {})
+      input, state: 'checking', ...(retained ? { result: retained } : {}),
+      ...(prior && configValuesEqual(prior.input, input) && prior.detail ? { detail: prior.detail } : {})
     } } }))
     const current = () => hostExecutorRequests.get(hostId) === request &&
       configValuesEqual(get().config?.hosts.find(item => item.id === hostId), input)
-    try {
-      const result = await api.executors.discover(hostId)
-      if (!current()) return
-      if (result.routeHostId !== hostId) throw new Error('Executor inventory belongs to another Host. Refresh the exact execution target.')
-      set(state => ({ hostExecutorInventories: { ...state.hostExecutorInventories, [hostId]: { input, state: 'ready', result, observedAt: Date.now() } } }))
-    } catch (error) {
-      if (!current()) return
-      set(state => ({ hostExecutorInventories: { ...state.hostExecutorInventories, [hostId]: {
-        input, state: 'error', ...(retained ? { result: retained } : {}), detail: presentError(error), observedAt: Date.now()
-      } } }))
-    }
+    const promise = (async () => {
+      try {
+        const result = await api.executors.discover(hostId)
+        if (!current()) return
+        if (result.routeHostId !== hostId) throw new Error('Executor inventory belongs to another Host. Refresh the exact execution target.')
+        set(state => ({ hostExecutorInventories: { ...state.hostExecutorInventories, [hostId]: { input, state: 'ready', result, observedAt: Date.now() } } }))
+      } catch (error) {
+        if (!current()) return
+        set(state => ({ hostExecutorInventories: { ...state.hostExecutorInventories, [hostId]: {
+          input, state: 'error', ...(retained ? { result: retained } : {}), detail: presentError(error), observedAt: Date.now()
+        } } }))
+      }
+    })()
+    pendingHostExecutorDiscoveries.set(hostId, { input, promise })
+    try { await promise }
+    finally { if (pendingHostExecutorDiscoveries.get(hostId)?.promise === promise) pendingHostExecutorDiscoveries.delete(hostId) }
   },
   async detectExecutors(hostId) {
     const config = get().config, host = config?.hosts.find(host => host.id === hostId)
     if (!config || !host) return
     if (host.kind === 'ssh') return await get().discoverHostExecutors(hostId)
-    const targets = Object.entries(config.executors).filter(([executorId, executor]) =>
-      currentExecutorDetection(get().executorDetections[executorDetectionKey(hostId, executorId)], executorId, executor, host)?.state !== 'checking'
-    ).map(([executorId, executor]) => {
+    const inFlight: Promise<void>[] = []
+    const targets = Object.entries(config.executors).filter(([executorId, executor]) => {
+      const pending = pendingExecutorDetections.get(executorDetectionKey(hostId, executorId))
+      if (pending && executorDetectionMatches(pending.input, executorId, executor, host)) {
+        inFlight.push(pending.promise)
+        return false
+      }
+      return true
+    }).map(([executorId, executor]) => {
       const key = executorDetectionKey(hostId, executorId), requestId = Symbol()
       detectionRequestIds.set(key, requestId)
       const input = structuredClone({ executorId, providerId: executor.providerId, command: executor.command, host })
       return { key, requestId, input }
     })
-    if (targets.length === 0) return
+    if (targets.length === 0) { await Promise.all(inFlight); return }
     const matchesCurrent = (input: ExecutorDetectionInput) => executorDetectionMatches(input, input.executorId,
       get().config?.executors[input.executorId], get().config?.hosts.find(host => host.id === input.host.id))
     set((state) => ({
       executorDetections: {
         ...state.executorDetections,
-        ...Object.fromEntries(targets.map(({ key, input }) => [key, { state: 'checking', input } satisfies ExecutorDetectionState]))
+        ...Object.fromEntries(targets.map(({ key, input }) => {
+          const prior = currentExecutorDetection(state.executorDetections[key], input.executorId, config.executors[input.executorId], host)
+          return [key, { ...(prior?.state === 'error' || prior?.state === 'checking' ? prior : {}), state: 'checking', input } satisfies ExecutorDetectionState]
+        }))
       }
     }))
-    await Promise.all(
-      targets.map(async ({ key, requestId, input }) => {
+    const started = targets.map(({ key, requestId, input }) => {
+      const promise = (async () => {
         try {
           const result = await api.executors.detect(input.executorId, hostId)
           if (detectionRequestIds.get(key) !== requestId || result.input.executorId !== input.executorId ||
@@ -6932,8 +7014,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             }
           }))
         }
-      })
-    )
+      })()
+      pendingExecutorDetections.set(key, { input, promise })
+      const release = () => {
+        if (pendingExecutorDetections.get(key)?.promise === promise) pendingExecutorDetections.delete(key)
+      }
+      void promise.then(release, release)
+      return promise
+    })
+    await Promise.all([...inFlight, ...started])
   },
   async checkHost(host) {
     const input = structuredClone(host)

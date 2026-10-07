@@ -49,7 +49,8 @@ import { useNativeOverlayChrome } from './hooks/useNativeOverlayChrome'
 import { RendererResourceOwners } from './components/RendererResourceOwners'
 import { WorkflowComponentGallery } from './components/WorkflowComponentGallery'
 import { FullPageLoadingSurface } from './components/FullPageLoadingSurface'
-import { beginRendererStartup, startupProgressDetail } from './lib/startup-progress'
+import { beginRendererStartup } from './lib/startup-progress'
+import { StartupLoadingSurface } from './components/StartupLoadingSurface'
 import { surveySelectReference, surveyResolvedZoneSelection } from './lib/survey-workface'
 import { spatialCatalog } from './lib/space-agent-control'
 import { scratchTopicsForWorkspace } from './lib/scratch-topic-snapshots'
@@ -92,6 +93,8 @@ function DesktopApp() {
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
   const startupProgress = useAppStore((state) => state.startupProgress)
+  const startupAgentAvailability = useAppStore(state => state.startupAgentAvailability)
+  const continueStartup = useAppStore(state => state.continueStartup)
   const error = useAppStore((state) => state.error)
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
@@ -514,8 +517,11 @@ function DesktopApp() {
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
   }, [])
 
-  if (loading) {
-    return <FullPageLoadingSurface scope="app" phase="loading" eyebrow="AgentMux startup" title="Restoring your workspace" detail={startupProgressDetail(startupProgress) + (!config && initialTheme?.status === 'unavailable' ? '\n' + initialTheme.message : '')} />
+  if (loading || startupAgentAvailability?.pending && startupAgentAvailability.waiting) {
+    return <StartupLoadingSurface loading={loading} progress={startupProgress} agents={startupAgentAvailability}
+      hostLabel={config?.hosts.find(host => host.id === startupAgentAvailability?.hostId)?.label}
+      detailSuffix={!config && initialTheme?.status === 'unavailable' ? '\n' + initialTheme.message : ''}
+      onContinue={continueStartup} />
   }
 
   if (!config && error) {
