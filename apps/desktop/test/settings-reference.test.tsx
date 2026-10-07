@@ -20,13 +20,28 @@ async function fill(node: HTMLInputElement, value: string) {
   })
 }
 const name = () => dom.container.querySelector<HTMLInputElement>('[data-executor-name]')!
-it('selection: horizontal focus and exact object selection reach a single detail through SettingsPanel', async () => {
+const provider = (id: string) => dom.click(`[aria-label="Providers"] [data-resource-row="provider:${id}"]`)
+async function scope(value: 'templates' | 'host') {
+  const node = dom.container.querySelector<HTMLSelectElement>('[aria-label="Executor configuration scope"]')!
+  await act(async () => { node.value = value; node.dispatchEvent(new Event('change', { bubbles: true })) })
+}
+it('sidebar: named groups and exact routes remain available through the registered Settings shell', async () => {
+  const close = vi.fn()
+  await dom.render(<SettingsPanel initialSection="agents" onClose={close} />)
+  expect([...dom.container.querySelectorAll('[data-settings-group]')].map(node => node.textContent)).toEqual(['Preferences', 'Message Tool', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
+  await dom.click('[data-settings-target="general"]')
+  expect(dom.container.querySelector('.settings-page')!.getAttribute('data-settings-page')).toBe('general')
+  expect(dom.container.querySelector('.settings-content__breadcrumb')!.textContent).toBe('Preferences')
+  await dom.click('[aria-label="Close settings"]'); expect(close).toHaveBeenCalledOnce()
+})
+it('selection: horizontal Provider context and vertical Executor selection reach one exact editor', async () => {
   await dom.render(<SettingsPanel initialSection="agents" onClose={() => {}} />)
+  expect(dom.container.querySelector('[aria-label="Providers"]')!.getAttribute('aria-orientation')).toBe('horizontal')
   const list = dom.container.querySelector('[aria-label="Executors"]')!
-  expect(list.getAttribute('aria-orientation')).toBe('horizontal')
+  expect(list.getAttribute('aria-orientation')).toBe('vertical')
   const rows = list.querySelectorAll<HTMLButtonElement>('[data-resource-row]')
   rows[0]!.focus()
-  await act(async () => rows[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })))
+  await act(async () => rows[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
   expect(document.activeElement).toBe(rows[1])
   expect(rows[0]!.getAttribute('aria-selected')).toBe('true')
   await act(async () => rows[1]!.click())
@@ -34,52 +49,37 @@ it('selection: horizontal focus and exact object selection reach a single detail
   expect(dom.container.querySelector<HTMLElement>('[data-resource-editor]')!.dataset.resourceEditor).toBe(ids[1])
   expect(document.activeElement).toBe(name())
 })
-it('drafts: sidebar and Provider navigation keep the authored exact Executor and whole-library save', async () => {
-  const save = vi.spyOn(api.config, 'save')
-  const close = vi.fn()
-  await dom.render(<SettingsPanel initialSection="agents" onClose={close} />)
+it('drafts: Provider scope and sidebar roundtrips preserve authored objects and whole-library save', async () => {
+  const save = vi.spyOn(api.config, 'save'), config = useAppStore.getState().config!
+  await dom.render(<SettingsPanel initialSection="agents" onClose={() => {}} />)
   await fill(name(), 'Authored before browsing')
-  await dom.click('.settings-providers-toggle')
-  await dom.click('[data-settings-target="general"]')
-  await dom.click('[data-settings-target="agents"]')
-  const back = [...dom.container.querySelectorAll<HTMLButtonElement>('.settings-agent-navigation button')].find(node => node.textContent === 'Executors')!
-  await act(async () => back.click())
-  expect(name().value, 'Cross-view navigation retains authored drafts').toBe('Authored before browsing')
+  const other = useAppStore.getState().providerCatalog.find(entry => entry.id !== config.executors[ids[0]!]!.providerId)!
+  await provider(other.id)
+  expect(dom.container.querySelectorAll('[aria-label="Executors"] [data-resource-row]')).toHaveLength(Object.values(config.executors).filter(entry => entry.providerId === other.id).length)
+  await dom.click('[data-settings-target="general"]'); await dom.click('[data-settings-target="agents"]')
+  await provider(config.executors[ids[0]!]!.providerId)
+  expect(name().value).toBe('Authored before browsing')
   await dom.click('[data-settings-save-bar] button')
   expect(save).toHaveBeenCalledWith(expect.objectContaining({ executors: expect.objectContaining({ [ids[0]!]: expect.objectContaining({ label: 'Authored before browsing' }) }) }), expect.anything())
-  await dom.click('[aria-label="Close settings"]')
-  expect(close).toHaveBeenCalledOnce()
+  expect(Object.keys(save.mock.calls[0]![0].executors)).toEqual(ids)
 })
-it('creation: Provider object selection creates the precise adapter configuration', async () => {
+it('creation: a selected Provider creates its precise launch configuration in the same workbench', async () => {
   await dom.render(<SettingsPanel initialSection="agents" onClose={() => {}} />)
-  const scope = dom.container.querySelector<HTMLSelectElement>('[aria-label="Executor configuration scope"]')!
-  await act(async () => { scope.value = 'host'; scope.dispatchEvent(new Event('change', { bubbles: true })) })
-  await dom.click('.settings-providers-toggle')
-  const providers = useAppStore.getState().providerCatalog
-  expect(providers.length).toBeGreaterThan(1)
-  await dom.click(`[aria-label="Providers"] [data-resource-row="${providers[1]!.id}"]`)
-  expect(dom.container.querySelectorAll('[data-provider-entry]')).toHaveLength(1)
-  await dom.click(`[aria-label="Create executor with ${providers[1]!.label}"]`)
-  const select = dom.container.querySelector<HTMLSelectElement>('[data-executor-provider]')!
-  expect(select.value, 'Creation uses selected Provider identity').toBe(providers[1]!.id)
-  expect(scope.value, 'Creating a global template returns to its visible configuration scope').toBe('templates')
-  expect(select.closest('[hidden]')).toBeNull()
-  expect(name().value).toContain(providers[1]!.label)
+  const chosen = useAppStore.getState().providerCatalog[1]!
+  await provider(chosen.id)
+  await dom.click('.settings-executor-toolbar .small-button')
+  expect(dom.container.querySelector<HTMLSelectElement>('[data-executor-provider]')!.value).toBe(chosen.id)
+  expect(name().value).toContain(chosen.label)
   expect(document.activeElement).toBe(name())
+  expect(dom.container.querySelector('[aria-label="Providers"] [aria-selected="true"]')!.getAttribute('data-resource-row')).toBe(`provider:${chosen.id}`)
 })
-
-it('retains an authored Host registration across Provider browsing without changing its scope', async () => {
+it('Host registration retains its own draft and does not inherit the global Provider filter', async () => {
   await dom.render(<SettingsPanel initialSection="agents" onClose={() => {}} />)
-  const scope = dom.container.querySelector<HTMLSelectElement>('[aria-label="Executor configuration scope"]')!
-  await act(async () => { scope.value = 'host'; scope.dispatchEvent(new Event('change', { bubbles: true })) })
+  await scope('host')
   const register = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.includes('Register command'))!
   await act(async () => register.click())
-  const input = dom.container.querySelector<HTMLInputElement>('[aria-label="Host Executor name"]')!
-  await fill(input, 'Authored Host wrapper')
-  await dom.click('.settings-providers-toggle')
-  await act(async () => dom.container.querySelector<HTMLButtonElement>('.settings-agent-navigation button')!.click())
-  expect(scope.value).toBe('host')
-  expect(dom.container.querySelector('[aria-label="Host Executor name"]')).toBe(input)
-  expect(input.value).toBe('Authored Host wrapper')
-  expect(input.closest('[hidden]')).toBeNull()
+  await fill(dom.container.querySelector<HTMLInputElement>('[aria-label="Host Executor name"]')!, 'Authored Host wrapper')
+  await scope('templates'); await provider(useAppStore.getState().providerCatalog[1]!.id); await scope('host')
+  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Host Executor name"]')!.value).toBe('Authored Host wrapper')
+  expect(dom.container.querySelector('[aria-label="Provider catalog"]')!.closest('[hidden]')).not.toBeNull()
 })

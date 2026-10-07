@@ -17,7 +17,7 @@ beforeEach(async () => {
   useAppStore.setState({ config, providerCatalog: catalog, executorDetections: {}, detectExecutors: vi.fn(async () => {}) })
 })
 function button(text: string) {
-  const found = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === text)
+  const found = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === text || node.getAttribute('aria-label') === text)
   expect(found, `Actual connected button ${text}`).toBeDefined()
   return found!
 }
@@ -31,7 +31,8 @@ async function fill(node: HTMLInputElement | HTMLTextAreaElement, value: string)
 }
 const editor = () => dom.container.querySelector<HTMLElement>('[data-resource-editor]')!
 const name = () => editor().querySelector<HTMLInputElement>('[data-executor-name]')!
-async function openProviders() { await dom.click('.settings-providers-toggle') }
+async function openProviders() { await dom.click(`[data-resource-row="provider:${providerSelect()?.value ?? config.executors[Object.keys(config.executors)[0]!]!.providerId}"]`) }
+async function allProviders() { await dom.click('[data-resource-row="providers:all"]') }
 async function render(onSave: (next: Record<string, AgentExecutorConfig>, expected: Record<string, AgentExecutorConfig>) => Promise<void> = async () => {}) {
   await dom.render(<AgentSettingsPane config={config} onSave={onSave} />)
 }
@@ -42,11 +43,11 @@ it('entry: an unknown catalog keeps creation reachable and shows an actual faile
   await render()
   expect(button('Add executor').disabled, 'Unknown Provider lookup must keep the creation entry operable').toBe(false)
   await click('Add executor')
-  expect(lookup).toHaveBeenCalledOnce()
+  expect(lookup).toHaveBeenCalledTimes(2)
   expect(dom.container.querySelector('[aria-label="Provider catalog"]')).not.toBeNull()
   expect(dom.container.querySelector('[role="alert"]')!.textContent).toContain('Original Host lookup unavailable')
   expect(dom.container.textContent).not.toContain('No providers registered')
-  expect(dom.container.querySelector('.settings-resource-count')!.textContent, 'Unknown Provider lookup cannot be presented as a confirmed zero').toBe('Provider catalog')
+  expect(dom.container.querySelector('.settings-resource-count')!.textContent, 'Unknown Provider lookup cannot be presented as a confirmed zero').toContain('global templates')
   expect(dom.container.querySelector('.settings-provider-catalog__empty')).toBeNull()
   expect(dom.container.querySelectorAll('[data-provider-entry]')).toHaveLength(0)
   expect(button('Retry providers').disabled).toBe(false)
@@ -57,17 +58,17 @@ it('publication: retry publishes the confirmed catalog and creates the exact cho
   useAppStore.setState({ providerCatalog: [] })
   const lookup = vi.spyOn(api.providers, 'list').mockRejectedValueOnce(new Error('Retry this read')).mockResolvedValueOnce(catalog)
   const save = vi.fn(async (_next: Record<string, AgentExecutorConfig>, _expected: Record<string, AgentExecutorConfig>) => {})
-  await render(save); await click('Add executor'); await click('Retry providers')
+  await render(save); await click('Retry providers')
   expect(lookup).toHaveBeenCalledTimes(2)
   expect(useAppStore.getState().providerCatalog, 'Confirmed Provider catalog is published for creation').toEqual(catalog)
-  expect(dom.container.querySelectorAll('[aria-label="Providers"] [data-resource-row]')).toHaveLength(catalog.length)
+  expect(dom.container.querySelectorAll('[aria-label="Providers"] [data-resource-row]')).toHaveLength(catalog.length + 1)
   const selected = catalog[1]!
-  await dom.click(`[aria-label="Providers"] [data-resource-row="${selected.id}"]`)
-  await dom.click(`[aria-label="Create executor with ${selected.label}"]`)
+  await dom.click(`[aria-label="Providers"] [data-resource-row="provider:${selected.id}"]`)
+  await click('Add executor')
   expect(name().isConnected).toBe(true); expect(document.activeElement).toBe(name())
   expect(name().selectionStart).toBe(0); expect(name().selectionEnd).toBe(name().value.length)
   const id = editor().dataset.resourceEditor!
-  await click('Save executors')
+  await click('Save all executors')
   expect(save).toHaveBeenCalledWith(expect.objectContaining({ [id]: expect.objectContaining({ providerId: selected.id, command: selected.executable }) }), config.executors)
   expect(useAppStore.getState().detectExecutors).toHaveBeenCalledOnce()
 })
@@ -78,7 +79,7 @@ it('distinguishes a confirmed empty catalog from the unknown initial projection'
   await render(); await click('Add executor')
   expect(dom.container.textContent).toContain('No providers registered')
   expect(dom.container.textContent).toContain('returned an empty provider catalog')
-  expect(dom.container.querySelector('.settings-resource-count')!.textContent).toBe('0 providers')
+  expect(dom.container.querySelector('.settings-resource-count')!.textContent).toContain('global templates')
   expect(dom.container.querySelectorAll('[data-provider-entry]')).toHaveLength(0)
   expect(button('Refresh providers').disabled).toBe(false)
 })
@@ -88,14 +89,14 @@ it('browses all actual catalog identities without probing or claiming installed 
   await render(); await openProviders()
   expect(lookup).not.toHaveBeenCalled()
   for (const provider of catalog) {
-    await dom.click(`[aria-label="Providers"] [data-resource-row="${provider.id}"]`)
+    await dom.click(`[aria-label="Providers"] [data-resource-row="provider:${provider.id}"]`)
     const entry = dom.container.querySelector(`[data-provider-entry="${provider.id}"]`)!
     expect(entry.textContent).toContain(provider.label)
     expect(entry.textContent).toContain(provider.executable)
     expect(entry.textContent).toContain(provider.capabilities.providerResume ? 'Native resume' : 'No native resume')
   }
   expect(dom.container.textContent).toContain('Command availability is checked separately')
-  expect(dom.container.querySelectorAll('[data-resource-editor]')).toHaveLength(0)
+  expect(dom.container.querySelectorAll('[data-resource-editor]')).toHaveLength(Object.values(config.executors).some(entry => entry.providerId === catalog.at(-1)!.id) ? 1 : 0)
   expect(useAppStore.getState().detectExecutors).toHaveBeenCalledOnce()
 })
 
@@ -104,11 +105,11 @@ it('a failed refresh preserves the exact last catalog and the authored Executor 
   await render(); await fill(name(), 'Keep this authored name'); await openProviders()
   await click('Refresh providers')
   expect(useAppStore.getState().providerCatalog).toBe(catalog)
-  expect(dom.container.querySelectorAll('[aria-label="Providers"] [data-resource-row]')).toHaveLength(catalog.length)
+  expect(dom.container.querySelectorAll('[aria-label="Providers"] [data-resource-row]')).toHaveLength(catalog.length + 1)
   expect(dom.container.textContent).toContain('last received providers remain')
-  await click('Executors')
+  await allProviders()
   expect(name().value).toBe('Keep this authored name')
-  expect(button('Save executors').disabled).toBe(false)
+  expect(button('Save all executors').disabled).toBe(false)
 })
 
 const providerSelect = () => editor().querySelector<HTMLSelectElement>('[data-executor-provider]')!
@@ -164,9 +165,9 @@ it('keeps the complete unsaved draft, custom command, disclosure and focus when 
   expect(field('Environment').value).toBe('{"LITERAL":"$HOME stays literal"}')
   expect(editor().querySelector<HTMLInputElement>('input[type="color"]')!.value).toBe('#112233')
   expect(document.activeElement).toBe(providerSelect())
-  await openProviders(); await click('Executors')
-  expect(document.activeElement).toBe(name()); expect(name().isConnected).toBe(true)
-  await click('Save executors')
+  await openProviders(); await allProviders()
+  await dom.click(`[data-resource-row="${nextId}"]`); expect(document.activeElement).toBe(name()); expect(name().isConnected).toBe(true)
+  await click('Save all executors')
   expect(save.mock.calls[0]![0]).not.toHaveProperty(oldId)
   expect(save.mock.calls[0]![0]).toHaveProperty(nextId, expect.objectContaining({
     providerId: catalog[1]!.id, label: 'My authored agent', command: 'my-custom-command',
@@ -204,7 +205,7 @@ it('fixes a newly captured Provider and identity while saving and retains later 
   let resolve!: () => void
   const save = vi.fn(async (_next: Record<string, AgentExecutorConfig>, _expected: Record<string, AgentExecutorConfig>) => { await new Promise<void>(done => { resolve = done }) })
   await render(save); await click('Add executor'); const id = editor().dataset.resourceEditor!
-  await fill(name(), 'Captured name'); await click('Save executors')
+  await fill(name(), 'Captured name'); await click('Save all executors')
   expect(providerSelect().disabled).toBe(true); expect(button('Add executor').disabled).toBe(true)
   expect(save.mock.calls[0]![0][id]!.providerId).toBe(catalog[0]!.id)
   await fill(name(), 'After submission')
@@ -219,14 +220,14 @@ it('preserves authored save baselines and post-submission edits while browsing P
   const pending = new Promise<void>(done => { resolve = done })
   const save = vi.fn(async (_next: Record<string, AgentExecutorConfig>, _expected: Record<string, AgentExecutorConfig>) => { await pending })
   await render(save); const originalId = editor().dataset.resourceEditor!
-  await fill(name(), 'Submitted name'); await click('Save executors')
+  await fill(name(), 'Submitted name'); await click('Save all executors')
   await openProviders()
   expect(dom.container.querySelector('[aria-label="Provider catalog"]')).not.toBeNull()
-  expect(dom.container.querySelector<HTMLButtonElement>('[data-provider-entry] button')!.disabled).toBe(true)
-  await click('Executors'); await fill(name(), 'After submission')
+  expect(button('Add executor').disabled).toBe(true)
+  await allProviders(); await fill(name(), 'After submission')
   await act(async () => resolve())
   expect(name().value).toBe('After submission')
-  await click('Save executors')
+  await click('Save all executors')
   expect(save.mock.calls[1]![1][originalId]!.label).toBe('Submitted name')
   expect(save.mock.calls[1]![0][originalId]!.label).toBe('After submission')
 })
@@ -235,7 +236,35 @@ it('a fresh exact Executor navigation leaves Providers and preserves the origina
   const id = Object.keys(config.executors)[0]!
   await render(); await fill(name(), 'Exact original draft'); await openProviders()
   await dom.render(<AgentSettingsPane config={config} onSave={async () => {}} navigationRequest={{ section: 'agents', executorId: id }} />)
-  expect(dom.container.querySelector('[aria-label="Provider catalog"]')).toBeNull()
+  expect(dom.container.querySelector('[aria-label="Providers"] [aria-selected="true"]')!.getAttribute('data-resource-row')).toBe(`provider:${config.executors[id]!.providerId}`)
   expect(editor().dataset.resourceEditor).toBe(id)
   expect(name().value).toBe('Exact original draft'); expect(document.activeElement).toBe(name())
+})
+
+it('keeps saved Provider identities visible when catalog declarations disappear', async () => {
+  const id = Object.keys(config.executors)[0]!, saved = config.executors[id]!
+  config = { ...config, executors: { ...config.executors, [id]: { ...saved, providerId: 'retired-provider' } } }
+  const save = vi.fn(async (_next: Record<string, AgentExecutorConfig>, _expected: Record<string, AgentExecutorConfig>) => {})
+  await render(save)
+  await dom.click('[data-resource-row="provider:retired-provider"]')
+  expect(editor().dataset.resourceEditor).toBe(id)
+  expect(dom.container.textContent).toContain('absent from the current catalog')
+  await fill(name(), 'Retain my configured adapter')
+  await click('Save all executors')
+  expect(save.mock.calls[0]![0][id]).toMatchObject({ providerId: 'retired-provider', label: 'Retain my configured adapter' })
+  expect(Object.keys(save.mock.calls[0]![0])).toEqual(Object.keys(config.executors))
+})
+
+it('retains the exact unsaved Provider option after a confirmed catalog change', async () => {
+  await render(); await click('Add executor')
+  const id = editor().dataset.resourceEditor!, selected = providerSelect().value, command = field('Command').value
+  await fill(name(), 'Keep my unsaved adapter')
+  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  await act(async () => { useAppStore.setState({ providerCatalog: [] }) })
+  expect(useAppStore.getState().providerCatalog).toEqual([])
+  expect(editor().dataset.resourceEditor).toBe(id)
+  expect(providerSelect().value).toBe(selected)
+  expect([...providerSelect().options].some(option => option.value === selected)).toBe(true)
+  expect(field('Command').value).toBe(command)
+  expect(name().value).toBe('Keep my unsaved adapter')
 })
