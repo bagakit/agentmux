@@ -119,3 +119,6 @@ export * from './search-metadata.js'
 export * from './search-contract.js'
 export * from './search-codec.js'
 export * from './search-reader.js'
+
+export * from './mote-connection-contract.js'
+export * from './mote-connection-codec.js'
