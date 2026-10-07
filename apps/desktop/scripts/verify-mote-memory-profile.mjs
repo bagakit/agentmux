@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createRequire } from 'node:module'
+import { createRequire, isBuiltin } from 'node:module'
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, statfs, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 
@@ -16,7 +16,9 @@ await mkdir(output, { recursive: true })
 const evidence = await mkdtemp(join(output, 'attempt-'))
 const isolated = join(evidence, 'source'), owner = 'apps/desktop/src/renderer/src/components/MoteMemory.tsx'
 const memoryTest = 'apps/desktop/test/mote-memory-profile.test.tsx', contextTest = 'apps/desktop/test/mote-context-files.test.ts'
-const memoryCases = 13, contextCases = 20
+const nativeSource = 'apps/desktop/native/workspace-move.c', nativeInclude = 'apps/desktop/native/workspace-file.inc'
+const nativeBuilder = 'apps/desktop/scripts/build-workspace-move-helper.mjs'
+const memoryCases = 13, contextCases = 21
 const config = 'memory-gate.config.mts', sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const packages = ['core', 'demand', 'git', 'identity', 'layout', 'client-ui', 'relay', 'diagnostic-evidence']
 const receipt = { schema: 'agentmux.mote-memory-profile-gate.v1', passed: false, functionalOnly,
@@ -77,10 +79,11 @@ function red(value, name) {
 try {
   const capacity = await statfs(repository)
   receipt.availableBytes = Number(capacity.bavail) * Number(capacity.bsize)
-  const trees = ['apps/desktop/src', 'apps/desktop/test/fixtures', 'apps/desktop/test/helpers', ...packages.map(name => 'packages/' + name + '/src')]
+  const trees = ['apps/desktop/src', 'apps/desktop/test/fixtures', 'apps/desktop/test/helpers', 'packages/core/bin', 'packages/core/test/helpers', ...packages.map(name => 'packages/' + name + '/src')]
   const selected = ['package.json', 'pnpm-lock.yaml', 'tsconfig.base.json', 'vitest.config.ts', 'vitest.setup.ts', 'test/fixture-values.mjs',
     'apps/desktop/package.json', 'apps/desktop/tsconfig.json', memoryTest, contextTest, 'apps/desktop/test/vitest.mote-context.config.mts',
-    'apps/desktop/scripts/lib/fixture-values.mjs', relative(repository, import.meta.filename),
+    'apps/desktop/scripts/lib/fixture-values.mjs', 'apps/desktop/resources/toolkit/initial-packages.ts',
+    nativeSource, nativeInclude, nativeBuilder, relative(repository, import.meta.filename),
     ...packages.flatMap(name => ['package.json', 'tsconfig.json'].map(file => 'packages/' + name + '/' + file))]
   const inputs = [...new Set([...selected, ...(await Promise.all(trees.map(files))).flat()])].sort()
   let inputBytes = 0
@@ -95,7 +98,8 @@ try {
       const saved = await readPinned(latest.receipt)
       assert.equal(saved.schema, functional.schema); assert.equal(saved.passed, true)
       assert.deepEqual(saved.source, functional.source); assert.deepEqual(saved.runtime, functional.runtime)
-      assert.equal(saved.mutations.length, 3); assert.equal(saved.runs.length, 6)
+      functional.qualificationSource = saved.qualificationSource
+      assert.ok(functional.qualificationSource?.[owner]); assert.equal(saved.mutations.length, 3); assert.equal(saved.runs.length, 6)
       for (const run of saved.runs) { await readPinned(run.report); assert.equal(sha(await readFile(resolve(repository, run.log.path))), run.log.sha256) }
       receipt.functional = { ...latest.receipt, reused: true }; reused = true
     }
@@ -111,19 +115,69 @@ try {
       receipt.candidateBytes += bytes.length
       assert.equal(functional.isolatedInputs[path], functional.source[path], 'Private copy differs: ' + path)
     }
-    for (const path of ['node_modules', 'apps/desktop/node_modules', 'apps/desktop/resources', ...packages.map(name => 'packages/' + name + '/node_modules')]) {
+    for (const path of ['node_modules', 'apps/desktop/node_modules', ...packages.map(name => 'packages/' + name + '/node_modules')]) {
       await mkdir(dirname(join(isolated, path)), { recursive: true }); await symlink(join(repository, path), join(isolated, path), 'dir')
     }
-    // The current Core deliberately forks this shipping listener asset. Build
-    // that one exact Source file here, rather than importing shared/stale dist.
+    // The real directory identity owner publishes through this shipping helper.
+    // Keep its default path private; a resources symlink could use or overwrite a shared binary.
+    const nativeCommand = [process.execPath, join(isolated, nativeBuilder)], nativeLog = join(evidence, 'native-build.log')
+    const nativeChild = spawn(nativeCommand[0], nativeCommand.slice(1), { cwd: isolated, stdio: ['ignore', 'pipe', 'pipe'] })
+    let nativeText = ''; nativeChild.stdout.on('data', bytes => { nativeText += bytes }); nativeChild.stderr.on('data', bytes => { nativeText += bytes })
+    const nativeStatus = await new Promise((accept, reject) => { nativeChild.once('error', reject); nativeChild.once('close', (code, signal) => accept({ code, signal })) })
+    await writeFile(nativeLog, nativeText)
+    assert.equal(nativeStatus.signal, null, 'Native helper build was terminated.')
+    assert.equal(nativeStatus.code, 0, 'Private shipping helper build failed: ' + nativeText)
+    const nativeOutput = 'apps/desktop/resources/bin/agentmux-workspace-move'
+    functional.privateNativeBuild = { sources: { [nativeSource]: functional.source[nativeSource], [nativeInclude]: functional.source[nativeInclude], [nativeBuilder]: functional.source[nativeBuilder] },
+      command: nativeCommand, ...nativeStatus, log: await locator(nativeLog), output: nativeOutput,
+      outputSha256: sha(await readFile(join(isolated, nativeOutput))), privateOnly: true }
+    // The listener and public Files CLI both use private current source.
     const { build } = createRequire(join(repository, 'packages/core/package.json'))('esbuild')
-    const workerSource = 'packages/core/src/control-endpoint-listener-worker.ts'
-    const workerOutput = 'packages/core/dist/control-endpoint-listener-worker.js'
-    await build({ entryPoints: [join(isolated, workerSource)], outfile: join(isolated, workerOutput),
-      platform: 'node', format: 'esm', bundle: true, packages: 'external', logLevel: 'error' })
-    functional.privateWorkerBuild = { source: workerSource, sourceSha256: functional.source[workerSource],
-      output: workerOutput, outputSha256: sha(await readFile(join(isolated, workerOutput))), privateOnly: true }
-    await writeFile(join(isolated, config), "import { defineConfig } from 'vitest/config'\nimport base from './apps/desktop/test/vitest.mote-context.config.mts'\nexport default defineConfig({...base,test:{...base.test,include:['apps/desktop/test/mote-memory-profile.test.tsx','apps/desktop/test/mote-context-files.test.ts','apps/desktop/test/mote-memory-dock-consumer.test.tsx'],passWithNoTests:false}})\n")
+    const alias = {}
+    for (const name of packages) {
+      const manifest = JSON.parse(await readFile(join(isolated, 'packages/' + name + '/package.json'), 'utf8'))
+      for (const [key, value] of Object.entries(manifest.exports ?? {})) {
+        if (key.includes('*')) continue
+        const target = typeof value === 'string' ? value : value.import
+        if (target) alias['@agentmux/' + name + (key === '.' ? '' : key.slice(1))] = join(isolated, 'packages/' + name,
+          target.replace('./dist/src/', './src/').replace('./dist/', './src/').replace(/\.js$/, '.ts'))
+      }
+    }
+    const options = { platform: 'node', format: 'esm', bundle: true, packages: 'external', alias, logLevel: 'error', metafile: true,
+      plugins: [{ name: 'original-dependency-owners', setup(builder) {
+        builder.onResolve({ filter: /^[^./]/ }, args => {
+          if (isBuiltin(args.path) || args.path.startsWith('@agentmux/') || args.importer.includes('/packages/core/')) return undefined
+          return { path: createRequire(args.importer || join(isolated, 'packages/core/package.json')).resolve(args.path), external: true }
+        })
+        // Presentation assets have their independent visual evidence below.
+        builder.onResolve({ filter: /\.(css|svg|png|jpg|gif|woff2?|ttf)$/ }, args => ({ path: args.path, external: true }))
+      } }] }
+    const buildInputs = new Set(selected)
+    functional.privatePackageBuilds = []
+    // The original process-restart consumer keeps these public package imports external.
+    const builds = [
+      ...['index', 'agentmux', 'control-endpoint-listener-worker', 'object-id', 'mote-preferences']
+        .map(name => ['packages/core/src/' + name + '.ts', 'packages/core/dist/' + name + '.js']),
+      ['packages/client-ui/src/lib/mote-face.ts', 'packages/client-ui/dist/lib/mote-face.js']
+    ]
+    for (const [source, output] of builds) {
+      const result = await build({ entryPoints: [join(isolated, source)], outfile: join(isolated, output), ...options })
+      for (const path of Object.keys(result.metafile.inputs)) buildInputs.add(relative(isolated, resolve(repository, path)))
+      functional.privatePackageBuilds.push({ source, sourceSha256: functional.source[source], output, outputSha256: sha(await readFile(join(isolated, output))), privateOnly: true })
+    }
+    const loadedInputs = join(evidence, 'loaded-inputs.jsonl')
+    await writeFile(loadedInputs, '')
+    await writeFile(join(isolated, config), `import { defineConfig } from 'vitest/config'
+import { appendFileSync, existsSync, realpathSync } from 'node:fs'
+import { relative } from 'node:path'
+import base from './apps/desktop/test/vitest.mote-context.config.mts'
+const root = realpathSync(import.meta.dirname)
+export default defineConfig({...base,plugins:[{name:'record-actual-proof-inputs',transform(code,id){
+ const file=id.split('?')[0];if(!existsSync(file))return
+ const path=relative(root,realpathSync(file));if(path.startsWith('..')||path.startsWith('node_modules/'))return
+ appendFileSync(${JSON.stringify(loadedInputs)},JSON.stringify(path)+'\\n')
+}}],test:{...base.test,include:['apps/desktop/test/mote-memory-profile.test.tsx','apps/desktop/test/mote-context-files.test.ts','apps/desktop/test/mote-memory-dock-consumer.test.tsx'],passWithNoTests:false}})
+`)
     const callerChecks = [
       ['apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', '<MoteMemory scope={scope} active={active && section === \'profile\'} onOpenPath={onOpenPath} />'],
       ['apps/desktop/src/renderer/src/components/MoteProfilePopover.tsx', '<MoteDetailsPanel key={owner.topicId}'],
@@ -176,8 +230,11 @@ it('executes the original SurfaceToolDock to saved Memory consumer', async () =>
       } finally { await writeFile(join(isolated, owner), original) }
     }
     green(await run('restored', [memoryTest, contextTest], memoryCases + contextCases))
+    for (const path of (await readFile(loadedInputs, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))) buildInputs.add(path)
+    functional.qualificationSource = Object.fromEntries([...buildInputs].filter(path => Object.hasOwn(functional.source, path)).map(path => [path, functional.source[path]]))
+    assert.ok(functional.qualificationSource[owner] && functional.qualificationSource[contextTest], 'Actual finite consumers must have transformed source inputs.')
     functional.sourceChanges = []
-    for (const [path, expected] of Object.entries(functional.source)) if (sha(await readFile(join(repository, path))) !== expected) functional.sourceChanges.push(path)
+    for (const [path, expected] of Object.entries(functional.qualificationSource)) if (sha(await readFile(join(repository, path))) !== expected) functional.sourceChanges.push(path)
     assert.deepEqual(functional.sourceChanges, [], 'Candidate changed during functional verification; rerun the changed inputs.')
     await rm(isolated, { recursive: true, force: true })
     functional.cleanup = { isolatedSourceRemoved: true, productSourceMutated: false, userAppOrRunTouched: false }
@@ -218,9 +275,7 @@ it('executes the original SurfaceToolDock to saved Memory consumer', async () =>
     receipt.visual = { approval: await locator(approvalPath), capture: approval.capture, reviewer: approval.reviewer, images: capture.images,
       compiledOutputs: capture.compiled, boundary: capture.boundary }
   }
-  const currentInputs = [...new Set([...selected, ...(await Promise.all(trees.map(files))).flat()])].sort()
-  assert.deepEqual(currentInputs, inputs, 'Source inventory changed during verification; new inputs need a new receipt.')
-  for (const [path, expected] of Object.entries(functional.source))
+  for (const [path, expected] of Object.entries(functional.qualificationSource))
     assert.equal(sha(await readFile(join(repository, path))), expected, 'Candidate changed before gate completion: ' + path)
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack } }
