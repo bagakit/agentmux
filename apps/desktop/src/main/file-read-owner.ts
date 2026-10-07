@@ -1,5 +1,5 @@
 import { AgentMuxError, parseFileReadParams, parseFileCreateParams, type FileCreateParams, type FileCreateResult, parseFileWriteParams, type FileWriteParams, type FileWriteResult, type FileWriteContext, parseFileListParams, type AgentMuxRpcFilesOwner, type FileReadParams, type FileReadResource, type FileReadResult, type FileListParams, type FileListResult } from '@agentmux/core'
-import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
+import type { AgentMuxSpaceCatalog, AgentMuxZoneFact } from '@agentmux/core/control'
 import type { WorkspaceRecord, WorkspaceFileRestoreInput, WorkspaceFileUndoInput, WorkspaceFileWriteResult } from '../shared/contracts'
 import { SCRATCH_WORKSPACE_ID, type ScratchDirectoryFact } from '../shared/scratch-topics'
 import { zoneFileResource } from '../shared/zone-file-resource'
@@ -12,6 +12,8 @@ import type { NoteHistoryQuery, NoteHistorySnapshot } from '@agentmux/core/note-
 export class FileReadOwner implements AgentMuxRpcFilesOwner {
   constructor(private readonly ports: {
     catalog(): Promise<AgentMuxSpaceCatalog | null>
+    /** Original closed Zone descriptor from the same durable spatial resource owner. */
+    retiredZone?(zoneId: string): Promise<unknown>
     topicForDirectory?(workspace: WorkspaceRecord, directory: string): Promise<ScratchDirectoryFact | null>
     workspace(id: string): WorkspaceRecord | undefined
     files: Pick<WorkspaceFiles, 'read' | 'listFiles'> & {
@@ -101,11 +103,16 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
     try { catalog = await this.ports.catalog() } catch (error) { return unknown(error instanceof Error ? error.message : String(error)) }
     if (!catalog) return unknown('The original Zone observation is unavailable. Keep the original file reference and retry discovery.')
     const zones = catalog.zones.filter(zone => zone.zoneId === params.zoneId)
-    const zone = zones[0]
-    if (zones.length !== 1 || !zone || zone.kind === 'unknown' || zone.hostId === null || zone.directoryPath === null) {
+    let zone = zones[0]
+    let retired: { zone: AgentMuxZoneFact; spaceId: unknown } | null = null
+    if (zones.length === 0 && this.ports.retiredZone) {
+      try { retired = this.retainedZone(params.zoneId, await this.ports.retiredZone(params.zoneId)); zone = retired?.zone }
+      catch (error) { return unknown(error instanceof Error ? error.message : String(error)) }
+    }
+    if (zones.length > 1 || !zone || zone.kind === 'unknown' || zone.hostId === null || zone.directoryPath === null) {
       return unknown('The exact original Zone resource is unconfirmed. Keep the original file reference and retry discovery.')
     }
-    if (params.spaceId && !catalog.bindings.some(binding => binding.zoneId === zone.zoneId && binding.spaceId === params.spaceId)) {
+    if (params.spaceId && !(retired ? retired.spaceId === params.spaceId : catalog.bindings.some(binding => binding.zoneId === zone.zoneId && binding.spaceId === params.spaceId))) {
       throw new AgentMuxError('The requested Space is not bound to this original Zone.', 'FILE_RESOURCE_MISMATCH')
     }
     const workspace = this.ports.workspace(zone.workspaceId)
@@ -125,5 +132,20 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
       zoneId: zone.zoneId, zonePath: mapped.directoryPath, path: mapped.path,
       ...(mapped.logicalDirectory === undefined ? {} : { logicalDirectory: mapped.logicalDirectory }) }
     return { resource, workspace: { ...workspace } }
+  }
+
+  private retainedZone(zoneId: string, value: unknown): { zone: AgentMuxZoneFact; spaceId: unknown } | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const descriptor = value as Record<string, unknown>, original = descriptor.originalZone
+    if (!original || typeof original !== 'object' || Array.isArray(original)) return null
+    const zone = original as Record<string, unknown>
+    if (zone.zoneId !== zoneId || !['worktree', 'directory'].includes(String(zone.kind)) || typeof zone.workspaceId !== 'string') return null
+    const workspace = this.ports.workspace(zone.workspaceId)
+    if (!workspace || workspace.kind !== 'worktree' || !workspace.closeout ||
+        workspace.closeout.targetWorkspaceId !== descriptor.closeoutTargetWorkspaceId ||
+        workspace.hostId !== zone.hostId || workspace.path !== zone.directoryPath) return null
+    const target = this.ports.workspace(workspace.closeout.targetWorkspaceId)
+    if (!target || target.closeout || target.hostId !== workspace.hostId || target.path !== workspace.repoPath) return null
+    return { zone: zone as AgentMuxZoneFact, spaceId: descriptor.spaceId }
   }
 }
