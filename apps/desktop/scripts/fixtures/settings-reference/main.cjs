@@ -1,0 +1,87 @@
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const { app, BrowserWindow } = require('electron')
+const [html, owned, evidence] = process.argv.slice(2)
+app.setPath('userData', path.join(owned, 'user-data'))
+app.setPath('sessionData', path.join(owned, 'session-data'))
+let win
+const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', frames: [], interactions: [], boundary: 'Actual SettingsPanel/modules/Panes/CSS with original controlled Preview configuration API and trusted Electron Renderer input. No user App, Runtime, SSH or installation claim.' }
+app.whenReady().then(async () => {
+  const read = code => win.webContents.executeJavaScript(code)
+  const until = async (code, label = code) => {
+    const end = Date.now() + 8000
+    while (Date.now() < end) { if (await read(code)) return; await new Promise(resolve => setTimeout(resolve, 30)) }
+    throw new Error('Timed out: ' + label)
+  }
+  const selector = value => JSON.stringify(value)
+  const click = async value => {
+    const rect = await read(`(() => { const node = document.querySelector(${selector(value)}); if (!node || node.closest('[hidden]')) throw new Error('Not visible: ' + ${selector(value)}); node.scrollIntoView({block:'nearest',inline:'nearest'}); const r = node.getBoundingClientRect(); return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),width:r.width,height:r.height}; })()`)
+    assert.ok(rect.width > 0 && rect.height > 0)
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: rect.x, y: rect.y, button: 'left', clickCount: 1 })
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: rect.x, y: rect.y, button: 'left', clickCount: 1 })
+    receipt.interactions.push({ kind: 'trusted-click', selector: value })
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  const fill = async (value, text) => {
+    await click(value)
+    win.webContents.selectAll()
+    win.webContents.insertText(text)
+    await until(`document.querySelector(${selector(value)}).value === ${JSON.stringify(text)}`)
+  }
+  const capture = async (name, width, height, theme) => {
+    win.setSize(width, height)
+    await read(`window.resourceLibraryProof.theme(${JSON.stringify(theme)})`)
+    await new Promise(resolve => setTimeout(resolve, 200))
+    const checks = await read(`(() => { const page=document.querySelector('.settings-page'), save=page.querySelector('[data-settings-save-bar]'), body=page.getBoundingClientRect(); const visible=[...page.querySelectorAll('button,input,select')].filter(n=>!n.closest('[hidden]')&&n.getBoundingClientRect().width>0); return {viewport:[innerWidth,innerHeight],pageWidth:body.width,overflow:document.documentElement.scrollWidth>innerWidth,save:save?.getBoundingClientRect().toJSON(),visibleControls:visible.length}; })()`)
+    assert.equal(checks.overflow, false, 'No document horizontal overflow')
+    assert.ok(checks.visibleControls > 8)
+    const file = path.join(evidence, name + '.png')
+    fs.writeFileSync(file, (await win.webContents.capturePage()).toPNG())
+    receipt.frames.push({ name, file, theme, checks })
+  }
+  try {
+    win = new BrowserWindow({ width: 1440, height: 1000, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
+    await win.loadFile(html)
+    await until('window.resourceLibraryProof?.ready && !!document.querySelector("[data-executor-name]")')
+    await capture('executors-light', 1440, 1000, 'light')
+    await fill('[data-executor-name]', 'Personal code review')
+    await click('.settings-providers-toggle')
+    await until('!!document.querySelector("[data-provider-entry]")')
+    await capture('providers-light', 1440, 1000, 'light')
+    await click('.settings-agent-navigation button:first-child')
+    await until('document.querySelector("[data-executor-name]").value === "Personal code review"')
+    await capture('executors-dark-draft', 1440, 1000, 'dark')
+    await click('[data-resource-row="executor-005"]')
+    await capture('executor-long-narrow', 760, 860, 'light')
+    await click('.settings-launch-config summary')
+    await read('document.querySelector(".settings-launch-config__fields").scrollIntoView({block:"start"})')
+    await capture('executor-advanced-compact', 500, 900, 'dark')
+    await click('.settings-providers-toggle')
+    await capture('provider-compact', 500, 900, 'light')
+    win.setSize(1440, 1000)
+    await read('window.resourceLibraryProof.catalogMode("error")')
+    await click('.settings-provider-catalog__header button')
+    await until('!!document.querySelector(".settings-provider-catalog__notice")')
+    await capture('provider-error', 1440, 1000, 'dark')
+    await click('.settings-agent-navigation button:first-child')
+    await read('window.resourceLibraryProof.many()')
+    await until('document.querySelectorAll("[data-resource-row^=many-]").length === 128')
+    await click('[data-resource-row="many-0"]')
+    await capture('executors-many', 1120, 860, 'light')
+    await fill('[aria-label="Filter executors"]', 'configuration 128')
+    await click('[data-resource-row="many-127"]')
+    await capture('executors-many-filtered', 760, 860, 'dark')
+    // Controlled change on the original select reaches its React owner. This does not claim native OS popup qualification.
+    await read('(() => {const node=document.querySelector("select[aria-label=\\"Executor configuration scope\\"]");node.value="host";node.dispatchEvent(new Event("change",{bubbles:true}));})()')
+    receipt.interactions.push({kind:'controlled-existing-select-change',value:'host'})
+    await until('document.querySelector("select[aria-label=\\"Executor configuration scope\\"]").value === "host"')
+    await capture('host-scope', 1120, 860, 'light')
+    assert.deepEqual(await read('window.resourceLibraryProof.errors'), [])
+    receipt.calls = await read('window.resourceLibraryProof.calls')
+    receipt.passed = true
+  } catch (error) { receipt.failure = { message: error.message, stack: error.stack } }
+  fs.writeFileSync(path.join(evidence, 'render.json'), JSON.stringify(receipt, null, 2))
+  win?.destroy()
+  app.exit(receipt.passed ? 0 : 1)
+})

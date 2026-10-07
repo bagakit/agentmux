@@ -60,9 +60,10 @@ it('publication: retry publishes the confirmed catalog and creates the exact cho
   await render(save); await click('Add executor'); await click('Retry providers')
   expect(lookup).toHaveBeenCalledTimes(2)
   expect(useAppStore.getState().providerCatalog, 'Confirmed Provider catalog is published for creation').toEqual(catalog)
-  expect(dom.container.querySelectorAll('[data-provider-entry]')).toHaveLength(catalog.length)
+  expect(dom.container.querySelectorAll('[aria-label="Providers"] [data-resource-row]')).toHaveLength(catalog.length)
   const selected = catalog[1]!
-  await dom.click(`[data-provider-entry="${selected.id}"] button`)
+  await dom.click(`[aria-label="Providers"] [data-resource-row="${selected.id}"]`)
+  await dom.click(`[aria-label="Create executor with ${selected.label}"]`)
   expect(name().isConnected).toBe(true); expect(document.activeElement).toBe(name())
   expect(name().selectionStart).toBe(0); expect(name().selectionEnd).toBe(name().value.length)
   const id = editor().dataset.resourceEditor!
@@ -87,6 +88,7 @@ it('browses all actual catalog identities without probing or claiming installed 
   await render(); await openProviders()
   expect(lookup).not.toHaveBeenCalled()
   for (const provider of catalog) {
+    await dom.click(`[aria-label="Providers"] [data-resource-row="${provider.id}"]`)
     const entry = dom.container.querySelector(`[data-provider-entry="${provider.id}"]`)!
     expect(entry.textContent).toContain(provider.label)
     expect(entry.textContent).toContain(provider.executable)
@@ -102,7 +104,7 @@ it('a failed refresh preserves the exact last catalog and the authored Executor 
   await render(); await fill(name(), 'Keep this authored name'); await openProviders()
   await click('Refresh providers')
   expect(useAppStore.getState().providerCatalog).toBe(catalog)
-  expect(dom.container.querySelectorAll('[data-provider-entry]')).toHaveLength(catalog.length)
+  expect(dom.container.querySelectorAll('[aria-label="Providers"] [data-resource-row]')).toHaveLength(catalog.length)
   expect(dom.container.textContent).toContain('last received providers remain')
   await click('Executors')
   expect(name().value).toBe('Keep this authored name')
