@@ -6,6 +6,6 @@ export function renderConversationQuestionNotice(diagnostic: QuestionDiagnostic)
   return <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
     step: diagnostic.message,
     mode: `Question details or its reply could not be confirmed (${diagnostic.code}). The original conversation and Session remain available.`,
-    restore: 'Inspect the original conversation or answer in terminal. Retry the same reply only when you choose to.'
+    restore: 'Inspect the original conversation and reply operation in terminal before answering. Opening terminal does not resend the reply.'
   } }} />
 }

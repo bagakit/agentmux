@@ -9,11 +9,11 @@ export type QuestionReplyIntent = ConversationQuestionInput & {
   afterSubmissionId: string | null
 }
 export type QuestionReplyPhase = 'sending' | 'unknown' | 'submitted' | 'rejected' | 'confirmed'
-export type QuestionReplyState = { phase: QuestionReplyPhase; answers: QuestionReplyIntent['answers']; diagnostic?: { code: string; message: string } | undefined }
-export type QuestionReplyAttempt = Omit<QuestionReplyState, 'answers'> & { input: QuestionReplyIntent }
+export type QuestionReplyState = { phase: QuestionReplyPhase; answers: QuestionReplyIntent['answers']; original?: QuestionReplyAttempt & { hostId?: string; runtimeId?: string | null }; diagnostic?: { code: string; message: string } | undefined }
+export type QuestionReplyAttempt = Omit<QuestionReplyState, 'answers' | 'original'> & { input: QuestionReplyIntent }
 
 export function questionReplyState(attempt: QuestionReplyAttempt): QuestionReplyState {
-  return { phase: attempt.phase, answers: attempt.input.answers, ...(attempt.diagnostic ? { diagnostic: attempt.diagnostic } : {}) }
+  return { phase: attempt.phase, answers: attempt.input.answers, original: attempt, ...(attempt.diagnostic ? { diagnostic: attempt.diagnostic } : {}) }
 }
 export function parseQuestionReplyAttempt(value: unknown): QuestionReplyAttempt {
   if (!value || typeof value !== 'object') throw new Error('The original question reply record is unavailable; it has not been replaced.')

@@ -115,3 +115,6 @@
 .agent-question__write > summary { width: fit-content; cursor: pointer; }
 .agent-question__write > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
 .agent-question__write .agent-question__custom { margin-top: 5px; }
+
+.agent-question__field > .content-copy { margin-top: 6px; }
+.agent-question__original { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-micro)/1.45 var(--font-mono); }

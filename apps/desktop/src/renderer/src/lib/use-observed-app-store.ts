@@ -10,7 +10,7 @@ type State = ReturnType<typeof useAppStore.getState>
 // A new fact read must join its notification owner here; actions are imperative.
 const sharedFacts = {
   composer: ['config', 'scratchTopicSnapshots', 'providerCatalog', 'errorNoticeContext', 'error', 'lastError', 'lastActiveFileByWorkspace'],
-  sessionPane: ['config', 'scratchTopicSnapshots', 'sessionNameMetadata', 'runtimeEndpointWarnings',
+  sessionPane: ['config', 'workbenchSaveWarning', 'scratchTopicSnapshots', 'sessionNameMetadata', 'runtimeEndpointWarnings',
     'localHome', 'demandPmoTabIds', 'demands', 'layouts', 'spaceZoneBindings', 'spatialRequests', 'topicCategories', 'projectGroups']
 } as const satisfies Record<ConsumerKind, readonly (keyof State)[]>
 const navigationFacts = ['retainedSpatialFocus', 'workbenchNavigationInputPolicy', 'mainSurface', 'activeWorkspaceId', 'workbenchSpaceSelection'] as const

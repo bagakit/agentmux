@@ -39,7 +39,7 @@ import { RULER_WINDOWS, conversationRulerRecords, conversationRulerWindow, type 
 import { projectAgentActivityHistory } from '@agentmux/core/timeline'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
-import { ConversationView, type ConversationQuestionReply } from '@agentmux/client-ui/components/ConversationView'
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import { renderConversationQuestionNotice } from './ConversationQuestionNotice'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { SemanticIcon } from './semantic-icons'
@@ -395,7 +395,7 @@ export function ActivityView({
   onSelectAnnotation,
   describeSpeaker,
   moteConversation = false,
-  onReplyQuestion, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionAnswersObserved,
+  questionReplyRoute, questionTerminalTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange,
   renderMessageActions
 }: {
   sessionId: string
@@ -433,11 +433,14 @@ export function ActivityView({
   describeSpeaker?: DescribeSpeaker
   moteConversation?: boolean
   renderMessageActions?: (source: ConversationReplySource) => ReactNode
+  questionReplyRoute?: ComponentProps<typeof ConversationView>['questionReplyRoute']
+  questionTerminalTarget?: ComponentProps<typeof ConversationView>['questionTerminalTarget']
+  questionDraftNotice?: string | undefined
+  questionReplyContext?: string
+  onOpenQuestionTerminal?: () => void
   questionReplyDraft?: ComponentProps<typeof ConversationView>['questionReplyDraft']
   onQuestionDraftChange?: ComponentProps<typeof ConversationView>['onQuestionDraftChange']
   questionReplyState?: ComponentProps<typeof ConversationView>['questionReplyState']
-  onQuestionAnswersObserved?: (page: AgentSessionHistoryPage, context: AgentSessionHistoryPage | null) => void
-  onReplyQuestion?: ConversationQuestionReply
 }) {
   const logRef = useRef<HTMLDivElement>(null)
   const [feedEl, setFeedEl] = useState<HTMLDivElement | null>(null)
@@ -482,8 +485,6 @@ export function ActivityView({
   const questionAnswerContext = useMemo(() => recentNativePage
     ? { ...recentNativePage, items: nativeContextItems ?? recentNativePage.items } : null,
     [recentNativePage, nativeContextItems])
-  useEffect(() => { if (nativeHistoryPage) onQuestionAnswersObserved?.(nativeHistoryPage, questionAnswerContext) },
-    [nativeHistoryPage, questionAnswerContext, onQuestionAnswersObserved])
   const historyBoundary = readingWindow.historyBoundary
   const boundaryIndex = !historyBoundary || !nativeHistoryPage ? -1 : nativeHistoryPage.items.findIndex(item => item.id === historyBoundary.beforeRecordId)
   const lastEarlierRecord = nativeHistoryPage?.items[boundaryIndex - 1]
@@ -1136,7 +1137,11 @@ export function ActivityView({
           </div> }
         } : {})}
         renderQuestionNotice={renderConversationQuestionNotice}
-        {...(onReplyQuestion ? { onReplyQuestion } : {})}
+        {...(questionDraftNotice ? { questionDraftNotice } : {})}
+        {...(questionReplyRoute ? { questionReplyRoute } : {})}
+        {...(questionTerminalTarget ? { questionTerminalTarget } : {})}
+        {...(questionReplyContext ? { questionReplyContext } : {})}
+        {...(onOpenQuestionTerminal ? { onOpenQuestionTerminal } : {})}
         {...(questionReplyState ? { questionReplyState } : {})}
         {...(questionReplyDraft ? { questionReplyDraft } : {})}
         {...(onQuestionDraftChange ? { onQuestionDraftChange } : {})}

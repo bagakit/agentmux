@@ -34,7 +34,7 @@ import { unobservedRecoveryReference, rereadUnobservedSession, type RecoverySour
 import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
-import { replyConversationQuestion, desktopQuestionReplyState, observeConversationQuestionAnswers, editConversationQuestionDraft } from '../lib/conversation-question'
+import { desktopQuestionReplyState, reconcileConversationQuestionReplies, editConversationQuestionDraft } from '../lib/conversation-question'
 import { ActivityView } from './ActivityView'
 import { OpenDestinationPopover } from './OpenDestinationBar'
 import { TerminalView } from './TerminalView'
@@ -184,17 +184,16 @@ export function SessionPane({
   const firstPrompt = useObservedAppStore('sessionPane', observationVisible, consumerScope, firstPromptSelector)
   const userName = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.agentNames?.[sessionId])
   const questionReplies = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.questionReplies?.[sessionId])
+  const questionSaveWarning = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.workbenchSaveWarning)
   const questionDrafts = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.questionReplyDrafts?.[sessionId])
   const questionControl = session?.kind === 'agent' ? session.control : undefined
   const questionNotApplied = session?.kind === 'agent' ? session.promptInputNotApplied : undefined
   const questionSessionId = questionControl?.agentSessionId, questionHostId = questionControl?.hostId, questionRunId = questionControl?.run.runId
   const refusedQuestionOperation = questionNotApplied?.submissionId, refusedQuestionRun = questionNotApplied?.run.runId
-  const observeQuestionAnswers = useCallback((page: AgentSessionHistoryPage, context: AgentSessionHistoryPage | null) => {
-    if (questionSessionId && questionHostId && questionRunId) observeConversationQuestionAnswers(
-      { kind: 'agent', agentSessionId: questionSessionId, hostId: questionHostId, run: { runId: questionRunId } }, page, context,
-      refusedQuestionOperation && refusedQuestionRun ? { submissionId: refusedQuestionOperation, run: { runId: refusedQuestionRun } } : undefined)
-    // New submitted/unknown intents must observe the same already-read page. Draft,
-    // presentation and other Session updates do not change this observation.
+  useEffect(() => {
+    if (questionSessionId && questionHostId && questionRunId && refusedQuestionOperation && refusedQuestionRun) reconcileConversationQuestionReplies(
+      { kind: 'agent', agentSessionId: questionSessionId, hostId: questionHostId, run: { runId: questionRunId } },
+      { submissionId: refusedQuestionOperation, run: { runId: refusedQuestionRun } })
   }, [questionSessionId, questionHostId, questionRunId, refusedQuestionOperation, refusedQuestionRun, questionReplies])
   const appendAgentComposerDraft = useAppStore.getState().appendAgentComposerDraft
   const terminalThemeId = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.config?.appearance.terminalTheme)
@@ -951,11 +950,16 @@ export function SessionPane({
     readPastedImage, readHistoryResource, openHttpLink: onProseLinkClick,
     ...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {}), describeSpeaker,
     moteConversation: moteOwner !== null, renderMessageActions,
-    ...(hasAgentComposer ? { onReplyQuestion: input => replyConversationQuestion(session.control, input),
+    ...(hasAgentComposer ? { questionReplyRoute: session.capabilities.asyncQuestionReply,
+      questionTerminalTarget: !session.nativeSourceObservation && session.nativeHandle?.kind === 'provider' ? {
+        source: { providerId: session.nativeHandle.providerId, nativeSessionId: session.nativeHandle.sessionId }, run: session.control.run
+      } : undefined,
+      questionDraftNotice: questionSaveWarning ? `Draft save unconfirmed. Your latest edits are kept in this running app; copy them before closing. ${questionSaveWarning}` : undefined,
+      questionReplyContext: JSON.stringify([session.control.hostId, session.id, session.control.run.runId]),
+      onOpenQuestionTerminal: openTerminal,
       questionReplyDraft: target => questionDrafts?.[questionReplyKey(sessionId, target)],
       onQuestionDraftChange: (target, answers) => editConversationQuestionDraft(session.control, target, answers),
-      questionReplyState: target => desktopQuestionReplyState(questionReplies, sessionId, target),
-      onQuestionAnswersObserved: observeQuestionAnswers } : {})
+      questionReplyState: target => desktopQuestionReplyState(questionReplies, sessionId, target) } : {})
   }
   // Covering/hiding a location freezes that location's already-presented elements.
   if (session.kind === 'agent' && visible && activityShown) {

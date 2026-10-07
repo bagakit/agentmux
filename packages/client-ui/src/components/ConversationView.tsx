@@ -1,4 +1,4 @@
-import type { AgentSessionHistoryItem, AgentSessionHistoryPage, AgentSessionQuestionReplyReceipt } from '@agentmux/core'
+import type { AgentCapabilities, AgentMuxRunRef, AgentSessionHistorySource, AgentSessionHistoryItem, AgentSessionHistoryPage } from '@agentmux/core'
 import { projectConversationRecords } from '../lib/conversation-records.js'
 import { memo, useMemo, type ReactNode } from 'react'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
@@ -16,10 +16,13 @@ import { conversationItemRef } from '@agentmux/core/conversation'
 type ReadingProps = Pick<ConversationMessageProps,
   'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
 
-export type ConversationQuestionReply = (input: ConversationQuestionInput) => Promise<AgentSessionQuestionReplyReceipt>
-
 type Props = ReadingProps & {
-  onReplyQuestion?: ConversationQuestionReply
+  questionReplyRoute?: AgentCapabilities['asyncQuestionReply']
+  questionTerminalTarget?: { source: AgentSessionHistorySource; run: AgentMuxRunRef } | undefined
+  /** Changes reset only transient card actions; drafts remain in the host's original owner. */
+  questionDraftNotice?: string | undefined
+  questionReplyContext?: string
+  onOpenQuestionTerminal?: () => void
   questionReplyState?: (target: ConversationQuestionTarget) => QuestionReplyState | undefined
   questionReplyDraft?: (target: ConversationQuestionTarget) => ConversationQuestionInput['answers'] | undefined
   onQuestionDraftChange?: (target: ConversationQuestionTarget, answers: ConversationQuestionInput['answers']) => void
@@ -41,7 +44,7 @@ type Props = ReadingProps & {
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  page, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, messageIdForRecord, showSource = false, onReplyQuestion, questionReplyState, questionReplyDraft, onQuestionDraftChange, renderQuestionNotice, ...reading
+  page, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, messageIdForRecord, showSource = false, questionReplyRoute, questionTerminalTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, renderQuestionNotice, ...reading
 }: Props) {
   const describedRecords = useMemo(() => projectConversationRecords({ agentSessionId: sessionId, executionHostId: reading.executionHostId, historyPage: page }),
     [page, sessionId, reading.executionHostId])
@@ -55,6 +58,10 @@ export const ConversationView = memo(function ConversationView({
       const record = descriptions.get(item.id)!
       const recordId = record.id
       const question = questions.get(item.id)
+      const questionAttempt = question && questionReplyState && question.turnId ? questionReplyState({ source: question.source, turnId: question.turnId, recordId: question.recordId }) : undefined
+      const terminalCurrent = Boolean(question && questionTerminalTarget && question.source.providerId === questionTerminalTarget.source.providerId
+        && question.source.nativeSessionId === questionTerminalTarget.source.nativeSessionId
+        && (!questionAttempt?.original || questionAttempt.original.input.expectedRun.runId === questionTerminalTarget.run.runId))
       const user = record.input
       const itemRef = conversationItemRef(record)
       const speaker = record.speaker
@@ -79,10 +86,11 @@ export const ConversationView = memo(function ConversationView({
           {...reading} />
       return <div key={recordId} className="conversation-native-thread__record" data-native-record-id={item.id}>
         {wrapBody ? wrapBody(body) : body}
-        {question ? <AgentAsyncQuestionCard key={JSON.stringify([sessionId, recordId])} request={question.request} recordedAnswers={question.recordedAnswers}
-          {...(onReplyQuestion && question.turnId ? { onSubmit: selected => onReplyQuestion({
-            source: { ...question.source }, turnId: question.turnId!, recordId: question.recordId, answers: selected }) } : {})}
-          {...(questionReplyState && question.turnId ? { attempt: questionReplyState({ source: question.source, turnId: question.turnId, recordId: question.recordId }) } : {})}
+        {question ? <AgentAsyncQuestionCard key={JSON.stringify([sessionId, recordId, reading.executionHostId, questionReplyContext])} request={question.request} recordedAnswers={question.recordedAnswers} terminalCurrent={terminalCurrent}
+          {...(questionDraftNotice ? { draftNotice: questionDraftNotice } : {})}
+          {...(questionReplyRoute ? { replyRoute: questionReplyRoute } : {})}
+          {...(onOpenQuestionTerminal ? { onOpenTerminal: onOpenQuestionTerminal } : {})}
+          {...(questionAttempt ? { attempt: questionAttempt } : {})}
           {...(questionReplyDraft && question.turnId ? { draftAnswers: questionReplyDraft({ source: question.source, turnId: question.turnId, recordId: question.recordId }) } : {})}
           {...(onQuestionDraftChange && question.turnId ? { onDraftChange: selected => onQuestionDraftChange({ source: question.source, turnId: question.turnId!, recordId: question.recordId }, selected) } : {})}
           {...(renderQuestionNotice ? { renderNotice: renderQuestionNotice } : {})} /> : null}
