@@ -13,7 +13,7 @@ const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { vi.useRealTimers(); for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 async function fixture(running = false) { const f = await ingressFixture(running); cleanup.push(() => f.close()); return f }
 function qualifier(f: Awaited<ReturnType<typeof fixture>>, read: NonNullable<IngressAuthenticator['qualifyReply']>) {
-  vi.spyOn(f.connections, 'resolvePublicationCredential').mockResolvedValue('trusted-host-credential')
+  vi.spyOn(f.connections, 'resolveCredential').mockResolvedValue('trusted-host-credential')
   const port: IngressAuthenticator = f.options.authenticators[0]!, result = vi.fn(read)
   port.qualifyReply = result
   return result
@@ -114,7 +114,7 @@ it('a stuck credential observation releases the same intake and its late result 
   const f = await fixture(), submit = vi.spyOn(f.client, 'submitAgentMessage')
   const read = qualifier(f, async () => 'reply')
   let lateCredential!: (credential: string) => void
-  const credentials = vi.spyOn(f.connections, 'resolvePublicationCredential').mockResolvedValue('current-credential')
+  const credentials = vi.spyOn(f.connections, 'resolveCredential').mockResolvedValue('current-credential')
     .mockImplementationOnce(async () => await new Promise<string>(resolve => { lateCredential = resolve }))
   const accepted = await f.receive({ selection: 'message', replyToMessageId: 'original-parent' })
   vi.useFakeTimers()
