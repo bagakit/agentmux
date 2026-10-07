@@ -10,11 +10,17 @@ export type VerifiedIngressEvent = {
   body: string
   /** Original platform addressing facts, not body matching. */
   selection: 'mention' | 'reply' | 'message'
+  /** Frozen native parent identity; its presence alone never qualifies a bot reply. */
+  replyToMessageId?: string
+  /** No text projection exists; retain the complete raw event and refuse only this input. */
+  unsupportedContent?: true
 }
 export interface IngressAuthenticator {
   readonly adapterId: string
   /** Own signature/token verification and issuer checks. Never expose this port over RPC. */
   verify(config: ConnectionConfig, raw: string, transportProof?: unknown): Promise<VerifiedIngressEvent>
+  /** Read the exact parent after persistence/ACK, outside original Core input admission. */
+  qualifyReply?(config: ConnectionConfig, event: Readonly<VerifiedIngressEvent>, raw: string, credential: string, signal: AbortSignal): Promise<'reply' | 'message' | 'unknown'>
 }
 export type DurableIngressCore = Pick<AgentMuxClient, 'readAgentSessions' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'>
 export type DurableIngressOptions = {
@@ -29,7 +35,9 @@ function fail(code: string): never { throw new AgentMuxError('This external inta
 function verified(value: VerifiedIngressEvent): VerifiedIngressEvent {
   const text = (v: unknown): string => { if (typeof v !== 'string' || !v.trim() || v.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(v)) fail('INVALID_CONNECTION_INGRESS'); return v as string }
   if (typeof value.body !== 'string' || !['mention', 'reply', 'message'].includes(value.selection)) fail('INVALID_CONNECTION_INGRESS')
-  return { eventId: text(value.eventId), messageId: text(value.messageId), externalConversationId: text(value.externalConversationId), actor: parseConnectionActor(value.actor), body: value.body, selection: value.selection }
+  if (value.unsupportedContent !== undefined && value.unsupportedContent !== true) fail('INVALID_CONNECTION_INGRESS')
+  return { eventId: text(value.eventId), messageId: text(value.messageId), externalConversationId: text(value.externalConversationId), actor: parseConnectionActor(value.actor), body: value.body, selection: value.selection,
+    ...(value.replyToMessageId === undefined ? {} : { replyToMessageId: text(value.replyToMessageId) }), ...(value.unsupportedContent ? { unsupportedContent: true } : {}) }
 }
 
 /** Durable transport admission only. The original Core queue owns all Agent input and delivery facts. */
@@ -95,7 +103,8 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       if (originalMessage && !equal(messageFacts(JSON.parse(String(originalMessage.event_json))), messageFacts(event))) fail('INGRESS_MESSAGE_CONFLICT')
       const ingress = originalMessage ? this.read(String(originalMessage.ingress_id))! : parseConnectionIngressRecord({
         ingressId: `ingress:${randomUUID()}`, connectionId: input.connectionId, application: current.config.application,
-        eventId: event.eventId, externalMessageId: event.messageId, externalConversationId: event.externalConversationId, actor: event.actor, body: event.body, state: 'received'
+        eventId: event.eventId, externalMessageId: event.messageId, externalConversationId: event.externalConversationId, actor: event.actor, body: event.body,
+        ...(event.unsupportedContent ? { state: 'refused', code: 'INGRESS_CONTENT_UNSUPPORTED' } : { state: 'received' })
       })
       if (!originalMessage) this.database.prepare('INSERT INTO connection_ingress_message (ingress_id,domain,app_id,message_id,connection_id,event_json,record_json) VALUES (?,?,?,?,?,?,?)').run(ingress.ingressId, domain, appId, event.messageId, input.connectionId, encoded, JSON.stringify(ingress))
       this.database.prepare('INSERT INTO connection_ingress_event (domain,app_id,event_id,ingress_id,event_json,raw_payload) VALUES (?,?,?,?,?,?)').run(domain, appId, event.eventId, ingress.ingressId, encoded, input.raw)
@@ -107,17 +116,49 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   private binding(record: ConnectionIngressRecord): RoomBinding | null {
     return this.options.bindings.listActive({ connectionId: record.connectionId }).find(binding => equal(binding.application, record.application) && binding.externalConversationId === record.externalConversationId) ?? null
   }
-  private authorize(record: ConnectionIngressRecord, expected?: ConnectionIngressRecord['input']) {
+  private authorize(record: ConnectionIngressRecord, expected?: ConnectionIngressRecord['input'], allowPendingReply = false) {
     const connection = this.options.connections.readConfiguration(record.connectionId), binding = this.binding(record)
     if (!connection?.config.enabled || !equal(connection.config.application, record.application)) fail('INGRESS_CONNECTION_UNAVAILABLE')
     if (!binding) fail('INGRESS_BINDING_UNAVAILABLE')
     const grant = this.options.bindings.findGrant({ connectionId: record.connectionId, externalConversationId: record.externalConversationId, actor: record.actor })
     if (!grant || grant.state !== 'active' || grant.bindingId !== binding.bindingId || grant.bindingRevision !== binding.revision || !grant.capabilities.includes('input') || !equal(grant.actor, record.actor)) fail('INGRESS_ACTOR_NOT_AUTHORIZED')
     const event = JSON.parse(String(this.database.prepare('SELECT event_json FROM connection_ingress_message WHERE ingress_id=?').get(record.ingressId)!.event_json)) as VerifiedIngressEvent
-    if (binding.scope.input === 'mentions-and-replies' && event.selection === 'message') fail('INGRESS_INPUT_OUTSIDE_SCOPE')
+    const qualifiedReply = record.addressing?.state === 'confirmed' && record.addressing.selection === 'reply' && record.addressing.replyToMessageId === event.replyToMessageId
+    if (binding.scope.input === 'mentions-and-replies' && event.selection === 'message' && !qualifiedReply) {
+      if (!event.replyToMessageId || record.addressing?.state === 'confirmed') fail('INGRESS_INPUT_OUTSIDE_SCOPE')
+      if (!allowPendingReply) fail('INGRESS_ADDRESSING_UNCONFIRMED')
+    }
     const author = parseAgentExternalMessageAuthor({ kind: 'external', connectionId: record.connectionId, actor: record.actor, externalConversationId: record.externalConversationId, externalMessageId: record.externalMessageId, bindingId: binding.bindingId, bindingRevision: binding.revision, grantId: grant.grantId, grantRevision: grant.revision })
     if (expected && (expected.hostId !== binding.executionHostId || expected.agentSessionId !== binding.agentSessionId || !equal(expected.author, author))) fail('INGRESS_AUTHORITY_REVISED')
-    return { binding, author }
+    return { binding, author, event }
+  }
+  private async qualifyReply(record: ConnectionIngressRecord, event: VerifiedIngressEvent): Promise<ConnectionIngressRecord> {
+    if (record.addressing?.state === 'confirmed') return record
+    const replyToMessageId = event.replyToMessageId!, connection = this.options.connections.readConfiguration(record.connectionId)
+    if (!connection?.config.enabled || !equal(connection.config.application, record.application)) fail('INGRESS_CONNECTION_UNAVAILABLE')
+    const authenticator = this.authenticators.get(connection.config.adapterId)
+    let addressing: NonNullable<ConnectionIngressRecord['addressing']> = { replyToMessageId, state: 'unknown', reason: 'reply-unconfirmed' }
+    if (!authenticator?.qualifyReply) addressing = { replyToMessageId, state: 'unavailable', reason: 'adapter-unavailable' }
+    else {
+      const raw = this.safe(() => String(this.database.prepare('SELECT raw_payload FROM connection_ingress_event WHERE domain=? AND app_id=? AND event_id=?').get(record.application.domain, record.application.appId, record.eventId)!.raw_payload))
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const controller = new AbortController()
+      try {
+        const credential = await this.options.connections.resolvePublicationCredential(record.connectionId)
+        if (!credential) addressing = { replyToMessageId, state: 'unavailable', reason: 'credential-missing' }
+        else {
+          const timeout = new Promise<'unknown'>(resolve => { timer = setTimeout(() => { controller.abort(); resolve('unknown') }, 5_000); timer.unref?.() })
+          const selection = await Promise.race([authenticator.qualifyReply(structuredClone(connection.config), structuredClone(event), raw, credential, controller.signal), timeout])
+          if (selection === 'reply' || selection === 'message') addressing = { replyToMessageId, state: 'confirmed', selection }
+        }
+      } catch { /* A parent read failure is an observation gap, never an outside-scope verdict. */ }
+      finally { if (timer) clearTimeout(timer); controller.abort() }
+    }
+    return this.transaction(() => {
+      const current = this.read(record.ingressId)!
+      if (current.state !== 'received' || current.addressing?.state === 'confirmed') return current
+      return this.write({ ...current, addressing })
+    })
   }
   private context(record: ConnectionIngressRecord): AgentInputCallContext {
     const ref = record.input!
@@ -134,11 +175,18 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     return await work
   }
   private async deliver(ingressId: string): Promise<ConnectionIngressInspection> {
-    const record = this.read(ingressId)
+    let record = this.read(ingressId)
     if (!record) fail('UNKNOWN_CONNECTION_INGRESS')
     if (record.state !== 'received') return await this.inspect({ ingressId })
     let original: ReturnType<DurableIngressHost['authorize']>
-    try { original = this.safe(() => this.authorize(record)) }
+    try {
+      original = this.safe(() => this.authorize(record!, undefined, true))
+      if (original.binding.scope.input === 'mentions-and-replies' && original.event.selection === 'message' && original.event.replyToMessageId) {
+        record = await this.qualifyReply(record, original.event)
+        if (record.state !== 'received' || record.addressing?.state !== 'confirmed') return await this.inspect({ ingressId })
+        original = this.safe(() => this.authorize(record!))
+      }
+    }
     catch (error) {
       if (!(error instanceof AgentMuxError) || error.code === 'INGRESS_STORAGE_UNCONFIRMED') throw error
       this.transaction(() => { const current = this.read(ingressId)!; if (current.state === 'received') this.write({ ...current, state: 'refused', code: error.code }) })
