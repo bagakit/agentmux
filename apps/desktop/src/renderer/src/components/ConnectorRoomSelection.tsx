@@ -56,21 +56,22 @@ export function useConnectorRoomFacts(connection: Connection | undefined, extern
   const identity = JSON.stringify([connection?.config.connectionId, connection?.revision, externalConversationId])
   const [read, setRead] = useState<{ identity: string; room: RoomGetResult | null; people: RoomMembersResult | null; issue: string } | null>(null)
   const current = useRef(identity), flight = useRef<object | null>(null), [pending, setPending] = useState(false)
+  const occurrence = useRef({})
   current.current = identity
   async function refresh(cursor?: string) {
     if (!connection || !externalConversationId || flight.current) return
-    const original = identity, input = { ...scopeOf(connection), externalConversationId }
+    const original = identity, originalOccurrence = occurrence.current, input = { ...scopeOf(connection), externalConversationId }
     const request = {}; flight.current = request; setPending(true)
-    const update = (value: Partial<NonNullable<typeof read>>) => { if (current.current === original) setRead(previous => ({ identity: original, room: null, people: null, issue: '', ...(previous?.identity === original ? previous : {}), ...value })) }
+    const update = (value: Partial<NonNullable<typeof read>>) => { if (current.current === original && occurrence.current === originalOccurrence) setRead(previous => ({ identity: original, room: null, people: null, issue: '', ...(previous?.identity === original ? previous : {}), ...value })) }
     try {
       const reads = cursor ? [] : [api.connections.call('connection.room.get', input).then(room => update({ room }))]
       reads.push(api.connections.call('connection.room.members', { ...input, limit: 20, ...(cursor ? { cursor } : {}) }).then(people => update({ people })))
       const results = await Promise.allSettled(reads)
       const failed = results.find(result => result.status === 'rejected')
       update({ issue: failed?.status === 'rejected' ? presentError(failed.reason) : '' })
-    } finally { if (flight.current === request) flight.current = null; if (current.current === original) setPending(false) }
+    } finally { if (flight.current === request) flight.current = null; if (current.current === original && occurrence.current === originalOccurrence) setPending(false) }
   }
-  useEffect(() => { current.current = identity; void refresh(); return () => { current.current = ''; flight.current = null } }, [identity])
+  useEffect(() => { current.current = identity; occurrence.current = {}; void refresh(); return () => { current.current = ''; occurrence.current = {}; flight.current = null } }, [identity])
   return { ...(read?.identity === identity ? read : { room: null, people: null, issue: '' }), pending, refresh }
 }
 
