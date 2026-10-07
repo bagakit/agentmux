@@ -1,5 +1,6 @@
 import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
+import { ReadingFind } from '@agentmux/client-ui/components/ReadingFind'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type ComponentProps, type KeyboardEvent, type WheelEvent } from 'react'
@@ -947,14 +948,20 @@ export function ActivityView({
   </>
 
   // Loading is a sibling overlay: neither scroll height nor card geometry depends on pending work.
-  const renderSurface = (content: JSX.Element): JSX.Element => <div className="activity-feed-frame">
+  const renderSurface = (content: JSX.Element): JSX.Element => <ReadingFind className="activity-feed-frame"
+    active={readingEnabled} source={JSON.stringify([executionHostId, sessionId, conversationReading?.identity])}
+    label="loaded conversation" bodySelector=".log-turn__body, .log-row__prose, .log-row__payload, .log-row__output, .log-diff__body" scrollSelector=".activity-feed"
+    onOpen={() => {
+      followRef.current = { ...followRef.current, following: false }
+      if (feedEl) anchorRef.current = captureReadingAnchor(feedEl)
+    }}>
     {content}
     {conversationReading?.enabled !== false && (readingWindow.loading && !readingWindow.loadingEarlier || userMessageRead?.loading) ? <div className="activity-feed__loading-layer">
       <span role="status" aria-live="polite" className="activity-feed__reading-status">
         <SemanticIcon name="status.loading" size={12} className="spin" />Reading records…
       </span>
     </div> : null}
-  </div>
+  </ReadingFind>
 
   if (capability === 'unavailable' && !hasUserMessages && !hasItems && !hasNativeRecords) {
     return renderSurface(

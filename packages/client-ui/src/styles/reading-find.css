@@ -1,0 +1,13 @@
+.reading-find { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; height: 100%; }
+.reading-find > style { display: none; }
+.reading-find__tools { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--line-soft); color: var(--text-2); background: var(--surface-1); font-size: var(--fs-meta); }
+.reading-find__tools button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); flex: none; min-width: 24px; height: 24px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); color: inherit; background: transparent; font: inherit; cursor: pointer; }
+.reading-find__tools button:hover { background: var(--surface-3); }
+.reading-find__tools button:disabled { opacity: .4; cursor: default; }
+.reading-find__tools button:focus-visible, .reading-find__field:focus-within { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.reading-find__field { display: flex; align-items: center; gap: var(--sp-2); flex: 1; min-width: 80px; max-width: 320px; height: 26px; padding-inline: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); }
+.reading-find__field input { width: 100%; min-width: 0; padding: 0; border: 0; outline: none; color: var(--text); background: transparent; font: inherit; }
+.reading-find__count { flex: none; font-variant-numeric: tabular-nums; }
+.reading-find__scope { flex-basis: 100%; color: var(--text-3); text-align: end; }
+.reading-find__content { position: relative; min-width: 0; min-height: 0; }
+@media (pointer: coarse) { .reading-find__tools button { min-width: 36px; height: 36px; } .reading-find__field { height: 36px; } }
