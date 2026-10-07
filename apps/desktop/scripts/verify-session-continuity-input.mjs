@@ -10,6 +10,7 @@ const evidence = resolve(process.argv[2] ?? join(root, '.tmp/session-continuity/
 const config = 'apps/desktop/test/session-continuity-input.config.mts'
 const mutations = [
   ['selected-body', 'delivers frozen selected parts once'],
+  ['optional-native-gate', 'retains the public first-prompt owner without optional native probes'],
   ['input-trigger', 'keeps input-trigger restoration free'],
   ['unknown-replay', 'never resends an unknown original input'],
   ['atomic-claim', 'does not dispatch twice when a stale second owner'],
@@ -18,6 +19,9 @@ const mutations = [
   ['handshake-credit', 'credits only the actual same-Run handshake'],
   ['new-user-priority', 'keeps a genuinely newer user prompt ahead'],
   ['native-target', 'does not send recovery input to a changed native conversation'],
+  ['native-transport', 'preserves a declared negative native transport result'],
+  ['observed-foreign-source', 'rejects a confirmed foreign process source while retaining'],
+  ['observer-unknown-gate', 'source observation from revoking the original first-prompt contract'],
   ['native-idle', 'requires actual native idle evidence'],
   ['dispose-observer', 'does not wait for an unresponsive native observer'],
   ['live-projection', 'clears the original pending notice through actual Store Core event consumption'],
