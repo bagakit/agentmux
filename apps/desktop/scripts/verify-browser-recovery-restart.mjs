@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { spawn, execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -165,7 +165,8 @@ async function identity() {
     'apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/src/renderer/src/styles/index.css',
     'apps/desktop/src/renderer/src/lib/workbench-persistence.ts', 'apps/desktop/scripts/probe-process.mjs',
     'apps/desktop/scripts/verify-browser-recovery-restart.mjs',
-    ...(privateCase ? ['apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts','packages/core/src/spatial-state.ts','packages/core/dist/spatial-state.js','apps/desktop/scripts/browser-private-probe-scenario.mjs','apps/desktop/scripts/verify-browser-private.mjs',
+    ...(privateCase ? ['apps/desktop/out/renderer/release.json','apps/desktop/src/main/renderer-updates.ts','apps/desktop/src/main/client-observation.ts',
+      'apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts','packages/core/src/spatial-state.ts','packages/core/dist/spatial-state.js','apps/desktop/scripts/browser-private-probe-scenario.mjs','apps/desktop/scripts/verify-browser-private.mjs',
       'apps/desktop/src/renderer/src/components/GlobalSurveySurface.tsx','apps/desktop/src/renderer/src/components/BrowserProfilesPanel.tsx',
       'apps/desktop/src/renderer/src/lib/survey-browser-creation.ts','apps/desktop/src/main/browser-input-history.ts',
       'apps/desktop/src/shared/browser-input-history.ts','packages/core/src/browser-targets.ts','packages/core/src/control-codec.ts',
@@ -280,7 +281,8 @@ async function launch(label) {
   const readyFile = join(root, `ready-${label}.json`)
   const child = spawn(appExecutable ?? require('electron'), ['--inspect-brk=0', ...(!privateApp ? [mainPath] : []), '--remote-debugging-port=0', `--agentmux-probe-root=${root}`], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...(privateCase ? Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^(?:AGENTMUX_|CTXMUX_|ELECTRON_)/.test(key))) : process.env), ...fixtureEnvironment, AGENTMUX_DESKTOP_READY_FILE: readyFile }
+    env: { ...(privateCase ? Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^(?:AGENTMUX_|CTXMUX_|ELECTRON_)/.test(key))) : process.env), ...fixtureEnvironment,
+      ...(!privateCase ? { AGENTMUX_DESKTOP_READY_FILE: readyFile } : {}) }
   })
   children.add(child)
   let diagnostics = '', mainUrl, rendererUrl, spawnError
@@ -343,7 +345,13 @@ async function launch(label) {
   await main.call('Debugger.removeBreakpoint', { breakpointId: breakpoint.breakpointId })
   await main.call('Debugger.resume')
   let ready
-  try { ready = await waitFor(`${label} ready`, async () => { alive(); try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error } }) }
+  try { ready = await waitFor(`${label} ready`, async () => {
+    alive()
+    if (privateCase) return main.evaluate(`(()=>{const {app,BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
+      const windows=BrowserWindow.getAllWindows().filter(window=>!window.isDestroyed()&&window.webContents.getURL().startsWith('file:')&&!window.webContents.isLoadingMainFrame());
+      return app.isReady()&&windows.length===1?{pid:process.pid,productName:app.name,version:app.getVersion(),packaged:app.isPackaged,executable:process.execPath,appPath:app.getAppPath(),home:app.getPath('home'),userData:app.getPath('userData')}:null})()`)
+    try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error }
+  }) }
   catch (error) {
     const observed = { pid: child.pid, exitCode: child.exitCode, signal: child.signalCode, stderr: diagnostics,
       mainUrl, rendererUrl, readyFile: { exists: false }, mainPauses: main.pauses.slice(-4).map(pause => ({ reason: pause.reason,
@@ -377,8 +385,27 @@ async function launch(label) {
   }
   const nativeHome = await cdp.evaluate('(async () => (await window.agentmux.sessions.snapshot()).localHome)()')
   assert.equal(nativeHome, privateHome)
+  let ordinaryInitialization
+  if (privateCase) {
+    assert.equal(ready.pid, child.pid); assert.equal(ready.home, privateHome)
+    assert.equal(await realpath(ready.userData), await realpath(userData))
+    if (privateApp) assert.equal(await realpath(ready.appPath), await realpath(packageRoot))
+    const release = JSON.parse(await readFile(join(packageRoot ?? desktopRoot, 'out/renderer/release.json'), 'utf8'))
+    ordinaryInitialization = await waitFor(`${label} ordinary loaded Desktop owner`, async () => {
+      alive()
+      let value
+      try { value = (await rpc.call('app.inspect', {})).observation }
+      catch (error) { if (error.code === 'CONTROL_UNAVAILABLE') return null; throw error }
+      assert.equal(value.main.pid, child.pid, 'The ordinary public observation must belong to this exact launched Main')
+      assert.deepEqual(value.main.renderer, { kind: 'bundled', id: release.id, identity: release.identity }, 'The actual RendererUpdates load owner must confirm the bundled release')
+      assert.ok(value.main.storage, 'The original Desktop owner must confirm its actual storage root')
+      assert.equal(await realpath(value.main.storage.userData), await realpath(userData))
+      if (privateApp) assert.deepEqual(value.main.package, receipt.qualificationApp.packageIdentity)
+      return value.workbench.loading ? null : { main: value.main, workbenchLoading: value.workbench.loading }
+    })
+  }
   const drainStageDelivery = observeStageDelivery ? await observeOriginalStageDelivery(cdp,desktopRoot) : undefined
-  receipt[label] = { pid: child.pid, home, nativeHome, ready, origin: await cdp.evaluate('({href:location.href,origin:location.origin})') }
+  receipt[label] = { pid: child.pid, home, nativeHome, ready, ...(ordinaryInitialization ? { ordinaryInitialization } : {}), origin: await cdp.evaluate('({href:location.href,origin:location.origin})') }
   probe.drainStageDelivery = drainStageDelivery
   return probe
 }
