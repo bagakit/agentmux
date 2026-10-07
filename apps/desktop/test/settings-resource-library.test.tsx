@@ -70,7 +70,7 @@ async function save() { await dom.click('[data-settings-save-bar] button'); awai
 describe.skipIf(section !== 'agents')('Agents resource library', () => {
   it('single: only mounts the accurate selected field subtree among 128 real records', async () => {
     await dom.render(<LivePane kind="agents" />)
-    expect(dom.container.querySelectorAll('[data-resource-row]')).toHaveLength(128)
+    expect(dom.container.querySelectorAll('[aria-label="Executors"] [data-resource-row]')).toHaveLength(128)
     expect(dom.container.querySelectorAll('[data-resource-editor]'), 'Only the selected Executor owns a field subtree').toHaveLength(1)
     expect(editor().dataset.resourceEditor).toBe(A)
     await select(B)
@@ -97,8 +97,8 @@ describe.skipIf(section !== 'agents')('Agents resource library', () => {
     expect(editor().querySelector<HTMLDetailsElement>('.settings-launch-config')!.open).toBe(true)
     expect(field('Arguments').value).toBe('--model "authored literal"')
     expect(field('Environment').value).toBe('{"AUTHORED":"$HOME"}')
-    await dom.click('.settings-providers-toggle')
-    await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('.settings-agent-navigation button')].find(node => node.textContent === 'Executors')!.click())
+    await dom.click('[data-resource-row="providers:all"]')
+    await dom.click(`[data-resource-row="${A}"]`)
     expect(document.activeElement).toBe(name())
     await select(A); await save()
     const current = await api.config.get()
@@ -112,10 +112,10 @@ describe.skipIf(section !== 'agents')('Agents resource library', () => {
     await fill(name(), 'Retained authored name')
     const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Filter executors"]')!
     await fill(search, 'Executor 002')
-    expect(dom.container.querySelectorAll('[data-resource-row]')).toHaveLength(1)
+    expect(dom.container.querySelectorAll('[aria-label="Executors"] [data-resource-row]')).toHaveLength(1)
     await render({ section: 'agents', executorId: A })
     expect(search.value, 'New same-ID navigation request clears resource filtering').toBe('')
-    expect(dom.container.querySelectorAll('[data-resource-row]')).toHaveLength(128)
+    expect(dom.container.querySelectorAll('[aria-label="Executors"] [data-resource-row]')).toHaveLength(128)
     expect(editor().dataset.resourceEditor).toBe(A); expect(name().value).toBe('Retained authored name')
     expect(document.activeElement).toBe(name())
   })
