@@ -9,6 +9,7 @@ import { DesktopConnectorSecrets, type CredentialEncryption } from './connector-
 export type DesktopConnectionServices = {
   connections: ConnectionPort
   secrets: Pick<DesktopConnectorSecrets, 'store' | 'inspect'>
+  openDatabase(): Promise<DatabaseSync>
   readonly database: DatabaseSync | null
   readonly bindings: RoomBindingHost | null
   readonly rooms: RoomProvisioningHost | null
@@ -59,6 +60,7 @@ export async function createDesktopConnections(options: { directory: string; enc
     get publication() { return live?.publication ?? null },
     get ingress() { return live?.ingress ?? null },
     get database() { return live?.database ?? null },
+    openDatabase: async () => (await ensure()).database,
     connections: {
       service: {
         get: async () => (await ensure()).connections.service.get(),

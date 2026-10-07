@@ -1,6 +1,6 @@
 import type { AgentMuxControlRequest, AgentMuxControlResult, AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { parseFileReadResult, parseFileWriteResult, parseFileCreateResult, type AgentMuxRpcFilesOwner } from '@agentmux/core/files'
-import type { ConnectionPort } from '@agentmux/core/connections'
+import type { ConnectionEnrollmentCallContext, ConnectionPort } from '@agentmux/core/connections'
 import { moteConnectionBaseline, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult,
   sameMoteConnectionValues, type MoteConnectionPreferencesReadInput, type MoteConnectionPreferencesReadResult,
   type MoteConnectionPreferencesSaveParams, type MoteConnectionPreferencesSaveResult } from '@agentmux/core/mote-preferences'
@@ -47,7 +47,7 @@ export class MoteConnectionPreferences {
     }
   }
 
-  async save(raw: MoteConnectionPreferencesSaveParams): Promise<MoteConnectionPreferencesSaveResult> {
+  async save(raw: MoteConnectionPreferencesSaveParams, context?: ConnectionEnrollmentCallContext): Promise<MoteConnectionPreferencesSaveResult> {
     const input = parseMotePreferencesSaveParams(raw)
     let dispatched = false
     const result = (status: MoteConnectionPreferencesSaveResult['status'], source: MoteConnectionPreferencesSaveResult['source'], detail: string | null) =>
@@ -67,6 +67,7 @@ export class MoteConnectionPreferences {
       await this.original(input)
       const base = { ...input.target, path: MOTE_QUICK_MODE_PATH, expectedResource: current.resource, content }
       // After dispatch, an exception is an observation gap, never a no-write assertion.
+      context?.signal?.throwIfAborted(); await context?.assertCurrent?.(); context?.signal?.throwIfAborted()
       dispatched = true
       const saved = current.document
         ? await this.ports.files.write({ ...base, expectedRevision: current.document.revision }).then(receipt => parseFileWriteResult(receipt, { ...base, expectedRevision: current.document!.revision }))
