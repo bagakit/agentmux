@@ -869,7 +869,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     observedNativeSource.current = { reference, source: sourceIdentity }
   }, [sourceIdentity, inputReference?.hostId, inputReference?.agentSessionId, cancelPreviewIntent])
   useEffect(() => {
-    if (!documentVisible) { previewFocusIntent.current = false; cancelPreviewIntent(); setPreview(current => current?.interactive ? current : null) }
+    if (!documentVisible) { setObservation(null); setWorkObservation(null); previewFocusIntent.current = false; cancelPreviewIntent(); setPreview(current => current?.interactive ? current : null) }
     if (mode === 'collapsed') { cancelPreviewIntent(); setPreview(null); setObservation(null); setWorkObservation(null); setReaderOpen(false); setReadingContextId(null); setEarlier(false) }
   }, [documentVisible, mode, cancelPreviewIntent])
   const drag = useRef<{ y: number; height: number; next: number } | null>(null)
