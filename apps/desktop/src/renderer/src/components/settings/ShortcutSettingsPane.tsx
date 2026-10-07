@@ -22,11 +22,15 @@ const ThemeActionClearIcon = semanticIconComponent('action.clear')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 
+type PromptScope = { kind: 'all' } | { kind: 'shared' } | { kind: 'provider'; providerId: string }
 
 const promptName = (prompt: ComposerShortcut) => prompt.label.trim() || prompt.keyword.trim() || 'Untitled prompt'
 const providerName = (prompt: ComposerShortcut) => prompt.providerId ? `${agentProviderLabel(prompt.providerId)} only` : 'Every Agent'
 const stateName = (state: (typeof COMPOSER_PROMPT_STATES)[number]) => describeAgentDisplayState(state).label
+const scopeIncludes = (scope: PromptScope, prompt: ComposerShortcut) => scope.kind === 'all' ||
+  (scope.kind === 'shared' ? prompt.providerId === undefined : prompt.providerId === scope.providerId)
 
 /** Selection belongs to the view; the complete authored library and its baseline stay in this Pane. */
 export function ShortcutSettingsPane({ config, active, onSave }: {
@@ -38,6 +42,8 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
   const drafts = Object.values(resource.value)
   const [selectedId, setSelectedId] = useState<string | null>(() => drafts[0]?.id ?? null)
   const [query, setQuery] = useState('')
+  const [scope, setScope] = useState<PromptScope>({ kind: 'all' })
+  const [usageOpen, setUsageOpen] = useState<Record<string, boolean>>({})
   const [view, setView] = useState<'library' | 'editor'>('library')
   const [recentDelete, setRecentDelete] = useState<{ prompt: ComposerShortcut } | null>(null)
   const nameInput = useRef<HTMLInputElement>(null)
@@ -49,7 +55,9 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
   const saveState = useSettingsSave()
   const prompt = selectedId !== null && Object.hasOwn(resource.value, selectedId) ? resource.value[selectedId] : undefined
   const normalizedQuery = query.trim().toLowerCase()
-  const visible = drafts.filter((candidate) => [candidate.label, candidate.keyword, candidate.body, providerName(candidate), ...(candidate.states ?? [])]
+  const providerScopes = [...new Set([...drafts.flatMap(candidate => candidate.providerId === undefined ? [] : [candidate.providerId]),
+    ...(scope.kind === 'provider' ? [scope.providerId] : [])])]
+  const visible = drafts.filter((candidate) => scopeIncludes(scope, candidate) && [candidate.label, candidate.keyword, candidate.body, providerName(candidate), ...(candidate.states ?? [])]
     .join(' ').toLowerCase().includes(normalizedQuery))
   const problems = drafts.flatMap((candidate) => {
     const keyword = candidate.keyword.trim()
@@ -84,7 +92,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
       .find((item) => item.dataset.promptId === selectedId)
     ;(row ?? searchInput.current)?.focus()
     focusBack.current = false
-  }, [view, selectedId])
+  }, [view, selectedId, scope, query])
 
   function update(id: string, patch: Partial<ComposerShortcut>): void {
     resource.setValue((current) => ({ ...current, [id]: { ...current[id]!, ...patch } }))
@@ -105,12 +113,15 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
     const additions = PROMPT_REACTION_STARTERS.filter(starter => !drafts.some(candidate => candidate.id === starter.id || candidate.keyword === starter.keyword))
     if (!additions.length) return
     resource.setValue(current => ({ ...current, ...Object.fromEntries(additions.map(starter => [starter.id, { ...starter }])) }))
+    setScope({ kind: 'shared' })
+    setQuery('')
     open(additions[0]!.id)
   }
   function open(id: string): void { setSelectedId(id); setView('editor') }
   function add(): void {
     const id = mintObjectId()
-    resource.setValue((current) => ({ ...current, [id]: { id, keyword: '', label: '', body: '' } }))
+    resource.setValue((current) => ({ ...current, [id]: { id, keyword: '', label: '', body: '',
+      ...(scope.kind === 'provider' ? { providerId: scope.providerId } : {}) } }))
     setQuery('')
     focusNewName.current = true
     open(id)
@@ -136,6 +147,12 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
     focusBack.current = true
     setView('library')
   }
+  function showInLibrary(): void {
+    setScope({ kind: 'all' })
+    setQuery('')
+    focusBack.current = true
+    setView('library')
+  }
   async function save(): Promise<void> {
     const submitted = resource.beginSave()
     const deletionAtStart = recentDelete
@@ -149,8 +166,16 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
 
   return (
     <div className="settings-pane-stack prompt-workbench" data-view={view}>
+      <div className="prompt-scope" role="group" aria-label="Prompt authoring scope">
+        <button type="button" data-prompt-scope="all" aria-pressed={scope.kind === 'all'} onClick={() => setScope({ kind: 'all' })}>All prompts <span>{drafts.length}</span></button>
+        <button type="button" data-prompt-scope="shared" aria-pressed={scope.kind === 'shared'} onClick={() => setScope({ kind: 'shared' })}>Shared <span>{drafts.filter(candidate => candidate.providerId === undefined).length}</span></button>
+        {providerScopes.map(providerId => <button type="button" key={providerId} data-prompt-scope-provider={providerId}
+          aria-pressed={scope.kind === 'provider' && scope.providerId === providerId} onClick={() => setScope({ kind: 'provider', providerId })}>
+          {agentProviderLabel(providerId)} <span>{drafts.filter(candidate => candidate.providerId === providerId).length}</span>
+        </button>)}
+      </div>
       <div className="settings-pane-toolbar prompt-workbench__toolbar">
-        <span className="settings-resource-count">{drafts.length} {drafts.length === 1 ? 'prompt' : 'prompts'}</span>
+        <span className="settings-resource-count">{visible.length} of {drafts.length} {drafts.length === 1 ? 'prompt' : 'prompts'}</span>
         <button type="button" className="small-button" onClick={add}><ThemeActionCreatePromptIcon size={13} /> Add prompt</button>
         {PROMPT_REACTION_STARTERS.some(starter => !drafts.some(candidate => candidate.id === starter.id || candidate.keyword === starter.keyword)) ?
           <button type="button" className="small-button" onClick={addReactionStarters}><ThemeActionAddQuickRepliesIcon size={13} /> Add quick replies</button> : null}
@@ -160,28 +185,38 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
           <label className="prompt-library__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput ref={searchInput} aria-label="Search prompts" placeholder="Find an instruction…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear prompt search" onClick={() => { setQuery(''); searchInput.current?.focus() }}><ThemeActionClearIcon size={12} /></button> : null}</label>
           <div ref={library} className="prompt-library__items">
             <LiquidSelectionSurface selected={selectedId} active={active} targetAttribute="data-prompt-id" />
-            {visible.map((candidate) => (
+            {visible.map((candidate) => {
+              const status = problems.some(problem => problem.id === candidate.id) ? 'invalid' :
+                !configValuesEqual(candidate, Object.hasOwn(resource.expected, candidate.id) ? resource.expected[candidate.id] : undefined) ? 'unsaved' : undefined
+              return (
               <button type="button" className="prompt-library__item" key={candidate.id} data-prompt-id={candidate.id} aria-pressed={selectedId === candidate.id} onClick={() => open(candidate.id)}>
-                <span className="prompt-library__name">{candidate.reactionIcon ? <PromptReactionIconView icon={candidate.reactionIcon} size={13} /> : null}<strong>{promptName(candidate)}</strong>{selectedId === candidate.id ? <ThemeStatusSelectedIcon size={13} aria-label="Selected prompt" /> : null}</span>
-                <code>{candidate.keyword.trim() ? `/${candidate.keyword.trim()}` : 'No keyword yet'}</code>
-                <span className="prompt-library__body">{candidate.body.trim().split('\n').find((line) => line.trim()) || 'Write an instruction…'}</span>
-                <span className="prompt-library__scope">{providerName(candidate)} · {candidate.reactionIcon ? 'Reply card' : candidate.states?.length ? candidate.states.map(stateName).join(', ') : 'Draft shortcut'}</span>
-                {problems.some((problem) => problem.id === candidate.id) ? <span className="prompt-library__invalid">Needs attention</span> : null}
+                <span className="prompt-library__name">{candidate.reactionIcon ? <PromptReactionIconView icon={candidate.reactionIcon} size={13} /> : null}<strong>{promptName(candidate)}</strong>{status ? <span className="prompt-library__status" data-prompt-list-status={status} aria-label={status === 'invalid' ? 'Needs attention' : 'Unsaved changes'} title={status === 'invalid' ? 'Needs attention' : 'Unsaved changes'}><SemanticIcon name={`status.prompt-${status}`} size={4} /></span> : null}{selectedId === candidate.id ? <ThemeStatusSelectedIcon size={13} aria-label="Selected prompt" /> : null}</span>
+                <span className="prompt-library__scope" title={`${providerName(candidate)} · ${candidate.states?.map(stateName).join(', ') || 'Draft shortcut'}${candidate.reactionIcon ? ' · Reply card' : ''}`}>
+                  <code>{candidate.keyword.trim() ? `/${candidate.keyword.trim()}` : 'No keyword yet'}</code>
+                  <span>{providerName(candidate)}{candidate.states?.length ? ` · ${candidate.states.map(stateName).join(', ')}` : ''}{candidate.reactionIcon ? ' · Reply card' : ''}</span>
+                </span>
               </button>
-            ))}
+              )
+            })}
           </div>
-          {!visible.length ? <p className="settings-resource-empty">{drafts.length ? 'No matching prompts. Your edits are kept.' : 'Keep the instructions you use often here. Add a prompt to get started.'}</p> : null}
+          {!visible.length ? <p className="settings-resource-empty">{drafts.length ? 'No prompts in this view. Your edits are kept.' : 'Keep the instructions you use often here. Add a prompt to get started.'}</p> : null}
         </section>
         {prompt ? <section className="prompt-settings-card prompt-editor" data-prompt-editor={prompt.id} aria-label={`Edit ${promptName(prompt)}`}>
           <div className="prompt-editor__heading"><button type="button" className="small-button prompt-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to prompts</button><span>{providerName(prompt)}</span><span className="prompt-editor__status" data-prompt-status={promptStatus}><SemanticIcon name={`status.prompt-${promptStatus}`} size={4} />{promptStatus === 'invalid' ? 'Needs attention' : promptStatus === 'unsaved' ? 'Unsaved' : 'Saved'}</span></div>
-          {!visible.some((candidate) => candidate.id === prompt.id) ? <p className="prompt-editor__filtered" role="status">This prompt is outside your search. <button type="button" className="small-button" onClick={() => setQuery('')}>Show in library</button></p> : null}
+          {!visible.some((candidate) => candidate.id === prompt.id) ? <p className="prompt-editor__filtered" role="status">This prompt is outside your search or scope. <button type="button" className="small-button" onClick={showInLibrary}>Show in library</button></p> : null}
           <div className="agent-settings-fields prompt-editor__fields">
             <label className="prompt-editor__name"><span>Name</span><TextInput ref={nameInput} value={prompt.label} onChange={(event) => update(prompt.id, { label: event.target.value })} placeholder="Explain simply" /></label>
             <label className="prompt-editor__instruction"><span>Prompt</span><ComposerTextarea aria-invalid={errors.some((error) => error.field === 'Prompt')} aria-describedby={`${descriptionId}-body`} value={prompt.body} onValueChange={(value) => update(prompt.id, { body: value })} placeholder="Explain what changed in plain words, then name the next useful step." rows={7} /><small id={`${descriptionId}-body`} className={errors.some((error) => error.field === 'Prompt') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Prompt')?.message ?? 'Your instruction, exactly as it will be used.'}</small></label>
             <div className="prompt-editor__reach">
               <label><span>Keyword</span><TextInput aria-invalid={errors.some((error) => error.field === 'Keyword')} value={prompt.keyword} onChange={(event) => update(prompt.id, { keyword: event.target.value })} placeholder="eli5" /><small className={errors.some((error) => error.field === 'Keyword') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Keyword')?.message ?? 'Use /keyword or the bare word to expand your draft.'}</small></label>
-              <label><span>Agent</span><select value={prompt.providerId ?? ''} onChange={(event) => bindProvider(prompt.id, event.target.value)}><option value="">Every Agent</option>{BUILT_IN_AGENT_PROVIDER_IDS.map((id) => <option key={id} value={id}>{agentProviderLabel(id)}</option>)}{prompt.providerId && !BUILT_IN_AGENT_PROVIDER_IDS.some((id) => id === prompt.providerId) ? <option value={prompt.providerId}>{agentProviderLabel(prompt.providerId)}</option> : null}</select><small>Where this instruction is available.</small></label>
+              <label><span>Provider scope</span><select aria-label="Prompt Provider scope" value={prompt.providerId ?? ''} onChange={(event) => bindProvider(prompt.id, event.target.value)}><option value="">Every Agent</option>{BUILT_IN_AGENT_PROVIDER_IDS.map((id) => <option key={id} value={id}>{agentProviderLabel(id)}</option>)}{prompt.providerId && !BUILT_IN_AGENT_PROVIDER_IDS.some((id) => id === prompt.providerId) ? <option value={prompt.providerId}>{agentProviderLabel(prompt.providerId)}</option> : null}</select><small>Shared, or available to one Provider.</small></label>
             </div>
+            <details className="prompt-editor__usage" open={Object.hasOwn(usageOpen, prompt.id) ? usageOpen[prompt.id] : false} onToggle={event => {
+              const open = event.currentTarget.open
+              setUsageOpen(current => current[prompt.id] === open ? current : { ...current, [prompt.id]: open })
+            }}>
+              <summary><span><strong>Where it appears</strong><small>{prompt.states?.length ? `${prompt.states.length} status ${prompt.states.length === 1 ? 'action' : 'actions'}` : 'Draft shortcut'}{prompt.reactionIcon ? ' · Quick reply' : ''}</small></span><ThemeNavigationDownIcon size={13} /></summary>
+              <div className="prompt-editor__usage-fields">
             <fieldset className="prompt-state-settings prompt-reaction-settings"><legend>Quick reply on Agent messages</legend>
               <div className="prompt-reaction-settings__choices"><button type="button" className="small-button" aria-pressed={!prompt.reactionIcon} onClick={() => bindReaction(prompt.id)}>None</button>
                 {PROMPT_REACTION_ICONS.map(icon => <button type="button" className="small-button" key={icon} aria-label={`Quick reply icon ${icon}`} aria-pressed={prompt.reactionIcon === icon} onClick={() => bindReaction(prompt.id, icon)}>
@@ -194,6 +229,8 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
               return <label key={state}><input type="checkbox" value={state} checked={prompt.states?.includes(state) ?? false} onChange={(event) => update(prompt.id, { states: event.target.checked ? [...(prompt.states ?? []), state] : (prompt.states ?? []).filter((candidate) => candidate !== state) })} /><span><strong>{meaning.label} <code>{state}</code></strong><small>{meaning.description}</small></span></label>
             })}</div><small>Each selection matches its exact state. Running does not include working. Visibility is separate from whether a message can be sent.</small></fieldset>
             <section className="prompt-usage" aria-label="Usage preview"><header>Usage preview <small>Read only</small></header><div><code>/{prompt.keyword.trim() || 'keyword'}</code><span>Type / or its bare keyword to add your instruction to a draft instead of sending.</span></div>{prompt.states?.length ? <div><span className="prompt-usage__example">{promptName(prompt)}</span><span>Open the receiving Agent avatar at {prompt.states.map(stateName).join(', ')} to choose this user prompt. Click sends this instruction only; pending permission or question requests queue it. Your draft is kept.</span></div> : <p>Draft shortcut only. Select states to make this instruction available in the receiving Agent avatar. Pending permission or question requests queue it.</p>}</section>
+              </div>
+            </details>
             <div className="prompt-editor__remove"><button type="button" className="small-button" onClick={() => remove(prompt.id)}>{Object.hasOwn(resource.expected, prompt.id) ? <><ThemeActionRemoveIcon size={13} /> Delete prompt</> : <><ThemeActionCancelIcon size={13} /> Cancel new prompt</>}</button></div>
           </div>
         </section> : <div className="prompt-editor__empty">Choose a prompt to edit its instruction and where it appears.</div>}
