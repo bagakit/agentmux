@@ -51,6 +51,8 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   const binding = bindings.find(item => item.connectionId === connectionId)
   const creatingGroup = mode === 'create' && !binding
   const bindingIntent = relevant.find(intent => intent.method === 'connection.bind' || intent.method === 'connection.binding.relink')
+  const bindingPending = !!bindingIntent
+  const showingCurrentBinding = !!binding && !changingGroup && !bindingPending
   const links = relevant.filter((intent): intent is Extract<ConnectorRoomIntent, { method: 'connection.room.link.create' }> => intent.method === 'connection.room.link.create')
   // Explicit submitted replacement references choose the head; presentation order is not authority.
   const replacedLinks = new Set(links.filter(next => links.some(previous => previous.input.operationId === next.replacesOperationId && previous.input.externalConversationId === next.input.externalConversationId)).map(next => next.replacesOperationId))
@@ -63,7 +65,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   const linkIntent = audienceHeads.length === 1 ? audienceHeads[0] : undefined
   const linkFact = linkIntent ? facts[linkIntent.input.operationId] : null
   const linkOperation = linkFact && 'input' in linkFact && 'externalConversationId' in linkFact.input ? linkFact as RoomLinkOperation : null
-  const roomFacts = useConnectorRoomFacts(connection, binding && !changingGroup ? binding.externalConversationId : audience)
+  const roomFacts = useConnectorRoomFacts(connection, audience)
   const knownRoom = roomFacts.room?.room
   useEffect(() => {
     if (!initialFocus.current || !connection || mode !== 'existing') return
@@ -75,11 +77,23 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
     ? new Set(actors.grants.filter(grant => grant.state === 'active').map(grant => JSON.stringify([grant.actor.application.domain, grant.actor.application.appId, grant.actor.idType, grant.actor.userId]))).size : null
   useEffect(() => { setGroup(binding?.externalConversationId ?? ''); setScope(binding?.scope.input ?? 'mentions-and-replies'); setPublication(binding?.scope.publication ?? 'future-native-user-facing'); setConfirmed(false); setChangingGroup(false); setActorId(''); setActorType(''); setAccessOpen(false) }, [connectionId, binding?.bindingId, binding?.revision])
   const frozenRoom = roomIntent?.method === 'connection.room.create' ? roomIntent.input : null
+  function observeBinding(bindingId: string, current: RoomBinding | null) {
+    setBindings(previous => {
+      const known = previous.find(item => item.bindingId === bindingId)
+      if (current && known && known.revision > current.revision) return previous
+      const others = previous.filter(item => item.bindingId !== bindingId)
+      return current && sameConnectorTarget(current, target) ? [...others, current] : others
+    })
+  }
   async function inspect(intent: ConnectorRoomIntent) {
-    const value = intent.method === 'connection.room.create'
-      ? (await api.connections.call('connection.room.inspect', { operationId: intent.input.operationId })).operation
-      : intent.method === 'connection.room.link.create' ? (await api.connections.call('connection.room.link.inspect', { operationId: intent.input.operationId })).operation
-      : (await api.connections.call('connection.binding.inspect', { operationId: intent.input.operationId })).operation
+    let value: Fact
+    if (intent.method === 'connection.room.create') value = (await api.connections.call('connection.room.inspect', { operationId: intent.input.operationId })).operation
+    else if (intent.method === 'connection.room.link.create') value = (await api.connections.call('connection.room.link.inspect', { operationId: intent.input.operationId })).operation
+    else {
+      const read = await api.connections.call('connection.binding.inspect', { operationId: intent.input.operationId })
+      value = read.operation
+      if (value?.state === 'applied') observeBinding(value.binding.bindingId, read.current)
+    }
     setFacts(previous => ({ ...previous, [intent.input.operationId]: value }))
     if (value && 'state' in value && value.state === 'applied') { await clearConnectorRoomIntent(intent.input.operationId); invalidateConnectorTarget(target) }
     return value
@@ -119,7 +133,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
     }
     const value = await api.connections.call(intent.method, intent.input)
     setFacts(previous => ({ ...previous, [intent.input.operationId]: value }))
-    if ('state' in value && value.state === 'applied') { invalidateConnectorTarget(target); await clearConnectorRoomIntent(intent.input.operationId) }
+    if ('state' in value && value.state === 'applied') { observeBinding(value.binding.bindingId, value.binding); invalidateConnectorTarget(target); await clearConnectorRoomIntent(intent.input.operationId) }
     await refresh()
   }
   function createRoom() {
@@ -158,7 +172,6 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
     else setIssue('The original Mote discussion entry is unavailable. Your Agent and draft are kept.')
   }
   const sameSharing = !!binding && audience === binding.externalConversationId && scope === binding.scope.input && publication === binding.scope.publication
-  const bindingPending = relevant.some(intent => intent.method === 'connection.bind' || intent.method === 'connection.binding.relink')
   const sharing = <section className="agent-connector-fields"><h3>{binding ? 'Sharing options' : 'Share with this group'}</h3>
     <div className="agent-connector-field"><label htmlFor={fieldId + '-publication'}>Share to the group</label><SelectionField id={fieldId + '-publication'} label="Group sharing content" value={publication} disabled={busy} onValueChange={value => { if (value === 'future-native-user-facing' || value === 'future-shared-conversation') { setPublication(value); setConfirmed(false) } }} options={[{ value: 'future-native-user-facing', label: 'Agent replies and questions' }, { value: 'future-shared-conversation', label: 'New shared conversation' }]} /></div>
     {publication === 'future-shared-conversation' ? <p className="agent-connector-note">Allow new human messages, including Terminal input, Agent replies, questions, answers and resources to be shared. Some sources or attachments may not sync yet; delivery details show missing content. Earlier history is not published.</p> : null}
@@ -195,16 +208,16 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
               <strong>{original.name}</strong><span>Agent</span>
             </div>
             <ConnectIcon className="agent-connector-pairing__link" size={18} aria-hidden="true" />
-            <div className="agent-connector-pairing__group"><span><GroupIcon size={14} aria-hidden="true" />{creatingGroup ? 'Group name' : 'Group conversation'}</span>
+            <div className="agent-connector-pairing__group"><span><GroupIcon size={14} aria-hidden="true" />{creatingGroup ? 'Group name' : bindingPending ? 'Requested group' : 'Group conversation'}</span>
               {creatingGroup ? <TextInput aria-label="Group name" title={frozenRoom?.name ?? name} value={frozenRoom?.name ?? name} disabled={busy || !!roomIntent} onChange={event => setName(event.target.value)} />
-                : binding && !changingGroup ? <strong className="agent-connector-group">{knownRoom ? roomName(knownRoom) : binding.externalConversationId}</strong>
+                : (bindingPending || showingCurrentBinding) ? <strong className="agent-connector-group">{knownRoom ? roomName(knownRoom) : audience}</strong>
                 : connection ? <ConnectorRoomSelection key={JSON.stringify([connectionId, connection.revision])} connection={connection} value={audience} disabled={busy || bindingPending} onChange={value => { setGroup(value); setConfirmed(false) }} /> : <span>Choose an application below.</span>}
             </div>
           </section>
           {application}
-          {binding && !changingGroup ? <><section className="agent-connector-status" aria-label="Group connection status"><div><strong>{binding.state === 'active' ? 'Sharing on' : 'Sharing paused'}</strong><span>New {binding.scope.publication === 'future-shared-conversation' ? 'conversation content' : 'replies and questions'}</span></div><button className="agent-connector-text-action" disabled={busy || binding.state === 'paused'} onClick={pause}>Pause sharing</button><p className="agent-connector-note" aria-label="Group member access">{approvedMembers === null ? 'Member access not confirmed' : approvedMembers === 0 ? 'No members approved to use this Agent' : approvedMembers + (approvedMembers === 1 ? ' member approved to use this Agent' : ' members approved to use this Agent')}</p></section><ConnectorDeliveryDetails key={JSON.stringify([binding.bindingId, binding.revision])} binding={binding} /></> : null}
-          {binding && changingGroup ? <p className="agent-connector-note" role="status">{bindingPending ? 'The group change is not confirmed. Check its original status.' : 'Your current group stays connected until you confirm this change.'}</p> : null}
-          {audience ? <ConnectorRoomPeople facts={roomFacts} onSelect={binding && !changingGroup ? (idType, userId) => { setActorType(idType); setActorId(userId); setAccessOpen(true) } : undefined} /> : null}
+          {showingCurrentBinding && binding ? <><section className="agent-connector-status" aria-label="Group connection status"><div><strong>{binding.state === 'active' ? 'Sharing on' : 'Sharing paused'}</strong><span>New {binding.scope.publication === 'future-shared-conversation' ? 'conversation content' : 'replies and questions'}</span></div><button className="agent-connector-text-action" disabled={busy || binding.state === 'paused'} onClick={pause}>Pause sharing</button><p className="agent-connector-note" aria-label="Group member access">{approvedMembers === null ? 'Member access not confirmed' : approvedMembers === 0 ? 'No members approved to use this Agent' : approvedMembers + (approvedMembers === 1 ? ' member approved to use this Agent' : ' members approved to use this Agent')}</p></section><ConnectorDeliveryDetails key={JSON.stringify([binding.bindingId, binding.revision])} binding={binding} /></> : null}
+          {bindingPending || binding && changingGroup ? <p className="agent-connector-note" role="status">{bindingPending ? 'The group change is not confirmed. Check its original status.' : 'Your current group stays connected until you confirm this change.'}</p> : null}
+          {audience ? <ConnectorRoomPeople facts={roomFacts} onSelect={showingCurrentBinding ? (idType, userId) => { setActorType(idType); setActorId(userId); setAccessOpen(true) } : undefined} /> : null}
           {audience && audienceLinks.length && !linkIntent ? <p role="status" className="agent-connector-note">Several original joining requests are kept. Check their receipts below before generating another.</p> : audience ? <ConnectorRoomJoinLink key={JSON.stringify([connectionId, audience])} submitted={!!linkIntent} operation={linkOperation} pending={busy} prominent={mode === 'create' && !!created && !binding}
             canContinue={linkIntent?.phase === 'not-dispatched' && !linkOperation}
             onCreate={() => createJoinLink()} onRegenerate={() => { if (linkIntent) createJoinLink(linkIntent.input.operationId) }} onInspect={() => { if (linkIntent) void work(async () => { await inspect(linkIntent) }) }}
@@ -237,7 +250,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
           {!binding && !bindingPending && (mode !== 'create' || created) ? sharing : null}
           {binding ? <>
             <details className="agent-connector-disclosure" open={changingGroup} onToggle={event => setChangingGroup(event.currentTarget.open)}><summary>Change connected group</summary><div className="agent-connector-fields">{bindingPending ? <p className="agent-connector-note">Check the pending connection setup before changing groups.</p> : sharing}</div></details>
-            {!changingGroup ? <details className="agent-connector-disclosure" open={accessOpen} onToggle={event => setAccessOpen(event.currentTarget.open)}><summary>Manage member access</summary><div className="agent-connector-fields">
+            {showingCurrentBinding ? <details className="agent-connector-disclosure" open={accessOpen} onToggle={event => setAccessOpen(event.currentTarget.open)}><summary>Manage member access</summary><div className="agent-connector-fields">
               <p className="agent-connector-note">Allow an exact person to send requests or answer questions in this group. Invitations alone do not grant access.</p>
               {actors?.bindingId === binding.bindingId && actors.revision === binding.revision ? actors.grants.length ? actors.grants.map(grant => <p className="agent-connector-note" key={grant.grantId}>{grant.actor.idType} · {grant.actor.userId}: {grant.state} · {grant.capabilities.join(', ')}</p>) : <p className="agent-connector-note">No member access has been approved for this connection.</p> : <p className="agent-connector-note">Member access is not confirmed.</p>}
               <p className="agent-connector-note">Choose a person from this group above, or enter an exact account below.</p>
@@ -253,7 +266,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
           <details className="agent-connector-disclosure"><summary>Connection details</summary><div className="agent-connector-fields">
             {settings ? <button className="agent-connector-text-action" onClick={() => { settings.open('chat-connections'); onClose() }}>Application settings</button> : null}
             {connection ? <span>{connection.config.application.domain} · {connection.config.application.appId} · Revision {connection.revision}</span> : null}
-            <span>Host · {target.executionHostId}</span>{audience ? <span>Group · {audience}</span> : null}{binding ? <span>Binding · {binding.bindingId} · Revision {binding.revision}</span> : null}
+            <span>Host · {target.executionHostId}</span>{audience ? <span>{bindingPending ? 'Requested group' : 'Group'} · {audience}</span> : null}{binding ? <>{bindingPending ? <span>Last observed group · {binding.externalConversationId}</span> : null}<span>{bindingPending ? 'Last observed Binding' : 'Binding'} · {binding.bindingId} · Revision {binding.revision}</span></> : null}
           </div></details>
           {issue ? <p role="status" className="surface-inline-error">{issue}</p> : null}
         </div><footer className="agent-connector-dialog__footer">
