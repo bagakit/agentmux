@@ -6,6 +6,7 @@ import type { ConnectionIngressTransport, ConnectionIngressReceiver } from '../.
 import type { IngressAuthenticator, VerifiedIngressEvent } from '../../durable-ingress.js'
 import { feishuFailure, feishuIdentity, readFeishuMessage, projectFeishuMessage } from './message.js'
 import { feishuParentAddressing } from './reply.js'
+import { readFeishuAction } from './action.js'
 import { FeishuPublicationAdapter } from './publication.js'
 import { createFeishuRooms } from './rooms.js'
 
@@ -98,6 +99,8 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
     if (!proof || typeof proof !== 'object' || !this.witnesses.has(proof)) feishuFailure('FEISHU_TRANSPORT_PROOF_REQUIRED')
     const witness = proof as Witness, receiver = witness.receiver
     if (witness.raw !== raw || !sameConfig(receiver.config, config) || !this.current(receiver)) feishuFailure('FEISHU_TRANSPORT_PROOF_MISMATCH')
+    const action = readFeishuAction(raw, config.application)
+    if (action) return action
     const payload = readFeishuMessage(raw, config.application)
     // Original parent/thread IDs stay in raw. Their presence cannot certify a reply to this application.
     if (!this.current(receiver)) feishuFailure('FEISHU_TRANSPORT_PROOF_MISMATCH')
@@ -105,7 +108,7 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   }
   /** An exact authenticated parent read, performed only after durable admission by the original Host. */
   async qualifyReply(config: ConnectionConfig, event: Readonly<VerifiedIngressEvent>, raw: string, credential: string, signal: AbortSignal): Promise<'reply' | 'message' | 'unknown'> {
-    if (signal.aborted || !event.replyToMessageId || event.unsupportedContent) return 'unknown'
+    if (event.kind === 'action' || signal.aborted || !event.replyToMessageId || event.unsupportedContent) return 'unknown'
     let parentId: string
     try {
       const payload = readFeishuMessage(raw, config.application), { message, sender } = payload.event
@@ -154,6 +157,12 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
         if (payload.event.sender.sender_type !== 'user' || payload.event.message.chat_type !== 'group') return
         await receive({ raw: witness.raw, transportProof: witness }, () => undefined)
         receiver.observed = true
+      }, 'card.action.trigger': async () => {
+        const witness = this.callback.getStore()
+        if (!witness || !this.witnesses.has(witness) || witness.receiver !== receiver) feishuFailure('FEISHU_TRANSPORT_PROOF_REQUIRED')
+        await receive({ raw: witness.raw, transportProof: witness }, () => undefined)
+        receiver.observed = true
+        return {}
       } })
       const invoke = dispatcher.invoke.bind(dispatcher)
       dispatcher.invoke = async (data, params) => {
