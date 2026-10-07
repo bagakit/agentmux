@@ -95,7 +95,7 @@ describe('shared semantic icon owner', () => {
     const host = mount(<><WorkflowSemanticIcon status="failed" /><SemanticIcon name="status.working" /></>)
     expect(host.querySelector('[data-semantic-icon="status.failed"] use')!.getAttribute('href')).toBe(semanticIconHref('status.failed'))
     expect(host.querySelector('[data-semantic-icon="status.working"] use')!.getAttribute('href')).toBe(semanticIconHref('status.working'))
-    expect(host.querySelector('.semantic-icon-motion--working')).not.toBeNull()
+    expect(host.querySelector('.semantic-icon-motion')).toBeNull()
     const symbol = getSymbol('status.failed')
     updateThemeSelection({ appAppearance: 'dark' })
     expect(getSymbol('status.failed')).toBe(symbol)
