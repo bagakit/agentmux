@@ -8,6 +8,7 @@
 @import './input-history.css';
 @import './inline-rename-field.css';
 @import './conversation-message.css';
+@import './conversation-message-disclosure.css';
 @import './conversation-resource-text.css';
 @import './markdown.css';
 @import './content-copy.css';
