@@ -100,6 +100,9 @@
 .mobile-send-status button, .mobile-send-status summary { min-width: 44px; min-height: 44px; border: 0; padding: 0; color: inherit; background: transparent; font: inherit; cursor: pointer; }
 .mobile-send-status[data-phase='unknown'] { color: var(--status-warning-text); }
 .mobile-send-status p { margin: 0 0 6px; overflow-wrap: anywhere; user-select: text; }
+.mobile-send-status[data-original-response] { grid-template-columns: minmax(0, 1fr); }
+.mobile-send-status[data-original-response] > button { justify-self: start; }
+.agent-interaction .mobile-send-status[data-original-response] { margin: 4px 0 0; }
 .mobile-send-status__diagnosis { min-width: 0; color: var(--text-2); }
 .mobile-send-status__diagnosis[open] { grid-column: 1 / -1; max-height: min(32dvh, 240px); overflow: auto; overscroll-behavior: contain; }
 .mobile-send-status__diagnosis dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 8px; margin: 0 0 8px; }

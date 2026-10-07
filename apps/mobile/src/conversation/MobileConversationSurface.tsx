@@ -532,9 +532,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         JSON.stringify(agentInteractionRequestTarget(receipt.expectedRequest)) !== JSON.stringify(agentInteractionRequestTarget(input.expectedRequest)) ||
         JSON.stringify(receipt.response) !== JSON.stringify(input.response)) throw new Error('原答复回执身份未匹配；原请求与操作保留。')
     attempt.phase = receipt.delivery === 'unknown' || receipt.delivery === 'saved' ? 'unknown' : 'confirmed'
-    attempt.message = receipt.nativeCompleted ? 'Core 已记录原请求完成；原答复操作仍可查询。'
+    attempt.message = receipt.nativeCompleted ? '原请求已确认完成；答复回执仍可查询。'
       : receipt.delivery === 'saved' ? '答复已保存；是否送达尚未确认。'
-      : receipt.delivery === 'unknown' ? '答复回执未知；请查询原操作。' : 'Core 已确认答复送达；原生采用与任务完成另行核对。'
+      : receipt.delivery === 'unknown' ? '答复回执未知；请查询原操作。' : '答复已送入原会话；是否采用及任务进展仍需核对。'
   }
   async function inspectResponse(key: string, attempt: ResponseAttempt): Promise<AgentMuxInteractionOperationReceipt | null> {
     if (!client || !attempt.original) return null
@@ -545,13 +545,19 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       const receipt = await client.inspectAgentInteractionOperation({ agentSessionId: original.input.agentSessionId, operationId: original.input.operationId })
       if (!mounted.current || responses.current.get(key) !== attempt) return receipt
       if (receipt) adoptResponseReceipt(attempt, receipt)
-      else attempt.message = 'Core 尚未返回这条原操作的回执；是否应用仍未知，原答复保留。'
+      else attempt.message = '尚未取得原操作的回执；是否送达仍未知，原答复保留。'
       await local.save()
       return receipt
     } catch (error) {
       if (mounted.current && responses.current.get(key) === attempt) attempt.message = `原答复查询未确认；原操作保留。${errorMessage(error)}`
       throw error
     } finally { if (mounted.current) redraw(value => value + 1) }
+  }
+  function responseStatus(key: string, attempt: ResponseAttempt) {
+    return <aside key={key} className="mobile-send-status" data-phase={attempt.phase} data-original-response={attempt.original!.input.operationId}>
+      <p role="status">{attempt.message}</p>
+      <button type="button" onClick={() => { void inspectResponse(key, attempt).catch(() => {}) }}>查询原答复回执</button>
+    </aside>
   }
   const describeSpeaker = useMemo(() => createSpeakerResolver({
     lookupAgent: id => {
@@ -695,15 +701,12 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       {request && requestKey ? <div className="mobile-conversation__interaction">
         <AgentInteractionCard key={requestKey} request={request} disabled={responseDisabled}
           {...(responseAttempt?.phase === 'unknown' ? { responseUnavailableReason: responseAttempt.message } : responseUnavailableReason ? { responseUnavailableReason } : {})}
-          onInspect={operationId => responseAttempt?.original?.input.operationId === operationId ? inspectResponse(requestKey, responseAttempt) : Promise.resolve(null)}
+          responseStatus={responseAttempt?.original ? responseStatus(requestKey, responseAttempt) : undefined}
           onRespond={respond} />
         {responseAttempt && !responseAttempt.original ? <p role="status">{responseAttempt.message}</p> : null}
       </div> : null}
-      {[...responses.current.forSession(agentSessionId ?? '')].filter(([, attempt]) => attempt.original?.input.agentSessionId === agentSessionId).map(([key, attempt]) =>
-        <aside key={key} className="mobile-send-status" data-original-response={attempt.original!.input.operationId}>
-          <p role="status">{attempt.message}</p>
-          <button type="button" onClick={() => { void inspectResponse(key, attempt).catch(() => {}) }}>查询原答复回执</button>
-        </aside>)}
+      {[...responses.current.forSession(agentSessionId ?? '')].filter(([key, attempt]) =>
+        attempt.original?.input.agentSessionId === agentSessionId && key !== requestKey).map(([key, attempt]) => responseStatus(key, attempt))}
       <div className="mobile-conversation__composer">
         <AgentComposer insertionRef={insertion} aboveInput={<MobileAttachments client={client} session={session ?? null}
           connected={connection.state === 'connected' && !reading.disconnected} controls={attachmentControls}

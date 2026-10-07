@@ -1,5 +1,5 @@
 import { SemanticIcon } from '../theme/icons.js'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { agentInteractionRequestTarget } from '@agentmux/core/agent-interaction-state'
 import type {
   AgentMuxInteractionRequest,
@@ -17,6 +17,7 @@ export function AgentInteractionCard({
   disabled = false,
   readOnly = false,
   responseUnavailableReason,
+  responseStatus,
   sourceNotice,
   onOpenTerminal,
   onInspect,
@@ -26,6 +27,8 @@ export function AgentInteractionCard({
   disabled?: boolean
   readOnly?: boolean
   responseUnavailableReason?: string | undefined
+  /** Presentation of a caller's retained original receipt; input ownership stays unchanged. */
+  responseStatus?: ReactNode
   sourceNotice?: string | undefined
   onOpenTerminal?(): void
   onInspect?(operationId: string): Promise<AgentMuxInteractionOperationReceipt | null>
@@ -75,7 +78,7 @@ export function AgentInteractionCard({
     : reason ? 'Confirmation pending'
     : disabled ? 'Answer unavailable · Check this Session'
     : 'Needs your answer'
-  const requestStatus = <div>
+  const requestStatus = responseStatus ?? <div>
     <p className="agent-interaction__status" role="status" aria-live="polite">{status}</p>
     {onInspect && operation.current && (receipt?.delivery === 'unknown' || receipt?.delivery === 'saved') ?
       <button type="button" onClick={() => { const original = operation.current!; void onInspect(original.operationId).then(value => {
