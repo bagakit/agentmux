@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { useShallow } from 'zustand/react/shallow'
 import type { AgentMuxSpaceLocation } from '@agentmux/core/control'
 import { groupIds, regionIds } from '@agentmux/layout'
@@ -8,7 +9,6 @@ import { regionCaretFocusTargets } from '../lib/region-focus'
 import { loadedNoteFiles, noteFilesFromDocuments, noteKnowledge, parseNoteFile, type NoteSource } from '../lib/note-knowledge'
 import { noteDirectorySourceFacts, noteDirectorySourceKey } from '../lib/note-directory-sources'
 import { noteBlockSelectionKey } from '../lib/note-block-selection'
-import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import { spatialCatalog } from '../lib/space-agent-control'
 import { surveyInitialZoneSelection, surveySelectReference } from '../lib/survey-workface'
 import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
@@ -18,6 +18,9 @@ import { NoteFileView } from './NoteFileView'
 import { noteReadingStyle } from '../lib/note-reading-style'
 import { openNotebookPage } from '../lib/recall-notebooks'
 import type { NotebookPage } from '@agentmux/core/notebook-catalog'
+import { useNotebookLibrary } from '../lib/notebook-library'
+import { useNoteSourceTitle } from '../lib/note-source-name'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 
 type SourceChoice = { source: NoteSource; blockId: string; location: AgentMuxSpaceLocation; displayName: string; tabName: string; position: string }
 
@@ -46,6 +49,9 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
     if (blockPresentation) useAppStore.getState().setNoteBlockSelection(blockPresentation, target)
   }, [blockPresentation])
   const [notice, setNotice] = useState<string | null>(null), [choices, setChoices] = useState<SourceChoice[]>([])
+  const sourceName = useNoteSourceTitle()
+  const choiceOpener = useRef<HTMLElement | null>(null), restoreChoiceFocus = useRef(false)
+  useEffect(() => { setChoices([]); setNotice(null) }, [key])
   const onRevealed = useCallback(() => {
     if (reveal?.noteBlock && blockPresentation) useAppStore.getState().setNoteBlockSelection(blockPresentation, reveal.noteBlock)
     if (useAppStore.getState().documentRevealTargets[key] === reveal) useAppStore.getState().clearDocumentRevealTarget(key)
@@ -101,6 +107,7 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
       const opened = await state.openFile(source.location.path, location.groupId, { line: 1, noteBlock: { noteId: source.note.noteId, blockId } }, source.location.workspaceId, true,
         { displayWorkspaceId: location.displayWorkspaceId, space: targetTab.space, resource: { hostId: resource.hostId, path: resource.path }, reference, ...(projection ? { projection } : {}) })
       if (!opened) { setNotice('The original Note was retained, but its display could not be confirmed. Choose its position again.'); return }
+      restoreChoiceFocus.current = false
       setChoices([]); setNotice(null)
     } catch (error) { setNotice(presentError(error)) }
   }
@@ -115,11 +122,21 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
     const exact = [...positions.values()].map(location => {
       const tab = state.tabs[location.tabId]!, layout = state.layouts[location.displayWorkspaceId], groups = layout ? groupIds(layout.root) : []
       const groupIndex = groups.indexOf(location.groupId), viewIndex = regionIds(tab.layout.root).indexOf(location.regionId)
-      return { source, blockId, location, displayName: state.config?.workspaces.find(workspace => workspace.id === location.displayWorkspaceId)?.name ?? location.displayWorkspaceId,
-        tabName: workbenchTabDisplayName(tab, state.sessions, state.agentNames, state.timelines), position: `${groupIndex < 0 ? location.groupId : `Panel ${groupIndex + 1}`} · ${viewIndex < 0 ? location.regionId : `View ${viewIndex + 1}`}` }
+      const tabIndex = layout?.groups.find(group => group.id === location.groupId)?.tabOrder.indexOf(location.tabId) ?? -1
+      const contexts = Object.values(useNotebookLibrary.getState().state?.pages ?? {}).filter(page => page.workface?.zoneId === location.zoneId)
+      return { source, blockId, location, displayName: contexts.length === 1 ? contexts[0]!.title : state.config?.workspaces.find(workspace => workspace.id === location.displayWorkspaceId)?.name ?? location.displayWorkspaceId,
+        tabName: tab.name || sourceName(source) || source.location.path, position: `${groupIndex < 0 ? location.groupId : `Panel ${groupIndex + 1}`} · ${tabIndex < 0 ? location.tabId : `Tab ${tabIndex + 1}`} · ${viewIndex < 0 ? location.regionId : `View ${viewIndex + 1}`}` }
     })
     if (!exact.length) { setChoices([]); setNotice('No original Note display position is confirmed yet. The reference and source identity are preserved.'); return }
-    if (exact.length > 1) { setNotice('Choose an original Note display position.'); setChoices(exact); return }
+    const current = blockPresentation?.reference
+    const local = current && exact.find(choice => choice.location.displayWorkspaceId === current.displayWorkspaceId && choice.location.groupId === current.groupId &&
+      choice.location.tabId === current.tabId && choice.location.regionId === current.regionId)
+    if (local) { setChoices([]); setNotice(null); void openAt(local); return }
+    if (exact.length > 1) {
+      choiceOpener.current = globalThis.document.activeElement instanceof HTMLElement ? globalThis.document.activeElement : null
+      restoreChoiceFocus.current = true
+      setNotice(null); setChoices(exact); return
+    }
     void openAt(exact[0]!)
   }
   const originalResource = config?.workspaces.find(item => item.id === surface.workspaceId)
@@ -135,13 +152,24 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
 
     {directoryFacts?.issues.length ? <div className="note-knowledge-notice" role="status">{directoryFacts.issues.map((issue, index) => <div key={index}>{issue}</div>)}</div> : null}
     {!blockPresentation ? <div className="note-knowledge-notice" role="status">Block selection recovery is unconfirmed for this display. Editing continues; restore its exact display position to resume selection recovery.</div> : null}
-    {notice ? <div className="note-knowledge-notice" role="status">{notice}</div> : null}
-    {choices.length ? <div className="note-source-choices" aria-label="Original Note positions">{choices.map(choice => <button type="button" className="note-backlink"
+    {notice && !choices.length ? <div className="note-knowledge-notice" role="status">{notice}</div> : null}
+    <Dialog.Root open={presentation.active && choices.length > 0} onOpenChange={open => { if (!open) setChoices([]) }}>
+      <Dialog.Portal container={resolveOverlayContainer()}><Dialog.Overlay className="dialog-scrim" />
+      <Dialog.Content className="notebook-create-dialog dialog-surface note-position-dialog" onCloseAutoFocus={event => {
+        event.preventDefault()
+        if (restoreChoiceFocus.current && presentation.active && choiceOpener.current?.isConnected) choiceOpener.current.focus({ preventScroll: true })
+      }}>
+      <header><Dialog.Title>Open {choices[0] ? sourceName(choices[0].source) ?? choices[0].source.location.path : 'Note'}</Dialog.Title><Dialog.Close asChild><button type="button" className="small-button" aria-label="Close Note positions">Close</button></Dialog.Close></header>
+      <Dialog.Description className="notebook-create-description">This note is open in several places. Choose where to show its block.</Dialog.Description>
+      {notice ? <p className="note-knowledge-notice" role="status">{notice}</p> : null}
+      <div className="note-source-choices" aria-label="Original Note positions">{choices.map(choice => <button type="button" className="note-backlink"
       aria-label={`Open Note position ${choice.location.displayWorkspaceId} · ${choice.location.groupId} · ${choice.location.tabId} · ${choice.location.regionId}`}
       title={`${choice.location.displayWorkspaceId} · ${choice.location.groupId} · ${choice.location.tabId} · ${choice.location.regionId}`}
       key={JSON.stringify([choice.location.displayWorkspaceId, choice.location.groupId, choice.location.tabId, choice.location.regionId])} onClick={() => void openAt(choice)}>
-      <span title={`${choice.location.displayWorkspaceId} · ${choice.location.groupId} · ${choice.location.tabId} · ${choice.location.regionId}`}>{choice.displayName} · {choice.tabName}</span><small>{choice.source.location.path} · {choice.position}</small>
-    </button>)}</div> : null}
+      <span>{choice.displayName} · {choice.tabName}</span><small>{choice.position}</small>
+    </button>)}</div>
+      </Dialog.Content></Dialog.Portal>
+    </Dialog.Root>
     <NoteFileView {...(originalResource ? { resource: { hostId: originalResource.hostId, workspaceId: originalResource.id, workspacePath: originalResource.path, path: surface.path } } : {})} document={document} dirty={dirty} knowledge={knowledge} onCheckOriginal={() => void useAppStore.getState().refreshDocument(surface.workspaceId, surface.path)} onChange={raw => update(tabId, raw, surface.regionId)} onSave={onSave} onOpen={onOpen} onOpenPage={openPage}
       {...(blockPresentation ? { onSelectedBlock } : {})} {...(restoredBlock ? { restoredBlock } : {})}
       {...(focusRequest !== undefined ? { focusRequest, canFocus, onFocused } : {})}

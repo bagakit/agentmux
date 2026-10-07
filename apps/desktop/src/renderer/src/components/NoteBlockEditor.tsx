@@ -15,6 +15,7 @@ import { useNoteWikiCompletion } from './NoteWikiCompletion'
 import { readNoteDocument, serializeNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
 import { noteProvenanceAttributes } from '@agentmux/client-ui/note/note-provenance'
 import { noteBacklinks, resolveNoteBlock, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
+import { useNoteSourceTitle } from '../lib/note-source-name'
 
 const ThemeObjectLinkIcon = semanticIconComponent('object.link')
 const ThemeActionReplyIcon = semanticIconComponent('action.reply')
@@ -26,7 +27,7 @@ const ThemeActionOutdentIcon = semanticIconComponent('action.outdent')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 
 
-type ReferenceContextValue = { knowledge: NoteKnowledge; trail: readonly string[]; onOpen: (source: NoteSource, blockId: string) => void; onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined }
+type ReferenceContextValue = { knowledge: NoteKnowledge; trail: readonly string[]; sourceName: (source: NoteSource) => string | undefined; onOpen: (source: NoteSource, blockId: string) => void; onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined }
 const ReferenceContext = createContext<ReferenceContextValue | null>(null)
 const targetKey = (target: NoteBlockTarget) => JSON.stringify([target.noteId, target.blockId])
 /** Only identity/metadata decoration may differ when reusing positions in this view. */
@@ -76,7 +77,7 @@ function NoteReferenceView({ node }: NodeViewProps) {
   return <NodeViewWrapper className={`note-reference note-reference--${reference.mode}`} contentEditable={false} {...noteProvenanceAttributes(node.attrs.provenance)}>
     <div className="note-reference__source"><ThemeObjectLinkIcon size={13} /><span>{reference.mode === 'embed' ? 'Embedded block' : 'Block reference'}</span>
       {resolution.status === 'resolved' ? <button type="button" className="note-text-button" title={`${resolution.source.location.workspaceId} · ${resolution.source.location.path} · ${reference.target.blockId}`} aria-label={`Open original block in ${resolution.source.location.workspaceId} · ${resolution.source.location.path} · ${reference.target.blockId}`}
-        onClick={() => context.onOpen(resolution.source, reference.target.blockId)}>{resolution.source.location.path}<ThemeActionReplyIcon size={12} /></button> : null}
+        onClick={() => context.onOpen(resolution.source, reference.target.blockId)}>{context.sourceName(resolution.source) ?? resolution.source.location.path}<ThemeActionReplyIcon size={12} /></button> : null}
     </div>
     {cycle ? <p className="note-knowledge-notice" role="status">This reference is circular. The original reference is preserved.</p>
       : resolution.status !== 'resolved' ? <p className="note-knowledge-notice" role="status">{resolution.message}</p>
@@ -102,6 +103,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   onSave: () => void; onIssue: (message: string | null) => void; handleRef?: Ref<NoteEditorHandle | null>; onSelectedBlock?: (target: NoteBlockTarget) => void
   onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined; active?: boolean; showBacklinks?: boolean; sourceIdentity?: string
 }) {
+  const sourceName = useNoteSourceTitle()
   const props = useRef({ note, onChange, onSave, onIssue, onSelectedBlock })
   props.current = { note, onChange, onSave, onIssue, onSelectedBlock }
   const [selected, setSelected] = useState<string | null>(null), [picker, setPicker] = useState(false), [query, setQuery] = useState('')
@@ -243,8 +245,8 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     const identityCounts = new Map<string, number>(), match = query.toLowerCase()
     for (const source of knowledge.sources) identityCounts.set(source.note.noteId, (identityCounts.get(source.note.noteId) ?? 0) + 1)
     return knowledge.sources.flatMap(source => identityCounts.get(source.note.noteId) !== 1 ? [] : [...source.blocks.values()].flatMap(block =>
-      `${source.location.path} ${block.text}`.toLowerCase().includes(match) ? [{ source, block, target: { noteId: source.note.noteId, blockId: block.blockId } }] : []))
-  }, [picker, knowledge, query])
+      `${sourceName(source) ?? ''} ${source.location.path} ${block.text}`.toLowerCase().includes(match) ? [{ source, block, target: { noteId: source.note.noteId, blockId: block.blockId } }] : []))
+  }, [picker, knowledge, query, sourceName])
   const foldTarget = () => {
     if (!editor) return null
     const { $from } = editor.state.selection
@@ -257,7 +259,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     editor.chain().focus().insertContent({ type: 'blockReference', attrs: { target, mode } }).run()
     setPicker(false); setQuery('')
   }
-  return <ReferenceContext.Provider value={{ knowledge, trail: [], onOpen, onOpenLink }}><div className="note-editor" data-note-empty={note.content.content?.length === 1 && note.content.content[0]?.type === 'paragraph' && !note.content.content[0].content?.length}>
+  return <ReferenceContext.Provider value={{ knowledge, trail: [], sourceName, onOpen, onOpenLink }}><div className="note-editor" data-note-empty={note.content.content?.length === 1 && note.content.content[0]?.type === 'paragraph' && !note.content.content[0].content?.length}>
     <RovingToolbar className="note-editor__tools" aria-label="Note block tools">
       <div className="note-editor__tool-group" role="group" aria-label="Block style">
         <RovingToolbarButton type="button" className="note-tool" title="Heading" aria-label="Heading" aria-pressed={formatting?.heading ?? false} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}><ThemeObjectHeadingIcon size={15} /></RovingToolbarButton>
@@ -279,7 +281,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
       <TextInput aria-label="Find a Note block" placeholder="Find in loaded Notes…" value={query} onChange={event => setQuery(event.target.value)} />
       <p className="note-scope">{knowledge.scope === 'complete' ? 'Confirmed Note scope' : 'Loaded Notes only · more sources may exist'}</p>
       <div className="note-reference-picker__results">{candidates.map(({ source, block, target }) => <div className="note-reference-picker__row" key={JSON.stringify([source.location.workspaceId, source.location.path, block.blockId])} title={`${source.location.workspaceId} · ${source.location.path} · ${block.blockId}`}>
-        <span><strong title={block.text}>{block.text || 'Empty block'}</strong><small>{source.location.path}</small></span>
+        <span><strong title={block.text}>{block.text || 'Empty block'}</strong><small title={source.location.path}>{sourceName(source) ?? source.location.path}</small></span>
         <button type="button" className="note-text-button" aria-label={`Reference ${source.location.workspaceId} · ${source.location.path} · ${block.blockId}`} onClick={() => insertReference(target, 'reference')}>Reference</button>
         <button type="button" className="note-text-button" aria-label={`Embed ${source.location.workspaceId} · ${source.location.path} · ${block.blockId}`} onClick={() => insertReference(target, 'embed')}>Embed</button>
       </div>)}{!candidates.length ? <p className="note-scope">No matching block is confirmed in this scope.</p> : null}</div>
@@ -289,7 +291,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     {showBacklinks ? <details className="note-backlinks"><summary>Backlinks{selected && backlinks.length ? ` · ${backlinks.length}` : ''}<span>{knowledge.scope === 'complete' ? 'Confirmed scope' : 'Partial scope'}</span></summary>
       {selected ? backlinks.length ? backlinks.map(link => <button type="button" className="note-backlink" key={JSON.stringify([link.source.location.workspaceId, link.source.location.path, link.occurrence])}
         title={`${link.source.location.workspaceId} · ${link.source.location.path} · ${link.blockId}`} aria-label={`Open ${link.source.location.workspaceId} · ${link.source.location.path} · ${link.blockId}`}
-        onClick={() => onOpen(link.source, link.blockId)}><span>{link.source.location.path}</span><small>{link.mode === 'embed' ? 'Embedded block' : 'Block reference'}</small></button>)
+        onClick={() => onOpen(link.source, link.blockId)}><span>{sourceName(link.source) ?? link.source.location.path}</span><small>{link.mode === 'embed' ? 'Embedded block' : 'Block reference'}</small></button>)
         : <p className="note-scope">{knowledge.scope === 'complete' ? 'No references in the confirmed scope.' : 'No references found among loaded Notes. Unread sources are not counted.'}</p>
         : <p className="note-scope">Select a block to see its exact incoming references.</p>}
       {knowledge.invalid.length ? <p className="note-knowledge-notice" role="status">{knowledge.invalid.length} Note file could not be indexed. Its original source is preserved.</p> : null}

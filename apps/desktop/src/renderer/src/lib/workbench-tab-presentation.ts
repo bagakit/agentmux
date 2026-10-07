@@ -4,7 +4,7 @@ import type { AgentSessionNameMetadata, SessionSnapshot } from '../../../shared/
 import { assertUnreachableSurface } from './workbench-surface-kinds'
 import { firstPromptFromTimeline, tabDisplayName, titleWorkbenchSurface, type AgentNameFacts, type WorkbenchTab } from './workbench-tabs'
 
-function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapshot[], metadata: Readonly<Record<string, AgentSessionNameMetadata>>): string {
+function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapshot[], metadata: Readonly<Record<string, AgentSessionNameMetadata>>, noteName?: string): string {
   const surface = titleWorkbenchSurface(tab)
   switch (surface.kind) {
     case 'git':
@@ -12,7 +12,7 @@ function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapsho
     case 'git-diff':
       return `${surface.comparison.file.path.split('/').at(-1) ?? surface.comparison.file.path} · Diff`
     case 'file':
-      return surface.path.split('/').at(-1) ?? surface.path
+      return noteName ?? surface.path.split('/').at(-1) ?? surface.path
     case 'launcher':
       return 'New Tab'
     case 'browser':
@@ -53,11 +53,12 @@ export function workbenchTabDisplayName(
   sessions: readonly SessionSnapshot[],
   agentNames: Readonly<Record<string, string>>,
   timelines: Readonly<Record<string, AgentTimelineSnapshot>>,
-  metadata: Readonly<Record<string, AgentSessionNameMetadata>> = {}
+  metadata: Readonly<Record<string, AgentSessionNameMetadata>> = {},
+  noteName?: string
 ): string {
   return tabDisplayName({
     tab,
-    fallback: tabSurfaceFallback(tab, sessions, metadata),
+    fallback: tabSurfaceFallback(tab, sessions, metadata, noteName),
     agentFactsFor: workbenchAgentFactsFor(sessions, agentNames, timelines, metadata)
   })
 }

@@ -7,6 +7,7 @@ import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import { detectLanguage } from '../lib/language-detect'
 import { FilePathLabel } from './FilePathLabel'
+import { useNoteFileName } from '../lib/note-source-name'
 import { useMonacoTheme } from '../hooks/useMonacoTheme'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
@@ -100,6 +101,7 @@ export function EditorPane({
   previewHasNoteAttribution?: boolean
 }) {
   const key = documentKey(surface.workspaceId, surface.path)
+  const noteName = useNoteFileName(surface.workspaceId, surface.path)
   const document = useAppStore((state) => {
     return state.documents[key] ?? null
   })
@@ -186,7 +188,7 @@ export function EditorPane({
       data-file-state={issue?.kind ?? (saving ? 'saving' : dirty ? 'dirty' : 'clean')}
     >
       <header className="editor-header">
-        <FilePathLabel path={document.path} />
+        <FilePathLabel path={document.path} label={previewing ? noteName : undefined} />
         <div className="editor-header__actions">
           {onTogglePreview ? <button className="small-button" aria-pressed={previewing} aria-label={previewing ? 'Show source' : 'Preview current content'} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <ThemeObjectSourceCodeIcon size={13} /> : <ThemeActionRevealIcon size={13} />}<span className="editor-header__label">{previewing ? 'Source' : 'Preview'}</span></button> : null}
           {regionMode === 'diff' ? <button className="small-button" disabled={Boolean(regionDiff?.loading)} title="Reload diff" aria-label="Reload diff" onClick={() => void reloadDiff(surface.regionId, surface.workspaceId, surface.path)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">{regionDiff?.loading ? 'Loading…' : 'Refresh'}</span></button>
