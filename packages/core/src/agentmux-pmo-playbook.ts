@@ -1,4 +1,5 @@
 import { AGENTMUX_CLI_COMMANDS } from './agentmux-cli-commands.js'
+import { goalRoleGuidance } from './goal-role-guidance.js'
 
 function reference(method: string): string {
   const command = AGENTMUX_CLI_COMMANDS.find(entry => entry.method === method)
@@ -75,13 +76,7 @@ Assign an owner with concrete input and acceptance evidence. Hand off communicat
 without silently completing an external Task. Keep message/thread/reply identities.
 Role registration is a separate explicit authorized action, never a step this manual runs.
 
-For authorized execution, inspect the original Goal's Supervisor, assignees and current
-criteria. Freeze the actual delegation and selected inputs with its original message
-identity. Follow questions and blockers through the original reply, retain responsibility
-for unreported work, and check each report's evidence, gaps and unknowns before collecting
-it into the same Goal. Submit the resulting criterion checks for human acceptance. Exit,
-idle, delivery, acknowledgement and worker_done are not business completion. A discussion
-or inspection request does not itself authorize implementation or human acceptance.
+${goalRoleGuidance({ role: 'manager' })}
 
 ## Name the actual working Sessions
 

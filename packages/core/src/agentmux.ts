@@ -18,6 +18,7 @@ import {
 } from './agentmux-cli-commands.js'
 import { AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from './agentmux-cli-help.js'
 import { agentMuxPmoPlaybook } from './agentmux-pmo-playbook.js'
+import { agentMuxModuleSkill } from './agentmux-cli-module-skills.js'
 
 function write(value: unknown, stream: NodeJS.WriteStream = process.stdout, boundedReader = false): void {
   const line = boundedReader ? rpcEncode(value) : JSON.stringify(value) + '\n'
@@ -115,6 +116,11 @@ async function main(): Promise<number> {
     process.stdout.write(help + '\n'); return 0
   }
   if (args.length === 1 && args[0] === '--skill') { process.stdout.write(AGENTMUX_CLI_SKILL + '\n'); return 0 }
+  if (args.length === 2 && args[1] === '--skill') {
+    const skill = agentMuxModuleSkill(args[0]!)
+    if (!skill) throw new AgentMuxError('Unknown module. Run amux --skill for the local module directory.', 'INVALID_CLI_ARGUMENT')
+    process.stdout.write(skill + '\n'); return 0
+  }
   if (args.length === 1 && (args[0] === '--version' || args[0] === '-V')) { process.stdout.write(`amux ${packageManifest.version}\n`); return 0 }
   const match = agentMuxCliMatch(args)
   if (!match && (args.at(-1) === '--help' || args.at(-1) === '-h')) {
