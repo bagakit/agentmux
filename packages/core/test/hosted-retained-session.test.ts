@@ -74,18 +74,19 @@ describe('Hosted durable Session authority', () => {
   it('reads original durable Sessions through the finite SDK without replacing an empty live registry or requiring Runtime recovery', async () => {
     const f = await fixture()
     try {
+      const original = cloneSession(f.retained)
       expect(f.core.agentSessions()).toEqual([])
-      expect(f.client.agentSessions()).toEqual([])
+      // Hosted bootstrap reads durable metadata even when the Core registry is not loaded.
+      expect(f.client.agentSessions()).toEqual([original])
       const connectCalls = f.connect.mock.calls.length
       expect(connectCalls).toBe(1)
-      const original = cloneSession(f.retained)
       const initialRead = await f.client.readAgentSessions().then(value => ({ value }), error => ({ error }))
       expect(initialRead, 'offline durable SDK reads remain available without Native reconnect').toEqual({ value: [original] })
       const changed = { ...f.retained, updatedAt: 2, workspacePath: join(f.retained.workspacePath, 'new-directory') }
       await f.store.compareAndSwap(f.retained, changed)
       await expect(f.client.readAgentSessions()).resolves.toEqual([cloneSession(changed)])
       expect(f.core.agentSessions()).toEqual([])
-      expect(f.client.agentSessions()).toEqual([])
+      expect(f.client.agentSessions()).toEqual([original])
       expect(f.connect.mock.calls).toHaveLength(connectCalls)
       expect(f.kernel.stop.mock.calls).toEqual([])
       expect(f.kernel.list.mock.calls).toEqual([])
