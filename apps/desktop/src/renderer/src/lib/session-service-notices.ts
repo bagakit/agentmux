@@ -37,6 +37,21 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
       cause: nativeSessionServiceCause(session, nativeService), notice })
   }
   if (session?.kind !== 'agent') return notices
+  for (const operation of Object.values(session.continuityOperations ?? {})) {
+    const delivery = operation.recoveryDelivery
+    if (delivery && delivery.key.expectedRun.runId === session.control.run.runId &&
+      !['accepted', 'superseded'].includes(delivery.phase)) notices.push({
+      id: `continuity-input:${operation.operationId}`, occurrence: JSON.stringify([session.id, delivery.key]),
+      cause: JSON.stringify([delivery.phase, delivery.reason]), observedAt: delivery.observedAt,
+      notice: { kind: 'indeterminate', notice: {
+        step: delivery.phase === 'waiting' ? 'Recovery input is waiting'
+          : delivery.phase === 'not-applied' ? 'Recovery input was not applied'
+            : delivery.phase === 'dispatching' ? 'Recovery input delivery is being checked' : 'Recovery input delivery is unconfirmed',
+        mode: `${delivery.reason}. The restored Session and available input controls are kept. Selected reminder and continuation parts share one original input.`,
+        restore: `Inspect recovery request ${operation.operationId} and input ${delivery.key.submissionId} in this Session. Unconfirmed input will not be replayed automatically; review it before composing a new message.`
+      } }
+    })
+  }
   const hookNotice = serviceNoticeToRender(classifyServiceNotice(hookIngressServiceOutcome(session), observationAvailable))
   if (hookNotice && session.hookIngressObservation) notices.push({ id: 'hook-ingress',
     occurrence: JSON.stringify([session.hostId, session.id, session.control.run.runId]),
