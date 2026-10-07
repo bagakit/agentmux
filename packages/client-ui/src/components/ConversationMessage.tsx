@@ -26,6 +26,7 @@ import { ConversationMessageDisclosure } from './ConversationMessageDisclosure.j
 const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
 export type ConversationMessageProps = {
+  active?: boolean
   showInputSource?: boolean
   /** Original record title: system disclosure heading or compact Provider speech context. */
   recordTitle?: string
@@ -126,12 +127,13 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  compact = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
+  active = true, compact = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
   speaker: recordedSpeaker, conversationSessionId, itemRef, inputSource, publicContent, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
   const platform = useClientUiPlatform()
   const completeCopy = useRef<AbortController | null>(null)
+  useEffect(() => { if (!active) completeCopy.current?.abort() }, [active])
   const renderClock = timeFormatter ?? formatClock
   const isStringContent = typeof content === 'string'
   const parts: readonly AgentSessionHistoryContentPart[] = isStringContent
@@ -247,6 +249,7 @@ export function ConversationMessage({
   }
 
   async function copyMessage(): Promise<void> {
+    if (!active) return
     setCopyReadError(null)
     completeCopy.current?.abort()
     const controller = new AbortController(); completeCopy.current = controller
@@ -382,12 +385,12 @@ export function ConversationMessage({
       {hasContent && (!isSystemContext || systemContextOpen) ? discloseBody(
         <div ref={bodyRef} id={isSystemContext ? systemContentId : undefined} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
-          {hasQuestionAnswers && firstTextIndex < 0 ? <ConversationQuestionReply answers={questionAnswers!}
+          {hasQuestionAnswers && firstTextIndex < 0 ? <ConversationQuestionReply visible={active} answers={questionAnswers!}
             inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
             {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /> : null}
           {parts.map((part, index) => {
             const key = partKey(part)
-            return part.kind === 'text' && hasQuestionAnswers && index === firstTextIndex ? <ConversationQuestionReply key={key}
+            return part.kind === 'text' && hasQuestionAnswers && index === firstTextIndex ? <ConversationQuestionReply visible={active} key={key}
               answers={questionAnswers!} originalText={part.text} inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             : part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}>
@@ -396,12 +399,12 @@ export function ConversationMessage({
                 <pre>{context.raw}</pre>
               </details>) : null}
               {index === 0 && prefix?.declaredContexts && prefix.body.length === 0 ? null : index === 0 && prefix?.packet ? prefix.packet.parts.map((packetPart, packetIndex) => packetPart.kind === 'text'
-              ? <MemoizedAgentMarkdown key={packetIndex} className="log-turn__packet-text" inputMode={inputMarkdown} content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
+              ? <MemoizedAgentMarkdown visible={active} key={packetIndex} className="log-turn__packet-text" inputMode={inputMarkdown} content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
               : <blockquote key={packetIndex} className="log-turn__citation"><span className="log-turn__citation-from">{packetPart.from}</span>
                 {packetPart.reference ? <code className="log-turn__citation-ref">{packetPart.reference}</code> : null}
-                <MemoizedAgentMarkdown className="log-turn__packet-text" inputMode={inputMarkdown} content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
-                  {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /></blockquote>) : <MemoizedAgentMarkdown
+                <MemoizedAgentMarkdown visible={active} className="log-turn__packet-text" inputMode={inputMarkdown} content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
+                  {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /></blockquote>) : <MemoizedAgentMarkdown visible={active}
               content={index === 0 && prefix
                 ? prefix.declaredContexts && !prefix.sourceLabel ? prefix.body.replace(/^(?:\r?\n){1,2}/u, '') : prefix.body
                 : sessionHistoryTextForReading(part)}
@@ -419,6 +422,7 @@ export function ConversationMessage({
                 {...(onToggleTrace ? { onToggle: (open) => onToggleTrace(traceDisclosureKey(messageId, key), open) } : {})} />
             ) : part.kind === 'reasoning' ? (
               <ConversationReasoningTrace
+                active={active}
                 key={key}
                 part={part}
                 copyIdentity={readingIdentity}
@@ -432,10 +436,10 @@ export function ConversationMessage({
                 {...(openHttpLink ? { openHttpLink } : {})}
               />
             ) : part.resourceType === 'text' && readHistoryResource && nativeResourceRecord ? (
-              <ConversationResourceText key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} workspaceRoot={workspaceRoot} homeDir={homeDir} inputMode={inputMarkdown}
+              <ConversationResourceText active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} workspaceRoot={workspaceRoot} homeDir={homeDir} inputMode={inputMarkdown}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             ) : part.resourceType === 'image' && readHistoryResource && nativeResourceRecord ? (
-              <ConversationResourceImage key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} />
+              <ConversationResourceImage active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} />
             ) : <div key={key} className="log-turn__resource">
               <span>{part.label ?? `${part.resourceType} resource`}</span>
               <code>{part.reference}</code>
