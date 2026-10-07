@@ -128,7 +128,7 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
       return this.store.read(input.operationId)!.operation
     })
   }
-  private adapterInput(row: EnrollmentRow): EnrollmentAdapterInput { const { operationId, connectionId, domain, label } = row.operation; return { operationId, connectionId, domain, label, attemptId: row.attemptId! } }
+  private adapterInput(row: EnrollmentRow): EnrollmentAdapterInput { const { operationId, connectionId, domain, label, preset } = row.operation; return { operationId, connectionId, domain, label, ...(preset ? { preset } : {}), attemptId: row.attemptId! } }
   private snapshot(raw: string): Snapshot {
     const p = JSON.parse(raw) as Snapshot
     if (typeof p.privateState !== 'string' || !p.privateState) throw new Error('Invalid private snapshot')

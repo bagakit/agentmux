@@ -1,6 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { parseConnectionRecord } from './connections-codec.js'
+import { parseConnectionRecord } from './connection-record-codec.js'
 import type { ConnectionEnrollmentBeginInput, ConnectionEnrollmentCapability, ConnectionEnrollmentChallenge, ConnectionEnrollmentMethod, ConnectionEnrollmentOperation, ConnectionEnrollmentParamsMap, ConnectionEnrollmentReason, ConnectionEnrollmentResultMap } from './connection-enrollment-contract.js'
 
 export const CONNECTION_ENROLLMENT_RPC_METHODS = { 'connection.enrollment.begin': 'long', 'connection.enrollment.advance': 'long', 'connection.enrollment.inspect': 'long', 'connection.enrollment.ls': 'long' } as const
@@ -14,8 +14,8 @@ function integer(v: unknown, min: number, max = Number.MAX_SAFE_INTEGER): number
 function choice<T extends string>(v: unknown, values: readonly T[]): T { if (!values.includes(v as T)) fail(); return v as T }
 const reasons: readonly ConnectionEnrollmentReason[] = ['adapter-unavailable', 'secure-storage-unavailable', 'storage-unconfirmed', 'begin-unconfirmed', 'poll-unconfirmed', 'credential-unconfirmed', 'configuration-unconfirmed', 'connection-conflict', 'authority-unavailable', 'platform-denied', 'platform-expired', 'platform-not-applied']
 export function parseConnectionEnrollmentBegin(value: unknown): ConnectionEnrollmentBeginInput {
-  const p = object(value, ['operationId', 'connectionId', 'adapterId', 'domain', 'label'])
-  return { operationId: id(p.operationId), connectionId: id(p.connectionId), adapterId: id(p.adapterId), domain: domain(p.domain), label: text(p.label) }
+  const p = object(value, ['operationId', 'connectionId', 'adapterId', 'domain', 'label', 'preset'])
+  return { operationId: id(p.operationId), connectionId: id(p.connectionId), adapterId: id(p.adapterId), domain: domain(p.domain), label: text(p.label), ...(p.preset === undefined ? {} : { preset: (() => { const v=object(p.preset,['name','description']); if(v.description!==undefined&&(typeof v.description!=='string'||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(v.description)))fail(); return {name:text(v.name),...(v.description===undefined?{}:{description:v.description as string})} })() }) }
 }
 export function parseConnectionEnrollmentChallenge(value: unknown): ConnectionEnrollmentChallenge {
   const p = object(value, ['verificationUrl', 'userCode', 'expiresAt', 'nextPollAt']), url = text(p.verificationUrl)
@@ -23,8 +23,8 @@ export function parseConnectionEnrollmentChallenge(value: unknown): ConnectionEn
   return { verificationUrl: url, ...(p.userCode === undefined ? {} : { userCode: text(p.userCode) }), expiresAt: p.expiresAt === null ? null : integer(p.expiresAt, 0), nextPollAt: integer(p.nextPollAt, 0) }
 }
 export function parseConnectionEnrollmentOperation(value: unknown): ConnectionEnrollmentOperation {
-  const p = object(value, ['operationId', 'connectionId', 'adapterId', 'domain', 'label', 'revision', 'authorization', 'credential', 'configuration', 'application', 'challenge', 'configured', 'reason'])
-  const input = parseConnectionEnrollmentBegin(Object.fromEntries(['operationId', 'connectionId', 'adapterId', 'domain', 'label'].map(k => [k, p[k]])))
+  const p = object(value, ['operationId', 'connectionId', 'adapterId', 'domain', 'label', 'preset', 'revision', 'authorization', 'credential', 'configuration', 'application', 'challenge', 'configured', 'reason'])
+  const input = parseConnectionEnrollmentBegin(Object.fromEntries(['operationId', 'connectionId', 'adapterId', 'domain', 'label', 'preset'].filter(k=>p[k]!==undefined).map(k => [k, p[k]])))
   const app = p.application === null ? null : object(p.application, ['domain', 'appId'])
   const application = app ? { domain: domain(app.domain), appId: id(app.appId) } : null
   if (application && application.domain !== input.domain) fail()
@@ -60,6 +60,6 @@ export function parseConnectionEnrollmentResult<M extends ConnectionEnrollmentMe
   }
   const operation = method === 'connection.enrollment.inspect' ? (() => { const p = object(value, ['operation']); return p.operation === null ? null : parseConnectionEnrollmentOperation(p.operation) })() : parseConnectionEnrollmentOperation(value)
   if (operation && operation.operationId !== (input as { operationId: string }).operationId) fail()
-  if (operation && method === 'connection.enrollment.begin' && JSON.stringify(parseConnectionEnrollmentBegin(Object.fromEntries(['operationId', 'connectionId', 'adapterId', 'domain', 'label'].map(k => [k, operation[k as keyof typeof operation]])))) !== JSON.stringify(input)) fail()
+  if (operation && method === 'connection.enrollment.begin' && JSON.stringify(parseConnectionEnrollmentBegin(Object.fromEntries(['operationId', 'connectionId', 'adapterId', 'domain', 'label', 'preset'].map(k => [k, operation[k as keyof typeof operation]])))) !== JSON.stringify(input)) fail()
   return (method === 'connection.enrollment.inspect' ? { operation } : operation) as ConnectionEnrollmentResultMap[M]
 }

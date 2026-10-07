@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
-import { parseConnectionEnrollmentOperation, type ConnectionEnrollmentBeginInput, type ConnectionEnrollmentCallContext, type ConnectionEnrollmentOperation } from '@agentmux/core/connections'
+import { parseConnectionEnrollmentOperation, parseConnectionEnrollmentParams, type ConnectionEnrollmentBeginInput, type ConnectionEnrollmentCallContext, type ConnectionEnrollmentOperation } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 
 export type EnrollmentRow = { operation: ConnectionEnrollmentOperation; actor: ConnectionEnrollmentCallContext['actor']; credentialOperationId: string; configureOperationId: string; attemptId: string | null; attemptKind: 'begin' | 'poll' | null; snapshotOperationId: string | null; privateRef: string | null }
@@ -25,7 +25,8 @@ export class ConnectionEnrollmentStore {
     return this.transaction(() => {
       const saved = this.read(input.operationId)
       if (saved) {
-        const old = Object.fromEntries(Object.keys(input).map(k => [k, saved.operation[k as keyof typeof input]]))
+        const { operationId, connectionId, adapterId, domain, label, preset } = saved.operation
+        const old = parseConnectionEnrollmentParams('connection.enrollment.begin', { operationId, connectionId, adapterId, domain, label, ...(preset ? { preset } : {}) })
         if (JSON.stringify(old) !== JSON.stringify(input) || JSON.stringify(saved.actor) !== JSON.stringify(actor)) throw new AgentMuxError('The original enrollment has different input or authority. Inspect it without replacing its identity.', 'CONNECTION_OPERATION_CONFLICT')
         return saved
       }

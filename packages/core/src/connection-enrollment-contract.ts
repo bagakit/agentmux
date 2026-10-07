@@ -4,7 +4,7 @@ export type ConnectionEnrollmentReason = 'adapter-unavailable' | 'secure-storage
 /** Local implementation availability, never remote account eligibility or granted scopes. */
 export type ConnectionEnrollmentCapability = { adapterId: string; domain: string; label: string; availability: 'available' | 'unavailable' | 'unknown'; reason?: 'adapter-unavailable' | 'secure-storage-unavailable' }
 export type ConnectionEnrollmentChallenge = { verificationUrl: string; userCode?: string; expiresAt: number | null; nextPollAt: number }
-export type ConnectionEnrollmentBeginInput = { operationId: string; connectionId: string; adapterId: string; domain: string; label: string }
+export type ConnectionEnrollmentBeginInput = { operationId: string; connectionId: string; adapterId: string; domain: string; label: string; preset?: { name: string; description?: string } }
 export type ConnectionEnrollmentOperation = ConnectionEnrollmentBeginInput & {
   revision: number
   authorization: 'not-started' | 'pending' | 'authorized' | 'denied' | 'expired' | 'unknown'

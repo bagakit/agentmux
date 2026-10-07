@@ -107,8 +107,8 @@ export function createFeishuEnrollment(): ConnectionEnrollmentAdapter {
       url.searchParams.set('tp', 'sdk')
       url.searchParams.set('createOnly', 'true')
       url.searchParams.delete('clientID')
-      url.searchParams.set('name', input.label)
-      url.searchParams.set('desc', 'Connect this bot to AgentMux')
+      url.searchParams.set('name', input.preset?.name ?? input.label)
+      url.searchParams.set('desc', input.preset?.description ?? (input.preset ? '' : 'Connect this bot to AgentMux'))
       url.searchParams.set('addons', addons)
       if (!verification(url.toString(), input.domain, result.device_code)) return { kind: 'unknown' }
       return receipt({ version: 1, operationId: input.operationId, connectionId: input.connectionId, domain: input.domain, label: input.label,
