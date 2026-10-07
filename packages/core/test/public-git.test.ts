@@ -20,6 +20,41 @@ const details: Extract<GitCommitDetailsResult, { kind: 'ready' }> = { kind: 'rea
 const input = { kind: 'commit' as const, snapshot, file: { path: details.entries[0]!.path, origPath: details.entries[0]!.origPath } }
 
 describe('public Git target and result contracts', () => {
+  it('parses exact worktree closeout intent and preserves deferred cleanup facts across the public service', async () => {
+    const params = { ...target, operationId: 'close-original-worktree', discardChanges: true }
+    const receipt = { workspaceId: target.workspaceId, targetWorkspaceId: 'default-workspace',
+      movedTabIds: ['original-tab'], workface: 'moved' as const, cleanup: 'pending' as const, reason: 'The original Session still needs its directory.' }
+    expect(parseGitParams('git.worktree.close', params)).toEqual(params)
+    const call = vi.fn(async () => receipt)
+    const service = new AgentMuxRpcService({ git: { call } as AgentMuxRpcGitOwner })
+    expect(await service.call('git.worktree.close', params)).toEqual(receipt)
+    expect(call).toHaveBeenCalledWith('git.worktree.close', params, expect.any(Object))
+    expect(parseRpcNativeResult('git.worktree.close', receipt, params)).toEqual(receipt)
+    for (const invalid of [{ ...params, operationId: undefined }, { ...params, discardChanges: 'true' },
+      { ...params, force: true }, { ...params, expectedResource: { hostId: 'local' } }])
+      expect(() => parseGitParams('git.worktree.close', invalid)).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
+    for (const invalid of [{ ...receipt, workspaceId: 'another' }, { ...receipt, targetWorkspaceId: target.workspaceId },
+      { ...receipt, movedTabIds: ['original-tab', 'original-tab'] }, { ...receipt, cleanup: 'done' },
+      { ...receipt, workface: undefined }, { ...receipt, workface: 'done' }, { ...receipt, workface: 'pending', cleanup: 'removed' },
+      { ...receipt, workface: 'pending', cleanup: 'kept' }, { ...receipt, cleanup: 'kept', reason: null },
+      { ...receipt, reason: undefined }, { ...receipt, extra: true }])
+      expect(() => parseGitResult('git.worktree.close', invalid, params)).toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+    expect(parseGitResult('git.worktree.close', { ...receipt, movedTabIds: [], workface: 'pending' }, params)).toMatchObject({ workface: 'pending', cleanup: 'pending' })
+    const kept = { ...receipt, cleanup: 'kept' as const, reason: 'Git registration has ended; remaining user evidence is retained.' }
+    expect(parseGitResult('git.worktree.close', kept, params)).toBe(kept)
+    expect(parseRpcNativeResult('git.worktree.close', kept, params)).toEqual(kept)
+  })
+  it('requires a caller-owned closeout operation ID in the real CLI parser and exposes its cleanup contract', async () => {
+    const args = ['git', 'worktree', 'close', '--workspace', target.workspaceId, '--host', 'local', '--workspace-path', target.expectedResource.workspacePath]
+    const parsed = await parseAgentMuxCliInvocation([...args, '--operation-id', 'close-original-worktree', '--discard-changes'])
+    expect(parsed).toMatchObject({ command: { method: 'git.worktree.close' }, params: { ...target, operationId: 'close-original-worktree', discardChanges: true } })
+    await expect(parseAgentMuxCliInvocation(args)).rejects.toThrow()
+    await expect(parseAgentMuxCliInvocation([...args, '--operation-id', 'close-original-worktree', '--force'])).rejects.toThrow()
+    expect(AGENTMUX_CLI_COMMANDS.filter(command => command.method === 'git.worktree.close')).toHaveLength(1)
+    expect(agentMuxCommandHelp('git.worktree.close')).toContain('pending retains unfinished responsibility')
+    expect(agentMuxCommandHelp('git.worktree.close')).toContain('kept ends an already unregistered resource')
+    expect(agentMuxModuleSkill('git')).toContain('execution cwd')
+  })
   it('retains full message and legal newline paths while refusing implicit or unbound reads', () => {
     expect(parseGitResult('git.commit', details, parseGitParams('git.commit', { ...target, oid }))).toBe(details)
     expect(parseGitParams('git.diff', { ...target, input }).input.file.path).toBe('new\nname 中文.txt')
