@@ -9,8 +9,10 @@ mkdirSync(evidence, { recursive: true })
 const mutant = process.env.AGENTMUX_SETTINGS_REFERENCE_MUTANT
 const edits: Record<string, [string, string, string]> = {
   selection: ['AgentSettingsPane.tsx', 'function selectExecutor(id: string): void {\n    setSelectedId(id)', 'function selectExecutor(id: string): void {\n    setSelectedId(null)'],
-  drafts: ['AgentSettingsPane.tsx', 'function closeProviders(): void {', 'function closeProviders(): void {\n    setDrafts(() => Object.fromEntries(Object.entries(config.executors).map(([id, value]) => [id, toDraft(value)])))'],
-  creation: ['ProviderCatalogPane.tsx', 'onClick={() => onCreate(provider)}', 'onClick={() => onCreate(entries[0]!)}']
+  drafts: ['AgentSettingsPane.tsx', 'function selectProvider(next: string | null): void {', 'function selectProvider(next: string | null): void {\n    setDrafts(() => Object.fromEntries(Object.entries(config.executors).map(([id, value]) => [id, toDraft(value)])))'],
+  creation: ['AgentSettingsPane.tsx', 'providerId: provider.id,', 'providerId: providerCatalog[0]!.id,'],
+  sidebar: ['SettingsPanel.tsx', '{group.title}</p>', '{null}</p>'],
+  'prompt-scope': ['ShortcutSettingsPane.tsx', ': prompt.providerId === scope.providerId)', ': (prompt.providerId === undefined || prompt.providerId === scope.providerId))']
 }
 export default defineConfig({ root, cacheDir: resolve(evidence, 'cache'),
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases },
@@ -25,6 +27,6 @@ export default defineConfig({ root, cacheDir: resolve(evidence, 'cache'),
       }
       return code
     } }],
-  test: { include: ['apps/desktop/test/settings-reference.test.tsx', ...(mutant ? [] : ['apps/desktop/test/settings-executor-creation.test.tsx','apps/desktop/test/settings-resource-library.test.tsx'])],
+  test: { include: ['apps/desktop/test/settings-reference.test.tsx', 'apps/desktop/test/settings-prompt-workbench.test.tsx', ...(mutant ? [] : ['apps/desktop/test/settings-executor-creation.test.tsx','apps/desktop/test/settings-resource-library.test.tsx','apps/desktop/test/settings-prompts-save.test.tsx','apps/desktop/test/settings-prompts-library.test.tsx','apps/desktop/test/settings-prompts-liquid.test.tsx'])],
     setupFiles: [resolve(root, 'vitest.setup.ts')], maxWorkers: 1, passWithNoTests: false, testTimeout: 15000 }
 })

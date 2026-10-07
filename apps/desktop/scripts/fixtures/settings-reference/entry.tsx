@@ -10,11 +10,11 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import '../../../src/renderer/src/styles/index.css'
 
-type Section = 'agents' | 'hosts'
+type Section = 'agents' | 'hosts' | 'prompts' | 'general'
 const before = await api.config.get(), catalog = await api.providers.list(), template = Object.values(before.executors)[0]!
 const seeded: AppConfig = { ...before,
   executors: Object.fromEntries(Array.from({ length: 5 }, (_, index) => [`executor-${String(index + 1).padStart(3, '0')}`, {
-    ...template, label: index === 4 ? 'Production code review · long recognizable executor name' : `Executor ${String(index + 1).padStart(3, '0')}`,
+    ...template, providerId: catalog[index < 3 ? 0 : 1]!.id, command: catalog[index < 3 ? 0 : 1]!.executable, label: index === 4 ? 'Production code review · long recognizable executor name' : `Executor ${String(index + 1).padStart(3, '0')}`,
     args: ['--model', 'literal model name'], env: { LITERAL: '$HOME remains literal' }
   }])),
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }, ...Array.from({ length: 23 }, (_, index) => ({
@@ -22,12 +22,19 @@ const seeded: AppConfig = { ...before,
     hostname: `controlled-${index + 1}.invalid`, user: 'developer', port: 2222, identityFile: '~/.ssh/controlled key',
     remoteCommand: (_hygiene_fixturePath("opt/agentmux") + " --literal"), remoteSocketPath: _hygiene_fixturePath("srv/literal.sock"), runtimeId: 'controlled-bound-runtime'
   }))],
+  composerShortcuts: [
+    { id: 'prompt-review', keyword: 'review', label: 'Review changes', body: 'Review the current changes. Focus on correctness, missed edge cases and the smallest useful improvement.', states: ['done'], reactionIcon: 'check' },
+    { id: 'prompt-brief', keyword: 'brief', label: 'Summarize progress', body: 'Summarize what changed, what is still uncertain, and the next useful step in a few clear sentences.' },
+    { id: 'prompt-plan', keyword: 'plan', label: 'Plan the next step', body: 'Read the local context, identify the next concrete step, and explain the tradeoff before changing code.', providerId: catalog[0]!.id, states: ['waiting', 'done'] },
+    { id: 'prompt-explain', keyword: 'explain', label: 'Explain this decision', body: 'Explain the decision in plain language. Use one concrete example and identify the assumption that matters most.', providerId: catalog[1]!.id, states: ['running'], reactionIcon: 'message-circle' },
+    { id: 'prompt-long', keyword: 'handoff', label: 'Prepare a careful handoff with evidence and remaining decisions', body: 'Prepare a handoff that another collaborator can continue.\n\nDescribe the objective, confirmed constraints, completed changes and remaining decisions. Link the relevant files and include the verification that has actually run.\n\nKeep original resource identities and authored changes intact. Make uncertainty explicit.', providerId: catalog[1]!.id }
+  ],
   workspaces: [{ id: 'project-a', name: 'Application', kind: 'folder', hostId: 'host-01', path: _hygiene_fixturePath("controlled/application") },
     { id: 'project-b', name: 'Library', kind: 'folder', hostId: 'host-01', path: _hygiene_fixturePath("controlled/library") }]
 }
 const calls: { kind: string; input?: unknown }[] = []
 let catalogMode: 'ready' | 'error' | 'empty' = 'ready'
-api.providers.list = async () => { calls.push({ kind: 'controlled-provider-read' }); if (catalogMode === 'error') throw new Error('The remote service did not confirm its Runtime identity. Existing executors and running agents are retained. Check this connection, then retry the provider lookup. ' + 'Original service observation remains unavailable. '.repeat(4)); return catalogMode === 'empty' ? [] : catalog }
+api.providers.list = (async (options?: { observation: true }) => { calls.push({ kind: 'controlled-provider-read' }); if (catalogMode === 'error') throw new Error('The remote service did not confirm its Runtime identity. Existing executors and running agents are retained. Check this connection, then retry the provider lookup. ' + 'Original service observation remains unavailable. '.repeat(4)); const result = catalogMode === 'empty' ? [] : catalog; return options ? { catalog: result, warnings: [] } : result }) as typeof api.providers.list
 const realSave = api.config.save.bind(api.config), realDetect = api.executors.detect.bind(api.executors)
 api.config.save = async (next, expected) => {
   calls.push({ kind: 'preview-config-save', input: { executors: Object.keys(next.executors).length, hosts: next.hosts.length } })
@@ -40,7 +47,7 @@ api.hosts.check = async (host: HostConfig) => {
   return { input: structuredClone(host), outcome: 'unsupported', detail: diagnostic }
 }
 const config = await realSave(seeded, before)
-useAppStore.setState({ config, providerCatalog: catalog, activeWorkspaceId: 'project-a', sessions: [], sessionSnapshots: {}, hostChecks: {}, executorDetections: {} })
+useAppStore.setState({ config, providerCatalog: catalog, activeWorkspaceId: 'project-a', sessions: [], hostChecks: {}, executorDetections: {} })
 api.config.onChange(next => useAppStore.setState({ config: next }))
 mountThemeRuntime(window, config.appearance)
 const probe = { ready: false, calls, errors: [] as string[], closeCount: 0,

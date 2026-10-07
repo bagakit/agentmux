@@ -5,7 +5,9 @@
     "../../../src/renderer/src/components/SettingsPanel.tsx",
     "../../../src/renderer/src/components/settings/AgentSettingsPane.tsx",
     "../../../src/renderer/src/components/settings/ProviderCatalogPane.tsx",
-    "../../../src/renderer/src/components/settings/SettingsResourceLibrary.tsx"
+    "../../../src/renderer/src/components/settings/SettingsResourceLibrary.tsx",
+    "entry.tsx",
+    "../../../src/renderer/src/components/settings/ShortcutSettingsPane.tsx"
   ],
   "exclude": []
 }
