@@ -21,6 +21,16 @@ function addressing(value: unknown): ConnectionIngressAddressing {
   return fail()
 }
 export function parseConnectionIngressRecord(value: unknown): ConnectionIngressRecord {
+  if (value && typeof value === 'object' && !Array.isArray(value) && Reflect.get(value, 'kind') === 'action') {
+    const p = object(value, ['kind', 'ingressId', 'connectionId', 'application', 'eventId', 'actor', 'externalConversationId', 'sourceMessageId', 'actionRef', 'state', 'code'])
+    const app = object(p.application, ['domain', 'appId']), application = { domain: text(app.domain), appId: text(app.appId) }
+    const actor = p.actor === undefined ? undefined : parseConnectionActor(p.actor)
+    if (p.state !== 'refused' || p.code !== 'INGRESS_ACTION_UNSUPPORTED' || actor && !equal(actor.application, application)) fail()
+    return { kind: 'action', ingressId: text(p.ingressId), connectionId: text(p.connectionId), application, eventId: text(p.eventId),
+      ...(actor === undefined ? {} : { actor }), ...(p.externalConversationId === undefined ? {} : { externalConversationId: text(p.externalConversationId) }),
+      ...(p.sourceMessageId === undefined ? {} : { sourceMessageId: text(p.sourceMessageId) }), ...(p.actionRef === undefined ? {} : { actionRef: text(p.actionRef) }),
+      state: 'refused', code: 'INGRESS_ACTION_UNSUPPORTED' }
+  }
   const p = object(value, ['ingressId', 'connectionId', 'application', 'eventId', 'externalMessageId', 'externalConversationId', 'actor', 'body', 'state', 'code', 'input', 'addressing'])
   const actor = parseConnectionActor(p.actor), app = object(p.application, ['domain', 'appId'])
   const application = { domain: text(app.domain), appId: text(app.appId) }
