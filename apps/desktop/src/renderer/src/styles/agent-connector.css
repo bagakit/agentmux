@@ -1,0 +1,16 @@
+.agent-connector-dialog { display: flex; flex-direction: column; max-height: calc(100dvh - var(--sp-6) * 2); overflow: hidden; }
+.agent-connector-dialog__body { display: flex; flex-direction: column; gap: var(--sp-5); min-height: 0; margin-top: var(--sp-5); overflow: auto; overflow-wrap: anywhere; }
+.agent-connector-fields { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; margin: 0; padding: 0; border: 0; }
+.agent-connector-fields h3, .agent-connector-fields legend { margin: 0; padding: 0; font-size: var(--fs-small); font-weight: 600; color: var(--text); }
+.agent-connector-field { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; color: var(--text-2); font-size: var(--fs-small); }
+.agent-connector-field input, .agent-connector-field select, .agent-connector-field textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; }
+.agent-connector-field textarea { resize: vertical; }
+.agent-connector-note { margin: 0; color: var(--text-2); font-size: var(--fs-small); line-height: 1.5; overflow-wrap: anywhere; }
+.agent-connector-check { display: flex; align-items: flex-start; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-small); line-height: 1.5; }
+.agent-connector-check input { flex: none; accent-color: var(--green); }
+.agent-connector-receipt { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding-block: var(--sp-3); border-block: 1px solid var(--line); font-size: var(--fs-small); }
+.agent-connector-receipt code { color: var(--text-3); overflow-wrap: anywhere; }
+.agent-connector-dialog footer { flex-wrap: wrap; flex: none; }
+.connector-sharing { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; color: var(--text-3); font-size: var(--fs-micro); }
+.connector-sharing__group { min-width: 0; padding: var(--sp-1) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); font: inherit; text-align: left; overflow-wrap: anywhere; }
+.connector-sharing__group:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }

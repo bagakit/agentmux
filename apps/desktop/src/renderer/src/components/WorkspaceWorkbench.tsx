@@ -1,3 +1,4 @@
+import { useAgentConnectorMenu } from '../lib/use-agent-connector-menu'
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -783,6 +784,7 @@ function WorkbenchRegionContent({
   const reportError = useAppStore((state) => state.reportError)
   const [confirmingClose, setConfirmingClose] = useState(false)
   const surface = tab.regions[node.regionId]
+  const connector = useAgentConnectorMenu(node.regionId, surface ? addressableAgentSessionId(surface) : null)
   const regionCount = Object.keys(tab.regions).length
   // 焦点是**一次**判定，两个消费者：CSS 类名（画环）与原生视图的让位量（browser 那格要按环宽内缩，
   // 否则窗口级层把环的三边物理盖掉）。见 region-focus.ts——分开各算一次时未聚焦的 browser 区
@@ -876,7 +878,7 @@ function WorkbenchRegionContent({
     })
     const surveyBrowser = surface.kind === 'browser' &&
       (target ? target.surface === 'survey' : browserPresentation.surface === 'survey' || browserPresentation.survey === true)
-    return <RegionContextMenu
+    return <RegionContextMenu connector={connector}
       regionId={node.regionId}
       // 只有承载 Agent 的一格才有语义身份可寻址。这个判定跟 Tab 级的唯一 Agent 判定同源
       // （tab-control-handoff 的 addressableAgentSessionId），所以第六种载 Agent 的 kind 只在那里声明一次。
@@ -940,7 +942,7 @@ function WorkbenchRegionContent({
     </section>
     </RegionContextMenu>
   }
-  return <>{renderFrame(
+  return <>{connector.dialog}{renderFrame(
       <SessionRegionHost arrangement="columns" className="workbench-session-region-host">
         <SurfaceContent
           surface={surface}

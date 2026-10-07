@@ -9,6 +9,7 @@ import { resolveOverlayContainer } from './WindowOverlayHost'
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeActionCopyAddressIcon = semanticIconComponent('action.copy-address')
 const ThemeActionReplaceIcon = semanticIconComponent('action.replace')
+const ThemeObjectConversationsIcon = semanticIconComponent('object.conversations')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 
 
@@ -20,9 +21,13 @@ type RegionCopyAction = {
 export type RegionMenuEntry =
   | { kind: 'action'; action: RegionCopyAction }
   | { kind: 'separator' }
+  | { kind: 'connector'; action: { label: string; onSelect(): void } }
   | { kind: 'split'; entry: WorkbenchSplitMenuEntry }
   | { kind: 'swap'; entry: RegionSwapMenuEntry }
   | { kind: 'promote'; onSelect(): void }
+
+export type RegionConnectorControls = { entries: readonly { label: string; onSelect(): void }[]; onOpen(open: boolean): void; dialogOpen: boolean; issue: string }
+const NO_CONNECTOR: RegionConnectorControls = { entries: [], onOpen: () => {}, dialogOpen: false, issue: '' }
 
 /** Links target the clicked Region and its stable semantic Agent separately. */
 export type RegionCopyModel = {
@@ -99,11 +104,12 @@ const REGION_MENU_ICONS: Record<RegionCopyAction['label'], typeof ThemeActionCop
   'Copy Agent Link': ThemeActionCopyIcon
 }
 
-const RegionMenuContext = createContext<readonly RegionMenuEntry[]>([])
+const RegionMenuContext = createContext<{ entries: readonly RegionMenuEntry[]; onOpen(open: boolean): void; dialogOpen: boolean; issue: string }>({ entries: [], onOpen: () => {}, dialogOpen: false, issue: '' })
 
 export function useRegionMenuEntries(): readonly RegionMenuEntry[] {
-  return useContext(RegionMenuContext)
+  return useContext(RegionMenuContext).entries
 }
+export const useRegionMenuObservation = () => useContext(RegionMenuContext)
 
 export function RegionMenuEntryView({ entry, index, Item, Separator }: {
   entry: RegionMenuEntry
@@ -111,6 +117,7 @@ export function RegionMenuEntryView({ entry, index, Item, Separator }: {
   Item: typeof ContextMenu.Item
   Separator: typeof ContextMenu.Separator
 }) {
+  if (entry.kind === 'connector') return <Item className="tab-context-menu__item" onSelect={entry.action.onSelect}><ThemeObjectConversationsIcon size={14} /><span>{entry.action.label}</span></Item>
   if (entry.kind === 'separator') {
     return (
       <Separator
@@ -181,9 +188,11 @@ export function RegionContextMenu({
   writeClipboardText,
   splitMenu,
   swapMenu,
-  promote
+  promote,
+  connector = NO_CONNECTOR
 }: {
   children: ReactNode
+  connector?: RegionConnectorControls
   regionId: string
   agentSessionId: string | null
   writeClipboardText(text: string): Promise<void>
@@ -191,7 +200,7 @@ export function RegionContextMenu({
     swapMenu: readonly RegionSwapMenuEntry[]
   promote?: (() => void) | undefined
 }) {
-  const model = createRegionCopyModel({
+  const base = createRegionCopyModel({
     regionId,
     agentSessionId,
     writeClipboardText,
@@ -199,19 +208,21 @@ export function RegionContextMenu({
     swapMenu,
     promote
   })
+  const model = { ...base, entries: [...base.entries, ...(connector.entries.length ? [{ kind: 'separator' as const }, ...connector.entries.map(action => ({ kind: 'connector' as const, action }))] : [])] }
   // 让位不在这里接线：原生视图的让位由 App 的那一个 MutationObserver 按 Radix 的 DOM 协议
   // （portal 到 React 根之外 + data-state=open）统一观察，见 lib/native-surface-overlay.ts。
   // 这个菜单——#544 那个被浏览器盖住的——正是"逐个接线会漏"的证据本身。
   return (
-    <RegionMenuContext.Provider value={model.entries}>
-      <ContextMenu.Root>
+    <RegionMenuContext.Provider value={{ entries: model.entries, onOpen: connector.onOpen, dialogOpen: connector.dialogOpen, issue: connector.issue }}>
+      <ContextMenu.Root onOpenChange={connector.onOpen}>
         <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
         <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
-          <ContextMenu.Content className="tab-context-menu region-context-menu" collisionPadding={8}>
+          <ContextMenu.Content className="tab-context-menu region-context-menu" collisionPadding={8} onCloseAutoFocus={event => { if (connector.dialogOpen) event.preventDefault() }}>
             {model.entries.map((entry, index) => <RegionMenuEntryView
               key={index} entry={entry} index={index}
               Item={ContextMenu.Item} Separator={ContextMenu.Separator}
             />)}
+            {connector.issue ? <ContextMenu.Label className="agent-region-menu__context" role="status">{connector.issue}</ContextMenu.Label> : null}
           </ContextMenu.Content>
         </ContextMenu.Portal>
       </ContextMenu.Root>

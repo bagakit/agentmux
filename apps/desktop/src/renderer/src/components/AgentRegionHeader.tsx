@@ -3,7 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { RegionMenuEntryView, useRegionMenuEntries } from './RegionContextMenu'
+import { RegionMenuEntryView, useRegionMenuEntries, useRegionMenuObservation } from './RegionContextMenu'
 import { HostBadge } from './HostBadge'
 import type { RegionExecutionHost } from '../lib/region-execution-host'
 import { useAgentNativeSourceControls, nativeSourceLabel, type AgentNativeSourceReference } from './AgentNativeSourceControls'
@@ -34,6 +34,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
   nativeSession?: AgentNativeSourceReference | undefined
 }) {
   const entries = useRegionMenuEntries()
+  const menuObservation = useRegionMenuObservation()
   const nativeSourceActions = useAgentNativeSourceControls({ session: nativeSession ?? null, readOnly })
   const home = useRef<HTMLDivElement>(null)
   const handoffFocus = useRef(false)
@@ -69,7 +70,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     {readOnly ? <span className="agent-region-header__mode">Read-only</span> : null}
     {resultReview}
     {sessionKind === 'agent' && nativeSession ? <RegionCurrentDemand agentSessionId={nativeSession.control.agentSessionId} hostId={nativeSession.control.hostId} /> : null}
-    <DropdownMenu.Root>
+    <DropdownMenu.Root onOpenChange={menuObservation.onOpen}>
       <DropdownMenu.Trigger className="agent-region-header__more"
         aria-label={`More actions for ${name}${nativeSession && nativeSourceLabel(nativeSession) ? `; ${nativeSourceLabel(nativeSession)}` : ''}`} title={`${name}; ${executorLabel}; ${executionHost.label}`}
         onPointerDown={(event) => event.stopPropagation()}>
@@ -80,7 +81,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
         data-owner-region-id={regionId} data-agent-session-id={sessionKind === 'agent' ? sessionId : undefined} side="bottom" align="end" sideOffset={0} collisionPadding={8}
         onPointerDown={(event) => event.stopPropagation()}
         onCloseAutoFocus={event => {
-          if (handoffFocus.current) event.preventDefault()
+          if (handoffFocus.current || menuObservation.dialogOpen) event.preventDefault()
           handoffFocus.current = false
         }}>
         <DropdownMenu.Label className="agent-region-menu__context">
@@ -90,6 +91,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
           <span>Host ID: {executionHost.id ?? 'Unknown'}</span>
           <span>Directory: {executionHost.cwd || 'Unknown'}</span>
         </DropdownMenu.Label>
+        {menuObservation.issue ? <DropdownMenu.Label className="agent-region-menu__context" role="status">{menuObservation.issue}</DropdownMenu.Label> : null}
         {nativeSourceActions}
         {currentConversationActions}
         {onHistory || onTakeOver || onRefreshObservation || entries.length > 0 ? <DropdownMenu.Separator className="tab-context-menu__separator" /> : null}
