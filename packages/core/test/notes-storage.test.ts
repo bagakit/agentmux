@@ -7,6 +7,9 @@ import { tmpdir } from 'node:os'
 import { AgentMuxNotebookStore, AgentMuxNotesStorage } from '../src/notebook-store.js'
 import { initializeNotebookDatabase, writeNotebookDatabase, readNotebookDatabase } from '../src/notebook-database.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
+import { noteHistoryRevision } from '../src/note-history.js'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 const directorySyncFault = vi.hoisted(() => ({ path: '', attempts: 0, failNext: false }))
 vi.mock('node:fs/promises', async importOriginal => {
   const original = await importOriginal<typeof import('node:fs/promises')>()
@@ -36,6 +39,22 @@ async function fixture() {
   return { root, original, target, location, bytes, storage: new AgentMuxNotesStorage(location, original), before: await store.read() }
 }
 describe('one durable Notes directory operation', () => {
+  it('moves recoverable historical bodies and event identities with the original library', async () => {
+    const f = await fixture(), resource = f.before.pages['original-note']!.resource
+    const store = new AgentMuxNotebookStore(join(f.original, 'notebooks.sqlite'))
+    const event = await store.recordHistory({ eventId: 'original-edit-operation', sequence: 0, batchId: 'original-edit-operation',
+      noteId: 'original-note', resource, originalResource: { ...resource }, status: 'committed', at: _historyFixtureEpoch(0, 0, 1),
+      actor: { kind: 'user', id: 'original-person' }, parentEventId: null, operation: 'edit', requestFingerprint: noteHistoryRevision('original-request'),
+      baseRevision: null, beforeContent: null, revision: noteHistoryRevision(f.bytes), content: f.bytes })
+    await f.storage.change({ operationId: 'move-with-history', expectedDirectory: f.original, directory: f.target })
+    const restarted = new AgentMuxNotebookStore(undefined, new AgentMuxNotesStorage(f.location, f.original))
+    const history = await restarted.readHistory({ noteId: event.noteId, resource: { ...resource, workspacePath: f.target }, eventId: event.eventId, includeContent: true })
+    expect(history.entries).toHaveLength(1)
+    expect(history.entries[0]).toMatchObject({ eventId: event.eventId, sequence: event.sequence, status: 'committed', content: f.bytes,
+      originalResource: resource, resource: { ...resource, workspacePath: f.target }, actor: event.actor })
+    expect(await readFile(join(f.target, 'one.note.md'), 'utf8')).toBe(f.bytes)
+    await expect(readFile(join(f.original, 'one.note.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
   it('moves real bytes and catalog, preserving identities and source history through a fresh owner', async () => {
     const f = await fixture(), operation = { operationId: 'change-original', expectedDirectory: f.original, directory: f.target }
     const result = await f.storage.change(operation)
