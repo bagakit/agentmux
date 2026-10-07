@@ -1,5 +1,5 @@
 import type { MobileQuestionReplyAttempt } from './question-replies'
-import type { AgentInputSubmissionReceipt, AgentInputWaitRef, AgentInputWaitStopReceipt, AgentSessionHistoryQuestionAnswer } from '@agentmux/core'
+import type { AgentInputSubmissionReceipt, AgentInputWaitRef, AgentInputWaitStopReceipt, AgentSessionHistoryQuestionAnswer, AgentMuxAgentInteractionInput } from '@agentmux/core'
 import type { AgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { DeviceWorkfaceRecordChangedError, getDeviceWorkface, type ConversationBucket, type ConversationCommit, type ConversationConflict, type ConversationEdit, type ConversationValue, type DraftRecord, type DeviceWorkface } from '../recovery/device-workface'
 
@@ -22,7 +22,9 @@ export type PromptAttempt = {
   explicit?: boolean
   logId?: string
 }
-export type ResponseAttempt = { phase: PromptAttempt['phase']; message: string }
+export type ResponseAttempt = { phase: PromptAttempt['phase']; message: string;
+  /** Frozen device intent only. Cold readers query Core; they never restore dispatch authority. */
+  original?: { input: AgentMuxAgentInteractionInput; hostId: string; runtimeId: string | null } }
 function restoredMessage(value: PromptAttempt['phase'], interaction = false): string {
   if (value === 'unknown') return interaction
     ? '重启后的原请求答复回执未知；不会重复回答，请核对原会话。'
@@ -94,7 +96,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
       for (const [key, answers] of value.questionDrafts ?? []) questionDrafts.set(key, answers)
       for (const [key, item] of savedResponses) {
         const status = (item as ResponseAttempt).phase === 'sending' ? 'unknown' : (item as ResponseAttempt).phase
-        responses.set(key, { phase: status, message: restoredMessage(status, true) })
+        responses.set(key, { ...item, phase: status, message: restoredMessage(status, true) })
       }
     }
   } catch {
@@ -114,7 +116,8 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
           ...(intent.originalRuntimeId !== undefined ? { originalRuntimeId: intent.originalRuntimeId } : {}),
           ...(intent.originalHostId !== undefined ? { originalHostId: intent.originalHostId } : {}),
           ...(intent.explicit !== undefined ? { explicit: intent.explicit } : {})
-        }]), responses: [...responses].map(([key, intent]) => [key, { phase: intent.phase }]),
+        }]), responses: [...responses].map(([key, intent]) => [key, { phase: intent.phase,
+          ...(intent.original ? { original: structuredClone(intent.original) } : {}) }]),
         ...(questions.size ? { questions: [...questions].map(([key, intent]) => [key, structuredClone(intent)] as [string, MobileQuestionReplyAttempt]) } : {}),
         ...(questionDrafts.size ? { questionDrafts: [...questionDrafts].map(([key, answers]) => [key, structuredClone(answers)] as [string, AgentSessionHistoryQuestionAnswer[]]) } : {}) }
       return record
@@ -166,7 +169,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
           } else {
             if (JSON.stringify(value) === JSON.stringify(now.get(key))) continue
             if (value === undefined) responses.delete(key)
-            else { const phase = (value as ResponseAttempt).phase; responses.set(key, { phase, message: restoredMessage(phase, true) }) }
+            else { const intent = value as ResponseAttempt, phase = intent.phase === 'sending' ? 'unknown' : intent.phase; responses.set(key, { ...intent, phase, message: restoredMessage(phase, true) }) }
           }
         }
       }

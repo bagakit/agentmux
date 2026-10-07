@@ -14,6 +14,7 @@ type Projection = {
   session: AgentMuxAgentSession | null
   timeline: AgentTimelineSnapshot | null
   page: AgentSessionHistoryPage | null
+  answerContext: AgentSessionHistoryPage | null
   reading: boolean
   notice: string | null
   disconnected: boolean
@@ -21,14 +22,17 @@ type Projection = {
   newerAvailable: boolean
 }
 const empty = (id: string | null): Projection => ({
-  id, session: null, timeline: null, page: null, reading: false, notice: null,
+  id, session: null, timeline: null, page: null, answerContext: null, reading: false, notice: null,
   disconnected: false, olderWindow: false, newerAvailable: false
 })
 
 /** Retained readonly SDK projections; no history reconciliation, Run owner or local business queue. */
 export function useHostedConversation(client: AgentMuxHostedClient | null, id: string | null, active: boolean) {
   const [projection, setProjection] = useState<Projection>(() => empty(id))
+  const currentPage = useRef(projection.page)
+  currentPage.current = projection.id === id ? projection.page : null
   const refreshRef = useRef<((cursor?: string) => Promise<void>) | null>(null)
+  const readingWindow = useRef<{ client: AgentMuxHostedClient | null; id: string | null; cursor?: string | undefined }>({ client, id })
   useEffect(() => {
     let live = true
     setProjection(value => value.id === id ? value : empty(id))
@@ -69,7 +73,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
         if (observation.kind === 'unavailable') {
           invalidateWatch(); recoverReading()
           patch({ notice: observation.message })
-        } else if (cursor) patch({ newerAvailable: true })
+        } else if (cursor) { patch({ newerAvailable: true }); void refreshAnswers() }
         else void refresh()
       }, { signal: controller.signal }).then(handle => {
         if (!live || epoch !== watchEpoch) handle.dispose()
@@ -80,7 +84,25 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
         if (canRecover(error)) recoverReading()
       }).finally(() => { if (epoch === watchEpoch) watchPending = false })
     }
-    let cursor: string | undefined
+    if (readingWindow.current.client !== client || readingWindow.current.id !== id) readingWindow.current = { client, id }
+    let cursor = readingWindow.current.cursor
+    let answersReading = false, answersDirty = false, answersRevision = 0
+    const sameSource = (left: AgentSessionHistoryPage, right: AgentSessionHistoryPage) =>
+      left.agentSessionId === right.agentSessionId && left.source.providerId === right.source.providerId && left.source.nativeSessionId === right.source.nativeSessionId
+    async function refreshAnswers(): Promise<void> {
+      if (!live || !cursor) return
+      if (answersReading) { answersDirty = true; return }
+      answersReading = true
+      const epoch = watchEpoch, revision = ++answersRevision
+      try {
+        const page = await client!.sessionHistoryPage(id!, { limit: 30 })
+        if (live && epoch === watchEpoch && revision === answersRevision && cursor && page.agentSessionId === id) {
+          if (currentPage.current && sameSource(currentPage.current, page)) patch({ answerContext: page })
+          else patch({ notice: 'The answer source changed. The original reading and drafts are retained.' })
+        }
+      } catch (error) { if (live && epoch === watchEpoch) patch({ notice: errorMessage(error) }) }
+      finally { answersReading = false; if (live && answersDirty) { answersDirty = false; void refreshAnswers() } }
+    }
     let requestedCursor: string | undefined
     const patch = (changes: Partial<Projection>) => {
       if (live) setProjection(value => ({ ...(value.id === id ? value : empty(id)), ...changes }))
@@ -89,8 +111,10 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
       if (!live) return
       if (reading) { dirty = true; requestedCursor = nextCursor; return }
       reading = true
+      answersRevision++
       const epoch = watchEpoch
       cursor = nextCursor
+      readingWindow.current.cursor = cursor
       patch({ reading: true, notice: null })
       try {
         // Each read fails independently: a native-history probe cannot suppress an existing
@@ -112,7 +136,13 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
         } else patch({ notice: errorMessage(timeline.reason) })
         if (history.status === 'fulfilled') {
           if (history.value.agentSessionId === id) {
-            patch({ page: history.value, olderWindow: Boolean(cursor), newerAvailable: false })
+            if (cursor && currentPage.current && !sameSource(currentPage.current, history.value)) {
+              patch({ notice: 'The native source changed. The original reading and drafts are retained.' })
+              return
+            }
+            currentPage.current = history.value
+            patch({ page: history.value, ...(!cursor ? { answerContext: history.value } : {}), olderWindow: Boolean(cursor), newerAvailable: false })
+            if (cursor) void refreshAnswers()
             // A successfully confirmed native source is the earliest valid point to establish its watch.
             // The initial failed probe never permanently retires this visible reader.
             ensureHistoryWatch(JSON.stringify([history.value.source, client!.agentSession(id!).run]))
@@ -140,7 +170,8 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
           void refresh(cursor)
         }
       } else if (event.type === 'agent-timeline' && event.agentSessionId === id) {
-        void refresh(cursor)
+        if (cursor) { patch({ newerAvailable: true }); void refreshAnswers() }
+        else void refresh()
       } else if (event.type === 'agent-error' && (!event.agentSessionId || event.agentSessionId === id)) {
         patch({ notice: event.message })
       }
@@ -150,7 +181,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
       if (!watchEstablished) { attemptedSource = null; void refresh(cursor) }
     }
     document.addEventListener('visibilitychange', foreground)
-    void refresh()
+    void refresh(cursor)
     return () => {
       live = false
       invalidateWatch()
