@@ -142,7 +142,6 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     const { connectAgentMuxRpc, formatAmuxObjectLink } = await import(pathToFileURL(join(core, 'dist/index.js')).href)
     rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(scope.directory, 'control.sock') } })
     const bundledRenderer = JSON.parse(await readFile(join(resources, 'out/renderer/release.json'), 'utf8'))
-    receipt.runtime = await eventually(() => scope.observeOwner(), 'Exact private Runtime owner')
     const observation = async () => {
       const result = await rpc.call('app.inspect', {}), value = result.observation
       assert.equal(value.main.package.sourceCommit, packageIdentity.sourceCommit)
@@ -218,6 +217,7 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     const terminal = await eventually(async () => regions(await observation()).find(region => region.kind === 'terminal' && region.control?.run.runId === run.region.runId && region.processState === 'running'), 'Private original healthy terminal Run')
     terminalControl = terminal.control
     receipt.originalTerminal = terminal
+    receipt.runtime = await eventually(() => scope.observeOwner(), 'Exact private Runtime owner after actual Terminal launch')
     await openSurveySettings()
     const draft = 'Unsubmitted research title ' + token
     await click('input[aria-label="Start page title"]')
