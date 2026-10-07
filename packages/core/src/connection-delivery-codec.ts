@@ -51,7 +51,7 @@ export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
 }
 export function parseConnectionDeliveryObservation(value: unknown): ConnectionDeliveryObservation {
   const p = object(value, ['state', 'reason'])
-  if (!['unknown', 'ready', 'unavailable', 'disabled'].includes(p.state as string) || p.reason !== undefined && !['not-started', 'source-unconfirmed', 'source-gap', 'storage-unconfirmed', 'adapter-unavailable', 'credential-missing', 'effect-unconfirmed'].includes(p.reason as string)) fail()
+  if (!['unknown', 'ready', 'unavailable', 'disabled'].includes(p.state as string) || p.reason !== undefined && !['not-started', 'source-unconfirmed', 'source-gap', 'content-unconfirmed', 'storage-unconfirmed', 'adapter-unavailable', 'credential-missing', 'effect-unconfirmed'].includes(p.reason as string)) fail()
   return { state: p.state as ConnectionDeliveryObservation['state'], ...(p.reason === undefined ? {} : { reason: p.reason as NonNullable<ConnectionDeliveryObservation['reason']> }) }
 }
 export function parseConnectionDeliveryParams<M extends ConnectionDeliveryMethod>(method: M, value: unknown): ConnectionDeliveryParamsMap[M] {

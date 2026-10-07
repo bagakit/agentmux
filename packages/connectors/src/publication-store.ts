@@ -65,7 +65,11 @@ function fragments(payload: PublicationPayload, byteLimit: number): PublicationP
 }
 
 /** Select typed original speech only. Native metadata, tool data, resources and reasoning never enter the payload. */
-function decide(item: AgentSessionHistoryItem): Decision {
+function decide(item: AgentSessionHistoryItem, scope: RoomBinding['scope']['publication']): Decision {
+  if (scope === 'future-shared-conversation' && (item.kind === 'user-message' ||
+    item.kind === 'assistant-message' && item.contentParts.some(part => part.kind === 'resource' &&
+      part.content?.kind !== 'text' && part.content?.kind !== 'reasoning' && part.content?.kind !== 'tool-call' && part.content?.kind !== 'tool-result')))
+    throw new AgentMuxError('This original source has no qualified public user-content boundary or complete resource delivery. Its shared frontier is retained; local conversation remains available.', 'PUBLICATION_CONTENT_UNCONFIRMED')
   if (item.kind !== 'assistant-message') return { recordId: item.id, revision: digest(item), reason: 'not-assistant-speech' }
   if (item.contentParts.some(part => part.kind === 'resource' && part.content?.kind === 'text'))
     throw new AgentMuxError('Read the complete original speech resource before publication. Its frontier is retained.', 'PUBLICATION_CONTENT_UNCONFIRMED')
@@ -151,7 +155,7 @@ export class PublicationStore {
     const page = parseConversationChangesPage(value, { ...ref(boundary), checkpoint: after, limit: 100 })
     const decisions = page.items.map(item => {
       const decision = decide({ ...item, contentParts: item.contentParts.map((part, index) =>
-        part.kind === 'resource' && part.content?.kind === 'text' ? options.resolvedText?.get(item.id)?.get(index) ?? part : part) })
+        part.kind === 'resource' && part.content?.kind === 'text' ? options.resolvedText?.get(item.id)?.get(index) ?? part : part) }, boundary.scope.publication)
       return { ...decision, fragments: decision.payload ? fragments(decision.payload, options.fragmentBytes ?? 8_192) : [] }
     }), source = sourceKey(page.source)
     this.transaction(() => {
