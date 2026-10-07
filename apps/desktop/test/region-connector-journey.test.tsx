@@ -14,11 +14,14 @@ async function consent() { const box = document.querySelector<HTMLInputElement>(
 
 it('the original Agent menu creates a dedicated group through actual IPC/Core/Host, then independently confirms sharing and reuses the same Binding in another Region', async () => {
   await f.mount(); expect(f.original.create).not.toHaveBeenCalled()
-  await f.menu('Create group chat'); await ready('New dedicated group')
+  await f.menu('Create group chat'); await ready('Create group chat')
   expect(f.original.create).not.toHaveBeenCalled(); expect(f.original.addMembers).not.toHaveBeenCalled()
   const invite = [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Invite people (optional)')!
   expect(invite.open).toBe(false)
   expect(document.querySelector('[aria-label="Group name"]')?.closest('details')).toBeNull()
+  expect(document.querySelector('[aria-label="Group name"]')).toBe(document.activeElement)
+  expect([...document.querySelectorAll('[role="dialog"] button')].find(node => node.textContent === 'Create group')?.closest('footer')).not.toBeNull()
+  expect([...document.querySelectorAll('[role="dialog"] button')].some(node => node.textContent === 'Refresh')).toBe(false)
   await f.fill('Member ID type', 'account_id'); await f.fill('Invite member IDs', 'member/甲\nmember/乙')
   await f.button('Create group'); await ready('Group created')
   expect(f.original.create).toHaveBeenCalledTimes(1); expect(f.original.addMembers).toHaveBeenCalledTimes(1)
