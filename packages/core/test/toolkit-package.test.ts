@@ -1,10 +1,11 @@
+import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
 import { win32 } from 'node:path'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../src/control.js'
 import { parseToolkitCommand } from '../src/toolkit-cli.js'
 import { AGENTMUX_CLI_COMMANDS, parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
-import { agentMuxCommandHelp, AGENTMUX_CLI_SKILL } from '../src/agentmux-cli-help.js'
+import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 import { isAgentMuxRpcMethod } from '../src/public-rpc.js'
 import { rpcControlRequest, parseRpcControlResult } from '../src/rpc-business-codec.js'
 import { parseAgentMuxControlReceipt } from '../src/control-codec.js'
@@ -133,7 +134,7 @@ describe('Toolkit local package data and original public command', () => {
     expect(AGENTMUX_CLI_COMMANDS.find(command => command.method === 'toolkit.install')?.rpcMethod).toBe('toolkit.create')
     expect(isAgentMuxRpcMethod('toolkit.install')).toBe(false)
     expect(agentMuxCommandHelp('toolkit.install')).toContain('--path <absolute-directory>')
-    expect(AGENTMUX_CLI_SKILL).toContain('next explicit')
+    expect(agentMuxModuleSkill('toolkit')!).toContain('next explicit')
     for (const args of [[], ['--path', 'relative'], ['--path', fields.packagePath, '--path', fixturePath("duplicate")], ['--path', fields.packagePath, '--cwd', 'relative'], ['--input', fixturePath("a.json")]]) {
       await expect(parseToolkitCommand(['install', configuration.id, ...args])).rejects.toMatchObject({ code: 'INVALID_CLI_ARGUMENT' })
     }

@@ -66,7 +66,7 @@ it('canonicalizes actual CLI Files saves, reads the same inline page/block targe
   expect(graph.references[0]).toMatchObject({ source: { noteId: 'source', blockId: 'source-block' }, occurrence: { kind: 'stored', referenceId: links[0]!.attrs!.referenceId }, mode: 'link', target: { kind: 'page', noteId: 'target' }, resolution: 'resolved' })
   expect(graph.references[1]!.target).toEqual({ kind: 'block', noteId: 'target', blockId: 'heading-stable' }); expect(graph.references[3]!.target).toEqual({ kind: 'unbound', text: 'Unknown page' })
   expect(await f.cli(['notebook', 'resolve', '--link', '[[Research #Decision]]'])).toMatchObject({ result: { status: 'resolved', target: { noteId: 'target', blockId: 'heading-stable' } } })
-  const skill = await runCompiledObjectCli(['--skill'], f.env); expect(skill.code).toBe(0); for (const word of ['note:targetNote#targetBlock', 'notebook resolve', 'saved unbound occurrence', 'occurrence', 'canonical content']) expect(skill.stdout).toContain(word)
+  const skill = await runCompiledObjectCli(['notebook', '--skill'], f.env); expect(skill.code).toBe(0); for (const word of ['note:targetNote#targetBlock', 'notebook resolve', 'saved unbound occurrence', 'occurrence', 'canonical content']) expect(skill.stdout).toContain(word)
 })
 
 it('uses no body IO for page search or ambiguous names, never equates a truncated result to uniqueness, and confirms one chosen original', async () => {

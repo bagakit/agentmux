@@ -44,7 +44,7 @@ describe('public amux sharing consumption', () => {
       { method: 'space.inspect', params: { target: { regionId: identity } } },
       { method: 'space.inspect', params: { target: { tabId: identity } } }
     ])
-    const guide = await command(probe, 'amux --skill')
+    const guide = await command(probe, 'amux space --skill')
     expect(guide.code, guide.stderr).toBe(0)
     expect(guide.stdout).toContain('amux://')
     expect(guide.stdout).toContain('parseAmuxObjectLink')

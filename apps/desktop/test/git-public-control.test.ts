@@ -166,7 +166,7 @@ describe('public CLI to Desktop Git owner to neutral Git on a real private repos
     for (const action of ['history', 'commit', 'diff', 'open']) expect(objectHelp.stdout).toContain('amux git ' + action)
     const diffHelp = await exec(process.execPath, [program, '--help', 'git', 'diff'], { timeout: 15_000 })
     expect(diffHelp.stdout).toContain('--input FILE|-'); expect(diffHelp.stdout).toContain('Keep both rename paths')
-    const skill = await exec(process.execPath, [program, '--skill'], { timeout: 15_000 })
+    const skill = await exec(process.execPath, [program, 'git', '--skill'], { timeout: 15_000 })
     expect(skill.stdout).toContain('Reading never checks out, stages or writes Git')
     expect(skill.stdout).toContain('read and presentation are separate facts')
   }, 30_000)

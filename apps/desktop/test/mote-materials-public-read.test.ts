@@ -120,7 +120,7 @@ describe('project filename discovery through original Files and public CLI', () 
     f.read.mockClear()
     const limited = await f.client.call('file.list', { ...params, limit: 1 })
     expect(limited.result).toMatchObject({ status: 'listed', files: [expect.any(String)], complete: false, partialReason: 'limit' })
-    const skill = await cli(f.root, ['--skill'])
+    const skill = await cli(f.root, ['file', '--help'])
     expect(skill.code).toBe(0); expect(skill.stdout).toContain('file ls')
     const help = await cli(f.root, ['--help', 'file', 'ls'])
     expect(help.code).toBe(0); expect(help.stdout).toContain('file.list'); expect(help.stdout).toContain('prepend the requested directory')
@@ -233,7 +233,7 @@ it('discovers file.write in actual CLI help and refuses unauthorized HTTP before
   expect(response.status).toBe(401); expect(write).not.toHaveBeenCalled()
   const help = await cli(f.root, ['--help', 'file', 'write'])
   expect(help.code).toBe(0); expect(help.stdout).toContain('--resource JSON'); expect(help.stdout).toContain('zonePath')
-  const skill = await cli(f.root, ['--skill']); expect(skill.code).toBe(0); expect(skill.stdout).toContain('file write')
+  const skill = await cli(f.root, ['file', '--help']); expect(skill.code).toBe(0); expect(skill.stdout).toContain('file write')
 })
 
 it('actual public Files and compiled CLI read and save original behavior YAML and Markdown with exact revision conflict', async () => {

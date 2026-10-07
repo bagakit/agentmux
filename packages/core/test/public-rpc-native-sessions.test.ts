@@ -1,3 +1,4 @@
+import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
 import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { sep as _tail_sep } from 'node:path'
 import { fixtureIso as _tail_fixtureIso } from '../../../test/fixture-values.mjs'
@@ -14,7 +15,7 @@ import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import { rpcControlRequest } from '../src/rpc-business-codec.js'
 import { parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
-import { agentMuxCommandHelp, AGENTMUX_CLI_SKILL } from '../src/agentmux-cli-help.js'
+import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { issueAgentCapability, hashAgentCapability } from '../src/agent-capability.js'
 
@@ -107,8 +108,8 @@ describe('original native conversations through public RPC and the compiled CLI'
       .rejects.toMatchObject({ code: 'INVALID_CLI_ARGUMENT' })
     expect(agentMuxCommandHelp('agent.open')).toContain('--native-source FILE|-')
     expect(agentMuxCommandHelp('agent.native.ls')).toContain('Read-only')
-    expect(AGENTMUX_CLI_SKILL).toContain('no user request is invented')
-    expect(AGENTMUX_CLI_SKILL).toContain('same --operation-id')
+    expect(agentMuxModuleSkill('agent')!).toContain('no user request is invented')
+    expect(agentMuxModuleSkill('agent')!).toContain('same --operation-id')
   })
 
   it('checks catalog scope, capabilities, source identity and partial issues at the client boundary', async () => {

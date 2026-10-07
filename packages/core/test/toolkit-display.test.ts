@@ -1,3 +1,4 @@
+import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
 import { fixtureDisplayPath as reshapeFixtureDisplayPath, fixtureEpoch as reshapeFixtureEpoch, fixturePath as reshapeFixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -8,7 +9,7 @@ import { AgentMuxControlServer, connectAgentMuxRpc, parseAgentMuxControlReceipt 
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxControlTimeoutMs } from '../src/control.js'
 import { AgentMuxRpcService, type AgentMuxRpcServiceOptions } from '../src/public-rpc-service.js'
 import { parseToolkitCommand } from '../src/toolkit-cli.js'
-import { AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
+import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 import { parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
 import { rpcControlRequest } from '../src/rpc-business-codec.js'
 import {
@@ -143,7 +144,7 @@ describe('Toolkit declared display evaluation public contract', () => {
     await expect(parseToolkitCommand(['watch', definition.id, '--capture-failure'])).rejects.toMatchObject({ code: 'INVALID_CLI_ARGUMENT' })
     expect(agentMuxCommandHelp('toolkit.evaluate')).toContain('independent baseline')
     expect(agentMuxCommandHelp('toolkit.watch')).toContain('--evaluate')
-    expect(AGENTMUX_CLI_SKILL).toContain('Ordinary inspect and watch never evaluate.')
+    expect(agentMuxModuleSkill('toolkit')!).toContain('Ordinary inspect and watch never evaluate.')
   })
   it('leaves automatic evaluation capture with the original owner through a real Unix socket and preserves pinned scope', async () => {
     const execute = vi.fn(async (request: ToolkitRequest) => owner(request))

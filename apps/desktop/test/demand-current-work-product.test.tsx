@@ -118,7 +118,7 @@ it.each(['finite', 'continue'] as const)('Current Demand: actual Source CLI %s S
     const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
     const inspectHelp = (await promisify(execFile)(process.execPath, [sourceCli, 'goal', 'inspect', '--help'], { env: environment, timeout: 15_000 })).stdout
     const startHelp = (await promisify(execFile)(process.execPath, [sourceCli, 'goal', 'start', '--help'], { env: environment, timeout: 15_000 })).stdout
-    const skill = (await promisify(execFile)(process.execPath, [sourceCli, '--skill'], { env: environment, timeout: 15_000 })).stdout
+    const skill = (await promisify(execFile)(process.execPath, [sourceCli, 'goal', '--help'], { env: environment, timeout: 15_000 })).stdout
     expect(inspectHelp).toContain('saved Start dispatch stages'); expect(inspectHelp).toContain('original Core input references')
     expect(startHelp).toContain('retry the same OP'); expect(skill).toContain('saved Start dispatch stages'); expect(skill).toContain('retry the same OP')
     const run = async (args: string[]) => {

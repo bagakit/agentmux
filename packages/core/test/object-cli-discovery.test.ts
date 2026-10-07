@@ -8,6 +8,7 @@ import { AgentMuxError } from '../src/errors.js'
 import type { AgentMuxControlRequest, AgentMuxControlResult, AgentMuxDemand } from '../src/control.js'
 import { AGENTMUX_CLI_COMMANDS, parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
 import { agentMuxPmoPlaybook } from '../src/agentmux-pmo-playbook.js'
+import { agentMuxModuleSkillEntry } from '../src/agentmux-cli-module-skills.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { privateRpcCorePort } from './helpers/private-rpc-core.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
@@ -160,7 +161,10 @@ describe('compiled object discovery through the actual public service and origin
     expect(referenced.length).toBeGreaterThan(0)
     for (const match of referenced) {
       const path = match[1]!.split(' ')
-      expect(AGENTMUX_CLI_COMMANDS.some(command => command.method.split('.').every((part, index) => path[index] === part))).toBe(true)
+      const localModule = path.length === 1 || path[1] === '--skill' || path[1] === '--help'
+        ? agentMuxModuleSkillEntry(path[0]!) : null
+      if (localModule) expect(localModule).toBe(`amux ${path[0]} --skill`)
+      else expect(AGENTMUX_CLI_COMMANDS.some(command => command.method.split('.').every((part, index) => path[index] === part))).toBe(true)
     }
     const empty = await parseAgentMuxCliInvocation(['agent', 'view', '--session', 'constructor'])
     expect(empty.params).toEqual({ agentSessionId: 'constructor' })

@@ -37,7 +37,7 @@ describe('durable Note body and graph public consumer',()=>{
     expect(graph.references).toEqual([{source:{noteId:'source',blockId:'ref-block'},sourceResource:f.resource('source.note.md'),target:{kind:'block',noteId:'target',blockId:'target-block'},occurrence:{kind:'stored',referenceId:'ref-one'},mode:'embed',resolution:'resolved'}]);expect(graph.hierarchy).toEqual([{parentNoteId:'target',noteId:'source'}])
     expect(graph.observations.every((o:any)=>!('content' in o))).toBe(true)
     const all=await run(['notebook','graph','--all'],env);expect(all.code,all.stderr).toBe(0)
-    const help=await run(['--skill'],env);expect(help.code,help.stderr).toBe(0);for(const word of ['agentmux.note.md.v1','notebook graph','file write','canonical content','follow','blockId'])expect(help.stdout).toContain(word)
+    const help=await run(['notebook', '--skill'],env);expect(help.code,help.stderr).toBe(0);for(const word of ['agentmux.note.md.v1','notebook graph','file write','canonical content','follow','blockId'])expect(help.stdout).toContain(word)
     expect((await run(['notebook','inspect','--notebook','default','--content'],env)).code).not.toBe(0)
   })
   it('keeps missing, invalid, oversized, unmapped and duplicate originals explicit without manufacturing zero incoming edges',async()=>{

@@ -200,7 +200,7 @@ it.each(['codex', 'claude'] as const)('publishes witnessed %s source change, pre
     nativeHandle: confirmed.nativeHandle, nativeConfirmation: confirmed.nativeConfirmation, reopenedFrom: f.original.reopenedFrom })
   const help = await runCompiledObjectCli(['agent', 'native', 'confirm', '--help'], objectCliEnvironment(f.root))
   expect(help.code).toBe(0); expect(help.stdout).toContain('expectedObservationAt')
-  const skill = await runCompiledObjectCli(['--skill'], objectCliEnvironment(f.root))
+  const skill = await runCompiledObjectCli(['agent', '--help'], objectCliEnvironment(f.root))
   expect(skill.code).toBe(0); expect(skill.stdout).toContain('amux agent native confirm')
   expect(await readFile(f.oldPath, 'utf8')).toContain(OLD)
   f.status.mockRejectedValue(new Error('private unavailable runtime observation'))

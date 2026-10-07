@@ -1,3 +1,4 @@
+import { agentMuxModuleSkill } from '../../../packages/core/src/agentmux-cli-module-skills.js'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
@@ -13,7 +14,6 @@ import { appLinkRefusedMessage } from '../src/main/browser-app-link.js'
 // 与 control-spatial-guide.test.ts 同一条规矩。
 import {
   AGENTMUX_CLI_HELP,
-  AGENTMUX_CLI_SKILL,
   agentMuxCommandHelp
 } from '../../../packages/core/src/agentmux-cli-help.js'
 
@@ -152,7 +152,7 @@ describe('三处对外说明都跟上了应用链接这条能力', () => {
   it('skill 告诉 Agent「点了不跳转」不是点击失败', () => {
     // 这一条是 skill 独有的读者需求：Agent 会 click 一个授权按钮然后等导航。等不到时，
     // 它的默认解释是「点击没生效」或「还在加载」，于是重试或者把超时耗光。
-    const skill = flat(AGENTMUX_CLI_SKILL)
+    const skill = flat(agentMuxModuleSkill('browser')!)
     expect(skill, 'skill 没提应用链接这回事').toMatch(/custom-app:|desktop app/iu)
     expect(skill, 'skill 没说 url 不会变——Agent 会一直等一个永远不来的导航')
       .toMatch(/pageInfo\(\)\.url[\s\S]{0,120}(stays|did not move)/iu)
@@ -182,7 +182,7 @@ describe('三处对外说明都跟上了应用链接这条能力', () => {
     // skill、新 Agent 读引导，会得到三种不同的心智模型——而这个能力的要害恰恰是「有人被问了一次」。
     const surfaces: Array<[string, string]> = [
       ['CLI help', agentMuxCommandHelp('open.browser') ?? ''],
-      ['skill', AGENTMUX_CLI_SKILL],
+      ['skill', agentMuxModuleSkill('browser')!],
       ['启动引导', read('../../../packages/core/src/agent-outbound-message.ts')]
     ]
     for (const [name, text] of surfaces) {
@@ -194,7 +194,7 @@ describe('三处对外说明都跟上了应用链接这条能力', () => {
   it('顶层 help 与三处说明的扫描面都非空', () => {
     // 空扫描全绿是本仓反复栽过的第三种白绿。上面几条都在扫文本，先证每一份文本真的在手上。
     expect(AGENTMUX_CLI_HELP.length, '顶层 help 是空的').toBeGreaterThan(200)
-    expect(AGENTMUX_CLI_SKILL.length, 'skill 是空的').toBeGreaterThan(200)
+    expect(agentMuxModuleSkill('browser')!.length, 'skill 是空的').toBeGreaterThan(200)
     expect((agentMuxCommandHelp('open.browser') ?? '').length, 'open.browser help 是空的').toBeGreaterThan(100)
   })
 })

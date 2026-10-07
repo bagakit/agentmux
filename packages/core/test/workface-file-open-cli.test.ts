@@ -1,10 +1,10 @@
+import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { parseSpaceControlRequest as sourceSpaceRequest, parseSpaceControlSuccessReceipt } from '../src/space-control-parser.js'
 import { isLongAgentMuxControlOperation } from '../src/control.js'
 import { workfaceCliFixture, location, saved } from './helpers/workface-cli.js'
 import { AGENTMUX_CLI_COMMANDS } from '../src/agentmux-cli-commands.js'
-import { AGENTMUX_CLI_SKILL } from '../src/agentmux-cli-help.js'
 const parseSpaceControlRequest: typeof sourceSpaceRequest = process.env.AGENTMUX_TEST_FILE_PARSER_ENTRY
   ? (await import(process.env.AGENTMUX_TEST_FILE_PARSER_ENTRY)).parseSpaceControlRequest : sourceSpaceRequest
 const base = { schemaVersion: 5, requestId: 'file-request' }
@@ -133,6 +133,6 @@ describe('File opening public CLI wire', () => {
     expect(help.stdout).toContain('actual File Region'); expect(help.stdout).toContain('default is background')
     const registered = AGENTMUX_CLI_COMMANDS.filter(command => command.method === 'file.open')
     expect(registered).toHaveLength(1); expect(registered[0]!.flags).toMatchObject({ '--tab': 'data', '--region': 'data', '--split': 'value' })
-    expect(AGENTMUX_CLI_SKILL).toContain('amux file open --path PATH --zone ZONE --tab TAB --region REGION --split right')
+    expect(agentMuxModuleSkill('file')!).toContain('amux file open --path PATH --zone ZONE --tab TAB --region REGION --split right')
   })
 })

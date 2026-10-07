@@ -1,3 +1,4 @@
+import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { parseGitParams, parseGitResult, parseGitOpenResult, parseGitOpenParams, type AgentMuxRpcGitOwner } from '../src/public-rpc-git.js'
@@ -6,7 +7,7 @@ import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from '../src
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import { assertControlResultTarget } from '../src/rpc-business-codec.js'
 import { AGENTMUX_CLI_COMMANDS, parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
-import { AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
+import { AGENTMUX_CLI_HELP, agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 import type { GitCommitDetailsResult } from '@agentmux/git/types'
 
 const oid = 'a'.repeat(40), parent = 'b'.repeat(40)
@@ -76,7 +77,7 @@ describe('public Git target and result contracts', () => {
     const parsed = await parseAgentMuxCliInvocation(['git', 'open', '--workspace', target.workspaceId, '--host', 'local', '--workspace-path', target.expectedResource.workspacePath])
     expect(parsed).toMatchObject({ params: target })
     expect(agentMuxCommandHelp('git.open')).toContain('Omit --oid')
-    expect(AGENTMUX_CLI_SKILL).toContain('[--oid OID [--parent OID]]')
+    expect(agentMuxCommandHelp('git.open')).toContain('[--oid OID [--parent OID]]')
   })
   it('delegates to the original owner and keeps malformed result or owner absence explicit', async () => {
     const call = vi.fn(async () => details)
@@ -98,7 +99,7 @@ describe('public Git target and result contracts', () => {
       expect(agentMuxCommandHelp(method)).toContain('--workspace ID --host ID --workspace-path PATH')
       expect(AGENTMUX_CLI_HELP).toContain('amux ' + method.replace('.', ' '))
     }
-    expect(AGENTMUX_CLI_SKILL).toContain('Reading never checks out, stages or writes Git')
+    expect(agentMuxModuleSkill('git')).toContain('Reading never checks out, stages or writes Git')
     expect(agentMuxCommandHelp('git.open')).toContain('read and presentation are separate facts')
     await expect(parseAgentMuxCliInvocation(['git', 'commit', '--oid', oid])).rejects.toThrow()
   })

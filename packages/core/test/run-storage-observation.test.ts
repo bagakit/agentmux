@@ -11,7 +11,7 @@ import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { connectHostedAgentMux } from '../src/hosted-client.js'
 import type { AgentMuxRuntimeOwnerIdentity } from '../src/hosted-client-contract.js'
-import { AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL } from '../src/agentmux-cli-help.js'
+import { AGENTMUX_CLI_HELP, agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 import { parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
@@ -256,7 +256,7 @@ describe('exact storage owner through public Core, Hosted, RPC and compiled CLI'
     const parsed = await parseAgentMuxCliInvocation(args)
     expect(parsed.command.method).toBe('system.storage')
     expect(parsed.params).toEqual({ hostId: 'right', runId: originalRun })
-    for (const text of [AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL]) expect(text).toContain('amux system storage --host HOST --run RUN')
+    for (const text of [AGENTMUX_CLI_HELP]) expect(text).toContain('amux system storage --host HOST --run RUN')
     const cli = await runCompiledObjectCli(args, objectCliEnvironment(endpoint.root))
     expect(cli.code, cli.stderr).toBe(0)
     const receipt = objectCliReceipt(JSON.parse(cli.stdout.trim()))
