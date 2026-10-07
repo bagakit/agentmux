@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import type { AgentManagedHookMutation } from '../managed-hook-installer.js'
 import { resolveCoreBinPath } from '../runtime-paths.js'
 import { HOOK_COMMAND_TIMEOUT_SECONDS } from './shared.js'
-import type { AgentNativeActivityEvent } from '../types.js'
+import type { AgentHookObservationFailure, AgentNativeActivityEvent } from '../types.js'
 
 function observationIdentity(payload: Readonly<Record<string, unknown>>) {
   if (typeof payload.session_id !== 'string' || !payload.session_id.trim() ||
@@ -15,6 +15,18 @@ export function claudeNativeTurnIdentity(payload: Readonly<Record<string, unknow
   const identity = observationIdentity(payload)
   if (!identity || typeof payload.turnId !== 'string' || !payload.turnId.trim()) return
   return { nativeTurnId: payload.turnId, sourceId: identity.sourceId, sequence: identity.sequence }
+}
+
+export function claudeNativeObservationFailure(
+  eventName: string,
+  payload: Readonly<Record<string, unknown>>
+): AgentHookObservationFailure | undefined {
+  if (eventName !== 'AgentMuxActivityUnavailable' || payload.reason !== 'source-identity-unavailable' ||
+      payload.session_id !== undefined || payload.agent_id !== undefined || payload.agentId !== undefined ||
+      typeof payload.sourceId !== 'string' || !payload.sourceId.trim() ||
+      typeof payload.sequence !== 'number' || !Number.isSafeInteger(payload.sequence) || payload.sequence < 1) return
+  return { code: 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE',
+    message: 'The native activity observer could not capture its original actor identity. Current activity is unconfirmed. The original Session, Run and input remain available; a subsequent original-identity Run can establish a fresh observer.' }
 }
 
 /** Only the documented native turn stream contributes activity; no outcome grants success. */
@@ -62,21 +74,25 @@ async function captureActor($) {
   actorCaptured = true
   if (await $.env.get('AGENTMUX_ENV') !== '1') return
   const id = await $.session.id()
-  if (typeof id === 'string' && id.length > 0) initialSessionId = id
+  if (typeof id === 'string' && id.trim()) initialSessionId = id
+  else return 'unavailable'
 }
 
 async function deliver($, eventName, event, sourceSequence) {
-  if (!initialSessionId) return
-  const current = await $.session.id()
-  if (current !== initialSessionId) sourceChanged = true
+  const identityUnavailable = eventName === 'AgentMuxActivityUnavailable' && event.reason === 'source-identity-unavailable'
+  if (!initialSessionId && !identityUnavailable) return
+  if (!identityUnavailable) {
+    const current = await $.session.id()
+    if (current !== initialSessionId) sourceChanged = true
+  }
   if (eventName === 'turn.start' && sourceSequence > deliveryGapThrough) deliveryGapThrough = 0
-  const unavailable = sourceChanged || deliveryGapThrough > 0
+  const unavailable = identityUnavailable || sourceChanged || deliveryGapThrough > 0
   const payload = {
     hook_event_name: unavailable ? 'AgentMuxActivityUnavailable' : eventName,
-    session_id: initialSessionId,
+    ...(initialSessionId ? { session_id: initialSessionId } : {}),
     sourceId,
     sequence: sourceSequence,
-    ...(unavailable ? { reason: sourceChanged ? 'source-changed' : 'delivery-gap' } : {
+    ...(unavailable ? { reason: identityUnavailable ? 'source-identity-unavailable' : sourceChanged ? 'source-changed' : 'delivery-gap' } : {
       turnId: event.turnId,
       ...(event.agentId === undefined ? {} : { agent_id: event.agentId }),
       ...(eventName === 'turn.complete' ? { reason: event.reason, isAborted: event.isAborted } : {})
@@ -117,7 +133,10 @@ function observe($, eventName, event) {
 
 export function register(on) {
   on('session.start', async ($, event, next) => {
-    try { await captureActor($) } catch {
+    let unavailable = false
+    try { unavailable = await captureActor($) === 'unavailable' } catch { unavailable = true }
+    if (unavailable) {
+      observe($, 'AgentMuxActivityUnavailable', { reason: 'source-identity-unavailable' })
       try { $.ui.log('AgentMux activity source identity unavailable; the Agent remains available.', { to: 'debug' }) } catch {}
     }
     return next(event)
