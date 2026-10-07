@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { WSClient, type HttpInstance } from '@larksuiteoapi/node-sdk'
+import { defaultHttpInstance, WSClient, type HttpInstance } from '@larksuiteoapi/node-sdk'
 import type { ConnectionConfig } from '@agentmux/core/connections'
 import type { ConnectionIngressTransport, DurableIngressHost } from '../../dist/index.js'
 
@@ -45,4 +45,11 @@ export function feishuSdkTransport() {
 /** Exercises the registered transport contract while keeping its original durable target fixed. */
 export function startFeishuTransport(transport: ConnectionIngressTransport, config: ConnectionConfig, ingress: Pick<DurableIngressHost, 'receive'>, signal = new AbortController().signal) {
   return transport.start({ config, credential: 'fixture-credential', signal, receive: (input, acknowledge) => ingress.receive({ ...input, connectionId: config.connectionId }, acknowledge) })
+}
+
+/** Uses the original default adapter registry while controlling only SDK transport I/O. */
+export function defaultFeishuSdkTransport() {
+  const transport = feishuSdkTransport()
+  vi.spyOn(defaultHttpInstance, 'request').mockImplementation(async input => transport.request(input.url ? { url: input.url } : {}))
+  return transport
 }
