@@ -199,13 +199,18 @@ describe('actual Focus Goal relationships', () => {
     useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces,
       { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: fixturePath('scratch-goals'), name: 'Topics', kind: 'folder' }] },
       demands: { original: goal('original', { participations: [participation('original-discussion')] }) } }))
+    const execute = vi.spyOn(useAppStore.getState(), 'executeControl')
     await mount(); await inspect()
     let finish!: (topics: []) => void
     vi.mocked(api.scratch.listTopics).mockImplementationOnce(() => new Promise<[]>(resolve => { finish = resolve }))
     await act(async () => trigger().click()); expect(finish).toBeDefined()
     await act(async () => useAppStore.getState().setMainSurface('survey'))
     const before = useAppStore.getState(); await act(async () => finish([])); await settle()
-    expect(useAppStore.getState().mainSurface).toBe('survey'); expect(useAppStore.getState().error).not.toBeNull(); expect(useAppStore.getState().error).toContain('newer navigation')
+    expect(useAppStore.getState().mainSurface).toBe('survey'); expect(useAppStore.getState().error).not.toBeNull(); expect(useAppStore.getState().error).not.toBe('')
+    const receipt = await execute.mock.results[0]!.value
+    expect(receipt.operation).toBe('focus')
+    if (receipt.operation !== 'focus') throw Error('Expected the original navigation receipt')
+    expect(receipt.issues).toContainEqual(expect.objectContaining({ step: 'navigation', code: 'NAVIGATION_CHANGED' }))
     expect(useAppStore.getState().selectedDemandId).toBe(before.selectedDemandId); unchanged(before)
   })
 

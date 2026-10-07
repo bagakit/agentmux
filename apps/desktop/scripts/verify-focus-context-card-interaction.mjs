@@ -11,7 +11,7 @@ const evidenceRoot = join(root, '.bagakit/feature-tracker/focus-identity-consist
 await mkdir(evidenceRoot, { recursive: true })
 const row = 'apps/desktop/src/renderer/src/components/FocusContextRow.tsx'
 const menu = 'apps/desktop/src/renderer/src/components/FocusContextMenu.tsx'
-const hover = 'apps/desktop/src/renderer/src/components/FocusContextHover.tsx'
+const hover = 'apps/desktop/src/renderer/src/components/AgentInformationPreview.tsx'
 const test = 'apps/desktop/test/focus-context-card-interaction.test.tsx'
 const name = 'card-interaction-mutants-' + globalThis.crypto.randomUUID()
 const reusedPaths = process.env.AGENTMUX_MUTATION_RECEIPTS ? JSON.parse(process.env.AGENTMUX_MUTATION_RECEIPTS) : null
@@ -32,7 +32,7 @@ for (const filename of ['baseline-green.log', ...mutation.cases.map(item => item
   assert.doesNotMatch(log, /\d+ skipped|no tests/)
 }
 const callers = {}
-for (const [symbol, definition] of [['<FocusContextRow ', row], ['<FocusContextMenu ', menu], ['useFocusContextHover(', hover]]) {
+for (const [symbol, definition] of [['<FocusContextRow ', row], ['<FocusContextMenu ', menu], ['useAgentInformationPreview(', hover]]) {
   const result = spawnSync('rg', ['-n', '--fixed-strings', symbol, 'apps/desktop/src'], { cwd: root, encoding: 'utf8' })
   assert.equal(result.status, 0)
   const hits = result.stdout.trim().split('\n').filter(line => !line.startsWith(definition + ':') && !/^.*:\d+:\s*import\b/.test(line))

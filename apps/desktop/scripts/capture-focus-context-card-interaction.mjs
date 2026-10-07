@@ -34,7 +34,7 @@ try{
   const buildResult=await build({entryPoints:[join(fixture,'entry.mjs')],outfile:join(out,'app.js'),bundle:true,platform:'browser',format:'esm',target:'es2022',jsx:'automatic',metafile:true,plugins:[observe],logLevel:'silent',
     define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},loader:{'.png':'file','.svg':'file','.woff2':'file','.woff':'file','.ttf':'file'}})
   receipt.metafile=buildResult.metafile;receipt.inputs=Object.fromEntries([...inputs].map(([path,sha])=>[relative(root,path),sha]));receipt.transformations=transformations
-  for(const suffix of ['GlobalFocusSurface.tsx','FocusContextRow.tsx','FocusContextMenu.tsx','FocusContextHover.tsx','focus-context.ts','launcher-resume.ts','agent-roster-menu.ts','agent-address.ts','clipboard-copy.ts','RegionContextMenu.tsx','WindowOverlayHost.tsx','GlobalSystemNotices.tsx','NotificationItem.tsx','store.ts'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Nonempty actual module '+suffix)
+  for(const suffix of ['GlobalFocusSurface.tsx','FocusContextRow.tsx','FocusContextMenu.tsx','AgentInformationPreview.tsx','focus-context.ts','launcher-resume.ts','agent-roster-menu.ts','agent-address.ts','clipboard-copy.ts','RegionContextMenu.tsx','WindowOverlayHost.tsx','GlobalSystemNotices.tsx','NotificationItem.tsx','store.ts'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Nonempty actual module '+suffix)
   const html=join(out,'index.html');await writeFile(html,'<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="./app.css"><div id="root"></div><script type="module" src="./app.js"></script></html>')
   receipt.compiled={renderer:hash(await readFile(join(out,'app.js'))),css:hash(await readFile(join(out,'app.css')))}
   const env={...process.env,AGENTMUX_DESKTOP_USER_DATA:join(privateRoot,'user-data'),AGENTMUX_RUNTIME_DIRECTORY:join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:join(privateRoot,'state')};delete env.ELECTRON_RUN_AS_NODE
@@ -43,7 +43,7 @@ try{
   receipt.frames=await Promise.all(receipt.actual.frames.map(async frame=>({...frame,sha256:hash(await readFile(join(evidence,frame.file)))})))
   assert.equal(receipt.frames.length,23,'Three window widths; hover, pointer selection/internal scroll, exact SID menus, rename transitions and explicit Focus selection')
   receipt.sourceAfter=Object.fromEntries(await Promise.all([...inputs.keys()].map(async path=>[relative(root,path),hash(await readFile(path))])));assert.deepEqual(receipt.sourceAfter,receipt.inputs,'Exact nonempty Source stable before/after')
-  receipt.owningSourceScope=['GlobalFocusSurface.tsx','FocusContextRow.tsx','FocusContextMenu.tsx','FocusContextHover.tsx','focus-context.ts','store.ts','styles/focus.css'];receipt.captureOnly=true;receipt.capturedPass=true
+  receipt.owningSourceScope=['GlobalFocusSurface.tsx','FocusContextRow.tsx','FocusContextMenu.tsx','AgentInformationPreview.tsx','focus-context.ts','store.ts','styles/focus.css'];receipt.captureOnly=true;receipt.capturedPass=true
 }catch(error){receipt.failure={name:error.name,message:error.message,stack:error.stack};process.exitCode=1}
 finally{
   await writeFile(join(evidence,'process.log'),logs.join('\n'))
