@@ -565,6 +565,8 @@ export type AgentUsageCapability = {
 export type AgentTurnUsage = {
   /** Native response coverage. Older saved samples without scope remain unknown. */
   scope?: 'response'
+  /** Native Session accounting from the same observation; never response or context usage. */
+  cumulative?: { scope: 'native-session'; inputTokens: number; outputTokens: number; totalTokens: number }
   /** Native context observation accompanying this sample; never lifetime billing totals. */
   context?: { usedTokens: number; capacityTokens: number }
   /** Native response output tokens. */

@@ -2,7 +2,7 @@ import type { AgentTurnUsage, AgentUsageCapability } from './types.js'
 import { open } from 'node:fs/promises'
 
 /**
- * 从 Provider 自己拥有格式的 transcript 里，抽出**最近一次响应** 的真实 token 用量。
+ * 从 Provider 自己拥有格式的 transcript 里，抽出最近一次响应及同条记录明确提供的原生会话累计。
  *
  * 为什么这份知识关在这里、且只被 hook 命令进程调用：Provider 的 transcript schema 是 Provider 的私产，
  * 哪天 codex 改了 rollout 格式、claude 改了 message 记录形状，坏的应该是这一个纯函数，而不是 Core 的会话
@@ -74,8 +74,8 @@ function extractClaudeUsage(tail: readonly string[], observedAt: number): AgentT
 /**
  * codex rollout（`~/.codex/sessions/.../rollout-*.jsonl`）：`type:"event_msg"` 且
  * `payload.type:"token_count"` 的记录带 `payload.info.last_token_usage`（最后一次模型请求）与
- * `total_token_usage`（会话累计）。这里只取响应级 `last_token_usage`，不能把它称为整轮。字段：`{input_tokens, output_tokens, total_tokens, ...}`，codex 自带 `total_tokens`
- * 就用它报的，不自行相加。
+ * `total_token_usage`（原生会话累计）。两者独立保留，响应不能称为整轮或会话累计。
+ * 原生 `total_tokens` 原样取值；累计缺字段时不自行相加。
  */
 function extractCodexUsage(tail: readonly string[], observedAt: number): AgentTurnUsage | null {
   for (const line of tail) {
@@ -97,12 +97,16 @@ function extractCodexUsage(tail: readonly string[], observedAt: number): AgentTu
     const output = finiteNonNegative((last as Record<string, unknown>).output_tokens)
     const total = finiteNonNegative((last as Record<string, unknown>).total_tokens)
     if (input === null || output === null) continue
+    const nativeTotal = (info as Record<string, unknown>).total_token_usage as Record<string, unknown> | undefined
+    const cumulative = nativeTotal && parseCumulativeUsage({ scope: 'native-session',
+      inputTokens: nativeTotal.input_tokens, outputTokens: nativeTotal.output_tokens, totalTokens: nativeTotal.total_tokens })
     return {
       scope: 'response',
       inputTokens: input,
       outputTokens: output,
       // codex 报了单一 total 就用它；没报（老格式）时退回 in+out，绝不为凑字段编数。
       totalTokens: total ?? input + output,
+      ...(cumulative ? { cumulative } : {}),
       ...nativeContext((info as Record<string, unknown>).model_context_window, total),
       observedAt
     }
@@ -148,6 +152,16 @@ function nativeContext(capacity: unknown, used: unknown): Pick<AgentTurnUsage, '
     ? { context: { capacityTokens, usedTokens } } : {}
 }
 
+/** Optional accounting is independent: a malformed total must not discard a valid response/context. */
+export function parseCumulativeUsage(value: unknown): NonNullable<AgentTurnUsage['cumulative']> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const source = value as Record<string, unknown>
+  const { inputTokens, outputTokens, totalTokens } = source
+  if (source.scope !== 'native-session' || ![inputTokens, outputTokens, totalTokens].every(
+    count => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0)) return null
+  return { scope: 'native-session', inputTokens: inputTokens as number, outputTokens: outputTokens as number, totalTokens: totalTokens as number }
+}
+
 export function parseTurnUsage(value: unknown): AgentTurnUsage | null {
   if (typeof value !== 'object' || value === null) return null
   const record = value as Record<string, unknown>
@@ -159,8 +173,10 @@ export function parseTurnUsage(value: unknown): AgentTurnUsage | null {
     return null
   }
   const context = record.context as Record<string, unknown> | undefined
+  const cumulative = parseCumulativeUsage(record.cumulative)
   return { inputTokens, outputTokens, totalTokens, observedAt,
     ...(record.scope === 'response' ? { scope: 'response' as const } : {}),
+    ...(cumulative ? { cumulative } : {}),
     ...(context && typeof context === 'object' ? nativeContext(context.capacityTokens, context.usedTokens) : {}) }
 }
 
