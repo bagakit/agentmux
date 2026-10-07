@@ -4,6 +4,7 @@ import { parseConnectionConfig, type ConnectionConfig, type ConnectionObservatio
 import type { ConnectionAdapter, ConnectionHost } from '../../connection-host.js'
 import type { DurableIngressHost, IngressAuthenticator, VerifiedIngressEvent } from '../../durable-ingress.js'
 import { feishuFailure, feishuIdentity, readFeishuMessage, projectFeishuMessage } from './message.js'
+import { feishuParentAddressing } from './reply.js'
 
 /** A trusted Host composition port, never populated from RPC or a platform event. */
 export type FeishuAdapterOptions = {
@@ -86,6 +87,27 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
     // Original parent/thread IDs stay in raw. Their presence cannot certify a reply to this application.
     if (!this.current(receiver)) feishuFailure('FEISHU_TRANSPORT_PROOF_MISMATCH')
     return projectFeishuMessage(payload, config.application, receiver.botOpenId)
+  }
+  /** An exact authenticated parent read, performed only after durable admission by the original Host. */
+  async qualifyReply(config: ConnectionConfig, event: Readonly<VerifiedIngressEvent>, raw: string, credential: string, signal: AbortSignal): Promise<'reply' | 'message' | 'unknown'> {
+    if (signal.aborted || !event.replyToMessageId || event.unsupportedContent) return 'unknown'
+    let parentId: string
+    try {
+      const payload = readFeishuMessage(raw, config.application), { message, sender } = payload.event
+      if (payload.header.event_id !== event.eventId || message.message_id !== event.messageId || message.chat_id !== event.externalConversationId ||
+        message.parent_id !== event.replyToMessageId || sender.sender_type !== 'user' || message.chat_type !== 'group' || event.actor.idType !== 'open_id' ||
+        sender.sender_id?.open_id !== event.actor.userId || event.actor.application.domain !== config.application.domain || event.actor.application.appId !== config.application.appId) return 'unknown'
+      parentId = message.parent_id
+    } catch { return 'unknown' }
+    let abort!: () => void
+    const cancelled = new Promise<'unknown'>(resolve => { abort = () => resolve('unknown'); signal.addEventListener('abort', abort, { once: true }) })
+    try {
+      const reading = this.withClient(config, credential, async client => {
+        const response = await client.request<unknown>({ url: `/open-apis/im/v1/messages/${encodeURIComponent(parentId)}`, method: 'GET', params: { user_id_type: 'open_id' }, signal })
+        return signal.aborted ? 'unknown' : feishuParentAddressing(response, config.application, parentId, event.externalConversationId)
+      }).catch(() => 'unknown' as const)
+      return await Promise.race([reading, cancelled])
+    } finally { signal.removeEventListener('abort', abort) }
   }
   async openReceiver(config: ConnectionConfig, credential: string, ingress: Pick<DurableIngressHost, 'receive'>): Promise<FeishuReceiver> {
     config = parseConnectionConfig(config)
