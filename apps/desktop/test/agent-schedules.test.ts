@@ -5,12 +5,18 @@ import { join } from 'node:path'
 import { nextCalendarOccurrence, latestCalendarOccurrence } from '../src/main/agent-schedule-calendar.js'
 import { ContinuousProgressLoopManager, type LoopTickHandler } from '../src/main/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
-import { observeAgent, type ContinuousProgressLoop, type AgentMuxRpcCallContext } from '@agentmux/core'
+import { observeAgent, type ContinuousProgressLoop, type AgentMuxRpcCallContext, type AgentMuxPendingInteraction } from '@agentmux/core'
 import { parseAgentScheduleCalendar, type AgentScheduleCalendar } from '../../../packages/core/src/agent-schedule.js'
 import { validateScheduleRpcResult } from '../../../packages/core/src/public-rpc-schedules.js'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 
 const rules = (kind: AgentScheduleCalendar['kind'], fields: Partial<AgentScheduleCalendar> = {}): AgentScheduleCalendar => ({ kind, timezone: 'UTC', time: _hygiene_fixtureClock(9, 30), policies: { gap: 'skip', fold: 'earlier', monthEnd: 'clamp', overdue: 'latest' }, ...fields })
 const target = { hostId: 'local', agentSessionId: 'agent', providerId: 'generic', workspacePath: _hygiene_fixturePath("repo") }
+const pendingPermission: AgentMuxPendingInteraction = { request: { kind: 'permission', id: 'permission',
+  agentSessionId: target.agentSessionId, title: 'Private permission request',
+  options: [{ id: 'allow-once', kind: 'allow-once', label: 'Allow' }],
+  evidence: { source: 'native-hook', run: { runId: 'run' }, hookReceiptId: 'permission', observedAt: _historyFixtureEpoch(0, 0, 1) } } }
 const stamp = (text: string) => Date.parse(text)
 const managers: ContinuousProgressLoopManager[] = [], dirs: string[] = []
 afterEach(async () => { await Promise.all(managers.splice(0).map(m => m.stop())); await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true }))) })
@@ -22,7 +28,7 @@ async function owner(onTick: LoopTickHandler = async () => 'sent', save = async 
   let now = stamp(_hygiene_fixtureIso(24134400000, "second")), occupied = false, working = false, permission = false, missing = false
   const manager = new ContinuousProgressLoopManager(store, onTick, () => now, async (loop, tickId) => {
     const status = { state: working ? 'working' as const : 'done' as const, source: 'native-hook' as const, observedAt: 1 }
-    return { session: { ...target, run: { runId: 'run' }, promptCompletionAdmission: { submissionId: 'old-input', completionId: '["run",1]', operationId: 'old-input', startByte: 0, endByte: 1 }, semanticStatus: status, futurePromptIntents: intents, ...(permission ? { pendingInteraction: {} as never } : {}) },
+    return { session: { ...target, run: { runId: 'run' }, promptCompletionAdmission: { submissionId: 'old-input', completionId: '["run",1]', operationId: 'old-input', startByte: 0, endByte: 1 }, semanticStatus: status, futurePromptIntents: intents, ...(permission ? { pendingInteraction: pendingPermission } : {}) },
       observation: observeAgent({ process: 'running', status, timelineCapability: 'complete-events', awaitingRequest: permission, terminalCapabilityUnverified: false }, now), inputOccupied: occupied, inputByte: missing ? null : 0, tickId, now }
   }, { saveFutureIntent: async (loop, active, context) => { await save(loop, active, context); intents[loop.futureIntentId!] = { operationId: loop.creationOperationId!, prompt: loop.prompt, message: { userContent: loop.prompt }, active } }, authorizeFutureIntent: authorize })
   managers.push(manager)
