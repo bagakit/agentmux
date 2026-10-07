@@ -21,6 +21,7 @@ const clientUiAliases = Object.entries(clientUi.exports).flatMap(([key, value]) 
  return [{ find: new RegExp('^' + name.split('*').map(escape).join('(.*)') + '$'), replacement: resolve(root, 'packages/client-ui', target.replace('*', '$1')) }]
 }).sort((a, b) => b.find.source.length - a.find.source.length)
 const mutations = {
+  shared: ['apps/desktop/src/renderer/src/components/TopicPresence.tsx', '<WorkbenchTopology tabs={tabs} onSelectTab={onSelectTab} />', 'null'],
   navigation: ['apps/desktop/src/renderer/src/components/WorkspaceTopicsPanel.tsx', '{ tabId, ...(groupId === undefined ? {} : { groupId }) }', '{ tabId }'],
   highlight: ['apps/desktop/src/renderer/src/components/WorkbenchTopology.tsx', 'data-subject-region={tab.highlightedRegionIds?.includes(region.regionId) || undefined}', 'data-subject-region={undefined}'],
   consumer: ['apps/desktop/src/renderer/src/components/TopicRowPresence.tsx', '{ highlightedRegionIds: [subject.regionId] }', '{ highlightedRegionIds: undefined }'],

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TopicRowPresence } from '../src/renderer/src/components/TopicRowPresence'
 import { WorkbenchTopology, type WorkbenchTabDetail } from '../src/renderer/src/components/WorkbenchTopology'
 import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { openTopicWorkSurfaces, topicTabRegionCells } from '../src/renderer/src/lib/scratch-topic-layout'
+import { openTopicWorkSurfaces } from '../src/renderer/src/lib/scratch-topic-layout'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
@@ -24,7 +24,7 @@ const tab = { ...split, layout: { ...split.layout, activeRegionId: 'neighbor-reg
 const layout = createWorkspaceLayout('subject-group', [tab.id])
 const topic: ScratchTopicSnapshot = { id: 'subject-topic', title: 'Subject work', directoryPath: 'subject', topicPath: 'subject/topic.md', summary: '', collaborators: [] }
 const reference = { displayWorkspaceId: workspace.id, groupId: 'subject-group', tabId: tab.id, regionId: 'subject-region' }
-const surfaces = [{ groupId: reference.groupId, tabId: tab.id, active: false, cells: topicTabRegionCells(tab) }]
+const surfaces = [{ groupId: reference.groupId, tabId: tab.id, active: false }]
 const onSelectTab = vi.fn(async () => {})
 async function row(active = true) {
   await dom.render(<TopicRowPresence workspace={workspace} topic={topic} paths={[]} surfaces={surfaces} active={active} onSelectTab={onSelectTab} />)
@@ -154,7 +154,7 @@ describe('original Topic row consumes shared workbench identity', () => {
     useAppStore.setState({ sessions: [remote, { ...agent, label: 'Local unrelated identity' }], tabs: { [tab.id]: single },
       agentNames: { [agent.id]: 'Ambiguous SID name' } })
     await refreshCoreGraph('remote-host')
-    await dom.render(<TopicRowPresence workspace={workspace} topic={topic} paths={[]} surfaces={[{ groupId: reference.groupId, tabId: tab.id, active: true, cells: topicTabRegionCells(single) }]} active onSelectTab={onSelectTab} />)
+    await dom.render(<TopicRowPresence workspace={workspace} topic={topic} paths={[]} surfaces={[{ groupId: reference.groupId, tabId: tab.id, active: true }]} active onSelectTab={onSelectTab} />)
     const chip = dom.container.querySelector<HTMLButtonElement>('.workbench-topology__tab-chip')!
     expect(chip.getAttribute('aria-label')).toContain('Remote source identity')
     expect(chip.getAttribute('aria-label')).not.toMatch(/Local unrelated|Ambiguous SID/)

@@ -4,24 +4,10 @@ import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 /**
- * 头像只收 `state` 这一个权威输入。这个文件守的是「没有第二个输入偷偷回来」。
- *
- * 病史：`SelectorPresenceAgent` 曾同时带 `state` 和 `attention`，于是两个调用方能对同一个 state
- * 各递一个不同的 attention（Topic 侧递 accent、Branch 侧硬写 null），组件照单全收——「waiting 画成
- * idle」就是这么静默发生的。修法是删掉那个字段，让注意力口径只由 `attentionAccentFor(state)` 在
- * 组件内部派生。
- *
- * 为什么删字段**不足以**把它钉住——这是本文件存在的全部理由，且是实测结论而非推理：
- *
- *   TypeScript 的 excess-property checking 只对**直接写出的对象字面量**生效。三形状探针实测：
- *     take([{ …, attention: null }])                    → error TS2353
- *     take(xs.map((x) => ({ …, attention: null })))      → 静默通过
- *     take(xs.map((x) => { return { …, attention: null } })) → 静默通过
- *   而两个调用方（SurfaceToolDock、BranchesPanel）**都**是 `.map()`。所以多写一个 attention 键，
- *   `tsc --noEmit` 从头到尾 exit 0。类型系统在这条路上帮不了忙。
- *
- * 判据因此落在 AST 上：凡是构造这些对象的地方，都不许出现那个属性名。文本判据（grep 'attention'）
- * 在这里没用——`data-attention`、`attentionAccentFor`、注释里的解释全会命中。
+ * Inline presence objects must not introduce a second attention input beside state.
+ * TypeScript permits extra properties returned from map callbacks, so inspect those
+ * JSX expression subtrees. This guard does not follow variable aliases such as the
+ * Topic row's memoized agents; the real shared consumer has its own behavioral tests.
  */
 
 const COMPONENTS_DIR = fileURLToPath(new URL('../src/renderer/src/components/', import.meta.url))
@@ -82,25 +68,25 @@ function isPresenceElement(node: ts.Node): boolean {
     : ts.isJsxOpeningElement(node)
       ? node.tagName
       : undefined
-  return tag !== undefined && ts.isIdentifier(tag) && ['SelectorPresence', 'TopicPresence', 'RegionMosaic'].includes(tag.text)
+  return tag !== undefined && ts.isIdentifier(tag) && ['SelectorPresence', 'TopicPresence'].includes(tag.text)
 }
 
-describe('SelectorPresence 的入参里不许有第二个注意力真相', () => {
+describe('SelectorPresence 内联入参里不许有第二个注意力真相', () => {
   const sources = componentFiles().map((name) => ({
     name,
     ast: parse(name, readFileSync(new URL(name, `file://${COMPONENTS_DIR}`), 'utf8'))
   }))
 
-  it('自检：扫描面真的看得见那两个调用方（否则下面整个循环空过）', () => {
+  it('自检：扫描面能看见当前原内联调用方，不能空过', () => {
     // 这条是本文件最容易失效的地方：提取器一旦看不懂新的写法，offenders 恒空，门永远绿。
     const withPresence = sources.filter(({ ast }) => presenceAgentPropertyNames(ast).length > 0)
     expect(
       withPresence.map(({ name }) => name).sort(),
       '认不出 <SelectorPresence agents={…}> 了——提取器瞎了，这道门此刻是恒真的'
-    ).toEqual(['BranchesPanel.tsx', 'WorkspaceTopicsPanel.tsx'])
+    ).toEqual(['BranchesPanel.tsx'])
   })
 
-  it('没有任何调用方写出 attention 键', () => {
+  it('没有内联调用方写出 attention 键', () => {
     // tsc 挡不住这件事（`.map()` 回调里的对象字面量不做 excess-property 检查，见文件头实测记录），
     // 所以这里是唯一的判据。多写的键今天只是死数据，但它是「两个真相」那个缺陷的完整前半段。
     for (const { name, ast } of sources) {

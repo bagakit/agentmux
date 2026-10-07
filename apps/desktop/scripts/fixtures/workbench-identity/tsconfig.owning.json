@@ -1,4 +1,4 @@
 {
   "extends": "../../../tsconfig.renderer.json",
-  "include": ["../../../src/renderer/**/*.ts", "../../../src/renderer/**/*.tsx", "../../../src/shared/**/*.ts", "../../../test/workbench-identity.test.tsx", "../../../test/topic-occurrence-navigation.test.tsx", "./vitest.owning.config.mts"]
+  "include": ["../../../src/renderer/**/*.ts", "../../../src/renderer/**/*.tsx", "../../../src/shared/**/*.ts", "../../../test/workbench-identity.test.tsx", "../../../test/topic-occurrence-navigation.test.tsx", "../../../test/agent-avatar-settings.test.tsx", "../../../test/scratch-topic-layout.test.ts", "../../../test/selector-presence-shape.test.ts", "./vitest.owning.config.mts"]
 }
