@@ -559,20 +559,17 @@ export type AgentUsageCapability = {
   transcriptFormat: 'claude-jsonl' | 'codex-rollout'
 }
 
-/**
- * 一个 turn 的**真实**原生 token 用量。分子（token 数）全部由 Provider 报出、可验证；这里刻意
- * **不含任何速率**——`tokens/s` 的分母（turn 墙钟时长）含用户思考、审批等待、工具执行、网络往返，
- * 是我们自己拼的、不可验证的数，真实分子除以编出来的分母仍是编出来的数（设计 SSOT《状态栏》节）。
- * 所以只上报累计量，UI 明说这是「最近一个 turn」的用量。
- */
+/** Latest native usage sample delivered by the existing Hook. It is not a whole-turn total. */
 export type AgentTurnUsage = {
+  /** Native response coverage. Older saved samples without scope remain unknown. */
+  scope?: 'response'
   /** Native context observation accompanying this sample; never lifetime billing totals. */
   context?: { usedTokens: number; capacityTokens: number }
-  /** 本 turn 生成的 output token 数——状态栏首要显示的量，它最接近"这一步产出了多少"。 */
+  /** Native response output tokens. */
   outputTokens: number
-  /** 本 turn 的 input token 数（含被 Provider 计入的上下文）。 */
+  /** Native response input tokens. */
   inputTokens: number
-  /** 本 turn 的合计 token（Provider 报的口径，可能与 in+out 不等，比如含 reasoning/cache）。 */
+  /** Existing sample total; its accounting is independent of history turn metrics. */
   totalTokens: number
   /** 采到这条用量的收尾事件观测时刻（epoch ms）——UI 用它说明"哪一段时间"的用量。 */
   observedAt: number
@@ -844,6 +841,26 @@ export type AgentSessionHistoryQuestionAnswer = {
   prompt?: string
 }
 
+/** Provider-reported token counts; missing counts stay absent and are never estimated or summed. */
+export type AgentSessionHistoryTokenUsage = {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  cachedInputTokens?: number
+  reasoningOutputTokens?: number
+}
+
+/** Read-only facts on the original native record, never Runtime or input authority. */
+export type AgentSessionHistoryMetrics = {
+  /** turn requires the original item's exact turnId; response is scoped to the original record. */
+  scope: 'turn' | 'response'
+  /** Native wall-clock elapsed milliseconds, not inference time or a locally started timer. */
+  durationMs?: number
+  usage?: AgentSessionHistoryTokenUsage
+  /** Only an explicit native outcome, independent of the Session/Run's current state. */
+  status?: 'completed' | 'failed' | 'interrupted'
+}
+
 export type AgentSessionHistoryItem = {
   id: string
   turnId?: string
@@ -854,6 +871,9 @@ export type AgentSessionHistoryItem = {
   questionAnswers?: AgentSessionHistoryQuestionAnswer[]
   /** A local native question/answer reading projection diagnostic; original speech and adjacent history stay readable. */
   questionDiagnostic?: { code: string; message: string }
+  metrics?: AgentSessionHistoryMetrics
+  /** Optional metrics unavailable; original content, identity and reading remain available. */
+  metricsDiagnostic?: { code: string; message: string }
   /** Original contentParts remain complete and copyable alongside this optional summary. */
   collaboration?: AgentSessionHistoryCollaboration
   title?: string
@@ -1175,10 +1195,9 @@ export type AgentMuxAgentSession = {
   nativePromptPredecessor?: AgentNativePromptPredecessor
   hookReceipt?: AgentHookReceipt
   /**
-   * 最近一个 turn 的真实原生 token 用量，随收尾事件的 hook 回执到达并被覆盖式更新（只保留最新一
-   * turn，不累加历史——状态栏回答的是"刚跑完这一 turn 花了多少"）。仅 usage 能力声明为
-   * `native-transcript` 的 Provider 会写入；缺席读作"还没有一 turn 的用量"或"此 Provider 不报用量"，
-   * 两者在 UI 上都不显示 0。
+   * 最近一次原生响应的用量样本，随收尾事件的 Hook 回执覆盖式更新，不累加历史、不冒充整轮。
+   * 仅 usage 能力声明为 `native-transcript` 的 Provider 会写入；旧样本缺 scope 时范围未知，
+   * 缺席用量表示尚未取得或 Provider 未报告，不显示虚构的 0。
    */
   turnUsage?: AgentTurnUsage
 }

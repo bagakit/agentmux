@@ -22,7 +22,7 @@ import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult }
 import { isDeepStrictEqual } from 'node:util'
 import { parseAgentMuxSpatialGraph } from './spatial-graph.js'
 import { normalizeAgentTimelineMutation } from './session-timeline.js'
-import { normalizeSessionHistoryPage } from './session-history.js'
+import { normalizeSessionHistoryPage, sessionHistoryWithoutMetrics } from './session-history.js'
 import { parseAgentContextParams } from './agent-context.js'
 import { parseConnectionOffer } from '@agentmux/relay/offer'
 import { normalizeMessageChannel } from './message-origin.js'
@@ -311,6 +311,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'agent.context': {
+        let nativePage = p.native
         const expected = parseAgentContextParams(input)
         record(p, ['hostId', 'sourceHostId', 'agentSessionId', 'descriptor', 'session', 'status', 'runtimeDiagnostics', 'captured', 'native', 'unavailable', 'nextCursor'])
         if (p.hostId !== expected.hostId || p.agentSessionId !== expected.agentSessionId) fail()
@@ -368,7 +369,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           if (handle !== undefined && record(handle).kind === 'provider' && (record(handle).sessionId !== source.nativeSessionId || record(handle).providerId !== source.providerId)) fail()
           const normalized = normalizeSessionHistoryPage(source as { providerId: string; nativeSessionId: string }, page, expected.limit ?? 30)
           const { agentSessionId: _sid, ...body } = page
-          if (!isDeepStrictEqual(normalized, body)) fail()
+          if (!isDeepStrictEqual(sessionHistoryWithoutMetrics(normalized), sessionHistoryWithoutMetrics({ ...body, items: body.items as unknown[] }))) fail()
+          nativePage = { agentSessionId: page.agentSessionId, ...normalized }
           if (page.sourceSizeBytes !== undefined) count(page.sourceSizeBytes)
         }
         array(p.unavailable, value => { const issue = record(value, ['source', 'code', 'message', 'recovery']); member(issue.source, ['captured', 'native', 'session', 'status', 'runtime']); string(issue.code); text(issue.message); text(issue.recovery) })
@@ -383,7 +385,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           const capabilities = record(kernel.capabilities, ['transport', 'orderedOutputBytes', 'boundedReplay', 'recoverableInput', 'resize', 'interrupt', 'completeStop'])
           if (capabilities.transport !== 'local-unix') fail(); for (const key of ['orderedOutputBytes', 'boundedReplay', 'recoverableInput', 'resize', 'interrupt', 'completeStop']) if (capabilities[key] !== true) fail()
         }
-        break
+        return { ...p, native: nativePage }
       }
       case 'runtime.bootstrap': parseRpcHostedBootstrap(p); break
       case 'runtime.invoke': record(p, ['value']); if (!Object.hasOwn(p, 'value')) fail(); break

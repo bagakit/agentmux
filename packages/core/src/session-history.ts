@@ -4,6 +4,8 @@ import type {
   AgentSessionHistoryContentPart,
   AgentSessionHistoryCollaboration,
   AgentSessionHistoryItem,
+  AgentSessionHistoryMetrics,
+  AgentSessionHistoryTokenUsage,
   AgentSessionHistoryQuestionRequest,
   AgentSessionHistoryQuestionAnswer,
   AgentSessionHistorySource
@@ -100,6 +102,63 @@ function questionAnswers(value: unknown): AgentSessionHistoryQuestionAnswer[] {
   })
 }
 
+/** Optional observations cannot take away an otherwise readable original native record. */
+export function normalizeSessionHistoryMetrics(item: { metrics?: unknown; metricsDiagnostic?: unknown; turnId?: unknown }):
+  Pick<AgentSessionHistoryItem, 'metrics' | 'metricsDiagnostic'> {
+  const result: Pick<AgentSessionHistoryItem, 'metrics' | 'metricsDiagnostic'> = {}, invalid: string[] = []
+  const optionalObject = (value: unknown): Record<string, unknown> | undefined => value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : undefined
+  if (item.metricsDiagnostic !== undefined) {
+    const diagnostic = optionalObject(item.metricsDiagnostic)
+    if (typeof diagnostic?.code === 'string' && diagnostic.code.length > 0 && diagnostic.code.length <= 256 &&
+      typeof diagnostic.message === 'string' && diagnostic.message.length > 0 && diagnostic.message.length <= 1024) {
+      result.metricsDiagnostic = { code: diagnostic.code, message: diagnostic.message }
+    } else invalid.push('diagnostic')
+  }
+  if (item.metrics !== undefined) {
+    const value = optionalObject(item.metrics)
+    if (!value || value.scope !== 'turn' && value.scope !== 'response' ||
+      value.scope === 'turn' && (typeof item.turnId !== 'string' || !item.turnId)) invalid.push('scope/turn identity')
+    else {
+      const metrics: AgentSessionHistoryMetrics = { scope: value.scope as AgentSessionHistoryMetrics['scope'] }
+      if (value.durationMs !== undefined) {
+        if (typeof value.durationMs === 'number' && Number.isFinite(value.durationMs) && value.durationMs >= 0) metrics.durationMs = value.durationMs
+        else invalid.push('durationMs')
+      }
+      if (value.status !== undefined) {
+        if (value.status === 'completed' || value.status === 'failed' || value.status === 'interrupted') metrics.status = value.status
+        else invalid.push('status')
+      }
+      if (value.usage !== undefined) {
+        const counts = optionalObject(value.usage), usage: AgentSessionHistoryTokenUsage = {}
+        if (!counts) invalid.push('usage')
+        else for (const key of ['inputTokens', 'outputTokens', 'totalTokens', 'cachedInputTokens', 'reasoningOutputTokens'] as const) {
+          if (counts[key] === undefined) continue
+          if (Number.isSafeInteger(counts[key]) && (counts[key] as number) >= 0) usage[key] = counts[key] as number
+          else invalid.push(`usage.${key}`)
+        }
+        if (Object.keys(usage).length) metrics.usage = usage
+      }
+      if (metrics.durationMs !== undefined || metrics.status !== undefined || metrics.usage !== undefined) result.metrics = metrics
+      else invalid.push('unreported values')
+    }
+  }
+  if (invalid.length) result.metricsDiagnostic = { code: 'NATIVE_HISTORY_METRICS_UNAVAILABLE',
+    message: `Optional native metrics are unknown (${invalid.join(', ')}). The original record remains readable; retry this exact source to refresh the observation.` }
+  return result
+}
+
+/** Ignore only optional metrics when proving that the original record has not been rewritten. */
+export function sessionHistoryWithoutMetrics<T extends { items: readonly unknown[] }>(page: T): T {
+  if (!page.items.some(value => value && typeof value === 'object' && !Array.isArray(value) &&
+    ((value as Record<string, unknown>).metrics !== undefined || (value as Record<string, unknown>).metricsDiagnostic !== undefined))) return page
+  return { ...page, items: page.items.map(value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+    const { metrics: _metrics, metricsDiagnostic: _diagnostic, ...original } = value as Record<string, unknown>
+    return original
+  }) } as T
+}
+
 export function normalizeSessionHistoryPage(
   source: AgentSessionHistorySource,
   value: unknown,
@@ -114,7 +173,8 @@ export function normalizeSessionHistoryPage(
     (page.nextCursor !== null && (typeof page.nextCursor !== 'string' || !page.nextCursor))) return invalid()
   // Invalid optional size metadata must not prevent an otherwise valid history page from being read.
   const { sourceSizeBytes: _sourceSizeBytes, ...pageBody } = page
-  if (new TextEncoder().encode(JSON.stringify(pageBody)).byteLength > SESSION_HISTORY_MAX_PAGE_BYTES) {
+  const originalBody = { ...pageBody, items: page.items }, originalPage = sessionHistoryWithoutMetrics(originalBody)
+  if (new TextEncoder().encode(JSON.stringify(originalPage)).byteLength > SESSION_HISTORY_MAX_PAGE_BYTES) {
     throw new AgentMuxError('Native history page exceeds its byte budget.', 'AGENT_SESSION_HISTORY_TOO_LARGE')
   }
   const ids = new Set<string>()
@@ -178,6 +238,7 @@ export function normalizeSessionHistoryPage(
     const questionDiagnostic = item.questionDiagnostic === undefined ? undefined : object(item.questionDiagnostic)
     if (questionDiagnostic && item.kind !== 'assistant-message' && item.kind !== 'user-message') return invalid()
     return { id, kind: item.kind, contentParts,
+      ...normalizeSessionHistoryMetrics(item),
       ...(item.messagePhase === undefined ? {} : { messagePhase: choice(item.messagePhase, ['progress', 'final']) }),
       ...(item.questionRequest === undefined ? {} : { questionRequest: questionRequest(item.questionRequest) }),
       ...(item.questionAnswers === undefined ? {} : { questionAnswers: questionAnswers(item.questionAnswers) }),
@@ -190,6 +251,16 @@ export function normalizeSessionHistoryPage(
       ...(startedAt === undefined ? {} : { startedAt }),
       ...(completedAt === undefined ? {} : { completedAt }) }
   })
+  // Keep optional observations inside the original page budget. They cannot displace content.
+  if (originalPage !== originalBody) {
+    let pageBytes = new TextEncoder().encode(JSON.stringify({ ...pageBody, items })).byteLength
+    for (let index = items.length - 1; index >= 0 && pageBytes > SESSION_HISTORY_MAX_PAGE_BYTES; index--) {
+      const item = items[index]!, { metrics: _metrics, metricsDiagnostic: _diagnostic, ...original } = item
+      pageBytes -= new TextEncoder().encode(JSON.stringify(item)).byteLength - new TextEncoder().encode(JSON.stringify(original)).byteLength
+      items[index] = original
+      if (_metrics || _diagnostic) console.warn('Optional native history metrics did not fit the page budget; original record retained.', { source, recordId: item.id })
+    }
+  }
   return { source: { ...source }, items, nextCursor: page.nextCursor as string | null,
     ...(Number.isSafeInteger(page.sourceSizeBytes) && (page.sourceSizeBytes as number) >= 0
       ? { sourceSizeBytes: page.sourceSizeBytes as number } : {}) }

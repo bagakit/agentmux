@@ -18,7 +18,7 @@ import type { AgentUsageCapability } from './types.js'
 const MAX_HOOK_INPUT_BYTES = 128 * 1024
 
 /**
- * 只有这些收尾类事件才谈得上"这一 turn 花了多少 token"——turn 结束、用量已在 transcript 落定。
+ * 只在这些收尾类事件读取最近响应的用量样本；收尾观测不把响应样本升级为整轮累计。
  * 在别的事件（工具前后、prompt 提交）上读 transcript 既读不到本 turn 终值，也白白多一次 IO，
  * 所以用量抽取只挂在收尾事件上，这也是「开销可忽略」的一半。
  *
@@ -31,7 +31,7 @@ const MAX_HOOK_INPUT_BYTES = 128 * 1024
  * 而那会读到半个 turn 的数、还会把上一 turn 的用量抹掉。
  *
  * 导出为 SSOT：client.ts 的会话侧要用同一份集合判定「这是收尾事件却没抽到用量」——那种情况必须
- * 清掉上一轮的 turnUsage，绝不让陈旧数字挂在「Last turn」标签下（读 transcript 失败/竞态截断/记录
+ * 清掉上一轮的 turnUsage，绝不让陈旧数字挂在最近用量标签下（读 transcript 失败/竞态截断/记录
  * 落在 256KiB 窗口外都会命中这条）。两侧共用一个集合，才不会一处新增收尾事件、另一处忘了跟。
  */
 export const USAGE_FINALIZATION_EVENTS: ReadonlySet<string> = new Set(

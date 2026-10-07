@@ -793,6 +793,7 @@ function turnUsage(value: unknown): AgentTurnUsage {
     outputTokens: timestamp(source.outputTokens, 'turnUsage.outputTokens'),
     totalTokens: timestamp(source.totalTokens, 'turnUsage.totalTokens'),
     observedAt: timestamp(source.observedAt, 'turnUsage.observedAt'),
+    ...(source.scope === 'response' ? { scope: 'response' as const } : {}),
     ...(source.context === undefined ? {} : {
       context: {
         usedTokens: timestamp(record(source.context, 'turnUsage.context').usedTokens, 'turnUsage.context.usedTokens'),
