@@ -5,6 +5,7 @@ import { discoverClaudeNativeSession } from './claude-native-session.js'
 import {
   claudeNativeActivity,
   claudeNativeActivityMutations,
+  claudeNativeObservationFailure,
   claudeNativeTurnIdentity,
   withClaudeNativeActivity
 } from './claude-native-activity.js'
@@ -56,6 +57,7 @@ export const CLAUDE_HOOK_EVENTS = [
 ] as const
 
 export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
+  observationFailure: claudeNativeObservationFailure,
   currentActivity: claudeNativeActivity,
   nativeTurnIdKeys: ['turnId'],
   nativeSessionTransition: (eventName, payload) => eventName === 'SessionStart' &&
@@ -68,10 +70,11 @@ export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
     (typeof payload.agentId === 'string' && payload.agentId.length > 0),
   rules: [
     // Native mods observe the actual runner end; activity is independent of task completion.
-    { events: ['turn.start'], state: 'working', lifecycleEvent: 'turn-start' },
+    { events: ['turn.start'], state: 'working', lifecycleEvent: 'turn-start',
+      matches: payload => claudeNativeTurnIdentity(payload) !== undefined },
     { events: ['turn.complete'], state: 'error', lifecycleEvent: 'turn-end',
       matches: payload => payload.reason === 'error' && claudeNativeActivity('turn.complete', payload)?.state === 'idle' },
-    { events: ['turn.complete', 'AgentMuxActivityUnavailable'], state: 'unknown', lifecycleEvent: null },
+    { events: ['turn.start', 'turn.complete', 'AgentMuxActivityUnavailable'], state: 'unknown', lifecycleEvent: null },
     { events: ['PermissionRequest'], state: 'waiting' },
     { events: ['PreToolUse'], toolNames: ['askuserquestion'], state: 'waiting' },
     // Stop 与 SubagentStop 是 Claude Code 的决策前回调（可被其它 hook 否决或追加 context 继续），
