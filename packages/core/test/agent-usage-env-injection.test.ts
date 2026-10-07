@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Readable } from 'node:stream'
+import { createServer } from 'node:http'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -64,7 +65,7 @@ type ClientInternals = {
  *
  * 走的是生产那一个方法，不重述它的内容——注入什么由 catalog 与 `agentEnvironment` 说了算。
  */
-function spawnEnvironmentFor(client: AgentMuxClient, providerId: AgentProviderId): Record<string, string> {
+function spawnEnvironmentFor(client: AgentMuxClient, providerId: AgentProviderId, hookUrl = 'http://127.0.0.1:65535/hook'): Record<string, string> {
   return (client as unknown as ClientInternals).agentEnvironment(
     {},
     `sess-${providerId}`,
@@ -73,7 +74,7 @@ function spawnEnvironmentFor(client: AgentMuxClient, providerId: AgentProviderId
     {
       bindingId: `binding-${providerId}`,
       // hook 进程的 POST 目标也来自这份环境——它同样是被注入的，不是测试硬塞的。
-      endpoint: { url: 'http://127.0.0.1:65535/hook', port: 65535, token: `token-${providerId}` }
+      endpoint: { url: hookUrl, port: Number(new URL(hookUrl).port), token: `token-${providerId}` }
     },
     `op-${providerId}`,
     `capability-${providerId}`
@@ -152,17 +153,19 @@ describe('hook 子进程跑在 Core 注入的环境里，用量才真的到得�
     }
   }
 
-  function captureHookPost(): { bodies: Array<Record<string, unknown>> } {
+  async function captureHookPost() {
     const bodies: Array<Record<string, unknown>> = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (_url: unknown, init: { body: string }) => {
-        bodies.push(JSON.parse(init.body) as Record<string, unknown>)
-        return { ok: true } as Response
-      })
-    )
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of request) chunks.push(Buffer.from(chunk))
+      bodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+      response.writeHead(204, { 'x-agentmux-hook-mode': 'observer' }); response.end()
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     vi.spyOn(process.stdout, 'write').mockReturnValue(true)
-    return { bodies }
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Private Hook capture has no HTTP endpoint.')
+    return { bodies, url: `http://127.0.0.1:${address.port}/hook`, close: () => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) }
   }
 
   /**
@@ -178,8 +181,9 @@ describe('hook 子进程跑在 Core 注入的环境里，用量才真的到得�
   ): Promise<Record<string, unknown>> {
     const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
     const dir = await mkdtemp(join(tmpdir(), 'agentmux-usage-env-'))
+    const capture = await captureHookPost()
     try {
-      const env = spawnEnvironmentFor(client, providerId)
+      const env = spawnEnvironmentFor(client, providerId, capture.url)
       // 事件名只许从 stdin 来：三个环境来源一律清空，免得外部 env 顶掉负载里的拼法。
       for (const key of ['AGENTMUX_HOOK_EVENT', 'HOOK_EVENT_NAME', 'AGENTMUX_ANTIGRAVITY_EVENT']) {
         vi.stubEnv(key, '')
@@ -191,7 +195,7 @@ describe('hook 子进程跑在 Core 注入的环境里，用量才真的到得�
 
       const transcriptPath = join(dir, 'transcript.jsonl')
       await writeFile(transcriptPath, transcriptContent)
-      const { bodies } = captureHookPost()
+      const { bodies } = capture
       feedStdin(JSON.stringify({ hook_event_name: 'Stop', session_id: 'sess', transcript_path: transcriptPath }))
 
       await runAgentHookCommand()
@@ -200,6 +204,7 @@ describe('hook 子进程跑在 Core 注入的环境里，用量才真的到得�
       expect(bodies).toHaveLength(1)
       return bodies[0]!.payload as Record<string, unknown>
     } finally {
+      await capture.close()
       await rm(dir, { recursive: true, force: true })
       await client.dispose()
     }

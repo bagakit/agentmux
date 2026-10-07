@@ -81,7 +81,9 @@ describe('native usage extraction from provider transcripts', () => {
     const usage = extractTurnUsage(CODEX, CODEX_ROLLOUT, 5678)
     // 必须取 last_token_usage（最后一次响应），不是 total_token_usage（会话累计）。若抽错字段，
     // 下面这三个数会变成 999999/888888/1888887——断言会红。codex 自报单一 total 就用它报的。
-    expect(usage).toEqual({ scope: 'response', inputTokens: 61008, outputTokens: 3381, totalTokens: 67039, observedAt: _newTailFixtureEpoch(0, 0, 5678) })
+    expect(usage).toEqual({ scope: 'response', inputTokens: 61008, outputTokens: 3381, totalTokens: 67039,
+      cumulative: { scope: 'native-session', inputTokens: 999999, outputTokens: 888888, totalTokens: 1888887 },
+      observedAt: _newTailFixtureEpoch(0, 0, 5678) })
     // 而且 total 必须是**它报的那个**，不是我们自己加的：fixture 里 61008+3381=64389 ≠ 67039，
     // 差额就是 reasoning_output_tokens。这一行把「谁算的」单独钉住——不写它的话，只要哪天有人
     // 把 fixture 改回三数自洽，`total ?? input + output` 换成 `input + output` 又会静默全绿。
