@@ -76,3 +76,17 @@ export const FocusGoalLinks = memo(function FocusGoalLinks({ links, onOpenChange
     </Menu.Content></Menu.Portal>
   </Menu.Root>
 })
+
+/** Shared read-only relationship facts with the original explicit Goal navigation. */
+export function AgentGoalRelationships({ links }: { links: Links }) {
+  const navigate = useGoalNavigation()
+  return <section className="agent-information-relations__goals" aria-label="Related Goals">
+    <h4>Goals</h4>
+    <ul>{links.items.map(goal => <li key={goal.goalId} data-goal-id={goal.goalId}>
+      <button type="button" onClick={() => void navigate(goal.goalId)}>{goal.title}</button>
+      <small>{goal.status.replaceAll('_', ' ')}{goal.status === 'done' || goal.status === 'cancelled' ? ' · Historical Goal' : ''}</small>
+      {goal.confirmedRoles.length ? <Roles roles={goal.confirmedRoles} sources={false} /> : null}
+      {goal.unconfirmedRoles.length ? <Roles roles={goal.unconfirmedRoles} sources={false} unconfirmed /> : null}
+    </li>)}</ul>
+  </section>
+}

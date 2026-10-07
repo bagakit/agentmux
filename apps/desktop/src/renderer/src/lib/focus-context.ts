@@ -2,7 +2,7 @@ import { scratchTopicsForConfig } from './scratch-topic-snapshots'
 import type { AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
 import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
-import { scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
+import { type ScratchTopicSnapshot, scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
 import { focusLaneForSession, type AgentFocusLane } from './agent-focus'
 import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
 import { agentDisplayName, firstPromptFromTimeline, workspaceForSession } from './workbench-tabs'
@@ -167,6 +167,28 @@ function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot, now: nu
     && a.control.run.runId === b.control.run.runId && workingEntryTime(a) === workingEntryTime(b)
     && agentStateEnteredAt(a, now) === agentStateEnteredAt(b, now)
     && (a.kind === 'agent' ? a.pendingInteraction : undefined) === (b.kind === 'agent' ? b.pendingInteraction : undefined)
+}
+/** Stable presentation for a caller-owned workspace membership; no Focus lane policy or IO. */
+export function createWorkspaceAgentContextsSelector() {
+  const cache = new Map<string, { session: SessionSnapshot; timeline: AgentTimelineSnapshot | undefined; name: string | undefined; semantic: AgentObservation['semantic'] | undefined; model: FocusContext }>()
+  let result: FocusContext[] = []
+  return (sessions: readonly SessionSnapshot[], timelines: Record<string, AgentTimelineSnapshot | undefined>, names: Record<string, string | undefined>, workspace: WorkspaceRecord, topics: readonly ScratchTopicSnapshot[] | null): FocusContext[] => {
+    const retained = new Set<string>(), now = Date.now()
+    const rows = sessions.map(session => {
+      const key = JSON.stringify([session.hostId, session.id]), old = cache.get(key)
+      retained.add(key)
+      const timeline = timelines[session.id], name = names[session.id]
+      const semantic = session.kind === 'agent' ? observeAgentSession(session, now).semantic : undefined
+      const topicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics)
+      if (old && old.semantic === semantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && old.name === name && old.model.workspace === workspace && old.model.topicId === topicId) return old.model
+      const model = agentContextForSession(session, timeline, name, workspace, topicId)
+      cache.set(key, { session, timeline, name, semantic, model })
+      return model
+    })
+    for (const key of cache.keys()) if (!retained.has(key)) cache.delete(key)
+    if (!sameItems(result, rows)) result = rows
+    return result
+  }
 }
 export type FocusProjection = { contexts: FocusContext[]; laneContexts: FocusContext[]; pmoAttention: string[] }
 function sameItems<T>(a: readonly T[], b: readonly T[]): boolean { return a.length === b.length && a.every((item, index) => item === b[index]) }

@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
+import { AgentInformationDetails } from './AgentInformationDetails'
+import type { FocusGoalLinks } from '../lib/focus-goal-links'
 import type { FocusContextIdentity } from '../lib/focus-context-identity'
-import { WorkbenchTabGlyph } from './WorkbenchTopology'
+import { WorkbenchTabGlyph, WorkbenchTopology } from './WorkbenchTopology'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
-import { useShallow } from 'zustand/react/shallow'
 import { createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
 import { clampStep } from '@agentmux/client-ui/activity-step-summary'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import type { FocusContext } from '../lib/focus-context'
 import { useSessionUserMessages } from '../lib/session-user-messages'
-import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { getWindowOverlayHost } from './WindowOverlayHost'
@@ -34,22 +34,15 @@ function ReadingBody({ reading }: { reading: { text: string; truncated: boolean 
 function FocusContextInputs({ context }: { context: FocusContext }) {
   const control = useAppStore(state => {
     const session = state.sessions.find(session => session.id === context.id && session.hostId === context.hostId && session.control.run.runId === context.runId)
-    return session?.kind === 'agent' && session.control.hostId === context.hostId && session.control.agentSessionId === context.id ? session.control : undefined
+    return session?.kind === 'agent' && session.control.hostId === context.hostId ? session.control : undefined
   })
   const reader = useSessionUserMessages(control)
   const ordered = reader.messages.every(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt))
   // Missing times retain the public source order; they cannot establish a cross-source chronology.
   const messages = (ordered ? [...reader.messages].sort((a, b) => a.recordedAt! - b.recordedAt!) : reader.messages).slice(-3)
-  const names = useAppStore(useShallow(state => messages.map(message => {
-    if (message.author.kind !== 'agent') return ''
-    const id = message.author.agentSessionId
-    const sender = state.sessions.find(session => session.id === id && session.kind === 'agent')
-    return sender ? agentDisplayName({ userName: state.agentNames[id], firstPrompt: firstPromptFromTimeline(state.timelines[id]), fallbackLabel: sender.label, providerLabel: sender.providerId ?? 'Agent' }) : id
-  })))
-  const describe = createSpeakerResolver({ lookupAgent: id => {
-    const index = messages.findIndex(message => message.author.kind === 'agent' && message.author.agentSessionId === id)
-    return index >= 0 ? { label: names[index]! } : undefined
-  } })
+  // Recorded authors carry a canonical SID, but no authoritative peer Host.
+  // Keep that reference rather than assigning a global first-match display name.
+  const describe = createSpeakerResolver()
   const notice = !control || reader.error || reader.observationError ? 'Recent message reading unavailable'
     : reader.sourceChanged ? 'Message source changed' : reader.windowFrozen ? 'Reading window paused'
       : reader.windowIncomplete ? 'Reading window incomplete' : null
@@ -97,7 +90,7 @@ function FocusContextStateSummary({ context, explanationVisible }: { context: Fo
 }
 
 /** Intent reveals held card facts and one scoped, read-only input preview. */
-export function useFocusContextHover(context: FocusContext, requested: boolean, identity?: FocusContextIdentity) {
+export function useAgentInformationPreview(context: FocusContext, requested: boolean, identity?: FocusContextIdentity, goalLinks?: FocusGoalLinks) {
   const active = useWorkbenchPresentationActive()
   const enabled = requested && active
   const displayPath = usePathDisplay()
@@ -202,6 +195,7 @@ export function useFocusContextHover(context: FocusContext, requested: boolean, 
       hideSoon()
     }}>
     <header><strong title={context.name}>{context.name}</strong><FocusContextStateSummary context={context} explanationVisible={serviceVisible} /></header>
+    {context.kind === 'agent' ? <AgentInformationDetails context={context} goalLinks={goalLinks} /> : null}
     {!context.detailIsRecap && !activitySupplement ? <p className="focus-context-hover__activity">{context.detail}</p> : null}
     {context.recap ? <section className="focus-context-hover__recap">
       <small title={`${context.recap.source} · ${context.recap.origin} · ${context.recap.text}`}>{context.recap.source === 'Last assistant message' ? 'Latest reply' : 'Latest input'}{(context.recap.reading?.truncated ?? true) ? ' · Excerpt' : ''}</small>
@@ -220,7 +214,12 @@ export function useFocusContextHover(context: FocusContext, requested: boolean, 
     {context.kind === 'agent' ? <FocusContextInputs key={`${context.hostId}:${context.id}:${context.runId}`} context={context} /> : null}
     <footer title={location} aria-label={location}><strong>{context.workspaceName}</strong><span>{path}</span></footer>
   </div>, host) : null
-  return { anchor, describedBy: open ? id : undefined, preview, close, suppressRestoredFocus,
+  const position = identity?.tabs.some(tab => tab.regions.length > 1) ? <span className="focus-context__position"
+    aria-label={`${identity.occurrenceCount} confirmed ${identity.occurrenceCount === 1 ? 'position' : 'positions'}`}
+    onPointerEnter={close} onPointerLeave={event => {
+      if (event.relatedTarget instanceof Node && anchor.current?.contains(event.relatedTarget)) showSoon()
+    }}><WorkbenchTopology tabs={identity.tabs} interactive={false} enabled={enabled && !open} /></span> : undefined
+  return { anchor, position, describedBy: open ? id : undefined, preview, close, suppressRestoredFocus,
     triggerEvents: { 'aria-keyshortcuts': enabled ? 'ArrowDown' : undefined, onPointerEnter: showSoon, onPointerLeave: hideSoon, onFocus: () => { if (!restoringFocus.current) show() }, onBlur: hideSoon, onPointerDown: close, onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
       if (event.key !== 'ArrowDown' || !enabled) return
       if (panel.current?.isConnected && panel.current.style.visibility === 'visible') {
