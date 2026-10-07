@@ -104,3 +104,23 @@ it('the exact canonical Lark application chooses its own authenticated SDK origi
   expect(f.remote.origins.length).toBeGreaterThan(0)
   expect(new Set(f.remote.origins)).toEqual(new Set(['https://open.larksuite.com']))
 })
+
+it.each([
+  ['array', []], ['string', 'false'], ['null', null], ['object', {}], ['literal-false', false], ['literal-true', true], ['absent', undefined]
+] as const)('only literal deletion facts can settle the original SDK message: %s', async (_name, deleted) => {
+  const original = operation({ mapping: { messageId: 'original-platform-message', threadId: 'original-platform-thread' } })
+  const message = { message_id: original.mapping!.messageId, chat_id: original.target.externalConversationId, thread_id: original.mapping!.threadId,
+    msg_type: 'post', sender: { sender_type: 'app', id_type: 'app_id', id: original.target.application.appId },
+    body: { content: JSON.stringify({ title: '', content: [[{ tag: 'text', text: original.payload.text }]] }) },
+    ...(deleted === undefined ? {} : { deleted }) }
+  const f = await fixture(call => call.method === 'PUT' || call.method === 'GET' ? { status: 200, body: { code: 0, data: call.method === 'GET' ? { items: [message] } : message } } : undefined)
+  const signal = new AbortController().signal, prepared = f.publisher.prepare(original), confirming = deleted === false || deleted === undefined
+  expect(await f.publisher.dispatch(prepared, original.target, 'fixture-credential', signal, original.mapping)).toEqual(confirming
+    ? { state: 'confirmed', mapping: original.mapping } : { state: 'unknown', reason: 'effect-unconfirmed' })
+  expect(await f.publisher.inspect(prepared, original.target, 'fixture-credential', signal, original.mapping)).toEqual(confirming
+    ? { state: 'confirmed', mapping: original.mapping } : null)
+  const withdrawal = f.publisher.prepare({ ...original, effect: 'withdraw' })
+  expect(await f.publisher.inspect(withdrawal, original.target, 'fixture-credential', signal, original.mapping)).toEqual(deleted === true
+    ? { state: 'confirmed', mapping: original.mapping } : null)
+  expect(f.remote.messageCalls().map(call => call.method)).toEqual(['PUT', 'GET', 'GET'])
+})
