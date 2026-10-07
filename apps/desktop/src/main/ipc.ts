@@ -1,3 +1,5 @@
+import { MoteConnectionOperations } from './mote-connection-operations.js'
+import { MoteConnectionSourceOwner } from './mote-connection-source.js'
 import { goalRoleInputNote } from './goal-role-input.js'
 import { GoalPatrolOwner } from './goal-patrol-owner.js'
 import { createPublicationConversationPort, createHostedIngressCorePort } from '@agentmux/connectors'
@@ -1990,10 +1992,16 @@ export async function registerIpc(args: {
       return { ...reference, checkpoint: await original[0]!.client.conversationCheckpoint(reference.agentSessionId) }
     } }
   })
+  const moteConnections = new MoteConnectionOperations({ connections: connectorServices, preferences: moteConnectionPreferences,
+    source: new MoteConnectionSourceOwner({ files: publicFiles, avatars: moteAvatars,
+      catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
+      workspace: id => config.workspaces.find(item => item.id === id),
+      topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory) }) })
   registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), secrets: connectorServices.secrets })
   registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   const control = new AgentMuxControlServer({
     connections: connectorServices.connections,
+    moteConnections,
     deliveryAttempts,
     moteContext: moteContextEvidencePort(deliveryAttempts.hostId, request => executeControl(request)),
     execute: executeControl,
@@ -2076,6 +2084,7 @@ export async function registerIpc(args: {
       { owner: 'progress-changes', dispose: () => disposeProgressChanges() },
       { owner: 'control-bridge', dispose: () => controlBridge.dispose() },
       { owner: 'control-server', dispose: () => control.stop() },
+      { owner: 'mote-connections', dispose: () => moteConnections.close() },
       { owner: 'connections', dispose: () => connectorServices.close() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },
