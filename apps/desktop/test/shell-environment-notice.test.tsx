@@ -8,7 +8,8 @@ import { api } from '../src/renderer/src/lib/api.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices.js'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
-import { loginShellEnvironmentWarning } from '../src/main/login-shell-environment.js'
+import { loginShellEnvironmentWarning } from '@agentmux/core'
+import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
 
 const initial = useAppStore.getState()
 const environmentWarning = loginShellEnvironmentWarning({ ok: true, shell: '/bin/zsh', mode: 'login' })!
@@ -42,7 +43,7 @@ async function toggle(state: 'open' | 'closed') {
 async function initializeSnapshot(warning: string | null) {
   const config = await api.config.get()
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [], ...(warning ? { environmentWarning: warning } : {}) })
   await act(async () => { dispose = await useAppStore.getState().initialize() })
   return config
