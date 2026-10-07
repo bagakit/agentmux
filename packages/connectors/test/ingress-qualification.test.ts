@@ -41,6 +41,9 @@ it('ACK precedes parent lookup; unknown keeps the original body and public CLI r
   expect(JSON.parse(detail.stdout).result).toMatchObject({ ingress: unknown.ingress, inputReceipt: null, observation: 'not-started' })
   expect(detail.stdout).not.toContain('trusted-host-credential'); expect(detail.stdout).not.toContain('Private parent lookup failure')
   expect(() => parseConnectionIngressRecord({ ...unknown.ingress, addressing: { ...unknown.ingress!.addressing, selection: 'reply' } })).toThrow()
+  for (const addressing of [{ state: 'confirmed', selection: ['reply'] }, { state: 'unavailable', reason: ['credential-missing'] }]) {
+    expect(() => parseConnectionIngressRecord({ ...unknown.ingress, addressing: { replyToMessageId: 'original-parent', ...addressing } })).toThrow()
+  }
   // A new Host observation resumes the original received record, never a new transport identity.
   const resumed = new DurableIngressHost(f.options), known = await resumed.dispatch(accepted.ingress.ingressId)
   expect(known.ingress).toMatchObject({ ingressId: accepted.ingress.ingressId, state: 'claimed', body: f.event().body, addressing: { state: 'confirmed', selection: 'reply', replyToMessageId: 'original-parent' } })
@@ -105,4 +108,26 @@ it('missing or late parent observations retain the received operation without ta
   finish('reply'); await Promise.resolve(); await Promise.resolve()
   expect((await f.ingress.inspect({ ingressId: accepted.ingress.ingressId })).ingress).toEqual(timedOut.ingress)
   expect(submit).not.toHaveBeenCalled()
+})
+
+it('a stuck credential observation releases the same intake and its late result cannot start a parent lookup', async () => {
+  const f = await fixture(), submit = vi.spyOn(f.client, 'submitAgentMessage')
+  const read = qualifier(f, async () => 'reply')
+  let lateCredential!: (credential: string) => void
+  const credentials = vi.spyOn(f.connections, 'resolvePublicationCredential').mockResolvedValue('current-credential')
+    .mockImplementationOnce(async () => await new Promise<string>(resolve => { lateCredential = resolve }))
+  const accepted = await f.receive({ selection: 'message', replyToMessageId: 'original-parent' })
+  vi.useFakeTimers()
+  const observing = f.ingress.dispatch(accepted.ingress.ingressId)
+  await vi.advanceTimersByTimeAsync(5_000)
+  expect((await observing).ingress).toMatchObject({ state: 'received', addressing: { state: 'unknown', reason: 'reply-unconfirmed' } })
+  expect(credentials).toHaveBeenCalledOnce(); expect(read).not.toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled()
+  vi.useRealTimers()
+  const recovered = await f.ingress.dispatch(accepted.ingress.ingressId)
+  expect(recovered.ingress).toMatchObject({ ingressId: accepted.ingress.ingressId, state: 'claimed' })
+  expect(read).toHaveBeenCalledOnce(); expect(read.mock.calls[0]![3]).toBe('current-credential')
+  lateCredential('obsolete-credential')
+  await new Promise<void>(resolve => setImmediate(resolve))
+  expect(read).toHaveBeenCalledOnce(); expect(submit).toHaveBeenCalledOnce()
+  expect((await f.ingress.inspect({ ingressId: accepted.ingress.ingressId })).ingress).toEqual(recovered.ingress)
 })
