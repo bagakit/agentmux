@@ -11,8 +11,9 @@ import { ConversationToolTrace } from './ConversationToolTrace.js'
 import { ConversationReasoningTrace } from './ConversationReasoningTrace.js'
 import type { ConversationHistoryResourceReader, ConversationNativeResourceRecord } from './ConversationResourceImage.js'
 
-export function ConversationResourceText({ part, partIndex, record, readResource, workspaceRoot = '', homeDir = '', inputMode = false,
+export function ConversationResourceText({ active = true, part, partIndex, record, readResource, workspaceRoot = '', homeDir = '', inputMode = false,
   openWorkspaceFile, readPastedImage, openHttpLink }: {
+  active?: boolean
   part: Extract<AgentSessionHistoryContentPart, { kind: 'resource' }>; partIndex: number
   record: ConversationNativeResourceRecord; readResource: ConversationHistoryResourceReader
   workspaceRoot?: string; homeDir?: string; inputMode?: boolean
@@ -30,8 +31,11 @@ export function ConversationResourceText({ part, partIndex, record, readResource
     mounted.current = true; setLoaded(null); setReading(null)
     return () => { mounted.current = false; pending.current?.abort(); pending.current = null }
   }, [owner])
+  useEffect(() => {
+    if (!active) { pending.current?.abort(); pending.current = null; setReading(current => current?.loading ? { ...current, loading: false } : current) }
+  }, [active])
   async function load() {
-    if (!mounted.current || latestOwner.current !== owner) return
+    if (!active || !mounted.current || latestOwner.current !== owner) return
     pending.current?.abort()
     const controller = new AbortController(); pending.current = controller
     setReading({ owner, loading: true, error: null })
@@ -56,11 +60,11 @@ export function ConversationResourceText({ part, partIndex, record, readResource
     {content?.kind === 'text' ? <div className="log-turn__text">
       {prefix?.sourceLabel ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
       {prefix?.declaredContexts?.map((context, index) => <details key={index} className="log-turn__declared-context"><summary>Declared context</summary><pre>{context.raw}</pre></details>)}
-      <AgentMarkdown content={prefix?.body ?? text} inputMode={inputMode} workspaceRoot={workspaceRoot} homeDir={homeDir}
+      <AgentMarkdown visible={active} content={prefix?.body ?? text} inputMode={inputMode} workspaceRoot={workspaceRoot} homeDir={homeDir}
         {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
     </div> :
       content?.kind === 'tool-call' || content?.kind === 'tool-result' ? <ConversationToolTrace copyIdentity={owner} part={content} workspaceRoot={workspaceRoot} /> :
-      content?.kind === 'reasoning' ? <ConversationReasoningTrace copyIdentity={owner} part={content} workspaceRoot={workspaceRoot} homeDir={homeDir}
+      content?.kind === 'reasoning' ? <ConversationReasoningTrace active={active} copyIdentity={owner} part={content} workspaceRoot={workspaceRoot} homeDir={homeDir}
         {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /> :
       content?.kind === 'resource' ? <div className="log-turn__resource"><span>{content.label ?? content.resourceType}</span><code>{content.reference}</code></div> : null}
   </div>

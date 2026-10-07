@@ -14,11 +14,12 @@ function highlightExcerpt(text: string, query: string) {
  return text.split(query).map((fragment, index) => <Fragment key={index}>{index ? <mark>{query}</mark> : null}{fragment}</Fragment>)
 }
 
-const Hit = memo(function Hit({ hit, query, open, onExpand }: { hit: FocusHistoryHit; query: string; open: boolean; onExpand(key: string, open: boolean): void }) {
+const Hit = memo(function Hit({ hit, query, open, onExpand, active }: { active: boolean; hit: FocusHistoryHit; query: string; open: boolean; onExpand(key: string, open: boolean): void }) {
  const item = hit.entry.item
  const currentNameSelector = useMemo(() => {
   let previous: readonly unknown[] | undefined, name: string | undefined
-  return (state: ReturnType<typeof useAppStore.getState>) => {
+  return (state: ReturnType<typeof useAppStore.getState>, observing: boolean) => {
+   if (!observing) return name
    const matches = (agentSessionPresentationIndex(state.sessions).get(hit.reference.agentSessionId) ?? []).filter(session =>
     session.hostId === hit.reference.hostId && session.control.hostId === hit.reference.hostId && session.control.agentSessionId === hit.reference.agentSessionId)
    const session = matches.length === 1 ? matches[0] : undefined, timeline = session ? state.timelines[session.id] : undefined
@@ -31,7 +32,7 @@ const Hit = memo(function Hit({ hit, query, open, onExpand }: { hit: FocusHistor
    return name
   }
  }, [hit.reference.hostId, hit.reference.agentSessionId])
- const currentName = useAppStore(currentNameSelector)
+ const currentName = useAppStore(state => currentNameSelector(state, active))
  const hosts = useAppStore(state => state.config?.hosts)
  const hostName = hosts?.find(host => host.id === hit.reference.hostId)?.label.trim() || hit.reference.hostId
  const record = useMemo(() => projectConversationRecords({ agentSessionId: hit.reference.agentSessionId, executionHostId: hit.reference.hostId,
@@ -44,7 +45,7 @@ const Hit = memo(function Hit({ hit, query, open, onExpand }: { hit: FocusHistor
  const excerpt = text.slice(start, start + 320)
  const readResource = useCallback((input: Parameters<typeof api.sessions.historyResource>[1]) => api.sessions.historyResource({ hostId: hit.reference.hostId, agentSessionId: hit.reference.agentSessionId }, input), [hit.reference.hostId, hit.reference.agentSessionId])
  const nativeRecord = useMemo(() => hit.nativeSource ? { source: hit.nativeSource, recordId: item.id, ...('turnId' in item && item.turnId ? { turnId: item.turnId } : {}) } : undefined, [hit])
- const body = (content: string | readonly AgentSessionHistoryContentPart[]) => <ConversationMessage compact recordedIdentity {...(record?.speaker ? { speaker: record.speaker } : {})} {...(record?.input ? { inputSource: record.input.source } : {})} content={content} recordTitle={item.kind} messageId={item.id} conversationSessionId={hit.reference.agentSessionId} executionHostId={hit.reference.hostId} {...(nativeRecord ? { nativeResourceRecord: nativeRecord } : {})} readHistoryResource={readResource} />
+ const body = (content: string | readonly AgentSessionHistoryContentPart[]) => <ConversationMessage active={active} compact recordedIdentity {...(record?.speaker ? { speaker: record.speaker } : {})} {...(record?.input ? { inputSource: record.input.source } : {})} content={content} recordTitle={item.kind} messageId={item.id} conversationSessionId={hit.reference.agentSessionId} executionHostId={hit.reference.hostId} {...(nativeRecord ? { nativeResourceRecord: nativeRecord } : {})} readHistoryResource={readResource} />
  return <details className="focus-history-hit" open={open} onToggle={event => onExpand(focusHistoryHitKey(hit), event.currentTarget.open)}>
   <summary>
    <span className="focus-history-hit__identity"><strong>{currentName || hit.reference.agentSessionId}</strong><small>{currentName ? 'Current name · ' : ''}{hostName}</small></span>
@@ -65,7 +66,7 @@ const Hit = memo(function Hit({ hit, query, open, onExpand }: { hit: FocusHistor
   </> : null}
  </details>
 })
-export function FocusHistorySearch({ search }: { search: ReturnType<typeof useFocusHistorySearch> }) {
+export function FocusHistorySearch({ search, active = true }: { active?: boolean; search: ReturnType<typeof useFocusHistorySearch> }) {
  const { result } = search
  if (!result) return null
  return <section className="focus-history-search" aria-label="History search results" aria-busy={result.loading}>
@@ -76,6 +77,6 @@ export function FocusHistorySearch({ search }: { search: ReturnType<typeof useFo
    {result.issues.length ? <><strong>Unavailable search coverage</strong>{result.issues.map((issue, index) => <p key={index}>{issue}</p>)}<p>Search again to retry unavailable sources.</p></> : null}
   </details>
   {!result.hits.length && !result.loading ? <p>{!result.confirmed || result.remaining || result.issues.length ? 'No matches in the checked records. Search coverage is incomplete.' : 'No matches in the retained text of the checked sources.'}</p> : null}
-  {result.hits.map(hit => <Hit key={focusHistoryHitKey(hit)} hit={hit} query={result.query} open={search.expandedKey === focusHistoryHitKey(hit)} onExpand={search.expand} />)}
+  {result.hits.map(hit => <Hit active={active} key={focusHistoryHitKey(hit)} hit={hit} query={result.query} open={search.expandedKey === focusHistoryHitKey(hit)} onExpand={search.expand} />)}
  </section>
 }

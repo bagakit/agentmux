@@ -7,6 +7,7 @@ import type { ReadPastedImage } from './ConversationImage.js'
 const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
 export type ConversationReasoningTraceProps = {
+  active?: boolean
   part: Extract<AgentSessionHistoryContentPart, { kind: 'reasoning' }>
   copyIdentity?: object
   traceId?: string
@@ -25,6 +26,7 @@ export type ConversationReasoningTraceProps = {
  * Controlled disclosure (e.g. from session history) and local interactive toggle are preserved.
  */
 export const ConversationReasoningTrace = memo(function ConversationReasoningTrace({
+  active = true,
   part,
   traceId,
   copyIdentity,
@@ -67,6 +69,7 @@ export const ConversationReasoningTrace = memo(function ConversationReasoningTra
           ) : (
             <div className="log-turn__trace-body">
               <MemoizedAgentMarkdown
+                visible={active}
                 content={part.text}
                 workspaceRoot={workspaceRoot}
                 homeDir={homeDir}
