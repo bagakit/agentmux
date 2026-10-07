@@ -1,22 +1,2 @@
-/* Topic aggregation and retained one-Tab mosaic; shared inspection has its own sheet. */
-.topic-region-mosaic {
-  flex: 0 0 auto;
-  position: relative;
-  width: 48px; height: 28px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface-0);
-  overflow: hidden;
-}
+/* Topic aggregation; shared geometry and inspection have their own sheet. */
 .topic-presence { display: flex; align-items: center; gap: var(--sp-2); }
-.topic-region-mosaic__cell {
-  position: absolute;
-  display: grid;
-  place-items: center;
-  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
-  overflow: hidden;
-  border: 1px solid var(--surface-0);
-  background: var(--surface-3);
-}
-.topic-region-mosaic__cell .agent-avatar { transform: scale(.6); transform-origin: center; }
-.workspace-topic-item.current .topic-region-mosaic__cell { background: var(--green-line); }
