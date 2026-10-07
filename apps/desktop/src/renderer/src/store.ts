@@ -6505,7 +6505,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   setMainSurface(mainSurface) {
     const state = get()
-    const choice = state.workbenchSpaceSelection ?? (mainSurface !== 'survey' && mainSurface !== 'recall' && state.activeWorkspaceId
+    const choice = state.workbenchSpaceSelection ?? (mainSurface === 'workbench' && state.activeWorkspaceId
       ? workbenchObjectLayout(state, state.activeWorkspaceId).choice : null)
     set({ mainSurface, workbenchNavigationInputPolicy: null, regionCaretFocus: null,
       ...(choice && !state.workbenchSpaceSelection ? { workbenchSpaceSelection: choice } : {}) })
