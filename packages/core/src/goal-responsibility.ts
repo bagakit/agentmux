@@ -47,7 +47,7 @@ export type GoalExecutionFacts = {
 }
 export function goalResponsibilityBasis(status: AgentMuxAgentRuntimeStatus | undefined): DemandResponsibilityBasis {
   const state = status?.session.semanticStatus
-  return { stateEnteredAt: state?.stateEnteredAt ?? null, activityRevision: state?.currentActivityRevision ?? null,
+  return { stateEnteredAt: status?.session.currentActivity ? null : state?.stateEnteredAt ?? null, activityRevision: state?.currentActivityRevision ?? null,
     inputSubmissionId: status?.session.promptCompletionAdmission?.submissionId ?? status?.session.terminalPromptSubmission?.submissionId ?? null }
 }
 /** Only original Core/domain facts select a phase. Display text never participates. */
@@ -107,7 +107,7 @@ export function observeGoalExecution(goal: Demand, facts: GoalExecutionFacts, no
     return set('waiting-external', `${current.summary} Resume when: ${current.waiting.resumeWhen}`, null, 'external', current.nextAction)
   if (observation.semantic === 'active') return set('executing', 'Core confirms activity on this original execution Run.', null, 'worker', 'Continue the original task and report progress, blockers and delivery.')
   if (observation.semantic === 'idle') {
-    if (!basis.stateEnteredAt || basis.stateEnteredAt > now) return set('unknown', 'Core confirms idle but its original state start is unavailable. Idle duration is unknown.', 'unknown')
+    if (!basis.stateEnteredAt || basis.stateEnteredAt > now) return set('unknown', 'Core confirms idle but its start time and the original task outcome are unconfirmed.', 'unknown')
     const due = basis.stateEnteredAt + GOAL_IDLE_GRACE_MS
     if (now < due) { set('idle-grace', 'The original turn ended; its report or handoff may still be arriving.', null, 'worker', 'Return the original report or declare the next responsibility.'); row.nextCheckAt = due; return row }
     return set('stalled', 'The original Agent remains idle without a verified report, waiting condition or handoff.', 'stalled', 'manager', 'Inspect the original Agent, collect its result or arrange explicit continuation.')

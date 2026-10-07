@@ -74,8 +74,9 @@ export function focusBucketForSession(session: SessionSnapshot, hasCurrentResult
   const state = session.status.state
   if ((session.kind === 'agent' && session.pendingInteraction) || isNeedsYouState(state) || state === 'error') return 'attention'
   if (session.runUnobserved || session.processState !== 'running') return 'idle'
-  if (turnWorking(state) && (state === 'starting' || session.kind !== 'agent' || observeAgentSession(session, now).semantic === 'active')) return 'working'
-  if (hasCurrentResult && state === 'done') return 'results'
+  const activity = session.kind === 'agent' ? observeAgentSession(session, now).semantic : undefined
+  if (activity === 'active' || turnWorking(state) && (state === 'starting' || session.kind !== 'agent')) return 'working'
+  if (hasCurrentResult && state === 'done' && (session.kind !== 'agent' || !session.currentActivity)) return 'results'
   return 'idle'
 }
 /** The neutral column is a presentation group, not evidence that every member is idle. */
@@ -83,7 +84,7 @@ export function focusNeutralGroupSummary(rows: readonly FocusContext[]): { label
   let idle = 0, unknown = 0, recovery = 0
   for (const row of rows) {
     if (row.processState !== 'running') recovery++
-    else if (row.activitySemantic === 'unknown' || row.activitySemantic === 'unsupported' || row.state === 'running') unknown++
+    else if (row.activitySemantic === 'unknown' || row.activitySemantic === 'unsupported' || row.activitySemantic === undefined && row.state === 'running') unknown++
     else idle++
   }
   const label = recovery ? 'Idle / Recovery' : unknown && !idle ? 'Activity unknown'
@@ -106,10 +107,11 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
     : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'unknown'
     ? activityExplanation!.label
     : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'unsupported'
-      ? 'Activity not reported' : sessionStatusLabel(session)
+      ? 'Activity not reported' : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'idle'
+        ? 'Idle' : bucket === 'working' && activitySemantic === 'active' ? 'Working' : sessionStatusLabel(session)
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
   const lastActivityAt = focusLastTaskActivityAt(items, activityEntryTime(session), now)
-  const stateEnteredAt = agentStateEnteredAt(session, now)
+  const stateEnteredAt = session.kind === 'agent' && session.currentActivity ? undefined : agentStateEnteredAt(session, now)
   const recap = items.length ? launcherTimelineRecap(timeline) : null
   let detail = 'No activity details observed', detailIsMessage = false
   let detailKind: FocusContext['detailKind'] = pending || bucket === 'attention' || state === 'disconnected' || state === 'exited' ? 'service' : 'activity'
@@ -149,12 +151,15 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
   // the helper's chosen kind and it is nonempty. A newer prompt is a different fact.
   const detailIsRecap = Boolean(detailIsMessage && recap && latest?.content?.trim()
     && latest.kind === (recap.source === 'Last assistant message' ? 'assistant_message' : 'user_message'))
+  const displayState = bucket === 'working' && activitySemantic === 'active' ? 'working'
+    : state === 'working' && activitySemantic !== 'active' || bucket === 'idle' && activitySemantic === 'idle' && session.kind === 'agent' && session.currentActivity
+      ? 'running' : state
   const retainedRunIds = [...new Set(items.flatMap(item => item.activityState ? [item.activityState.run.runId] : []))]
-  return { ...(retainedRunIds.length ? { retainedRunIds } : {}), id: session.id, ...(session.kind === 'agent' && (session.nativeHandle?.sessionId ?? session.nativeSessionId) ? { nativeSessionId: session.nativeHandle?.sessionId ?? session.nativeSessionId } : {}), name, detail, state: state === 'working' && activitySemantic !== 'active' ? 'running' : state, stateLabel, processState: session.processState, runUnobserved: session.runUnobserved === true, bucket, kind: session.kind, providerId: session.providerId,
+  return { ...(retainedRunIds.length ? { retainedRunIds } : {}), id: session.id, ...(session.kind === 'agent' && (session.nativeHandle?.sessionId ?? session.nativeSessionId) ? { nativeSessionId: session.nativeHandle?.sessionId ?? session.nativeSessionId } : {}), name, detail, state: displayState, stateLabel, processState: session.processState, runUnobserved: session.runUnobserved === true, bucket, kind: session.kind, providerId: session.providerId,
     ...(session.kind === 'agent' ? { executorId: session.executorId } : {}),
     hostId: session.hostId, topicId, workspace, workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
     liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state) || session.kind === 'agent' && state === 'error', lastActivityAt,
-    runId: session.control.run.runId, ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }), workingEnteredAt: activitySemantic === 'unknown' || activitySemantic === 'unsupported' ? null : workingEntryTime(session), recap, detailIsRecap, detailKind,
+    runId: session.control.run.runId, ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }), workingEnteredAt: activitySemantic === 'active' && !(session.kind === 'agent' && session.currentActivity) ? workingEntryTime(session) : null, recap, detailIsRecap, detailKind,
     ...(activitySemantic === undefined ? {} : { activitySemantic }) }
 }
 function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot, now: number): boolean {
@@ -165,6 +170,7 @@ function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot, now: nu
     && a.status.detail === b.status.detail && a.runUnobserved === b.runUnobserved
     && a.status.source === b.status.source
     && (a.kind === 'agent' ? a.semanticStatus : undefined) === (b.kind === 'agent' ? b.semanticStatus : undefined)
+    && (a.kind === 'agent' ? a.currentActivity : undefined) === (b.kind === 'agent' ? b.currentActivity : undefined)
     && (a.kind !== 'terminal' || a.status.exitCode === b.status.exitCode && a.status.exitReason === b.status.exitReason)
     && activityEntryTime(a) === activityEntryTime(b)
     && a.control.run.runId === b.control.run.runId && workingEntryTime(a) === workingEntryTime(b)

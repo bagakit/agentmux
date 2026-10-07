@@ -321,6 +321,7 @@ function projectSession(
         : {}),
       capabilities: capabilitiesFor(subject.providerId),
       ...(semanticFacts ? { semanticStatus: structuredClone(semanticFacts) } : {}),
+      ...(subject.agentSession.currentActivity ? { currentActivity: structuredClone(subject.agentSession.currentActivity) } : {}),
       ...(subject.agentSession.continuity ? { continuity: structuredClone(subject.agentSession.continuity) } : {}),
       hostId: subject.hostId,
       workspacePath: subject.workspacePath,
