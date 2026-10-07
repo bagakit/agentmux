@@ -16,7 +16,7 @@ const databases: DatabaseSync[] = [], directories: string[] = []
 afterEach(async () => { for (const db of databases.splice(0)) if (db.isOpen) db.close(); for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }) })
 const checkpoint = (cursor = 'original-cut'): ConversationCheckpoint => ({ agentSessionId: 'session-a', source: { providerId: 'claude', nativeSessionId: 'native-a' }, cursor })
 const boundary: PublicationBoundary = { bindingId: 'binding-a', revision: 1, connectionId: 'connection-a', application: { domain: 'chat.example', appId: 'app-a' },
-  executionHostId: 'host-a', agentSessionId: 'session-a', externalConversationId: 'room-a', sourceCheckpoints: [checkpoint()] }
+  executionHostId: 'host-a', agentSessionId: 'session-a', externalConversationId: 'room-a', sourceCheckpoints: [checkpoint()], scope: { input: 'mentions-and-replies', publication: 'future-native-user-facing' } }
 const speech = (id: string, text = 'Same original speech'): AgentSessionHistoryItem => ({ id, kind: 'assistant-message', contentParts: [{ kind: 'text', text }] })
 const page = (items: AgentSessionHistoryItem[], cursor = 'next-cut'): ConversationChangesPage => ({ hostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId,
   source: checkpoint().source, items, checkpoint: checkpoint(cursor), more: false })
