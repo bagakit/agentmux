@@ -5,9 +5,16 @@ import { act, createElement, type ReactNode } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { webcrypto } from 'node:crypto'
+import { mkdtemp, rm, symlink } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { spawn } from 'node:child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { parseAgentMuxControlReceipt, parseAgentMuxControlRequest } from '@agentmux/core'
+import { AgentMuxControlServer, connectAgentMuxRpc } from '../../../packages/core/src/control-host'
+import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc'
 import type { AgentMuxControlResult, AgentMuxDesktopFocusResult, AgentMuxDesktopFocusTarget } from '@agentmux/core/control'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
@@ -139,7 +146,6 @@ beforeEach(async () => {
   window.localStorage.clear()
   useAppStore.setState({ ...initial, restoredWorkbench: null, config: null }, true)
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
@@ -243,15 +249,106 @@ describe('actual Desktop navigation and content-free observation owners', () => 
     expect(document.activeElement).toBe(document.body)
     expect(useAppStore.getState().regionCaretFocus).toBeNull()
   })
-  it('opens an exact Goal then follows the uniquely associated Work Goal on reentry without PMO launch', async () => {
+  it('opens an exact Goal and retains its independent selection on Goals reentry without PMO launch', async () => {
     const launch = vi.spyOn(api.sessions, 'launchAgent'), send = vi.spyOn(api.sessions, 'submitPrompt')
     const result = await control({ kind: 'goal', goalId: 'exact' })
     expect(result.navigation.selection).toMatchObject({ surface: 'goals', mainSurface: 'board', goalId: 'exact' })
     expect(container.querySelector('[data-goal-detail-id="exact"]')).not.toBeNull()
     expect(result.presentation.state).toBe('main-visible')
     for (const surface of ['space', 'focus', 'survey', 'goals'] as const) await control({ kind: 'surface', surface })
-    expect(useAppStore.getState().selectedDemandId).toBe('first')
+    expect(useAppStore.getState().selectedDemandId).toBe('exact')
     expect(launch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled(); expect(document.activeElement).toBe(outside)
+  })
+  it('keeps original Work and execution history when the actual Goal row selects a uniquely linked other Agent', async () => {
+    await control({ kind: 'space', regionId: 'source-region' })
+    await act(async () => useAppStore.setState(state => ({ demands: { ...state.demands, exact: goal('exact', [target.id]) } })))
+    await control({ kind: 'surface', surface: 'goals' })
+    const original = useAppStore.getState(), select = vi.spyOn(original, 'selectMainRegion')
+    const row = [...container.querySelectorAll<HTMLButtonElement>('.goals-row')]
+      .find(button => button.querySelector('strong')?.textContent === 'exact')
+    expect(row).toBeDefined()
+    await act(async () => row!.click())
+    expect(container.querySelector('[data-goal-detail-id="exact"]')).not.toBeNull()
+    const after = useAppStore.getState()
+    expect(after.selectedDemandId).toBe('exact')
+    expect(after.workbenchSpaceSelection).toBe(original.workbenchSpaceSelection)
+    expect(after.activeWorkspaceId).toBe(original.activeWorkspaceId)
+    expect(after.agentFocus).toBe(original.agentFocus)
+    expect(after.agentComposerDrafts).toBe(original.agentComposerDrafts)
+    expect(select).not.toHaveBeenCalled()
+  })
+  it('executes public Goal focus through typed RPC and compiled CLI into the original App without selecting its linked Agent', async () => {
+    await control({ kind: 'space', regionId: 'source-region' })
+    await act(async () => useAppStore.setState(state => ({ demands: { ...state.demands, exact: goal('exact', [target.id]) } })))
+    const original = useAppStore.getState(), select = vi.spyOn(original, 'selectMainRegion')
+    const controls = [vi.spyOn(api.sessions, 'launchAgent'), vi.spyOn(api.sessions, 'submitPrompt'), vi.spyOn(api.sessions, 'resume'), vi.spyOn(api.sessions, 'stop')]
+    const directory = await mkdtemp(join(tmpdir(), 'goal-focus-consumer-'))
+    const cli = join(directory, 'amux.mjs')
+    const require = createRequire(import.meta.url), core = dirname(require.resolve('../../../packages/core/package.json'))
+    await symlink(join(core, 'node_modules'), join(directory, 'node_modules'), 'dir')
+    await require(join(core, 'node_modules/esbuild')).build({ entryPoints: [join(core, 'src/agentmux.ts')],
+      outfile: cli, bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent' })
+    const requests: string[] = []
+    const server = new AgentMuxControlServer({ socketPath: join(directory, 'control.sock'), coreClients: () => [], async execute(request) {
+      requests.push(request.operation)
+      let pending!: Promise<AgentMuxControlResult>
+      await act(async () => { pending = useAppStore.getState().executeControl(request); await Promise.resolve() })
+      return await pending
+    } })
+    await server.start()
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    try {
+      const receipt = await client.call('goal.focus', { goalId: 'exact' })
+      expect(receipt.navigation.selection).toMatchObject({ surface: 'goals', goalId: 'exact' })
+      expect(receipt.presentation.state).toBe('main-visible')
+      expect(container.querySelector('[data-goal-detail-id="exact"]')).not.toBeNull()
+      await act(async () => useAppStore.getState().setSelectedDemand('first'))
+      const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+        const child = spawn(process.execPath, [cli, 'goal', 'focus', '--goal', 'exact'], { env: objectCliEnvironment(directory), stdio: ['ignore', 'pipe', 'pipe'] })
+        let stdout = '', stderr = ''
+        const timer = setTimeout(() => { child.kill(); reject(new Error('Original CLI request exceeded its bounded deadline.')) }, 10_000)
+        child.stdout.on('data', value => { stdout += value }); child.stderr.on('data', value => { stderr += value })
+        child.on('error', error => { clearTimeout(timer); reject(error) })
+        child.on('close', code => { clearTimeout(timer); resolve({ code, stdout, stderr }) })
+      })
+      const output = JSON.parse(result.stdout)
+      expect(result.stderr).toBe('')
+      expect(output).toMatchObject({ ok: true, operation: 'goal.focus', result: { navigation: { selection: { surface: 'goals', goalId: 'exact' } } } })
+      expect(result.code).toBe(output.result.partial ? 1 : 0)
+      expect(useAppStore.getState().selectedDemandId).toBe('exact')
+      expect(container.querySelector('[data-goal-detail-id="exact"]')).not.toBeNull()
+      const absent = await client.call('goal.focus', { goalId: 'unavailable-goal' })
+      expect(absent).toMatchObject({ partial: true, navigation: { state: 'rejected', selection: { goalId: 'exact' } }, issues: expect.arrayContaining([expect.objectContaining({ code: 'GOAL_UNKNOWN' })]) })
+      const after = useAppStore.getState()
+      expect(after.workbenchSpaceSelection).toBe(original.workbenchSpaceSelection)
+      expect(after.activeWorkspaceId).toBe(original.activeWorkspaceId)
+      expect(after.agentFocus).toBe(original.agentFocus)
+      expect(after.agentComposerDrafts).toBe(original.agentComposerDrafts)
+      expect(document.activeElement).toBe(outside)
+      expect([outside.selectionStart, outside.selectionEnd]).toEqual([2, 5])
+      expect(requests).toEqual(['focus', 'focus', 'focus'])
+      expect(select).not.toHaveBeenCalled()
+      for (const operation of controls) expect(operation).not.toHaveBeenCalled()
+    } finally { await client.dispose(); await server.stop(); await rm(directory, { recursive: true }) }
+  })
+  it('rejects a late Goal navigation after the user has selected a later surface', async () => {
+    let release!: (topics: []) => void
+    vi.spyOn(api.scratch, 'listTopics').mockImplementationOnce(() => new Promise<[]>(resolve => { release = resolve })).mockResolvedValue([])
+    let pending!: Promise<AgentMuxControlResult>
+    await act(async () => {
+      useAppStore.setState({ config: { ...config, workspaces: [...config.workspaces,
+        { id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', path: _hygiene_fixturePath('scratch'), kind: 'folder' }] } })
+      pending = useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'original-goal-navigation', operation: 'focus', target: { kind: 'goal', goalId: 'exact' }, inputPolicy: 'preserve' })
+    })
+    await act(async () => useAppStore.getState().setMainSurface('survey'))
+    const original = useAppStore.getState()
+    release([])
+    const result = await pending
+    expect(result).toMatchObject({ operation: 'focus', partial: true, navigation: { state: 'rejected', selection: { surface: 'survey', goalId: 'first' } },
+      issues: expect.arrayContaining([expect.objectContaining({ code: 'NAVIGATION_CHANGED' })]) })
+    expect(useAppStore.getState().agentFocus).toBe(original.agentFocus)
+    expect(useAppStore.getState().selectedDemandId).toBe('first')
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(original.workbenchSpaceSelection)
   })
   it('transfers input only through the exact mounted Terminal owner and cancels an old intent on later explicit navigation', async () => {
     const result = await control({ kind: 'space', tabId: 'target-tab' }, 'target')
