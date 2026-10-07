@@ -81,6 +81,7 @@ export class ObjectCliProbe {
 export function objectCliSeed(method: string, input: string): string[] {
   const ids = { agent: 'SID', region: 'R', zone: 'Z', space: 'S', goal: 'G' }
   const fixed: Record<string, string[]> = {
+    'space.mote.connection.create': ['--input', '-'], 'space.mote.connection.sync': ['--input', '-'], 'space.mote.connection.advance': ['--operation-id', 'mote-original'], 'space.mote.connection.inspect': ['--operation-id', 'mote-original'], 'space.mote.connection.ls': ['--input', '-'],
     'connection.profile.get': ['--connection', 'profile-connection', '--revision', '1'], 'connection.profile.sync': ['--input', '-'], 'connection.profile.advance': ['--operation-id', 'profile-original'], 'connection.profile.inspect': ['--operation-id', 'profile-original'], 'connection.profile.ls': ['--connection', 'profile-connection'],
     'connection.enrollment.begin': ['--input', '-'], 'connection.enrollment.advance': ['--operation-id', 'enroll-original'], 'connection.enrollment.inspect': ['--operation-id', 'enroll-original'], 'connection.enrollment.ls': [],
     'connection.service.get': [], 'connection.service.configure': ['--input', '-'], 'connection.service.inspect': ['--operation-id', 'service-original'],
