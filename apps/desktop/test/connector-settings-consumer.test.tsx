@@ -44,7 +44,7 @@ async function fill(label: string, value: string) {
   expect(input).not.toBeNull()
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) })
 }
-async function open() { const Pane = connectionsSettingsModule.Pane; await dom.render(<Pane active config={composerConfig} onClose={() => {}} onNavigate={() => {}} />); await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(1)) }) }
+async function open() { const Pane = connectionsSettingsModule.Pane; await dom.render(<Pane active config={composerConfig} onClose={() => {}} onNavigate={() => {}} />); await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(1)) }); if (dom.container.querySelector('[data-bot-enrollment]')) await dom.click('[data-enrollment-existing]') }
 async function draft() { await act(async () => { dom.container.querySelector<HTMLDetailsElement>('.connector-optional')!.open = true }); await fill('Connection name', 'Shared team'); await fill('Connection app ID', 'app-a'); await fill('Connection app secret', secret) }
 
 describe('Settings uses the original connection owner through public service', () => {
@@ -104,6 +104,7 @@ describe('Settings uses the original connection owner through public service', (
 
   it('contributes to Connections and stores encrypted credentials before the real configure/list path', async () => {
     expect(settingsNavGroups('').find(group => group.id === 'connections')!.items.map(item => item.id)).toContain('chat-connections')
+    expect(settingsNavGroups('扫码').flatMap(group => group.items).map(item => item.id)).toContain('chat-connections')
     await open(); await draft(); await dom.click('[data-connection-editor] .primary-button')
     await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(2)) })
     const [saved] = (await owner.list()).connections
