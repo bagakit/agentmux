@@ -38,14 +38,15 @@ async function fill(label: string, value: string) {
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) })
 }
 async function saved() {
-  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.textContent).toContain('Connection saved.') })
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.textContent).toContain('Application saved.') })
   return (await services.connections.list()).connections[0]!
 }
 
 describe('Mounted Settings preserves the registered adapter identity', () => {
   it.each(['open.feishu.cn', 'open.larksuite.com'])('starts the original default SDK receiver after saving %s', async domain => {
     await dom.render(<ExternalConnectionsSettings active />)
-    await fill('Connection name', 'Original team application'); await fill('Connection app ID', feishuConfig.application.appId); await fill('Connection app secret', 'fixture-credential')
+    await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[aria-label="Connection app ID"]')).not.toBeNull() })
+    await act(async () => { dom.container.querySelector<HTMLDetailsElement>('.connector-optional')!.open = true }); await fill('Connection name', 'Original team application'); await fill('Connection app ID', feishuConfig.application.appId); await fill('Connection app secret', 'fixture-credential')
     const platform = dom.container.querySelector<HTMLSelectElement>('[aria-label="Connection platform"]')!
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(platform, domain); platform.dispatchEvent(new Event('change', { bubbles: true })) })
     await dom.click('[data-connection-save]')
@@ -72,7 +73,7 @@ describe('Mounted Settings preserves the registered adapter identity', () => {
     await services.connections.configure({ operationId: 'seed-application', expectedRevision: null, connection: { ...feishuConfig, adapterId, credentialRef: credential.credentialRef, enabled: false } })
     await dom.render(<ExternalConnectionsSettings active />)
     await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-connection]')).not.toBeNull() })
-    await dom.click('[data-connection] button:first-of-type'); await fill('Connection name', 'Renamed original application')
+    await dom.click('[data-connection] button:first-of-type'); await dom.click('[data-connection-editor] .connector-editor-actions .small-button'); await fill('Connection name', 'Renamed original application')
     await dom.click('[data-connection-save]')
     const record = await saved()
     expect(record.revision).toBe(2)

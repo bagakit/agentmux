@@ -44,8 +44,8 @@ async function fill(label: string, value: string) {
   expect(input).not.toBeNull()
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) })
 }
-async function open() { const Pane = connectionsSettingsModule.Pane; await dom.render(<Pane active config={composerConfig} onClose={() => {}} onNavigate={() => {}} />) }
-async function draft() { await fill('Connection name', 'Shared team'); await fill('Connection app ID', 'app-a'); await fill('Connection app secret', secret) }
+async function open() { const Pane = connectionsSettingsModule.Pane; await dom.render(<Pane active config={composerConfig} onClose={() => {}} onNavigate={() => {}} />); await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(1)) }) }
+async function draft() { await act(async () => { dom.container.querySelector<HTMLDetailsElement>('.connector-optional')!.open = true }); await fill('Connection name', 'Shared team'); await fill('Connection app ID', 'app-a'); await fill('Connection app secret', secret) }
 
 describe('Settings uses the original connection owner through public service', () => {
   it('contributes to Connections and stores encrypted credentials before the real configure/list path', async () => {
@@ -56,8 +56,8 @@ describe('Settings uses the original connection owner through public service', (
     expect(saved?.config.label).toBe('Shared team'); expect(saved?.config.application).toEqual({ domain: 'open.feishu.cn', appId: 'app-a' })
     expect(await secrets.resolve(saved!.config.credentialRef)).toBe(secret)
     expect(saved?.observation.authentication.state).toBe('unknown')
-    expect(dom.container.querySelector('[data-connection]')?.textContent).toContain('Not confirmed')
-    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Connection app secret"]')?.value).toBe('')
+    expect(dom.container.querySelector('.connector-connection-state')?.textContent).toContain('Saved · connection not yet confirmed')
+    expect(dom.container.querySelector('[aria-label="Connection app secret"]')).toBeNull()
     expect(JSON.stringify(await owner.list())).not.toContain(secret)
     database.exec('PRAGMA wal_checkpoint(FULL)')
     expect((await readFile(join(directory, 'connections.sqlite'))).includes(Buffer.from(secret))).toBe(false)
@@ -67,10 +67,12 @@ describe('Settings uses the original connection owner through public service', (
     expect(editor.querySelector('[aria-label="Connection platform"]')).toBeNull()
     expect(editor.querySelector('[aria-label="Connection app ID"]')).toBeNull()
     expect(editor.querySelector('.primary-button')?.textContent).toBe('Check connection')
-    expect(editor.querySelector('[data-connection-save]')?.classList.contains('primary-button')).toBe(false)
+    expect(editor.querySelector('[data-connection-save]')).toBeNull()
+    await dom.click('[data-connection-editor] .connector-editor-actions .small-button')
     await fill('Connection name', 'Updated team')
     expect(editor.querySelector('[data-connection-save]')?.classList.contains('primary-button')).toBe(true)
-    expect(editor.textContent).toContain('Check saved connection')
+    expect(editor.textContent).toContain('Save changes')
+    expect(editor.textContent).not.toContain('Check saved connection')
 
   })
   it('reconciles a lost save response with the original operation without resending or creating a new connection', async () => {
@@ -82,12 +84,12 @@ describe('Settings uses the original connection owner through public service', (
     })
     await open(); await draft(); await dom.click('[data-connection-editor] .primary-button')
     await act(async () => { await vi.waitFor(() => expect(configured).toBe(1)) })
-    expect(dom.container.textContent).toContain('Check pending save')
+    expect(dom.container.textContent).toContain('Check this save')
     expect((await owner.inspect({ operationId })).operation).not.toBeNull()
     await dom.click('[data-connection-editor] .primary-button')
     await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(2)) })
     expect(configured).toBe(1); expect((await owner.list()).connections).toHaveLength(1)
-    expect(dom.container.textContent).toContain('Connection saved')
+    expect(dom.container.textContent).toContain('The original application save is confirmed')
   })
   it('keeps check outcomes with the exact connection and reports each unconfirmed service fact', async () => {
     const application = { adapterId: 'sample', application: { domain: 'chat.example', appId: 'app-a' }, enabled: true, credentialRef: 'credential-a' }
@@ -95,15 +97,83 @@ describe('Settings uses the original connection owner through public service', (
     await owner.configure({ operationId: 'seed-b', expectedRevision: null, connection: { ...application, connectionId: 'connection-b', label: 'Application B' } })
     await open()
     await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(1)) })
-    await dom.click('[data-connection="connection-b"] button:last-child')
+    await dom.click('[data-connection="connection-b"] button')
+    await dom.click('[data-connection-editor] .primary-button')
     await act(async () => { await vi.waitFor(() => expect(completedChecks).toBe(1)) })
-    const first = dom.container.querySelector('[data-connection="connection-a"]')!, checked = dom.container.querySelector('[data-connection="connection-b"]')!
-    expect(first.querySelector('[role="status"]')).toBeNull()
-    expect(checked.querySelector('[role="status"]')?.textContent).toContain('Not confirmed: authentication, durable receiving, group delivery')
-    expect(checked.querySelector('[role="status"]')?.textContent).toContain('Unavailable: connection')
-    expect(checked.querySelector('.connector-stage-list')?.textContent).toContain('Durable receiving')
+    const editor = dom.container.querySelector('[data-connection-editor]')!
+    expect(editor.querySelector('.connector-check-feedback')?.textContent).toContain('Not confirmed: application credentials, receiving messages, group delivery')
+    expect(editor.querySelector('.connector-check-feedback')?.textContent).toContain('Needs attention: live connection')
+    expect(editor.querySelector('.connector-stage-list')?.textContent).toContain('Receiving messages')
     expect(dom.container.querySelector('[data-connector-settings] > [role="status"]')).toBeNull()
-    expect(dom.container.textContent).not.toContain('reported separately below')
+    await dom.click('.connector-back')
+    await dom.click('[data-connection="connection-a"] button')
+    expect(dom.container.querySelector('.connector-check-feedback')).toBeNull()
+    expect(dom.container.querySelector('.connector-editor-title')?.textContent).toBe('Application A')
+  })
+  it('explains the credential source and next group step without making a group or claiming connection readiness', async () => {
+    const external = vi.spyOn(api.ui, 'openExternal').mockResolvedValue(undefined)
+    await open()
+    expect(dom.container.textContent).toContain('Credentials & Basic Info')
+    expect(dom.container.querySelector('.connector-stage-list')).toBeNull()
+    expect(dom.container.querySelector('[aria-current="step"]')?.textContent).toContain('App credentials')
+    await dom.click('.connector-credentials-source button')
+    expect(external).toHaveBeenCalledExactlyOnceWith('https://open.feishu.cn/app')
+    await dom.click('[data-connection-save]')
+    expect(dom.container.querySelector('[aria-label="Connection app ID"]')?.hasAttribute('disabled')).toBe(false)
+    expect((await owner.list()).connections).toHaveLength(0)
+    await fill('Connection app ID', 'app-a'); await fill('Connection app secret', secret)
+    await dom.click('[data-connection-save]')
+    await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(2)) })
+    const record = (await owner.list()).connections[0]!
+    expect(record.config.label).toBe('Feishu bot')
+    expect(dom.container.querySelector('.connector-next-step')?.textContent).toContain('Open an Agent’s menu')
+    expect(dom.container.querySelector('.connector-connection-state')?.textContent).toContain('connection not yet confirmed')
+    expect(dom.container.querySelectorAll('[data-connection-editor] .primary-button')).toHaveLength(1)
+    expect(database.prepare('SELECT COUNT(*) AS count FROM connection_configuration_operation').get()?.count).toBe(1)
+    expect(vi.mocked(api.connections.call).mock.calls.map(call => call[0])).not.toContain('connection.test')
+    expect(vi.mocked(api.connections.call).mock.calls.map(call => call[0])).not.toContain('connection.room.create')
+  })
+  it('only inspects an unknown save and explicitly continues its same frozen input when no receipt is recorded', async () => {
+    const attempts: ConnectionParamsMap['connection.configure'][] = []
+    vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
+      if (method === 'connection.configure') {
+        attempts.push(structuredClone(params as ConnectionParamsMap['connection.configure']))
+        if (attempts.length === 1) throw new Error('Request transport interrupted before dispatch')
+      }
+      return await originalCall(method, params)
+    })
+    await open(); await fill('Connection app ID', 'app-a'); await fill('Connection app secret', secret)
+    await dom.click('[data-connection-save]')
+    await act(async () => { await vi.waitFor(() => expect(attempts).toHaveLength(1)) })
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Connection app ID"]')?.disabled).toBe(true)
+    expect(dom.container.querySelector('[data-connection-save]')?.textContent).toBe('Check this save')
+    await dom.click('[data-connection-save]')
+    await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-connection-save]')?.textContent).toBe('Continue this save') })
+    expect(attempts).toHaveLength(1)
+    expect((await owner.inspect({ operationId: attempts[0]!.operationId })).operation).toBeNull()
+    await dom.click('.connector-editor-actions .small-button')
+    await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector<HTMLButtonElement>('[data-connection-save]')?.disabled).toBe(false) })
+    expect(attempts).toHaveLength(1)
+    await dom.click('[data-connection-save]')
+    await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(2)) })
+    expect(attempts).toHaveLength(2)
+    expect(attempts[1]).toEqual(attempts[0])
+    expect((await owner.inspect({ operationId: attempts[0]!.operationId })).operation?.connection.config.label).toBe('Feishu bot')
+    expect((await owner.list()).connections).toHaveLength(1)
+    expect(vi.mocked(api.connections.storeCredential)).toHaveBeenCalledTimes(1)
+  })
+  it('keeps the original credential draft through hidden settings and refresh without saving it', async () => {
+    await open(); await draft()
+    const Pane = connectionsSettingsModule.Pane
+    await dom.render(<Pane active={false} config={composerConfig} onClose={() => {}} onNavigate={() => {}} />)
+    expect(dom.container.textContent).toBe('')
+    await dom.render(<Pane active config={composerConfig} onClose={() => {}} onNavigate={() => {}} />)
+    await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(2)) })
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Connection name"]')?.value).toBe('Shared team')
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Connection app ID"]')?.value).toBe('app-a')
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Connection app secret"]')?.value).toBe(secret)
+    expect((await owner.list()).connections).toHaveLength(0)
+    expect(vi.mocked(api.connections.storeCredential)).not.toHaveBeenCalled()
   })
   it('rejects foreign IPC methods and untrusted credential entry before contacting the owner', async () => {
     await expect(handlers.get('connections:call')!({}, 'agent.send', {})).rejects.toThrow('Unsupported connection operation')
