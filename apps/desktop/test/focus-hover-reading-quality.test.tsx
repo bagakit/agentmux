@@ -292,7 +292,7 @@ it('keeps HTTP, file, image, code, anchor and footnote references selectable wit
       await act(async () => http!.click())
       expect(hostHttp).toHaveBeenCalledExactlyOnceWith('https://example.invalid/docs', expect.objectContaining({ metaKey: false, ctrlKey: false }))
       await act(async () => file!.click())
-      expect(hostFile).toHaveBeenCalledExactlyOnceWith('src/original.ts', undefined)
+      expect(hostFile).toHaveBeenCalledExactlyOnceWith('src/original.ts', undefined, expect.objectContaining({ type: 'click', metaKey: false, ctrlKey: false }))
       await act(async () => footnote!.click())
       expect(document.activeElement).toBe(documentContainer.querySelector('[data-md-footnote="1"]'))
       await act(async () => backlink!.click())
