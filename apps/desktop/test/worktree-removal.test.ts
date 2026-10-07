@@ -183,7 +183,7 @@ describe('worktree 移除的两次确认', () => {
 
     // 没问到（note 缺席）：正文就是干净的动作说明，不能出现悬空的分隔符或凭空补出的安心话。
     expect(withoutNote.description).toBe(
-      `The checkout at this location goes away. Branch ${request().branch} itself is untouched and stays available.`
+      `The workface moves into this project's default workspace. Original Agents, history and drafts stay available. Directory cleanup waits while original resources still use it. Branch ${request().branch} itself is untouched and stays available.`
     )
 
     // note 只属于**确认屏**：`blocked` 那屏说的是「丢弃未提交产出」，绝不能把这句留存说明混进去
