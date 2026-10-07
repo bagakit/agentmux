@@ -16,6 +16,7 @@ import type { InputHistoryRead } from '@agentmux/client-ui/use-agent-input-histo
 import { inputHistoryText } from '@agentmux/client-ui/input-history-text'
 import { agentPromptCondition, agentPromptNotApplied, validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
+import { HUMAN_SPEAKER_ID, speakerOfExternalAuthor } from '@agentmux/client-ui/conversation-speaker'
 import {
   AgentComposer, AgentInteractionCard, ClientUiProvider, NativeProcessObservation, ConversationMessage, ConversationView,
   createSpeakerResolver, expandSemanticReferences, speakerOfUserMessage,
@@ -574,9 +575,11 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     ...(reading.page ? { historyPage: reading.page } : {}), ...(reading.timeline ? { timeline: reading.timeline } : {}) }) : [],
   [agentSessionId, reading.page, reading.timeline])
   const capturedById = useMemo(() => new Map(captured.map(message => [message.id, message])), [captured])
+  const capturedSpeech = useMemo(() => reading.timeline?.items.filter(item => item.agentSessionId === agentSessionId &&
+    (item.kind === 'user_message' || item.kind === 'assistant_message')) ?? [], [agentSessionId, reading.timeline])
   const appendQuote = (quote: string) => setDraft(`${drafts.current.get(draftKey) ?? ''}${drafts.current.get(draftKey) ? '\n\n' : ''}${quote}`)
   const readingProps = {
-    ...(session ? { workspaceRoot: session.workspacePath } : {}),
+    ...(session ? { workspaceRoot: session.workspacePath, executionHostId: session.hostId } : {}),
     ...(openWorkspaceFile ? { openWorkspaceFile } : {}), ...(readPastedImage ? { readPastedImage } : {}),
     ...(openHttpLink ? { openHttpLink } : {}),
     onSelectAnnotation: ({ messageId, quote }: Parameters<NonNullable<ConversationMessageProps['onSelectAnnotation']>>[0]) =>
@@ -679,20 +682,22 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
             questionReplyContext={JSON.stringify([session?.hostId, agentSessionId, session?.run.runId, client?.runtimeOwnerIdentity?.()?.runtimeId])}
             {...(onShowTerminal ? { onOpenQuestionTerminal: onShowTerminal } : {})}
             {...readingProps} />
-        </> : !reading.reading ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
-        {captured.length > 0 || reading.timeline?.items.some(item => item.kind === 'assistant_message') ? <details className="mobile-conversation__captured" open={!reading.page?.items.length}><summary>发送与实时观察{attempt && attempt.phase !== 'confirmed' ? ' · 交付待确认' : ''}</summary><section aria-label="已发送消息">
-          {reading.page && <p className="mobile-captured-source">独立记录来源，保留发送设备与交付事实</p>}
-          {reading.timeline?.items.filter(item => item.agentSessionId === agentSessionId && (item.kind === 'user_message' || item.kind === 'assistant_message')).map(item => {
+        </> : !reading.reading && capturedSpeech.length === 0 ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
+        {capturedSpeech.length > 0 ? <section className="mobile-conversation__captured" aria-label="提交与运行记录">
+          {capturedSpeech.map(item => {
             if (item.kind === 'assistant_message') return <CapturedConversationMessage key={item.id} item={item}
-              conversationSessionId={agentSessionId!} speaker={{ role: 'agent', id: agentSessionId! }} describeSpeaker={describeSpeaker} {...readingProps} />
+              conversationSessionId={agentSessionId!} speaker={item.authorExternal ? speakerOfExternalAuthor(item.authorExternal)
+                : item.authorAgentSessionId ? { role: 'agent', id: item.authorAgentSessionId }
+                : item.authorHuman === true ? { role: 'human', id: HUMAN_SPEAKER_ID }
+                : { role: 'agent', id: agentSessionId! }} describeSpeaker={describeSpeaker} {...readingProps} />
             const message = capturedById.get(`captured:${item.id}`)
             return message ? <ConversationMessage key={message.id} messageId={message.id}
-              conversationSessionId={agentSessionId!} content={message.contentParts} inputSource={message.source}
+              conversationSessionId={agentSessionId!} content={message.contentParts} inputSource={message.source} publicContent={message.publicContent}
               speaker={speakerOfUserMessage(message)} describeSpeaker={describeSpeaker}
               {...(message.deliveryStatus ? { status: message.deliveryStatus } : {})}
               {...(message.recordedAt !== undefined ? { createdAt: message.recordedAt } : {})} {...readingProps} /> : null
           })}
-        </section></details> : null}
+        </section> : null}
       </div>
       {reading.timeline?.items.filter(item => item.sourceDevice && item.kind === 'system_message').map(item => <details key={item.id} className="mobile-conversation__notice"><summary>设备操作记录</summary><ConversationMessage
         messageId={item.id} conversationSessionId={agentSessionId!} content={item.content ?? item.title}

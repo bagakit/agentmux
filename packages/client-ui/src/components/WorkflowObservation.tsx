@@ -49,7 +49,9 @@ export function RecordedStepsCard({ observation, compact = false, expanded, onEx
   const { recordedTime, status } = observation
   return <article className="wf-card wf-card--observation" data-observation-id={observation.id} data-status={status}>
     <button type="button" className="log-fold wf-head" data-open={expanded ? '' : undefined}
-      aria-expanded={expanded} aria-controls={contentId} aria-description={recordedTime?.offset}
+      aria-expanded={expanded} aria-controls={contentId}
+      title={recordedTime ? `${recordedTime.from} – ${recordedTime.to} · ${recordedTime.offset}` : undefined}
+      aria-description={recordedTime ? `${recordedTime.from} – ${recordedTime.to} · ${recordedTime.offset}` : undefined}
       onClick={() => onExpandedChange(!expanded)}>
       <span className="log-fold__node"><SemanticIcon name="navigation.disclosure" size={12} className="wf-chev log-fold__chevron" /></span>
       <span className="log-fold__label">
