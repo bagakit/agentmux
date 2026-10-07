@@ -33,6 +33,9 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     const nativeSource = { nativeHandle: { kind: 'provider', providerId: 'private', sessionId: 'saved-native',
       transcriptPath: join(fixture.root, 'saved-native.jsonl') }, workspacePath: fixture.root, revision: 'a'.repeat(64) }
     const stdinByMethod: Record<string, string> = {
+      'space.mote.connection.create': JSON.stringify({ operationId: 'mote-original', source: {target: {spaceId: 'S', zoneId: 'Z', expectedResource: {hostId: 'local', workspaceId: 'W', workspacePath: fixture.root}}, expectedTopicRevision: 'sha256:'+'a'.repeat(64), expectedAvatarRevision: null}, adapterId: 'sample', domain: 'chat.example', avatar: 'omit' }),
+      'space.mote.connection.sync': JSON.stringify({ operationId: 'mote-original', source: {target: {spaceId: 'S', zoneId: 'Z', expectedResource: {hostId: 'local', workspaceId: 'W', workspacePath: fixture.root}}, expectedTopicRevision: 'sha256:'+'a'.repeat(64), expectedAvatarRevision: null}, connection: {connectionId: 'original', application: {domain: 'chat.example', appId: 'app'}}, expectedConnectionRevision: 1, avatar: 'omit' }),
+      'space.mote.connection.ls': JSON.stringify({ target: {spaceId: 'S', zoneId: 'Z', expectedResource: {hostId: 'local', workspaceId: 'W', workspacePath: fixture.root}} }),
       'connection.profile.sync': JSON.stringify({ operationId: 'profile-original', connectionId: 'profile-connection', expectedConnectionRevision: 1, desired: { name: 'Desired name' } }),
       'connection.enrollment.begin': JSON.stringify({ operationId: 'enroll-original', connectionId: 'connection-new', adapterId: 'sample', domain: 'chat.example', label: 'Team' }),
       'connection.service.configure': JSON.stringify({ operationId: 'service-original', expectedRevision: 0, service: { enabled: false } }),
