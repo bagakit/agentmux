@@ -4,10 +4,65 @@ import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 import { describe, expect, it, vi } from 'vitest'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
+import { GRAPHITE_THEME, mountThemeRuntime, previewTheme, serializeThemeFile } from '@agentmux/client-ui/theme'
+import { semanticIconHref } from '@agentmux/client-ui/icons'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 
 describe('conversation tool trace in the production message', () => {
+  it('uses typed call/result meanings without claiming terminal execution, current activity or successful completion', async () => {
+    const content: AgentSessionHistoryContentPart[] = [
+      { kind: 'tool-call', name: 'mcp__documents__read', input: '{"path":"notes.md"}', callId: 'read' },
+      { kind: 'tool-result', name: 'mcp__documents__read', output: 'success and failed are only original text', callId: 'read' },
+      { kind: 'tool-call', name: 'terminal', input: 'opaque request', callId: 'other' },
+      { kind: 'tool-result', output: 'no confirmed success status', failed: false },
+      { kind: 'tool-result', name: 'read', output: 'original error', failed: true, callId: 'failed' }
+    ]
+    const host = document.createElement('div'); document.body.append(host)
+    const root = createRoot(host)
+    try {
+      await act(async () => root.render(createElement(ConversationMessage, { content })))
+      const traces = [...host.querySelectorAll<HTMLElement>('.conversation-tool-trace')]
+      expect(traces.map(row => row.querySelector<SVGElement>('.conversation-tool-trace__row > [data-semantic-icon]')?.dataset.semanticIcon)).toEqual([
+        'conversation.tool-call', 'conversation.tool-result', 'conversation.tool-call', 'conversation.tool-result', 'status.failed'
+      ])
+      expect(traces.map(row => row.dataset.status)).toEqual([undefined, undefined, undefined, undefined, 'failed'])
+      expect(traces.map(row => row.dataset.callId)).toEqual(['read', 'read', 'other', undefined, 'failed'])
+      expect(host.querySelector('[data-semantic-icon="object.terminal"], [data-semantic-icon="status.completed"], [data-icon-animation]')).toBeNull()
+      expect(traces[1]!.textContent).toContain('Tool result')
+      expect(traces[3]!.textContent).not.toContain('Completed')
+      await act(async () => traces[1]!.querySelector<HTMLButtonElement>('button')!.click())
+      expect(traces[1]!.querySelector('pre')!.textContent).toBe(content[1]!.kind === 'tool-result' ? content[1]!.output : '')
+    } finally { await act(async () => root.unmount()); host.remove() }
+  })
+
+  it('keeps call, result and actual terminal assets independently customizable without rewriting the saved theme', async () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
+    const release = mountThemeRuntime(window, { appAppearance: 'light' })
+    const host = document.createElement('div'); document.body.append(host)
+    const root = createRoot(host)
+    const custom = { ...structuredClone(GRAPHITE_THEME), id: 'custom.tool-records', name: 'Original tool assets', icons: {
+      'conversation.tool-call': { kind: 'paths' as const, paths: [{ d: 'M4 4H20V20H4Z' }] },
+      'conversation.tool-result': { kind: 'glyph' as const, glyph: 'file-text' as const },
+      'object.terminal': { kind: 'paths' as const, paths: [{ d: 'M3 5H21V19H3Z' }] }
+    } }
+    const saved = serializeThemeFile(custom)
+    const symbol = (id: 'conversation.tool-call' | 'conversation.tool-result' | 'object.terminal' | 'status.failed') => document.getElementById(semanticIconHref(id).slice(1))!
+    try {
+      await act(async () => root.render(createElement(ConversationMessage, { content: [
+        { kind: 'tool-call', name: 'unknown', input: 'original' }, { kind: 'tool-result', output: 'original' }
+      ] })))
+      const failed = symbol('status.failed').innerHTML
+      expect(previewTheme(custom).applied).toBe(true)
+      expect(symbol('conversation.tool-call').querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')
+      expect(symbol('conversation.tool-result').innerHTML).not.toBe(symbol('conversation.tool-call').innerHTML)
+      expect(symbol('object.terminal').querySelector('path')?.getAttribute('d')).toBe('M3 5H21V19H3Z')
+      expect(symbol('status.failed').innerHTML).toBe(failed)
+      expect(host.querySelector('[data-icon-animation]')).toBeNull()
+      expect(serializeThemeFile(custom)).toBe(saved)
+    } finally { await act(async () => root.unmount()); release(); host.remove(); vi.unstubAllGlobals() }
+  })
+
   it('keeps observed identities/order and failure visible, with large payloads mounted only on demand', async () => {
     const input = JSON.stringify({ command: 'pnpm test', unneeded: 'raw-input-'.repeat(1000) })
     const output = 'raw-failure-'.repeat(1000)
