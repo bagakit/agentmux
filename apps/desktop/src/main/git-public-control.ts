@@ -1,17 +1,26 @@
-import { AgentMuxError, parseGitParams, parseGitResult, type AgentMuxRpcGitOwner, type AgentMuxRpcCallContext, type GitMethod, type GitParameterMap, type GitResultMap } from '@agentmux/core'
+import { AgentMuxError, parseGitParams, parseGitResult, type AgentMuxRpcGitOwner, type AgentMuxRpcCallContext, type GitMethod, type GitParameterMap, type GitResultMap, type WorktreeCloseoutParams, type WorktreeCloseoutReceipt } from '@agentmux/core'
 import type { AppConfig } from '../shared/contracts.js'
 import type { GitService } from './git-service.js'
 
-/** The configured original resource authorizes each read; all Git work stays in GitService. */
+/** The original resource authorizes reads and closeout; mutations stay at their existing owner. */
 export class GitPublicControl implements AgentMuxRpcGitOwner {
   constructor(private readonly ports: {
     config(): AppConfig
     git: Pick<GitService, 'history' | 'commitDetails' | 'commitDiff' | 'branchDiff'>
+    closeWorktree?(params: WorktreeCloseoutParams): Promise<WorktreeCloseoutReceipt>
   }) {}
 
   async call<M extends GitMethod>(method: M, value: GitParameterMap[M], context?: AgentMuxRpcCallContext): Promise<GitResultMap[M]> {
     const params = parseGitParams(method, value)
     context?.signal?.throwIfAborted()
+    if (method === 'git.worktree.close') {
+      if (!this.ports.closeWorktree) throw new AgentMuxError('Worktree closeout is unavailable at its original owner. Existing Agents and work remain available.', 'CONTROL_UNAVAILABLE')
+      // Closing can withdraw the source record. Its result is checked against the
+      // original request. The closeout owner checks the exact resource against
+      // either the live source or its original saved operation on readback.
+      const result = await this.ports.closeWorktree(params as WorktreeCloseoutParams)
+      return parseGitResult(method, result, params)
+    }
     const config = this.ports.config()
     this.assertTarget(params, config)
     let result: GitResultMap[GitMethod]

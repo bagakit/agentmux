@@ -429,6 +429,10 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     if (split !== undefined && !isSplitDirection(split)) invalid('--split must be left, right, up or down.')
     return { ...operation(f), path: value(f, '--path', true), ...selector(f), ...(split === undefined ? {} : { split }), focus: focus(f) }
   }, 'Without --tab/--region/--split, open in a new Tab. A Region destination requires the exact existing Tab, anchor Region, Display Workspace and Group together. The returned placement names the actual File Region, which may differ from the anchor. --focus controls navigation independently; its default is background. ' + SAVE_NOTICE),
+  command('git.worktree.close', '--workspace ID --host ID --workspace-path PATH --operation-id ID [--discard-changes]', 'Close an exact worktree and gather its original Tabs into the default project workspace.',
+    { ...GIT_TARGET, ...OP, '--discard-changes': 'boolean' }, f => parseGitParams('git.worktree.close', { ...gitTarget(f), operationId: id(f, '--operation-id', true),
+      ...(f.booleans.has('--discard-changes') ? { discardChanges: true } : {}) }) as unknown as Record<string, unknown>,
+    'Preserve the original operation ID and exact resource. Original Sessions, Runs, execution cwd, Tabs and input are retained. workface moved confirms the saved display move; workface pending retains its unfinished responsibility. Directory cleanup is separate: cleanup pending retains the original directory and its retry responsibility. --discard-changes explicitly discards uncommitted Git work; it never authorizes stopping an Agent or deleting a live cwd.'),
   command('git.history', '--workspace ID --host ID --workspace-path PATH [--ref REF] [--limit N] [--cursor JSON]', 'Read a fixed original repository history page without changing checkout or Agent cwd.',
     { ...GIT_TARGET, '--ref': 'data', '--limit': 'value', '--cursor': 'data' }, f => parseGitParams('git.history', { ...gitTarget(f),
       ...(f.values.has('--ref') ? { ref: value(f, '--ref', true)! } : {}), ...numbers(f, { '--limit': 'limit' }),

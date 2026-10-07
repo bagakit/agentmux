@@ -10,12 +10,23 @@ import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 /** The original configured resource, discovered from app.snapshot; never a display or cwd guess. */
 export type GitExpectedResource = { hostId: string; workspacePath: string }
 export type GitTarget = { workspaceId: string; expectedResource: GitExpectedResource }
+export type WorktreeCloseoutParams = GitTarget & { operationId: string; discardChanges?: boolean }
+export type WorktreeCloseoutReceipt = {
+  workspaceId: string
+  targetWorkspaceId: string
+  movedTabIds: string[]
+  workface: 'moved' | 'pending'
+  cleanup: 'pending' | 'removed'
+  reason: string | null
+}
 export type GitParameterMap = {
+  'git.worktree.close': WorktreeCloseoutParams
   'git.history': GitTarget & GitHistoryInput
   'git.commit': GitTarget & GitCommitDetailsInput
   'git.diff': GitTarget & { input: GitDiffDescriptor }
 }
 export type GitResultMap = {
+  'git.worktree.close': WorktreeCloseoutReceipt
   'git.history': GitHistoryResult
   'git.commit': GitCommitDetailsResult
   'git.diff': GitFileDiff
@@ -31,7 +42,7 @@ export interface AgentMuxRpcGitOwner {
   call<M extends GitMethod>(method: M, params: GitParameterMap[M], context?: AgentMuxRpcCallContext): Promise<GitResultMap[M]>
 }
 export const AGENTMUX_RPC_GIT_METHODS = {
-  'git.history': 'long', 'git.commit': 'long', 'git.diff': 'long'
+  'git.history': 'long', 'git.commit': 'long', 'git.diff': 'long', 'git.worktree.close': 'long'
 } as const satisfies Record<GitMethod, 'short' | 'long'>
 export function isGitMethod(value: unknown): value is GitMethod {
   return typeof value === 'string' && Object.hasOwn(AGENTMUX_RPC_GIT_METHODS, value)
@@ -110,9 +121,12 @@ function diffDescriptor(value: unknown, code: string): GitDiffDescriptor {
 }
 export function parseGitParams<M extends GitMethod>(method: M, value: unknown, code = 'INVALID_CONTROL_REQUEST'): GitParameterMap[M] {
   const p = rpcRecord(value, ['workspaceId', 'expectedResource',
-    ...(method === 'git.history' ? ['ref', 'limit', 'cursor'] : method === 'git.commit' ? ['oid', 'parentOid'] : ['input'])], code)
+    ...(method === 'git.worktree.close' ? ['operationId', 'discardChanges'] : method === 'git.history' ? ['ref', 'limit', 'cursor'] : method === 'git.commit' ? ['oid', 'parentOid'] : ['input'])], code)
   parseTarget(p, code)
-  if (method === 'git.commit') {
+  if (method === 'git.worktree.close') {
+    identity(p.operationId, code)
+    if (p.discardChanges !== undefined && typeof p.discardChanges !== 'boolean') invalid('Discard changes must be an explicit boolean.', code)
+  } else if (method === 'git.commit') {
     oid(p.oid, code); if (p.parentOid !== undefined) oid(p.parentOid, code)
   } else if (method === 'git.history') {
     if (p.ref !== undefined && p.ref !== null) identity(p.ref, code)
@@ -163,7 +177,16 @@ function side(value: unknown, code: string): GitDiffSide {
 }
 export function parseGitResult<M extends GitMethod>(method: M, value: unknown, params: GitParameterMap[M]): GitResultMap[M] {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, undefined, code)
-  if (method === 'git.diff') {
+  if (method === 'git.worktree.close') {
+    rpcRecord(p, ['workspaceId', 'targetWorkspaceId', 'movedTabIds', 'workface', 'cleanup', 'reason'], code)
+    identity(p.workspaceId, code); identity(p.targetWorkspaceId, code)
+    array(p.movedTabIds, code, item => identity(item, code))
+    if (p.workspaceId !== params.workspaceId || p.workspaceId === p.targetWorkspaceId ||
+        new Set(p.movedTabIds as string[]).size !== (p.movedTabIds as string[]).length ||
+        !['moved', 'pending'].includes(String(p.workface)) || !['pending', 'removed'].includes(String(p.cleanup)) ||
+        p.workface === 'pending' && p.cleanup === 'removed') invalid('Worktree closeout does not match the original resource, workface or cleanup state.', code)
+    if (p.reason !== null) text(p.reason, code)
+  } else if (method === 'git.diff') {
     rpcRecord(p, ['path', 'old', 'new', 'binary', 'change'], code)
     filePath(p.path, code); const old = side(p.old, code), current = side(p.new, code)
     if (p.path !== (params as GitParameterMap['git.diff']).input.file.path ||
