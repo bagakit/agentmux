@@ -451,7 +451,7 @@ export function ActivityView({
   const [rulerWindow, setRulerWindow] = useState<RulerWindow>('24h')
   const readingWindow = useSessionConversationWindow(conversationReading, recentNativePage ?? null, (page, intent, currentOriginal, projection) => {
     const keepAnchor = intent === 'earlier' || intent === 'newer' || (intent !== 'current' && !followRef.current.following)
-    if (protectsConversationWindow(feedEl, page, keepAnchor, currentOriginal, projection)) return false
+    if (protectsConversationWindow(feedEl, page, keepAnchor, currentOriginal, projection, userMessages)) return false
     anchorRef.current = keepAnchor && feedEl ? captureReadingAnchor(feedEl) : null
     if (intent === 'current') {
       followRef.current = { ...followRef.current, following: true }
@@ -522,13 +522,15 @@ export function ActivityView({
     // A historical native window contains only its own source records. Recent facts stay
     // in the shared current window; a missing/different source never erases observed input.
     const observedMessages = userMessages?.filter((message) => {
-      if (message.source.kind !== 'native' || !page) return true
+      if (message.source.kind !== 'native' || !page?.items.length) return true
       const sameSource = message.source.providerId === page.source.providerId && message.source.nativeSessionId === page.source.nativeSessionId
       if (conversationReading?.nativeSourceFacts && !sameSource) return false
-      return !sameSource || !readingWindow.historical && !nativeIds.has(message.rawId)
+      // Sparse input context is not a continuation of the original reading window.
+      // Static/fallback consumers still own their independent input projection.
+      return !sameSource || !conversationReading && !readingWindow.historical && !nativeIds.has(message.rawId)
     })
     return buildActivityEntries(items, observedMessages)
-  }, [items, userMessages, nativeHistoryPage, sessionId, readingWindow.historical, Boolean(conversationReading?.nativeSourceFacts)])
+  }, [items, userMessages, nativeHistoryPage, sessionId, readingWindow.historical, Boolean(conversationReading), Boolean(conversationReading?.nativeSourceFacts)])
   const placed = useMemo(() => placeSegments(segments), [segments])
   const nativeSupplement = (entry: Segment): boolean => entry.kind === 'user-message' && entry.message.source.kind === 'native'
   const observations = placed.reduce((summary, { entry }) => {
