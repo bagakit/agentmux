@@ -60,9 +60,25 @@ export async function readNotebookDatabase(path: string, includeProvenance = tru
   if (!original) return null
   try { return snapshot(original.db, original.acknowledged, includeProvenance) } finally { original.db.close() }
 }
-function createdFor(db: DatabaseSync, noteId: string, resource: string, blockId: string): NoteAuthorship | null {
-  const row = db.prepare("SELECT p.note_id,p.resource,p.revision,p.json FROM provenance AS p, json_each(p.json,'$.blocks') AS block WHERE p.note_id=? AND p.resource=? AND block.key=? AND json_type(block.value,'$.created')='object' ORDER BY p.rowid LIMIT 1").get(noteId, resource, blockId)
-  return row ? provenanceRow(row).blocks[blockId]?.created ?? null : null
+function creatorsFor(db: DatabaseSync, noteId: string, resource: string, blockIds: readonly string[]): Map<string, NoteAuthorship> {
+  const remaining = new Set(blockIds), creators = new Map<string, NoteAuthorship>()
+  if (!remaining.size) return creators
+  const rows = db.prepare('SELECT note_id,resource,revision,json FROM provenance WHERE note_id=? AND resource=? ORDER BY rowid')
+  for (const row of rows.iterate(noteId, resource)) {
+    const raw = JSON.parse(String(row.json)) as { blocks?: Record<string, { created?: unknown } | null> } | null
+    const blocks = raw?.blocks
+    if (!blocks || typeof blocks !== 'object' || Array.isArray(blocks)) continue
+    let checked: NoteProvenanceWrite | undefined
+    for (const id of remaining) {
+      const created = Object.hasOwn(blocks, id) ? blocks[id]?.created : undefined
+      if (!created || typeof created !== 'object' || Array.isArray(created)) continue
+      checked ??= provenanceRow(row)
+      const original = checked.blocks[id]?.created
+      if (original) { creators.set(id, original); remaining.delete(id) }
+    }
+    if (!remaining.size) break
+  }
+  return creators
 }
 /** A provenance lookup touches only the requested original, not all saved Notes or revisions. */
 export async function readNotebookProvenance(path: string, query: NoteProvenanceQuery): Promise<NoteProvenanceSnapshot> {
@@ -72,7 +88,8 @@ export async function readNotebookProvenance(path: string, query: NoteProvenance
   if (original) try {
     const row = original.db.prepare('SELECT note_id,resource,revision,json FROM provenance WHERE note_id=? AND resource=? AND revision=?').get(query.noteId, key, query.revision)
     if (row) exact = provenanceRow(row)
-    for (const id of query.blockIds) blocks[id] = { created: exact?.blocks[id]?.created ?? createdFor(original.db, query.noteId, key, id), lastEdited: exact?.blocks[id]?.lastEdited ?? null }
+    const creators = creatorsFor(original.db, query.noteId, key, query.blockIds.filter(id => !exact?.blocks[id]?.created))
+    for (const id of query.blockIds) blocks[id] = { created: exact?.blocks[id]?.created ?? creators.get(id) ?? null, lastEdited: exact?.blocks[id]?.lastEdited ?? null }
   } finally { original.db.close() }
   if (!original) for (const id of query.blockIds) blocks[id] = { created: null, lastEdited: null }
   const confirmed = exact && query.blockIds.every(id => Object.hasOwn(exact.blocks, id))
@@ -152,8 +169,9 @@ export async function writeNotebookDatabase(path: string, update: { state?: Note
     if (update.provenance) {
       const value = parseNoteProvenanceWrite(update.provenance)
       const resource = noteProvenanceResourceKey(value.resource)
+      const creators = creatorsFor(db, value.noteId, resource, Object.keys(value.blocks))
       for (const [id, block] of Object.entries(value.blocks)) {
-        const created = createdFor(db, value.noteId, resource, id)
+        const created = creators.get(id)
         if (created) {
           if (block.created && notebookFingerprint(created) !== notebookFingerprint(block.created)) throw new AgentMuxError('The original block creator is already confirmed. Its trusted attribution is retained.', 'NOTE_PROVENANCE_CONFLICT')
           block.created = created
