@@ -29,7 +29,7 @@ export function createContinuityInputDelivery(operation: AgentMuxContinuityOpera
     key: { kind: 'prompt', agentSessionId: operation.agentSessionId, expectedRun: { ...operation.newRun },
       submissionId: 'continuity-' + digest(JSON.stringify([operation.agentSessionId, operation.operationId, operation.newRun])) },
     ...(initialInputByte === undefined ? {} : { initialInputByte }),
-    phase: 'waiting', reason: 'native-input-observation-pending', observedAt: Date.now(),
+    phase: 'waiting', reason: 'original-input-admission-pending', observedAt: Date.now(),
     reminder: part(reminder), continuation: part(inputs.continuation)
   }
 }
@@ -194,6 +194,11 @@ export class AgentSessionContinuityInputs {
     if (!operation?.newRun || !operation.nativeTarget || operation.kind !== 'resumed' || !operation.interruptedWorking || operation.trigger === 'input' ||
       !isDeepStrictEqual(operation.recoveryDelivery?.key, delivery.key) || operation.recoveryDelivery?.phase === 'superseded' || session.run.runId !== delivery.key.expectedRun.runId ||
       !isDeepStrictEqual(session.nativeHandle, operation.nativeTarget)) throw new AgentMuxError('The original recovery input target changed. Its text and key are kept.', 'CONTINUITY_INPUT_SUPERSEDED')
+    const observed = session.observedNativeHandle, source = session.nativeSourceObservation
+    if (source?.run.runId === session.run.runId && source.state === 'changed' || observed &&
+      (observed.kind !== 'provider' || observed.providerId !== operation.nativeTarget.providerId || observed.sessionId !== operation.nativeTarget.sessionId)) {
+      throw new AgentMuxError('The confirmed current native conversation differs from the original recovery target. The original text and key are retained.', 'CONTINUITY_INPUT_SUPERSEDED')
+    }
     const phase = operation.recoveryDelivery?.phase
     if (claimed ? !['dispatching', 'unknown'].includes(phase ?? '') || operation.recoveryDelivery?.dispatchOwner !== this.owner : phase !== 'waiting') {
       throw new AgentMuxError('The original recovery input is already owned. Only its exact receipt may be observed.', 'CONTINUITY_INPUT_ALREADY_DISPATCHED')
@@ -207,13 +212,19 @@ export class AgentSessionContinuityInputs {
       if (inputByte === undefined || run.acceptedInputBytes === null) throw new AgentMuxError('The original input boundary is unknown.', 'CONTINUITY_INPUT_UNCONFIRMED')
       if (run.acceptedInputBytes !== inputByte) throw new AgentMuxError('The original input boundary changed; its source is unconfirmed.', 'CONTINUITY_INPUT_UNCONFIRMED')
       const provider = this.deps.providers.get(session.providerId)
-      if (!provider.readPromptExecutionEvidence || !provider.verifyPromptExecutionTransport) throw new AgentMuxError('Provider native input evidence is unavailable. Ordinary input remains available.', 'CONTINUITY_INPUT_UNCONFIRMED')
       const context = { args: run.args, workspacePath: session.workspacePath, signal: this.controller.signal,
         ...(run.pid === null ? {} : { processId: run.pid }), nativeHandle: operation.nativeTarget,
         ...(session.nativePromptPredecessor ? { nativePromptPredecessor: session.nativePromptPredecessor } : {}) }
-      const evidence = await observePromptInput(this.controller.signal, () => provider.readPromptExecutionEvidence!(context))
-      if (!evidence || evidence.state === 'working' || !await observePromptInput(this.controller.signal,
-        () => provider.verifyPromptExecutionTransport!({ ...context, nativeSourceId: evidence.sourceId }))) throw new AgentMuxError('Native idle input transport is unconfirmed. The original input is retained.', 'CONTINUITY_INPUT_UNCONFIRMED')
+      // These optional Provider proofs narrow its own transport. Their absence does not revoke
+      // the public default first-prompt contract: the original input owner still owns admission,
+      // the Provider plan, any rendering degradation and the actual terminal/native ACK.
+      const evidence = provider.readPromptExecutionEvidence
+        ? await observePromptInput(this.controller.signal, () => provider.readPromptExecutionEvidence!(context)) : undefined
+      if (provider.readPromptExecutionEvidence && (!evidence || evidence.state === 'working') ||
+        provider.verifyPromptExecutionTransport && !await observePromptInput(this.controller.signal,
+          () => provider.verifyPromptExecutionTransport!({ ...context, ...(evidence ? { nativeSourceId: evidence.sourceId } : {}) }))) {
+        throw new AgentMuxError('The Provider native input evidence is unconfirmed. The original input is retained.', 'CONTINUITY_INPUT_UNCONFIRMED')
+      }
       const current = await this.deps.status(this.deps.read(id))
       if (current.pid !== run.pid || current.acceptedInputBytes !== inputByte || current.state.type !== 'running') throw new AgentMuxError('Native input changed during recovery observation.', 'CONTINUITY_INPUT_UNCONFIRMED')
     }
