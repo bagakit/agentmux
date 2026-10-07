@@ -1,3 +1,4 @@
+import { validateComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import { AgentMuxNotesStorage } from '@agentmux/core/notebook-store'
 import { NOTES_WORKSPACE_ID, NOTES_WORKSPACE_NAME } from '../shared/notes-library.js'
 import { constants, mkdir, open, readFile } from 'node:fs/promises'
@@ -318,7 +319,11 @@ const configSchema = z
     // 没有它，写成必需会让整块判失败）——且**不回填**：缺席与默认（缩写）同义，补盘只是白写；读处
     // 一律 `=== true` 判绝对档，落盘只在用户勾了绝对路径时发生。
     copyPathsAsAbsolute: z.boolean().optional(),
-    messageToolInitialLayout: z.enum(MESSAGE_TOOL_INITIAL_LAYOUT_IDS).optional()
+    messageToolInitialLayout: z.enum(MESSAGE_TOOL_INITIAL_LAYOUT_IDS).optional(),
+    messageToolCompletion: z.object({ command: z.string().nullable(), skill: z.string().nullable(), reference: z.string().nullable(), keywords: z.boolean() }).strict().superRefine((value, context) => {
+      const error = validateComposerInputConfig(value)
+      if (error) context.addIssue({ code: 'custom', message: error })
+    }).optional()
   })
   .strict()
   .superRefine((config, context) => {

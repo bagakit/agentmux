@@ -1,3 +1,4 @@
+import { DEFAULT_COMPOSER_INPUT_CONFIG, resolveComposerInputConfig, type ComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import { DEFAULT_THEME_ID } from '@agentmux/client-ui/theme'
 import { normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-continuity'
 import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, PROJECT_RAIL_DENSITY_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT, MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, type AppConfig, type GoalsCommonActionsConfig } from './contracts'
@@ -39,6 +40,8 @@ function effective(path: string, value: unknown): unknown {
   if (path === 'startup') return { skipAgentAvailabilityCheckWait: (value as AppConfig['startup'])?.skipAgentAvailabilityCheckWait === true }
   if (path === 'startup.skipAgentAvailabilityCheckWait') return value ?? false
   if (path === 'projectRailDensity') return value ?? PROJECT_RAIL_DENSITY_DEFAULT
+  if (path === 'messageToolCompletion') return resolveComposerInputConfig(value as ComposerInputConfig | undefined)
+  if (path.startsWith('messageToolCompletion.')) return value === undefined ? DEFAULT_COMPOSER_INPUT_CONFIG[path.slice('messageToolCompletion.'.length) as keyof ComposerInputConfig] : value
   if (path === 'messageToolInitialLayout') return value ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT
   if (path === 'moteDirectoryView') return value ?? MOTE_DIRECTORY_VIEW_DEFAULT
   if (path === 'moteDirectoryAvatarSize') return value ?? MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT
@@ -77,7 +80,7 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
     if (path === 'notes' || path === 'goals' || path === 'startup' || path === 'continuity' || path === 'browser.startPage') {
       // Compare effective defaults without persisting fields the user did not edit.
       actual = actual ?? {}; expected = effective(path, expected); requested = effective(path, requested)
-    } else if (path === 'profile' || path === 'focus' || path === 'goalsCommonActions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
+    } else if (path === 'messageToolCompletion' || path === 'profile' || path === 'focus' || path === 'goalsCommonActions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
       actual = effective(path, actual); expected = effective(path, expected); requested = effective(path, requested)
     }
     // A theme record is authored as one complete value; never synthesize variants or icon assets.

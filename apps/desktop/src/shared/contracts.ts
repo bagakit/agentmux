@@ -1,3 +1,4 @@
+import type { ComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import type { ThemeDocument } from '@agentmux/client-ui/theme'
 import type { DeliveryAttempt, DeliveryAttemptLookup } from '@agentmux/core'
 import type { PastedImage } from '@agentmux/client-ui/pasted-images'
@@ -597,6 +598,8 @@ export type AppConfig = {
   copyPathsAsAbsolute?: boolean
   /** Initial layout of newly mounted Agent message tools; absence uses one line without backfilling. */
   messageToolInitialLayout?: MessageToolInitialLayout
+  /** Literal completion prefixes; null disables only that shortcut, absence retains defaults. */
+  messageToolCompletion?: ComposerInputConfig
 }
 
 export type FileDocument = {
