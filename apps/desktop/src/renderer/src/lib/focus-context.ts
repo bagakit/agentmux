@@ -116,6 +116,9 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
   if (bucket === 'idle' && (session.runUnobserved || session.processState === 'interrupted')) {
     detail = `${session.runUnobserved ? 'Run not observed' : 'Run interrupted'} · ${session.status.detail?.trim() || (session.runUnobserved ? 'Original Run state is unknown' : 'Cause unknown')}`
     detailKind = 'service'
+  } else if (state === 'disconnected' && session.status.detail?.trim()) {
+    detail = session.status.detail.trim()
+    detailKind = 'service'
   } else if (bucket === 'idle' && activityExplanation) {
     detail = `${activityExplanation.label} · ${activityExplanation.detail}`
     detailKind = 'service'
