@@ -672,3 +672,26 @@ against a loopback HTTP server. The default Desktop Host tests consume original
 SDK callbacks, Core history, Mailbox, Settings and compiled public CLI receipts.
 These controlled ports prove the product call chain and exact bytes; they do not
 certify live credentials, platform permissions or delivery to a real group.
+
+## Application enrollment
+
+`connection.enrollment.ls` discovers locally retained enrollment operations and
+implemented issuer capabilities. `inspect` reads one original operation without
+contacting the platform. `begin` is an explicit application-creation intent;
+`advance` may make one original protocol request or continue its local secure
+handoff. All administration uses the public service's approved user/device
+identity. No Agent, group or sharing grant is created by enrollment.
+
+Private challenges and application credentials stay in the executing Host's
+secure credential owner. A pending authorization, securely stored credential,
+configured connection and actual live connection are separate facts. After an
+unknown one-time delivery, inspect the same operation rather than beginning or
+polling again. A still-running Host can explicitly continue a verified response
+whose secure save was temporarily unavailable. A process lost before that save
+may leave an unrecoverable unknown result; expiry or closing a page does not
+prove that the remote application was never created.
+
+The original SDK registration protocol is invoked as finite begin/poll effects,
+without its internal polling loop or implicit issuer migration. Requested bot
+permissions and configuration are not evidence that the platform granted them.
+The existing credential-entry flow remains available independently.
