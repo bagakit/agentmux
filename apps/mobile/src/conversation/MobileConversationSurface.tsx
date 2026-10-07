@@ -2,7 +2,7 @@ import { projectInputReceipt } from '@agentmux/client-ui/input-receipt-projectio
 import { presentMessageDeliveryFailure } from '@agentmux/client-ui/message-delivery-presentation'
 import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
-import { mobileQuestionReplyState, observeMobileQuestionAnswers, replyMobileQuestion } from './question-replies'
+import { mobileQuestionReplyState, reconcileMobileQuestionReplies } from './question-replies'
 import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
 import { ClientDeliveryDiagnostics, startDeliveryAttempt, type DeliveryAttemptSeed } from '@agentmux/client-ui/delivery-diagnostics'
 import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDetails'
@@ -272,8 +272,8 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   }, [reading.timeline, reading.session, agentSessionId, draftKey, revision])
 
   useEffect(() => {
-    if (reading.page && agentSessionId) void observeMobileQuestionAnswers(local, agentSessionId, reading.page, reading.session, client?.runtimeOwnerIdentity?.()?.runtimeId).then(changed => { if (changed && mounted.current) redraw(value => value + 1) })
-  }, [reading.page, reading.session, agentSessionId, client, local])
+    if (agentSessionId) void reconcileMobileQuestionReplies(local, agentSessionId, reading.session, client?.runtimeOwnerIdentity?.()?.runtimeId).then(changed => { if (changed && mounted.current) redraw(value => value + 1) })
+  }, [reading.session, agentSessionId, client, local])
   const diagnosticOwner = (originalClient: AgentMuxHostedClient | null): string | null => {
     const identity = originalClient?.runtimeOwnerIdentity?.()
     return identity ? `runtime:${identity.runtimeId}` : null
@@ -635,8 +635,12 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
               local.questionDrafts.set(questionReplyKey(agentSessionId, target), structuredClone(answers))
               void local.save().then(() => { if (mounted.current) redraw(value => value + 1) })
             }}
-            {...(available && client?.forwardRpc ? { onReplyQuestion: input => replyMobileQuestion(client, agentSessionId, session!.run.runId,
-              input, local, () => { if (mounted.current) redraw(value => value + 1) }) } : {})}
+            questionReplyRoute={session?.providerId ? client?.catalog?.().find(provider => provider.id === session.providerId)?.capabilities.asyncQuestionReply : undefined}
+            questionTerminalTarget={!session?.nativeSourceObservation && session?.nativeHandle?.kind === 'provider' ? {
+              source: { providerId: session.nativeHandle.providerId, nativeSessionId: session.nativeHandle.sessionId }, run: session.run
+            } : undefined}
+            questionReplyContext={JSON.stringify([session?.hostId, agentSessionId, session?.run.runId, client?.runtimeOwnerIdentity?.()?.runtimeId])}
+            {...(onShowTerminal ? { onOpenQuestionTerminal: onShowTerminal } : {})}
             {...readingProps} />
         </> : !reading.reading ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
         {captured.length > 0 || reading.timeline?.items.some(item => item.kind === 'assistant_message') ? <details className="mobile-conversation__captured" open={!reading.page?.items.length}><summary>发送与实时观察{attempt && attempt.phase !== 'confirmed' ? ' · 交付待确认' : ''}</summary><section aria-label="已发送消息">
