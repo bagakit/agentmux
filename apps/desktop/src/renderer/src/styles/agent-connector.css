@@ -1,21 +1,32 @@
-.agent-connector-dialog { display: flex; flex-direction: column; max-height: calc(100dvh - var(--sp-6) * 2); overflow: hidden; }
-.agent-connector-dialog__body { display: flex; flex-direction: column; gap: var(--sp-5); min-height: 0; margin-top: var(--sp-5); overflow: auto; overflow-wrap: anywhere; }
+.agent-connector-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(460px, calc(100vw - 24px)); display: flex; flex-direction: column; max-height: calc(100dvh - 24px); overflow: hidden; }
+.agent-connector-dialog__header { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); border-bottom: 1px solid var(--line-soft); }
+.agent-connector-dialog__header > div { min-width: 0; }
+.agent-connector-dialog__header h2 { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 600; line-height: 1.4; letter-spacing: -.015em; }
+.agent-connector-identity { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
+.agent-connector-identity > svg, .agent-connector-dialog__header > button { flex: none; }
+.agent-connector-dialog__body { display: flex; flex-direction: column; gap: var(--sp-5); min-height: 0; padding: var(--sp-5) var(--sp-6); overflow: auto; overflow-wrap: anywhere; }
 .agent-connector-fields { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; margin: 0; padding: 0; border: 0; }
-.agent-connector-fields h3, .agent-connector-fields legend { margin: 0; padding: 0; font-size: var(--fs-small); font-weight: 600; color: var(--text); }
-.agent-connector-field { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; color: var(--text-2); font-size: var(--fs-small); }
-.agent-connector-field input, .agent-connector-field select, .agent-connector-field textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; }
+.agent-connector-fields > button, .agent-connector-receipt > button { align-self: flex-start; }
+.agent-connector-fields h3, .agent-connector-fields legend { margin: 0; padding: 0; font-size: var(--fs-meta); font-weight: 600; color: var(--text); }
+.agent-connector-field { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; color: var(--text-2); font-size: var(--fs-meta); }
+.agent-connector-application { display: grid; gap: var(--sp-2); }
+.agent-connector-text-action { width: fit-content; max-width: 100%; padding: var(--sp-1) 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-meta); text-align: left; cursor: pointer; }
+.agent-connector-text-action:hover:not(:disabled) { color: var(--text); }
+.agent-connector-text-action:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.agent-connector-field input, .agent-connector-field select, .agent-connector-field textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: var(--fs-body)/1.5 var(--font-sans); }
 .agent-connector-field textarea { resize: vertical; }
-.agent-connector-note { margin: 0; color: var(--text-2); font-size: var(--fs-small); line-height: 1.5; overflow-wrap: anywhere; }
-.agent-connector-check { display: flex; align-items: flex-start; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-small); line-height: 1.5; }
+.agent-connector-note { margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
+.agent-connector-check { display: flex; align-items: flex-start; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
 .agent-connector-check input { flex: none; accent-color: var(--green); }
-.agent-connector-receipt { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding-block: var(--sp-3); border-block: 1px solid var(--line); font-size: var(--fs-small); }
+.agent-connector-receipt { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding-block: var(--sp-3); border-block: 1px solid var(--line); font-size: var(--fs-meta); }
 .agent-connector-receipt code { color: var(--text-3); overflow-wrap: anywhere; }
-.agent-connector-dialog footer { flex-wrap: wrap; flex: none; }
+.agent-connector-dialog__footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; flex: none; gap: var(--sp-3); padding: var(--sp-4) var(--sp-6); border-top: 1px solid var(--line-soft); }
+.agent-connector-dialog__footer > .agent-connector-text-action { margin-right: auto; }
 .connector-sharing { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; color: var(--text-3); font-size: var(--fs-micro); }
 .connector-sharing__group { min-width: 0; padding: var(--sp-1) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); font: inherit; text-align: left; overflow-wrap: anywhere; }
 .connector-sharing__group:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 
-.agent-connector-disclosure { min-width: 0; font-size: var(--fs-small); color: var(--text-2); }
+.agent-connector-disclosure { min-width: 0; font-size: var(--fs-meta); color: var(--text-2); }
 .agent-connector-disclosure > summary { cursor: pointer; padding-block: var(--sp-2); }
 .agent-connector-disclosure > .agent-connector-fields, .agent-connector-disclosure > .agent-connector-receipt { margin-top: var(--sp-3); }
 .agent-connector-group { margin: 0; color: var(--text); overflow-wrap: anywhere; }
