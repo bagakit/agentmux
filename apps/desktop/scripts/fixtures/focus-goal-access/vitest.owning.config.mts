@@ -6,6 +6,7 @@ import shared from '../workbench-identity/vitest.owning.config.mts'
 
 const root = resolve(import.meta.dirname, '../../../../..')
 const mutations = {
+  scanChoice: ['apps/desktop/src/renderer/src/store.ts', "mainSurface === 'workbench' && state.activeWorkspaceId", "mainSurface !== 'survey' && mainSurface !== 'recall' && state.activeWorkspaceId"],
   goalHost: ['apps/desktop/src/renderer/src/lib/focus-goal-links.ts', 'exact = qualified.rows.get(demandRelationKey(subject.hostId, subject.agentSessionId))', "exact = qualified.rows.get(demandRelationKey('local', subject.agentSessionId))"],
   goalConsumer: ['apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx', 'goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))}', 'goalLinks={undefined}'],
   goalCardHost: ['apps/desktop/src/renderer/src/lib/focus-goal-links.ts', 'JSON.stringify([hostId, presentationId])', 'presentationId'],
