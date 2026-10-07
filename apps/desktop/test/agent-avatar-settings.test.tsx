@@ -8,7 +8,7 @@ import { AppearanceSettingsPane } from '../src/renderer/src/components/settings/
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { AgentAvatar, ExecutorIdentityContext } from '../src/renderer/src/components/AgentAvatar'
 import { SelectorPresence } from '../src/renderer/src/components/SelectorList'
-import { RegionMosaic } from '../src/renderer/src/components/TopicPresence'
+import { TopicPresence } from '../src/renderer/src/components/TopicPresence'
 import { WorkspaceTopicsPanel } from '../src/renderer/src/components/WorkspaceTopicsPanel'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/contracts'
@@ -165,11 +165,16 @@ it('holds one native-surface lease per visible avatar panel and releases it on c
   browserStage.remove()
 })
 
-it('passes appearance and stack count through both shared presence paths', async () => {
-  const agent = { key: 'a', providerId: 'codex', state: 'running' as const, label: 'Review', appearance: appearances.review, count: 3 }
-  await dom.render(<><SelectorPresence agents={[agent]} /><RegionMosaic cells={[{ regionId: 'r', agentSessionId: 'a', bounds: { x: 0, y: 0, width: 1, height: 1 } }]} agents={[agent]} /></>)
+it('preserves Executor appearance in shared topology and the unmounted background roster', async () => {
+  const agent = { key: 'a', sessionId: 'a', providerId: 'codex', state: 'running' as const, label: 'Review', appearance: appearances.review, count: 3 }
+  const background = { ...agent, key: 'b', sessionId: 'b', label: 'Background review' }
+  await dom.render(<TopicPresence agents={[agent, background]} tabs={[{ tabId: 'original-tab', title: 'Original work', active: true,
+    regions: [{ regionId: 'r', agentSessionId: agent.sessionId, surfaceKind: 'agent', bounds: { x: 0, y: 0, width: 1, height: 1 },
+      executorLabel: 'Review', activity: 'Original reply', agent: { sessionId: agent.sessionId, providerId: agent.providerId,
+        label: agent.label, appearance: agent.appearance, state: agent.state } }] }]} />)
   expect(badges()).toEqual(['shield', 'shield'])
-  expect([...dom.container.querySelectorAll('.agent-avatar__count')].map((node) => node.textContent)).toEqual(['3', '3'])
+  expect([...dom.container.querySelectorAll('.agent-avatar__count')].map((node) => node.textContent)).toEqual(['3'])
+  expect(dom.container.querySelectorAll('.workbench-topology__tab-chip')).toHaveLength(1)
   expect(dom.container.querySelectorAll('.agent-avatar__status')).toHaveLength(0)
   expect(dom.container.querySelectorAll('[data-agent-provider="codex"]')).toHaveLength(2)
 })
