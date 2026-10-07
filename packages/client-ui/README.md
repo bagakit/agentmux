@@ -2,6 +2,8 @@
 
 `@agentmux/client-ui` contains the same message, native-history, trace, permission-card and Tiptap composer implementations consumed by AgentMux Desktop. It owns presentation and editing; Core and the Host retain all Agent and Run facts. There is no conversation log, Runtime client, Provider adapter or Session store in this package.
 
+`ConversationRecordSequence` presents optional native turn/response metrics from the already-read Core records. It retains source order and mounted reading nodes, shows each loaded turn's latest cumulative sample once, and reuses `NativeProcessObservation` disclosure. Response-only reports retain their own record identity. Import the shared styles (or `styles/conversation-metrics.css` with the host's individual style imports); no additional reader, timer or execution channel is needed.
+
 Applications wrap their view in `ClientUiProvider` with an explicit `ClientUiPlatform`. The adapter supplies clipboard error reporting, the overlay target, editor focus registration and identity/icon rendering. File opening, HTTP navigation, pasted-image IO, send/queue/interrupt and permission responses are typed component props. `DescribeSpeaker` may supply an already-rendered avatar; platform-specific Mote and project discovery stays in Desktop.
 
 The optional `renderObjectLink` adapter receives an exact `amux://agent|region|tab|space|zone/…` URI and its Core-parsed typed target. Conversation prose and Markdown links share this inline presentation; code, read-only previews and document mode retain their original presentation. Without the adapter, Markdown remains usable as text. The host resolves current names, Mote appearance, state, details and navigation; message storage and copying retain the original source.

@@ -23,6 +23,8 @@ Core 使用 Node 24+，包不设 OS 安装门，portable API 可独立使用；�
 
 `sessionHistoryPage(agentSessionId, { limit, cursor?, signal? })` 读取原 Session 的 Provider 原生记录；`observeSessionHistory(agentSessionId, onChange)` 观察该原生来源的变化，消费者据此重读最新页。两者独立于 Hook timeline，读取不向 Agent 输入内容或改变 Run。历史 cursor 是 Provider 生成的 opaque 值，不能用数组下标、正文或时间重新生成。
 
+原生记录可携带 `metrics`：`scope: 'turn'` 归属该记录准确的 `turnId`，`scope: 'response'` 归属原记录 ID；可选的 `durationMs`、`usage` 和 `status` 都是只读原生报告。缺值不补零，累计快照不相加，`metricsDiagnostic` 只说明读数不可确认，原内容与 Agent 能力保留。原历史页、conversation changes、context 和 CLI 读取同一字段，不能把最新 Hook 用量贴到历史回合。既有 `turnUsage.scope: 'response'` 表示最近响应样本，旧样本缺 scope 时范围未知；上下文观测独立。
+
 | Provider | 原生来源与身份 | 更新观察 | Native Resume |
 | --- | --- | --- | --- |
 | Grok | `chat_history.jsonl`；原 Session ID、Workspace 与 `summary.info` 一致 | 同一经过核验的 JSONL，包含第一次落盘 | Session ID |
