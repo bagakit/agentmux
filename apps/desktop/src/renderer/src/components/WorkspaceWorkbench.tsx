@@ -80,6 +80,7 @@ import {
 } from '@agentmux/layout'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { workbenchAgentFactsFor, workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
+import { useNoteFileName } from '../lib/note-source-name'
 import {
   activeWorkbenchSurface,
   agentDisplayName,
@@ -133,12 +134,18 @@ type DragTabData = { kind: 'tab'; tabId: string; groupId: string }
 type DropData = DragTabData | { kind: 'pane'; groupId: string }
 type SplitTarget = { groupId: string; direction: SplitDirection }
 
+function useTabNoteName(tab: WorkbenchTab) {
+  const surface = titleWorkbenchSurface(tab)
+  return useNoteFileName(surface.kind === 'file' ? surface.workspaceId : undefined, surface.kind === 'file' ? surface.path : undefined)
+}
+
 function DragPreview({ tab }: { tab: WorkbenchTab }) {
+  const noteName = useTabNoteName(tab)
   const sessions = useWorkbenchTabSessions(tab)
   const sessionNameMetadata = useWorkbenchTabNameMetadata(tab)
   const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
   const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
-  const label = workbenchTabDisplayName(tab, sessions, agentNames, timelines, sessionNameMetadata)
+  const label = workbenchTabDisplayName(tab, sessions, agentNames, timelines, sessionNameMetadata, noteName)
   return (
     <div className="tab-drag-preview">
       <ThemeActionDragIcon size={12} />
@@ -195,7 +202,8 @@ function SortableWorkbenchTab({
   // The one place a tab's shown name is decided: the naming SSOT chain, fed the Store's own facts. It is
   // NOT `session.label` — that is only the chain's lowest tier (Provider·Workspace), overridden by a user
   // rename, a single Agent's own name, or the multi-Agent family name.
-  const displayName = workbenchTabDisplayName(tab, sessions, agentNames, timelines, sessionNameMetadata)
+  const noteName = useTabNoteName(tab)
+  const displayName = workbenchTabDisplayName(tab, sessions, agentNames, timelines, sessionNameMetadata, noteName)
   const copyableAgentSessionId = copyableAgentSessionIdForTab(tab)
   // 文件 Tab 才有路径复制与「在文件管理器中显示」；其余类型缺席，那三项整组不出现。workspaceRoot 用于把
   // 相对 path 接成绝对路径（走共用的 formatPathsForCopy 出口）；reveal 走 FileExplorer 同一条 api.files.reveal。
@@ -1537,11 +1545,12 @@ function RetainedWorkbenchNotice({ workspaceId, targetTabId, available, visible,
 
 /** A retained resource choice has no synthetic Group or action address. */
 function UnplacedWorkbenchTab({ tab, onSelect }: { tab: WorkbenchTab; onSelect(): void }) {
+  const noteName = useTabNoteName(tab)
   const sessions = useWorkbenchTabSessions(tab)
   const metadata = useWorkbenchTabNameMetadata(tab)
   const names = useAppStore(useShallow(state => recordForWorkbenchTab(state.agentNames, tab)))
   const timelines = useAppStore(useShallow(state => recordForWorkbenchTab(state.timelines, tab)))
-  const name = workbenchTabDisplayName(tab, sessions, names, timelines, metadata)
+  const name = workbenchTabDisplayName(tab, sessions, names, timelines, metadata, noteName)
   return <button type="button" className="workbench-tab" data-workbench-tab-id={tab.id}
     title={`Choose location · ${name}`} onClick={onSelect}><span className="workbench-tab__label">{name}</span></button>
 }
