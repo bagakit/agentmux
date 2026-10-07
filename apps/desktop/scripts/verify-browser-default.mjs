@@ -21,6 +21,8 @@ const sourceFiles = [
   'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/settings/DefaultBrowserSetting.tsx',
   'apps/desktop/src/renderer/src/components/settings/modules/survey.tsx', 'apps/desktop/scripts/package-macos.mjs',
   'packages/core/dist/browser-default.js', 'packages/core/dist/control-codec.js', 'packages/core/dist/public-rpc.js',
+  'packages/core/package.json', 'packages/core/src/sharing.ts', 'packages/core/src/index.ts',
+  'packages/core/dist/sharing.js', 'packages/core/dist/index.js',
   ...files
 ]
 async function manifest() { return Object.fromEntries(await Promise.all(sourceFiles.map(async path => [path, hash(await readFile(join(repository, path)))]))) }
@@ -50,7 +52,7 @@ if (process.argv.includes('--os')) {
 }
 const before = await manifest(), receipt = { schema: 'agentmux.browser-default-proof.v1', runId: randomUUID(), status: 'running',
   candidateHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim(),
-  verifierSha256: hash(await readFile(fileURLToPath(import.meta.url))), sourceInputs: before, runs: [] }
+  verifierSha256: hash(await readFile(fileURLToPath(import.meta.url))), sourceInputs: before, runs: [], browserBundles: [] }
 async function writeReceipt() {
   const temporaryReceipt = join(output, 'receipt-' + receipt.runId + '.tmp')
   await writeFile(temporaryReceipt, JSON.stringify(receipt, null, 2) + '\n')
@@ -58,6 +60,49 @@ async function writeReceipt() {
 }
 await writeReceipt()
 const temporary = await mkdtemp(join(output, 'isolated-'))
+async function browserBundle(name, wrongRoot = false) {
+  const { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+  const owner = join(repository, 'apps/desktop/src/renderer/src/lib/survey-system-url.ts'), original = await readFile(owner, 'utf8')
+  const anchor = "from '@agentmux/core/sharing'"
+  assert(original.split(anchor).length === 2, name + ': exact existing pure import must occur once')
+  const entry = wrongRoot ? join(temporary, name + '.ts') : owner
+  const transformed = wrongRoot ? original.replace(anchor, "from '@agentmux/core'") : original
+  if (wrongRoot) await writeFile(entry, transformed)
+  const inputs = new Map(), nodeImports = [], outfile = join(temporary, name + '.js')
+  let result, failure
+  try {
+    result = await build({ absWorkingDir: repository, entryPoints: [entry], outfile, bundle: true, write: false,
+      platform: 'browser', format: 'esm', target: 'es2022', metafile: true, logLevel: 'silent',
+      define: { 'process.env.NODE_ENV': '"production"' },
+      plugins: [{ name: 'actual-browser-owner-inputs', setup(builder) {
+        builder.onResolve({ filter: /^node:/ }, args => { nodeImports.push({ path: args.path, importer: args.importer }); return undefined })
+        builder.onLoad({ filter: /\.(?:[cm]?js|tsx?|json)$/ }, async args => {
+          const contents = await readFile(args.path, 'utf8'); inputs.set(args.path, hash(contents))
+          return { contents, loader: args.path.endsWith('.json') ? 'json' : args.path.endsWith('.tsx') ? 'tsx' : args.path.endsWith('.ts') ? 'ts' : 'js',
+            resolveDir: dirname(args.path === entry && wrongRoot ? owner : args.path) }
+        })
+      } }] })
+  } catch (error) { failure = error }
+  assert(inputs.get(entry) === hash(transformed), name + ': the exact actual or private owner must be loaded')
+  const nodeErrors = (failure?.errors ?? []).filter(error => nodeImports.some(input =>
+    error.text === 'Could not resolve ' + JSON.stringify(input.path) && error.location && resolve(repository, error.location.file) === input.importer))
+  if (wrongRoot) assert(failure && nodeErrors.length > 0, name + ': only actual browser resolution failures for Node dependencies count as RED')
+  else {
+    assert(!failure, name + ': actual product browser bundle must pass: ' + (failure?.message ?? ''))
+    const metadata = Object.keys(result.metafile.inputs).map(path => resolve(repository, path))
+    assert(metadata.includes(owner) && metadata.includes(join(repository, 'packages/core/dist/sharing.js')), name + ': actual product and public pure Core entry must be consumed')
+    assert(!metadata.includes(join(repository, 'packages/core/dist/index.js')) && nodeImports.length === 0, name + ': Native Core root must not enter the browser graph')
+    assert(result.outputFiles.length === 1 && result.outputFiles[0].contents.length > 0 && Object.values(result.metafile.outputs).some(file => file.exports.includes('openSystemUrlInSurvey')), name + ': nonempty actual browser consumer export')
+  }
+  for (const [path, sha] of inputs) assert(hash(await readFile(path)) === sha, name + ': a loaded input changed')
+  assert(JSON.stringify(await manifest()) === JSON.stringify(before), name + ': original source or compiled input changed')
+  receipt.browserBundles.push({ name, status: wrongRoot ? 'expected-node-resolution-RED' : 'passed', entry,
+    originalSha256: hash(original), loadedSha256: inputs.get(entry), inputs: Object.fromEntries(inputs),
+    outputSha256: result ? hash(result.outputFiles[0].contents) : null,
+    nodeErrors: nodeErrors.map(error => ({ text: error.text, location: error.location })), errors: failure?.errors?.length ?? 0 })
+  await writeReceipt()
+  process.stdout.write(`${name}: ${wrongRoot ? 'expected Node resolution RED' : 'browser bundle GREEN'}\n`)
+}
 try {
   async function check(name, change) {
     const jsonPath = join(output, name + '.json'), logPath = join(output, name + '.log')
@@ -79,7 +124,7 @@ try {
       await writeFile(copied, content); await writeFile(loaded, '')
       variant = { original: hash(original), transformed: hash(content), path: copied, loaded, expectedFailure: change.test }
       config += `import { resolve, dirname } from 'node:path';\nconst source = ${JSON.stringify(sourcePath.replace(/\.ts$/, ''))};\n`
-      config += `const plugin = { name: 'browser-default-exact-owner-input', enforce: 'pre', resolveId(id, importer) { if(id==='@agentmux/core' && importer===${JSON.stringify(copied)}) return ${JSON.stringify(join(repository, 'packages/core/dist/index.js'))}; if(id==='electron' && importer===${JSON.stringify(copied)}) return ${JSON.stringify(require.resolve('electron'))}; const candidate=id.startsWith('.') && importer ? resolve(dirname(importer),id) : id; if(candidate.replace(/\\.(?:[cm]?[jt]sx?)$/, '')===source) return ${JSON.stringify(copied)}; } };\n`
+      config += `const plugin = { name: 'browser-default-exact-owner-input', enforce: 'pre', resolveId(id, importer) { if(id==='@agentmux/core' && importer===${JSON.stringify(copied)}) return ${JSON.stringify(join(repository, 'packages/core/dist/index.js'))}; if(id==='@agentmux/core/sharing' && importer===${JSON.stringify(copied)}) return ${JSON.stringify(join(repository, 'packages/core/dist/sharing.js'))}; if(id==='electron' && importer===${JSON.stringify(copied)}) return ${JSON.stringify(require.resolve('electron'))}; const candidate=id.startsWith('.') && importer ? resolve(dirname(importer),id) : id; if(candidate.replace(/\\.(?:[cm]?[jt]sx?)$/, '')===source) return ${JSON.stringify(copied)}; } };\n`
     }
     config += `export default mergeConfig(base, { ${variant ? 'plugins: [plugin],' : ''} test: { reporters: ['json'], outputFile: ${JSON.stringify(jsonPath)} } });\n`
     const configPath = join(temporary, name + '.config.mjs'); await writeFile(configPath, config)
@@ -103,7 +148,10 @@ try {
     process.stdout.write(`${name}: ${variant ? 'expected consumer RED' : 'GREEN'} (${assertions.length} cases)\n`)
   }
   await check('source')
+  await browserBundle('source-browser-bundle')
   if (process.argv.includes('--mutations')) {
+    await browserBundle('root-core-entry-browser-bundle', true)
+    await browserBundle('restored-browser-bundle')
     await check('handler-facts-removed', { path: 'apps/desktop/src/main/browser-default.ts', from: 'isCurrentApplication: app.isDefaultProtocolClient(scheme)', to: 'isCurrentApplication: true', test: 'real Core SDK and built CLI consume the same native inspection and explicit request owner' })
     await check('native-settings-request-removed', { path: 'apps/desktop/src/main/browser-default.ts', from: '  await port.openSettings()', to: '  /* exact native settings request removed by private mutation */', test: 'keeps an observation failure unknown and the independent settings request usable' })
     await check('survey-creation-disconnected', { path: 'apps/desktop/src/renderer/src/lib/survey-system-url.ts', from: "await get().createSurveyBrowser({ workspaceId: SCRATCH_WORKSPACE_ID, url: request.url, preparation: null, onPrepared(value) { preparation = value } })", to: "await Promise.reject(new Error('Private mutation disconnected original Survey creation'))", test: 'the system URL consumer uses the real Survey preparation and exact Scratch Browser creation without changing the original page' })
