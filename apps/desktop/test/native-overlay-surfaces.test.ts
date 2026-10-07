@@ -92,15 +92,15 @@ it('keeps document blur separate from App departure before sibling focus settles
 
 // A separate process observes real unhandled-rejection delivery without changing Vitest's
 // own handler. It compiles the current production module; only Electron's native boundary is modeled.
-function lateDocumentAfterRemoval(geometry: 'radius' | 'reorder'): {
+function lateDocumentAfterRemoval(): {
   projected: number; warning: string; views: number; closed: boolean; unhandled: string[]
 } {
   const script = String.raw`
     const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
     const ts = require('typescript'), { createRequire } = require('node:module');
     const root = process.cwd(), requirePackage = createRequire(path.join(root, 'package.json'));
-    const geometry = process.argv[1], modules = new Map(), views = [], unhandled = [];
-    let rejectDocument, attachmentCount = 0;
+    const modules = new Map(), views = [], unhandled = [];
+    let rejectDocument;
     process.on('unhandledRejection', error => unhandled.push(error.message));
     class View {
       constructor() {
@@ -115,7 +115,7 @@ function lateDocumentAfterRemoval(geometry: 'radius' | 'reorder'): {
         };
       }
       setBackgroundColor() {} setBounds(bounds) { this.bounds = bounds } setVisible() {}
-      setBorderRadius() { if (geometry === 'radius') throw new Error('Original native radius rejected') }
+      setBorderRadius() { throw new Error('Original native radius rejected') }
     }
     function load(file) {
       if (modules.has(file)) return modules.get(file).exports;
@@ -137,7 +137,7 @@ function lateDocumentAfterRemoval(geometry: 'radius' | 'reorder'): {
         webContents: { isDestroyed: () => false },
         contentView: {
           addChildView() {
-            if (++attachmentCount === 2 && geometry === 'reorder') throw new Error('Original native reorder rejected');
+            throw new Error('Unexpected attachment before document readiness');
           }, removeChildView() {}
         }
       };
@@ -149,7 +149,7 @@ function lateDocumentAfterRemoval(geometry: 'radius' | 'reorder'): {
         views: views.length, closed: views[0].closed, unhandled }));
     })().catch(error => { console.error(error); process.exitCode = 1 });
   `
-  return JSON.parse(execFileSync(process.execPath, ['-e', script, geometry], {
+  return JSON.parse(execFileSync(process.execPath, ['-e', script], {
     cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
   })) as ReturnType<typeof lateDocumentAfterRemoval>
 }
@@ -167,7 +167,7 @@ describe('actual native Chrome owner', () => {
     expect(await owner.update([containing])).toEqual({ projected: 1, capturedPixels: 8000 })
     expect(fake.views).toHaveLength(1)
     expect(window.contentView.children).toEqual([pageView, unrelated, fake.views[0], inside])
-    expect(window.contentView.addChildView.mock.calls.map(call => call[0])).toEqual([fake.views[0], fake.views[0], inside])
+    expect(window.contentView.addChildView.mock.calls.map(call => call[0])).toEqual([fake.views[0], inside])
     const origin = nativeOwner('inside') as any
     owner.forwardBrowserInput(origin, { type: 'pointer', event: { type: 'mouseMove', x: 20, y: 20 } })
     expect(pointer.mock.calls).toEqual([[{ type: 'pointerMove', browserId: 'inside', overlayId: 'chrome-1', x: 120, y: 144, button: 0 }]])
@@ -177,7 +177,7 @@ describe('actual native Chrome owner', () => {
     const later = { id: 'chrome-2', bounds: { x: 140, y: 170, width: 30, height: 30 }, radius: 2 }
     expect(await owner.update([containing, later])).toEqual({ projected: 2, capturedPixels: 8900 })
     expect(window.contentView.children).toEqual([pageView, unrelated, fake.views[0], inside, fake.views[1]])
-    expect(window.contentView.addChildView.mock.calls.map(call => call[0])).toEqual([fake.views[1], fake.views[1]])
+    expect(window.contentView.addChildView.mock.calls.map(call => call[0])).toEqual([fake.views[1]])
     pointer.mockClear()
     owner.forwardBrowserInput(origin, { type: 'pointer', event: { type: 'mouseDown', x: 20, y: 20, button: 'left' } })
     expect(pointer).not.toHaveBeenCalled()
@@ -199,17 +199,17 @@ describe('actual native Chrome owner', () => {
     await owner.update([containing])
     expect(fake.views).toHaveLength(1)
     expect(window.contentView.children).toEqual([pageView, inside, fake.views[0]])
-    expect(window.contentView.addChildView.mock.calls.map(call => call[0])).toEqual([fake.views[0], fake.views[0]])
+    expect(window.contentView.addChildView.mock.calls.map(call => call[0])).toEqual([fake.views[0]])
     expect(owner.forwardBrowserInput({ browserId: 'inside', bounds: inside.getBounds(), view: inside } as any, { type: 'escape' })).toBe(false)
     expect(pointer).not.toHaveBeenCalled()
     owner.dispose()
   })
-  it.each(['radius', 'reorder'] as const)('consumes a removed owner document rejection after synchronous %s failure', geometry => {
-    const result = lateDocumentAfterRemoval(geometry)
+  it('consumes a removed owner document rejection after synchronous geometry failure', () => {
+    const result = lateDocumentAfterRemoval()
     expect(result.views).toBe(1)
     expect(result.closed).toBe(true)
     expect(result.projected).toBe(0)
-    expect(result.warning).toContain(`Chrome geometry: Original native ${geometry} rejected`)
+    expect(result.warning).toContain('Chrome geometry: Original native radius rejected')
     expect(result.unhandled).toEqual([])
   })
   it.each([[11.25, 11], [7.2, 7], [0.625, 1]])('paints a visible interactive owner for fractional zoom radius %s', async (radius, nativeRadius) => {
@@ -238,11 +238,10 @@ describe('actual native Chrome owner', () => {
     expect(contents.sendInputEvent).not.toHaveBeenCalled()
     owner.dispose()
   })
-  it('cleans a rejected native reorder without leaving empty Chrome over a healthy page', async () => {
+  it('cleans a rejected first native attachment without leaving empty Chrome over a healthy page', async () => {
     const { owner, window, contents } = fixture()
-    window.contentView.addChildView.mockImplementationOnce(view => { view.ownerWindow = window })
-      .mockImplementationOnce(() => { throw new Error('Native child reorder rejected') })
-    await expect(owner.update([float])).resolves.toMatchObject({ projected: 0, warning: expect.stringContaining('Native child reorder rejected') })
+    window.contentView.addChildView.mockImplementationOnce(() => { throw new Error('Native child attachment rejected') })
+    await expect(owner.update([float])).resolves.toMatchObject({ projected: 0, warning: expect.stringContaining('Chrome attachment: Native child attachment rejected') })
     expect(fake.views).toHaveLength(1)
     const view = fake.views[0]
     expect(view.webContents.close).toHaveBeenCalledTimes(1)
@@ -259,7 +258,7 @@ describe('actual native Chrome owner', () => {
     const pending = owner.update([float])
     expect(fake.views).toHaveLength(1)
     const view = fake.views[0]
-    expect(view.ownerWindow).toBe(window)
+    expect(view.ownerWindow).toBeNull()
     expect(view.getBounds()).toEqual(float.bounds)
     expect(view.webContents.setBackgroundThrottling).not.toHaveBeenCalled()
     expect(contents.capturePage).not.toHaveBeenCalled()
@@ -282,6 +281,84 @@ describe('actual native Chrome owner', () => {
     expect(view.setVisible.mock.calls).toEqual([[true]])
     expect(contents.focus).not.toHaveBeenCalled()
     owner.dispose()
+  })
+  it.each(['document', 'image'] as const)('does not swallow an original menu gesture while its cold %s paint is pending', async phase => {
+    let finishPaint!: () => void
+    const held = new Promise<void>(resolve => { finishPaint = resolve })
+    if (phase === 'document') fake.load = held
+    else fake.image = held
+    const { owner, window, contents, pageView } = fixture()
+    const pending = owner.update([float])
+    try {
+      if (phase === 'image') await vi.waitFor(() => expect(contents.capturePage).toHaveBeenCalledTimes(1))
+      expect(fake.views).toHaveLength(1)
+      const view = fake.views[0], point = { x: 5, y: 7 }
+      expect(view.ownerWindow).toBe(phase === 'image' ? window : null)
+      expect(view.getVisible()).toBe(true)
+      if (phase === 'image') {
+        const preparing = view.getBounds()
+        expect(preparing.x + preparing.width).toBeLessThanOrEqual(0)
+        expect(preparing.y + preparing.height).toBeLessThanOrEqual(0)
+        expect(owner.hasProjectionInFocusedWindow()).toBe(false)
+      }
+      const input = (type: 'mouseDown' | 'mouseUp') => ({ type, ...point, button: 'left', clickCount: 1 })
+      const originalInput = (type: 'mouseDown' | 'mouseUp') => ({ ...input(type), x: float.bounds.x + point.x, y: float.bounds.y + point.y })
+      const intercepted = window.contentView.children.includes(view) && view.getVisible() &&
+        view.getBounds().x === float.bounds.x && view.getBounds().y === float.bounds.y &&
+        view.getBounds().width === float.bounds.width && view.getBounds().height === float.bounds.height
+      expect(view.contentLoaded).toBe(false)
+      // Model only the native boundary, using the existing owner fixture. An unready layer
+      // may remain out of the hit path; if it covers this exact original menu, its real
+      // production input handler must carry the complete gesture without awaiting paint.
+      if (intercepted) {
+        view.listeners['input-event']({}, input('mouseDown'))
+        view.listeners['input-event']({}, input('mouseUp'))
+      }
+      const whilePending = contents.sendInputEvent.mock.calls.map(([event]) => event)
+      finishPaint()
+      expect(await pending).toEqual({ projected: 1, capturedPixels: 8000 })
+      expect(view.contentLoaded).toBe(true)
+      expect(pageView.webContents.sendInputEvent).not.toHaveBeenCalled()
+      expect(pageView.webContents.focus).not.toHaveBeenCalled()
+      expect(pageView.webContents.close).not.toHaveBeenCalled()
+      expect(whilePending, 'an attached exact menu layer must not swallow down/up while paint is pending')
+        .toEqual(intercepted ? [originalInput('mouseDown'), originalInput('mouseUp')] : [])
+      // Readiness cannot replay a previously intercepted click a second time.
+      expect(contents.sendInputEvent.mock.calls.map(([event]) => event)).toEqual(whilePending)
+      await owner.update([])
+      contents.sendInputEvent.mockClear()
+      view.listeners['input-event']({}, input('mouseDown'))
+      view.listeners['input-event']({}, input('mouseUp'))
+      expect(contents.sendInputEvent, 'the revoked native owner cannot dispatch into the original menu').not.toHaveBeenCalled()
+    } finally {
+      finishPaint()
+      await pending
+      owner.dispose()
+    }
+  })
+  it('does not attach a pending owner while another attached float repaints', async () => {
+    const { owner, window, contents } = fixture()
+    await owner.update([float])
+    const first = fake.views[0]
+    let finishDocument!: () => void
+    fake.load = new Promise<void>(resolve => { finishDocument = resolve })
+    const second = { ...float, id: 'chrome-2', bounds: { ...float.bounds, x: 300 } }
+    const pending = owner.update([float, second])
+    try {
+      await vi.waitFor(() => expect(fake.views).toHaveLength(2))
+      const cold = fake.views[1]
+      expect(cold.ownerWindow).toBeNull()
+      first.listeners['input-event']({}, { type: 'mouseMove', x: 5, y: 7, button: 'none' })
+      await vi.waitFor(() => expect(contents.capturePage).toHaveBeenCalledTimes(3))
+      expect(window.contentView.children).toContain(first)
+      expect(window.contentView.children).not.toContain(cold)
+      expect(cold.ownerWindow).toBeNull()
+      expect(window.contentView.addChildView.mock.calls.map(([view]) => view)).toEqual([first])
+      finishDocument()
+      expect(await pending).toEqual({ projected: 2, capturedPixels: 16000 })
+      expect(window.contentView.children).toEqual([expect.anything(), first, cold])
+      expect(window.contentView.addChildView.mock.calls.map(([view]) => view)).toEqual([first, cold])
+    } finally { finishDocument(); await pending; owner.dispose() }
   })
   it('cannot synchronize or route a late document after its native owner is removed', async () => {
     let finishDocument!: () => void
@@ -352,7 +429,7 @@ describe('actual native Chrome owner', () => {
     expect(await owner.refresh()).toEqual({ projected: 0, capturedPixels: 0 })
     owner.dispose()
   })
-  it('attaches the Chrome to its owner with actual clipped bounds before its document starts loading', async () => {
+  it('prepares actual clipped geometry before loading and attaches its prepared pixels once', async () => {
     const { owner, window, contents, visible } = fixture()
     visible.mockReturnValue([{ x: 0, y: 0, width: 1000, height: 700 }])
     const requested = { ...float, bounds: { x: 940, y: 650, width: 200, height: 100 } }
@@ -364,9 +441,12 @@ describe('actual native Chrome owner', () => {
     // not inferred from its final attachment or invocation-order numbers. Native frames
     // remain a separate canonical product proof.
     expect(view.loadStates).toHaveLength(1)
-    expect(view.loadStates[0].ownerWindow).toBe(window)
+    expect(view.loadStates[0].ownerWindow).toBeNull()
     expect(view.loadStates[0].bounds).toEqual(actual)
     expect(view.loadStates[0].visible).toBe(true)
+    expect(view.ownerWindow).toBe(window)
+    expect(view.contentLoaded).toBe(true)
+    expect(window.contentView.addChildView).toHaveBeenCalledExactlyOnceWith(view)
     expect(view.webContents.loadURL).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^data:text\/html,/))
     expect(contents.capturePage).toHaveBeenCalledExactlyOnceWith(actual)
     expect(view.setVisible.mock.calls).toEqual([[true]])
