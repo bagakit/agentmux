@@ -31,7 +31,8 @@ import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef
 import { useShallow } from 'zustand/react/shallow'
 import { createSessionViewModeSelector, effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import { recordForWorkbenchTab, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
-import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelGroupHandle } from 'react-resizable-panels'
+import { Panel, PanelGroup, type ImperativePanelGroupHandle } from 'react-resizable-panels'
+import { WorkbenchSplitHandle } from './WorkbenchSplitHandle'
 import { BrowserPane } from './BrowserPane'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
@@ -1048,11 +1049,12 @@ function WorkbenchRegionBranch({
           onDragging={onDragging}
         />
       </Panel>
-      <PanelResizeHandle
+      <WorkbenchSplitHandle
         className="workbench-region-resize-handle"
+        group={groupRef} committer={committer} ratio={node.ratio}
+        sourceKey={JSON.stringify([tab.workspaceId, tab.id, nodePath, node.direction, regionIds(node)])}
         disabled={!surfaceVisible}
         onDragging={(active) => {
-          committer.setDragging(active)
           setDragging(active)
           onDragging(active)
         }}
@@ -1475,11 +1477,12 @@ function SplitBranch({
           recoveryNotice={recoveryNotice}
         />
       </Panel>
-      <PanelResizeHandle
+      <WorkbenchSplitHandle
         className="pane-resize-handle"
+        group={groupRef} committer={committer} ratio={ratio}
+        sourceKey={JSON.stringify([workspaceId, nodePath, viewHostPrefix, projection?.presentationId, node.direction, groupIds(node)])}
         disabled={!surfaceVisible || projection?.placementConfirmed === false}
         onDragging={(active) => {
-          committer.setDragging(active)
           setDragging(active)
         }}
       />
