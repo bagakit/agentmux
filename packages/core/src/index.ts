@@ -124,3 +124,6 @@ export * from './mote-connection-contract.js'
 export * from './mote-connection-codec.js'
 export * from './note-history.js'
 export * from './note-merge.js'
+
+export * from './conversation-landmarks.js'
+export * from './conversation-landmark-store.js'

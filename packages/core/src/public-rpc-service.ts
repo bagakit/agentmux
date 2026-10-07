@@ -1,3 +1,5 @@
+import { ConversationLandmarkStore } from './conversation-landmark-store.js'
+import { parseConversationLandmarkQuery, parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { isConnectionServiceMethod, parseConnectionServiceParams } from './connection-service-codec.js'
 import { isMoteConnectionMethod, parseMoteConnectionParams, parseMoteConnectionResult } from './mote-connection-codec.js'
 import type { MoteConnectionPort, MoteConnectionMethod } from './mote-connection-contract.js'
@@ -99,6 +101,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   deliveryAttempts?: { hostId: string; store: DeliveryAttemptStore }
   /** Original semantic owner identity; never ctxmux identity or a route alias. */
   diagnosticCoreAuthority?(scope: AgentMuxRpcCoreClient): import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation | Promise<import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation>
+  conversationLandmarks?: ConversationLandmarkStore
   notebookStore?: AgentMuxNotebookStore
   notebookObservation?: NotebookObservationPort
   files?: AgentMuxRpcFilesOwner
@@ -180,6 +183,8 @@ const NATIVE_FIELDS = {
   'agent.conversation.changes': ['hostId', 'agentSessionId', 'checkpoint', 'limit'],
   'agent.conversation.watch': ['hostId', 'agentSessionId'],
   'agent.conversation.inspect': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes'],
+  'agent.conversation.landmark.ls': ['hostId', 'agentSessionId', 'operationId'],
+  'agent.conversation.landmark.apply': ['hostId', 'agentSessionId', 'operationId', 'expectedRevision', 'change'],
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes', 'kind', 'query', 'scanLimit'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
@@ -228,11 +233,12 @@ function validateFilters(p: Record<string, unknown>): void {
 /** All business orchestration lives here; transports carry messages, clients parse argv. */
 export class AgentMuxRpcService {
   private readonly diagnosticQuery = new DiagnosticEvidenceQuery()
+  private readonly landmarks: ConversationLandmarkStore
   private readonly notebooks: AgentMuxNotebookStore
   private readonly spatial: AgentMuxSpatialStateStore
   private search: ReturnType<typeof createAgentMuxSearchReader<SearchCallContext>> | undefined
   private local: Promise<AgentMuxClient> | undefined
-  constructor(private readonly ports: AgentMuxRpcServiceOptions = {}) { this.spatial = ports.spatialState ?? new AgentMuxSpatialStateStore(); this.notebooks = ports.notebookStore ?? new AgentMuxNotebookStore() }
+  constructor(private readonly ports: AgentMuxRpcServiceOptions = {}) { this.landmarks = ports.conversationLandmarks ?? new ConversationLandmarkStore(); this.spatial = ports.spatialState ?? new AgentMuxSpatialStateStore(); this.notebooks = ports.notebookStore ?? new AgentMuxNotebookStore() }
 
   private async hosted(method: AgentMuxRpcMethod, params: unknown, context: AgentMuxRpcCallContext) {
     // Native SDK writes are authorized as a user/device by the transport. An
@@ -992,6 +998,13 @@ export class AgentMuxRpcService {
       return parseRpcNativeResult(method, await this.ports.forwardControl(method, p as AgentMuxRpcParams<M>, context), p, context.caller) as AgentMuxRpcResult<M>
     }
     switch (method) {
+      case 'agent.conversation.landmark.ls': result = await this.landmarks.list(parseConversationLandmarkQuery(p)); break
+      case 'agent.conversation.landmark.apply': {
+        const actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId } : context.principal
+        if (!actor) throw new AgentMuxError('Reading-point writing requires an authenticated user, device or Agent. Original records and Runs remain available.', 'CONTROL_PERMISSION_DENIED')
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        result = await this.landmarks.apply(parseConversationLandmarkWrite(p), actor); break
+      }
       case 'notebook.ls': result = {state:await this.notebooks.read()}; break
       case 'notebook.inspect': {
         const input = parseNotebookObservationParams(p, true), state = await this.notebooks.read()

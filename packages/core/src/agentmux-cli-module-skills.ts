@@ -33,6 +33,10 @@ authors. A content boundary grants no sharing authorization; read the leaf help 
 confirmed and unknown meanings. Original text and copyable parts remain complete.
 agent conversation operations read source-qualified records, while original history/resource
 reads retain their own provenance and cursor. Status prose is not permission or input proof.
+agent conversation landmark ls/apply manage explicit user-named original record references,
+not generated chapters or copied bodies. A saved point is not record availability. Keep its
+full source and the original operation after an unknown save; ls --operation-id inspects that
+receipt. Offline targets retain their points; original conversation readers own reachability.
 Ordinary input must use the original public input/message owner and returned admission facts.
 agent interrupt, stop, resume and reopen are distinct explicit lifecycle operations. Observe
 the original input after an uncertain send; inspect a creation/move operation before another
