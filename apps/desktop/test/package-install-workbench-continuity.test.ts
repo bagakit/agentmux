@@ -136,6 +136,17 @@ it('actual installation admits registry insertion changes and object keys withou
   expect(io.before).toEqual(original)
 })
 
+it.each(['', 'Updated by the original page'])('actual installation preserves recovery when the page title becomes %j', async title => {
+  const f = await fixture(), original = structuredClone(io.before)
+  browser().title = title
+  const outcome = await install(f).then(result => ({ result, error: null }), error => ({ result: null, error: String(error) }))
+  expect(outcome.error).toBeNull()
+  expect(outcome.result?.ui.status).toBe('committed')
+  expect(io.cutovers).toBe(1)
+  expect(io.before).toEqual(original)
+  expect(browser().title).toBe(title)
+})
+
 const changes: [string, () => void][] = [
   ['tab order', () => after().layouts.workspace!.groups[0]!.tabOrder.reverse()],
   ['recent order', () => after().layouts.workspace!.groups[0]!.recentTabIds.reverse()],
@@ -155,7 +166,9 @@ const changes: [string, () => void][] = [
   ['missing region', () => { after().tabs[0]!.regions.pop() }],
   ['duplicate tab', () => { after().tabs.push(structuredClone(after().tabs[0]!)) }],
   ['duplicate region', () => { after().tabs[0]!.regions.push(structuredClone(agent())) }],
-  ['browser descriptor', () => { browser().url = 'https://example.invalid/other' }]
+  ['browser descriptor', () => { browser().url = 'https://example.invalid/other' }],
+  ['browser identity', () => { browser().browserId = 'different-browser' }],
+  ['browser profile', () => { browser().profileId = 'different-profile' }]
 ]
 it.each(changes)('actual installation rejects changed %s and retains exact observations', async (_name, change) => {
   const f = await fixture(); change()
