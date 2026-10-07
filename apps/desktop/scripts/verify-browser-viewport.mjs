@@ -97,7 +97,13 @@ async function native(label, mutation) {
       return { contents: omittedGuard, loader: 'ts', resolveDir: dirname(path) }
     })
   } }] : []
-  await build({ ...base, plugins: preloadPlugins, platform: 'node', format: 'cjs', external: ['electron'], entryPoints: [join(fixture, 'preload.ts')], outfile: join(compiled, 'preload.cjs') })
+  // Match electron-vite's sandboxed preload resolution: browser/module entries
+  // must not acquire Node-only transitive imports from otherwise shared packages.
+  const preload = await build({ ...base, plugins: preloadPlugins, platform: 'browser', format: 'cjs',
+    conditions: ['module', 'browser', 'production'], mainFields: ['browser', 'module', 'jsnext:main', 'jsnext', 'main'],
+    external: ['electron'], metafile: true, entryPoints: [join(fixture, 'preload.ts')], outfile: join(compiled, 'preload.cjs') })
+  assert.ok(Object.values(preload.metafile.outputs).every(output => output.imports.every(input => input.path === 'electron')),
+    'The actual sandbox preload can require only Electron')
   if (omittedGuard) { assert.equal(guardMutations, 1, 'The exact original preload guard loads the private mutation once')
     await writeFile(join(out, label + '-mutation.json'), JSON.stringify({source: 'apps/desktop/src/preload/native-overlay-focus.ts', sourceSha256: sha(originalBlurGuard), mutationSha256: sha(omittedGuard)}, null, 2)) }
   await build({ ...base, alias: { ...base.alias, ...radixOverlayAliases }, plugins, platform: 'browser', format: 'esm', define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' },
