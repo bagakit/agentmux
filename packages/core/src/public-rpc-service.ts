@@ -1,6 +1,7 @@
 import { isConnectionDeliveryMethod, parseConnectionDeliveryParams } from './connection-delivery-codec.js'
 import { isRoomBindingMethod, parseRoomBindingParams } from './room-binding-codec.js'
 import { isRoomProvisioningMethod, parseRoomProvisioningParams } from './room-provisioning-codec.js'
+import { isRoomDiscoveryMethod, parseRoomDiscoveryParams } from './room-discovery-codec.js'
 import { parseConversationRef, parseConversationCheckpointPage, parseConversationChangesInput, parseConversationChangesPage } from './conversation-changes.js'
 import { createAgentMuxSearchReader, type AgentMuxSearchReadContext } from './search-reader.js'
 import { createAgentMuxSearchObservationOwner } from './search-observation.js'
@@ -398,10 +399,24 @@ export class AgentMuxRpcService {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       const owner = this.ports.connections
       const administration = { actor: { kind: context.principal.kind as 'user' | 'device', id: context.principal.id }, assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.() } }
+      if (isRoomDiscoveryMethod(method)) {
+        const rooms = owner.rooms
+        const handler = method === 'connection.room.ls' ? rooms?.list : method === 'connection.room.search' ? rooms?.search : method === 'connection.room.get' ? rooms?.get
+          : method === 'connection.room.members' ? rooms?.members : method === 'connection.room.link.create' ? rooms?.createLink : rooms?.inspectLink
+        if (!handler) throw new AgentMuxError('This room capability is unavailable on the original Host. Existing Agents and connections remain available.', 'CONTROL_UNAVAILABLE')
+        const result = method === 'connection.room.ls' ? await rooms!.list!(parseRoomDiscoveryParams(method, params))
+          : method === 'connection.room.search' ? await rooms!.search!(parseRoomDiscoveryParams(method, params))
+          : method === 'connection.room.get' ? await rooms!.get!(parseRoomDiscoveryParams(method, params))
+          : method === 'connection.room.members' ? await rooms!.members!(parseRoomDiscoveryParams(method, params))
+          : method === 'connection.room.link.create' ? await rooms!.createLink!(parseRoomDiscoveryParams(method, params), { ...administration, ...(context.signal ? { signal: context.signal } : {}) })
+          : await rooms!.inspectLink!(parseRoomDiscoveryParams(method, params))
+        return parseConnectionResult(method, result, input) as AgentMuxRpcResult<M>
+      }
       if (isRoomProvisioningMethod(method)) {
-        if (!owner.rooms) throw new AgentMuxError('Room creation is not enabled on this Host. Existing Agents and connections remain available.', 'CONTROL_UNAVAILABLE')
-        const result = method === 'connection.room.create' ? await owner.rooms.create(parseRoomProvisioningParams(method, params), { ...administration, ...(context.signal ? { signal: context.signal } : {}) })
-          : await owner.rooms.inspect(parseRoomProvisioningParams(method, params))
+        const rooms = owner.rooms
+        if (method === 'connection.room.create' ? !rooms?.create : !rooms?.inspect) throw new AgentMuxError('Room creation is not enabled on this Host. Existing Agents and connections remain available.', 'CONTROL_UNAVAILABLE')
+        const result = method === 'connection.room.create' ? await rooms!.create!(parseRoomProvisioningParams(method, params), { ...administration, ...(context.signal ? { signal: context.signal } : {}) })
+          : await rooms!.inspect!(parseRoomProvisioningParams(method, params))
         return parseConnectionResult(method, result, input) as AgentMuxRpcResult<M>
       }
       if (isConnectionDeliveryMethod(method)) {
