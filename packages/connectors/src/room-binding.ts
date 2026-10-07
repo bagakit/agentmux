@@ -3,6 +3,7 @@ import { parseConversationCheckpointPage, type ConversationCheckpoint, type Conv
 import type { AgentMuxSpatialState } from '@agentmux/core/spatial-graph'
 import { parseConnectionActor, parseConnectionGrant, parseRoomBinding, parseRoomBindingAuthority, parseRoomBindingOperation, parseRoomBindingParams, type ConnectionGrant, type RoomBinding, type RoomBindingAuthority, type RoomBindingBindInput, type RoomBindingCallContext, type RoomBindingGrantInput, type RoomBindingInspectInput, type RoomBindingListInput, type RoomBindingOperation, type RoomBindingPauseInput, type RoomBindingReadPort, type RoomBindingRelinkInput, type RoomBindingsPort, type RoomPublicationAuthority } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
+import { readRoomTarget } from './room-target.js'
 
 export type RoomBindingHostOptions = {
   connections: ConnectionHost
@@ -151,9 +152,9 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     return current
   }
   private async region(input: RoomBindingBindInput): Promise<number> {
-    const state = await this.options.spatial.read(), region = state?.graph.regions.find(region => region.regionId === input.regionAnchor.regionId)
-    if (!state || !region || region.kind !== 'agent' || region.execution?.hostId !== input.executionHostId || region.agentSessionId !== input.agentSessionId) refuse('ROOM_BINDING_TARGET_CHANGED')
-    return state.revision
+    const target = await readRoomTarget(this.options.spatial, input)
+    if (!target) refuse('ROOM_BINDING_TARGET_CHANGED')
+    return target.revision
   }
   private async cut(input: RoomBindingBindInput): Promise<ConversationCheckpoint[]> {
     const ref = { hostId: input.executionHostId, agentSessionId: input.agentSessionId }
