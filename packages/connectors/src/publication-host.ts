@@ -75,8 +75,11 @@ export class PublicationHost implements ConnectionDeliveryPort {
     try { await this.catchUp(lane, adapter) }
     catch { if (!signal.aborted) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' } }
     if (!signal.aborted && this.authorized(binding)) {
-      try { await this.drain(lane, adapter) }
-      catch (error) { lane.observation = { state: 'unavailable', reason: error instanceof AgentMuxError && ['PUBLICATION_ADAPTER_UNAVAILABLE', 'PUBLICATION_PREPARATION_UNCONFIRMED'].includes(error.code) ? 'adapter-unavailable' : 'storage-unconfirmed' } }
+      let effectObservation: PublicationObservation | undefined
+      try { effectObservation = await this.drain(lane, adapter) }
+      catch (error) { effectObservation = { state: 'unavailable', reason: error instanceof AgentMuxError && ['PUBLICATION_ADAPTER_UNAVAILABLE', 'PUBLICATION_PREPARATION_UNCONFIRMED'].includes(error.code) ? 'adapter-unavailable' : 'storage-unconfirmed' } }
+      // Original effects may still settle or dispatch; their observation cannot hide an unresolved content gap.
+      if (effectObservation && lane.observation.reason !== 'content-unconfirmed') lane.observation = effectObservation
     }
   }
   private async catchUp(lane: Lane, adapter: PublicationAdapter): Promise<void> {
@@ -135,7 +138,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     }
     lane.observation = lane.watch ? { state: 'ready' } : { state: 'unavailable', reason: 'source-unconfirmed' }
   }
-  private async drain(lane: Lane, adapter: PublicationAdapter): Promise<void> {
+  private async drain(lane: Lane, adapter: PublicationAdapter): Promise<PublicationObservation | undefined> {
     const binding = lane.binding, signal = lane.abort.signal
     for (let count = 0; count < 16; count++) {
       if (signal.aborted || !this.authorized(binding)) return
@@ -143,9 +146,9 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (!original) return
       let credential: string | null
       try { credential = await this.options.connections.resolveCredential(binding.connectionId) } catch { credential = null }
-      if (!credential) { lane.observation = { state: 'unavailable', reason: 'credential-missing' }; return }
+      if (!credential) return { state: 'unavailable', reason: 'credential-missing' }
       if (signal.aborted || !this.authorized(binding)) return
-      if (original.state === 'not-applied') { lane.observation = { state: 'unavailable', reason: 'effect-unconfirmed' }; return }
+      if (original.state === 'not-applied') return { state: 'unavailable', reason: 'effect-unconfirmed' }
       if (original.state === 'dispatching' || original.state === 'unknown') {
         // Recovery is read-only even when no platform lookup can establish the effect.
         if (original.state === 'dispatching') original = this.store.settle(original.operationId, original.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
@@ -153,7 +156,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
           try { const receipt = await adapter.inspect(parsePreparedPublication(original.prepared, adapter), original.target, credential, AbortSignal.any([signal, AbortSignal.timeout(30_000)]), original.mapping); if (receipt) this.store.settle(original.operationId, original.attempt!, receipt) } catch { /* Unknown original effect is retained without replay or changing its audience. */ }
         }
         if (this.store.inspect(original.operationId)?.state === 'confirmed') continue
-        lane.observation = { state: 'unknown', reason: 'effect-unconfirmed' }; return
+        return { state: 'unknown', reason: 'effect-unconfirmed' }
       }
       const claimed = this.store.claimNext(binding, () => this.authorized(binding), adapter)
       if (!claimed) return
@@ -169,9 +172,9 @@ export class PublicationHost implements ConnectionDeliveryPort {
         this.wake(lane)
       }, () => {})
       try { await this.until(effect, dispatchSignal); if (signal.aborted) return }
-      catch { try { settle({ state: 'unknown', reason: 'effect-unconfirmed' }) } catch { /* Retain already confirmed outcome or unconfirmed storage. */ } lane.observation = { state: 'unknown', reason: 'effect-unconfirmed' }; return }
+      catch { try { settle({ state: 'unknown', reason: 'effect-unconfirmed' }) } catch { /* Retain already confirmed outcome or unconfirmed storage. */ } return { state: 'unknown', reason: 'effect-unconfirmed' } }
       const state = this.store.inspect(claimed.operationId)?.state
-      if (state !== 'confirmed') { lane.observation = { state: 'unknown', reason: 'effect-unconfirmed' }; return }
+      if (state !== 'confirmed') return { state: 'unknown', reason: 'effect-unconfirmed' }
       if (count === 15) lane.dirty = true
     }
   }
