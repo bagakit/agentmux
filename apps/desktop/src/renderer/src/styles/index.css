@@ -22,6 +22,8 @@
 @import './file-explorer.css';
 @import './surface-mode-switch.css';
 @import './source-control.css';
+@import './workspace-git.css';
+@import './workspace-zones.css';
 @import './git-history.css';
 @import './workbench.css';
 @import './file-preview.css';

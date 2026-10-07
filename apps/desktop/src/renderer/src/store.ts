@@ -302,6 +302,7 @@ import {
   clampToolDockWidth,
   type WorkspaceTool
 } from './lib/surface-tool-dock'
+import { restoreGitCommitDrafts, restoreWorkspaceGitView, type WorkspaceGitView } from './lib/workspace-git-view'
 import { projectDemands, type DemandArrangement, type DemandPriority, type DemandRecord, type DemandStatus } from './lib/global-demand-board'
 import type { Demand as FilesystemDemand } from '@agentmux/demand'
 import { demandWriteDecision } from './lib/demand-write-policy'
@@ -953,6 +954,8 @@ type AppState = {
    */
   portalOverlayCount: number
   workspaceTool: WorkspaceTool
+  workspaceGitView: WorkspaceGitView
+  gitCommitDrafts: Record<string, string>
   projectRailWidth: number
   toolDockWidth: number
   /**
@@ -1004,7 +1007,7 @@ type AppState = {
   retryWorkbenchSave(): Promise<void>
   initialize(): Promise<() => void>
   selectWorkspace(id: string): Promise<void>
-  activateWorkspaceSelection(result: WorkspaceSelectionResult): void
+  activateWorkspaceSelection(result: WorkspaceSelectionResult, reveal?: boolean): void
   runFanOut(input: RunFanOutInput): Promise<RunFanOutResult>
   keepOneOfFanOut(input: KeepOneOfFanOutInput): Promise<KeepOneOfFanOutOutcome | null>
   /**
@@ -1147,6 +1150,8 @@ type AppState = {
   acquireNativeSurfaceOverlay(): void
   releaseNativeSurfaceOverlay(): void
   setWorkspaceTool(tool: WorkspaceTool): void
+  setWorkspaceGitView(view: WorkspaceGitView): void
+  setGitCommitDraft(scope: string, message: string): void
   toggleTools(): void
   setProjectRailWidth(width: number): void
   setToolDockWidth(width: number): void
@@ -2757,6 +2762,8 @@ type PersistedAppState = {
   spaceObjectIcons?: unknown
   toolsOpen?: boolean
   workspaceTool?: WorkspaceTool
+  workspaceGitView?: WorkspaceGitView
+  gitCommitDrafts?: Record<string, string>
   projectRailWidth?: number
   toolDockWidth?: number
   editorWordWrap?: boolean
@@ -2792,6 +2799,8 @@ export type RestoredUiState = Pick<
   | 'spaceObjectIcons'
   | 'toolsOpen'
   | 'workspaceTool'
+  | 'workspaceGitView'
+  | 'gitCommitDrafts'
   | 'projectRailWidth'
   | 'toolDockWidth'
   | 'focusTimelineNameWidth'
@@ -2886,6 +2895,8 @@ export function restorePersistedUiState(
     | 'spaceObjectIcons'
     | 'toolsOpen'
     | 'workspaceTool'
+    | 'workspaceGitView'
+    | 'gitCommitDrafts'
     | 'projectRailWidth'
   | 'toolDockWidth'
   | 'focusTimelineNameWidth'
@@ -2924,6 +2935,8 @@ export function restorePersistedUiState(
     spaceObjectIcons: restoreSpaceIconOverrides(Object.hasOwn(config.appearance, 'spaceObjectIcons') ? config.appearance.spaceObjectIcons : retainedSpaceIconHandoff ?? persisted.spaceObjectIcons),
     toolsOpen: restoredBoolean(persisted.toolsOpen, true),
     workspaceTool: restoredWorkspaceTool(persisted.workspaceTool),
+    workspaceGitView: restoreWorkspaceGitView(persisted.workspaceGitView),
+    gitCommitDrafts: restoreGitCommitDrafts(persisted.gitCommitDrafts),
     projectRailWidth: clampProjectRailWidth(persisted.projectRailWidth ?? PROJECT_RAIL_DEFAULT_WIDTH),
     toolDockWidth: clampToolDockWidth(
       typeof persisted.toolDockWidth === 'number'
@@ -3011,6 +3024,8 @@ function selectPersistedInputs(state: AppState) {
     ...(retainedSpaceIconHandoff === undefined ? {} : { spaceObjectIcons: retainedSpaceIconHandoff }),
     toolsOpen: state.toolsOpen,
     workspaceTool: state.workspaceTool,
+    workspaceGitView: state.workspaceGitView,
+    gitCommitDrafts: state.gitCommitDrafts,
     projectRailWidth: state.projectRailWidth,
     toolDockWidth: state.toolDockWidth,
     // 换行开关是一种查看偏好（像主题），重开要还在——与上面这些表面偏好同一档。
@@ -3935,6 +3950,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   nativeSurfaceOverlayCount: 0,
   portalOverlayCount: 0,
   workspaceTool: 'files-branches',
+  workspaceGitView: 'changes',
+  gitCommitDrafts: {},
   projectRailWidth: PROJECT_RAIL_DEFAULT_WIDTH,
   toolDockWidth: TOOL_DOCK_DEFAULT_WIDTH,
   loading: true,
@@ -4477,18 +4494,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }))
     }
   },
-  activateWorkspaceSelection(result) {
-    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
+  activateWorkspaceSelection(result, reveal = true) {
+    if (reveal && get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     const workspace = result.workspace
     set((state) => {
       const existingLayout = state.layouts[workspace.id]
       return {
         config: result.config,
-        activeWorkspaceId: workspace.id,
-        mainSurface: 'workbench',
-        regionCaretFocus: null,
-        error: null,
-        errorDismissed: true,
+        ...(reveal ? { activeWorkspaceId: workspace.id, workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null,
+          mainSurface: 'workbench' as const, regionCaretFocus: null, error: null, errorDismissed: true } : {}),
         layouts: existingLayout
           ? state.layouts
           : { ...state.layouts, [workspace.id]: createWorkspaceLayout(newTabGroupId()) }
@@ -6903,6 +6917,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   setWorkspaceTool(workspaceTool) {
     set({ workspaceTool, toolsOpen: true, mainSurface: 'workbench' })
+  },
+  setWorkspaceGitView(workspaceGitView) {
+    set({ workspaceGitView })
+  },
+  setGitCommitDraft(scope, message) {
+    set(state => {
+      const gitCommitDrafts = { ...state.gitCommitDrafts }
+      if (message) gitCommitDrafts[scope] = message
+      else delete gitCommitDrafts[scope]
+      return { gitCommitDrafts }
+    })
   },
   toggleTools() {
     set((state) => ({ toolsOpen: !state.toolsOpen }))

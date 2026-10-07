@@ -8,14 +8,15 @@ import { contentSlotPresentation } from '../lib/surface-tool-dock'
 import { useAppStore } from '../store'
 import type { FileExplorerRevealRequest } from './FileExplorer'
 import { TopicNavigationPanel } from './TopicNavigationPanel'
+import { WorkspaceZonesPanel } from './WorkspaceZonesPanel'
 import { WorkspaceFilesFrame, type WorkspaceFileActions } from './WorkspaceFilesFrame'
 
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 
 
 /** Topic/Category observations and original directory scope belong to this assembly. */
-export function TopicFilesTool({ workspace, visible, isScratch, topicId, onOpenPath, onOpenTerminal, actions, projectContent }: WorkspaceFileActions & {
-  isScratch: boolean; topicId?: string | null | undefined; actions: ReactNode; projectContent: ReactNode
+export function TopicFilesTool({ workspace, visible, isScratch, topicId, onOpenPath, onOpenTerminal, actions }: WorkspaceFileActions & {
+  isScratch: boolean; topicId?: string | null | undefined; actions: ReactNode
 }) {
   const choice = useAppStore(state => state.workbenchSpaceSelection?.workspaceId === workspace.id ? state.workbenchSpaceSelection : null)
   const scratch = useAppStore(state => state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID))
@@ -45,5 +46,8 @@ export function TopicFilesTool({ workspace, visible, isScratch, topicId, onOpenP
     topics={topics ?? []} categorySpaceId={categorySpaceId} visible={visible} onRevealDirectory={path => {
       setReveal({ selection: selectedTopicId ?? null, categorySpaceId, request: { workspaceId: workspace.id, path, requestId: ++requestId.current } })
       useAppStore.getState().setExplorerCollapsed(workspace.id, false)
-    }} />) : frame(projectContent)
+    }} />) : frame(<WorkspaceZonesPanel workspace={workspace} visible={visible} onCreateWorktree={() => {
+      useAppStore.getState().setWorkspaceGitView('branches')
+      useAppStore.getState().setWorkspaceTool('git')
+    }} />)
 }

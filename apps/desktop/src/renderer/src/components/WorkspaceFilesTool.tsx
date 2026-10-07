@@ -7,7 +7,7 @@ import { useAppStore } from '../store'
 import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
 import { TopicFilesTool } from './TopicFilesTool'
 import { MoteFilesTool } from './MoteFilesTool'
-import { ProjectFilesTool, ProjectSourceControl } from './ProjectFilesTool'
+import { ProjectFilesTool } from './ProjectFilesTool'
 import type { WorkspaceFileActions } from './WorkspaceFilesFrame'
 
 const CollectSourcesIcon = semanticIconComponent('action.collect-sources')
@@ -28,9 +28,9 @@ export function WorkspaceFilesTool(props: WorkspaceFileActions & {
       setCapture(target)
     } catch (error) { useAppStore.getState().reportError(error) }
   }}><CollectSourcesIcon size={13} /></button>
-  return <ProjectSourceControl workspace={workspace} visible={visible && !isScratch && !mote}>{projectContent => <>
+  return <>
     {capture ? <TopicKnowledgeCapture target={capture} onClose={() => setCapture(null)} /> : null}
     {mote ? <MoteFilesTool {...props} scope={mote} /> : isScratch || selectedTopicId ?
-      <TopicFilesTool {...props} topicId={selectedTopicId} actions={collect} projectContent={projectContent} /> : <ProjectFilesTool {...props} actions={collect} content={projectContent} />}
-  </>}</ProjectSourceControl>
+      <TopicFilesTool {...props} topicId={selectedTopicId} actions={collect} /> : <ProjectFilesTool {...props} actions={collect} />}
+  </>
 }

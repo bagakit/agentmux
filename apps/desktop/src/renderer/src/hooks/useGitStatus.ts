@@ -70,6 +70,7 @@ export function useGitStatus(workspaceId: string | null, active = true): GitStat
   }, [refresh])
   useEffect(() => {
     if (active && autoRead.current !== scope.current) void refresh()
+    if (!active) autoRead.current = null
   }, [active, refresh])
 
   const visible = state?.workspaceId === workspaceId

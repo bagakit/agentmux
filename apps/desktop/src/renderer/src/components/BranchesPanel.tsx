@@ -5,7 +5,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
   WorkspaceBranchesSnapshot,
   WorkspaceBranchRecord,
-  WorkspaceRecord
+  WorkspaceRecord,
+  WorkspaceSelectionResult
 } from '../../../shared/contracts'
 import { useWorkspaceBranches } from '../hooks/useWorkspaceBranches'
 import { useGitAheadBehind } from '../hooks/useGitAheadBehind'
@@ -73,7 +74,9 @@ function WorktreeAgentPresence({ hostId, path }: { hostId: string; path: string 
                   }))} />
 }
 
-export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
+export function BranchesPanel({ workspace, active = true }: { workspace: WorkspaceRecord; active?: boolean }) {
+  const activeRef = useRef(active)
+  activeRef.current = active
   const displayPath = usePathDisplay()
   const activateWorkspaceSelection = useAppStore((state) => state.activateWorkspaceSelection)
   const runFanOut = useAppStore((state) => state.runFanOut)
@@ -142,10 +145,10 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   // 只会改到其中一处，那正是本仓「读的 key 与写的 key 必须只判一次」栽过的形状：按钮说要丢弃、
   // 请求里却没带。
   const removalPrompt = removal === null ? null : worktreeRemovalPrompt(removal)
-  const { snapshot, loading, error: loadError, refresh } = useWorkspaceBranches(workspace.id)
+  const { snapshot, loading, error: loadError, refresh } = useWorkspaceBranches(workspace.id, active)
   // ahead/behind 是 **HEAD** 相对它自己 upstream 的事实，不是逐分支的——所以下面只把它画在
   // `isCurrent` 那一行。画到别的行上会是谎：那些分支各有各的 upstream，这一个计数说不了它们的事。
-  const { facts: syncFacts } = useGitAheadBehind(workspace.id)
+  const { facts: syncFacts } = useGitAheadBehind(workspace.id, active)
 
   useEffect(() => {
     const current = snapshot?.kind === 'git-repository'
@@ -242,6 +245,17 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     setActionError(null)
   }
 
+  function adoptSelection(result: WorkspaceSelectionResult, navigation: ReturnType<typeof useAppStore.getState>): void {
+    const current = useAppStore.getState()
+    const reveal = activeRef.current && current.toolsOpen !== false && current.activeWorkspaceId === navigation.activeWorkspaceId && current.workbenchSpaceSelection === navigation.workbenchSpaceSelection &&
+      current.mainSurface === navigation.mainSurface && current.workspaceTool === navigation.workspaceTool && current.workspaceGitView === navigation.workspaceGitView
+    if (reveal) activateWorkspaceSelection(result)
+    else {
+      activateWorkspaceSelection(result, false)
+      setActionError('The worktree is available. Your newer workface and selection are kept; open the worktree explicitly to continue there.')
+    }
+  }
+
   async function openBranch(branch: WorkspaceBranchRecord): Promise<void> {
     if (!branch || busyBranch) return
     setSelectedBranch(branch.name)
@@ -252,8 +266,9 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       return
     }
     setBusyBranch(branch.name)
+    const navigation = useAppStore.getState()
     try {
-      activateWorkspaceSelection(await api.workspaces.openBranch(workspace.id, branch.name))
+      adoptSelection(await api.workspaces.openBranch(workspace.id, branch.name), navigation)
     } catch (cause) {
       setActionError(message(cause))
     } finally {
@@ -266,12 +281,13 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     if (!createBranch || branchHasWorktree(createBranch) || !worktreePath.trim() || busyBranch) return
     setBusyBranch(createBranch.name)
     setActionError(null)
+    const navigation = useAppStore.getState()
     try {
-      activateWorkspaceSelection(await api.workspaces.createWorktreeForBranch({
+      adoptSelection(await api.workspaces.createWorktreeForBranch({
         workspaceId: workspace.id,
         branch: createBranch.name,
         path: worktreePath.trim()
-      }))
+      }), navigation)
       setCreateBranch(null)
     } catch (cause) {
       setActionError(message(cause))
@@ -427,7 +443,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               titleTooltip={worktree ? `${branch.name} · ${displayPath(worktree, workspace.hostId)}` : branch.name}
               subtitle={worktree && worktree !== workspace.path ? pathSummary(worktree) : null}
               subtitleTooltip={worktree ? displayPath(worktree, workspace.hostId) : undefined}
-              presence={worktree !== null && snapshot?.kind === 'git-repository'
+              presence={active && worktree !== null && snapshot?.kind === 'git-repository'
                 ? <WorktreeAgentPresence hostId={snapshot.hostId} path={worktree} />
                 : null}
               trailing={
@@ -554,7 +570,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       </div>
       {actionError && !createBranch && snapshot ? <div className="branches-inline-error" role="alert">{actionError}</div> : null}
       <Dialog.Root
-        open={createBranch !== null}
+        open={active && createBranch !== null}
         onOpenChange={(open) => {
           if (!open && busyBranch === null) {
             setCreateBranch(null)
@@ -611,7 +627,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       {/* Fan one prompt across N fresh branches. Lives beside "create worktree" because it is the same
           act repeated — the branch names and paths are main's to derive, never chosen here. */}
       <Dialog.Root
-        open={fanOutOpen}
+        open={active && fanOutOpen}
         onOpenChange={(open) => {
           if (fanningOut) return
           setFanOutOpen(open)
@@ -679,7 +695,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
         按钮说要丢弃、请求里却没带。
       */}
       <ConfirmationDialog
-        open={removalPrompt !== null}
+        open={active && removalPrompt !== null}
         title={removalPrompt?.title ?? ''}
         description={removalPrompt?.description ?? ''}
         {...(removalPrompt ? { subject: displayPath(removalPrompt.subject, workspace.hostId) } : {})}
