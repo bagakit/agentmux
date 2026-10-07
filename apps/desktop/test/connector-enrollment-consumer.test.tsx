@@ -244,3 +244,66 @@ it('a pending platform effect keeps other setup actions and the original local l
     await vi.waitFor(() => expect(calls.some(call => call.method === 'connection.enrollment.advance' && (call.input as { operationId: string }).operationId === a.operationId)).toBe(true))
   }
 })
+
+
+it('explicit independent creation retains both lost original requests while the setup list is unavailable', async () => {
+  await mount()
+  const actualCall = vi.mocked(api.connections.call).getMockImplementation()! as typeof api.connections.call
+  const admitted: Array<{ operationId: string; connectionId: string }> = []
+  let unavailable = false
+  vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
+    if (method === 'connection.enrollment.ls' && unavailable) throw new Error('Only the setup list is temporarily unavailable')
+    const result = await actualCall(method, input)
+    if (method === 'connection.enrollment.begin') { admitted.push(input as { operationId: string; connectionId: string }); throw new Error('Only this Renderer creation reply was lost') }
+    return result
+  })
+  await click('[data-enrollment-create]'); await vi.waitFor(() => expect(admitted).toHaveLength(1))
+  unavailable = true
+  await click('.connector-enrollment > .connector-back')
+  expect(dom.container.querySelector('[data-enrollment-resume]')).not.toBeNull()
+  await click('[data-enrollment-separate] > summary'); await click('[data-enrollment-start-another]')
+  expect(admitted).toHaveLength(1)
+  await click('[data-enrollment-create]'); await vi.waitFor(() => expect(admitted).toHaveLength(2))
+  expect(admitted[0].operationId).not.toBe(admitted[1].operationId); expect(admitted[0].connectionId).not.toBe(admitted[1].connectionId)
+  await click('.connector-enrollment > .connector-back'); await click('.connector-enrollment__history > summary')
+  for (const target of admitted) expect(dom.container.querySelector('[data-enrollment-select="' + target.operationId + '"]'), 'Every lost original request must remain reachable').not.toBeNull()
+  for (const target of admitted) {
+    await click('[data-enrollment-select="' + target.operationId + '"]'); await click('[data-enrollment-inspect]')
+    await vi.waitFor(() => expect(dom.container.querySelector('[data-enrollment-code] svg')).not.toBeNull())
+    expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe(target.operationId)
+    expect((await services.connections.enrollment!.inspect({ operationId: target.operationId })).operation?.connectionId).toBe(target.connectionId)
+    await click('.connector-enrollment > .connector-back'); await click('.connector-enrollment__history > summary')
+  }
+  expect(platformCalls).toEqual(['begin', 'begin'])
+  expect((await services.connections.enrollment!.list({})).operations).toHaveLength(2)
+})
+
+it('a pending begin does not block an explicitly independent fresh intent through the real Host', async () => {
+  await mount()
+  const originalFetch = globalThis.fetch
+  let release!: () => void, held = false
+  const gate = new Promise<void>(resolve => { release = resolve })
+  vi.stubGlobal('fetch', async (...args: Parameters<typeof fetch>) => {
+    if (new URLSearchParams(String(args[1]?.body)).get('action') === 'begin' && !held) { held = true; await gate }
+    return await originalFetch(...args)
+  })
+  try {
+    await click('[data-enrollment-create]'); await vi.waitFor(() => expect(held).toBe(true))
+    const a = (await services.connections.enrollment!.list({})).operations[0]!
+    await click('.connector-enrollment > .connector-back'); await click('[data-enrollment-separate] > summary'); await click('[data-enrollment-start-another]')
+    const create = dom.container.querySelector<HTMLButtonElement>('[data-enrollment-create]')!
+    expect(create.disabled, 'Another creation intent must not inherit the first begin wait').toBe(false)
+    await act(async () => { create.click(); create.click() })
+    await vi.waitFor(() => expect(calls.filter(call => call.method === 'connection.enrollment.begin'), 'The independent begin must reach the actual owner exactly once').toHaveLength(1))
+    const b = (await services.connections.enrollment!.list({})).operations.find(item => item.operationId !== a.operationId)!
+    expect(b?.authorization).toBe('pending')
+    expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe(b.operationId)
+    await act(async () => { release(); await gate })
+    await vi.waitFor(() => expect(calls.filter(call => call.method === 'connection.enrollment.begin')).toHaveLength(2))
+    expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe(b.operationId)
+    expect(platformCalls).toEqual(['begin', 'begin'])
+  } finally {
+    release()
+    await vi.waitFor(() => expect(calls.filter(call => call.method === 'connection.enrollment.begin')).toHaveLength(2))
+  }
+})
