@@ -13,3 +13,6 @@ export * from './connection-delivery-codec.js'
 
 export type * from './connection-enrollment-contract.js'
 export * from './connection-enrollment-codec.js'
+
+export type * from './connection-profile-contract.js'
+export * from './connection-profile-codec.js'
