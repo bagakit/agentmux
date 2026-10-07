@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { createRoomDiscovery } from './room-discovery.js'
 import { AgentMuxError } from '@agentmux/core'
 import { parseConnectionConfig, parseConnectionObservation, parseConnectionParams, parseConnectionRecord, type ConnectionConfig, type ConnectionConfigureInput, type ConnectionInspectInput, type ConnectionInspectResult, type ConnectionObservation, type ConnectionOperation, type ConnectionPort, type ConnectionRecord } from '@agentmux/core/connections'
 
@@ -16,6 +17,7 @@ export interface ConnectionAdapter {
   readonly adapterId: string
   readonly publication?: import('./publication-adapter.js').PublicationAdapter
   readonly rooms?: import('./room-provisioning-adapter.js').RoomProvisioningAdapter
+  readonly roomDiscovery?: import('./room-discovery-adapter.js').RoomDiscoveryAdapter
   readonly ingress?: import('./durable-ingress.js').IngressAuthenticator
   readonly transport?: import('./connection-receivers.js').ConnectionIngressTransport
   /** Return facts from the original adapter protocol; no implicit send or Agent execution. */
@@ -29,7 +31,7 @@ function unavailable(reason: 'credential-missing' | 'adapter-unavailable' | 'che
 }
 /** Optional original Host owner. Configuration and its operation receipt commit in one SQLite transaction. */
 export class ConnectionHost implements ConnectionPort {
-  rooms?: import('@agentmux/core/connections').RoomProvisioningPort
+  rooms?: import('@agentmux/core/connections').RoomPort
   bindings?: import('@agentmux/core/connections').RoomBindingsPort
   delivery?: import('@agentmux/core/connections').ConnectionDeliveryPort
   ingress?: import('@agentmux/core/connections').ConnectionIngressReadPort
@@ -37,19 +39,22 @@ export class ConnectionHost implements ConnectionPort {
   readonly database: DatabaseSync
   private readonly adapters: Map<string, ConnectionAdapter>
   private readonly observations = new Map<string, { revision: number; value: ConnectionObservation }>()
+  private readonly closeRoomDiscovery: () => void
   constructor(private readonly options: ConnectionHostOptions) {
     let ownedDatabase: DatabaseSync | undefined
     try {
       if (!options.database && !options.databasePath) throw new Error('Missing original connection database.')
       if (!options.database && options.databasePath !== ':memory:') mkdirSync(dirname(options.databasePath!), { recursive: true, mode: 0o700 })
       this.database = options.database ?? (ownedDatabase = new DatabaseSync(options.databasePath!))
-      this.database.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS connection_configuration (connection_id TEXT PRIMARY KEY, config_json TEXT NOT NULL, revision INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS connection_configuration_operation (operation_id TEXT PRIMARY KEY, input_json TEXT NOT NULL, result_json TEXT NOT NULL);')
+      this.database.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS connection_configuration (connection_id TEXT PRIMARY KEY, config_json TEXT NOT NULL, revision INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS connection_configuration_operation (operation_id TEXT PRIMARY KEY, input_json TEXT NOT NULL, result_json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS connection_room_link_operation (operation_id TEXT PRIMARY KEY, operation_json TEXT NOT NULL);')
     } catch {
       try { ownedDatabase?.close() } catch { /* Preserve the original initialization failure without exposing storage details. */ }
       throw new AgentMuxError('Connection configuration storage is unavailable. Existing Agents are retained.', 'CONNECTION_STORAGE_UNAVAILABLE')
     }
     this.adapters = new Map((options.adapters ?? []).map(adapter => [adapter.adapterId, adapter]))
     if (this.adapters.size !== (options.adapters?.length ?? 0)) { if (!options.database) this.database.close(); throw new AgentMuxError('Connection adapter IDs must be unique.', 'INVALID_CONNECTION_DATA') }
+    const discovery = createRoomDiscovery(this, options.secrets)
+    this.rooms = discovery.port; this.closeRoomDiscovery = discovery.close
   }
   private read(connectionId: string, includeReceiver = true): ConnectionRecord | null {
     const row = this.database.prepare('SELECT config_json, revision FROM connection_configuration WHERE connection_id = ?').get(connectionId)
@@ -146,5 +151,5 @@ export class ConnectionHost implements ConnectionPort {
     const config = this.readConfiguration(connectionId)?.config
     return config?.enabled ? this.options.secrets.resolve(config.credentialRef) : null
   }
-  close(): void { if (!this.options.database) this.database.close() }
+  close(): void { this.closeRoomDiscovery(); if (!this.options.database) this.database.close() }
 }

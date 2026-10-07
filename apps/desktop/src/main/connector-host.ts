@@ -35,7 +35,7 @@ export async function createDesktopConnections(options: { directory: string; enc
         const bindings = options.bindings ? new RoomBindingHost({ ...options.bindings, connections }) : undefined
         if (bindings) connections.bindings = bindings
         const rooms = options.bindings ? new RoomProvisioningHost({ connections, spatial: options.bindings.spatial }) : undefined
-        if (rooms) connections.rooms = rooms
+        if (rooms) connections.rooms = { ...connections.rooms, create: (input, context) => rooms.create(input, context), inspect: input => rooms.inspect(input) }
         publication = bindings && options.publication ? new PublicationHost({ connections, bindings, conversation: options.publication }) : undefined
         if (publication) connections.delivery = publication
         const ingress = bindings && options.ingress ? new DurableIngressHost({ connections, bindings, authenticators: connections.ingressAuthenticators(), core: options.ingress.core }) : undefined
@@ -60,10 +60,18 @@ export async function createDesktopConnections(options: { directory: string; enc
     get ingress() { return live?.ingress ?? null },
     get database() { return live?.database ?? null },
     connections: {
-      ...(options.bindings ? { rooms: {
-        create: async (input, context) => (await ensure()).rooms!.create(input, context),
-        inspect: async input => (await ensure()).rooms!.inspect(input)
-      } satisfies import('@agentmux/core/connections').RoomProvisioningPort } : {}),
+      rooms: {
+        list: async input => (await ensure()).connections.rooms!.list!(input),
+        search: async input => (await ensure()).connections.rooms!.search!(input),
+        get: async input => (await ensure()).connections.rooms!.get!(input),
+        members: async input => (await ensure()).connections.rooms!.members!(input),
+        createLink: async (input, context) => (await ensure()).connections.rooms!.createLink!(input, context),
+        inspectLink: async input => (await ensure()).connections.rooms!.inspectLink!(input),
+        ...(options.bindings ? {
+          create: async (input, context) => (await ensure()).rooms!.create(input, context),
+          inspect: async input => (await ensure()).rooms!.inspect(input)
+        } satisfies import('@agentmux/core/connections').RoomProvisioningPort : {})
+      } satisfies import('@agentmux/core/connections').RoomPort,
       ...(options.bindings ? { bindings: {
         bind: async (input, context) => { const owner = await ensure(); const result = await owner.bindings!.bind(input, context); owner.publication?.refresh(); owner.receivers?.refresh(); return result },
         inspect: async input => (await ensure()).bindings!.inspect(input),
