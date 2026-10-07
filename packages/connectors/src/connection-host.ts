@@ -129,7 +129,12 @@ export class ConnectionHost implements ConnectionPort {
   }
   registeredAdapter(adapterId: string): ConnectionAdapter | undefined { return this.adapters.get(adapterId) }
   ingressAuthenticators(): import('./durable-ingress.js').IngressAuthenticator[] {
-    return [...this.adapters.values()].flatMap(adapter => adapter.ingress ? [{ adapterId: adapter.adapterId, verify: (config: ConnectionConfig, raw: string, proof?: unknown) => adapter.ingress!.verify(config, raw, proof) }] : [])
+    return [...this.adapters.values()].flatMap(adapter => {
+      const ingress = adapter.ingress
+      if (!ingress) return []
+      return [{ adapterId: adapter.adapterId, verify: (config: ConnectionConfig, raw: string, proof?: unknown) => ingress.verify(config, raw, proof),
+        ...(ingress.qualifyReply ? { qualifyReply: (config: ConnectionConfig, event: Readonly<import('./durable-ingress.js').VerifiedIngressEvent>, raw: string, credential: string, signal: AbortSignal) => ingress.qualifyReply!(config, event, raw, credential, signal) } : {}) }]
+    })
   }
   async resolveIngressCredential(connectionId: string): Promise<string | null> {
     const config = this.readConfiguration(connectionId)?.config
