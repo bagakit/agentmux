@@ -4,7 +4,7 @@ import * as Menu from './HoverDropdownMenu'
 import { ClusterEntries } from './ConversationAxis'
 import { RULER_WINDOWS, type RulerRecord, type RulerWindow } from '../lib/conversation-ruler'
 
-const ThemeObjectScheduleIcon = semanticIconComponent('object.schedule')
+const HistoryWindowIcon = semanticIconComponent('conversation.history-window')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 
 export function ConversationRulerControls({ window, onWindow, untimed, onSelect, describe, onOpen }: {
@@ -23,7 +23,7 @@ export function ConversationRulerControls({ window, onWindow, untimed, onSelect,
     <Menu.Root modal={false} onOpenChange={open => { if (open) onOpen() }}>
       <Menu.Trigger asChild><button type="button" className="conversation-ruler__window"
         title="Recorded time around your reading position; larger ranges load earlier records asynchronously"
-        aria-label={`History window: ${window === 'all' ? 'All' : window}`}><ThemeObjectScheduleIcon size={11}/>{window === 'all' ? 'All' : window}<ThemeNavigationDownIcon size={10}/></button></Menu.Trigger>
+        aria-label={`History window: ${window === 'all' ? 'All' : window}`}><HistoryWindowIcon size={11}/>{window === 'all' ? 'All' : window}<ThemeNavigationDownIcon size={10}/></button></Menu.Trigger>
       <Menu.Portal><Menu.Content className="tab-context-menu" align="end" sideOffset={5}>
         <Menu.Label className="conversation-axis__menu-heading">Around your reading position</Menu.Label>
         <Menu.RadioGroup value={window} onValueChange={value => onWindow(value as RulerWindow)}>

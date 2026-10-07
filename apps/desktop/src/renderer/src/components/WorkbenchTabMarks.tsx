@@ -3,9 +3,9 @@ import type { WorkbenchTabMark } from '../lib/workbench-tab-marks'
 import { AgentAvatar } from './AgentAvatar'
 
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
-const ThemeFileCodeIcon = semanticIconComponent('file.code')
+const FileIcon = semanticIconComponent('object.file')
 const ThemeGitCompareIcon = semanticIconComponent('git.compare')
-const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+const ControlledBrowserIcon = semanticIconComponent('object.agent-controlled-browser')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
 
@@ -54,15 +54,15 @@ function WorkbenchTabMarkIcon({ mark }: { mark: WorkbenchTabMark }) {
     case 'terminal':
       return <ThemeObjectTerminalIcon size={12} />
     case 'file':
-      return <ThemeFileCodeIcon size={12} />
+      return <FileIcon size={12} />
     case 'git':
     case 'git-diff':
       return <ThemeGitCompareIcon size={12} />
     case 'browser':
-      // 被 Agent 驱动的那一格画 Bot，不是地球——它与旁边闲着的 Browser 必须一眼分得开，这正是
-      // 这个标记存在的全部理由（页面内角标只在人看着那一页时成立）。`title` 让悬停也说得出来。
+      // Agent 控制中的 Browser 保留窗口轮廓并显示控制标记；它仍是 Browser，不代表 Agent 本体或正在执行。
+      // 是否受控只消费原 mark.driving，`title` 保留原控制事实的悬停说明。
       return mark.driving
-        ? <span className="workbench-tab__driving-mark" style={{ display: 'inline-flex', flex: 'none', lineHeight: 0 }} role="img" aria-label="Agent driving" title="Agent driving"><ThemeObjectAgentIcon size={12} /></span>
+        ? <span className="workbench-tab__driving-mark" style={{ display: 'inline-flex', flex: 'none', lineHeight: 0 }} role="img" aria-label="Agent driving" title="Agent driving"><ControlledBrowserIcon size={12} /></span>
         : <ThemeObjectBrowserIcon size={12} />
     case 'launcher':
       return <ThemeObjectLauncherIcon size={12} />

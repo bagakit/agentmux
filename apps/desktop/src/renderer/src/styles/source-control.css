@@ -133,7 +133,7 @@
 .change-row:has(.change-row__discard--armed) { background: var(--red-bg); }
 /* 远端三键跟在分支名后面：它们作用于整个仓库，所以落在仓库那一行而不是任何一个文件行上。 */
 .changes-remote { display: inline-flex; align-items: center; gap:1px; margin-left:auto; }
-.changes-remote__action { width: 20px; height: 20px; }
+.changes-remote__action { width: auto; height: 20px; padding: 0 var(--sp-1); gap: var(--sp-1); font-size: var(--fs-micro); white-space: nowrap; }
 .branches-inline-notice { margin:0; padding:var(--sp-3) var(--sp-4); border-top: 1px solid var(--green-line); color: var(--green-text); background: var(--green-bg); font-size: var(--fs-micro); line-height: 1.4; }
 .commit-box { flex: 0 0 auto; display: flex; flex-direction: column; gap:var(--sp-3); padding:var(--sp-4); border-top: 1px solid var(--line-soft); }
 .commit-box__message { width: 100%; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); outline: 0; color: var(--text); background: var(--bg); font-family: inherit; font-size: var(--fs-meta); line-height: 1.45; resize: none; }

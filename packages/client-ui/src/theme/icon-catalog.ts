@@ -3,6 +3,23 @@ export { ICON_GLYPHS, ICON_GLYPH_IDS, AUTHORED_ICON_GLYPH_IDS, type IconGlyphId 
 
 /** IDs describe product meaning. Library glyph IDs are only the default drawing choice. */
 export const SEMANTIC_ICON_CATALOG = {
+  'action.fork-conversation': { label: 'Fork current conversation', glyph: 'git-fork' },
+  'object.relationships': { label: 'Note relationships', glyph: 'topology-nodes' },
+  'object.collaboration': { label: 'Recorded Agent collaboration', glyph: 'message-history' },
+  'action.move-to-draft': { label: 'Move queued message to draft', glyph: 'draft-return' },
+  'navigation.space': { label: 'Space workbench', glyph: 'layers' },
+  'navigation.focus': { label: 'Focus workface', glyph: 'focus' },
+  'navigation.goals': { label: 'Goals workface', glyph: 'target' },
+  'navigation.recall': { label: 'Recall knowledge workface', glyph: 'book-open' },
+  'object.agent-controlled-browser': { label: 'Agent-controlled Browser', glyph: 'browser-agent' },
+  'conversation.history-window': { label: 'Conversation history window', glyph: 'clock-3' },
+  'action.configure-reconnect': { label: 'Configure original conversation reconnect timing', glyph: 'clock-3' },
+  'action.upgrade-host': { label: 'Upgrade Host', glyph: 'arrow-up' },
+  'action.arrange-graph': { label: 'Arrange note relationships', glyph: 'graph-arrange' },
+  'git.pull': { label: 'Pull from remote', glyph: 'download' },
+  'git.push': { label: 'Push to remote', glyph: 'upload' },
+  'git.discard-changes': { label: 'Discard tracked changes', glyph: 'trash-2' },
+  'action.collect-sources': { label: 'Collect sources in a knowledge Topic', glyph: 'notebook-text' },
   'object.topic': { label: 'Topic', glyph: 'topic-card' },
   'object.tab': { label: 'Tab', glyph: 'tab-item' },
   'object.zone': { label: 'Zone', glyph: 'zone-group' },

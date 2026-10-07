@@ -82,7 +82,7 @@ function NativeProcessStep({ item, origin, children }: {
   return <div className="wf-native-process" data-native-step-id={item.id}>
     <WorkflowToolRow observation={{ id: item.id, title, source: 'Native', persistentSource: true,
       ...(status ? { status } : {}), ...(time ? { recordedTime: time } : {}) }}
-      className="log-row" icon={collaboration ? <SemanticIcon name="object.branch" size={12} /> : <SemanticIcon name="object.terminal" size={12} />}
+      className="log-row" icon={collaboration ? <SemanticIcon name="object.collaboration" size={12} /> : <SemanticIcon name="object.terminal" size={12} />}
       expanded={expanded} controls={bodyId} onToggle={toggle} />
     <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>
       {expanded || readOnce ? <>

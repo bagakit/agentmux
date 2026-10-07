@@ -20,6 +20,7 @@ import { PrLaunchSurface } from './PrLaunchSurface'
 const ThemeActionCreateFileIcon = semanticIconComponent('action.create-file')
 const ThemeFileDiffIcon = semanticIconComponent('file.diff')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+const ThemeGitDiscardIcon = semanticIconComponent('git.discard-changes')
 const ThemeGitStageIcon = semanticIconComponent('git.stage')
 const ThemeActionCreateIcon = semanticIconComponent('action.create')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
@@ -27,8 +28,8 @@ const ThemeGitUnstageIcon = semanticIconComponent('git.unstage')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
 const ThemeGitFetchIcon = semanticIconComponent('git.fetch')
-const ThemeActionDownloadIcon = semanticIconComponent('action.download')
-const ThemeActionUploadIcon = semanticIconComponent('action.upload')
+const GitPullIcon = semanticIconComponent('git.pull')
+const GitPushIcon = semanticIconComponent('git.push')
 const ThemeGitPullRequestIcon = semanticIconComponent('git.pull-request')
 const ThemeGitCommitIcon = semanticIconComponent('git.commit')
 
@@ -341,7 +342,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               disabled={busyPath !== null}
               onClick={() => void discardFile(change)}
             >
-              <ThemeActionRemoveIcon size={12} />
+              {change.untracked ? <ThemeActionRemoveIcon size={12} /> : <ThemeGitDiscardIcon size={12} />}
             </button>
           ) : null}
           {canStage ? (
@@ -353,7 +354,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               disabled={busyPath !== null}
               onClick={() => void stageFile(change)}
             >
-              {busyPath === change.path ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeGitStageIcon size={12} />}
+              {busyPath === change.path ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeGitStageIcon size={12} />}
             </button>
           ) : (
             <button
@@ -364,7 +365,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               disabled={busyPath !== null}
               onClick={() => void unstageFile(change)}
             >
-              {busyPath === change.path ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeGitUnstageIcon size={12} />}
+              {busyPath === change.path ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeGitUnstageIcon size={12} />}
             </button>
           )}
         </span>
@@ -383,7 +384,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
         disabled={busyRemote !== null}
         onClick={() => void runRemote(verb)}
       >
-        {busyRemote === verb ? <ThemeStatusLoadingIcon className="spin" size={13} /> : icon}
+        {busyRemote === verb ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : icon}<span>{verb === 'fetch' ? 'Fetch' : verb === 'pull' ? 'Pull' : 'Push'}</span>
       </button>
     )
   }
@@ -393,7 +394,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       <header className="branches-header branches-header--tools" aria-label="Change actions">
         <span className="source-control-count" aria-label="Changed file count">{repo ? repo.changes.length : 0} files</span>
         <button type="button" title="Refresh changes" onClick={() => void refresh()} disabled={loading}>
-          {loading ? <ThemeStatusLoadingIcon className="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
+          {loading ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
         </button>
       </header>
       {repo ? (
@@ -402,8 +403,8 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
           <span>{repo.branch ?? 'Detached HEAD'}</span>
           <div className="changes-remote">
             {remoteButton('fetch', <ThemeGitFetchIcon size={12} />, 'Fetch from remote')}
-            {remoteButton('pull', <ThemeActionDownloadIcon size={12} />, 'Pull from remote')}
-            {remoteButton('push', <ThemeActionUploadIcon size={12} />, 'Push to remote')}
+            {remoteButton('pull', <GitPullIcon size={12} />, 'Pull from remote')}
+            {remoteButton('push', <GitPushIcon size={12} />, 'Push to remote')}
             {/*
               开 PR 挨着 push，因为它就是 push 之后那一步。它不共用 remoteButton：那三个动词的忙态与
               失败分类是同一族（见 describeGitRemote），而这一个的结果是一个表单，不是一次回执。
@@ -417,7 +418,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               onClick={() => void openPrForm()}
             >
               {prReadiness.loading
-                ? <ThemeStatusLoadingIcon className="spin" size={12} />
+                ? <ThemeStatusLoadingIcon animation="spin" size={12} />
                 : <ThemeGitPullRequestIcon size={12} />}
             </button>
           </div>
@@ -491,7 +492,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
             className="primary-button commit-box__submit"
             disabled={staged.length === 0 || !commitMessage.trim() || committing}
           >
-            {committing ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeGitCommitIcon size={13} />}
+            {committing ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeGitCommitIcon size={13} />}
             {committing ? 'Committing…' : `Commit ${staged.length > 0 ? `(${staged.length})` : ''}`.trim()}
           </button>
         </form>
