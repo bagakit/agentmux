@@ -22,6 +22,8 @@ it('persists exact detached intent and claimed attempts before either effect, pr
     expect(JSON.parse(String(row.receipt_json))).toEqual({ state: 'dispatching', attemptId: request.attemptId })
     expect((await f.provisioning.inspect({ operationId: original.operationId })).operation!.input).toEqual(original)
     expect(request).not.toHaveProperty('members'); expect(request.name).toBe(original.name)
+    expect(request.config).toEqual(f.connections.readConfiguration(original.connectionId)!.config)
+    request.config.application.appId = 'mutated-adapter-copy'
     return { kind: 'created', externalConversationId: 'created-room' }
   })
   f.addMembers.mockImplementation(async request => {
@@ -29,6 +31,8 @@ it('persists exact detached intent and claimed attempts before either effect, pr
     expect(saved.creation).toMatchObject({ state: 'created', externalConversationId: 'created-room' })
     expect(saved.membership).toEqual({ state: 'dispatching', attemptId: request.attemptId })
     expect(request.members).toEqual(original.members)
+    expect(request.config).toEqual(f.connections.readConfiguration(original.connectionId)!.config)
+    expect(request.config.application.appId).not.toBe('mutated-adapter-copy')
     return { results: request.members.map(member => ({ member, state: 'joined' })) }
   })
   const work = f.provisioning.create(f.createInput, context)
