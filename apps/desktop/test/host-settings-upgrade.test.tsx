@@ -30,7 +30,7 @@ beforeEach(() => {
 const render = (draft = host, committed: SshHostConfig | undefined = host, active = true) => dom.render(<HostUpgradePanel host={draft} committed={committed} active={active} />)
 const click = () => dom.click('[data-upgrade-action]')
 it('checks automatically, then one explicit click rechecks and pins the owner before upgrading', async () => {
-  await render(); await click()
+  await render(); expect(dom.container.querySelector('[data-semantic-icon="action.upgrade-host"]')).not.toBeNull(); await click()
   expect(checkCall).toHaveBeenCalledTimes(2)
   expect(checkCall.mock.calls.every(([input]) => input.hostname === host.hostname)).toBe(true)
   expect(upgradeCall).toHaveBeenCalledExactlyOnceWith(host, check.expected, expect.stringMatching(/^[a-f0-9-]{36}$/))

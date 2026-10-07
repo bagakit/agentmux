@@ -135,6 +135,7 @@ describe('quick-mode original consumer counterexamples', () => {
     const write = vi.spyOn(api.files, 'write'), create = vi.spyOn(api.files, 'create')
     useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } })
     await app.mount()
+    const timing = app.container.querySelector('.mote-quick-mode [data-semantic-icon="action.configure-reconnect"]'); expect(timing).not.toBeNull(); expect(timing!.closest('button')?.textContent).toContain('Reconnect')
     await moteClick(app.container.querySelector<HTMLElement>('[aria-label="Edit quick mode"]')!)
     const agent = document.querySelector<HTMLButtonElement>('[aria-label="Executor for new chat"]')!, selected = document.querySelector<HTMLButtonElement>('[aria-label="Default conversation"]')!
     expect(agent.dataset.value).toBe('fixture'); expect(JSON.parse(selected.dataset.value!)).toEqual(conversation)

@@ -21,6 +21,8 @@ describe('file type icons', () => {
     expect(getFileTypeIcon('notes.patch')).toBe(semanticIconComponent('file.diff'))
     expect(getFileTypeIcon('db/schema.sql')).toBe(semanticIconComponent('file.database'))
     expect(getFileTypeIcon('reports/summary.xlsx')).toBe(semanticIconComponent('file.spreadsheet'))
+    expect(getFileTypeIcon('certs/server.p12')).toBe(semanticIconComponent('file.key'))
+    expect(getFileTypeIcon('certs/server.pfx')).toBe(semanticIconComponent('file.key'))
     expect(getFileTypeIcon('certs/server.pem')).toBe(semanticIconComponent('file.key'))
     expect(getFileTypeIcon('slides/status.pptx')).toBe(semanticIconComponent('file.presentation'))
     expect(getFileTypeIcon('sound/theme.mp3')).toBe(semanticIconComponent('file.audio'))
