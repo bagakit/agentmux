@@ -821,7 +821,7 @@ function workbenchIdentity(workbench) {
         return descriptor
       }
       if (region.kind === 'browser') {
-        const { loading, error, navigationId, ...descriptor } = region
+        const { loading, error, navigationId, title, ...descriptor } = region
         return descriptor
       }
       return region
