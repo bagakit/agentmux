@@ -49,6 +49,8 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
   const active = queued.find(entry => entry.preparing || entry.sending)
   const selected = queued.find(entry => entry.id === (editingId ?? hoveredId ?? selectedId)) ?? active ?? queued.find(entry => entry.deliverable) ?? queued[0]
   const currentIndex = selected ? queued.indexOf(selected) : -1
+  // Queue facts keep rendering; native resize owns geometry after membership/order settles.
+  const orderedOperationIds = JSON.stringify(queued.map(entry => entry.id))
 
   function paintPointer() {
     const floating = surfaceRef.current, pointer = pointerRef.current
@@ -113,7 +115,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
     resize.observe(list)
     for (const card of list.children) resize.observe(card)
     return () => { list.removeEventListener('scroll', updateScrollPivot); resize.disconnect() }
-  }, [queued, currentIndex, editingId, suppressed, Boolean(notice)])
+  }, [orderedOperationIds, currentIndex, editingId, suppressed, Boolean(notice)])
 
   useLayoutEffect(() => {
     const revealId = editingId ?? selectedId ?? active?.id
