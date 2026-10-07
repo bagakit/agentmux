@@ -47,7 +47,7 @@ describe('target Host Executor owner', () => {
     await writeFile(f.path, JSON.stringify({ schema: 'agentmux.host-executors.v1', runtimeId: 'target-runtime', executors: values }))
     expect((await stat(f.path)).size).toBeGreaterThan(1024 * 1024)
     await f.owner.configure({ executorId: 'next-wrapper', config: config('codex') })
-    const reopened = new AgentMuxHostExecutorOwner({ path: f.path, runtimeId: 'target-runtime', catalog: () => catalog })
+    const reopened = new AgentMuxHostExecutorOwner({ path: f.path, runtimeId: 'target-runtime', catalog: () => catalog, environment: () => ({ PATH: f.bin }) })
     expect((await reopened.resolve('wrapper-299')).config).toEqual(values['wrapper-299'])
     const server = new AgentMuxControlServer({ execute: async request => {
       if (request.operation !== 'list.agents') throw new Error('Only Executor inventory is requested')
