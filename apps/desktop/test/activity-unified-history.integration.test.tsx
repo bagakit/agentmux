@@ -1289,12 +1289,79 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   await act(async () => root.render(<ActivityView sessionId={sid} items={[]} capability="complete-events"
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true, opened: true }} />))
   expect(container.querySelector('[role="slider"]')).toBeNull()
-  const status = container.querySelector('.activity-feed__reading-status')!
+  const status = container.querySelector('.activity-feed__empty-reading')!
   expect(status.textContent).toContain('Reading records'); expect(status.querySelector('[data-icon-animation="spin"] [data-semantic-icon="status.loading"]')).not.toBeNull()
+  expect(status.getAttribute('role')).toBe('status'); expect(status.getAttribute('aria-live')).toBe('polite')
+  expect(container.querySelector('.activity-feed__loading-layer')).toBeNull()
+  expect(container.textContent).not.toContain('No structured activity yet'); expect(container.textContent).not.toContain('No inputs in the recent conversation window')
   expect(requests).toEqual([{ limit: 100 }])
   await act(async () => release(await client.sessionHistoryPage(sid, { limit: 100 }))); await flush()
   expect(ids()).toHaveLength(300); expect(requests).toHaveLength(3)
-  expect(container.querySelector('[role="slider"]')).not.toBeNull(); expect(container.querySelector('.activity-feed__reading-status')).toBeNull()
+  expect(container.querySelector('[role="slider"]')).not.toBeNull(); expect(container.querySelector('.activity-feed__empty-reading')).toBeNull()
+ })
+ it('coalesces actual shared and local pending in one retained ruler slot, while Earlier owns its original inline status', async () => {
+  await render(compose(true, true))
+  const slot = container.querySelector<HTMLElement>('.activity-ruler__pending')!, count = container.querySelector<HTMLElement>('.activity-ruler__count')!
+  expect(slot).not.toBeNull(); expect(slot.textContent).toBe(''); expect(slot.getAttribute('role')).toBeNull()
+  const body = container.querySelector<HTMLElement>('[data-native-record-id="record-353"] .log-turn__body')!, text = body.querySelector('p')!.firstChild!
+  const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5); window.getSelection()!.addRange(range)
+  const before = ids(), originalCount = count.textContent, original = vi.mocked(api.sessions.historyPage).getMockImplementation()!
+  let holdLocal = true, holdShared = true
+  const held: { options: NonNullable<Parameters<typeof api.sessions.historyPage>[1]>; release: (page: AgentSessionHistoryPage) => void }[] = []
+  vi.mocked(api.sessions.historyPage).mockImplementation((reference, options = {}) => {
+   if (options.limit === 100 && holdLocal || options.limit === 30 && holdShared) {
+    if (options.limit === 100) holdLocal = false; else holdShared = false
+    requests.push(options); return new Promise(resolve => held.push({ options, release: resolve }))
+   }
+   return original(reference, options)
+  })
+  const release = async () => { for (const request of held.splice(0)) request.release(await client.sessionHistoryPage(sid, request.options)) }
+  const retained = () => { expect(body.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(range.toString()).toBe('Reply') }
+  const start = requests.length
+  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
+  expect(held.map(request => request.options.limit)).toEqual([30])
+  expect(slot.getAttribute('role')).toBe('status'); expect(slot.getAttribute('aria-live')).toBe('polite'); expect(slot.textContent).toBe('Reading records…')
+  expect(slot.querySelector('svg[data-semantic-icon="status.loading"]')).not.toBeNull()
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Return to latest messages"]')!.click()); await flush()
+  expect(held.map(request => request.options.limit)).toEqual([30, 100]); expect(ids()).toEqual(before); retained()
+  expect(container.querySelectorAll('.activity-ruler__pending[role="status"]')).toHaveLength(1)
+  expect(count.textContent).toBe(originalCount); expect(count.querySelector('svg, [role="status"]')).toBeNull()
+  expect(container.querySelector('.activity-feed__loading-layer, .activity-feed__empty-reading')).toBeNull()
+  expect(requests).toHaveLength(start + 2)
+  await act(release); await flush()
+  expect(requests).toHaveLength(start + 4); expect(requests.slice(start).filter(request => request.limit === 100)).toHaveLength(3)
+  expect(ids()).toEqual(before); retained(); expect(container.querySelector('.activity-ruler__pending')).toBe(slot)
+  expect(slot.textContent).toBe(''); expect(slot.getAttribute('role')).toBeNull()
+  holdLocal = true; holdShared = true
+  const earlierStart = requests.length, earlier = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')!
+  await act(async () => earlier.click()); await flush()
+  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
+  expect(held.map(request => request.options.limit)).toEqual([100, 30])
+  expect(earlier.getAttribute('aria-busy')).toBe('true'); expect(earlier.querySelector('[role="status"]')?.textContent).toBe('Loading earlier…')
+  expect(slot.getAttribute('role')).toBeNull(); expect(slot.textContent).toBe(''); expect(slot.querySelector('svg')).toBeNull()
+  expect(container.querySelector('.activity-feed__loading-layer, .activity-feed__empty-reading')).toBeNull()
+  expect(requests).toHaveLength(earlierStart + 2); expect(ids()).toEqual(before); retained()
+  await act(release); await flush()
+  expect(requests).toHaveLength(earlierStart + 2); expect(ids()).toHaveLength(360); expect(ids()[0]).toBe('record-000'); retained()
+  expect(slot.getAttribute('role')).toBeNull(); expect(slot.textContent).toBe(''); expect(earlier.isConnected).toBe(false)
+  expect(container.querySelector('.activity-feed__reading [aria-busy="true"]')).toBeNull()
+ })
+ it('keeps local-only pending and a genuine first read failure honest until explicit Retry returns an actual empty source', async () => {
+  let reject!: (error: Error) => void
+  vi.mocked(api.sessions.historyPage).mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return new Promise((_resolve, failure) => { reject = failure }) })
+  await act(async () => root.render(<ActivityView sessionId={sid} items={[]} capability="complete-events"
+   conversationReading={{ reference: control, identity: control.run.runId, enabled: true, opened: true }} />))
+  expect(container.querySelector('.activity-feed__empty-reading[role="status"]')).not.toBeNull()
+  expect(container.querySelector('[role="slider"]')).toBeNull(); expect(requests).toEqual([{ limit: 100 }])
+  expect(container.textContent).not.toContain('No structured activity yet'); expect(container.textContent).not.toContain('No inputs in the recent conversation window')
+  await act(async () => reject(new Error('Original first conversation read unavailable'))); await flush()
+  expect(container.querySelector('.activity-feed__empty-reading')).toBeNull(); expect(container.textContent).toContain('Original first conversation read unavailable')
+  expect(container.textContent).not.toContain('No structured activity yet'); expect(container.textContent).not.toContain('No inputs in the recent conversation window')
+  expect(container.querySelector('[role="slider"]')).toBeNull(); expect(requests).toHaveLength(1)
+  await writeFile(transcript, ''); await click('Retry')
+  expect(requests).toEqual([{ limit: 100 }, { limit: 100 }]); expect(container.querySelector('[role="slider"]')).toBeNull()
+  expect(container.querySelector('.activity-feed__empty-reading')).toBeNull(); expect(container.textContent).not.toContain('Original first conversation read unavailable')
+  expect(container.textContent).toContain('No structured activity yet. Terminal remains available.')
  })
  it('protects a connected Range crossing a middle-page record with neither endpoint inside it', async () => {
   await render(compose()); await click('Earlier')

@@ -155,8 +155,17 @@ it('actual Activity defaults to the public 24h fill and keeps its common convers
   await act(async () => root.render(<ActivityView sessionId={f.reading.reference.agentSessionId} items={[]} capability="complete-events" conversationReading={f.reading} />))
   await wait(() => { expect(f.blocked).toBe(true); expect(host.querySelector('[data-native-record-id="record-699"]')).not.toBeNull() })
   const row = host.querySelector('[data-native-record-id="record-699"]')!
-  expect(host.textContent).toContain('Reading records'); await act(async () => f.release!())
-  await wait(() => expect(f.reads.length).toBeGreaterThan(3)); expect(host.querySelector('[data-native-record-id="record-699"]')).toBe(row)
+  const slot = host.querySelector<HTMLElement>('.activity-ruler__pending')!, text = row.querySelector('.log-turn__body p')!.firstChild!
+  const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 8); window.getSelection()!.addRange(range)
+  expect(slot.getAttribute('role')).toBe('status'); expect(slot.getAttribute('aria-live')).toBe('polite'); expect(slot.textContent).toBe('Reading records…')
+  expect(slot.querySelector('svg[data-semantic-icon="status.loading"]')).not.toBeNull()
+  expect(host.querySelector('.activity-ruler__count')!.textContent?.trim()).toBe('300 records')
+  expect(host.querySelector('.activity-feed__loading-layer, .activity-feed__empty-reading')).toBeNull(); expect(f.reads).toHaveLength(4)
+  await act(async () => f.release!())
+  await wait(() => expect(slot.textContent).toBe(''))
+  expect(f.reads).toHaveLength(5); expect(f.reads.filter(read => !read.cursor)).toHaveLength(1)
+  expect(host.querySelector('[data-native-record-id="record-699"]')).toBe(row); expect(host.querySelector('.activity-ruler__pending')).toBe(slot)
+  expect(slot.getAttribute('role')).toBeNull(); expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(range.toString()).toBe('Original')
 })
 
 it('keeps the accepted prefix when real decoded bytes hit the unchanged memory budget, with no trim or retry loop', async () => {
