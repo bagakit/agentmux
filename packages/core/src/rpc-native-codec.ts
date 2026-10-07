@@ -1,3 +1,4 @@
+import { parseConversationLandmarkPage, parseConversationLandmarkQuery, parseConversationLandmarkWritePage, parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { isMoteConnectionMethod, parseMoteConnectionParams, parseMoteConnectionResult } from './mote-connection-codec.js'
 import { parseConversationCheckpointPage, parseConversationChangesPage, parseConversationWatchOpening } from './conversation-changes.js'
 import { parseAgentMuxSearchInput, parseAgentMuxSearchPage } from './search-codec.js'
@@ -109,6 +110,17 @@ export function parseRpcAgentSession(value: unknown): ReturnType<typeof normaliz
       if (!session.nativeHandle) fail()
       member(source.nativeHandlePersistence, ['confirmed', 'unconfirmed'])
       session.nativeHandlePersistence = source.nativeHandlePersistence as 'confirmed' | 'unconfirmed'
+    }
+    if (source.currentActivity !== undefined) {
+      const activity = record(source.currentActivity, ['state', 'source', 'run', 'nativeSessionId', 'nativeTurnId',
+        'sourceId', 'sequence', 'hookReceiptId', 'observedAt'])
+      member(activity.state, ['active', 'idle', 'unknown']); member(activity.source, ['native-hook'])
+      if (runRef(activity.run).runId !== session.run.runId || session.nativeHandle?.kind !== 'provider' ||
+          activity.nativeSessionId !== session.nativeHandle.sessionId) fail()
+      for (const key of ['nativeSessionId', 'sourceId', 'hookReceiptId']) string(activity[key])
+      if (activity.state !== 'unknown' || activity.nativeTurnId !== undefined) string(activity.nativeTurnId)
+      count(activity.sequence); if (activity.sequence === 0) fail(); count(activity.observedAt)
+      session.currentActivity = structuredClone(activity) as NonNullable<typeof session.currentActivity>
     }
     return session
   } catch { return fail() }
@@ -421,6 +433,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.conversation.checkpoint': return parseConversationCheckpointPage(value, input as import('./conversation.js').ConversationRef)
       case 'agent.conversation.changes': return parseConversationChangesPage(value, input as import('./conversation-changes.js').ConversationChangesInput)
       case 'agent.conversation.watch': return parseConversationWatchOpening(value, input as import('./conversation.js').ConversationRef)
+      case 'agent.conversation.landmark.ls': return parseConversationLandmarkPage(value, parseConversationLandmarkQuery(input))
+      case 'agent.conversation.landmark.apply': return parseConversationLandmarkWritePage(value, parseConversationLandmarkWrite(input))
       case 'agent.conversation.inspect': return parseConversationReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.history': return parseAgentSessionHistoryReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.inspect': case 'whoami': {

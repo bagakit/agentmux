@@ -11,7 +11,9 @@ export function cloneSession(session: AgentMuxStoredAgentSession): AgentMuxAgent
 }
 
 /** Identity of a completed turn, scoped to its exact Run. */
-export function agentTurnCompletionIdentity(session: Pick<AgentMuxAgentSession, 'run' | 'semanticStatus'>): string | undefined {
+export function agentTurnCompletionIdentity(session: Pick<AgentMuxAgentSession, 'run' | 'semanticStatus' | 'currentActivity'>): string | undefined {
+  if (session.currentActivity && (session.currentActivity.state !== 'idle' ||
+      session.currentActivity.nativeTurnId !== session.semanticStatus?.nativeTurnId)) return undefined
   return session.semanticStatus?.state === 'done'
     ? JSON.stringify([session.run.runId, session.semanticStatus.observedAt]) : undefined
 }
