@@ -10,3 +10,5 @@ export * from './collaboration.js'
 
 export * from './dispatch.js'
 export * from './delegations.js'
+export * from './responsibility.js'
+export * from './goal-patrol.js'

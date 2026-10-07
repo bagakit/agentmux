@@ -1,4 +1,6 @@
+import type { DemandPatrol } from './goal-patrol.js'
 import type { DemandDispatch } from './dispatch.js'
+import type { DemandProgress } from './responsibility.js'
 import type { DemandDelegation } from './delegations.js'
 import type { DemandCreationOrigin, DemandParticipation, DemandParticipationSource } from './collaboration.js'
 import type { DemandContentReference } from './content-references.js'
@@ -104,6 +106,9 @@ export type Demand = {
   dispatches?: DemandDispatch[]
   /** Frozen work responsibility and report references; communication stays with Core. */
   delegations?: DemandDelegation[]
+  /** Source-qualified business declarations, separate from Runtime and human acceptance. */
+  progressUpdates?: DemandProgress[]
+  patrols?: DemandPatrol[]
   activities: DemandActivity[]
   decisions: DemandDecision[]
   alignment?: DemandAlignment
