@@ -69,8 +69,11 @@ describe('Claude native mod activity', () => {
       .toBeUndefined()
     expect(event('AgentMuxActivityUnavailable', { reason: 'source-changed' }).currentActivity)
       .toEqual({ state: 'unknown', nativeSessionId: 'native-A', sourceId: 'observer-A', sequence: 1 })
-    for (const extra of [{ turnId: '' }, { sourceId: '' }, { sequence: -1 }, { sequence: 1.1 }, { sequence: Infinity }]) {
-      expect(event('turn.start', extra).currentActivity).toBeUndefined()
+    for (const extra of [{ session_id: '' }, { turnId: '' }, { sourceId: '' }, { sequence: -1 }, { sequence: 1.1 }, { sequence: Infinity }]) {
+      const start = event('turn.start', extra)
+      expect(start.currentActivity).toBeUndefined()
+      expect(start.semanticState).toBe('unknown')
+      expect(start.lifecycleEvent).toBeNull()
     }
     expect(event('turn.complete', { reason: 'answer', isAborted: true }).currentActivity).toBeUndefined()
     for (const extra of [{ sourceId: '' }, { sequence: -1 }, { turnId: '' }, { isAborted: true }]) {
@@ -101,6 +104,60 @@ describe('Claude native mod activity', () => {
       child('turn.complete', 'resumed-turn', 5)
       expect(agentHasActiveSubagents(runId)).toBe(false)
     } finally { releaseSubagentRoster(runId) }
+  })
+
+  it.each(['throws', 'empty'])('a %s original actor capture reports a diagnostic without claiming or rebinding an actor', async failure => {
+    const directory = await mkdtemp(join(tmpdir(), 'agentmux-claude-native-source-'))
+    const modulePath = join(directory, 'register.mjs')
+    const calls: Array<{ stdin: string }> = []
+    const sessionId = vi.fn(async () => {
+      if (failure === 'throws') throw new Error('Original actor getter unavailable')
+      return ' '
+    })
+    const api = { env: { get: async () => '1' }, session: { id: sessionId },
+      process: { run: async (_argv: string[], init: { stdin: string }) => {
+        calls.push(init); return { exitCode: 0, stdout: '{}\n', stderr: '' }
+      } }, ui: { log: vi.fn() } }
+    type Handler = (client: typeof api, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => unknown
+    const handlers = new Map<string, Handler>()
+    try {
+      await writeFile(modulePath, claudeNativeActivitySource())
+      const module = await import(/* @vite-ignore */ pathToFileURL(modulePath).href) as {
+        register(on: (name: string, handler: Handler) => void): void
+      }
+      module.register((name, handler) => { handlers.set(name, handler); return { catch() {} } })
+      const next = (event: Record<string, unknown>) => ({ original: event })
+      const sessionStart = { original: 'native session start' }
+      expect(await handlers.get('session.start')!(api, sessionStart, next)).toEqual({ original: sessionStart })
+      await vi.waitFor(() => expect(calls).toHaveLength(1))
+      const payload = JSON.parse(calls[0]!.stdin)
+      expect(payload).toMatchObject({ hook_event_name: 'AgentMuxActivityUnavailable', reason: 'source-identity-unavailable', sequence: 1 })
+      expect(payload).not.toHaveProperty('session_id')
+      expect(payload).not.toHaveProperty('turnId')
+      expect(payload).not.toHaveProperty('agent_id')
+      const provider = new AgentProviderRegistry().get('claude')
+      const normalize = (extra = {}) => provider.normalizeHook({ receiptId: 'source-unavailable',
+        agentSessionId: 'core-source', runId: 'run-source', providerId: 'claude', payload: { ...payload, ...extra } }, {})
+      const diagnostic = normalize()
+      expect(diagnostic.observationFailure).toEqual({ code: 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE',
+        message: 'The native activity observer could not capture its original actor identity. Current activity is unconfirmed. The original Session, Run and input remain available; a subsequent original-identity Run can establish a fresh observer.' })
+      expect(diagnostic.semanticState).toBe('unknown')
+      expect(diagnostic.lifecycleEvent).toBeNull()
+      expect(diagnostic.currentActivity).toBeUndefined()
+      expect(diagnostic.nativeHandle).toBeUndefined()
+      expect(diagnostic.interaction).toBeUndefined()
+      for (const extra of [{ session_id: 'unconfirmed-actor' }, { agent_id: 'child' }, { sourceId: '' }, { sequence: 0 }]) {
+        expect(normalize(extra).observationFailure).toBeUndefined()
+      }
+      sessionId.mockResolvedValue('later-native-actor')
+      expect(await handlers.get('session.start')!(api, {}, next)).toEqual({ original: {} })
+      const turn = { turnId: 'later-turn', reason: 'answer', isAborted: false }
+      expect(handlers.get('turn.start')!(api, turn, next)).toEqual({ original: turn })
+      expect(handlers.get('turn.complete')!(api, turn, next)).toEqual({ original: turn })
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(sessionId).toHaveBeenCalledTimes(1)
+      expect(calls).toHaveLength(1)
+    } finally { await rm(directory, { recursive: true, force: true }) }
   })
 
   it('generated callbacks preserve native results, serialize delivery and freeze their original actor', async () => {

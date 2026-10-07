@@ -6,6 +6,7 @@ const root = resolve(import.meta.dirname, '../../../../..')
 const edits: Record<string, [string, string, string]> = {
   'main-turn': ['packages/core/src/client.ts', 'event.nativeTurnId !== previous.event.nativeTurnId', 'false'],
   'child-turn': ['packages/core/src/hook-normalizer.ts', 'previous.nativeTurnId !== identity.nativeTurnId', 'false'],
+  'child-source': ['packages/core/src/client.ts', 'agentSubagentActivityUnconfirmed(session.run.runId, previousActivity?.runId === session.run.runId ? previousActivity.event.sourceId : undefined)', 'false'],
   projection: ['packages/core/src/client.ts', 'if (currentActivity) projected.currentActivity = currentActivity', 'if (false) projected.currentActivity = currentActivity']
 }
 export default defineConfig({ root, cacheDir: resolve(root, '.local/claude-native-activity/cache'),

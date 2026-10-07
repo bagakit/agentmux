@@ -176,3 +176,50 @@ it('source sequence governs equal and backwards clocks without rewriting native 
     expect(status.session.currentActivity).toMatchObject({nativeTurnId:'next-native-turn',observedAt:now-1})
   } finally {clock.mockRestore()}
 })
+
+it.each([
+  { childId: 'same-child', startOld: true },
+  { childId: 'new-child', startOld: true },
+  { childId: 'first-child', startOld: false }
+])('a child source replacement ($childId) cannot let an old child end release main idle', async ({childId, startOld}) => {
+  const id = `child-source-replacement-${childId}`
+  const h = await activityCertaintyClient(id, 'claude')
+  const payload = (sourceId: string, sequence: number, turnId: string, extra = {}) => ({ session_id: 'native-main', sourceId, sequence, turnId, ...extra })
+  try {
+    await h.hook('turn.start', 'main-start-A', payload('source-A', 1, 'main-turn-A'))
+    if (startOld) await h.hook('turn.start', 'child-start-A', payload('source-A', 2, 'child-turn-A', {agent_id:'same-child'}))
+    await h.hook('turn.complete', 'main-end-A', payload('source-A', 3, 'main-turn-A', {reason:'answer',isAborted:false}))
+    if (startOld) expect(h.client.agentSession(id).currentActivity).toBeUndefined()
+    await h.hook('turn.start', 'child-start-B', payload('source-B', 1, 'child-turn-B', {agent_id:childId}))
+    await h.hook('turn.complete', 'late-child-end-A', payload('source-A', 4, 'child-turn-A', {agent_id:'same-child',reason:'answer',isAborted:false}))
+    const status = await h.client.statusAgent(id)
+    expect(status.observation.semantic).toBe('unknown')
+    expect(status.session.currentActivity?.state).toBe('unknown')
+    expect(status.session.hookIngressObservation?.code).toBe('AGENT_NATIVE_ACTIVITY_UNAVAILABLE')
+    await h.hook('turn.complete', 'child-end-B', payload('source-B', 2, 'child-turn-B', {agent_id:childId,reason:'answer',isAborted:false}))
+    expect((await h.client.statusAgent(id)).observation.semantic).toBe('unknown')
+    await h.hook('PermissionRequest', 'permission-after-source-conflict', {session_id:'native-main', tool_name:'Bash', tool_use_id:'source-conflict-permission', tool_input:{command:'true'}})
+    expect((await h.client.statusAgent(id)).observation.semantic).toBe('awaiting-input')
+    expect(h.client.agentSession(id).pendingInteraction?.request.kind).toBe('permission')
+    await h.hook('StopFailure', 'failure-after-source-conflict', {session_id:'native-main', error:'native failure'})
+    expect(h.client.agentSession(id).semanticStatus?.state).toBe('error')
+  } finally { await h.close() }
+})
+
+
+it('an actor capture failure remains a visible diagnostic without inventing native identity or consuming capability', async () => {
+  const h = await harness('actor-capture-failure')
+  const before = h.client.agentSession('actor-capture-failure')
+  const capability = (await h.client.statusAgent('actor-capture-failure')).capabilities
+  await h.hook('AgentMuxActivityUnavailable', 'actor-unavailable', {
+    sourceId:'uncaptured-source', sequence:1, reason:'source-identity-unavailable'
+  })
+  await h.hook('Notification', 'independent-raw-ack', {})
+  const after = await h.client.statusAgent('actor-capture-failure')
+  expect(after.session.hookIngressObservation).toMatchObject({code:'AGENT_NATIVE_ACTIVITY_UNAVAILABLE', run:before.run})
+  expect(after.session.nativeHandle).toEqual(before.nativeHandle)
+  expect(after.session.semanticStatus).toEqual(before.semanticStatus)
+  expect(after.session.currentActivity).toBeUndefined()
+  expect(after.capabilities).toEqual(capability)
+  expect(after.run.state).toBe('running')
+})
