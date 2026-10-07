@@ -1,10 +1,10 @@
 import { parseMotePreferencesTarget, parseMoteQuickDefaults, parseMoteQuickBaseline, parseMotePreferencesSaveParams,
   parseMotePreferencesSaveResult, sameMotePreferencesTarget, type MotePreferencesTarget, type MoteQuickDefaults,
-  type MoteQuickBaseline, type MotePreferencesSaveParams, type MotePreferencesSaveResult } from '@agentmux/core/mote-preferences'
+  type MoteQuickBaseline, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult } from '@agentmux/core/mote-preferences'
 import { isLocalNetworkHost } from '@agentmux/relay/offer'
 
 export type MoteQuickScope = { origin: string; runtimeId: string; deviceHostId: string | null; target: MotePreferencesTarget }
-export type MoteQuickAttempt = { input: MotePreferencesSaveParams; ownerInstanceId: string; phase: 'sending' | 'unknown' | 'saved' | 'failed'; result: MotePreferencesSaveResult | null; issue: string | null }
+export type MoteQuickAttempt = { input: MoteQuickPreferencesSaveParams; ownerInstanceId: string; phase: 'sending' | 'unknown' | 'saved' | 'failed'; result: MoteQuickPreferencesSaveResult | null; issue: string | null }
 export type MoteQuickDraft = { scope: MoteQuickScope; values: MoteQuickDefaults; baseline: MoteQuickBaseline | null;
   attempts: MoteQuickAttempt[]; blockedAttemptId: string | null }
 export type MoteQuickDraftCommit = { recordId: string | null; applied: boolean; draft: MoteQuickDraft | null; conflict: MoteQuickDraft | null }
@@ -40,11 +40,11 @@ export function parseMoteQuickDraft(value: unknown): MoteQuickDraft {
     const ids = new Set<string>()
     for (const value of v.attempts as unknown[]) {
       const a = object(value, ['input', 'ownerInstanceId', 'phase', 'result', 'issue']), input = parseMotePreferencesSaveParams(a.input)
-      if (!sameMotePreferencesTarget(input.target, scope.target) || !identity(a.ownerInstanceId) || ids.has(input.operationId) ||
+      if (input.kind !== 'quick' || !sameMotePreferencesTarget(input.target, scope.target) || !identity(a.ownerInstanceId) || ids.has(input.operationId) ||
         !['sending', 'unknown', 'saved', 'failed'].includes(String(a.phase)) || !(a.issue === null || typeof a.issue === 'string')) invalid()
       if (a.result !== null) parseMotePreferencesSaveResult(a.result, input)
-      if (a.phase === 'saved' && (!a.result || !['saved', 'unchanged'].includes((a.result as MotePreferencesSaveResult).status))) invalid()
-      if (a.phase === 'failed' && (!a.result || (a.result as MotePreferencesSaveResult).status !== 'refused-before-write')) invalid()
+      if (a.phase === 'saved' && (!a.result || !['saved', 'unchanged'].includes((a.result as MoteQuickPreferencesSaveResult).status))) invalid()
+      if (a.phase === 'failed' && (!a.result || (a.result as MoteQuickPreferencesSaveResult).status !== 'refused-before-write')) invalid()
       ids.add(input.operationId)
     }
     if (!(v.blockedAttemptId === null || typeof v.blockedAttemptId === 'string' && (v.attempts as MoteQuickAttempt[]).some(a =>

@@ -1,6 +1,6 @@
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core/control'
-import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MotePreferencesReadInput,
-  type MotePreferencesReadResult, type MotePreferencesSaveParams } from '@agentmux/core/mote-preferences'
+import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MoteQuickPreferencesReadInput,
+  type MoteQuickPreferencesReadResult, type MoteQuickPreferencesSaveParams } from '@agentmux/core/mote-preferences'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath, scratchTopicLogicalPath } from '../../../shared/scratch-topics'
 import { directoryIdentity, homeZoneId } from '../../../shared/space-addresses'
 import { api } from './api'
@@ -15,7 +15,7 @@ import { MoteQuickSaveError, readMoteQuickDefaults, saveMoteQuickDefaults, type 
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 
-async function originalScope(input: MotePreferencesReadInput) {
+async function originalScope(input: MoteQuickPreferencesReadInput) {
   const state = useAppStore.getState(), expected = input.target.expectedResource
   const workspace = state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID && item.id === expected.workspaceId &&
     item.hostId === expected.hostId && item.path === expected.workspacePath)
@@ -31,12 +31,12 @@ async function originalScope(input: MotePreferencesReadInput) {
   if (current?.hostId !== workspace.hostId || current.path !== workspace.path) throw new Error('The original Mote resource changed during discovery.')
   return { scope: { topic, workspace, rootPath }, topics }
 }
-export async function readMotePreferences(input: MotePreferencesReadInput): Promise<MotePreferencesReadResult> {
+export async function readMotePreferences(input: MoteQuickPreferencesReadInput): Promise<MoteQuickPreferencesReadResult> {
   const base = { kind: input.kind, target: input.target }
   try {
     const { scope, topics } = await originalScope(input), state = useAppStore.getState()
     const saved = await readMoteQuickDefaults(scope), catalog = spatialCatalog(useAppStore.getState(), topics)
-    const destinations: MotePreferencesReadResult['choices']['destinations'] = catalog.locations.flatMap(location => {
+    const destinations: MoteQuickPreferencesReadResult['choices']['destinations'] = catalog.locations.flatMap(location => {
       const reference = { displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, tabId: location.tabId, regionId: location.regionId }
       return location.spaceId === input.target.spaceId && confirmedMoteReference(useAppStore.getState(), scope, { reference }) ? [{
         reference: { kind: 'occurrence' as const, ...reference }, label: [state.config?.workspaces.find(w => w.id === location.displayWorkspaceId)?.name ?? 'Workspace',
@@ -61,9 +61,10 @@ export async function readMotePreferences(input: MotePreferencesReadInput): Prom
   }
 }
 export async function executeMotePreferencesControl(request: Extract<AgentMuxControlRequest, { operation: 'space.mote.preferences.read' | 'space.mote.preferences.save' }>, signal?: AbortSignal): Promise<AgentMuxControlResult> {
+  if (request.kind !== 'quick') throw new Error('Connection preferences belong to the original Main Files owner. Keep the request and use its public service.')
   const { operation, requestId, schemaVersion: _schema, ...input } = request
   if (request.operation === 'space.mote.preferences.read') return { operation: request.operation, ...await readMotePreferences(request) }
-  const params: MotePreferencesSaveParams = { ...request, operationId: requestId }
+  const params: MoteQuickPreferencesSaveParams = { ...request, operationId: requestId }
   const fail = (status: 'refused-before-write' | 'unconfirmed', error: unknown) => ({ operation: 'space.mote.preferences.save' as const, requestId,
     ...input, status, source: null, message: error instanceof Error ? error.message : String(error) })
   let unsubscribe = () => {}, cancel = () => {}, completed: MoteQuickWrite | null = null
