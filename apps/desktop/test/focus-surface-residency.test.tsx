@@ -20,6 +20,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
 import { installNativePopover } from './fixtures/mote-workface'
+import { SCRATCH_WORKSPACE_ID } from '../src/shared/contracts'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 // Actual App/Store/Workbench/SessionPane/TerminalView focus owners run. The Run API,
 // terminal DOM paint/addons and geometry are isolated leaves; native proof covers real I/O.
@@ -28,6 +29,7 @@ vi.mock('react-resizable-panels', async () => {
   const { createRequire } = await import('node:module')
   return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js')
 })
+
 vi.mock('@xterm/xterm', async () => {
   const { Terminal } = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm')
   return { Terminal: class extends Terminal {
@@ -398,3 +400,57 @@ describe('actual App Focus residency', () => {
   })
 })
 
+describe('actual App Focus Goal access', () => {
+  async function linkedGoal() {
+    await focus()
+    await act(async () => useAppStore.setState({ demands: { linked: { ...goal('linked'), title: 'Exact linked Goal',
+      participations: [{ id: 'original-discussion', operationId: 'original-discussion', kind: 'discussion', hostId: source.control.hostId,
+        agentSessionId: source.control.agentSessionId, entryPoint: 'original-entry', recordedAt: fixtureEpoch(0, 0, 1) }] } } }))
+    const card = container.querySelector<HTMLButtonElement>(`button[data-session-id="${source.id}"]`)!
+    const trigger = card.parentElement!.querySelector<HTMLButtonElement>('.focus-goal__trigger')!
+    expect(card).not.toBeNull(); expect(trigger).not.toBeNull(); expect(card.contains(trigger)).toBe(false)
+    return { card, trigger }
+  }
+  it('opens the exact related Goal from the original card and returns to the same App Focus reader and workface', async () => {
+    const { card, trigger } = await linkedGoal()
+    await query(source.id)
+    const surface = container.querySelector<HTMLElement>('.global-focus-surface')!, workspace = surface.querySelector('.global-session-workspace')!
+    const board = surface.querySelector<HTMLElement>('.focus-project-lanes')!; board.scrollTop = 127
+    const before = useAppStore.getState(), originalInput = container.querySelector('.xterm-helper-textarea')
+    const effects = ['launchAgent', 'recover', 'resume', 'stop', 'write', 'interrupt'] as const
+    for (const name of effects) vi.spyOn(api.sessions, name)
+    outside.focus(); outside.setSelectionRange(2, 5)
+    await act(async () => trigger.click()); await settle()
+    expect(container.querySelector('[data-goal-detail-id="linked"]')).not.toBeNull()
+    expect(useAppStore.getState().selectedDemandId).toBe('linked')
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(originalInput?.isConnected).toBe(true); expect(document.activeElement).toBe(outside)
+    await control({ kind: 'surface', surface: 'focus' })
+    expect(container.querySelector('.global-focus-surface')).toBe(surface); expect(surface.querySelector('.global-session-workspace')).toBe(workspace)
+    expect(container.querySelector(`button[data-session-id="${source.id}"]`)).toBe(card)
+    expect(surface.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!.value).toBe(source.id)
+    expect(board.scrollTop).toBe(127); expect(document.activeElement).toBe(outside)
+    expect([outside.selectionStart, outside.selectionEnd]).toEqual([2, 5])
+    for (const name of effects) expect(api.sessions[name]).not.toHaveBeenCalled()
+  })
+
+  it('retains an applied Goal and its existing presentation notice when an overlay makes the exact receipt partial', async () => {
+    const { trigger } = await linkedGoal()
+    await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces,
+      { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: fixturePath('scratch-goals'), name: 'Topics', kind: 'folder' }] } })))
+    let finish!: (topics: []) => void
+    vi.spyOn(api.scratch, 'listTopics').mockImplementationOnce(() => new Promise<[]>(resolve => { finish = resolve })).mockResolvedValue([])
+    await act(async () => trigger.click()); expect(finish).toBeDefined()
+    const beforeError = useAppStore.getState().error
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Settings"]')!.click()); await settle()
+    await act(async () => finish([])); await settle()
+    expect(useAppStore.getState().selectedDemandId).toBe('linked')
+    expect(useAppStore.getState().mainSurface).toBe('board')
+    expect(useAppStore.getState().error).toBe(beforeError)
+    expect(useAppStore.getState().desktopNavigationNotice?.code).toBe('DESKTOP_PRESENTATION_PARTIAL')
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Settings"]')!.click()); await settle()
+    expect(container.querySelector('[data-goal-detail-id="linked"]')).not.toBeNull()
+  })
+})
