@@ -33,6 +33,8 @@ function effective(path: string, value: unknown): unknown {
   if (path === 'goals.defaultView') return value ?? resolveGoalsPreferences(undefined).defaultView
   if (path === 'goals.showFinished') return value ?? resolveGoalsPreferences(undefined).showFinished
   if (path === 'goals.requesterAsSupervisor') return value ?? resolveGoalsPreferences(undefined).requesterAsSupervisor
+  if (path === 'startup') return { skipAgentAvailabilityCheckWait: (value as AppConfig['startup'])?.skipAgentAvailabilityCheckWait === true }
+  if (path === 'startup.skipAgentAvailabilityCheckWait') return value ?? false
   if (path === 'projectRailDensity') return value ?? PROJECT_RAIL_DENSITY_DEFAULT
   if (path === 'messageToolInitialLayout') return value ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT
   if (path === 'moteDirectoryView') return value ?? MOTE_DIRECTORY_VIEW_DEFAULT
@@ -69,7 +71,7 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
     if (configValuesEqual(effective(path, expected), effective(path, requested))) return actual
     if (configValuesEqual(effective(path, actual), effective(path, requested))) return actual
     // Optional domains still merge authored fields/identities after a concurrent first edit.
-    if (path === 'notes' || path === 'goals' || path === 'browser.startPage') {
+    if (path === 'notes' || path === 'goals' || path === 'startup' || path === 'browser.startPage') {
       // Compare effective defaults without persisting fields the user did not edit.
       actual = actual ?? {}; expected = effective(path, expected); requested = effective(path, requested)
     } else if (path === 'profile' || path === 'focus' || path === 'goalsCommonActions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
