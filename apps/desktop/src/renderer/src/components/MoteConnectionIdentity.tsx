@@ -125,8 +125,8 @@ function MoteConnectionDialog({ target, moteName, onClose, onRead, returnFocus }
   const current = snapshot?.saved.values?.connection
   const currentChoice = current && snapshot && !snapshot.connectionIssue ? moteConnectionChoice(current, snapshot.connections) : null
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal container={resolveOverlayContainer()}>
-    <div className="window-overlay-host__entry" data-overlay-layer="dialog"><Dialog.Overlay className="modal-overlay" />
-      <Dialog.Content ref={content} className="modal mote-connection-dialog" onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
+    <div className="window-overlay-host__entry" data-overlay-layer="dialog"><Dialog.Overlay className="dialog-scrim" />
+      <Dialog.Content ref={content} className="dialog-surface mote-connection-dialog" onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
         onCloseAutoFocus={event => { event.preventDefault(); const active = document.activeElement, node = returnFocus();
           if (node?.isConnected && (active === document.body || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}>
         <header className="mote-connection-dialog__header"><div><Dialog.Title>Bot for {moteName}</Dialog.Title>
@@ -153,7 +153,7 @@ function MoteConnectionDialog({ target, moteName, onClose, onRead, returnFocus }
           </details> : null}
         </div>
         <footer className="mote-connection-dialog__footer"><Dialog.Close asChild><button type="button" className="small-button">Cancel</button></Dialog.Close>
-          <button type="button" className="small-button primary" onClick={() => void save()} disabled={busy || pending || !snapshot || snapshot.saved.status !== 'ready'}>{busy ? 'Saving choice…' : 'Use this bot'}</button>
+          <button type="button" className="primary-button" onClick={() => void save()} disabled={busy || pending || !snapshot || snapshot.saved.status !== 'ready'}>{busy ? 'Saving choice…' : 'Use this bot'}</button>
         </footer>
       </Dialog.Content>
     </div>
