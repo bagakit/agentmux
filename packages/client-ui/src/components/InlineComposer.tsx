@@ -14,6 +14,8 @@ import { useClientUiPlatform } from '../platform.js'
 import { ConversationImageCollection } from './ConversationImageCollection.js'
 import { uniqueImageReferences, type ConversationImageReference } from '../lib/conversation-image-references.js'
 import { SemanticIcon } from '../theme/icons.js'
+import { composerWordBefore, hasExplicitComposerTrigger, type ComposerCaret } from '../lib/composer-completion.js'
+import { resolveComposerInputConfig, type ComposerInputConfig } from '../lib/composer-input-config.js'
 
 const ComposerImageReader = createContext<ReadPastedImage | undefined>(undefined)
 const ComposerDraftEditable = createContext<boolean | undefined>(undefined)
@@ -49,6 +51,7 @@ function ComposerImage({ node, editor, getPos, readImage }: Pick<NodeViewProps, 
 function ComposerFile({ node, editor, getPos }: Pick<NodeViewProps, 'node' | 'editor' | 'getPos'>) {
   const reference = node.attrs as ComposerSemanticReference
   const activate = useContext(ComposerReferenceActivation)
+  const isAgent = reference.kind === 'agent'
   const { editable, remove } = useDraftNodeRemoval({ node, editor, getPos })
   const [revealed, setRevealed] = useState<typeof node | null>(null)
   const trigger = useRef<HTMLButtonElement>(null)
@@ -61,18 +64,18 @@ function ComposerFile({ node, editor, getPos }: Pick<NodeViewProps, 'node' | 'ed
     if (referenceBounds.bottom > bounds.bottom) viewport.scrollTop += referenceBounds.bottom - bounds.bottom
     else if (referenceBounds.top < bounds.top) viewport.scrollTop += referenceBounds.top - bounds.top
   }, [open, editor])
-  return <NodeViewWrapper as="span" className="composer-file" contentEditable={false} data-tool-reference="file"
+  return <NodeViewWrapper as="span" className="composer-file" contentEditable={false} data-tool-reference={reference.kind}
     onKeyDown={(event: ReactKeyboardEvent) => { if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); setRevealed(null); trigger.current?.focus() } }}>
     <button ref={trigger} type="button" className="composer-file__name" title={reference.reference}
-      aria-label={'File reference: ' + reference.reference} aria-expanded={open} aria-controls={contentId}
+      aria-label={(isAgent ? 'Agent reference: ' : 'File reference: ') + reference.reference} aria-expanded={open} aria-controls={contentId}
       onClick={() => setRevealed(open ? null : node)}>
-      <SemanticIcon name="conversation.reference-file" size={12} aria-hidden="true" /><span>{reference.label}</span>
+      <SemanticIcon name={isAgent ? 'object.agent' : 'conversation.reference-file'} size={12} aria-hidden="true" /><span>{reference.label}</span>
     </button>
-    {editable ? <button type="button" className="composer-file__remove" aria-label="Remove file from draft" title="Remove file from draft" onClick={remove}>
+    {editable ? <button type="button" className="composer-file__remove" aria-label={isAgent ? 'Remove Agent from draft' : 'Remove file from draft'} title={isAgent ? 'Remove Agent from draft' : 'Remove file from draft'} onClick={remove}>
       <SemanticIcon name="action.close" size={8} aria-hidden="true" />
     </button> : null}
     {open ? <span ref={detail} id={contentId} className="composer-file__reference"><code>{reference.reference}</code>
-      {activate ? <button type="button" onClick={() => activate(reference)}>Open file</button> : null}
+      {activate && !isAgent ? <button type="button" onClick={() => activate(reference)}>Open file</button> : null}
     </span> : null}
   </NodeViewWrapper>
 }
@@ -105,18 +108,19 @@ export function documentDraft(doc: JSONContent): string {
  * 走 `addDecorations` 而不是自己写 ProseMirror 插件：已装的 @tiptap/core 自带这个钩子，装饰是纯派生
  * 的视图状态，不进文档、不进 undo 栈、不进草稿字符串。
  */
-export function keywordUnderlineExtension(keywords: () => readonly string[]) {
+export function keywordUnderlineExtension(keywords: () => readonly string[], config: () => ComposerInputConfig = () => resolveComposerInputConfig()) {
   return Extension.create({
     name: 'promptKeywordUnderline',
     addDecorations() {
       return {
         create: ({ state }) => {
           const current = keywords()
-          if (current.length === 0) return []
+          if (current.length === 0 || !config().keywords) return []
           const decorations: Decoration[] = []
           state.doc.descendants((node, pos) => {
             if (!node.isText || !node.text) return
             for (const match of composerKeywordMatches(node.text, current)) {
+              if (hasExplicitComposerTrigger(node.text, match.to, config())) continue
               decorations.push(Decoration.Inline(pos + match.from, pos + match.to, {
                 class: 'composer-keyword-hit',
                 'data-composer-keyword': match.keyword
@@ -134,7 +138,8 @@ export function keywordUnderlineExtension(keywords: () => readonly string[]) {
 export function composerExtensions(
   onActivate?: (reference: ComposerSemanticReference) => void,
   keywords: () => readonly string[] = () => [],
-  readPastedImage: ReadPastedImage = async () => null
+  readPastedImage: ReadPastedImage = async () => null,
+  config: () => ComposerInputConfig = () => resolveComposerInputConfig()
 ) {
   return [StarterKit.configure({
     blockquote: false, bold: false, bulletList: false, code: false, codeBlock: false,
@@ -149,7 +154,7 @@ export function composerExtensions(
     addNodeView() {
       const renderFile = ReactNodeViewRenderer(ComposerFile, {
         update: ({ oldNode, newNode, updateProps }) => {
-          if (newNode.attrs.kind !== 'file') return false
+          if (newNode.attrs.kind !== 'file' && newNode.attrs.kind !== 'agent') return false
           if (oldNode !== newNode) updateProps()
           return true
         },
@@ -157,14 +162,14 @@ export function composerExtensions(
       })
       return props => {
         const { node, editor, getPos } = props
-        if (node.attrs.kind === 'file') return renderFile(props)
+        if (node.attrs.kind === 'file' || node.attrs.kind === 'agent') return renderFile(props)
         const reference = node.attrs as ComposerSemanticReference
         const dom = document.createElement('button')
         dom.type = 'button'
         dom.contentEditable = 'false'
         dom.className = `composer-semantic-token composer-semantic-token--${reference.kind}`
         dom.dataset.toolReference = reference.kind
-        dom.append(createSemanticIconElement(`conversation.reference-${reference.kind}`, dom.ownerDocument, { size: 12 }), dom.ownerDocument.createTextNode(reference.label))
+        dom.append(createSemanticIconElement(reference.kind === 'agent' ? 'object.agent' : `conversation.reference-${reference.kind}`, dom.ownerDocument, { size: 12 }), dom.ownerDocument.createTextNode(reference.label))
         dom.title = `${reference.kind === 'subcommand' ? 'Expand prompt' : 'Open reference'}: ${reference.reference}`
         dom.setAttribute('aria-label', dom.title)
         dom.addEventListener('click', () => {
@@ -186,7 +191,7 @@ export function composerExtensions(
         <ComposerImage node={node} editor={editor} getPos={getPos} readImage={readPastedImage} />
       </NodeViewWrapper>)
     }
-  }), keywordUnderlineExtension(keywords)]
+  }), keywordUnderlineExtension(keywords, config)]
 }
 
 export type InlineComposerProps = {
@@ -207,6 +212,9 @@ export type InlineComposerProps = {
   // 要在正文里加下划线的识别词。每次渲染都可能是新数组，而扩展只装一次——所以下面读的是
   // `latest.current`，绝不把它捕进闭包（否则改了设置编辑器不跟着变）。
   keywords?: readonly string[]
+  completionConfig?: ComposerInputConfig
+  /** Actual maintained editor coordinates, including a codec-independent text prefix. */
+  onSelectionChange?: (caret: ComposerCaret) => void
 }
 
 export function InlineComposer(props: InlineComposerProps) {
@@ -223,7 +231,8 @@ function unavailableEditor(): Error & { code: string } {
 function UnpresentedInlineComposer(props: InlineComposerProps) {
   useImperativeHandle(props.insertionRef, () => ({
     replace: () => { throw unavailableEditor() },
-    insert: async () => { throw unavailableEditor() }
+    insert: async () => { throw unavailableEditor() },
+    replaceRange: () => false
   }), [])
   return <div className="composer__editor" data-placeholder={props.placeholder} data-disabled={props.disabled} data-empty={props.value.length === 0 ? 'true' : 'false'}>
     {props.value ? <span className="composer__editor-fallback">{props.value}</span> : null}
@@ -249,8 +258,16 @@ function PresentedInlineComposer(props: InlineComposerProps) {
   const extensions = useMemo(() => composerExtensions(
     (reference) => latest.current.onActivateReference?.(reference),
     () => latest.current.keywords ?? [],
-    (path) => latest.current.readPastedImage?.(path) ?? Promise.resolve(null)
+    (path) => latest.current.readPastedImage?.(path) ?? Promise.resolve(null),
+    () => resolveComposerInputConfig(latest.current.completionConfig)
   ), [])
+  function reportSelection(editor: Editor): void {
+    if (editor.isDestroyed || !latest.current.onSelectionChange) return
+    const { from, to, $from } = editor.state.selection
+    const preceding = $from.nodeBefore
+    const before = preceding?.isText ? composerWordBefore(preceding.text ?? '') : ''
+    latest.current.onSelectionChange?.({ from, to, after: $from.parent.textBetween($from.parentOffset, Math.min($from.parent.content.size, $from.parentOffset + 1), '', '\ufffc'), before, composing: editor.view.composing })
+  }
   const editorProps = useMemo(() => ({
     attributes: { role: 'textbox', 'aria-multiline': 'true', 'aria-label': latest.current['aria-label'], 'data-placeholder': latest.current.placeholder },
     handleKeyDown: (view: any, event: KeyboardEvent) => {
@@ -258,6 +275,10 @@ function PresentedInlineComposer(props: InlineComposerProps) {
       const before = view.state.doc.cut(0, view.state.selection.from)
       latest.current.onKeyDown(event, documentDraft(before.toJSON()).length, view.state.selection.empty)
       return event.defaultPrevented
+    },
+    handleDOMEvents: {
+      compositionstart: () => { const editor = editorRef.current; if (editor) { const { from, to } = editor.state.selection; latest.current.onSelectionChange?.({ from, to, before: '', composing: true }) }; return false },
+      compositionend: () => { queueMicrotask(() => { const editor = editorRef.current; if (editor) reportSelection(editor) }); return false }
     },
     handlePaste: (_view: any, event: ClipboardEvent) => {
       const editor = editorRef.current
@@ -287,6 +308,8 @@ function PresentedInlineComposer(props: InlineComposerProps) {
     content: draftDocument(''),
     editable: !props.disabled,
     onUpdate,
+    onTransaction: ({ editor }) => reportSelection(editor),
+    onFocus: ({ editor }) => reportSelection(editor),
     editorProps
   })
   editorRef.current = editor
@@ -303,6 +326,17 @@ function PresentedInlineComposer(props: InlineComposerProps) {
     })
   }, [editor, props.disabled, platform])
   useImperativeHandle(props.insertionRef, () => ({
+    replaceRange: (range, value) => {
+      if (!editor || editor.isDestroyed || !editor.isEditable || latest.current.disabled || !editor.view.dom.isConnected || editor.view.composing) return false
+      if (range.from < 0 || range.to > editor.state.doc.content.size || editor.state.doc.textBetween(range.from, range.to, '\n', '\ufffc') !== range.expected) return false
+      editor.view.dispatch(closeHistory(editor.state.tr))
+      // The caller names the original range; never replace the controlled draft or its following text.
+      editor.commands.setTextSelection({ from: range.from, to: range.to })
+      replaceComposerRange(editor, draftDocument(value), range)
+      editor.view.dispatch(closeHistory(editor.state.tr))
+      editor.commands.focus()
+      return true
+    },
     replace: (value) => {
       if (!editor || editor.isDestroyed || !editor.view.dom.isConnected) throw unavailableEditor()
       replaceComposerDraft(editor, draftDocument(value))
@@ -329,6 +363,7 @@ function PresentedInlineComposer(props: InlineComposerProps) {
           editor.view.updateState(EditorState.create({ schema: editor.schema, doc,
             selection: TextSelection.atEnd(doc), plugins: editor.state.plugins }))
         }
+        reportSelection(editor)
         return
       }
       const origin = historyOrigin.current
@@ -340,6 +375,7 @@ function PresentedInlineComposer(props: InlineComposerProps) {
         editor.chain().setMeta('addToHistory', false).setContent(draftContent, { emitUpdate: false }).run()
         if (wasEmpty) editor.commands.setTextSelection(editor.state.doc.content.size - 1)
       }
+      reportSelection(editor)
     })
     return () => { cancelled = true }
   }, [editor, props.value, props.historyNavigation])
@@ -352,7 +388,7 @@ function PresentedInlineComposer(props: InlineComposerProps) {
   useEffect(() => {
     if (!editor || editor.isDestroyed) return
     editor.commands.updateDecorations()
-  }, [editor, keywordKey])
+  }, [editor, keywordKey, props.completionConfig])
   return <div className="composer__editor" data-placeholder={props.placeholder} data-disabled={props.disabled} data-empty={props.value.length === 0 ? 'true' : 'false'}>
     <ComposerReferenceActivation.Provider value={props.onActivateReference}><ComposerDraftEditable.Provider value={!props.disabled}><ComposerImageReader.Provider value={props.readPastedImage}><ConversationImageCollection references={imageReferences} readImage={props.readPastedImage}>
       <EditorContent editor={editor} />

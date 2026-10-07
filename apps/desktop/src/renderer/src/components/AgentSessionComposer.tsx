@@ -12,8 +12,8 @@ import type { ComposerShortcut, SessionSnapshot } from '../../../shared/contract
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { appendFileReferences, appendSelectedFileReferences } from '@agentmux/client-ui/composer-file-reference'
-import { appendSemanticReference, encodeSemanticReference, expandSemanticReferences, semanticReferenceKind, semanticReferenceLabel, type ComposerSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
-import { AGENT_COMMAND_GROUP_LABEL, composerShortcutForBareWord, composerShortcutSuggestion, composerShortcutsForProvider, resolveComposerShortcuts } from '../../../shared/composer-shortcut-library'
+import { expandSemanticReferences, type ComposerSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
+import { useComposerCandidates, skillComposerSuggestion } from '../lib/use-composer-candidates'
 import { composerSubmitMode } from '../lib/composer-submit-mode'
 import {
   caretAtFirstLine,
@@ -140,31 +140,6 @@ export function AgentSessionComposer({
   )
   const composerOptions = useObservedAppStore('composer', visible, consumerScope, (state) => session?.kind === 'agent'
     ? state.providerCatalog.find((entry) => entry.id === session.providerId)?.composer : undefined)
-  // 用户自己的 prompt，按这个 Session 的 Provider 过滤。读的是**实时配置**而不是构造时的快照：
-  // 在设置页改完回到 Composer，候选必须已经是新的（本仓「替身写成常量会藏起被测性质」同一族）。
-  // 走共用取值层而不是就地 `?? []`：缺席即空、缺 providerId 即通用这两个默认必须只有一处，且它
-  // 缺席时返回共享冻结的同一个引用——zustand 按引用比较，就地新建 `[]` 会无限重渲染。
-  const myShortcuts = useObservedAppStore('composer', visible, consumerScope, (state) => resolveComposerShortcuts(state.config))
-  const shortcutsHere = composerShortcutsForProvider(
-    myShortcuts,
-    session?.kind === 'agent' ? session.providerId : undefined
-  )
-  // 候选来源是**并集**：Provider 原生命令 ∪ 我自己的 prompt，各自标出来源。此前这里只有前者，
-  // 而那句 `COMPOSER_SHORTCUT_PRESETS.find((entry) => entry.text === item)` 恒返回 undefined——
-  // `commands` 只装 Provider catalog 声明的命令，13 家内置加起来是
-  // `/compact /context /cost /diff /help /model /status`，没有一个等于 `/review-changes`。
-  // 于是打 `/review` 一条候选都不出，而 tsc 干净、测试全绿：那句 `.find()` 长得就是「已经合并了」
-  // 的样子（判「两套是否真的合并」要从消费侧的数据来源反推，不读桥接代码的意图）。
-  //
-  // Shortcut 段排在 Agent 原生命令**之前**：这是用户自己配的那套，也是他来这个列表要找的东西；
-  // 段序即此处的拼装序（AgentComposer 用保插入序的 Map 分组，不另立优先级表）。
-  const commandCandidates = [
-    ...shortcutsHere.map(composerShortcutSuggestion),
-    ...(composerOptions?.commands ?? []).map((command) => ({ ...command, group: AGENT_COMMAND_GROUP_LABEL }))
-  ]
-  // 识别词：同一批 Shortcut 的**裸** keyword（无 `/`）。同一个 keyword 字段供两处识别（`/` 候选与裸词），
-  // 不建第二份注册表——那两份必然漂移，一处认得的词另一处不认。
-  const keywordCandidates = shortcutsHere.map((shortcut) => ({ text: shortcut.keyword, description: `${shortcut.label} · Shortcut` }))
   const send = useAppStore.getState().send
   const interrupt = useAppStore.getState().interrupt
   const setPosture = useAppStore.getState().setPosture
@@ -173,6 +148,9 @@ export function AgentSessionComposer({
   // type, does the surface permit a submit (true while working — that IS steer), and is the primary button
   // Send or Stop. availability stays for other consumers; this component reads only submitMode.
   const submitMode = composerSubmitMode(session, disabled || readOnly)
+  const completion = useComposerCandidates({ scope: JSON.stringify([sessionId, session?.hostId, workspace?.id, session?.kind === 'agent' ? session.providerId : null]),
+    active: visible && submitMode.canType, config, workspace, sessionId,
+    providerId: session?.kind === 'agent' ? session.providerId : undefined, commands: composerOptions?.commands ?? [], insertion: insertionRef })
   const queueStatusPrompt = submitMode.canType && session?.kind === 'agent' && Boolean(session.pendingInteraction)
 
   function sendStatusPrompt(prompt: ComposerShortcut): boolean {
@@ -245,18 +223,6 @@ export function AgentSessionComposer({
       const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' })
       return appendFileReferences('', [path])
     }, { separate: true })
-  }
-
-  function insertSemanticReference(reference: { name: string; path: string }): void {
-    const kind = semanticReferenceKind(reference.path)
-    const token = kind === 'subcommand' ? reference.path : `$${reference.name.replace(/[^A-Za-z0-9._-]+/g, '-')}`
-    const item: ComposerSemanticReference = {
-      token,
-      label: semanticReferenceLabel(reference.name),
-      kind,
-      reference: kind === 'subcommand' ? reference.path : `@${reference.path}`
-    }
-    setAgentComposerDraft(sessionId, appendSemanticReference(useAppStore.getState().agentComposerDrafts[sessionId] ?? '', item))
   }
 
   async function capture(): Promise<void> {
@@ -334,7 +300,7 @@ export function AgentSessionComposer({
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
         executorLabel={executors?.[session.executorId]?.label ?? session.executorId}
-        appearance={executors?.[session.executorId]?.avatar} prompts={shortcutsHere} visible={visible}
+        appearance={executors?.[session.executorId]?.avatar} prompts={completion.prompts} visible={visible}
         disabled={!submitMode.canType || (!submitMode.canSubmit && !queueStatusPrompt)} queue={queueStatusPrompt}
         inputAction={!submitMode.canType ? 'Messages are unavailable on this surface.' : queueStatusPrompt
           ? 'Queue a message until the pending request is answered.' : session.processState !== 'running' || session.status.state === 'disconnected'
@@ -342,34 +308,21 @@ export function AgentSessionComposer({
         onSelect={sendStatusPrompt} resultReview={resultReview} /> : null}
       contextUsage={<AgentContextUsage visible={visible} source={session?.kind === 'agent' ? JSON.stringify([session.hostId, session.id, session.providerId, session.control.run.runId]) : sessionId} usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
       {...(workspace ? { onActivateSemanticReference: (reference: ComposerSemanticReference) => {
+        if (reference.kind === 'agent') { void api.ui.openObjectLink(reference.reference).catch(reportError); return }
         const path = reference.reference.startsWith('@') ? reference.reference.slice(1) : reference.reference
         const store = useAppStore.getState()
         void store.selectWorkspace(workspace.id).catch(reportError)
         void store.openFile(path, undefined, undefined, workspace.id).catch(reportError)
       } } : {})}
-      commands={commandCandidates}
-      promptKeywords={keywordCandidates}
-      references={activeFile ? [{ text: `@${activeFile.split('/').at(-1)}`, description: activeFile }] : []}
-      onSelectSuggestion={(item, kind) => {
-        if (kind === 'reference' && activeFile) return appendSelectedFileReferences('', [activeFile]).trim()
-        // 我自己的 prompt 选中后就地展开成一个 subcommand token（点它再展开成正文）；Provider 原生
-        // 命令原样填进草稿交给 Provider。查表用 keyword 去掉 `/` 之后的裸词，与裸词识别同一个键——
-        // 两处识别共用一个 keyword 字段，不建第二份注册表。
-        // `kind === 'keyword'` 是裸词那条路（`item` 就是 keyword 本身），`'command'` 那条要先剥掉 `/`。
-        // 两条都查同一张表：keyword 一个字段两处识别，没有第二份注册表。
-        const mine = kind === 'keyword' || kind === 'command'
-          ? composerShortcutForBareWord(shortcutsHere, item.replace(/^\//, ''))
-          : undefined
-        if (mine) return encodeSemanticReference({ token: item, label: mine.label, kind: 'subcommand', reference: mine.body })
-        return item
-      }}
-      tools={<><AgentComposerTools disabled={!submitMode.canType} commands={commandCandidates}
+      completionConfig={completion.completionConfig}
+      commands={completion.commands} skills={completion.skills} references={completion.references}
+      promptKeywords={completion.promptKeywords} onCompletionQuery={completion.onCompletionQuery}
+      completionFeedback={completion.completionFeedback}
+      tools={(referenceTools) => <AgentComposerTools key={completion.scope} disabled={!submitMode.canType} commands={completion.commands} referenceTools={referenceTools}
         viewMode={viewMode} onViewModeChange={(mode) => setViewMode(sessionId, mode)}
-        loadSkills={() => api.ui.listAgentSkills(sessionId)} onChooseSkill={insertSemanticReference}
-        onCommand={(command) => {
-          const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
-          setAgentComposerDraft(sessionId, `${command}${current ? ` ${current}` : ' '}`)
-        }} {...(session?.hostId === 'local' ? { onCapture: capture } : {})} runAction={feedback.run} /></>}
+        loadSkills={completion.loadSkills} onChooseSkill={skill => { void feedback.run(() => completion.insertCandidate(skillComposerSuggestion(skill))) }}
+        onCommand={(_command, candidate) => { void feedback.run(() => completion.insertCandidate(candidate)) }}
+        {...(session?.hostId === 'local' ? { onCapture: capture } : {})} runAction={feedback.run} />}
       value={text}
       disabled={!submitMode.canType}
       placeholder={submitMode.placeholder}

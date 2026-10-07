@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
 import { TextInput } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import type { AgentCatalogEntry, AgentSkill } from '@agentmux/core'
+import type { AgentSkill } from '@agentmux/core'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { SessionViewMode } from '../lib/session-state'
 import * as DropdownMenu from './HoverDropdownMenu'
@@ -68,15 +69,16 @@ function ComposerChoiceMenu({ label, triggerLabel, icon, disabled, onOpenChange,
   </DropdownMenu.Root>
 }
 
-export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSkill, onCommand, onCapture, runAction, layoutControl = true, viewMode, onViewModeChange }: {
+export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSkill, onCommand, onCapture, runAction, referenceTools, layoutControl = true, viewMode, onViewModeChange }: {
   disabled: boolean
   layoutControl?: boolean
   viewMode?: SessionViewMode
   onViewModeChange?: (mode: SessionViewMode) => void
-  commands: NonNullable<AgentCatalogEntry['composer']>['commands']
+  commands: readonly ComposerSuggestion[]
+  referenceTools?: ReactNode
   loadSkills(): Promise<AgentSkill[]>
   onChooseSkill(skill: AgentSkill): void
-  onCommand(text: string): void
+  onCommand(text: string, item: ComposerSuggestion): void
   onCapture?: () => Promise<void>
   runAction(action: () => void | Promise<void>): Promise<void>
 }) {
@@ -106,6 +108,7 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
   }
 
   return <span className="composer-tools" data-mode={mode}>
+    {layoutControl || viewMode && onViewModeChange ? <span className="composer-tool-group" role="group" aria-label="View and input layout">
     {viewMode && onViewModeChange ? <span className="composer-tool-view-switch">
       <button
         type="button"
@@ -118,9 +121,9 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
       </button>
     </span> : null}
     {layoutControl ? <ComposerLayoutToggle phase={mode} onChange={setMode} /> : null}
+    </span> : null}
     {mode === 'collapsed' ? null : <>
-    {onCapture ? <button type="button" className="composer-tool" disabled={disabled || capturing}
-      aria-label="Capture a screen region" title="Capture a screen region" onClick={() => { void runAction(capture) }}>{capturing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionCaptureIcon size={14} />} <span className="composer-tool__label">Capture</span></button> : null}
+    <span className="composer-tool-group" role="group" aria-label="Skills, commands and references">
     <ComposerChoiceMenu label="Choose a skill" triggerLabel="Skills" icon={<SemanticIcon name="object.skill" size={14} />} disabled={disabled} onOpenChange={open => { if (open) void runAction(discoverSkills); else discovery.current++ }}>
       {query => <>
         <DropdownMenu.Label className="composer-menu__hint">Choose a skill to reference</DropdownMenu.Label>
@@ -135,12 +138,16 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
     </ComposerChoiceMenu>
     {commands.length ? <ComposerChoiceMenu label="Choose a command" triggerLabel="Commands" icon={<SemanticIcon name="object.subcommand" size={14} />} disabled={disabled}>
       {query => <>
-        {commands.filter(command => `${command.text} ${command.description}`.toLocaleLowerCase().includes(query)).map(command => <DropdownMenu.Item key={command.text} disabled={disabled} className="tab-context-menu__item composer-menu__item" textValue={command.text} onSelect={() => { void runAction(() => onCommand(command.text)) }}>
-          <SemanticIcon name="object.subcommand" size={13} /><span>{command.text}<small>{command.description}</small></span>
+        {commands.filter(command => `${command.text} ${command.label ?? ''} ${command.description}`.toLocaleLowerCase().includes(query)).map(command => <DropdownMenu.Item key={command.id ?? command.text} disabled={disabled} className="tab-context-menu__item composer-menu__item" textValue={command.text} onSelect={() => { void runAction(() => onCommand(command.text, command)) }}>
+          <SemanticIcon name="object.subcommand" size={13} /><span>{command.label ?? command.text}<small>{command.description}</small></span>
         </DropdownMenu.Item>)}
-        {!commands.some(command => `${command.text} ${command.description}`.toLocaleLowerCase().includes(query)) ? <div className="composer-menu__hint" role="status">No matching commands.</div> : null}
+        {!commands.some(command => `${command.text} ${command.label ?? ''} ${command.description}`.toLocaleLowerCase().includes(query)) ? <div className="composer-menu__hint" role="status">No matching commands.</div> : null}
       </>}
     </ComposerChoiceMenu> : null}
+    {referenceTools}
+    </span>
+    {onCapture ? <span className="composer-tool-group" role="group" aria-label="Screen capture"><button type="button" className="composer-tool" disabled={disabled || capturing}
+      aria-label="Capture a screen region" title="Capture a screen region" onClick={() => { void runAction(capture) }}>{capturing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionCaptureIcon size={14} />} <span className="composer-tool__label">Capture</span></button></span> : null}
     </>}
   </span>
 }

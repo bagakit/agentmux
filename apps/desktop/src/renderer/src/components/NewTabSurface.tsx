@@ -21,7 +21,8 @@ import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-
 import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
 import { warmLauncherId, warmTerminalForLauncher, warmTerminalPreview } from '../lib/warm-terminal-preview'
-import { InlineComposer } from '@agentmux/client-ui/components/InlineComposer'
+import { ComposerCompletionEditor } from '@agentmux/client-ui/components/ComposerCompletionEditor'
+import { useComposerCandidates, skillComposerSuggestion } from '../lib/use-composer-candidates'
 import { LaunchRefine } from './LaunchOptionControls'
 import { isMacPlatform } from '../lib/host-platform'
 import { api } from '../lib/api'
@@ -230,6 +231,8 @@ export function NewTabSurface({
   const toolsScope = JSON.stringify([regionId, workspace?.id, workspace?.hostId, workspace?.path, selectedProviderId])
   useEffect(() => { setFileReferencesOpen(false) }, [toolsScope, motionActive])
   const feedback = useComposerFeedback(toolsScope)
+  const completion = useComposerCandidates({ scope: toolsScope, active: motionActive && sections.agents === 'expanded' && busy === null, config, workspace,
+    providerId: selectedProviderId, commands: providerCatalog.find(entry => entry.id === selectedProviderId)?.composer?.commands ?? [], insertion: insertionRef })
   const launchOptions = useMemo(
     () => providerCatalog.find((entry) => entry.id === selectedProviderId)?.launchOptions ?? [],
     [providerCatalog, selectedProviderId]
@@ -397,7 +400,9 @@ export function NewTabSurface({
         {moteId && displayedExecutorId && !executors.some(item => item.id === displayedExecutorId) ? <div className="launcher-error" role="status">Saved Agent {displayedExecutorId} is unavailable. Choose another Agent or edit this Mote’s quick mode.</div> : null}
         <AgentExecutorPicker executors={executors} selected={displayedExecutorId || null}
           active={visible && presentationActive} onSelect={chooseExecutor} />
-        <div className="launcher-composer composer"><InlineComposer active={visible && presentationActive} aria-label="Agent prompt" disabled={false} readPastedImage={api.ui.readPastedImage} insertionRef={insertionRef}
+        <div className="launcher-composer composer"><ComposerCompletionEditor completionConfig={completion.completionConfig} commands={completion.commands} skills={completion.skills}
+          references={completion.references} promptKeywords={completion.promptKeywords} onCompletionQuery={completion.onCompletionQuery}
+          completionFeedback={completion.completionFeedback} active={visible && presentationActive} aria-label="Agent prompt" disabled={false} readPastedImage={api.ui.readPastedImage} insertionRef={insertionRef}
           onPasteImage={(file, insert) => { void feedback.run(async () => {
             if (host?.kind !== 'local') throw new Error('This image has not been sent to the selected machine. Your draft is kept; use Files to reference an image in that project, or paste it after choosing the local machine.')
             await insert(async () => { const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' }); return feedback.isCurrent() ? appendFileReferences('', [path]) : null }, { separate: true }) }) }}
@@ -405,12 +410,12 @@ export function NewTabSurface({
           onKeyDown={event => { if (!launcherKeydownLaunches(event, isMacPlatform(), readiness)) return; event.preventDefault(); launchFromLauncher() }}
           placeholder="What would you like to work on?" /></div>
         <div className="composer__toolbar launcher-tools"><div>
-          <AgentComposerTools key={toolsScope} layoutControl={false} disabled={busy !== null || !workspace}
-            commands={providerCatalog.find(entry => entry.id === selectedProviderId)?.composer?.commands ?? []}
-            loadSkills={() => workspace && selectedProviderId ? api.ui.listWorkspaceSkills(workspace.id, selectedProviderId) : Promise.resolve([])}
-            onChooseSkill={skill => appendReference(skill.path)} onCommand={command => setPrompt(`${command}${prompt ? ` ${prompt}` : ' '}`)}
+          <AgentComposerTools key={completion.scope} layoutControl={false} disabled={busy !== null || !workspace}
+            commands={completion.commands} loadSkills={completion.loadSkills}
+            onChooseSkill={skill => { void feedback.run(() => completion.insertCandidate(skillComposerSuggestion(skill))) }}
+            onCommand={(_command, candidate) => { void feedback.run(() => completion.insertCandidate(candidate)) }}
+            referenceTools={<ComposerReferenceTool disabled={busy !== null || !workspace} onSelect={() => { void feedback.run(chooseComposerFiles) }} label="Reference files for the Agent" />}
             {...(host?.kind === 'local' ? { onCapture: captureComposerScreenshot } : {})} runAction={feedback.run} />
-          <ComposerReferenceTool disabled={busy !== null || !workspace} onSelect={() => { void feedback.run(chooseComposerFiles) }} label="Reference files for the Agent" />
         </div><LaunchRefine options={launchOptions} selection={launchOptionSelection} expanded={optionsExpanded} active={motionActive}
           onToggle={() => setOptionsExpanded(value => !value)} disabled={busy !== null} names={names} onNameChange={setName}
           onReset={() => { if (selectedProviderId) for (const optionId of Object.keys(launchOptionSelection)) selectOption(selectedProviderId, optionId, null) }}
