@@ -28,9 +28,13 @@ const fullOracle = {
   'actual worker progress remains manager review until exact manager verification': productSuite + 'actual worker progress remains manager review until exact manager verification; related input and wrong Run reopen the original responsibility',
   'prioritizes a later stalled execution in actual list and Mote compact consumers': productSuite + 'prioritizes a later stalled execution in actual list and Mote compact consumers and exposes every hidden attention count',
   'an exact transient index update reads no unrelated Goal getters or record enumeration': productSuite + 'an exact transient index update reads no unrelated Goal getters or record enumeration and retains unrelated consumer references',
-  'reads newly published execution after an early Domain event without detail': productSuite + 'reads newly published execution after an early Domain event without detail, then renders exact finite/delegated responsibility and preserves drafts'
+  'reads newly published execution after an early Domain event without detail': productSuite + 'reads newly published execution after an early Domain event without detail, then renders exact finite/delegated responsibility and preserves drafts',
+  'retains same-Goal execution ambiguity': productSuite + 'retains same-Goal execution ambiguity in real Region and board consumers for starts, delegations and mixed sources'
 }
 const responsibilityCases = [
+  { name: 'confirmed-input-erases-same-goal-execution-ambiguity', file: 'apps/desktop/src/renderer/src/lib/goal-current-work.ts',
+    changes: [["attributionAmbiguous: original?.attributionAmbiguous === true || row?.binding === 'ambiguous'", 'attributionAmbiguous: false']], test: product,
+    oracle: 'retains same-Goal execution ambiguity' },
   { name: 'idle-grace-never-becomes-unreported-stall', file: shared, build: true,
     changes: [['if (now < due) {', 'if (true) {']], test: unit,
     oracle: 'delays a short native idle but exposes persistent unreported responsibility' },

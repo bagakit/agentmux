@@ -22,6 +22,45 @@ import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scr
 import { moteTopics, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
 
 describe('responsibility production owners, compiled public CLI and mounted consumers', () => {
+  it('retains same-Goal execution ambiguity in real Region and board consumers for starts, delegations and mixed sources', async () => {
+    for (const kinds of [['delegation', 'delegation'], ['start', 'start'], ['start', 'delegation']] as const) {
+      const f = await fixture({ patrol: true }), operations: string[] = []
+      const drafts = { 'worker-a': 'Keep this original unsent draft' }
+      for (const [index, kind] of kinds.entries()) {
+        const operationId = `original-${kind}-${index}`; operations.push(operationId)
+        if (kind === 'start') {
+          await f.demands.prepareDispatch('goal', { operationId, agentSessionId: 'worker-a', hostId: 'local', runId: 'worker-a-run', execution: 'finite', prompt: 'Original finite task' })
+          await f.demands.recordDispatchPhase('goal', operationId, { stage: 'confirmed', receipt: { kind: 'core-prompt', itemId: `prompt:${operationId}`, createdAt: Date.now() } })
+        } else await f.action('owner', 'delegate', { goalId: 'goal', intent: { operationId, sourceMessageId: 'source-' + operationId,
+          hostId: 'local', ownerAgentSessionId: 'owner', ownerRunId: 'owner-run', workerAgentSessionId: 'worker-a', workerRunId: 'worker-a-run',
+          threadId: 'thread-' + operationId, text: 'Original delegated task', alignmentRevision: 1, criterionIds: ['AC'] } })
+      }
+      await f.publish()
+      const snapshot = await f.capture('same-goal-ambiguity')
+      await act(async () => useAppStore.setState({ sessions: snapshot.sessions, selectedDemandId: null, agentComposerDrafts: drafts,
+        agentFocus: { execution: { sessionId: 'worker-a', history: [] }, pmo: { sessionId: null } } }))
+      const original = useAppStore.getState().demands.goal!
+      expect(original.responsibility!.executions.map(row => [row.binding, row.phase, row.alert])).toEqual([
+        ['ambiguous', 'unknown', 'unknown'], ['ambiguous', 'unknown', 'unknown']])
+      const fact = currentDemandIndex(useAppStore.getState().demands).get(currentDemandKey('local', 'worker-a'))!
+      expect(fact.state).toBe('ambiguous'); expect(fact.goals).toHaveLength(1)
+      expect(fact.goals[0]).toMatchObject({ confirmed: true, attributionAmbiguous: true, operationIds: [...operations].sort() })
+      await mount(createElement('div', {}, createElement(RegionCurrentDemand, { hostId: 'local', agentSessionId: 'worker-a' }), createElement(GlobalBoardSurface)))
+      expect(container.querySelector('.region-current-demand')!.getAttribute('data-current-demand-state')).toBe('ambiguous')
+      expect(container.querySelector('.region-current-demand')!.textContent).toContain('execution is ambiguous')
+      expect(container.querySelector('.goals-row')!.textContent).toContain('Multiple original executions')
+      expect(container.querySelector('.goals-row')!.hasAttribute('data-session-context')).toBe(false)
+      expect(useAppStore.getState().agentComposerDrafts).toBe(drafts); expect(f.stop).not.toHaveBeenCalled()
+      // Unknown current activity alone does not revoke a single confirmed attribution.
+      const single = { ...original, dispatches: original.dispatches?.slice(0, kinds[0] === 'start' ? 1 : 0),
+        delegations: original.delegations?.slice(0, kinds[0] === 'delegation' ? 1 : 0),
+        responsibility: { ...original.responsibility!, executions: [{ ...original.responsibility!.executions[0]!, binding: 'confirmed' as const }] } }
+      await act(async () => useAppStore.setState({ demands: { goal: single } }))
+      expect(currentDemandIndex(useAppStore.getState().demands).get(currentDemandKey('local', 'worker-a'))!.state).toBe('current')
+      await mount(null)
+    }
+  }, 30_000)
+
   it('reads newly published execution after an early Domain event without detail, then renders exact finite/delegated responsibility and preserves drafts', async () => {
     const f = await fixture()
     const drafts = { original: 'Keep this unsent human draft' }, selection = 'goal'
