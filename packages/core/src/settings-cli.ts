@@ -65,6 +65,9 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
   if (resource === 'workspaces' && action === 'register' && args.length === 4 && id === '--input') {
     return { method: 'settings.workspaces.register', params: { input: await input(args[3]!) } }
   }
+  if (resource === 'browser-default' && args.length === 2 && (action === 'inspect' || action === 'open-settings')) {
+    return { method: `settings.browser-default.${action}`, params: {} }
+  }
   if (resource === 'browser-links') {
     if (action === 'ls' && args.length === 2) return { method: 'settings.browser-links.ls', params: {} }
     // A lone positional value is data, including an empty scheme or --help.

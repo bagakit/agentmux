@@ -35,7 +35,8 @@ import { foregroundActionsForSecondInstance, instanceRoleFromLock } from './sing
 import { singleFlight } from './single-flight.js'
 import { runOwnerDisposals } from './owner-disposal.js'
 import { reportQuitDisposalFailure } from './quit-disposal-failure.js'
-import { SpatialLinkIngress, receiveSpatialLinkArguments } from './spatial-link-ingress.js'
+import { SpatialLinkIngress } from './spatial-link-ingress.js'
+import { WebUrlIngress, receiveDesktopUrl, receiveDesktopUrlArguments } from './web-url-ingress.js'
 import { topFrameNavigationGuard, topFrameOrigin } from './top-frame-navigation.js'
 import { windowOpenOutcome, windowSecurityWebPreferences } from './window-security.js'
 import { deliverContinuousProgress } from './continuous-progress-delivery.js'
@@ -85,7 +86,7 @@ if (instanceRoleFromLock(app.requestSingleInstanceLock()).role === 'secondary') 
  * 都不会构造。运行时 owner、窗口、IPC、崩溃后的清理全在这个闭包里，第二实例一样都碰不到。
  */
 function startPrimaryInstance(): void {
-  const spatialLinks = new SpatialLinkIngress()
+  const spatialLinks = new SpatialLinkIngress(), webLinks = new WebUrlIngress()
   // macOS declares its scheme in the packaged Info.plist; development never takes the user's handler.
   if (app.isPackaged && process.platform !== 'darwin') app.setAsDefaultProtocolClient('amux')
   const loadedPackage = readLoadedPackageIdentity(join(import.meta.dirname, '../../package-identity.json'))
@@ -188,8 +189,8 @@ function startPrimaryInstance(): void {
     workbenchWindow = window
     recoverInterface = registerRendererCrashRecovery(window, dialog, () => app.quit(), () => ownerDisposal !== null)
     installTextEditContextMenu(window.webContents, window, { isCurrent: () => workbenchWindow === window })
-    window.once('closed', () => { if (workbenchWindow === window) { spatialLinks.unavailable(); workbenchWindow = null; recoverInterface = null } })
-    window.webContents.on('did-start-navigation', (_event, _url, _inPlace, mainFrame) => { if (mainFrame) spatialLinks.unavailable() })
+    window.once('closed', () => { if (workbenchWindow === window) { spatialLinks.unavailable(); webLinks.unavailable(); workbenchWindow = null; recoverInterface = null } })
+    window.webContents.on('did-start-navigation', (_event, _url, _inPlace, mainFrame) => { if (mainFrame) { spatialLinks.unavailable(); webLinks.unavailable() } })
     // A window persisted while maximized reopens maximized on top of its restored normal bounds, so
     // unmaximize returns to the size the user actually chose rather than the default.
     if (persistedGeometry?.maximized) window.maximize()
@@ -259,7 +260,7 @@ function startPrimaryInstance(): void {
     })
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
-    disposeIpc = await registerIpc({ window, configStore, initialConfig, runtime, progressLoops, demands, scratchTopics, workspaceFiles, spatialLinks,
+    disposeIpc = await registerIpc({ window, configStore, initialConfig, runtime, progressLoops, demands, scratchTopics, workspaceFiles, spatialLinks, webLinks,
       loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, ...(environmentWarning ? { environmentWarning } : {}) })
@@ -458,8 +459,8 @@ function startPrimaryInstance(): void {
   // 第二实例来敲门时把已有窗口带到用户眼前。最小化的先还原再聚焦，否则聚焦一个最小化窗口用户还是
   // 看不见；窗口全关了（macOS 上 app 还活着）则新开一个。决策在纯函数里，这里只执行动作。
   app.on('second-instance', (_event, argv) => {
-    receiveSpatialLinkArguments(spatialLinks, argv)
-    const [existing] = BrowserWindow.getAllWindows()
+    receiveDesktopUrlArguments(spatialLinks, webLinks, argv)
+    const existing = workbenchWindow ?? undefined
     const actions = foregroundActionsForSecondInstance({
       exists: existing !== undefined,
       minimized: existing?.isMinimized() ?? false
@@ -473,14 +474,14 @@ function startPrimaryInstance(): void {
 
   app.on('open-url', (event, url) => {
     event.preventDefault()
-    spatialLinks.receive(url)
+    receiveDesktopUrl(spatialLinks, webLinks, url)
     void app.whenReady().then(async () => {
       const window = workbenchWindow
       if (!window) await createWindow()
       else { if (window.isMinimized()) window.restore(); window.focus() }
     })
   })
-  receiveSpatialLinkArguments(spatialLinks, process.argv)
+  receiveDesktopUrlArguments(spatialLinks, webLinks, process.argv)
 
   app.whenReady().then(async () => {
     const appReadyAtMs = Date.now()

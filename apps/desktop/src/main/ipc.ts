@@ -44,6 +44,8 @@ import { FileBuilds } from './file-builds.js'
 import { TopicKnowledgeOwner } from './topic-knowledge.js'
 import { TopicSearchHistoryOwner } from './topic-search-history.js'
 import type { SpatialLinkIngress } from './spatial-link-ingress.js'
+import type { WebUrlIngress } from './web-url-ingress.js'
+import { executeBrowserDefaultControl, inspectDefaultBrowser, openDefaultBrowserSettings } from './browser-default.js'
 import { TopicSpatialOwner } from './topic-spatial-owner.js'
 import { AgentMuxNotebookStore, AgentMuxNotesStorage, type NotebookWrite } from '@agentmux/core/notebook-store'
 import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-state'
@@ -251,6 +253,7 @@ export async function registerIpc(args: {
   environmentWarning?: string
   onRendererUpdateReady?: (token: string) => void
   onRendererStartupFailure?: (input: unknown) => boolean
+  webLinks?: WebUrlIngress
   spatialLinks?: SpatialLinkIngress
   loadedPackage?: DesktopPackageIdentity | null
   loadedRenderer?: () => DesktopLoadedRenderer | null
@@ -513,6 +516,7 @@ export async function registerIpc(args: {
       }),
       runtimes: () => args.runtime.connectedRuntimeIdentities(), execute: (input) => controlBridge.execute(input)
     })
+    if (request.operation === 'settings.browser.default.inspect' || request.operation === 'settings.browser.default.open-settings') return executeBrowserDefaultControl(request)
     if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') return await executeCrashLogControl(request)
     if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner, notesStorageOwner)
     if (request.operation === 'settings.workspaces.add') return await executeSettingsWorkspaceAddControl(request, configOwner, id => args.runtime.executionHost(id))
@@ -1267,9 +1271,12 @@ export async function registerIpc(args: {
     if (!args.spatialLinks) throw new Error('Object link navigation is unavailable in this window. The original workface and Agents are kept; retry the exact link in the main Desktop window.')
     args.spatialLinks.receive(rawUrl)
   })
+  handleWithEvent('ui:inspectDefaultBrowser', event => { requireTrustedSender('ui:inspectDefaultBrowser', event); return inspectDefaultBrowser() })
+  handleWithEvent('ui:openDefaultBrowserSettings', event => { requireTrustedSender('ui:openDefaultBrowserSettings', event); return openDefaultBrowserSettings() })
   handleWithEvent('ui:spatialLinksReady', event => {
     requireTrustedSender('ui:spatialLinksReady', event)
     args.spatialLinks?.ready((request, signal) => executeControl(request, undefined, signal), message => args.window.webContents.send('ui:spatialLinkIssue', message))
+    args.webLinks?.ready((request, signal) => controlBridge.execute(request, signal), message => args.window.webContents.send('ui:spatialLinkIssue', message))
   })
   handle('ui:readClipboardText' , () => clipboard.readText())
   handle('ui:writeClipboardText', (text: string) => {
@@ -2076,6 +2083,7 @@ export async function registerIpc(args: {
       { owner: 'toolkit-ipc', dispose: () => disposeToolkitIpc() },
       { owner: 'toolkit', dispose: () => toolkit.dispose() },
       { owner: 'spatial-links', dispose: () => args.spatialLinks?.unavailable() },
+      { owner: 'web-links', dispose: () => args.webLinks?.unavailable() },
       { owner: 'metrics-listener', dispose: () => { args.window.webContents.off('destroyed', closeMetrics) } },
       { owner: 'metrics', dispose: () => metrics.dispose() },
       { owner: 'theme-bootstrap', dispose: disposeThemeBootstrap },

@@ -1,3 +1,4 @@
+import { parseBrowserDefaultInspection, parseBrowserDefaultSettingsRequest } from './browser-default.js'
 import { parseDemandPatrols } from '@agentmux/demand'
 import { parseDemandDelegations } from '@agentmux/demand/delegations'
 import { parseDemandDispatches, parseDemandProgressUpdates } from '@agentmux/demand'
@@ -304,6 +305,10 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (Object.keys(source).some(key => !['schemaVersion', 'requestId', 'operation'].includes(key))) {
       throw new AgentMuxError('Metrics queries take no data parameters.', 'INVALID_CONTROL_REQUEST')
     }
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
+  }
+  if (source.operation === 'settings.browser.default.inspect' || source.operation === 'settings.browser.default.open-settings') {
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation'], 'INVALID_CONTROL_REQUEST')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
   }
   if (source.operation === 'diagnostics.crash-log.get' || source.operation === 'diagnostics.crash-log.reveal') {
@@ -1178,6 +1183,11 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     }
     if (executable === undefined) throw new AgentMuxError('Missing executable fact is invalid.', code)
     return resourceReceipt({ ...base, result: { input, executable, availability: fields.availability, ...(cause ? { cause } : {}) } })
+  }
+  if (operation === 'settings.browser.default.inspect' || operation === 'settings.browser.default.open-settings') {
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], 'CONTROL_PROTOCOL_ERROR')
+    if (operation === 'settings.browser.default.inspect') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: parseBrowserDefaultInspection(result) }
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: parseBrowserDefaultSettingsRequest(result) }
   }
   if (operation === 'diagnostics.crash-log.get' || operation === 'diagnostics.crash-log.reveal') {
     const code = 'CONTROL_PROTOCOL_ERROR'

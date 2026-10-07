@@ -45,6 +45,7 @@ import { acknowledgedNameProjection, projectedNameRevision } from './lib/name-au
 import type { AgentMuxDisplayLabel, AgentMuxNameTarget, AgentMuxDisplayLabelResult } from '@agentmux/core/spatial-graph'
 import { displayLabel, nameTargetKey } from '@agentmux/core/spatial-graph'
 import { createSurveyBrowser } from './lib/survey-browser-creation'
+import { openSystemUrlInSurvey } from './lib/survey-system-url'
 import { isToolkitRequest } from '@agentmux/core/control'
 import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
 import { useLauncherState } from './lib/launcher-state'
@@ -4043,7 +4044,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       else get().applyBrowserEvent(event)
     })
-    const disposeControl = api.control.onRequest((request, signal) => request.operation === 'continuous-progress.observeInput'
+    const disposeControl = api.control.onRequest((request, signal) => request.operation === 'browser.openFromSystem' ? openSystemUrlInSurvey({ get, navigation: () => fileNavigationSelection(get()), subscribe: listener => useAppStore.subscribe(listener) }, request, signal) : request.operation === 'continuous-progress.observeInput'
       ? readContinuousProgressInput(get(), request, signal)
       : request.operation === 'metrics.renderer'
         ? { operation: 'metrics.renderer', window: request.window, observedAt: Date.now(), ...api.readRendererMemory(), counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() }
@@ -4702,6 +4703,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         request.operation === 'settings.executors.refresh' ||
         request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.test' ||
         request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect' ||
+        request.operation === 'settings.browser.default.inspect' || request.operation === 'settings.browser.default.open-settings' ||
         request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget' ||
         request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
         request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||

@@ -347,6 +347,8 @@ const api: AgentMuxPreloadApi = {
     requestStorageFlush: () => ipcRenderer.invoke('ui:requestStorageFlush'),
     rendererUpdateReady: (token: string) => ipcRenderer.invoke('ui:rendererUpdateReady', token),
     recordStartupFailure: input => ipcRenderer.invoke('ui:recordStartupFailure', input),
+    inspectDefaultBrowser: () => ipcRenderer.invoke('ui:inspectDefaultBrowser'),
+    openDefaultBrowserSettings: () => ipcRenderer.invoke('ui:openDefaultBrowserSettings'),
     spatialLinksReady: () => ipcRenderer.invoke('ui:spatialLinksReady'),
     openObjectLink: (url: string) => ipcRenderer.invoke('ui:openObjectLink', url),
     onSpatialLinkIssue(listener) {

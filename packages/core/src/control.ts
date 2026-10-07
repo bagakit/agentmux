@@ -13,6 +13,8 @@ import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
 import type { AgentMuxBrowserTarget } from './browser-targets.js'
+import type { BrowserDefaultPayload, BrowserDefaultResult } from './browser-default.js'
+export * from './browser-default.js'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './space-control.js'
 import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopInputPolicy, AgentMuxDesktopFocusResult } from './desktop-focus-control.js'
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from './browser-task-control.js'
@@ -649,6 +651,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlSettingsGetRequest
   | AgentMuxControlSettingsSetRequest
   | AgentMuxControlSettingsBrowserLinksRequest
+  | (RequestBase & BrowserDefaultPayload)
   | AgentMuxControlSettingsWorkspaceAddRequest
   | AgentMuxControlSettingsResourceRequest
   | AgentMuxControlSettingsHostsRequest
@@ -758,6 +761,7 @@ export type AgentMuxControlResult =
   | { operation: 'list.active-agents'; agents: AgentMuxControlActiveAgent[] }
   | { operation: 'settings.get'; entries: AgentMuxControlSettingEntry[]; partial: true }
   | { operation: 'settings.set'; entry: AgentMuxControlSettingEntry; requestId?: string }
+  | BrowserDefaultResult
   | { operation: 'settings.browser.links.list'; entries: AgentMuxControlSettingsBrowserLinkEntry[] }
   | { operation: 'settings.browser.links.forget'; scheme: string; changed: boolean }
   | { operation: 'settings.workspaces.add'; item: AgentMuxControlSettingsResourceItem; changed: boolean }
@@ -1039,6 +1043,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'settings.hosts.upgrade-inspect': 'long',
   'settings.executors.refresh': 'long',
   'settings.set': 'long',
+  'settings.browser.default.inspect': 'short',
+  'settings.browser.default.open-settings': 'long',
   'settings.browser.links.list': 'short',
   'settings.browser.links.forget': 'long',
   'settings.workspaces.add': 'long',

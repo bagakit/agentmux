@@ -629,6 +629,8 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.hosts.upgrade', '<id> --input <file|->', 'Upgrade the checked original Core, carrying expected and operationId.', 1),
   settings('settings.hosts.upgrade-inspect', '<id> --operation-id ID', 'Inspect the original Core update without replaying it.', 1),
   settings('settings.workspaces.register', '--input <file|->', 'Register an existing directory; this does not run Git, focus or start an Agent.'),
+  empty('settings.browser-default.inspect', 'Read current HTTP and HTTPS default handlers through this desktop host.'),
+  empty('settings.browser-default.open-settings', 'Request system default-browser settings; does not change the default.'),
   settings('settings.browser-links.ls', '', 'List remembered system-application link choices.'),
   settings('settings.browser-links.forget', '<scheme>|--input <file|->', 'Forget one exact remembered scheme decision.', 1),
   command('system.diagnostics.inspect', '--list | --input FILE|- | --domain DOMAIN --host-id HOST (--logid ID | --execution-id ID | --session-id SID --run-id RUN) [--authority ID] [--include-raw] [--no-related] [--max-reads N --max-depth N --max-bytes N --deadline-ms N]', 'Inspect bounded original diagnostic evidence and explicit relations; no sampling or recovery.',
