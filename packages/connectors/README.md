@@ -220,6 +220,14 @@ expand its scope. The same Outbox freezes scope before dispatch, retaining old
 pending and unknown effects. The broader consent choice does not by itself
 qualify native public content, a sender identity, media or complete parity.
 
+When broader sharing reaches native user content without a qualified public
+boundary, or an image/file the adapter cannot deliver completely, `connection
+delivery ls` reports `unavailable` with reason `content-unconfirmed`. The original
+source cut and pending work remain intact across worker restart. Unsupported
+content is never silently skipped to report ready; local conversation and input
+remain available. The existing assistant-speech scope retains its original
+coverage.
+
 ```sh
 amux agent conversation checkpoint --host local --session original-agent
 amux connection bind --input binding.json
