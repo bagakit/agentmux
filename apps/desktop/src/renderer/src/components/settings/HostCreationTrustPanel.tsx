@@ -68,7 +68,7 @@ export function HostCreationTrustPanel({ host, committed, active }: {
     </> : null}
     {error ? <p className="field-error" role="alert">{error}</p> : null}
     <div className="host-creation-trust__actions">
-      <button type="button" className="small-button" disabled={!saved || busy} onClick={() => void refresh()}>{busy ? <ThemeStatusLoadingIcon className="spin" size={13} /> : null} Review source trust</button>
+      <button type="button" className="small-button" disabled={!saved || busy} onClick={() => void refresh()}>{busy ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : null} Review source trust</button>
       {snapshot && !pin && !error ? <button type="button" className="primary-button" disabled={!verified || busy} onClick={() => void refresh(true)}>Trust this computer</button> : null}
     </div>
   </section>

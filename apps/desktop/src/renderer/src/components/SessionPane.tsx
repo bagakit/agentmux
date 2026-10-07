@@ -1058,7 +1058,7 @@ export function SessionPane({
           {(disconnected || missing || exited) && !pendingAgentRestore ? (
             <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited, failed: session.status.state === 'error' }))} role="status" aria-live="polite">
               <span className="terminal-recovery__icon">
-                {refreshing || recovering ? <ThemeStatusLoadingIcon className="spin" size={16} /> : session.status.state === 'error' ? <ThemeStatusWarningIcon size={16} /> : disconnected || missing ? <ThemeStatusHostUnavailableIcon size={16} /> : <ThemeActionStopIcon size={16} />}
+                {refreshing || recovering ? <ThemeStatusLoadingIcon animation="spin" size={16} /> : session.status.state === 'error' ? <ThemeStatusWarningIcon size={16} /> : disconnected || missing ? <ThemeStatusHostUnavailableIcon size={16} /> : <ThemeActionStopIcon size={16} />}
               </span>
               <div>
                 <strong>{recoveryTitle}</strong>

@@ -25,7 +25,12 @@
 .semantic-icon-motion[data-icon-animation="stream"] { --icon-stream-animation: semantic-icon-stream-caret; }
 .semantic-icon-motion[data-icon-animation="execute"] { --icon-execute-animation: semantic-icon-execute-arrow; }
 .semantic-icon-motion[data-icon-animation="orbit"] { --icon-orbit-animation: semantic-icon-orbit-arc; }
-.semantic-icon-motion[data-icon-animation="spin"] { animation: semantic-icon-spin 1s linear infinite; }
+.semantic-icon-motion[data-icon-animation="spin"] { --icon-spin-animation: semantic-icon-spin; }
+[data-semantic-icon-part="spin-body"] {
+  transform-box: view-box;
+  transform-origin: 12px 12px;
+  animation: var(--icon-spin-animation, none) 1s linear infinite;
+}
 [data-semantic-icon-part="stream-caret"] { animation: var(--icon-stream-animation, none) 1.8s ease-in-out infinite; }
 [data-semantic-icon-part="execution-arrow"] { animation: var(--icon-execute-animation, none) 2s ease-in-out infinite; }
 [data-semantic-icon-part="progress-arc"] { animation: var(--icon-orbit-animation, none) 1.6s linear infinite; transform-origin: 12px 12px; }
@@ -66,7 +71,7 @@
   animation-duration: .48s, 4.8s;
 }
 /* Every authored part uses the same stop policy, including future registered parts. */
-[data-semantic-icon-part] { animation-iteration-count: var(--icon-motion-iterations, infinite); animation-play-state: inherit; }
+[data-semantic-icon-part] { animation-iteration-count: var(--icon-motion-iterations, infinite); animation-play-state: var(--icon-motion-play-state, inherit); }
 @keyframes semantic-icon-hourglass-turn {
   0%, 78% { transform: rotate(0); }
   78% { animation-timing-function: cubic-bezier(.4, 0, .2, 1); }

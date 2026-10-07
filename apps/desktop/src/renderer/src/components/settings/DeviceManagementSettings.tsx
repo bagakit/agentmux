@@ -69,7 +69,7 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
       <p className="settings-group-note">{list ? `${devices.filter(device => device.online === true).length} connected · ${devices.length} authorized` : 'Device status not yet confirmed'}</p>
   
       <div className="settings-pane-toolbar">
-        <button className="primary-button" disabled={busy} onClick={() => { void link() }}>{busy ? <ThemeStatusLoadingIcon size={16} className="device-management__spinner" /> : <ThemeActionCopyIcon size={16} />}{busy ? 'Working…' : 'Copy connection link'}</button>
+        <button className="primary-button" disabled={busy} onClick={() => { void link() }}>{busy ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionCopyIcon size={16} />}{busy ? 'Working…' : 'Copy connection link'}</button>
       </div>
       {list && <p className="settings-group-note" role="status">{list.mobileAccess.state === 'connected' ? 'Ready to connect' : list.mobileAccess.state === 'starting' ? 'Connection service is starting. Try again shortly.' : 'Connection service unavailable'}</p>}
       {list && list.mobileAccess.state !== 'connected' && <details><summary>Connection details</summary><p className="settings-group-note">{list.mobileAccess.message}</p></details>}
@@ -77,7 +77,7 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
       {url && <><ConnectionLinkCode url={url} /><details className="device-management__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={url} onFocus={event => event.target.select()} /></details></>}
     </div>
     <div className="device-management__devices">
-      <div className="settings-pane-toolbar"><h3>Devices</h3><button className="small-button" disabled={refreshing} onClick={() => { void read() }}>{refreshing ? <ThemeStatusLoadingIcon size={16} className="device-management__spinner" /> : <ThemeActionRefreshIcon size={16} />}{refreshing ? 'Checking…' : 'Refresh'}</button></div>
+      <div className="settings-pane-toolbar"><h3>Devices</h3><button className="small-button" disabled={refreshing} onClick={() => { void read() }}>{refreshing ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionRefreshIcon size={16} />}{refreshing ? 'Checking…' : 'Refresh'}</button></div>
       {observedAt && <p className="device-management__updated">Last checked {new Date(observedAt).toLocaleTimeString()}</p>}
       <details className="device-management__records" data-device-records>
         <summary>Device records{list ? ` · ${devices.length} authorized` : ''}</summary>

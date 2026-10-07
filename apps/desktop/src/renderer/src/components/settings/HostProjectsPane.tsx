@@ -162,7 +162,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
       <footer className="host-projects__actions">
         <button type="button" className="small-button" data-register-folder disabled={!host || !path.trim() || busy} onClick={() => void register(false)}>Register folder</button>
         <button type="submit" className="primary-button" data-open-folder disabled={!host || !path.trim() || busy}>
-          {busy ? <ThemeStatusLoadingIcon size={13} className="spin" /> : <ThemeObjectFolderOpenIcon size={13} />}{executorId ? 'Open and start Agent' : 'Open folder'}
+          {busy ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeObjectFolderOpenIcon size={13} />}{executorId ? 'Open and start Agent' : 'Open folder'}
         </button>
       </footer>
     </form>

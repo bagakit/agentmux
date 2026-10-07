@@ -136,7 +136,7 @@ export function PrLaunchSurface({
             className="primary-button pr-form__submit"
             disabled={submitting || !title.trim()}
           >
-            {submitting ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeGitPullRequestIcon size={13} />}
+            {submitting ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeGitPullRequestIcon size={13} />}
             {submitting ? 'Opening…' : 'Open pull request'}
           </button>
         </form>

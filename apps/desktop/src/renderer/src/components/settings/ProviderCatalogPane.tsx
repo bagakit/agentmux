@@ -24,7 +24,7 @@ export function ProviderCatalogPane({ entries, read, executorCounts, selectedId,
       <strong>Provider</strong>
       <span>Choose an adapter, then configure its executors.</span>
       <button type="button" className="icon-button" disabled={loading} aria-label={read.state === 'error' ? 'Retry providers' : 'Refresh providers'} title={read.state === 'error' ? 'Retry providers' : 'Refresh providers'} onClick={onRefresh}>
-        {loading ? <ThemeStatusLoadingIcon className="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
+        {loading ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
       </button>
     </header>
     <SettingsResourceLibrary label="Providers" layout="horizontal" selectedId={selectedId === null ? 'providers:all' : `provider:${selectedId}`}

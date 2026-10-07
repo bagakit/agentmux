@@ -195,7 +195,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
               projectCount: projects,
               detail: `${host.kind === 'ssh' ? host.hostname || 'SSH · Host required' : 'Local machine'}${projects ? ` · ${projects} ${projects === 1 ? 'project' : 'projects'}` : ''}`,
               mark: <HostIcon kind={host.kind} size={18} />,
-              status: <span className={`settings-resource-row__check check-pill--${check?.state === 'error' ? check.result?.outcome ?? 'check-failed' : check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} title={hostCheckLabel(check ?? { state: 'idle' })}>{check?.state === 'checking' ? <ThemeStatusLoadingIcon className="spin" size={13} /> : check?.state === 'ready' ? <ThemeStatusCompletedIcon size={13} /> : <ThemeStatusInfoIcon size={13} />}<span>{hostCheckLabel(check ?? { state: 'idle' })}</span></span>
+              status: <span className={`settings-resource-row__check check-pill--${check?.state === 'error' ? check.result?.outcome ?? 'check-failed' : check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} title={hostCheckLabel(check ?? { state: 'idle' })}>{check?.state === 'checking' ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : check?.state === 'ready' ? <ThemeStatusCompletedIcon size={13} /> : <ThemeStatusInfoIcon size={13} />}<span>{hostCheckLabel(check ?? { state: 'idle' })}</span></span>
             }
           })} />
         <div ref={editor} className="settings-resource-editor">
@@ -210,7 +210,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                 <div><strong>{host.label}</strong><small>{host.kind === 'ssh' ? `${host.user ? `${host.user}@` : ''}${host.hostname || 'hostname required'}${host.port ? `:${host.port}` : ''}` : 'Local machine'}</small></div>
                 {check ? (
                   <span role="status" className={`check-pill check-pill--${check.state === 'error' ? check.result?.outcome ?? 'check-failed' : check.state}`}>
-                    {check.state === 'checking' ? <ThemeStatusLoadingIcon className="spin" size={13} /> :
+                    {check.state === 'checking' ? <ThemeStatusLoadingIcon animation="spin" size={13} /> :
                       check.state === 'ready' ? <ThemeStatusCompletedIcon size={13} /> : check.state === 'error' ? <ThemeStatusInfoIcon size={13} /> : null}
                     {hostCheckLabel(check)}
                   </span>

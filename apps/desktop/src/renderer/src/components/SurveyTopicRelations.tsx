@@ -42,7 +42,7 @@ export function SurveyTopicRelations({ zone, topics, relatedTopics, unknownRelat
         onSelect={event => event.preventDefault()}
         onCheckedChange={value => onLinkChange(topic.spaceId, value === true)}>
         <span className="survey-topic-menu__indicator" aria-hidden="true">
-          {pendingSpaceId === topic.spaceId ? <ThemeStatusLoadingIcon className="spin" size={13} />
+          {pendingSpaceId === topic.spaceId ? <ThemeStatusLoadingIcon animation="spin" size={13} />
             : <DropdownMenu.ItemIndicator>{checked === 'indeterminate' ? <ThemeControlCheckboxMixedIcon size={13} /> : <ThemeStatusSelectedIcon size={13} />}</DropdownMenu.ItemIndicator>}
         </span>
         <span className="survey-topic-menu__context"><strong>{topic.name}</strong><small>{topic.hostId} · {displayPath(topic.directoryPath, topic.hostId)}</small></span>

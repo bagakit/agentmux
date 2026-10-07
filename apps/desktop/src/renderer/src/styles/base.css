@@ -26,8 +26,6 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 ::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--radius); background: var(--surface-3); background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--neutral-1); background-clip: content-box; }
 ::-webkit-scrollbar-corner { background: transparent; }
-.spin { animation: spin .8s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: .45; transform: scale(.8); } }
 
 .app-shell {

@@ -109,7 +109,7 @@ export function WorkspaceSettingsPane({ config, onClose }: {
           <label className="workspace-composer__wide"><span>Agent</span><select value={executorId} onChange={(event) => setExecutorId(event.target.value)} ><option value="none">Open without an agent</option>{readyExecutors.map((executor) => <option key={executor.id} value={executor.id}>{executor.label} · {agentProviderLabel(executor.providerId)}</option>)}</select><small>{checking ? 'Detecting agents on this host…' : inventory?.state === 'error' ? 'Host check failed; known configurations are retained.' : `${readyExecutors.length} configurations on this host`}</small></label>
         </div>
         {error ? <div className="dialog-error">{error}</div> : null}
-        <footer><span>Branches and worktrees remain Git-owned and appear in the project navigator.</span><button className="primary-button" disabled={!projectPath.trim() || creating || !readyHosts.some((host) => host.id === hostId)} onClick={() => void create()}>{creating ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionStartIcon size={14} />}{creating ? 'Adding…' : 'Add project'}</button></footer>
+        <footer><span>Branches and worktrees remain Git-owned and appear in the project navigator.</span><button className="primary-button" disabled={!projectPath.trim() || creating || !readyHosts.some((host) => host.id === hostId)} onClick={() => void create()}>{creating ? <ThemeStatusLoadingIcon animation="spin" size={14} /> : <ThemeActionStartIcon size={14} />}{creating ? 'Adding…' : 'Add project'}</button></footer>
       </section>
       </div>
       {config.workspaces.length > 0 ? <section className="settings-group">

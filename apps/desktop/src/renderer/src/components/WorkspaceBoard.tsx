@@ -252,7 +252,7 @@ export function WorkspaceBoard() {
         ) : null}
         <HostBadge context="Host" className="board-host-scope" host={hostIdentityProjection(hostId, hosts?.find(host => host.id === hostId))} />
         <span className="board-filter-count">{filteredRows.length} / {rows.length}</span>
-        {hasFilters ? <button className="small-button" onClick={clearFilters}><ThemeActionResetFiltersIcon size={11} /> Reset</button> : kind === 'branch' ? <button className="small-button" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionRefreshIcon size={12} />} Refresh</button> : null}
+        {hasFilters ? <button className="small-button" onClick={clearFilters}><ThemeActionResetFiltersIcon size={11} /> Reset</button> : kind === 'branch' ? <button className="small-button" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeActionRefreshIcon size={12} />} Refresh</button> : null}
       </div>
 
       {/* Which branches are racing on the same prompt. Absent when there is no fan-out to compare. */}

@@ -1052,7 +1052,7 @@ function BrowserPaneContent({
           title={connectionUnavailable ? restoring ? 'Waiting for the original page connection' : 'Retry the original page connection' : 'Reload'}
           disabled={busy || released || restoring}
           onClick={() => { if (restoreError !== null) retryConnection(); else void run(() => api.browser.reload(tab.browserId)) }}>
-          {tab.loading || busy ? <ThemeStatusLoadingIcon className="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
+          {tab.loading || busy ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
         </button>
         {startPageConfig && tab.url === 'about:blank' ? <span className="browser-toolbar__empty-address">New page</span> : <label>
           <ThemeObjectBrowserIcon size={13} />
@@ -1084,7 +1084,7 @@ function BrowserPaneContent({
             disabled={selectElementDisabled}
             onClick={selectElement}
           >
-            {selectionBusy ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionInspectIcon size={14} />}
+            {selectionBusy ? <ThemeStatusLoadingIcon animation="spin" size={14} /> : <ThemeActionInspectIcon size={14} />}
           </button>
         ) : null}
         {toolbar?.screenshot ? (
@@ -1096,7 +1096,7 @@ function BrowserPaneContent({
             disabled={screenshotDisabled}
             onClick={() => void beginScreenshot()}
           >
-            {screenshotBusy && !screenshot ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionCaptureIcon size={14} />}
+            {screenshotBusy && !screenshot ? <ThemeStatusLoadingIcon animation="spin" size={14} /> : <ThemeActionCaptureIcon size={14} />}
           </button>
         ) : null}
         {toolbar?.devTools ? (

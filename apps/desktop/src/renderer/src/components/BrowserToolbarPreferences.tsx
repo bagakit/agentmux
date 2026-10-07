@@ -36,7 +36,7 @@ export function BrowserToolbarPreferences({
     <section className="browser-tools-preferences" aria-label="Browser bar visibility">
       <details>
         <summary aria-label="Browser bar settings">
-          {busy ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionAdjustIcon size={14} />}
+          {busy ? <ThemeStatusLoadingIcon animation="spin" size={14} /> : <ThemeActionAdjustIcon size={14} />}
           <strong>Browser bar</strong>{draft.dirty ? <small>Unsaved</small> : null}<ThemeNavigationDisclosureIcon size={13} />
         </summary>
         <div className="browser-tools-preferences__body">
@@ -60,7 +60,7 @@ export function BrowserToolbarPreferences({
             disabled={!draft.dirty || busy}
             onClick={() => void save()}
           >
-            {busy ? <ThemeStatusLoadingIcon className="spin" size={12} /> : null}
+            {busy ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : null}
             {busy ? 'Saving…' : 'Save Browser bar'}
           </button>
         </div>

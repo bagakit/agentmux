@@ -65,7 +65,7 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
     {layoutControl ? <ComposerLayoutToggle phase={mode} onChange={setMode} /> : null}
     {mode === 'collapsed' ? null : <>
     {onCapture ? <button type="button" className="composer-tool" disabled={disabled || capturing}
-      aria-label="Capture a screen region" title="Capture a screen region" onClick={() => { void runAction(capture) }}>{capturing ? <ThemeStatusLoadingIcon size={14} className="spin" /> : <ThemeActionCaptureIcon size={14} />} <span className="composer-tool__label">Capture</span></button> : null}
+      aria-label="Capture a screen region" title="Capture a screen region" onClick={() => { void runAction(capture) }}>{capturing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionCaptureIcon size={14} />} <span className="composer-tool__label">Capture</span></button> : null}
     <DropdownMenu.Root onOpenChange={(open) => { if (open) void runAction(discoverSkills) }}>
       <DropdownMenu.Trigger className="composer-tool" disabled={disabled} aria-label="Choose a skill" title="Choose a skill"><SemanticIcon name="object.skill" size={14} /> <span className="composer-tool__label">Skills</span></DropdownMenu.Trigger>
       <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="start" sideOffset={4}>

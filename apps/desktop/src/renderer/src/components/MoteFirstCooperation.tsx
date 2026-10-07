@@ -57,7 +57,7 @@ export function MoteFirstCooperation({ scope, reference }: {
         }} />
       <MoteBehaviorAction label={pending ? 'Reading original materials' : 'Prepare this question in a new discussion'}
         disabled={pending || !question.trim()} busy={pending}
-        onClick={() => void prepare()}>{pending ? <ThemeStatusLoadingIcon size={14} className="spin" /> : <ThemeNavigationForwardIcon size={16} />}</MoteBehaviorAction>
+        onClick={() => void prepare()}>{pending ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeNavigationForwardIcon size={16} />}</MoteBehaviorAction>
     </InputGroup>
     <span className="mote-cooperation-entry__shortcut" aria-hidden="true">{isMacPlatform() ? '⌘' : 'Ctrl'} <ThemeKeyEnterIcon size={11} /></span>
     {pending ? <p className="mote-details__hint" role="status">Reading the saved profile…</p> : null}

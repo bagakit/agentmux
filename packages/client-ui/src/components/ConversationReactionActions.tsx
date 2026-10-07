@@ -118,7 +118,7 @@ export function ConversationReactionActions({ definitions, source, onSend, pendi
       <span className="conversation-reactions__feedback"
       role={currentFeedback.state === 'failed' ? 'alert' : 'status'} tabIndex={currentFeedback.state === 'failed' ? 0 : undefined}
       data-reaction-status={currentFeedback.state}>
-      {currentFeedback.state === 'preparing' ? <SemanticIcon name="status.loading" size={13} aria-hidden="true" />
+      {currentFeedback.state === 'preparing' ? <SemanticIcon name="status.loading" animation="spin" size={13} aria-hidden="true" />
         : currentFeedback.state === 'queued' ? <SemanticIcon name="action.confirm" size={13} aria-hidden="true" /> : <SemanticIcon name="status.warning" size={13} aria-hidden="true" />}
       <span className="conversation-reactions__sr">{currentFeedback.state === 'preparing' ? '准备回复…'
         : currentFeedback.state === 'queued' ? '已加入发件箱' : currentFeedback.error}</span>

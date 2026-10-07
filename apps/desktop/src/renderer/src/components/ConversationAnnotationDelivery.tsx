@@ -155,7 +155,7 @@ export function ConversationAnnotationDelivery({ sessionId, origin, annotation, 
       </Menu.Root>
       <button type="button" className="conversation-annotation-delivery__send" aria-label={request ? '检查原批注请求' : '发送批注'}
         disabled={!active || busy || !annotation.note.trim() || (recipient.kind === 'new' && !request && !executor)} onClick={() => void send()}>
-        {busy ? <ThemeStatusLoadingIcon size={14} aria-hidden="true" /> : <ThemeActionSendIcon size={14} aria-hidden="true" />}{request ? '检查原请求' : '发送'}
+        {busy ? <ThemeStatusLoadingIcon animation="spin" size={14} aria-hidden="true" /> : <ThemeActionSendIcon size={14} aria-hidden="true" />}{request ? '检查原请求' : '发送'}
       </button>
     </div>
     {recipient.kind === 'new' && active ? <AgentExecutorPicker presentation="field" label="新 Agent 配置" unsetLabel="选择 Agent 配置" executors={choices}
