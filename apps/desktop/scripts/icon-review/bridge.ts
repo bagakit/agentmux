@@ -1,6 +1,7 @@
 import { getSemanticIconCatalog } from '../../../../packages/client-ui/src/theme/icon-catalog-metadata.js'
 import { ICON_GLYPHS, type SemanticIconId } from '../../../../packages/client-ui/src/theme/icon-catalog.js'
 import { createSemanticIconElement } from '../../../../packages/client-ui/src/theme/icon-sprite.js'
+import { ICON_ANIMATIONS, type SemanticIconPresentation } from '../../../../packages/client-ui/src/theme/icon-presentation.js'
 import { getThemeCatalog, GRAPHITE_THEME } from '../../../../packages/client-ui/src/theme/catalog.js'
 import { mountThemeRuntime, updateObservedTheme } from '../../../../packages/client-ui/src/theme/runtime.js'
 import { parseThemeFile, serializeThemeFile, type ThemeDocument, type ThemeMode, type ThemeIconAsset } from '../../../../packages/client-ui/src/theme/schema.js'
@@ -9,10 +10,11 @@ export const catalog = getSemanticIconCatalog()
 export const glyphs = ICON_GLYPHS
 export const themes = getThemeCatalog().items.filter(item => item.readonly).map(item => ({ id: item.id, ...item.value }))
 export { parseThemeFile, serializeThemeFile }
+export { ICON_ANIMATIONS }
 
 /** The same native projection used by editors; the root owns all geometry. */
-export function semanticMarkup(name: SemanticIconId, size = 24, className = '') {
-  return createSemanticIconElement(name, document, { size, className }).outerHTML
+export function semanticMarkup(name: SemanticIconId, size = 24, className = '', presentation: Pick<SemanticIconPresentation, 'color' | 'animation'> = {}) {
+  return createSemanticIconElement(name, document, { size, className, ...presentation }).outerHTML
 }
 export function startThemeRuntime() {
   return mountThemeRuntime(window, { appAppearance: 'light' })

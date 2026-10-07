@@ -7,6 +7,8 @@ const editable = ['glyph','feature','meaning','note','status'];
 let data, roleById, draft, activeId = 'status.working', category = 'all', mode = 'gallery', query = '', modifiedOnly = false;
 let storageAvailable = true, corruptRaw = null, toastTimer, lastTrigger = null;
 let manifest, sessionExportTime, projectedTheme;
+// Simulated instance parameters never enter the saved draft or a theme file.
+const samplePresentation = { animation:'none', color:undefined };
 const mobile = () => matchMedia('(max-width:950px)').matches;
 const changed = id => Boolean(draft.edits[id]);
 const effective = r => ({...r, note:'',status:'not_started',...draft.edits[r.id]});
@@ -42,7 +44,7 @@ function applyPreview() {
 }
 function renderSamples() {
   const items=[['status.working','工作产出'],['status.streaming','内容流入'],['status.browser-running','浏览器执行'],['object.activity','工作记录']];
-  $('#semantic-samples').innerHTML=items.map(([id,label])=>`<button type="button" data-sample="${id}" aria-label="编辑 ${id}"><span class="sample-icons">${semantic(id,12)}${semantic(id,24)}</span><strong>${label}</strong><small>${id}</small></button>`).join('');
+  $('#semantic-samples').innerHTML=items.map(([id,label])=>`<button type="button" data-sample="${id}" aria-label="编辑 ${id}"><span class="sample-icons">${ThemeBridge.semanticMarkup(id,12,'',samplePresentation)}${ThemeBridge.semanticMarkup(id,24,'',samplePresentation)}</span><strong>${label}</strong><small>${id}</small></button>`).join('');
 }
 function toast(message) {
   $('#toast').textContent=message;$('#toast').hidden=false;
@@ -248,6 +250,12 @@ function renderDrafts() {
   $('#reset-all').disabled=!entries.length;
 }
 function attachEvents() {
+  const animationLabels={none:'静态',work:'写写停停',stream:'轻轻浮动',execute:'小步探看',spin:'旋转等待'};
+  $('#preview-animation').innerHTML=ThemeBridge.ICON_ANIMATIONS.map(value=>`<option value="${value}">${animationLabels[value]}</option>`).join('');
+  $('#preview-animation').addEventListener('change',event=>{samplePresentation.animation=event.target.value;renderSamples();});
+  $('#preview-color').addEventListener('input',event=>{samplePresentation.color=event.target.value;renderSamples();$('#inherit-color').disabled=false;});
+  $('#inherit-color').disabled=true;
+  $('#inherit-color').addEventListener('click',()=>{samplePresentation.color=undefined;renderSamples();$('#inherit-color').disabled=true;});
   $('#semantic-samples').addEventListener('click',event=>{const button=event.target.closest('[data-sample]');if(button)selectRole(button.dataset.sample,button);});
   for(const id of ['preview-theme','preview-mode'])$('#'+id).addEventListener('change',()=>{
     const preview={...draft.preview,themeId:$('#preview-theme').value,mode:$('#preview-mode').value};
