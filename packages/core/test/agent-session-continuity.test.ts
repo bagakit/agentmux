@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
-import { decideAgentSessionContinuity, DEFAULT_AGENT_CONTINUITY_POLICY } from '../src/agent-session-continuity.js'
+import { decideAgentSessionContinuity, agentContinuityAdmission, DEFAULT_AGENT_CONTINUITY_POLICY } from '../src/agent-session-continuity.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxError } from '../src/errors.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -457,6 +457,29 @@ async function continuityHarness(options: {
 }
 
 describe('Core-owned continuity policy and original-operation receipts', () => {
+  it.each(['native-hook', 'native-transcript', 'acp'] as const)('uses the exact configured confirmed-idle boundary from %s', source => {
+    const now = _historyFixtureEpoch(2, 27200, 0), current = session()
+    const decide = (age: number, window = 86_400_000) => agentContinuityAdmission({
+      session: { ...current, semanticStatus: { state: 'done', source, observedAt: now, stateEnteredAt: now - age } },
+      trigger: 'startup', policy: { ...DEFAULT_AGENT_CONTINUITY_POLICY, confirmedIdleWindowMs: window }, admittedAt: now, now })
+    expect(decide(_historyFixtureEpoch(1, 0, 0))).toMatchObject({ kind: 'resume', reason: 'confirmed-idle', interruptedWorking: false })
+    expect(decide(_historyFixtureEpoch(1, 0, 1))).toEqual({ kind: 'pending', reason: 'idle-window-expired' })
+    expect(decide(_historyFixtureEpoch(0, 1800, 0), 1_800_000)).toMatchObject({ kind: 'resume', reason: 'confirmed-idle' })
+    expect(decide(_historyFixtureEpoch(0, 1800, 1), 1_800_000)).toEqual({ kind: 'pending', reason: 'idle-window-expired' })
+  })
+  it.each([undefined, NaN, Infinity, -1, 200_000_001])('keeps invalid or absent idle entry time unknown (%s)', stateEnteredAt => {
+    expect(agentContinuityAdmission({ session: { ...session(), semanticStatus: {
+      state: 'done', source: 'native-hook', observedAt: _historyFixtureEpoch(2, 27200, 0), ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }) } },
+      trigger: 'startup', policy: { ...DEFAULT_AGENT_CONTINUITY_POLICY }, admittedAt: _historyFixtureEpoch(2, 27200, 0), now: _historyFixtureEpoch(2, 27200, 0)
+    })).toEqual({ kind: 'pending', reason: 'idle-unknown' })
+  })
+  it('does not grant automatic recovery from display or process status sources', () => {
+    for (const source of ['user', 'agentmux', 'run-process', 'terminal-output'] as const) {
+      expect(agentContinuityAdmission({ session: { ...session(), semanticStatus: { state: 'done', source, observedAt: _historyFixtureEpoch(0, 0, 10), stateEnteredAt: _historyFixtureEpoch(0, 0, 10) } },
+        trigger: 'startup', policy: { ...DEFAULT_AGENT_CONTINUITY_POLICY }, admittedAt: _historyFixtureEpoch(0, 0, 20), now: _historyFixtureEpoch(0, 0, 20)
+      })).toEqual({ kind: 'pending', reason: 'idle-unknown' })
+    }
+  })
   async function working(harness: ContinuityHarness) {
     const registry = (harness.client as any).registry
     await registry.update('agent-1', { runId: 'run-1' }, (value: AgentMuxStoredAgentSession) => ({ ...value, updatedAt: _historyFixtureEpoch(0, 0, 10),
