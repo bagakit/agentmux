@@ -412,10 +412,17 @@ export const AUTHORED_ICON_DEFINITIONS = {
     }
   },
   "tool-invoke": {
-    shapes: [["path",{"d":"M11 20H3V4h18v7 M7 8l3 3-3 3 M12 16h9 M17 12l4 4-4 4"}]],
+    shapes: [["path",{"d":"M13 3 21 7.5v9L13 21l-5-3v-3 M8 9V6l5-3 M2 12h12 M10 8l4 4-4 4"}]],
     design: {
-      rest: "终端框、prompt与调用箭头",
-      motion: { kind: "still", animation: "none", description: "当前消费表达对象/记录或入口，未提供持续活动事实；实际面板/选中/布局变化已表达动作结果，保持图标静止减少重复反馈。", trigger: "沿现有对象身份、分类、导航、记录或工具入口；hover/focus沿宿主短反馈" }
+      rest: "右侧通用工具模块与进入模块的请求箭头；不限定为终端或某一种工具",
+      motion: { kind: "still", animation: "none", description: "调用记录保持完整静止；记录出现不代表仍在执行，箭头只表达输入方向。", trigger: "原结构明确为工具调用记录；不从工具名、输入或展示文案推断当前执行。" }
+    }
+  },
+  "tool-return": {
+    shapes: [["path",{"d":"M11 3 3 7.5v9L11 21l5-3v-3 M16 9V6l-5-3 M10 12h12 M18 8l4 4-4 4"}]],
+    design: {
+      rest: "左侧同族工具模块与离开模块的结果箭头；不使用表示成功的勾选",
+      motion: { kind: "still", animation: "none", description: "结果记录保持完整静止；返回内容不等于成功，不补推完成或配对关系。", trigger: "原结构明确为工具结果记录；明确失败仍由原失败状态与原因表达。" }
     }
   },
   "input-tools": {

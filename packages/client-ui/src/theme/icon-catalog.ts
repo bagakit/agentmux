@@ -498,6 +498,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'conversation.user-message': { label: 'Human message', glyph: 'user-round' },
   'conversation.assistant-message': { label: 'Assistant message', glyph: 'bot' },
   'conversation.tool-call': { label: 'Tool call', glyph: 'tool-invoke' },
+  'conversation.tool-result': { label: 'Tool result', glyph: 'tool-return' },
   'conversation.message-queue': { label: 'Message queue', glyph: 'list-ordered' },
   'conversation.message-tools': { label: 'Message tools', glyph: 'input-tools' },
   'status.completed': { label: 'Completed', glyph: 'circle-check' },
