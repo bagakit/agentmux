@@ -6,6 +6,14 @@ import shared from '../workbench-identity/vitest.owning.config.mts'
 
 const root = resolve(import.meta.dirname, '../../../../..')
 const mutations = {
+  goalHost: ['apps/desktop/src/renderer/src/lib/focus-goal-links.ts', 'exact = qualified.rows.get(demandRelationKey(subject.hostId, subject.agentSessionId))', "exact = qualified.rows.get(demandRelationKey('local', subject.agentSessionId))"],
+  goalConsumer: ['apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx', 'goalLinks={goalLinks.get(context.id)}', 'goalLinks={undefined}'],
+  goalUnknown: ['apps/desktop/src/renderer/src/components/FocusGoalLinks.tsx', '!links.confirmedCount ? <span className="focus-goal__unknown"', 'false ? <span className="focus-goal__unknown"'],
+  goalRoles: ['apps/desktop/src/renderer/src/lib/focus-goal-links.ts', 'held ? { ...held, unconfirmedRoles: roles }', 'held ? held'],
+  goalCount: ['apps/desktop/src/renderer/src/lib/focus-goal-links.ts', 'confirmedCount: confirmed.length', 'confirmedCount: confirmed.reduce((count, goal) => count + goal.roles.length, 0)'],
+  goalIncremental: ['apps/desktop/src/renderer/src/lib/focus-goal-links.ts', 'if (old?.goal === goal) continue', 'if (false) continue'],
+  goalFeedback: ['apps/desktop/src/renderer/src/lib/use-goal-navigation.ts', "result.operation !== 'focus' || result.navigation.state === 'rejected' || result.navigation.state === 'unconfirmed'", "result.operation !== 'focus'"],
+  goalPartial: ['apps/desktop/src/renderer/src/lib/use-goal-navigation.ts', "result.operation !== 'focus' || result.navigation.state === 'rejected'", "result.operation !== 'focus' || result.partial || result.navigation.state === 'rejected'"],
   residency: ['apps/desktop/src/renderer/src/App.tsx', "mainSurface === 'agents' || focusVisited ? <GlobalFocusSurface", "mainSurface === 'agents' ? <GlobalFocusSurface"],
   dormantProjection: ['apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx', 'contextSelector(state, visible)', 'contextSelector(state, true)'],
   resourceConsumer: ['apps/desktop/src/renderer/src/components/FocusHistorySearch.tsx', '<ConversationMessage active={active}', '<ConversationMessage active={true}'],
@@ -30,7 +38,7 @@ const mutations = {
 export default defineConfig({ ...shared, cacheDir: resolve(root, '.tmp/focus-goal-access/vitest-cache'),
   plugins: [...shared.plugins ?? [], { name: 'original-focus-goal-consumer', enforce: 'pre', transform(code, id) {
     const path = relative(root, id.split('?')[0]!)
-    if (!path.startsWith('apps/desktop/src/') && !path.startsWith('packages/core/src/') && !path.startsWith('packages/client-ui/src/') && !['apps/desktop/test/focus-surface-residency.test.tsx', 'packages/client-ui/test/conversation-reading-activity.test.tsx'].includes(path)) return
+    if (!path.startsWith('apps/desktop/src/') && !path.startsWith('packages/core/src/') && !path.startsWith('packages/client-ui/src/') && path !== 'packages/demand/src/relations.ts' && !['apps/desktop/test/focus-surface-residency.test.tsx', 'packages/client-ui/test/conversation-reading-activity.test.tsx', 'apps/desktop/test/focus-goal-relations.test.tsx'].includes(path)) return
     const mutation = process.env.AGENTMUX_GOAL_MUTATION as keyof typeof mutations | undefined
     let served = code
     if (mutation && mutations[mutation]?.[0] === path) {
@@ -42,5 +50,5 @@ export default defineConfig({ ...shared, cacheDir: resolve(root, '.tmp/focus-goa
       sourceSha256: createHash('sha256').update(code).digest('hex'), servedSha256: createHash('sha256').update(served).digest('hex'), mutated: served !== code }) + '\n')
     return served !== code ? { code: served, map: null } : undefined
   } }],
-  test: { ...shared.test, include: ['apps/desktop/test/desktop-focus-navigation.test.tsx', 'apps/desktop/test/focus-surface-residency.test.tsx', 'packages/client-ui/test/conversation-reading-activity.test.tsx'], passWithNoTests: false }
+  test: { ...shared.test, include: ['apps/desktop/test/desktop-focus-navigation.test.tsx', 'apps/desktop/test/focus-surface-residency.test.tsx', 'packages/client-ui/test/conversation-reading-activity.test.tsx', 'apps/desktop/test/focus-goal-relations.test.tsx'], passWithNoTests: false }
 })
