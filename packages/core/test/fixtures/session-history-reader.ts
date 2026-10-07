@@ -21,8 +21,12 @@ export async function historyReaderFixture(native = false, retired = false, body
     ...(native ? { nativeHandle: { kind: 'provider' as const, providerId: 'claude', sessionId: 'original-native', transcriptPath: transcript } } : {}) }
   await store.compareAndSwap(null, session)
   const caller = managedCaller ? { agentSessionId: 'mote-actor', capability: core.issueAgentCapability() } : undefined
-  if (caller) await store.compareAndSwap(null, { ...session, agentSessionId: caller.agentSessionId,
-    run: { runId: 'actor-run' }, capabilityHash: core.hashAgentCapability(caller.capability) })
+  if (caller) {
+    const actorSession = { ...session, agentSessionId: caller.agentSessionId,
+      run: { runId: 'actor-run' }, capabilityHash: core.hashAgentCapability(caller.capability) }
+    delete actorSession.nativeHandle
+    await store.compareAndSwap(null, actorSession)
+  }
   for (const [index, content] of ['Older captured work', body].entries()) {
     await store.applyTimelineMutation({ type: 'append', agentSessionId: session.agentSessionId, item: {
       id: `captured-${index}`, agentSessionId: session.agentSessionId, kind: 'user_message', status: 'complete',

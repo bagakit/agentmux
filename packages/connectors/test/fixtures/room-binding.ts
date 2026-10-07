@@ -1,16 +1,16 @@
 import { join } from 'node:path'
 import { historyReaderFixture, core } from '../../../core/test/fixtures/session-history-reader.js'
-import { AgentMuxSpatialStateStore } from '../../../core/src/spatial-state.js'
+import { AgentMuxSpatialStateStore } from '../../../core/dist/spatial-state.js'
 import { createWorkspaceLayout } from '../../../core/src/spatial-layout.js'
 import type { AgentMuxSpatialGraph } from '../../../core/src/spatial-graph.js'
 import type { ConnectionConfig, RoomBindingBindInput } from '../../../core/src/connections.js'
-import { ConnectionHost } from '../../src/connection-host.js'
+import { ConnectionHost, type ConnectionAdapter, type SecretPort } from '../../src/connection-host.js'
 import { RoomBindingHost } from '../../src/room-binding.js'
 
 export const config: ConnectionConfig = { connectionId: 'sample-connection', adapterId: 'sample', application: { domain: 'chat.example', appId: 'original-app' }, label: 'Team', enabled: true, credentialRef: 'host-credential' }
 export const context = { actor: { kind: 'user' as const, id: 'fixture-user' } }
-export async function roomBindingFixture(native = true) {
-  const original = await historyReaderFixture(native, true)
+export async function roomBindingFixture(native = true, options: { adapters?: readonly ConnectionAdapter[]; secrets?: SecretPort; managedCaller?: boolean } = {}) {
+  const original = await historyReaderFixture(native, true, undefined, options.managedCaller)
   const spatial = new AgentMuxSpatialStateStore(join(original.root, 'spatial.json'))
   const graph: AgentMuxSpatialGraph = {
     spaces: [{ spaceId: 'space', kind: 'topic', name: 'Team', hostId: 'local', directoryPath: original.root, projectId: 'project' }],
@@ -21,7 +21,7 @@ export async function roomBindingFixture(native = true) {
     tabLayouts: { tab: { root: { type: 'split', direction: 'horizontal', ratio: 0.5, first: { type: 'leaf', regionId: 'original-region' }, second: { type: 'leaf', regionId: 'other-region' } }, activeRegionId: 'original-region' } }, resources: {}
   }
   await spatial.commit({ expectedRevision: 0, graph })
-  const connections = new ConnectionHost({ databasePath: join(original.root, 'connections.sqlite'), secrets: { resolve: async () => 'private-fixture-credential' }, adapters: [{ adapterId: 'sample', test: async () => ({ authentication: { state: 'ready' }, transport: { state: 'ready' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }) }] })
+  const connections = new ConnectionHost({ databasePath: join(original.root, 'connections.sqlite'), secrets: options.secrets ?? { resolve: async () => 'private-fixture-credential' }, adapters: options.adapters ?? [{ adapterId: 'sample', test: async () => ({ authentication: { state: 'ready' }, transport: { state: 'ready' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }) }] })
   await connections.configure({ operationId: 'configure', expectedRevision: null, connection: config })
   const checkpoint = async (ref: { hostId: string; agentSessionId: string }) => {
     if (ref.hostId !== 'local') throw new Error('Exact Host required')
