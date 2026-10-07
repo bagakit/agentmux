@@ -12,6 +12,23 @@ Run the capture with an existing Electron binary and a source JSON path:
 node apps/desktop/scripts/verify-goal-responsibility-journey.mjs --source SOURCE_JSON --electron EXISTING_ELECTRON
 ```
 
+`--capture-only` performs the same strict source/CLI/candidate/build checks and
+two hidden processes with at least 27 full frames, without waiting for Native,
+workface or cost evidence. Its receipt remains `captureOnly:true` with recorded
+transport scope; it cannot qualify the combined gate by itself.
+
+To combine that original capture later, use `--capture-receipt CAPTURE_RECEIPT`
+or set `AGENTMUX_GOAL_RESPONSIBILITY_CAPTURE_RECEIPT` for the default command.
+This branch reads the original capture (or an exact path/SHA pointer), checks its
+current candidate, source, original journey, CLI, compiled files, phases, hidden
+window facts, PNG bytes and cleanup, then reads current Native/workface/cost
+qualifications. It does not build, recapture or run Native. An independent output
+directory receives a new `agentmux.goal-responsibility-visual-combined.v1` receipt
+with `originalCapture:{path,sha256}` and `captureEvidence` naming the original
+directory. Original source/phase/PNG/compiled files remain unchanged; frame names
+remain relative to that original directory. Independent image review binds the
+original capture receipt and its exact images. Changed evidence or candidates fail.
+
 `--prepare-only` builds the actual Renderer and records its graph without starting
 Electron. It is preparation, not a passing visual or lifecycle gate. The default
 capture requires current source/CLI hashes to match the original journey receipt.
