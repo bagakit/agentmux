@@ -7,6 +7,7 @@ vi.mock('react-resizable-panels', async () => { const { createRequire } = await 
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div>Controlled terminal rendering</div> }))
 import { connectorJourneyFixture } from './fixtures/connector-journey'
 import { useAppStore } from '../src/renderer/src/store'
+import { api } from '../src/renderer/src/lib/api'
 
 const f = connectorJourneyFixture({ publication: true, platform: async request => {
   if (request.url?.endsWith('/messages')) return { code: 0, data: { message_id: 'om_original', chat_id: 'oc_shared', msg_type: 'post' } }
@@ -70,4 +71,26 @@ it('the original default PublicationHost content gap remains readable beside its
   expect(await readFile(f.original.storePath)).toEqual(metadata); expect(f.original.client.connect).not.toHaveBeenCalled()
   expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
   expect(f.original.create).not.toHaveBeenCalled(); expect(f.original.addMembers).not.toHaveBeenCalled()
+}, 25_000)
+
+it('switching applications starts an exact delivery window even when different binding identities have the same concatenated label', async () => {
+  const configured = (await f.services.connections.list()).connections[0]!.config
+  await api.connections.call('connection.configure', { operationId: 'other-application-config', expectedRevision: null, connection: { ...configured, connectionId: 'other-application', application: { ...configured.application, appId: 'cli_1123456789abcdef' } } })
+  const original = { ...f.original.input, operationId: 'first-delivery-window', bindingId: 'a', connectionId: configured.connectionId, externalConversationId: 'oc_first' }
+  expect((await api.connections.call('connection.bind', original)).state).toBe('applied')
+  for (let revision = 1; revision <= 10; revision++) expect((await api.connections.call('connection.binding.relink', { ...original, operationId: 'advance-window-' + revision, expectedRevision: revision })).state).toBe('applied')
+  expect((await api.connections.call('connection.bind', { ...original, operationId: 'second-delivery-window', bindingId: 'a1', connectionId: 'other-application', externalConversationId: 'oc_second' })).state).toBe('applied')
+  await f.mount()
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelectorAll('.connector-sharing__group')).toHaveLength(4) })
+  const audience = [...document.querySelectorAll<HTMLButtonElement>('.connector-sharing__group')].find(node => node.getAttribute('aria-label')?.includes('oc_first'))!
+  await act(async () => audience.click())
+  await vi.waitFor(async () => { await act(async () => {}); expect(f.calls.some(call => call.method === 'connection.delivery.ls' && (call.input as { bindingId: string }).bindingId === 'a')).toBe(true) })
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-busy')).toBe('false') })
+  await select('Group application', 'other-application')
+  expect(document.querySelector('[aria-label="Group application"]')?.getAttribute('data-value')).toBe('other-application')
+  await vi.waitFor(async () => { await act(async () => {}); expect(f.calls.some(call => call.method === 'connection.delivery.ls' && (call.input as { bindingId: string }).bindingId === 'a1')).toBe(true) })
+  expect(f.calls.filter(call => call.method === 'connection.delivery.ls').map(call => call.input)).toContainEqual({ connectionId: 'other-application', bindingId: 'a1', bindingRevision: 1, limit: 5 })
+  expect((await f.cli(['binding', 'inspect', '--binding', 'a'])).binding.revision).toBe(11)
+  expect((await f.cli(['binding', 'inspect', '--binding', 'a1'])).binding.revision).toBe(1)
+  expect(f.calls.some(call => call.method === 'connection.delivery.retry')).toBe(false); await f.original.unchanged()
 }, 25_000)
