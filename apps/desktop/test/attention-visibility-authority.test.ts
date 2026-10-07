@@ -48,7 +48,8 @@ describe('attention 路径的在屏判定只有一处来源', () => {
     expect(
       hook,
       'attention hook 不再从 session-visibility 取在屏集合——它要么自己算了一遍，要么换了来源'
-    ).toMatch(/import \{[^}]*\bvisibleSessionIdsForState\b[^}]*\} from '\.\.\/lib\/session-visibility'/)
+    ).toMatch(/import \{[^}]*\bcreateVisibleSessionIdsSelector\b[^}]*\} from '\.\.\/lib\/session-visibility'/)
+    expect(hook.match(/\bcreateVisibleSessionIdsSelector\(/g) ?? []).toHaveLength(1)
     expect(
       hook.match(/\bvisibleSessionIdsForState\(/g) ?? [],
       'attention hook import 了在屏取值器却没有调用它——import 是死的，正是原缺陷的一种形状'
