@@ -19,6 +19,7 @@
 @import './conversation-tool-trace.css';
 @import './conversation-tool-payload.css';
 @import './conversation-trace-feedback.css';
+@import './conversation-process-collapse.css';
 @import './conversation-native-thread.css';
 @import './conversation-metrics.css';
 @import './conversation-avatar.css';

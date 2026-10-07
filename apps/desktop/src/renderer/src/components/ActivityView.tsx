@@ -2,6 +2,7 @@ import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from 
 import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
 import { ConversationToolPayload } from '@agentmux/client-ui/components/ConversationToolPayload'
 import { ReadingFind } from '@agentmux/client-ui/components/ReadingFind'
+import { useConversationTraceDisclosure } from '@agentmux/client-ui/conversation-trace-disclosure'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type ComponentProps, type KeyboardEvent, type WheelEvent } from 'react'
@@ -58,6 +59,7 @@ const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosu
 const ThemeNavigationUpIcon = semanticIconComponent('navigation.up')
 const ThemeActionCurrentIcon = semanticIconComponent('action.current')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeLayoutCollapseAllIcon = semanticIconComponent('layout.collapse-all')
 
 
 /**
@@ -494,6 +496,15 @@ export function ActivityView({
     clearEarlierSpace()
   }, [sessionId, conversationReading?.identity, conversationReading?.reference.hostId])
   const nativeHistoryPage = readingWindow.page
+  const traceDisclosure = useConversationTraceDisclosure(JSON.stringify([executionHostId, sessionId, conversationReading?.identity,
+    nativeHistoryPage?.source.providerId, nativeHistoryPage?.source.nativeSessionId]))
+  const traceAnchorPending = useRef(false)
+  useLayoutEffect(() => {
+    if (!traceAnchorPending.current || !feedEl) return
+    traceAnchorPending.current = false
+    if (anchorRef.current) restoreReadingPosition(feedEl, anchorRef.current)
+    markProgrammaticReadingScroll(feedEl)
+  }, [traceDisclosure.expandedTraces, feedEl])
   useEffect(() => {
     edgeRef.current.earlier = false; edgeRef.current.newer = false
   }, [nativeHistoryPage?.nextCursor, readingWindow.error])
@@ -973,6 +984,25 @@ export function ActivityView({
     {!readingWindow.historical ? <UserMessageReadNotice showEarlier={!conversationReading} read={userMessageRead ? { ...userMessageRead,
       onReadEarlier: conversationReading ? readingWindow.readEarlier : userMessageRead.onReadEarlier } : undefined} /> : null}
   </>
+  const collapseTraces = nativeHistoryPage?.items.some(item => item.contentParts.some(part =>
+    part.kind === 'reasoning' || part.kind === 'tool-call' || part.kind === 'tool-result')) ? <button type="button"
+    className="conversation-process-collapse" aria-label="收起已展开的过程详情"
+    title={traceDisclosure.expandedTraces.size ? '收起本页已展开的工具与思考详情；保留答案和过程摘要' : '本页没有已展开的工具或思考详情'}
+    disabled={!readingEnabled} aria-disabled={traceDisclosure.expandedTraces.size === 0}
+    onMouseDown={event => event.preventDefault()} onClick={event => {
+      if (traceDisclosure.expandedTraces.size === 0) return
+      followRef.current = { ...followRef.current, following: false }
+      if (feedEl) {
+        anchorRef.current = captureReadingAnchor(feedEl)
+        const focused = feedEl.ownerDocument.activeElement
+        const payload = focused instanceof Element ? focused.closest('.conversation-tool-trace__payload, .log-turn__trace-payload') : null
+        if (payload && feedEl.querySelector('.conversation-native-thread')?.contains(payload)) event.currentTarget.focus({ preventScroll: true })
+      }
+      traceAnchorPending.current = true
+      setShowJump(true)
+      traceDisclosure.collapse()
+    }}><ThemeLayoutCollapseAllIcon size={13} aria-hidden="true" /></button> : null
+
   const latestControl = conversationReading?.opened || showJump || readingWindow.historical || readingWindow.hasEarlierNavigation || readingWindow.newerOutside || readingWindow.held || readingWindow.error ? (
     <div className="activity-feed__latest-layer" data-conversation-current-entry>
       {readingWindow.held ? <span className="activity-feed__latest-held" role="status">保留阅读位置</span> : null}
@@ -1153,7 +1183,7 @@ export function ActivityView({
         activity={activity.segments}
         controls={close => <><ConversationRulerControls window={rulerWindow} onWindow={setRulerWindow}
           untimed={ruler.untimed} onSelect={selectRulerRecord} describe={describeSpeaker ?? (() => ({ name: 'Recorded input' }))}
-          onOpen={() => { close() }} />{findTrigger}</>}
+          onOpen={() => { close() }} />{collapseTraces}{findTrigger}</>}
         onSelect={index => selectRulerRecord(ruler.items[index]!)}
         axes={({ width, onPeek, onPeekEnd }) =>
           describeSpeaker ? (
@@ -1164,10 +1194,11 @@ export function ActivityView({
               onSelect={index => selectRulerRecord(ruler.items[index]!)} onPeek={onPeek} onPeekEnd={onPeekEnd} />
           ) : null
         }
-      /> : <><div className="reading-find__floating-trigger">{findTrigger}</div>{emptyReadStatus}</>}
+      /> : <><div className="reading-find__floating-trigger">{collapseTraces}{findTrigger}</div>{emptyReadStatus}</>}
       {readingEntry}
       {nativeHistoryPage ? <ConversationView
         page={nativeHistoryPage}
+        traceDisclosure={traceDisclosure}
         questionAnswerContext={questionAnswerContext}
         {...(historyBoundary && boundaryIndex > 0 ? {
           recordBoundary: { ...historyBoundary, content: <div className="activity-feed__history-divider" role="separator">
