@@ -24,13 +24,13 @@ exports.run = async p => {
     const complete = async () => {
       const geometry = await read(`(()=>{const n=document.querySelector(${JSON.stringify(preview)}),r=n.getBoundingClientRect(),pane=n.closest('[data-settings-pane]').getBoundingClientRect(),save=document.querySelector('[data-settings-pane="continuity"] [data-settings-save-bar]').getBoundingClientRect();return{top:r.top,bottom:r.bottom,paneTop:pane.top,saveTop:save.top,text:n.textContent}})()`)
       assert.ok(geometry.top >= geometry.paneTop - 1 && geometry.bottom <= geometry.saveTop + 1, 'The complete delivery explanation fits between the fixed header and Save')
-      assert.ok(geometry.text.includes('Selected nonempty content is sent in one new input') && geometry.text.includes('If neither part has content, no input is sent') && geometry.text.includes('same original input key and Provider acceptance record'))
+      assert.ok(geometry.text.includes('Selected nonempty content is sent in one new input') && geometry.text.includes('If neither part has content, no input is sent') && geometry.text.includes('same original input key and actual transport or delivery receipt') && geometry.text.includes('Runtime carriage only; Provider consumption requires separate evidence'))
       return geometry
     }
     await position(); result.deliveryWide = await complete()
-    await capture('1480-dark-continuity-delivery.png', 'Saved reminder platform note and continuation compose one input with one original key and acceptance')
+    await capture('1480-dark-continuity-delivery.png', 'Saved reminder platform note and continuation compose one input with one original key and transport receipt')
     await scene(320, 'light'); await position(); result.deliveryNarrow = await complete()
-    await capture('320-light-continuity-delivery.png', 'The full shared-input explanation and acceptance boundary remain readable at 320 px')
+    await capture('320-light-continuity-delivery.png', 'The full shared-input explanation and transport boundary remain readable at 320 px')
     result.savedContinuity = structuredClone(owner.current.continuity)
     result.settingsOnly = true; result.deliveryOnly = true; return
   }
