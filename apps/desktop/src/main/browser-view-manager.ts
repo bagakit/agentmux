@@ -96,11 +96,17 @@ type BrowserEntry = {
   storage: BrowserStorage
   requestedUrl: string
   navigationId: string
+  initialDocument: {
+    view: WebContentsView; completion: AbortController; superseded: AbortController
+    failure: { error: unknown } | null
+    resolve(): void; reject(error: unknown): void
+    navigationId: string | null; loadNavigationId: string | null; committedNavigationId: string | null
+  } | null
   faviconDataUrl?: string | undefined
   faviconUrl?: string | undefined
   faviconRequest?: AbortController | undefined
   selectionRevision: number
-  selectionOperation: number | null
+  selectionOperation: number | symbol | null
   annotationRevision: number
   switchRevision: number
   pendingSwitch: PendingProfileSwitch | null
@@ -179,6 +185,8 @@ type PresentationCapture = {
 type BrowserTaskPageExecution = { cursor: BrowserTaskStepExecution; step?: BrowserTaskStep }
 
 const BROWSER_WAIT_PAGE_CALLS = new Set(browserPageCapabilityNames('wait'))
+const BROWSER_DOCUMENT_PAGE_CALLS = new Set(BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
+  !['gotoUrl', 'cdp', 'readResult', 'readDownload', 'wait'].includes(name)))
 
 
 // Native input clears visual feedback only; control changes require an explicit action.
@@ -245,6 +253,9 @@ export const DEFAULT_BROWSER_ZOOM_FACTOR = 0.9
 export interface NativeBrowserOwner { browserId: string; bounds: BrowserBounds; view: WebContentsView }
 export type NativeBrowserPageInput = { type: 'pointer'; event: Electron.MouseInputEvent } | { type: 'escape' }
 const BROWSER_SELECTION_TIMEOUT_MS = 120_000
+// Standalone observations have no script worker deadline. End only this first-document
+// wait after its request budget; the loading page and its navigation remain available.
+const BROWSER_INITIAL_DOCUMENT_OBSERVATION_MS = 30_000
 const BROWSER_MARKER_MAX_COUNT = 50
 const BROWSER_MARKER_MAX_COORDINATE = 10_000_000
 
@@ -980,6 +991,7 @@ export class BrowserViewManager {
       storage,
       requestedUrl: url,
       navigationId: randomUUID(),
+      initialDocument: null,
       selectionRevision: 0,
       selectionOperation: null,
       annotationRevision: 0,
@@ -1013,11 +1025,7 @@ export class BrowserViewManager {
         this.emit(entry)
       })
       if (this.taskAssets) void this.getTaskAssets(id).catch(() => {})
-      void view.webContents.loadURL(url).catch((error) => {
-        if (!this.owns(entry, view)) return
-        entry.error = error instanceof Error ? error.message : String(error)
-        this.emit(entry)
-      })
+      void this.startNavigation(entry, url, true).catch(() => {})
       return this.snapshot(entry)
     } catch (error) {
       this.entries.delete(id)
@@ -1050,21 +1058,85 @@ export class BrowserViewManager {
     return this.snapshot(entry)
   }
 
-  /** One navigation owner; page programs await the actual load promise, UI returns its projection. */
-  private startNavigation(entry: BrowserEntry, rawUrl: string): Promise<void> {
+  /** Keep full navigation completion separate from first-document consumption. */
+  private startNavigation(entry: BrowserEntry, rawUrl: string, initial = false): Promise<void> {
     const url = normalizeBrowserUrl(rawUrl)
     this.cancelPendingSwitchForNavigation(entry, new Error('Browser profile switch was superseded by navigation'))
     const view = entry.view
     entry.requestedUrl = url
     entry.error = null
     this.emit(entry)
-    return view.webContents.loadURL(url).catch((error) => {
-      if (this.owns(entry, view)) {
+    let document: BrowserEntry['initialDocument'] = null
+    if (initial || entry.initialDocument) {
+      entry.initialDocument?.superseded.abort()
+      document = { view, completion: new AbortController(), superseded: new AbortController(), failure: null,
+        resolve: () => settled(null), reject: error => settled({ error }),
+        navigationId: null, loadNavigationId: null, committedNavigationId: null }
+      const attempt = document
+      const settled = (failure: { error: unknown } | null) => {
+        if (attempt.completion.signal.aborted) return
+        attempt.failure = failure
+        if (entry.initialDocument === attempt) entry.initialDocument = null
+        attempt.completion.abort()
+      }
+      entry.initialDocument = attempt
+    }
+    const promise = view.webContents.loadURL(url).catch((error) => {
+      if (this.owns(entry, view) && !document?.superseded.signal.aborted &&
+        (!document || document.navigationId === document.loadNavigationId)) {
         entry.error = error instanceof Error ? error.message : String(error)
         this.emit(entry)
       }
       throw error
     })
+    void promise.then(() => {
+      if (document && (!this.owns(entry, view) ||
+        (document.navigationId && document.navigationId === document.loadNavigationId &&
+          document.committedNavigationId === document.navigationId))) document.resolve()
+    }, error => {
+      if (document && document.navigationId === document.loadNavigationId) document.reject(error)
+    })
+    return promise
+  }
+
+  private async waitForInitialDocument(entry: BrowserEntry, view: WebContentsView,
+    signal?: AbortSignal, deadlineMillis = performance.now() + BROWSER_INITIAL_DOCUMENT_OBSERVATION_MS): Promise<void> {
+    const current = () => {
+      if (!this.owns(entry, view) || view.webContents.isDestroyed()) throw new Error('The original Browser owner changed before its document was ready.')
+      signal?.throwIfAborted()
+      if (performance.now() >= deadlineMillis) throw new Error('The initial Browser document did not become ready within this request budget. Navigation and existing Browser work remain available.')
+    }
+    current()
+    while (entry.initialDocument) {
+      const document = entry.initialDocument
+      if (document.view !== view) throw new Error('The original Browser view changed before its document was ready.')
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const finish = (error?: unknown, failed = error !== undefined) => {
+            clearTimeout(timeout)
+            signal?.removeEventListener('abort', aborted)
+            document.superseded.signal.removeEventListener('abort', replaced)
+            document.completion.signal.removeEventListener('abort', completed)
+            failed ? reject(error) : resolve()
+          }
+          const replaced = () => finish()
+          const aborted = () => finish(signal?.reason ?? new Error('The Browser operation stopped before its document was ready.'))
+          const completed = () => finish(document.failure?.error, document.failure !== null)
+          const timeout = setTimeout(() => finish(new Error('The initial Browser document exceeded this request budget. Navigation and existing Browser work remain available.')), Math.max(1, deadlineMillis - performance.now()))
+          timeout.unref?.()
+          signal?.addEventListener('abort', aborted, { once: true })
+          document.superseded.signal.addEventListener('abort', replaced, { once: true })
+          document.completion.signal.addEventListener('abort', completed, { once: true })
+          if (document.completion.signal.aborted) completed()
+          else if (document.superseded.signal.aborted) replaced()
+          else if (signal?.aborted) aborted()
+        })
+      } catch (error) {
+        current()
+        if (!document.superseded.signal.aborted) throw error
+      }
+      current()
+    }
   }
 
   async back(id: string): Promise<BrowserSnapshot> {
@@ -1149,6 +1221,8 @@ export class BrowserViewManager {
       this.revokePresentationCapture(entry, 'source-replaced')
       this.clearFavicon(entry)
       entry.view = candidate
+      if (entry.initialDocument) entry.initialDocument.superseded.abort()
+      entry.initialDocument = null
       entry.storage = { mode: 'normal', profileId, partition }
       entry.requestedUrl = candidate.webContents.getURL() || url
       entry.navigationId = randomUUID()
@@ -1204,10 +1278,14 @@ export class BrowserViewManager {
   async captureScreenshot(id: string): Promise<BrowserScreenshotCapture> {
     const entry = this.require(id)
     const view = entry.view
+    await this.waitForInitialDocument(entry, view)
     const navigationId = entry.navigationId
     const url = view.webContents.getURL(), title = view.webContents.getTitle()
     const readViewport = () => readScreenshotViewport(() => view.webContents.executeJavaScriptInIsolatedWorld(BROWSER_SELECTION_WORLD_ID, [{ code: SCREENSHOT_VIEWPORT_SCRIPT }]))
     const before = await readViewport()
+    if (!this.owns(entry, view) || view.webContents.isDestroyed() || entry.navigationId !== navigationId) {
+      throw new Error('Browser page changed while the screenshot was being captured')
+    }
     const image = await view.webContents.capturePage()
     const after = await readViewport()
     if (
@@ -1252,7 +1330,6 @@ export class BrowserViewManager {
     const entry = this.require(id)
     // Capture releases its native/CDP owner before its first await. Durable draft writes do not gate a healthy run.
     void this.releaseDemonstrationCapture(entry)
-    const resultNavigationId = entry.navigationId
     if (entry.humanControl) {
       // 带类型化的码，不是一句散文：调用方要能把「人在用这一页」与「出故障了」分开，并且知道恢复
       // 动作是**人明确交还控制**，不是重试。裸 Error 会让两者在机读侧长得一模一样。
@@ -1372,17 +1449,17 @@ export class BrowserViewManager {
       if (stopRequested) return {
         result: undefined, logs: [], outcome: { kind: 'stopped', message: operation.warning! }, runOperation: operation
       }
-      const resultContext: BrowserResultContext = {
-        workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id,
-        navigationId: resultNavigationId
-      }
-      const remainingMillis = taskPage?.cursor.deadlineMillis === undefined ? undefined : Math.floor(taskPage.cursor.deadlineMillis - performance.now())
-      if (remainingMillis !== undefined && (!Number.isFinite(remainingMillis) || remainingMillis <= 0)) throw new Error('Task execution budget reached before script dispatch. Existing progress remains; the step was not replayed.')
+      const deadlineMillis = Math.min(performance.now() + 30_000, taskPage?.cursor.deadlineMillis ?? Infinity)
+      const remainingMillis = Math.floor(deadlineMillis - performance.now())
+      if (!Number.isFinite(remainingMillis) || remainingMillis <= 0) throw new Error('Task execution budget reached before script dispatch. Existing progress remains; the step was not replayed.')
       const run = await runBrowserScript({ code, signal: stopController.signal,
-        ...(remainingMillis === undefined ? {} : { timeoutMs: Math.min(30_000, remainingMillis) }),
-        onPageCall: this.pageCallHandler(entry, session, notes, operation, privateTaskParameters, stopController.signal, taskPage),
-        ...(this.resultArtifacts ? { captureResultArtifact: async (sourcePath: string) =>
-          await this.resultArtifacts!.import(resultContext, sourcePath) } : {})
+        timeoutMs: remainingMillis,
+        onPageCall: this.pageCallHandler(entry, session, notes, operation, privateTaskParameters, stopController.signal, taskPage, deadlineMillis),
+        ...(this.resultArtifacts ? { captureResultArtifact: async (sourcePath: string) => {
+          if (!this.owns(entry, feedbackView) || entry.activeRun?.operationId !== operation.id || stopController.signal.aborted) throw new Error('The original Browser operation changed before retaining its result.')
+          const context: BrowserResultContext = { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id, navigationId: entry.navigationId }
+          return await this.resultArtifacts!.import(context, sourcePath)
+        } } : {})
       })
       // 会话中途没了，**压过程序自己的结局**。这一条是承重的：Agent 的程序里一个
       // `try { await click(ref) } catch {}` 完全是正常写法，而那个 catch 会把"会话没了"
@@ -1508,6 +1585,7 @@ export class BrowserViewManager {
       entry.activity = { operation, control: 'agent', ...('message' in outcome ? { warning: outcome.message } : {}) }
       return { result: undefined, logs: run.logs, outcome, runOperation: operation }
     } finally {
+      stopController.abort()
       await feedback.end(operation.phase === 'completed')
       const cleanupWarning = session.detach()
       if (cleanupWarning) {
@@ -1556,6 +1634,8 @@ export class BrowserViewManager {
     }
     this.demonstrationCapture = current
     try {
+      await this.waitForInitialDocument(entry, view)
+      if (this.demonstrationCapture !== current || entry.runInFlight || entry.activeRun) throw new Error('Recording no longer owns this Browser. The current Browser operation remains available.')
       const draft = await current.capture.start()
       if (this.demonstrationCapture !== current || !this.owns(entry, view) || contents.isDestroyed()) {
         throw new Error('Recording no longer owns this Browser. The current Browser operation remains available.')
@@ -1735,6 +1815,7 @@ export class BrowserViewManager {
   async checkOutcomeFields(id: string, input: BrowserOutcomeFieldRunInput): Promise<BrowserOutcomeEvaluation> {
     const entry = this.require(id)
     const view = entry.view
+    await this.waitForInitialDocument(entry, view)
     const navigationId = entry.navigationId
     const request = parseBrowserStructuredOutputRequest(input.request)
     const criteria = parseBrowserOutcomeCriteriaRequest({ criteria: input.criteria }).criteria
@@ -1876,6 +1957,8 @@ export class BrowserViewManager {
     const step = asset.draft.steps.find(step => step.id === stepId)
     if (!step || step.kind === 'checkpoint' || (step.kind === 'branch' && step.branch?.condition.kind !== 'element-present')) throw new Error('This task step has no page target.')
     const view = entry.view
+    await this.waitForInitialDocument(entry, view)
+    if (entry.runInFlight || entry.activeRun) throw new Error('Wait for the active Browser operation before locating a task target.')
     const contents = view.webContents
     const navigationId = entry.navigationId
     const live = () => this.owns(entry, view) && !contents.isDestroyed() && entry.navigationId === navigationId
@@ -2103,12 +2186,18 @@ export class BrowserViewManager {
     operation: BrowserOperation,
     privateTaskParameters = false,
     signal?: AbortSignal,
-    taskPage?: BrowserTaskPageExecution
+    taskPage?: BrowserTaskPageExecution,
+    deadlineMillis = taskPage?.cursor.deadlineMillis ?? Infinity
   ): (name: string, args: unknown[]) => Promise<unknown> {
     let activeStep: BrowserOperationStep | null = null
     const waitingSteps = new Set<number>()
     let beforeWaiting: { phase: BrowserOperation['phase']; summary: string } | null = null
     const observingView = entry.view
+    const requireCurrentDocumentOperation = () => {
+      if (!this.owns(entry, observingView) || observingView.webContents.isDestroyed() || entry.activeRun?.operationId !== operation.id) throw new Error('The original Browser operation changed before document dispatch.')
+      signal?.throwIfAborted()
+      if (performance.now() >= deadlineMillis) throw new Error('The Browser program budget ended before document dispatch.')
+    }
     let activeRecoveryMayDispatch: (() => boolean) | undefined
     const requireLive = (): WebContentsView => {
       const view = entry.view
@@ -2239,6 +2328,11 @@ export class BrowserViewManager {
         }
       }
       try {
+        if (BROWSER_DOCUMENT_PAGE_CALLS.has(name)) {
+          requireCurrentDocumentOperation()
+          await this.waitForInitialDocument(entry, observingView, signal, deadlineMillis)
+          requireCurrentDocumentOperation()
+        }
         let value: unknown
         try {
           const feedback = entry.feedback
@@ -2248,6 +2342,7 @@ export class BrowserViewManager {
             action = await feedback?.begin(name, name === 'pressKey' ? args[1] : undefined)
             beforeAction(step)
           } else await feedback?.clear(BROWSER_WAIT_PAGE_CALLS.has(name) ? 'invalidate' : 'replace')
+          if (BROWSER_DOCUMENT_PAGE_CALLS.has(name)) requireCurrentDocumentOperation()
           value = await dispatch(name, args, { beforeAction: () => beforeAction(step),
             ...(feedback && action !== undefined && entry.visible ? { feedback: async (node: BrowserPageSnapshot['nodes'][number], send: typeof session.sendCommand) => {
               beforeAction(step)
@@ -2406,6 +2501,11 @@ export class BrowserViewManager {
   async selectElement(id: string, inspectTarget?: (revision: number, inspectionToken: string) => Promise<void>): Promise<BrowserElementSelection | null> {
     const entry = this.require(id)
     const view = entry.view
+    const pending = Symbol('initial document selection')
+    entry.selectionOperation = pending
+    try { await this.waitForInitialDocument(entry, view) }
+    catch (error) { if (entry.selectionOperation === pending) entry.selectionOperation = null; throw error }
+    if (entry.selectionOperation !== pending) return null
     const navigationId = entry.navigationId
     entry.selectionOperation = null
     const preflightRevision = ++entry.selectionRevision
@@ -2787,6 +2887,17 @@ export class BrowserViewManager {
       this.applyViewport(entry, view)
       void this.refreshFaviconAfterLoad(entry, view)
     })
+    contents.on('dom-ready', () => {
+      const document = entry.initialDocument
+      if (!this.owns(entry, view) || !document || document.view !== view ||
+        !document.navigationId || document.navigationId !== entry.navigationId ||
+        document.committedNavigationId !== entry.navigationId) return
+      // The original viewport policy must be active before the first consumer,
+      // even when images or child frames keep the full load in progress.
+      contents.setZoomFactor(DEFAULT_BROWSER_ZOOM_FACTOR)
+      this.applyViewport(entry, view)
+      document.resolve()
+    })
     contents.on('did-start-navigation', (details) => {
       if (details.isMainFrame && !details.isSameDocument && this.faviconUrls.get(view)?.documentUrl !== details.url) this.faviconUrls.delete(view)
       if (!details.isMainFrame || !this.owns(entry, view)) return
@@ -2803,7 +2914,9 @@ export class BrowserViewManager {
       if (entry.pendingSwitch?.token === entry.switchRevision) {
         this.cancelPendingSwitchForNavigation(entry, new Error('Browser profile switch was superseded by navigation'))
       }
-      entry.selectionOperation = null
+      // A pending picker has no document handles yet. The initial navigation can
+      // settle without canceling it; explicit cancel still clears this owner token.
+      if (typeof entry.selectionOperation !== 'symbol' || !entry.initialDocument) entry.selectionOperation = null
       void entry.feedback?.clear()
       const selectionRevision = ++entry.selectionRevision
       const annotationRevision = ++entry.annotationRevision
@@ -2818,6 +2931,18 @@ export class BrowserViewManager {
       this.clearFavicon(entry, details.isSameDocument)
       entry.requestedUrl = requestedUrl
       entry.navigationId = randomUUID()
+      const document = entry.initialDocument
+      if (document?.view === view && (!details.isSameDocument || document.navigationId)) {
+        const previous = document.navigationId
+        document.navigationId = entry.navigationId
+        if (details.isSameDocument) {
+          if (document.loadNavigationId === previous) document.loadNavigationId = entry.navigationId
+          if (document.committedNavigationId === previous) document.committedNavigationId = entry.navigationId
+        } else {
+          document.loadNavigationId ??= entry.navigationId
+          document.committedNavigationId = null
+        }
+      }
       entry.error = null
       this.emit(entry)
     })
@@ -2835,6 +2960,8 @@ export class BrowserViewManager {
     })
     contents.on('did-navigate', (_event, url) => {
       if (!this.owns(entry, view)) return
+      const document = entry.initialDocument
+      if (document?.view === view && document.navigationId === entry.navigationId) document.committedNavigationId = entry.navigationId
       this.releaseUploadFiles(entry)
       entry.requestedUrl = url
       entry.error = null
