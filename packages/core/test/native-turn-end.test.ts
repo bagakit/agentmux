@@ -264,3 +264,49 @@ it('a real isolated Node writer and fresh reader retain the exact end and origin
       request: { id: 'durable-hook', agentSessionId: 'durable-agent', permissionHook: { nativeSessionId: 'native-durable', nativeTurnId: 'durable-turn', nativeTurnEnded: { recordId: 'durable-end' } } } })
   } finally { await rm(root, { recursive: true, force: true }) }
 }, 25_000)
+
+it.each([
+  { state: 'done', nativeTurnId: 'turn-original', refuses: true },
+  { state: 'done', nativeTurnId: 'another-turn', refuses: false },
+  { state: 'unknown', nativeTurnId: 'turn-original', refuses: false },
+  { state: 'working', nativeTurnId: 'turn-original', refuses: false }
+] as const)('reads another Core owner after final authority wait: $state on $nativeTurnId', async observation => {
+  const h = await nativeTurnEndFixture()
+  const { AgentMuxClient } = await import('../src/client.js')
+  const { AgentMuxFileAgentSessionStore } = await import('../src/agent-session-store.js')
+  const second = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(h.store.path) })
+  const inner = second as unknown as typeof h.inner
+  await inner.registry.load('local'); inner.connected = true; inner.kernel.isConnected = () => true
+  inner.kernel.status = vi.fn(async (id: string) => h.run(id))
+  let onStatus: ((status: AgentProviderSessionStatus) => void) | undefined
+  second.providers.get('codex').observeSessionStatus = async context => { onStatus = context.onStatus; return { dispose() {} } }
+  let committed = false
+  try {
+    const { pending } = await h.open('cross-owner-hook'), input = h.input('cross-owner-hook')
+    const result = await h.client.respondAgentInteraction(input, { assertCurrent: async () => {
+      const request = h.read('cross-owner-hook')
+      if (committed || request?.kind !== 'permission' || request.permissionHook?.response?.delivery !== 'unknown') return
+      await second.statusAgent('recipient')
+      if (!onStatus) throw new Error('The other original Core status observer is missing.')
+      onStatus({ state: observation.state, nativeTurnId: observation.nativeTurnId, recordId: 'other-owner-end' })
+      const watches = Reflect.get(second, 'nativeStatusWatches') as Map<string, { pending: Promise<void> }>
+      await watches.get('recipient')!.pending
+      const durable = (await h.store.readMetadata('recipient'))!
+      if (observation.state === 'done') expect(durable.nativeTurnEnds?.turns[observation.nativeTurnId]?.recordId).toBe('other-owner-end')
+      else expect(durable).not.toHaveProperty('nativeTurnEnds')
+      const cached = h.read('cross-owner-hook')
+      expect(cached?.kind === 'permission' && cached.permissionHook?.nativeTurnEnded).toBeUndefined()
+      committed = true
+    } }).then(value => value, error => error)
+    expect(committed).toBe(true)
+    if (observation.refuses) {
+      expect(result).toMatchObject({ code: 'AGENT_INTERACTION_UNCONFIRMED' })
+      expect(await (await pending).json()).toEqual({})
+      expect(await h.client.inspectAgentInteractionOperation(input)).toMatchObject({ delivery: 'saved', nativeAdoption: 'unknown' })
+    } else {
+      expect(result).toMatchObject({ delivery: 'hook-written', nativeAdoption: 'unknown' })
+      expect(await (await pending).json()).toMatchObject({ hookSpecificOutput: { decision: { behavior: 'allow' } } })
+    }
+    expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  } finally { await second.dispose(); await h.close() }
+})
