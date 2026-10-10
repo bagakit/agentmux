@@ -24,6 +24,8 @@ export class PermissionActions implements PublicationPermissionsPort {
       CREATE TABLE IF NOT EXISTS connection_ingress_action_reference (action_ref TEXT PRIMARY KEY, projection_id TEXT NOT NULL, binding_id TEXT NOT NULL, binding_revision INTEGER NOT NULL, reference_json TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS connection_ingress_action_audience ON connection_ingress_action_reference(binding_id,binding_revision,projection_id);
       CREATE TABLE IF NOT EXISTS connection_ingress_action_intent (operation_id TEXT PRIMARY KEY, intent_json TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS connection_ingress_action_original ON connection_ingress_event(json_extract(record_json,'$.input.author.actionRef'),json_extract(record_json,'$.input.author.actor'),json_extract(record_json,'$.input.author.grantRevision'),intake_sequence) WHERE json_extract(record_json,'$.kind')='action' AND json_extract(record_json,'$.state')='claimed';
+      CREATE INDEX IF NOT EXISTS connection_ingress_action_operation ON connection_ingress_event(json_extract(record_json,'$.input.operationId')) WHERE record_json IS NOT NULL AND json_extract(record_json,'$.input.operationId') IS NOT NULL;
     `)
     this.initialized = true
   }
@@ -128,7 +130,7 @@ export class PermissionActions implements PublicationPermissionsPort {
   claim(record: ConnectionIngressAction): { record: ConnectionIngressAction; input: AgentMuxAgentInteractionInput; own: boolean } {
     const ref = this.authorize(record), grant = this.current(ref).find(value => same(value.actor, record.actor))!
     const database = this.options.connections.database
-    const existing = database.prepare("SELECT record_json FROM connection_ingress_event WHERE json_extract(record_json,'$.state')='claimed' AND json_extract(record_json,'$.input.author.actionRef')=? AND json_extract(record_json,'$.input.author.actor')=? AND json_extract(record_json,'$.input.author.grantRevision')=? ORDER BY intake_sequence LIMIT 1")
+    const existing = database.prepare("SELECT record_json FROM connection_ingress_event WHERE json_extract(record_json,'$.kind')='action' AND json_extract(record_json,'$.state')='claimed' AND json_extract(record_json,'$.input.author.actionRef')=? AND json_extract(record_json,'$.input.author.actor')=? AND json_extract(record_json,'$.input.author.grantRevision')=? ORDER BY intake_sequence LIMIT 1")
       .get(ref.actionRef, encode(record.actor), grant.revision)
     if (existing) {
       const original = parseConnectionIngressRecord(JSON.parse(String(existing.record_json))) as ConnectionIngressAction
