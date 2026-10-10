@@ -260,9 +260,15 @@ Settings 中的当前分区标题属于工具工作面的区块 header，使用�
 - **选中态一律不用左侧竖条（inset 竖线）**。一条贴边的亮色竖线是"AI 生成的管理后台"最容易辨认的印记：它既不是填充也不是描边，只是一根贴在行左缘的装饰，在密集列表里连成一片噪音。选中由**单一几何信号**表达——干净的 Surface 填充，必要时配实心图标格。这条对所有列表行成立（Project Rail、Topic、Tree、Segment、Settings 分区），没有例外；`box-shadow: inset <n>px 0 ...` 与 `border-left: <n>px ...`（含 `border-inline-start`）这两种拼法都不得用于表达选中——它们在屏幕上是同一根线，禁的是那根线而不是某一种画法。这条由 `apps/desktop/test/surface-selection-contract.test.ts` 守住：它从 CSS 推出两种拼法的所有左缘竖条并在选中态类名上断言其不存在，加回一条会红；两个形状判定各自带一条自证（拿合法的容器分隔线与内容引用条当样本），因为一个认不出竖条的检查会因"没找到"而全绿。
 - **一列全同的图标不是信息，是宽度开销**。若某个列表里每一行的行首图标都相同（重复的 Topic 类型图标、纯文件列表的文件图标），去掉它——图标的价值在于区分，无可区分时它只在挤压标题的可读宽度。行首位置留给真正有区分度的东西（对象的手动或自动身份、状态、Provider 身份）或干脆留白；Space 的共用对象身份槽遵守[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)。
 
-用户要求替换 Mote 和项目中制式的 AI 星芒图标。Mote 默认类型图形使用原创 SVG 标记，以克制的不对称实体轮廓与留白表达微小但稳定的身份；在 12–24px 保持清楚，跟随当前文字颜色，无渐变、阴影、滤镜、装饰性星芒或动画。相同 Mote 类型入口共用同一标记；对象可按[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)的共用身份规则选择手动图标。项目自己的通用 AI 星芒（Lucide Sparkles / WandSparkles）退场：新建工作面用创建语义、技能用技能语义、跳过权限提示用明确权限语义；现头像 spark 徽标保留原数据含义而更换其字形。保留 Provider 官方品牌资产，不能把它们当成制式 AI 图标替换。产品身份边界见 interaction[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。
-
 Mailbox 原生输入的来源更新与有界阅读告示引用交互文档[《用户消息从 Provider 原生会话取得》](../behavior/conversation-mode.md#用户消息从-provider-原生会话取得)；沿原有就地边界与服务窗语言，不新增常驻工具栏、另一套状态或消息表面。
+
+### Mote 默认身份与装饰徽标
+
+Mote 默认身份使用原创填充 SVG，以独特、克制的不对称轮廓和清楚负空间建立辨识；12–24px、单色和深浅背景均保持完整，不能靠放大、颜色或动态才看懂。造型有稳定的记忆点，不直接采用普通字母 m、通用机器人方脸或制式 AI 星芒；无渐变、阴影、滤镜和装饰性碎部。类型入口、主 Mote 与普通 Mote 的自动默认外观消费同一语义标记及主题资产，跟随当前文字颜色，不再由主身份的独立默认 PNG 绕开主题覆盖。类型标记与自动默认剪影保持静止，不受宿主通用 SVG 姿态选择器整体驱动；用户选择的头像已有姿态与真实状态表达仍归[原 Mote 呈现 owner](motes-and-coordination.md#mote-头像与主-mote)。
+
+自动默认只适用于原外观 owner 确认没有显式选择的 Mote；恢复自动后使用同一默认身份。用户已保存的图标、捏脸、图片与系列选择优先，保持原内容、原色、比例与部件，不能因主身份、资源读取失败或默认升级而被改写。对象手动外观继续沿[共用身份规则](spaces-and-layout.md#project-rail-与-topic-行密度)及[头像行为合同](../behavior/motes-and-coordination.md#mote-头像与主-mote)选择和保存。功能入口、对象身份与执行状态分别表达；新轮廓不授予运行、权限或操作资格。
+
+Executor 头像的装饰徽标使用独立语义项与适合 6／8px 的简单静态轮廓，不借用 Mote 身份图形。已有 `spark` 等徽标数据与选择含义保留，徽标和 Mote 主题资产可分别覆盖；微小徽标不加入星芒碎部、运行态或循环。项目自己的通用 AI 星芒（Lucide Sparkles / WandSparkles）退场：新建工作面、技能与跳过权限提示各用准确语义。Provider 官方品牌资产保留，不作为制式 AI 图标替换。产品身份边界见[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。
 
 ## 身份归属
 
