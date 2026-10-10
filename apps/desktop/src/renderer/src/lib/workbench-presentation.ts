@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react'
 import { groupIds, type WorkspaceLayout } from '@agentmux/layout'
 import type { WorkbenchTab } from './workbench-tabs'
-import { workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
+import { sameWorkbenchProjectionSelection, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
 import { desktopElementVisible } from './desktop-presentation'
 import type { BrowserStartPageConfig } from '../../../shared/browser-start-page'
 
@@ -15,6 +15,18 @@ export function useWorkbenchRetainedRegionId(): string | null { return useContex
 export function useWorkbenchBrowserPresentation() { return useContext(WorkbenchPresentationContext) }
 export type WorkbenchViewTargets = Readonly<Record<string, readonly WorkbenchViewTarget[]>>
 export type WorkbenchViewTarget = { hostId: string; active: boolean; visible?: boolean; surface?: 'recall' | 'survey' | 'focus' | 'space' | 'mote'; browserStartPage?: BrowserStartPageConfig; controlsOpen?: boolean; retainedRegionId?: string; headerPortalTargetId?: string; onSelectRegion?: (regionId: string) => void; projection?: WorkbenchProjection; reference?: WorkbenchProjectionSelection }
+
+/** Resolve the original Browser occurrence inside an independently presented workface. */
+export function workbenchBrowserWindowTarget(targets: readonly WorkbenchViewTarget[], owner: WorkbenchPresentation, regionId: string): WorkbenchViewTarget | undefined {
+  if (!owner.reference) return
+  // Tab slots retain their selected sibling as a caret hint. Their Browser
+  // occurrence substitutes its own Region; Region projections remain exact below.
+  const reference = { ...owner.reference, regionId }
+  const matches = targets.filter(target => target.reference && sameWorkbenchProjectionSelection({ ...target.reference, regionId }, reference) &&
+    (target.surface ?? 'space') === (owner.surface ?? 'space') && target.projection?.presentationId === owner.projection?.presentationId &&
+    (target.projection?.entity.kind !== 'region' || target.projection.entity.regionId === regionId && target.reference.regionId === regionId))
+  return matches.length === 1 ? matches[0] : undefined
+}
 
 /** A Tab's committed host does not change occurrence when its selected sibling changes. */
 function committedTabMarkerMatches(tab: WorkbenchTab, prefix: 'primary' | 'view', reference: WorkbenchProjectionSelection, marker: string | undefined): boolean {
