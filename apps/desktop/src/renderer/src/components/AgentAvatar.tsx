@@ -1,3 +1,4 @@
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -89,6 +90,8 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   /** Browser rails use the existing native-surface occlusion lease while this panel is open. */
   onPanelVisibilityChange?: ((visible: boolean) => void) | undefined
 }) {
+  const document = useWorkbenchDocument()
+  const window = document.defaultView!
   const identity = useContext(ExecutorIdentityContext)
   const notifyPanelVisibilityChange = onPanelVisibilityChange ?? identity.onPanelVisibilityChange
   const session = useAppStore(useShallow((store) => {
@@ -152,7 +155,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     clearTimeout(openTimer.current)
     if (disclosure && (!trigger.current?.isConnected || trigger.current.closest('[inert]') || document.visibilityState === 'hidden')) return
     if (!visible) return
-    if (!position && document.activeElement instanceof HTMLElement && document.activeElement !== trigger.current) previousFocus.current = document.activeElement
+    if (!position && document.activeElement?.nodeType === 1 && document.activeElement !== trigger.current) previousFocus.current = document.activeElement as HTMLElement
     const bounds = trigger.current?.getBoundingClientRect()
     if (bounds) {
       controlledReference.current = disclosure?.reference()
@@ -181,7 +184,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     }
     document.addEventListener('pointerdown', outside, true)
     return () => document.removeEventListener('pointerdown', outside, true)
-  }, [Boolean(position), Boolean(actionDisclosure)])
+  }, [Boolean(position), Boolean(actionDisclosure), document])
   useEffect(() => () => {
     clearTimeout(closeTimer.current)
     clearTimeout(openTimer.current)
@@ -208,7 +211,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
       document.removeEventListener('pointerdown', dismiss)
       document.removeEventListener('keydown', escape)
     }
-  }, [disclosure?.scope])
+  }, [disclosure?.scope, document])
   useEffect(() => {
     if (!position) return
     // A fixed portal becomes stale when the dock or page scrolls. Dismiss it so the
@@ -229,7 +232,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
       window.removeEventListener('resize', dismiss)
       window.removeEventListener('scroll', dismiss, true)
     }
-  }, [position])
+  }, [position, document])
   function syncNativeOverlayLease(left: number, top: number, width: number, height: number) {
     const overlapsBrowser = [...document.querySelectorAll<HTMLElement>('[data-native-browser-stage]')]
       .some((stage) => {
@@ -265,7 +268,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     }
     const stop = autoUpdate(reference, surface, () => { void update() })
     return () => { disposed = true; stop() }
-  }, [position])
+  }, [position, document])
   useLayoutEffect(() => {
     if (!position || !panel.current || controlledReference.current) return
     let bounds = panel.current.getBoundingClientRect()
@@ -307,18 +310,18 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     }
     if (left !== position.left || top !== position.top) { setPosition({ left, top }); return }
     syncNativeOverlayLease(left, top, bounds.width, bounds.height)
-  }, [position, actionDisclosure])
+  }, [position, actionDisclosure, document])
   useEffect(() => {
     if (!position || !actionDisclosure || !panel.current) return
-    const observer = new ResizeObserver(() => show())
+    const observer = new window.ResizeObserver(() => show())
     observer.observe(panel.current)
     const surface = trigger.current?.closest('.agent-surface')
     if (surface) observer.observe(surface)
     return () => observer.disconnect()
-  }, [Boolean(position), Boolean(actionDisclosure)])
+  }, [Boolean(position), Boolean(actionDisclosure), document])
 
   const face = <AgentAvatarFace provider={provider} displayState={displayState} avatar={avatar} count={count} size={size} mark={identityMark ?? disclosure?.mark} tintMark={identityMark === undefined} active={session?.active === true} />
-  const overlayHost = getWindowOverlayHost()
+  const overlayHost = getWindowOverlayHost(document)
   return <>
     <Element ref={trigger} className={`agent-avatar${inlineLabel !== undefined ? ' agent-avatar--inline' : ''}${displayState ? ` status status--${displayState}` : ''}`}
       style={{ '--agent-avatar-size': `${size}px` } as CSSProperties}
@@ -326,10 +329,10 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
       aria-describedby={position ? panelId : undefined} aria-expanded={actionDisclosure ? Boolean(position) : undefined} aria-controls={actionDisclosure ? panelId : undefined} data-executor-id={resolvedExecutorId}
       {...(attention ? { 'data-attention': attention } : {})}
       onPointerEnter={disclosure ? showSoon : show} onPointerLeave={hideSoon}
-      onPointerDown={() => { if (document.activeElement instanceof HTMLElement && document.activeElement !== trigger.current) previousFocus.current = document.activeElement }}
+      onPointerDown={() => { if (document.activeElement?.nodeType === 1 && document.activeElement !== trigger.current) previousFocus.current = document.activeElement as HTMLElement }}
       onFocus={(event) => {
         if (suppressFocusPreview.current) return
-        if (!position && event.relatedTarget instanceof HTMLElement) previousFocus.current = event.relatedTarget
+        if (!position && event.relatedTarget && (event.relatedTarget as Node).nodeType === 1) previousFocus.current = event.relatedTarget as HTMLElement
         show()
       }}
       onBlur={(event) => { if (!panel.current?.contains(event.relatedTarget as Node)) hideSoon() }}
