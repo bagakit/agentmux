@@ -36,7 +36,7 @@ export function AgentInputRecap({ request, enabled, available }: { request: Prev
     const arrivals = slots ? reader.messages.filter(message => message.source.kind === 'native' && !ids.has(message.id)).slice(-slots) : []
     const messages = slots ? [...frozen.messages, ...arrivals.slice(-slots)] : frozen.messages
     if (messages !== frozen.messages) {
-      const container = region.current?.closest<HTMLElement>('.agent-information-reader__reading')
+      const container = region.current?.querySelector<HTMLElement>('[data-agent-input-reading]') ?? region.current?.closest<HTMLElement>('.agent-information-reader__reading')
       if (container) reflow.current = { container, anchor: captureReadingAnchor(container) }
     }
     setFrozen({ ...current, messages }); setPaused(true)
@@ -121,7 +121,7 @@ function OriginalInput({ inspected, request, active, onClose }: { inspected: Ins
     <header><button type="button" onClick={onClose} aria-label="Back to recent inputs">←</button>
       <div><strong>{meta.author}</strong><time dateTime={meta.date?.toISOString()} title={meta.provenance}>{meta.time}</time></div>
       <small>Original input</small></header>
-    <div ref={body} className="agent-input-recall__original-body" tabIndex={0} aria-label="Original input text and images">
+    <div ref={body} data-agent-input-reading className="agent-input-recall__original-body" tabIndex={0} aria-label="Original input text and images">
       <AgentReadingBody reading={meta.reading} active={active} control={request.control} sourceKey={request.sourceKey} input={inspected.message} />
     </div>
   </div>

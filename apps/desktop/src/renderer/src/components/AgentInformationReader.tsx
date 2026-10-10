@@ -75,7 +75,8 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
   const panel = useRef<HTMLDivElement>(null), reading = useRef<HTMLDivElement>(null)
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const back = useRef<HTMLButtonElement>(null), returnToReading = useRef(false)
-  const reflowAnchor = useRef<ReturnType<typeof captureReadingAnchor>>(null)
+  const reflowAnchor = useRef<{ container: HTMLElement; anchor: ReturnType<typeof captureReadingAnchor> } | null>(null)
+  const heldReadingSurface = useRef<HTMLElement | null>(null)
   const heldSelection = useRef<Range | null>(null), laterSelection = useRef(false)
   const [tab, setTab] = useState<AgentInformationTab | null>(null)
   const visible = useWorkbenchDocumentVisibility(document)
@@ -172,16 +173,18 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
   }
   function togglePin() {
     cancelDeparture()
-    reflowAnchor.current = reading.current ? captureReadingAnchor(reading.current) : null
+    const container = reading.current?.querySelector<HTMLElement>('[data-agent-input-reading]') ?? reading.current
+    reflowAnchor.current = container ? { container, anchor: captureReadingAnchor(container) } : null
     agentInformationPreview.pin(request.token)
   }
   useLayoutEffect(() => {
-    if (reading.current && reflowAnchor.current) restoreReadingAnchor(reading.current, reflowAnchor.current)
+    if (reflowAnchor.current) restoreReadingAnchor(reflowAnchor.current.container, reflowAnchor.current.anchor)
     reflowAnchor.current = null
   }, [request.pinned])
   function showMetadata(next: AgentInformationTab) {
     cancelDeparture()
     if (!tab) {
+      heldReadingSurface.current = reading.current?.querySelector<HTMLElement>('[data-agent-input-reading]') ?? reading.current
       laterSelection.current = false
       const selection = window.getSelection()
       heldSelection.current = selection?.rangeCount && !selection.isCollapsed && reading.current?.contains(selection.anchorNode) && reading.current.contains(selection.focusNode)
@@ -197,7 +200,9 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
       const selection = window.getSelection(), saved = heldSelection.current
       const restore = !laterSelection.current && saved && reading.current?.contains(saved.startContainer) && reading.current.contains(saved.endContainer) &&
         (selection?.isCollapsed || reading.current.contains(selection?.anchorNode ?? null))
-      reading.current?.focus({ preventScroll: true })
+      const surface = heldReadingSurface.current?.isConnected ? heldReadingSurface.current : reading.current
+      surface?.focus({ preventScroll: true })
+      heldReadingSurface.current = null
       if (restore && selection) { selection.removeAllRanges(); selection.addRange(saved) }
       heldSelection.current = null
     }
