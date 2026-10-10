@@ -57,6 +57,48 @@ describe('the original member access owner', () => {
     expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中'); await f.original.unchanged()
   }, 25_000)
 
+  it.each(['selection', 'receipt'] as const)('keeps %s scoped to the current group while its original grant read is delayed', async phase => {
+    const configured = (await f.services.connections.list()).connections[0]!.config
+    await api.connections.call('connection.configure', { operationId: 'other-application-config', expectedRevision: null, connection: { ...configured, connectionId: 'other-application', application: { ...configured.application, appId: 'cli_1123456789abcdef' } } })
+    const first = { ...f.original.input, operationId: 'first-member-group', bindingId: 'first-group', connectionId: configured.connectionId, externalConversationId: 'oc_first' }
+    const second = { ...first, operationId: 'second-member-group', bindingId: 'second-group', connectionId: 'other-application', externalConversationId: 'oc_second' }
+    expect((await api.connections.call('connection.bind', first)).state).toBe('applied')
+    const bound = await api.connections.call('connection.bind', second)
+    expect(bound.state).toBe('applied')
+    await api.connections.call('connection.grant', { operationId: 'first-member-grant', bindingId: first.bindingId, expectedBindingRevision: 1, grantId: 'first-member', expectedRevision: null,
+      actor: { application: configured.application, idType: 'open_id', userId: 'ou_original' }, capabilities: ['permission'], state: 'active' })
+    await f.mount()
+    let firstButton: HTMLButtonElement | undefined
+    await vi.waitFor(async () => { await act(async () => {}); firstButton = [...document.querySelectorAll<HTMLButtonElement>('.connector-sharing__group')].find(node => node.getAttribute('aria-label')?.includes('oc_first')); expect(firstButton).toBeDefined() })
+    await act(async () => firstButton!.click()); await ready('Revoke permission decisions')
+    let release!: () => void
+    const barrier = new Promise<void>(resolve => { release = resolve }), forward = f.forward
+    vi.spyOn(api.connections, 'call').mockImplementation(async (method, input) => {
+      const result = await forward(method, input)
+      if (method === 'connection.binding.inspect' && 'bindingId' in input && input.bindingId === second.bindingId) await barrier
+      return result
+    })
+    try {
+      const trigger = document.querySelector<HTMLElement>('[aria-label="Group application"]')!
+      await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+      const option = document.querySelector<HTMLElement>('[role="menuitemradio"][data-value="other-application"]')!
+      expect(option).not.toBeNull(); await act(async () => option.click())
+      await disclosure('People in this group'); await f.button('Choose')
+      const permission = [...document.querySelectorAll('label')].find(node => node.textContent === 'Allow permission decisions')!.querySelector('input')!
+      if (phase === 'selection') expect(permission.checked, 'Another application grant cannot opt this group into permission sharing').toBe(false)
+      else {
+        if (!permission.checked) await toggle('Allow permission decisions')
+        await f.button('Approve this member')
+        await vi.waitFor(async () => { await act(async () => {}); expect([...document.querySelectorAll('button')].some(node => node.textContent === 'Revoke permission decisions'), 'The exact current applied grant remains visible while its initial read is pending').toBe(true) })
+        const read = await f.cli(['binding', 'inspect', '--binding', second.bindingId])
+        expect(read.grants).toHaveLength(1); expect(read.grants[0]).toMatchObject({ actor: { application: bound.state === 'applied' ? bound.binding.application : {} }, capabilities: ['permission'] })
+        await f.button('Revoke permission decisions')
+        await vi.waitFor(async () => expect((await f.cli(['binding', 'inspect', '--binding', second.bindingId])).grants[0].state).toBe('revoked'))
+      }
+      expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
+    } finally { await act(async () => release()) }
+  }, 25_000)
+
   it('retains the original grant intent after a lost IPC receipt and only inspects it', async () => {
     await open(); await toggle('Allow permission decisions')
     const forward = f.forward
