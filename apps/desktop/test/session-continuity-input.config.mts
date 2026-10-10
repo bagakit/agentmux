@@ -13,6 +13,7 @@ const mutations: Record<string, { file?: string; before: string; after: string }
   'postlaunch-known-unknown': { file: 'packages/core/src/client.ts', before: 'if (record) return this.postLaunchPromptConfirmed(record, text, message)', after: 'if (false) return this.postLaunchPromptConfirmed(record, text, message)' },
   'postlaunch-same-op': { file: 'packages/core/src/client.ts', before: "if (prior.launchInput?.delivery === 'post-launch' && prior.launchInput.state !== 'terminal-confirmed')", after: 'if (false)' },
   'postlaunch-lost-start': { file: 'packages/core/src/client.ts', before: "if (carried?.delivery === 'post-launch' && prepared.continuity) return await this.settleContinuityPostLaunchInput(restored, prepared.continuity.operationId)", after: '' },
+  'postlaunch-not-applied': { file: 'packages/core/src/client.ts', before: "})) state = 'not-applied'", after: "})) state = 'unknown'" },
   'launch-reconcile-history': { file: 'packages/core/src/client.ts', before: "if (carried?.delivery === 'launch' && carried.state === 'launch-carried')", after: 'if (false)' },
   'launch-mailbox-carrier': { file: 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', before: '...(entry.resumeInputReceipt ? { resumeInputReceipt: entry.resumeInputReceipt } : {}),', after: '' },
   'launch-history-key': { file: 'packages/core/src/client.ts', before: 'continuity?.launchInput?.input.submissionId ?? lifecycleOperationId', after: 'lifecycleOperationId' },
