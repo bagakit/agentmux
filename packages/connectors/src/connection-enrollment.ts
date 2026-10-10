@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
-import { parseConnectionParams, parseConnectionResult, parseConnectionEnrollmentChallenge, parseConnectionEnrollmentOperation, parseConnectionEnrollmentParams, type ConnectionEnrollmentBeginInput, type ConnectionEnrollmentCallContext, type ConnectionEnrollmentCapability, type ConnectionEnrollmentListInput, type ConnectionEnrollmentOperation, type ConnectionEnrollmentOperationInput, type ConnectionEnrollmentPort } from '@agentmux/core/connections'
+import { parseConnectionParams, parseConnectionResult, parseConnectionEnrollmentChallenge, parseConnectionEnrollmentOperation, parseConnectionEnrollmentParams, type ConnectionEnrollmentBeginInput, type ConnectionEnrollmentCallContext, type ConnectionEnrollmentCapability, type ConnectionEnrollmentDiagnostic, type ConnectionEnrollmentListInput, type ConnectionEnrollmentOperation, type ConnectionEnrollmentOperationInput, type ConnectionEnrollmentPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
-import type { ConnectionEnrollmentAdapter, EnrollmentAdapterInput, EnrollmentChallengeReceipt, EnrollmentSecrets } from './connection-enrollment-adapter.js'
+import type { ConnectionEnrollmentAdapter, EnrollmentAdapterInput, EnrollmentBeginReceipt, EnrollmentChallengeReceipt, EnrollmentPollReceipt, EnrollmentSecrets } from './connection-enrollment-adapter.js'
 import { ConnectionEnrollmentStore, type EnrollmentRow } from './connection-enrollment-store.js'
 
 type Application = NonNullable<ConnectionEnrollmentOperation['application']>
@@ -43,6 +43,10 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
     const active = this.pending.get(operationId); if (active) return active
     const work = call().finally(() => this.pending.delete(operationId)); this.pending.set(operationId, work); return work
   }
+  private unconfirmed(row: EnrollmentRow, diagnostic?: ConnectionEnrollmentDiagnostic): ConnectionEnrollmentOperation {
+    if (this.closed) return row.operation
+    return diagnostic ? this.store.diagnose(row.operation.operationId, row.attemptId!, diagnostic).operation : this.store.read(row.operation.operationId)!.operation
+  }
   async begin(value: ConnectionEnrollmentBeginInput, context: ConnectionEnrollmentCallContext): Promise<ConnectionEnrollmentOperation> {
     const input = parseConnectionEnrollmentParams('connection.enrollment.begin', value)
     await this.authority(this.store.read(input.operationId), context)
@@ -55,13 +59,13 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
       await this.authority(row, context)
       const claim = this.store.claim(input.operationId, 'begin', this.owner, row)
       if (!claim.claimed) return claim.row.operation
-      try {
-        const receipt = await adapter.begin(this.adapterInput(claim.row), context.signal)
-        if (this.closed) return claim.row.operation
-        if (receipt.kind === 'pending') return await this.pendingReceipt(claim.row, receipt)
-        if (receipt.kind === 'not-applied') return this.store.settle(input.operationId, claim.row.attemptId!, r => { r.operation.authorization = 'denied'; r.operation.challenge = null; r.operation.reason = 'platform-not-applied' }).operation
-      } catch { /* Claimed begin may already have created an application. Never replay it. */ }
-      return this.store.read(input.operationId)!.operation
+      let receipt: EnrollmentBeginReceipt
+      try { receipt = await adapter.begin(this.adapterInput(claim.row), context.signal) }
+      catch { return this.unconfirmed(claim.row) }
+      if (this.closed) return claim.row.operation
+      if (receipt.kind === 'pending') return await this.pendingReceipt(claim.row, receipt)
+      if (receipt.kind === 'not-applied') return this.store.settle(input.operationId, claim.row.attemptId!, r => { r.operation.authorization = 'denied'; r.operation.challenge = null; r.operation.reason = 'platform-not-applied'; delete r.operation.diagnostic }).operation
+      return this.unconfirmed(claim.row, receipt.diagnostic)
     })
   }
   async advance(value: ConnectionEnrollmentOperationInput, context: ConnectionEnrollmentCallContext): Promise<ConnectionEnrollmentOperation> {
@@ -75,7 +79,7 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
       const liveCredential = this.unsettledCredentials.get(input.operationId)
       if (row.operation.authorization === 'unknown' && liveCredential?.attemptId === row.attemptId && row.attemptKind === 'poll') {
         try {
-          row = this.store.settle(input.operationId, row.attemptId!, r => { r.operation.authorization = 'authorized'; r.operation.application = liveCredential.application; r.operation.challenge = null; r.operation.credential = 'storing'; delete r.operation.reason })
+          row = this.store.settle(input.operationId, row.attemptId!, r => { r.operation.authorization = 'authorized'; r.operation.application = liveCredential.application; r.operation.challenge = null; r.operation.credential = 'storing'; delete r.operation.reason; delete r.operation.diagnostic })
         } catch { return row.operation }
         return row.operation.authorization === 'authorized' ? await this.configure(row, context) : row.operation
       }
@@ -87,10 +91,10 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
           const restored = saved ?? (live?.attemptId === row.attemptId ? await secrets.store({ operationId: row.snapshotOperationId, secret: JSON.stringify(live.snapshot) }) : null)
           if (restored) {
             const raw = await secrets.resolve(restored.credentialRef), snapshot = raw ? this.snapshot(raw) : null
-            if (snapshot) row = this.store.settle(input.operationId, row.attemptId!, r => { r.privateRef = restored.credentialRef; r.operation.authorization = 'pending'; r.operation.challenge = snapshot.challenge; delete r.operation.reason })
+            if (snapshot) row = this.store.settle(input.operationId, row.attemptId!, r => { r.privateRef = restored.credentialRef; r.operation.authorization = 'pending'; r.operation.challenge = snapshot.challenge; delete r.operation.reason; delete r.operation.diagnostic })
           }
           if (row.operation.authorization === 'pending') this.unsettledSnapshots.delete(input.operationId)
-        } catch { return row.operation }
+        } catch { return this.unconfirmed(row, { stage: 'secure-storage', code: 'challenge-unconfirmed' }) }
         return row.operation // A recovered pending receipt needs a separate explicit advance to poll.
       }
       if (row.operation.authorization === 'authorized') return await this.configure(row, context)
@@ -106,8 +110,10 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
       await this.authority(row, context)
       const claim = this.store.claim(input.operationId, 'poll', this.owner, row)
       if (!claim.claimed) return claim.row.operation
+      let receipt: EnrollmentPollReceipt
+      try { receipt = await adapter.poll({ ...this.adapterInput(claim.row), privateState: snapshot.privateState }, context.signal) }
+      catch { return this.unconfirmed(claim.row) }
       try {
-        const receipt = await adapter.poll({ ...this.adapterInput(claim.row), privateState: snapshot.privateState }, context.signal)
         if (this.closed) return claim.row.operation
         if (receipt.kind === 'pending') return await this.pendingReceipt(claim.row, receipt)
         if (receipt.kind === 'authorized') {
@@ -115,15 +121,16 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
           // Preserve the non-secret application fact before awaiting the secure credential commit.
           parseConnectionEnrollmentOperation({ ...claim.row.operation, authorization: 'authorized', application: receipt.application, credential: 'storing' })
           this.unsettledCredentials.set(input.operationId, { attemptId: claim.row.attemptId!, application: receipt.application, secret: receipt.secret })
-          row = this.store.settle(input.operationId, claim.row.attemptId!, r => { r.operation.authorization = 'authorized'; r.operation.challenge = null; r.operation.application = receipt.application; r.operation.credential = 'storing'; delete r.operation.reason })
+          row = this.store.settle(input.operationId, claim.row.attemptId!, r => { r.operation.authorization = 'authorized'; r.operation.challenge = null; r.operation.application = receipt.application; r.operation.credential = 'storing'; delete r.operation.reason; delete r.operation.diagnostic })
           if (row.operation.authorization !== 'authorized' || row.attemptId !== claim.row.attemptId) return row.operation
           try { await secrets.store({ operationId: row.credentialOperationId, secret: receipt.secret }); this.unsettledCredentials.delete(input.operationId) }
-          catch { return this.store.update(input.operationId, r => { r.operation.credential = 'unknown'; r.operation.reason = 'credential-unconfirmed' }, row.attemptId!).operation }
+          catch { return this.store.update(input.operationId, r => { r.operation.credential = 'unknown'; r.operation.reason = 'credential-unconfirmed'; r.operation.diagnostic = { stage: 'secure-storage', code: 'credential-unconfirmed' } }, row.attemptId!).operation }
           if (this.closed) return row.operation
           row = this.store.update(input.operationId, r => { r.operation.credential = 'stored' }, row.attemptId!)
           return await this.configure(row, context)
         }
-        if (receipt.kind === 'denied' || receipt.kind === 'expired') return this.store.settle(input.operationId, claim.row.attemptId!, r => { r.operation.authorization = receipt.kind as 'denied' | 'expired'; r.operation.challenge = null; r.operation.reason = receipt.kind === 'denied' ? 'platform-denied' : 'platform-expired' }).operation
+        if (receipt.kind === 'denied' || receipt.kind === 'expired') return this.store.settle(input.operationId, claim.row.attemptId!, r => { r.operation.authorization = receipt.kind as 'denied' | 'expired'; r.operation.challenge = null; r.operation.reason = receipt.kind === 'denied' ? 'platform-denied' : 'platform-expired'; delete r.operation.diagnostic }).operation
+        if (receipt.kind === 'unknown') return this.unconfirmed(claim.row, receipt.diagnostic)
       } catch { /* One-time poll delivery may have happened; its durable claim stays unknown. */ }
       return this.store.read(input.operationId)!.operation
     })
@@ -135,16 +142,22 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
     return { privateState: p.privateState, challenge: parseConnectionEnrollmentChallenge(p.challenge) }
   }
   private async pendingReceipt(row: EnrollmentRow, receipt: EnrollmentChallengeReceipt): Promise<ConnectionEnrollmentOperation> {
-    if (typeof receipt.privateState !== 'string' || !receipt.privateState || receipt.expiresInMs !== null && (!Number.isSafeInteger(receipt.expiresInMs) || receipt.expiresInMs < 0) || !Number.isSafeInteger(receipt.pollIntervalMs) || receipt.pollIntervalMs < 0) throw new Error('Invalid original challenge')
-    const now = Date.now(), prior = row.operation.challenge?.expiresAt
-    const receivedExpiry = receipt.expiresInMs === null ? null : now + receipt.expiresInMs
-    const challenge = parseConnectionEnrollmentChallenge({ verificationUrl: receipt.verificationUrl, ...(receipt.userCode === undefined ? {} : { userCode: receipt.userCode }), expiresAt: prior !== null && prior !== undefined ? receivedExpiry === null ? prior : Math.min(prior, receivedExpiry) : receivedExpiry, nextPollAt: now + receipt.pollIntervalMs })
-    const snapshot = { privateState: receipt.privateState, challenge }
+    let snapshot: Snapshot
+    try {
+      if (typeof receipt.privateState !== 'string' || !receipt.privateState || receipt.expiresInMs !== null && (!Number.isSafeInteger(receipt.expiresInMs) || receipt.expiresInMs < 0) || !Number.isSafeInteger(receipt.pollIntervalMs) || receipt.pollIntervalMs < 0) throw new Error('Invalid original challenge')
+      const now = Date.now(), prior = row.operation.challenge?.expiresAt
+      const receivedExpiry = receipt.expiresInMs === null ? null : now + receipt.expiresInMs
+      const challenge = parseConnectionEnrollmentChallenge({ verificationUrl: receipt.verificationUrl, ...(receipt.userCode === undefined ? {} : { userCode: receipt.userCode }), expiresAt: prior !== null && prior !== undefined ? receivedExpiry === null ? prior : Math.min(prior, receivedExpiry) : receivedExpiry, nextPollAt: now + receipt.pollIntervalMs })
+      snapshot = { privateState: receipt.privateState, challenge }
+    } catch { return this.unconfirmed(row, { stage: 'challenge', code: 'invalid-challenge' }) }
     this.unsettledSnapshots.set(row.operation.operationId, { attemptId: row.attemptId!, snapshot })
-    const secrets = await this.secure(), saved = await secrets.store({ operationId: row.snapshotOperationId!, secret: JSON.stringify(snapshot) })
+    let saved: { credentialRef: string }
+    try { const secrets = await this.secure(); saved = await secrets.store({ operationId: row.snapshotOperationId!, secret: JSON.stringify(snapshot) }) }
+    catch { return this.unconfirmed(row, { stage: 'secure-storage', code: 'challenge-unconfirmed' }) }
     this.unsettledSnapshots.delete(row.operation.operationId)
-    this.current()
-    return this.store.settle(row.operation.operationId, row.attemptId!, r => { r.privateRef = saved.credentialRef; r.operation.authorization = 'pending'; r.operation.challenge = challenge; delete r.operation.reason }).operation
+    if (this.closed) return row.operation
+    try { return this.store.settle(row.operation.operationId, row.attemptId!, r => { r.privateRef = saved.credentialRef; r.operation.authorization = 'pending'; r.operation.challenge = snapshot.challenge; delete r.operation.reason; delete r.operation.diagnostic }).operation }
+    catch { return this.store.read(row.operation.operationId)!.operation }
   }
   private async configure(row: EnrollmentRow, context: ConnectionEnrollmentCallContext): Promise<ConnectionEnrollmentOperation> {
     const operationId = row.operation.operationId
@@ -155,14 +168,14 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
       if (!credential && live?.attemptId === row.attemptId) credential = await secrets.store({ operationId: row.credentialOperationId, secret: live.secret })
       this.current()
       if (credential) this.unsettledCredentials.delete(operationId)
-      if (!credential || !row.operation.application) return this.store.update(operationId, r => { r.operation.credential = 'unknown'; r.operation.reason = 'credential-unconfirmed' }).operation
-      row = this.store.update(operationId, r => { r.operation.credential = 'stored'; r.operation.configuration = 'saving' })
+      if (!credential || !row.operation.application) return this.store.update(operationId, r => { r.operation.credential = 'unknown'; r.operation.reason = 'credential-unconfirmed'; r.operation.diagnostic = { stage: 'secure-storage', code: 'credential-unconfirmed' } }).operation
+      row = this.store.update(operationId, r => { r.operation.credential = 'stored'; r.operation.configuration = 'saving'; delete r.operation.diagnostic })
       await this.authority(row, context)
       const intended = parseConnectionParams('connection.configure', { operationId: row.configureOperationId, expectedRevision: null, connection: { connectionId: row.operation.connectionId, adapterId: row.operation.adapterId, application: row.operation.application!, label: row.operation.label, credentialRef: credential.credentialRef, enabled: true } })
       const original = await this.options.connections.inspect({ operationId: row.configureOperationId })
       const configured = parseConnectionResult('connection.configure', original.operation ?? await this.options.connections.configure(intended), intended)
       this.current()
-      return this.store.update(operationId, r => { r.operation.configuration = 'configured'; r.operation.configured = configured; delete r.operation.reason }).operation
+      return this.store.update(operationId, r => { r.operation.configuration = 'configured'; r.operation.configured = configured; delete r.operation.reason; delete r.operation.diagnostic }).operation
     } catch (error) {
       if (this.closed) return row.operation
       return this.store.update(operationId, r => { r.operation.configuration = error instanceof AgentMuxError && ['CONNECTION_IDENTITY_CONFLICT', 'CONNECTION_REVISION_CONFLICT'].includes(error.code) ? 'refused' : 'unknown'; r.operation.reason = r.operation.configuration === 'refused' ? 'connection-conflict' : 'configuration-unconfirmed' }).operation
