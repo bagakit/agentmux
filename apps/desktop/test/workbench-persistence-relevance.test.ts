@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -7,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AppConfig, BrowserSnapshot, SessionSnapshot } from '../src/shared/contracts.js'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
+import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
 
 const storageName = 'agentmux-workbench-v1'
 const workspaceId = 'persistence-workspace'
@@ -57,9 +59,10 @@ beforeEach(async () => {
   const persistence = await import('../src/renderer/src/lib/workbench-persistence.js')
   projection = vi.spyOn(persistence, 'projectPersistedWorkbench')
   store = (await import('../src/renderer/src/store.js')).useAppStore
+  store.setState({ sessions: [session] })
   api = (await import('../src/renderer/src/lib/api.js')).api
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
-  vi.spyOn(api.providers, 'list').mockResolvedValue({ catalog: [], warnings: [] })
+  vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [session], timelines: {}, recoveryCandidates: [] })
   // Positions belong to the real Core owner. Local storage retains UI preferences
@@ -88,6 +91,8 @@ afterEach(async () => {
 async function initialize(): Promise<void> {
   dispose = await store.getState().initialize()
   expect(store.getState().loading).toBe(false)
+  // Runtime observation is intentionally released after durable publication.
+  await vi.waitFor(() => expect(store.getState().sessions.map(value => value.id)).toContain(sessionId))
 }
 
 function agentTab(id = 'agent-tab') {
@@ -115,6 +120,133 @@ async function savedWorkbench() {
 }
 
 describe('actual Store persistence relevance', () => {
+  it.each([1, 32, 100])('reuses the local projection across real Browser events beside %i independent file Tabs', async count => {
+    await initialize()
+    const browser: BrowserSnapshot = {
+      id: 'cost-browser', mode: 'normal', navigationId: 'cost-navigation', profileId: 'cost-profile',
+      url: 'https://example.test/cost', title: 'Cost page', loading: false,
+      canGoBack: false, canGoForward: false, viewport: 'desktop', error: null, driving: false, appLinkPrompt: null
+    }
+    const browserTab = createWorkbenchTab('cost-browser-tab', { ...browser, regionId: 'cost-browser-region', kind: 'browser', workspaceId, browserId: browser.id })
+    const tabs = Object.fromEntries(Array.from({ length: count }, (_, index) => {
+      const id = `independent-file-${index}`
+      const tab = createWorkbenchTab(id, { regionId: `${id}-region`, kind: 'file', workspaceId,
+        path: _hygiene_fixturePath(`private/persistence/${id}.txt`) })
+      return [id, tab]
+    }))
+    tabs[browserTab.id] = browserTab
+    store.setState({ tabs, layouts: { [workspaceId]: createWorkspaceLayout('cost-group', Object.keys(tabs)) } })
+    store.getState().setAgentComposerDraft(sessionId, 'Private unsent content '.repeat(8192))
+    await savedWorkbench()
+    vi.advanceTimersByTime(400)
+    const partialize = store.persist.getOptions().partialize!, before = partialize(store.getState())
+    const durableBefore = backing.get(storageName)
+    projection.mockClear()
+    vi.mocked(localStorage.getItem).mockClear()
+    writes.length = 0
+    const stringify = vi.spyOn(JSON, 'stringify')
+    for (let index = 0; index < 16; index += 1) {
+      store.getState().applyBrowserEvent({ type: 'updated', browser: { ...browser, loading: index % 2 === 0,
+        driving: true, canGoBack: index % 2 === 1 } })
+      expect(partialize(store.getState())).toBe(before)
+    }
+    // The real Core subscription still observes spatial changes. This assertion
+    // isolates the synchronous local UI projection, before its async ACK work.
+    expect(projection).not.toHaveBeenCalled()
+    expect(stringify.mock.calls.filter(([value]) => value && typeof value === 'object' && 'state' in value && 'version' in value)).toEqual([])
+    expect(localStorage.getItem).not.toHaveBeenCalled()
+    expect(writes).toEqual([])
+    expect(backing.get(storageName)).toBe(durableBefore)
+    expect(store.getState().tabs[browserTab.id]?.regions['cost-browser-region']).toMatchObject({ loading: false, driving: true, canGoBack: true })
+
+    const current = store.getState()
+    store.setState({ tabs: { ...current.tabs }, layouts: { ...current.layouts },
+      projectGroups: [...current.projectGroups], spaceZoneBindings: { ...current.spaceZoneBindings } })
+    expect(partialize(store.getState())).toBe(before)
+    expect(projection).not.toHaveBeenCalled()
+    stringify.mockRestore()
+    // A genuine preference change rebuilds its own projection, but still must
+    // not build the Core-owned workbench only to discard it afterwards.
+    store.setState({ toolsOpen: !current.toolsOpen })
+    expect(partialize(store.getState())).not.toBe(before)
+    expect(projection).not.toHaveBeenCalled()
+    const next = { ...browser, url: 'https://example.test/durable', title: 'Durable page' }
+    store.getState().applyBrowserEvent({ type: 'updated', browser: next })
+    const savedGraph = await savedWorkbench()
+    expect(Object.keys(savedGraph.tabs)).toHaveLength(count + 1)
+    expect(savedGraph.tabs[browserTab.id]?.regions['cost-browser-region']).toMatchObject({ url: next.url, title: next.title })
+    expect(saved().state.agentComposerDrafts?.[sessionId]).toHaveLength('Private unsent content '.length * 8192)
+    expect(saved().state.toolsOpen).toBe(!current.toolsOpen)
+  })
+
+  it('invalidates the projection in both Core readiness directions while keeping the entire unready handoff', async () => {
+    const tab = agentTab('handoff-tab')
+    store.setState({ tabs: { [tab.id]: tab }, layouts: { [workspaceId]: createWorkspaceLayout('handoff-group', [tab.id]) } })
+    const partialize = store.persist.getOptions().partialize!
+    const unready = partialize(store.getState())
+    expect(unready.restoredWorkbench?.tabs[tab.id]).toBeDefined()
+    expect(unready).toHaveProperty('projectGroups')
+    expect(unready).toHaveProperty('spaceZoneBindings')
+    await initialize()
+    store.setState({ tabs: { [tab.id]: tab }, layouts: { [workspaceId]: createWorkspaceLayout('handoff-group', [tab.id]) } })
+    const ready = partialize(store.getState())
+    expect(ready).not.toHaveProperty('restoredWorkbench')
+    expect(ready).not.toHaveProperty('projectGroups')
+    expect(ready).not.toHaveProperty('spaceZoneBindings')
+    const { DesktopSpatialPersistence } = await import('../src/renderer/src/lib/desktop-spatial-state.js')
+    const readyGetter = vi.spyOn(DesktopSpatialPersistence.prototype, 'ready', 'get').mockReturnValue(false)
+    const sameState = store.getState()
+    try {
+      const unreadyAgain = partialize(sameState)
+      expect(unreadyAgain).not.toBe(ready)
+      expect(unreadyAgain.restoredWorkbench?.tabs[tab.id]).toBeDefined()
+      expect(unreadyAgain.projectGroups).toBe(sameState.projectGroups)
+      expect(unreadyAgain.spaceZoneBindings).toBe(sameState.spaceZoneBindings)
+    } finally { readyGetter.mockRestore() }
+    expect(partialize(sameState)).not.toHaveProperty('restoredWorkbench')
+  })
+
+  it('keeps acknowledged names and unrelated name handoffs on their original durable owners', async () => {
+    await initialize()
+    const tab = agentTab('name-tab')
+    store.setState({ tabs: { [tab.id]: tab }, layouts: { [workspaceId]: createWorkspaceLayout('name-group', [tab.id]) },
+      agentNames: { 'waiting-session': 'Unacknowledged handoff' } })
+    await savedWorkbench()
+    vi.spyOn(api.spatial, 'renameLabel').mockImplementation(input => spatial.mutateDisplayLabel(input,
+      { actor: { kind: 'device', id: 'private-device', verified: true }, source: 'desktop-ui',
+        entryPoint: 'spatial:renameLabel', transport: 'electron-ipc', location: { windowId: 'private-window' } }))
+    expect(await store.getState().renameAgent(sessionId, 'Explicit name', 0)).toBe(true)
+    vi.advanceTimersByTime(400)
+    expect(saved().state.agentNames).toEqual({ 'waiting-session': 'Unacknowledged handoff' })
+    expect(store.getState().agentNames[sessionId]).toBe('Explicit name')
+    const { displayLabel } = await import('@agentmux/core/spatial-graph')
+    expect(displayLabel((await spatial.readForLayout())!.graph, { kind: 'agent-session', id: sessionId })?.value).toBe('Explicit name')
+    store.setState({ agentNames: { 'waiting-session': 'New handoff' } })
+    vi.advanceTimersByTime(400)
+    expect(saved().state.agentNames).toEqual({ 'waiting-session': 'New handoff' })
+    await store.persist.rehydrate()
+    expect(store.getState().agentNames['waiting-session']).toBe('New handoff')
+  })
+
+  it('encodes and rehydrates pending note input and attempts even when their document is not marked dirty', async () => {
+    await initialize()
+    const path = _hygiene_fixturePath('private/persistence/note.md'), key = `${workspaceId}\0${path}`
+    const resource = { hostId: 'local', workspaceId, workspacePath: config.workspaces[0]!.path, path }
+    const document = { path, revision: 'note-base', content: 'Current private note', noteEditing: {
+      input: { baseContent: 'Original note', observedContent: 'Concurrent note', proposedContent: 'Unconsumed editor input', resource, phase: 'conflict' as const },
+      attempt: { operationId: 'private-note-attempt', noteId: null, content: 'Unconfirmed write', expectedRevision: 'note-base',
+        generation: 1, resource, phase: 'unknown' as const }
+    } }
+    store.setState({ documents: { [key]: document }, dirtyDocuments: {}, retainedDocumentDrafts: { [key]: [document] } })
+    vi.advanceTimersByTime(400)
+    expect(saved().state.documents?.[key]).toEqual(document)
+    expect(saved().state.retainedDocumentDrafts?.[key]).toEqual([document])
+    store.setState({ documents: {}, retainedDocumentDrafts: {} })
+    await store.persist.rehydrate()
+    expect(store.getState().documents[key]).toEqual(document)
+    expect(store.getState().retainedDocumentDrafts[key]).toEqual([document])
+  })
+
   it('consumes semantic events and external transient updates without projecting or encoding unrelated Tabs', async () => {
     await initialize()
     const tabs = Object.fromEntries(Array.from({ length: 64 }, (_, index) => {
@@ -218,7 +350,7 @@ describe('actual Store persistence relevance', () => {
   it('preserves Browser URL/title and layout edits while transient Browser snapshots keep arriving', async () => {
     await initialize()
     const browser: BrowserSnapshot = {
-      id: 'private-browser', navigationId: 'private-navigation', profileId: 'private-profile',
+      id: 'private-browser', mode: 'normal', navigationId: 'private-navigation', profileId: 'private-profile',
       url: 'https://example.test/first', title: 'First page', loading: false, canGoBack: false, canGoForward: false,
       viewport: 'desktop', error: null, driving: false, appLinkPrompt: null
     }
@@ -326,6 +458,6 @@ describe('actual Store persistence relevance', () => {
     store.getState().setAgentComposerDraft(sessionId, 'Intentional draft edit while offline')
     vi.advanceTimersByTime(400)
     expect(saved().state.agentComposerDrafts).toEqual({ [sessionId]: 'Intentional draft edit while offline' })
-    expect(Object.keys(saved().state.restoredWorkbench.tabs)).toEqual([tab.id])
+    expect(Object.keys(saved().state.restoredWorkbench!.tabs)).toEqual([tab.id])
   })
 })
