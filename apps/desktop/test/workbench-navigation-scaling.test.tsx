@@ -12,6 +12,9 @@ import { workbenchNavigationCatalog, workbenchNavigationTabs } from '../src/rend
 import { createSessionProjectFileContextSelector } from '../src/renderer/src/lib/session-project-file-context'
 import * as spatial from '../src/renderer/src/lib/space-agent-control'
 import * as workbench from '../src/renderer/src/lib/workbench-tabs'
+import { workbenchObjectLayout } from '../src/renderer/src/lib/desktop-focus-navigation'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 
 const initial = useAppStore.getState()
 afterEach(() => { useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -22,14 +25,14 @@ function scene(count = 48) {
     browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
   const sessions: SessionSnapshot[] = Array.from({ length: count }, (_, n) => ({ id: `agent-${n}`, kind: 'agent',
     providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"), label: `Agent ${n}`,
-    createdAt: 1, updatedAt: 1, latestOutputBytes: 0, processState: 'running',
+    createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1), agentSessionUpdatedAt: _historyFixtureEpoch(0, 0, 1), latestOutputBytes: 0, processState: 'running',
     status: { state: 'running', source: 'run-process', observedAt: 1 },
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: `agent-${n}`, run: { runId: `run-${n}` } } }))
   const tabs = Object.fromEntries(sessions.map(s => [s.id, createWorkbenchTab(s.id,
     { kind: 'agent', phase: 'attached', regionId: `region-${s.id}`, workspaceId: 'workspace', sessionId: s.id })]))
   const browser = { id: 'browser', browserId: 'browser', kind: 'browser' as const, regionId: 'browser-region',
-    workspaceId: 'workspace', navigationId: 'nav', url: 'https://example.test', title: 'Page', profileId: 'profile',
+    workspaceId: 'workspace', mode: 'normal' as const, navigationId: 'nav', url: 'https://example.test', title: 'Page', profileId: 'profile',
     driving: false, appLinkPrompt: null, loading: false, canGoBack: false, canGoForward: false, viewport: 'responsive' as const, error: null }
   tabs.browser = createWorkbenchTab('browser', browser)
   const state = { ...initial, config, sessions, tabs, localHome: _hygiene_fixturePath("Users/me"),
@@ -120,4 +123,111 @@ it('invalidates structural identity, file scope, membership and binding facts', 
   const surface = browser.regions['browser-region']!
   const changed = { ...state, tabs: { ...state.tabs, browser: { ...browser, regions: { 'browser-region': { ...surface, browserId: 'replacement' } } } } }
   expect(workbenchNavigationCatalog(changed).regions.find(region => region.regionId === 'browser-region')?.browserId).toBe('replacement')
+})
+
+it('reuses the structural graph through actual Tab activation and mounted layout and file consumers', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const { state } = scene()
+  useAppStore.setState(state, true)
+  const build = vi.spyOn(spatial, 'spatialCatalog')
+  const selectors = state.sessions.map(s => createSessionProjectFileContextSelector(s.id, {
+    workspaceId: 'workspace', tabGroupId: 'group', tabId: s.id, regionId: `region-${s.id}`, sessionId: s.id
+  }))
+  const original = selectors.map(select => select(state))
+  expect(original).toHaveLength(48)
+  expect(original.every(context => context.kind === 'session')).toBe(true)
+  const catalog = workbenchNavigationCatalog(state)
+  const element = document.createElement('div'); document.body.appendChild(element)
+  const root = createRoot(element)
+  function Probe() {
+    const value = useWorkbenchObjectLayout('workspace')
+    return <output>{value.layout?.groups.find(group => group.id === 'group')?.activeTabId}</output>
+  }
+  try {
+    await act(async () => root.render(<><Probe /><Probe /></>))
+    expect(build).toHaveBeenCalledTimes(1)
+    for (let n = 0; n < 12; n++) {
+      const id = `agent-${1 + n % 2}`
+      await act(async () => useAppStore.getState().activateTab('workspace', 'group', id, 'local'))
+      const current = useAppStore.getState(), group = current.layouts.workspace!.groups[0]!
+      expect(current.workbenchSpaceSelection).toMatchObject({ groupId: 'group', tabId: id, regionId: `region-${id}` })
+      expect(group.activeTabId).toBe(id)
+      expect(group.recentTabIds.at(-1)).toBe(id)
+      expect([...element.querySelectorAll('output')].map(node => node.textContent)).toEqual([id, id])
+      expect(selectors.map(select => select(current))).toEqual(original)
+    }
+    expect(build).toHaveBeenCalledTimes(1)
+    // Later consumers of this same immutable input must not repeat the layout comparison.
+    const current = useAppStore.getState(), keys = Object.keys
+    expect(workbenchNavigationCatalog(current)).toBe(catalog)
+    let layoutReads = 0
+    const read = vi.spyOn(Object, 'keys').mockImplementation(value => {
+      if (value === current.layouts) layoutReads++
+      return keys(value)
+    })
+    for (let n = 0; n < 5; n++) expect(workbenchNavigationCatalog(current)).toBe(catalog)
+    read.mockRestore()
+    expect(layoutReads).toBe(0)
+    expect(current.sessions).toBe(state.sessions)
+    expect(current.tabs).toBe(state.tabs)
+  } finally { await act(async () => root.unmount()); element.remove() }
+})
+
+it('refreshes original location and file consumers when membership, order, identity or bindings change', () => {
+  const { state } = scene(2), first = state.layouts.workspace!
+  const second = createWorkspaceLayout('second', ['agent-1'])
+  const layout = { ...first, root: { type: 'split' as const, direction: 'horizontal' as const, ratio: .5,
+    first: first.root, second: second.root }, groups: [...first.groups, ...second.groups] }
+  const baseline = { ...state, layouts: { workspace: layout } }
+  const select = createSessionProjectFileContextSelector('agent-1', {
+    workspaceId: 'workspace', tabGroupId: 'group', tabId: 'agent-1', regionId: 'region-agent-1', sessionId: 'agent-1'
+  })
+  const build = vi.spyOn(spatial, 'spatialCatalog'), before = workbenchNavigationCatalog(baseline)
+  expect(select(baseline).kind).toBe('session')
+  const removed = { ...baseline, layouts: { workspace: { ...layout,
+    groups: layout.groups.map(group => group.id === 'group' ? { ...group, tabOrder: group.tabOrder.filter(id => id !== 'agent-1') } : group) } } }
+  expect(workbenchNavigationCatalog(removed).locations.filter(location => location.tabId === 'agent-1').map(location => location.groupId)).toEqual(['second'])
+  expect(select(removed).kind).toBe('unconfirmed')
+  expect(workbenchObjectLayout(removed, 'workspace').layout?.groups[0]?.tabOrder).not.toContain('agent-1')
+
+  const reordered = { ...baseline, layouts: { workspace: { ...layout, groups: [...layout.groups].reverse() } } }
+  const next = workbenchNavigationCatalog(reordered)
+  expect(next.locations[0]?.groupId).toBe('second')
+  expect(workbenchObjectLayout(reordered, 'workspace').layout?.groups.map(group => group.id)).toEqual(['second', 'group'])
+
+  const excluded = { ...baseline, layouts: { workspace: { ...layout, root: second.root } } }
+  expect(workbenchNavigationCatalog(excluded).locations.every(location => location.groupId === 'second')).toBe(true)
+  expect(select(excluded).kind).toBe('unconfirmed')
+
+  const tab = state.tabs['agent-1']!, surface = tab.regions['region-agent-1']!
+  const replaced = { ...baseline, tabs: { ...baseline.tabs, [tab.id]: { ...tab,
+    regions: { 'region-agent-1': { ...surface, sessionId: 'replacement' } } } } }
+  expect(workbenchNavigationCatalog(replaced).regions.find(region => region.regionId === 'region-agent-1')?.agentSessionId).toBe('replacement')
+  expect(select(replaced).kind).toBe('unconfirmed')
+
+  const zoneId = before.tabs[0]!.zoneId!, spaceId = JSON.stringify(['local', _hygiene_fixturePath('other')])
+  const linked = { ...baseline, spaceZoneBindings: { [zoneId]: { workspaceId: 'workspace', spaceId } } }
+  expect(workbenchNavigationCatalog(linked).bindings).toContainEqual({ zoneId, spaceId })
+  expect(select(linked).placement?.space).toEqual({ zoneId, spaceId })
+  expect(build).toHaveBeenCalledTimes(6)
+})
+
+it('rebuilds conservatively for root ratios, workspace membership and unknown layout or group fields', () => {
+  const { state } = scene(2), layout = state.layouts.workspace!
+  const build = vi.spyOn(spatial, 'spatialCatalog')
+  const catalog = workbenchNavigationCatalog(state)
+  const variants = [
+    { workspace: { ...layout, root: { type: 'split' as const, direction: 'horizontal' as const, ratio: .4,
+      first: layout.root, second: layout.root } } },
+    { workspace: layout, other: createWorkspaceLayout('empty') },
+    { workspace: { ...layout, future: undefined } },
+    { workspace: { ...layout, groups: layout.groups.map(group => ({ ...group, future: undefined })) } },
+    { workspace: { ...layout, future: 1 } },
+    { workspace: { ...layout, next: 1 } }
+  ]
+  for (const layouts of variants) {
+    const before = build.mock.calls.length
+    expect(workbenchNavigationCatalog({ ...state, layouts })).toEqual(catalog)
+    expect(build).toHaveBeenCalledTimes(before + 1)
+  }
 })

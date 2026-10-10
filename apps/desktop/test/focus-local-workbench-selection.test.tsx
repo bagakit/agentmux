@@ -8,7 +8,7 @@ import { createWorkspaceLayout, splitWorkbenchRegion, type WorkspaceLayout } fro
 vi.mock('react-resizable-panels', () => createRequire(import.meta.url)(
   '../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js'))
 const leaves = vi.hoisted(() => ({ mounts: [] as string[], unmounts: [] as string[] }))
-// Keep the App/Global/Workbench/Provider tree actual; isolate only PTY painting.
+// Keep App/Global/Workbench/Provider actual; replace SessionPane with a retained leaf for parent selection and draft projection.
 vi.mock('../src/renderer/src/components/SessionPane', () => ({
   SessionPane: ({ sessionId, linkOrigin }: { sessionId: string; linkOrigin: { tabId: string; regionId: string } }) => {
     const key = `${linkOrigin.tabId}/${linkOrigin.regionId}`
@@ -99,6 +99,44 @@ it('actual File pointer selects its original occurrence without changing Agent/h
     expect(leaf.querySelector('textarea')?.value).toBe('Original unsent draft')
     expect(leaves.mounts).toEqual(mounts); expect(leaves.unmounts).toEqual([])
     for (const read of Object.values(reads)) expect(read).not.toHaveBeenCalled()
+  } finally { await f.close() }
+})
+it('actual Tab clicks keep parent selection and the retained leaf Range, scroll and draft projection', async () => {
+  const f = await fixture()
+  try {
+    const other = createWorkbenchTab('switch-other', { regionId: 'switch-other-region', workspaceId: f.resource.id,
+      kind: 'agent', phase: 'attached', sessionId: f.other.id }, 'Other original Agent')
+    const initial = useAppStore.getState(), layout = initial.layouts[f.display.id]!
+    await act(async () => useAppStore.setState({ mainSurface: 'workbench', activeWorkspaceId: f.display.id,
+      tabs: { ...initial.tabs, [other.id]: other }, layouts: { ...initial.layouts, [f.display.id]: { ...layout,
+        groups: layout.groups.map(group => group.id === f.reference.groupId ? { ...group, tabOrder: [...group.tabOrder, other.id] } : group) } } }))
+    const leaf = f.container.querySelector<HTMLElement>('[data-selection-leaf="explicit-exact-tab/exact-r2"]')!
+    expect(leaf).not.toBeNull()
+    const text = leaf.querySelector('p')!.firstChild!, range = document.createRange(), selection = window.getSelection()!
+    range.setStart(text, 9); range.setEnd(text, 17); selection.removeAllRanges(); selection.addRange(range)
+    leaf.scrollTop = 37
+    const before = useAppStore.getState(), mounts = [...leaves.mounts]
+    for (const id of [other.id, f.exact.id]) {
+      const button = f.container.querySelector<HTMLButtonElement>(`[data-pane-group-id="${f.reference.groupId}"] button[data-workbench-tab-id="${id}"]`)
+      expect(button).not.toBeNull()
+      await act(async () => button!.click())
+      expect(mainRegionReference(useAppStore.getState().workbenchSpaceSelection)?.tabId).toBe(id)
+    }
+    const after = useAppStore.getState()
+    expect(after.layouts[f.display.id]!.groups.find(group => group.id === f.reference.groupId)?.recentTabIds.at(-1)).toBe(f.exact.id)
+    expect(after.sessions).toBe(before.sessions)
+    expect(after.tabs).toBe(before.tabs)
+    expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(f.container.querySelector('[data-selection-leaf="explicit-exact-tab/exact-r2"]')).toBe(leaf)
+    expect(leaf.scrollTop).toBe(37)
+    expect(selection.getRangeAt(0).startContainer).toBe(text)
+    expect(selection.getRangeAt(0).endContainer).toBe(text)
+    expect(selection.toString()).toBe('readable')
+    expect(leaves.mounts).toEqual(mounts)
+    expect(leaves.unmounts).toEqual([])
+    // SessionPane is an isolated leaf here: this checks Store draft projection, not editor input.
+    await act(async () => after.setAgentComposerDraft(f.session.id, 'Original unsent draft + later input'))
+    expect(leaf.querySelector('textarea')?.value).toBe('Original unsent draft + later input')
   } finally { await f.close() }
 })
 it('Tab-level Focus has no parent Group chrome and keeps the original mixed Tab during resource restoration', async () => {
