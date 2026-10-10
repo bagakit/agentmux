@@ -1,5 +1,6 @@
 import { conversationLandmarkIntentKey, type ConversationLandmarkIntents } from './lib/conversation-landmark-intent'
 import { parseConversationLandmarkWrite, type ConversationLandmarkWrite } from '@agentmux/core/conversation'
+import { restoredMoteBotRequests, type MoteBotRequest } from './lib/mote-bot-request'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { restoredConnectorRoomIntents, type ConnectorRoomIntent } from './lib/connector-room-intent'
 import { restoredConnectorServiceIntents, type ConnectorServiceIntent } from './lib/connector-service-intent'
@@ -839,6 +840,7 @@ type AppState = {
   connectorServiceIntents: Record<string, ConnectorServiceIntent>
   /** Current policy is an endpoint-scoped observation, never a durable preference or receipt. */
   connectorServiceObservation: ConnectorServiceObservation | null
+  moteBotRequests: Record<string, MoteBotRequest>
   moteConnectionSaveIntents: Record<string, MoteConnectionSaveIntent>
   agentComposerDrafts: Record<string, string>
   agentComposerHistory: Record<string, readonly string[]>
@@ -2771,6 +2773,7 @@ type PersistedAppState = {
   connectorRoomIntents?: Record<string, ConnectorRoomIntent>
   conversationLandmarkIntents?: ConversationLandmarkIntents
   connectorServiceIntents?: Record<string, ConnectorServiceIntent>
+  moteBotRequests?: Record<string, MoteBotRequest>
   moteConnectionSaveIntents?: Record<string, MoteConnectionSaveIntent>
   agentComposerDrafts?: Record<string, string>
   agentComposerHistory?: Record<string, readonly string[]>
@@ -3025,6 +3028,7 @@ function selectPersistedInputs(state: AppState) {
     connectorRoomIntents: state.connectorRoomIntents,
     conversationLandmarkIntents: state.conversationLandmarkIntents,
     connectorServiceIntents: state.connectorServiceIntents,
+    moteBotRequests: state.moteBotRequests,
     moteConnectionSaveIntents: state.moteConnectionSaveIntents,
     agentComposerDrafts: state.agentComposerDrafts,
     agentComposerHistory: state.agentComposerHistory,
@@ -3397,6 +3401,16 @@ export async function retainConnectorServiceIntent(intent: ConnectorServiceInten
   const previous = useAppStore.getState().connectorServiceIntents[intent.input.operationId]
   if (previous && JSON.stringify(previous.input) !== JSON.stringify(parsed.input)) throw new Error('The original Connector service input cannot be replaced. Inspect that request separately.')
   useAppStore.setState(state => ({ connectorServiceIntents: { ...state.connectorServiceIntents, [parsed.input.operationId]: parsed } }))
+  return await saveWorkbenchSelection(false)
+}
+/** Save the exact client request before a Mote effect; receipts remain with the original public owner. */
+export async function retainMoteBotRequest(request: MoteBotRequest): Promise<AgentMuxSpatialSave> {
+  const parsed = restoredMoteBotRequests({ [request.input.operationId]: request })[request.input.operationId]
+  if (!parsed) throw new Error('The original Mote bot request is required.')
+  const previous = useAppStore.getState().moteBotRequests[parsed.input.operationId]
+  if (previous && (previous.action !== parsed.action || JSON.stringify(previous.input) !== JSON.stringify(parsed.input)))
+    throw new Error('The original Mote bot request cannot be replaced.')
+  useAppStore.setState(state => ({ moteBotRequests: { ...state.moteBotRequests, [parsed.input.operationId]: parsed } }))
   return await saveWorkbenchSelection(false)
 }
 /** Retain the exact submitted file input; this is neither a preference nor an effect journal. */
@@ -3873,6 +3887,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   conversationLandmarkIntents: {},
   connectorServiceIntents: {},
   connectorServiceObservation: null,
+  moteBotRequests: {},
   moteConnectionSaveIntents: {},
   retainedSpatialFocus: null,
   config: null,
@@ -10992,7 +11007,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
-    return { ...state, connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState
