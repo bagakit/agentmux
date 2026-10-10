@@ -223,8 +223,13 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     await openSurveySettings()
     const draft = 'Unsubmitted research title ' + token
     await click(startPageTitleSelector)
-    await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 4 })
-    await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 4 })
+    await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 4, windowsVirtualKeyCode: 65, commands: ['selectAll'] })
+    await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 4, windowsVirtualKeyCode: 65 })
+    const draftInput = await page.evaluate(`(() => {const input=document.querySelector(${JSON.stringify(startPageTitleSelector)});return {focused:document.activeElement===input,start:input.selectionStart,end:input.selectionEnd,value:input.value}})()`)
+    assert.equal(draftInput.focused, true, 'The original Settings input owns focus before typing')
+    assert.equal(draftInput.start, 0, 'The original input selection starts at the first character')
+    assert.equal(draftInput.end, draftInput.value.length, 'The original input selection includes its complete old value')
+    receipt.draftInputBeforeTyping = draftInput
     await page.call('Input.insertText', { text: draft })
     assert.equal(await page.evaluate('document.querySelector(' + JSON.stringify(startPageTitleSelector) + ').value'), draft, 'Original Settings owns the real unsubmitted draft')
     const beforeWarm = await observation()
