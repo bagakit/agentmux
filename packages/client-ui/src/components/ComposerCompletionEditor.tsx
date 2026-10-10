@@ -60,7 +60,7 @@ export function ComposerCompletionEditor({ completionConfig, commands = [], skil
     }
     const stop = autoUpdate(anchor, floating, () => { void update() })
     return () => { current = false; stop() }
-  }, [open])
+  }, [open, platform.ownerDocument])
   useEffect(() => { onCompletionQuery?.(queryKind ? { kind: queryKind, query: queryText } : null) }, [onCompletionQuery, queryKind, queryText])
   function selectionChanged(next: ComposerCaret): void {
     setCaret(previous => previous && previous.from === next.from && previous.to === next.to && previous.before === next.before && previous.after === next.after && previous.composing === next.composing ? previous : next)
