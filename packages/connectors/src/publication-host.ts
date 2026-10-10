@@ -52,7 +52,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (!lane) {
         lane = { binding, abort: new AbortController(), dirty: false, observation: { state: 'unknown', reason: 'not-started' } }
         this.lanes.set(binding.bindingId, lane)
-        try { const current = lane; lane.permissionStop = this.options.permissions?.observe(binding, () => this.wake(current)) } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
+        try { const current = lane; lane.permissionStop = this.options.connections.publicationAdapter(binding.connectionId)?.permissionActions === true ? this.options.permissions?.observe(binding, () => this.wake(current)) : undefined } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
         this.wake(lane)
       } else if (!recoveryOnly || lane.observation.state !== 'ready' || !lane.watch || lane.watch.closed?.aborted) this.wake(lane)
     }
@@ -80,7 +80,12 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const adapter = this.options.connections.publicationAdapter(binding.connectionId)
     if (!adapter) { lane.observation = { state: 'unavailable', reason: 'adapter-unavailable' }; return }
     let permissionProjections: string[] = [], permissionsUnavailable = false
-    try { permissionProjections = this.options.permissions?.project(binding, this.store) ?? [] } catch { permissionsUnavailable = true }
+    try {
+      if (adapter.permissionActions === true) {
+        lane.permissionStop ??= this.options.permissions?.observe(binding, () => this.wake(lane))
+        permissionProjections = this.options.permissions?.project(binding, this.store) ?? []
+      }
+    } catch { permissionsUnavailable = true }
     for (const projection of permissionProjections) {
       try { await this.drain(lane, adapter, projection) } catch { permissionsUnavailable = true }
     }

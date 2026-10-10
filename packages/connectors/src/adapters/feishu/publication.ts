@@ -86,6 +86,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
   readonly supportedRenderVersions = ['feishu-post-group-v1', this.renderVersion]
   readonly fragmentBytes = 4_096
   readonly addressing = 'group'
+  readonly permissionActions = true as const
   constructor(private readonly clients: Pick<FeishuAdapter, 'withClient'>) {}
 
   prepare(operation: Readonly<PublicationOperation>): PreparedPublication {
