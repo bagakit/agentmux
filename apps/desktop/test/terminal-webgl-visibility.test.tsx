@@ -30,7 +30,10 @@ const fixture = vi.hoisted(() => ({
   receive: null as ((event: RuntimeEvent) => void) | null,
   attach: vi.fn(),
   detach: vi.fn(),
-  unsubscribe: vi.fn()
+  unsubscribe: vi.fn(),
+  resize: vi.fn(),
+  realViewport: false,
+  grid: { cols: 80, rows: 24 }
 }))
 
 vi.mock('@xterm/xterm', async () => {
@@ -56,16 +59,18 @@ vi.mock('@xterm/xterm', async () => {
     onRender() { return { dispose() {} } }
     onSelectionChange() { return { dispose() {} } }
     getSelection() { return '' }
+    getSelectionPosition() { return undefined }
     hasSelection() { return false }
     registerLinkProvider() { return { dispose() {} } }
     attachCustomKeyEventHandler() {}
   } }
 })
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class {
-  activate() {}
+  private terminal: HeadlessTerminal | null = null
+  activate(terminal: HeadlessTerminal) { this.terminal = terminal }
   dispose() {}
-  fit() {}
-  proposeDimensions() { return { cols: 80, rows: 24 } }
+  fit() { this.terminal?.resize(fixture.grid.cols, fixture.grid.rows) }
+  proposeDimensions() { return { ...fixture.grid } }
 } }))
 vi.mock('@xterm/addon-search', () => ({ SearchAddon: class {
   activate() {}
@@ -92,6 +97,7 @@ vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class {
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: {
   attach: fixture.attach,
   detach: fixture.detach,
+  resize: fixture.resize,
   onEvent: (receive: (event: RuntimeEvent) => void) => {
     fixture.receive = receive
     return fixture.unsubscribe
@@ -107,19 +113,23 @@ vi.mock('../src/renderer/src/store', () => {
     getState: () => state, setState: vi.fn()
   }) }
 })
-vi.mock('../src/renderer/src/lib/terminal-viewport-sync', () => ({
-  TerminalViewportSynchronizer: class {
+vi.mock('../src/renderer/src/lib/terminal-viewport-sync', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/lib/terminal-viewport-sync')>()
+  return { TerminalViewportSynchronizer: class {
+    constructor(options: ConstructorParameters<typeof actual.TerminalViewportSynchronizer>[0]) {
+      if (fixture.realViewport) return new actual.TerminalViewportSynchronizer(options)
+    }
     beginReplay() {}
-    endReplay() {}
-    setInteractiveResize() {}
-    setVisible() {}
+    endReplay(_hasReplay: boolean) {}
+    setInteractiveResize(_active: boolean) {}
+    setVisible(_visible: boolean) {}
     synchronizeCellMetrics() {}
     observeViewport() {}
-    acceptOwnerSize() {}
+    acceptOwnerSize(_size: { cols: number; rows: number }) {}
     async startLiveSynchronization() {}
     dispose() {}
-  }
-}))
+  } }
+})
 vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({
   TerminalContextMenu: ({ children }: { children: ReactNode }) => children
 }))
@@ -142,12 +152,15 @@ beforeEach(() => {
   fixture.terminals.length = 0
   fixture.webgl.length = 0
   fixture.receive = null
+  fixture.realViewport = false
+  fixture.grid = { cols: 80, rows: 24 }
   vi.clearAllMocks()
   fixture.attach.mockResolvedValue({ attachmentId: 'attachment-retained', currentSize: { cols: 80, rows: 24 },
     session: { ...session, latestOutputBytes: 7 }, terminal: { type: 'unavailable', reason: 'source_gap' },
     resizeRevision: 0, gap: null,
     replay: [{ runId: session.control.run.runId, data: 'before ', dataBytes: new TextEncoder().encode('before '), startByte: 0, endByte: 7 }] })
   fixture.detach.mockResolvedValue(undefined)
+  fixture.resize.mockImplementation(async (_attachmentId: string, cols: number, rows: number) => ({ cols, rows }))
   rootContainer = document.createElement('div')
   document.body.append(rootContainer)
   root = createRoot(rootContainer)
@@ -335,4 +348,74 @@ it.each(['reading', 'latest', 'later wheel', 'later pointer', 'later key', 'late
     expect(fixture.terminals).toEqual([terminal]);expect(originalElement.ownerDocument).toBe(child)
     expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control,0);expect(fixture.detach).not.toHaveBeenCalled();expect(fixture.unsubscribe).not.toHaveBeenCalled();expect(terminal.dispose).not.toHaveBeenCalled()
   }finally{marker?.dispose();await act(async()=>root!.unmount());root=null;schedule.mockRestore();cancel.mockRestore();frameElement.remove()}
+})
+
+
+it.each(['combined grid', 'column reflow', 'column continuation', 'narrow continuation', 'wide continuation', 'wide padding chain', 'first-frame continuation', 'first-frame narrow continuation', 'missing marker', 'later wheel', 'latest'])('preserves the original reading through a settled document fit: %s', async mode => {
+  fixture.realViewport = true
+  const firstFrame = mode.startsWith('first-frame')
+  const wrapped = mode === 'column reflow' || mode.endsWith('continuation') || mode === 'wide padding chain'
+  fixture.grid = wrapped ? { cols: mode === 'wide padding chain' ? 81 : 80, rows: 61 } : { cols: 136, rows: 61 }
+  let currentDocument = document
+  const tree = () => <WorkbenchDocumentContext.Provider value={{ document: currentDocument, window: null }}><TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin}/></WorkbenchDocumentContext.Provider>
+  await act(async () => root!.render(tree()))
+  await act(async () => vi.waitFor(() => {
+    expect(fixture.terminals[0]?.completed).toContain('before ')
+    expect(fixture.terminals[0]?.cols).toBe(fixture.grid.cols)
+    expect(fixture.terminals[0]?.rows).toBe(fixture.grid.rows)
+    expect(rendererPerformance.snapshot().terminals[0]?.liveReady).toBe(true)
+  }))
+  const terminal = fixture.terminals[0]!, originalElement = (terminal as unknown as { element: HTMLElement }).element
+  const history = mode === 'wide padding chain'
+    ? 'short original line\r\n'.repeat(100) + 'w'.repeat(80) + '界'.repeat(3000) + '\r\n' + 'following original line\r\n'.repeat(200)
+    : mode === 'wide continuation'
+    ? 'short original line\r\n'.repeat(100) + 'w'.repeat(79) + '界' + 'tail'.repeat(25) + '\r\n' + 'following original line\r\n'.repeat(200)
+    : Array.from({ length: 300 }, (_, index) => `HISTORY_${String(index).padStart(4, '0')} ${wrapped ? 'x'.repeat(110) : ''}\r\n`).join('')
+  await hiddenOutput(history, 7)
+  if (mode === 'latest') terminal.scrollToBottom()
+  else terminal.scrollToLine(mode === 'column reflow' ? 112 : mode === 'wide continuation' ? 101 : mode === 'wide padding chain' ? 150 : 113)
+  const firstLine = terminal.buffer.active.viewportY
+  const originalCols = terminal.cols
+  const frameElement = document.createElement('iframe'); document.body.append(frameElement)
+  const child = frameElement.contentDocument!, queued = new Map<number, FrameRequestCallback>(); let frameId = 0
+  const schedule = vi.spyOn(child.defaultView!, 'requestAnimationFrame').mockImplementation(callback => { const id = ++frameId; queued.set(id, callback); return id })
+  const cancel = vi.spyOn(child.defaultView!, 'cancelAnimationFrame').mockImplementation(id => { queued.delete(id) })
+  const flushFrame = async () => { await act(async () => { const callbacks = [...queued.values()]; queued.clear(); for (const callback of callbacks) callback(0) }) }
+  let marker: ReturnType<FixtureTerminal['registerMarker']>
+  const unavailableMarker = mode === 'missing marker' ? vi.spyOn(terminal, 'registerMarker').mockReturnValue(undefined) : null
+  if (firstFrame) {
+    marker = terminal.registerMarker(112 - terminal.buffer.active.baseY - terminal.buffer.active.cursorY)
+    fixture.grid = { cols: mode === 'first-frame narrow continuation' ? 40 : 160, rows: 61 }
+  }
+  try {
+    child.body.append(child.adoptNode(rootContainer)); currentDocument = child
+    await act(async () => root!.render(tree()))
+    // A later proposal takes two stability frames; an already settled proposal
+    // fits in the first frame, before the document's own reading restore.
+    fixture.grid = wrapped ? { cols: mode === 'narrow continuation' || mode === 'wide continuation' || mode === 'wide padding chain' || mode === 'first-frame narrow continuation' ? 40 : 160, rows: 61 } : { cols: 157, rows: 54 }
+    await flushFrame()
+    expect(terminal.cols).toBe(firstFrame ? fixture.grid.cols : originalCols)
+    expect(terminal.buffer.active.viewportY).toBe(firstFrame ? marker!.line + (mode === 'first-frame narrow continuation' ? 2 : 0) : firstLine)
+    if (mode === 'later wheel') {
+      terminal.scrollToLine(75)
+      originalElement.dispatchEvent(new child.defaultView!.Event('wheel', { bubbles: true }))
+    }
+    const reading = terminal.buffer.active.viewportY
+    const anchorLine = mode === 'wide continuation' || mode === 'wide padding chain' ? 100 : mode.endsWith('continuation') ? 112 : reading
+    if (!firstFrame) marker = mode === 'latest' || mode === 'missing marker' ? undefined : terminal.registerMarker(anchorLine - terminal.buffer.active.baseY - terminal.buffer.active.cursorY)
+    await hiddenOutput('LIVE original output\r\n', 7 + history.length)
+    await flushFrame()
+    expect({ cols: terminal.cols, rows: terminal.rows }).toEqual(fixture.grid)
+    const expectedLine = mode === 'latest' ? terminal.buffer.active.baseY : mode === 'missing marker' ? reading : marker!.line + (mode === 'wide padding chain' ? 100 : mode === 'narrow continuation' || mode === 'wide continuation' || mode === 'first-frame narrow continuation' ? 2 : 0)
+    expect(terminal.buffer.active.viewportY).toBe(expectedLine)
+    if (mode === 'wide continuation') expect(terminal.buffer.active.getLine(expectedLine)?.translateToString()).toMatch(/^界/)
+    if (mode === 'column reflow') expect(marker!.line).toBeLessThan(reading)
+    expect(fixture.resize).toHaveBeenCalledWith('attachment-retained', fixture.grid.cols, fixture.grid.rows)
+    expect(fixture.terminals).toEqual([terminal]); expect(originalElement.ownerDocument).toBe(child)
+    expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control, 0)
+    expect(fixture.detach).not.toHaveBeenCalled(); expect(fixture.unsubscribe).not.toHaveBeenCalled(); expect(terminal.dispose).not.toHaveBeenCalled()
+  } finally {
+    unavailableMarker?.mockRestore(); marker?.dispose(); await act(async () => root!.unmount()); root = null
+    schedule.mockRestore(); cancel.mockRestore(); frameElement.remove()
+  }
 })
