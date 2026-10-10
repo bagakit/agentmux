@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { createHash } from 'node:crypto'
 import type { ConnectionApplication } from '@agentmux/core/connections'
 import type { PublicationAdapter } from '../../publication-adapter.js'
@@ -16,6 +17,26 @@ function ownSender(value: unknown, application: ConnectionApplication): boolean 
 }
 function post(text: string): string {
   return JSON.stringify({ zh_cn: { title: '', content: [[{ tag: 'text', text, un_escape: false }]] } })
+}
+function requestCard(prepared: PreparedPublication): Record<string, unknown> | null {
+  try {
+    const body = object(JSON.parse(prepared.request.body!)), card = typeof body?.content === 'string' ? object(JSON.parse(body.content)) : null
+    if (!card || object(card.config)?.update_multi !== true || object(object(card.header)?.title)?.tag !== 'plain_text' || !Array.isArray(card.elements)) return null
+    for (const element of card.elements) {
+      const value = object(element)
+      if (value?.tag === 'div') { if (object(value.text)?.tag !== 'plain_text' || typeof object(value.text)?.content !== 'string') return null }
+      else if (value?.tag === 'action' && Array.isArray(value.actions) && value.actions.length === 1) {
+        const button = object(value.actions[0]), text = object(button?.text), ref = object(button?.value)
+        if (button?.tag !== 'button' || text?.tag !== 'plain_text' || typeof text.content !== 'string' || !ref || Object.keys(ref).length !== 1) return null
+        feishuIdentity(ref.actionRef)
+      } else return null
+    }
+    return card
+  } catch { return null }
+}
+function sameCard(value: unknown, prepared: PreparedPublication): boolean {
+  if (typeof value !== 'string') return false
+  try { return isDeepStrictEqual(JSON.parse(value), requestCard(prepared)) } catch { return false }
 }
 function requestText(prepared: PreparedPublication): string | null {
   try {
@@ -61,8 +82,8 @@ function consistent(data: Record<string, unknown>, target: PublicationTarget, ma
 /** Stateless platform effects. The original Host owns source selection, durable work, ordering and retries. */
 export class FeishuPublicationAdapter implements PublicationAdapter {
   readonly adapterId = 'feishu'
-  readonly renderVersion = 'feishu-post-group-v1'
-  readonly supportedRenderVersions = [this.renderVersion]
+  readonly renderVersion = 'feishu-group-v2'
+  readonly supportedRenderVersions = ['feishu-post-group-v1', this.renderVersion]
   readonly fragmentBytes = 4_096
   readonly addressing = 'group'
   constructor(private readonly clients: Pick<FeishuAdapter, 'withClient'>) {}
@@ -76,6 +97,20 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     if (operation.effect === 'withdraw') {
       if (!mapping) feishuFailure('FEISHU_PUBLICATION_MAPPING_REQUIRED')
       return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: { method: 'DELETE', path: `${path}/${encodeURIComponent(mapping.messageId)}` } }
+    }
+    if (operation.payload.kind === 'permission') {
+      const payload = operation.payload
+      const status = { pending: 'Choose one original permission option.', 'response-sent': 'Decision returned. Native adoption and completion are not confirmed.', unconfirmed: 'The original decision is not confirmed. Check it in amux; it will not be resent.', unavailable: 'Continue in the original amux terminal.' }[payload.status]
+      const card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: payload.title } }, elements: [
+        ...(payload.context === undefined ? [] : [{ tag: 'div', text: { tag: 'plain_text', content: payload.context } }]),
+        { tag: 'div', text: { tag: 'plain_text', content: status } },
+        ...payload.options.map(option => ({ tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: option.label }, value: { actionRef: option.actionRef } }] }))
+      ] }
+      const body = JSON.stringify({ ...(mapping ? {} : { receive_id: operation.target.externalConversationId, msg_type: 'interactive', uuid: key(operation.operationId) }), content: JSON.stringify(card) })
+      if (Buffer.byteLength(body) > 30 * 1024) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
+      return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {
+        method: mapping ? 'PATCH' : 'POST', path: mapping ? `${path}/${encodeURIComponent(mapping.messageId)}` : path,
+        ...(mapping ? {} : { query: { receive_id_type: 'chat_id' } }), contentType: 'application/json', body } }
     }
     const text = [operation.payload.text, ...(operation.payload.questions ?? []).map(question => [question.prompt, ...question.options.map(option => `- ${option.label}`)].join('\n'))].filter(Boolean).join('\n\n')
     if (!text) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
@@ -92,10 +127,10 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       parsePreparedPublication(prepared, this)
       if (prepared.request.body !== undefined && Buffer.byteLength(prepared.request.body) > 30 * 1024) return false
       if (mapping) return prepared.request.path === `${path}/${encodeURIComponent(feishuIdentity(mapping.messageId))}` &&
-        prepared.request.query === undefined && (prepared.request.method === 'DELETE' && prepared.request.body === undefined || prepared.request.method === 'PUT' && prepared.request.contentType === 'application/json' && requestText(prepared) !== null)
+        prepared.request.query === undefined && (prepared.request.method === 'DELETE' && prepared.request.body === undefined || prepared.request.method === 'PUT' && prepared.request.contentType === 'application/json' && requestText(prepared) !== null || prepared.request.method === 'PATCH' && prepared.renderVersion === this.renderVersion && prepared.request.contentType === 'application/json' && requestCard(prepared) !== null)
       const body = object(JSON.parse(prepared.request.body!))
       return prepared.request.method === 'POST' && prepared.request.path === path && prepared.request.contentType === 'application/json' && prepared.request.query?.receive_id_type === 'chat_id' &&
-        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && body.msg_type === 'post' && requestText(prepared) !== null
+        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'post' && requestText(prepared) !== null || body.msg_type === 'interactive' && prepared.renderVersion === this.renderVersion && requestCard(prepared) !== null)
     } catch { return false }
   }
   async dispatch(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>): Promise<PublicationReceipt> {
@@ -113,10 +148,11 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       const data = object(result?.data)
       if (!data || !consistent(data, target, mapping)) return unknown()
       if (prepared.request.method === 'DELETE') return mapping ? { state: 'confirmed', mapping: { ...mapping } } : unknown()
-      const messageId = feishuIdentity(data.message_id)
-      if (data.chat_id !== target.externalConversationId || data.msg_type !== undefined && data.msg_type !== 'post') return unknown()
+      if (prepared.request.method === 'PATCH') return mapping ? { state: 'confirmed', mapping: { ...mapping } } : unknown()
+      const card = requestCard(prepared), messageId = feishuIdentity(data.message_id)
+      if (data.chat_id !== target.externalConversationId || data.msg_type !== undefined && data.msg_type !== (card ? 'interactive' : 'post')) return unknown()
       const body = object(data.body)
-      if (body?.content !== undefined && !samePost(body.content, requestText(prepared)!)) return unknown()
+      if (body?.content !== undefined && !(card ? sameCard(body.content, prepared) : samePost(body.content, requestText(prepared)!))) return unknown()
       if (mapping) return { state: 'confirmed', mapping: { ...mapping } }
       const threadId = data.thread_id === undefined ? undefined : feishuIdentity(data.thread_id)
       return { state: 'confirmed', mapping: { messageId, ...(threadId === undefined ? {} : { threadId }) } }
@@ -135,7 +171,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       const original = matches[0]!
       if (original.deleted !== undefined && typeof original.deleted !== 'boolean' || original.chat_id !== target.externalConversationId || !ownSender(original.sender, target.application) || original.thread_id !== undefined && original.thread_id !== mapping.threadId) return null
       if (prepared.request.method === 'DELETE') return original.deleted === true ? { state: 'confirmed', mapping: { ...mapping } } : null
-      return original.deleted !== true && original.msg_type === 'post' && samePost(object(original.body)?.content, requestText(prepared)!) ? { state: 'confirmed', mapping: { ...mapping } } : null
+      return original.deleted !== true && (requestCard(prepared) ? original.msg_type === 'interactive' && sameCard(object(original.body)?.content, prepared) : original.msg_type === 'post' && samePost(object(original.body)?.content, requestText(prepared)!)) ? { state: 'confirmed', mapping: { ...mapping } } : null
     } catch { return null }
   }
 }
