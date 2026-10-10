@@ -6,7 +6,7 @@ import { agentRosterMenuActions } from '../lib/agent-roster-menu'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useAppStore } from '../store'
 import { RegionMenuEntryView } from './RegionContextMenu'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useFocusStopAgent } from './FocusStopAgent'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 
@@ -33,7 +33,7 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
       const rect = event.currentTarget.getBoundingClientRect()
       event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: rect.left, clientY: rect.bottom }))
     }}>{children}</ContextMenu.Trigger>
-    <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+    <DocumentOverlayPortal component={ContextMenu.Portal}>
       <ContextMenu.Content className="tab-context-menu focus-context-menu" data-agent-session-id={sessionId} collisionPadding={8}
         onCloseAutoFocus={event => {
           if (!active) { event.preventDefault(); return }
@@ -51,6 +51,6 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
         <ContextMenu.Separator className="tab-context-menu__separator" />
         <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); stop.requestStop(sessionId, context.name, origin.current) }}><ThemeActionStopIcon size={14} /><span>Stop Agent</span></ContextMenu.Item>
       </ContextMenu.Content>
-    </ContextMenu.Portal>
+    </DocumentOverlayPortal>
   </ContextMenu.Root>{active ? stop.dialog : null}</>
 }

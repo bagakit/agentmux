@@ -1,7 +1,7 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
 const CreateWorktreeIcon = semanticIconComponent('action.create-worktree')
@@ -30,7 +30,7 @@ export function BranchContextMenu({
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
-      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+      <DocumentOverlayPortal component={ContextMenu.Portal}>
         <ContextMenu.Content
           className="tab-context-menu branch-context-menu"
           collisionPadding={8}
@@ -74,7 +74,7 @@ export function BranchContextMenu({
             </>
           ) : null}
         </ContextMenu.Content>
-      </ContextMenu.Portal>
+      </DocumentOverlayPortal>
     </ContextMenu.Root>
   )
 }

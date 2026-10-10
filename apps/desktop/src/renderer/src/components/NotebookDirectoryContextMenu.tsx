@@ -2,7 +2,7 @@ import * as ContextMenu from '@radix-ui/react-context-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useRef, type ReactNode } from 'react'
 import type { NotebookPage } from '@agentmux/core/notebook-catalog'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
 
@@ -35,7 +35,7 @@ export function NotebookDirectoryContextMenu({ pages, onTalk, children }: {
       button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true,
         clientX: bounds.left + bounds.width / 2, clientY: bounds.top + bounds.height / 2 }))
     }}>{children}</ContextMenu.Trigger>
-    <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+    <DocumentOverlayPortal component={ContextMenu.Portal}>
       <ContextMenu.Content className="tab-context-menu" collisionPadding={8}
         onInteractOutside={() => { outside.current = true }}
         onCloseAutoFocus={event => {
@@ -54,6 +54,6 @@ export function NotebookDirectoryContextMenu({ pages, onTalk, children }: {
           <ThemeObjectConversationIcon size={14} /><span>Talk with Agent</span>
         </ContextMenu.Item>
       </ContextMenu.Content>
-    </ContextMenu.Portal>
+    </DocumentOverlayPortal>
   </ContextMenu.Root>
 }

@@ -2,7 +2,7 @@ import * as ContextMenu from '@radix-ui/react-context-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { SpaceIconTarget } from '../lib/space-object-appearance'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeObjectShapesIcon = semanticIconComponent('object.shapes')
@@ -80,7 +80,7 @@ export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuO
   const [, setOpen] = useState(false)
   return <ContextMenu.Root onOpenChange={open => { setOpen(open); if (open) onMenuOpen?.(); menu.onOpenChange(open) }}>
     <ContextMenu.Trigger asChild {...menu.triggerProps}>{children}</ContextMenu.Trigger>
-    <ContextMenu.Portal container={resolveOverlayContainer(container?.()) as HTMLElement | undefined}>
+    <DocumentOverlayPortal component={ContextMenu.Portal} container={container?.()}>
       <ContextMenu.Content className="tab-context-menu" collisionPadding={8} onCloseAutoFocus={event => {
         menu.onCloseAutoFocus(event); archiveReturnFocus.current?.()
       }}>
@@ -164,6 +164,6 @@ export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuO
           <span>{moteArchive.reason ?? (moteArchive.archived ? 'Restore Mote' : 'Archive Mote')}</span>
         </ContextMenu.Item> : null}
       </ContextMenu.Content>
-    </ContextMenu.Portal>
+    </DocumentOverlayPortal>
   </ContextMenu.Root>
 }

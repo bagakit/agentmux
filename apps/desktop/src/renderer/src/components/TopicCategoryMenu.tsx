@@ -4,7 +4,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
 import type { SpaceIconTarget } from '../lib/space-object-appearance'
 import { useSpaceObjectActionsMenu, useSpaceObjectMenu } from './SpaceObjectContextMenu'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeObjectShapesIcon = semanticIconComponent('object.shapes')
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
@@ -34,11 +34,11 @@ export function TopicCategoryContextMenu({ children, ...actions }: CategoryMenuA
   const menu = useSpaceObjectMenu()
   return <ContextMenu.Root onOpenChange={menu.onOpenChange}>
     <ContextMenu.Trigger asChild {...menu.triggerProps}>{children}</ContextMenu.Trigger>
-    <ContextMenu.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={ContextMenu.Portal}>
       <ContextMenu.Content className="tab-context-menu" collisionPadding={8} onCloseAutoFocus={menu.onCloseAutoFocus}>
         {categoryMenuItems(ContextMenu.Item, ContextMenu.Separator, actions, menu.changeIcon)}
       </ContextMenu.Content>
-    </ContextMenu.Portal>
+    </DocumentOverlayPortal>
   </ContextMenu.Root>
 }
 
@@ -49,12 +49,12 @@ export function TopicCategoryActionsMenu(actions: CategoryMenuActions) {
       aria-label={`Actions for category ${actions.target.name}`} title={`Actions for category ${actions.target.name}`}
       onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
       onKeyDown={event => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) event.stopPropagation() }}><ThemeActionMoreIcon size={13} /></button></DropdownMenu.Trigger>
-    <DropdownMenu.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={DropdownMenu.Portal}>
       <DropdownMenu.Content className="tab-context-menu" align="end" collisionPadding={8}
         onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}
         onCloseAutoFocus={menu.onCloseAutoFocus}>
         {categoryMenuItems(DropdownMenu.Item, DropdownMenu.Separator, actions, menu.openDialog)}
       </DropdownMenu.Content>
-    </DropdownMenu.Portal>
+    </DocumentOverlayPortal>
   </DropdownMenu.Root>
 }

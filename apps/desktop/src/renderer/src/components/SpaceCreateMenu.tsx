@@ -3,7 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { MoteIcon } from './MoteIcon'
 import { useState } from 'react'
 import { useAppStore } from '../store'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeActionCreateSpaceIcon = semanticIconComponent('action.create-space')
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
@@ -24,7 +24,7 @@ export function SpaceCreateMenu({ onOpenFolder, onCreateProjectGroup }: { onOpen
       <DropdownMenu.Trigger asChild>
         <button type="button" className="icon-button" aria-label="Add Space" title="Add Space" disabled={busy}><ThemeActionCreateSpaceIcon size={15} /></button>
       </DropdownMenu.Trigger>
-      <DropdownMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+      <DocumentOverlayPortal component={DropdownMenu.Portal}>
         <DropdownMenu.Content className="tab-context-menu" collisionPadding={8} align="end">
           <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => void run(onOpenFolder)}>
             <ThemeObjectFolderOpenIcon size={14} /><span>Open Folder As a Project</span>
@@ -39,7 +39,7 @@ export function SpaceCreateMenu({ onOpenFolder, onCreateProjectGroup }: { onOpen
             <ThemeObjectLinkIcon size={14} /><span>Create project group</span>
           </DropdownMenu.Item> : null}
         </DropdownMenu.Content>
-      </DropdownMenu.Portal>
+      </DocumentOverlayPortal>
     </DropdownMenu.Root>
   )
 }
