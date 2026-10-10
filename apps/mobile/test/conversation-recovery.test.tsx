@@ -6,6 +6,7 @@ import { button, click, deferred, editor, fixture, history, mount, mounted, past
 import { createLocalDrafts } from '../src/conversation/local-drafts'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { fixtureEpoch as _historyTailFixtureEpoch } from '../../../test/fixture-values.mjs'
+import type { AgentSessionHistoryResourceReadResult } from '@agentmux/core'
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }; vi.useRealTimers() })
 const connected = { state: 'connected' as const, message: 'Connected' }
@@ -106,6 +107,69 @@ describe('original conversation observation recovery', () => {
     expect(f.respond).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
   })
 
+  it('keeps native resource demand visible and rejects a late original image after changing Session without replacing either draft', async () => {
+    const f = fixture(), hidden = deferred<AgentSessionHistoryResourceReadResult>(), pending = deferred<AgentSessionHistoryResourceReadResult>()
+    const original = history(), reference = 'original-native-image'
+    f.setPage({ ...original, items: [{ id: 'original-image', kind: 'assistant-message',
+      contentParts: [{ kind: 'resource', resourceType: 'image', reference }] }] })
+    const read = vi.fn(() => pending.promise).mockReturnValueOnce(hidden.promise)
+    Object.assign(f.client, { sessionHistoryResource: read })
+    const surface = (id: string, visible: boolean) => <MobileConversationSurface client={f.client} agentSessionId={id}
+      connection={connected} visible={visible} platform={createBrowserPlatform()} />
+    const view = await mount(surface('session-original', false))
+    expect(read).not.toHaveBeenCalled()
+    await view.render(surface('session-original', true))
+    await vi.waitFor(() => expect(read).toHaveBeenCalledExactlyOnceWith('session-original', {
+      source: original.source, recordId: 'original-image', partIndex: 0, expectedReference: reference }))
+    await paste(view.element, 'Original draft remains')
+    await view.render(surface('session-original', false))
+    const result = { agentSessionId: 'session-original', source: original.source, recordId: 'original-image', partIndex: 0, reference,
+      result: { status: 'read' as const, mimeType: 'image/png' as const, dataBase64: 'eA==', byteLength: 1 } }
+    await act(async () => hidden.resolve(result))
+    expect(view.element.querySelector('.conversation-native-thread img')).toBeNull()
+    await view.render(surface('session-original', true))
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2))
+    f.setPage(history('other'))
+    await view.render(surface('other', true))
+    await vi.waitFor(() => expect(view.element.querySelector('[data-native-record-id="native-answer"]')).not.toBeNull())
+    await paste(view.element, 'New Session draft')
+    await act(async () => pending.resolve(result))
+    expect(view.element.querySelector('.conversation-native-thread img')).toBeNull()
+    expect(editor(view.element).textContent).toContain('New Session draft')
+    expect(read).toHaveBeenCalledTimes(2)
+    await view.render(surface('session-original', true))
+    expect(editor(view.element).textContent).toContain('Original draft remains')
+    expect(f.respond).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
+  })
+
 })
 // @vitest-environment happy-dom
 import './device-locks'
+
+
+it('retains an image page at its original Host when another client reuses the Session and native record IDs', async () => {
+  const a = fixture(), b = fixture(), pending = deferred<ReturnType<typeof history>>()
+  const page = { ...history(), items: [{ id: 'same-record', kind: 'assistant-message' as const,
+    contentParts: [{ kind: 'resource' as const, resourceType: 'image' as const, reference: 'same-native-reference' }] }] }
+  a.setPage(page); b.readHistory.mockReturnValueOnce(pending.promise)
+  b.sessions.set('session-original', { ...b.sessions.get('session-original')!, hostId: 'host-other', workspacePath: 'other-workspace' })
+  const result = { agentSessionId: 'session-original', source: page.source, recordId: 'same-record', partIndex: 0, reference: 'same-native-reference',
+    result: { status: 'read' as const, mimeType: 'image/png' as const, dataBase64: 'eA==', byteLength: 1 } }
+  const readA = vi.fn(async () => result), readB = vi.fn(async () => result)
+  Object.assign(a.client, { sessionHistoryResource: readA }); Object.assign(b.client, { sessionHistoryResource: readB })
+  const surface = (client: typeof a.client) => <MobileConversationSurface client={client} agentSessionId="session-original" connection={connected} platform={createBrowserPlatform()} />
+  const view = await mount(surface(a.client))
+  await vi.waitFor(() => expect(view.element.querySelector('.conversation-native-thread img')).not.toBeNull())
+  expect(readA).toHaveBeenCalledOnce()
+  await view.render(surface(b.client))
+  await vi.waitFor(() => expect(b.readHistory).toHaveBeenCalled())
+  expect(readB).not.toHaveBeenCalled()
+  const retained = view.element.querySelector('[data-native-record-id="same-record"] [data-message-id]')!
+  expect(retained.getAttribute('data-message-id')).toContain('host-original')
+  await paste(view.element, 'The new draft remains editable')
+  await act(async () => pending.resolve(page))
+  await vi.waitFor(() => expect(readB).toHaveBeenCalledOnce())
+  expect(view.element.querySelector('[data-native-record-id="same-record"] [data-message-id]')!.getAttribute('data-message-id')).toContain('host-other')
+  expect(editor(view.element).textContent).toContain('The new draft remains editable')
+  expect(a.submit).not.toHaveBeenCalled(); expect(b.submit).not.toHaveBeenCalled()
+})

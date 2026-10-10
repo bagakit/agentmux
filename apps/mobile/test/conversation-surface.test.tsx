@@ -339,6 +339,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
   it('answers the original permission option once and keeps an unknown request unavailable when another request replaces it', async () => {
     const f = fixture(), value = session(), answer = deferred<void>()
     value.pendingInteraction = { request: { kind: 'permission', agentSessionId: value.agentSessionId, id: 'request-original', title: '原请求', evidence,
+      permissionHook: { receiptId: 'request-original' },
       options: [{ id: 'exact-allow', label: '原选项', kind: 'allow-once' }, { id: 'exact-deny', label: '拒绝原请求', kind: 'reject-once' }] } }
     f.sessions.set(value.agentSessionId, value); f.respond.mockImplementationOnce(() => answer.promise)
     const view = await mount(<MobileConversationSurface {...props(f)} />)
@@ -346,7 +347,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(f.respond).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'session-original', expectedRun: { runId: 'run-original' },
       expectedRequest: value.pendingInteraction.request, operationId: expect.any(String),
       response: { kind: 'permission', requestId: 'request-original', decision: { outcome: 'selected', optionId: 'exact-allow' } } })
-    const newer = { ...value, pendingInteraction: { request: { ...value.pendingInteraction.request, id: 'request-new', title: '新请求' } } }
+    const newer = { ...value, pendingInteraction: { request: { ...value.pendingInteraction.request, id: 'request-new', title: '新请求', permissionHook: { receiptId: 'request-new' } } } }
     f.sessions.set(value.agentSessionId, newer)
     await act(async () => f.emit({ type: 'agent-session', session: newer }))
     await act(async () => answer.reject(new Error('transport lost')))
@@ -356,7 +357,8 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await act(async () => f.emit({ type: 'agent-session', session: value }))
     expect(view.element.textContent).toContain('答复回执未知')
     expect(view.element.querySelector('[data-request-id="request-original"]')).not.toBeNull()
-    expect([...view.element.querySelectorAll<HTMLButtonElement>('[data-request-id="request-original"] button')].map(item => item.disabled)).toEqual([])
+    expect([...view.element.querySelectorAll<HTMLButtonElement>('[data-request-id="request-original"] button')]
+      .map(item => ({ label: item.textContent, disabled: item.disabled }))).toEqual([{ label: '查询原答复回执', disabled: false }])
     expect(f.respond).toHaveBeenCalledOnce()
   })
 
@@ -419,19 +421,21 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
   it('restores an unconfirmed original permission answer as unavailable and never automatically answers on startup', async () => {
     const f = fixture(), value = session(), receipt = deferred<void>()
     value.pendingInteraction = { request: { kind: 'permission', id: 'request-original', agentSessionId: value.agentSessionId, title: '冷启原请求', evidence,
+      permissionHook: { receiptId: 'request-original' },
       options: [{ id: 'allow-original', label: '原答复', kind: 'allow-once' }] } }
     f.sessions.set(value.agentSessionId, value); f.respond.mockImplementationOnce(() => receipt.promise)
     const options = props(f), view = await mount(<MobileConversationSurface {...options} />)
     await click(button(view.element, '原答复'))
     const saved = JSON.parse(localStorage.getItem(STORAGE)!).conversation
-    expect(saved.responses).toEqual([[JSON.stringify(['session-original', 'run-original', 'request-original']), { phase: 'sending',
+    expect(saved.responses).toEqual([[JSON.stringify(['session-original', 'run-original', 'request-original', f.respond.mock.calls[0]![0].operationId]), { phase: 'sending',
       original: { hostId: value.hostId, runtimeId: 'original-runtime', input: f.respond.mock.calls[0]![0] } }]])
     const previous = mounted.pop()!
     await act(async () => previous.root.unmount()); previous.element.remove()
     const restored = await mount(<MobileConversationSurface {...options} />)
     expect(restored.element.querySelector('[data-request-id="request-original"]')).not.toBeNull()
     expect(restored.element.textContent).toContain('重启后的原请求答复回执未知')
-    expect(restored.element.querySelector('[data-request-id="request-original"] button')).toBeNull()
+    expect([...restored.element.querySelectorAll<HTMLButtonElement>('[data-request-id="request-original"] button')]
+      .map(item => ({ label: item.textContent, disabled: item.disabled }))).toEqual([{ label: '查询原答复回执', disabled: false }])
     expect(f.respond).toHaveBeenCalledOnce()
     await refreshOriginal(restored.element)
     expect(f.respond).toHaveBeenCalledOnce()
