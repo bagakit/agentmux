@@ -60,6 +60,15 @@ their Host/path facts, then app inspect for the current presentation. A resource
 display Workspace and process cwd are not interchangeable. Discover globally rather than
 assuming the current Tab contains every resource or Agent.
 
+app window ls observes the original client windows and their opaque document generations.
+app window open moves one exact discovered Tab/Region occurrence; it does not clone content,
+change the Core graph, start a Run or change execution cwd. app window focus/return require
+the exact window and document generation. Returning closes only its shell after the original
+workface has returned. Retain the original operation ID: query it with app window ls after
+an unknown result, without automatically opening another window. A recorded acknowledgement
+and current native presentation are separate facts; absent client support is unavailable,
+not an empty window catalog or loss of healthy Agents.
+
 Use app search with the appropriate metadata/content mode, retaining each result's source
 identity and availability. Inspect an exact returned object through its module before an
 operation. app focus selects a surface; it does not accept a task or certify input eligibility.
