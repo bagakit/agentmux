@@ -187,15 +187,17 @@ describe('worktree closeout moves the workface without moving execution resource
     const { state, source, target, closedConfig } = fixture()
     const previous = desktopSpatialGraph(state, [])
     const patch = rehomeClosedWorkspaces(state, closedConfig)
-    const next = { ...state, ...patch, config: closedConfig, activeWorkspaceId: target.id, spaceZoneBindings: desktopBindingsFromSpatial(previous) }
-    const graph = desktopSpatialGraph(next, [], previous, new Set([workspaceZoneId(directoryIdentity(source.hostId, source.repoPath!), source.id)]))
-    expectSourceRetired(graph, source)
-    expect(graph.layouts[target.id]!.groups.map(group => group.id)).toEqual(['default-group', 'source-first', 'source-second'])
-    const repeated = desktopSpatialGraph({ ...next, spaceZoneBindings: desktopBindingsFromSpatial(graph) }, [], graph)
-    expectSourceRetired(repeated, source)
-    expect(repeated).toEqual(graph)
-    const closedOnly = desktopSpatialGraph({ ...next, tabs: {}, layouts: {}, spaceZoneBindings: {} }, [])
-    expectSourceRetired(closedOnly, source, false)
-    expect(closedOnly.zones.some(zone => zone.workspaceId === target.id)).toBe(true)
+    for (const spaceZoneBindings of [desktopBindingsFromSpatial(previous), {}]) {
+      const next = { ...state, ...patch, config: closedConfig, activeWorkspaceId: target.id, spaceZoneBindings }
+      const graph = desktopSpatialGraph(next, [], previous, new Set([workspaceZoneId(directoryIdentity(source.hostId, source.repoPath!), source.id)]))
+      expectSourceRetired(graph, source)
+      expect(graph.layouts[target.id]!.groups.map(group => group.id)).toEqual(['default-group', 'source-first', 'source-second'])
+      const repeated = desktopSpatialGraph({ ...next, spaceZoneBindings: desktopBindingsFromSpatial(graph) }, [], graph)
+      expectSourceRetired(repeated, source)
+      expect(repeated).toEqual(graph)
+      const closedOnly = desktopSpatialGraph({ ...next, tabs: {}, layouts: {}, spaceZoneBindings: {} }, [])
+      expectSourceRetired(closedOnly, source, false)
+      expect(closedOnly.zones.some(zone => zone.workspaceId === target.id)).toBe(true)
+    }
   })
 })
