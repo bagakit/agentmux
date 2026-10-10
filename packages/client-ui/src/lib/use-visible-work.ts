@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useClientUiOwnerDocument } from '../platform.js'
 
 /** Host activity and the actual viewport both own expensive block work. Source text stays mounted. */
 export function useVisibleWork<T extends HTMLElement>(active = true) {
   const platformDocument = useClientUiOwnerDocument()
+  const ref = useRef<T>(null)
   const [target, setTarget] = useState<T | null>(null)
-  const ref = useCallback((node: T | null) => { setTarget(node) }, [])
+  // Keep the original ref/current API while tracking committed node replacements.
+  useLayoutEffect(() => { if (ref.current !== target) setTarget(ref.current) })
   const [viewport, setViewport] = useState<{ target: T; document: Document; intersecting: boolean } | null>(null)
   const [foreground, setForeground] = useState<{ document: Document; visible: boolean } | null>(null)
   useEffect(() => {
