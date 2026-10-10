@@ -1282,13 +1282,13 @@ export class BrowserViewManager {
     const stopController = new AbortController()
     let stopRequested = false
     const localOperation: BrowserOperation = {
-      // 调用方给了 id 就用它；没给才由 journal 铸（`start` 的 `input.id?.trim() || this.makeId()`）。
+      // 非空白 id 保留原值；缺席或全空白才由 journal 的 `start` 唯一铸造。
       // 这里不写 `?? randomUUID()`：那会是第二个铸造点，而它造出来的 id 与 journal 记下的那个可能
       // 不是同一个——查询按一个、记录按另一个，两边各自看起来都正常。
       //
       // 没有 journal 时（只在测试里）这个分支要给一个值才能构成 BrowserOperation，所以用空串占位，
       // 由下面 `operation = ... : localOperation` 那条路承担。空串不会被当成合法 id：journal 的
-      // `input.id?.trim() ||` 对空串取假，正是靠这个落回铸造点。
+      // `start` 对空串判为空白，正是靠这个落回铸造点。
       id: operationId ?? '',
       browserId: id,
       operator: operator ?? { id: 'agent:unknown', name: 'Agent' },

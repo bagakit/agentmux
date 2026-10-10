@@ -179,7 +179,7 @@ export class BrowserOperationJournal {
     await this.ready()
     const at = this.now()
     const operation = sanitizeOperation({
-      id: input.id?.trim() || this.makeId(),
+      id: input.id?.trim() ? input.id : this.makeId(),
       browserId: input.browserId,
       operator: input.operator,
       startedAt: at,
@@ -668,7 +668,6 @@ function sanitizeOperation(operation: BrowserOperation): BrowserOperation {
   return {
     ...facts,
     ...(outcome ? { outcome } : {}),
-    id: clamp(operation.id),
     browserId: clamp(operation.browserId),
     operator: {
       id: clamp(operation.operator.id),
@@ -767,14 +766,14 @@ function sanitizeEvent(event: BrowserOperationEvent): BrowserOperationEvent {
     case 'operation-started':
     case 'operation-finished':
     case 'operation-checked':
-      return { ...event, operationId: clamp(event.operationId), operation: sanitizeOperation(event.operation) }
+      return { ...event, operation: sanitizeOperation(event.operation) }
     case 'step-started':
     case 'step-finished':
-      return { ...event, operationId: clamp(event.operationId), step: sanitizeStep(event.step) }
+      return { ...event, step: sanitizeStep(event.step) }
     case 'phase-changed':
-      return { ...event, operationId: clamp(event.operationId), ...(event.warning ? { warning: clampProse(event.warning) } : {}) }
+      return { ...event, ...(event.warning ? { warning: clampProse(event.warning) } : {}) }
     case 'operation-recovered':
-      return { ...event, operationId: clamp(event.operationId), warning: clampProse(event.warning) }
+      return { ...event, warning: clampProse(event.warning) }
   }
 }
 
