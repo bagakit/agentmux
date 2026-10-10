@@ -7,13 +7,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Window } from 'happy-dom'
-import type { AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentProviderSessionHistoryObservation, AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
+import type { AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentMuxInteractionOperationReceipt, AgentProviderSessionHistoryObservation, AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
 import { loadAgentSessions } from '../../../packages/core/src/agent-session-store'
 import { AgentMuxHostedRuntimeService } from '../../../packages/core/src/hosted-runtime-service'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { connectHostedAgentMux } from '../../../packages/core/src/hosted-client'
 import { AgentTerminalScreen } from '../../../packages/core/src/agent-terminal-screen'
+import { interactionOperationHook, OPERATION_SESSION_ID, OPERATION_RUN_ID } from '../../../packages/core/test/fixtures/interaction-operation-hook'
+import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner'
+import type { AgentMuxClient } from '../../../packages/core/src/client'
+import type { AgentMuxAcpBinding } from '../../../packages/core/src/acp-adapter'
 import { connectedClient, permission, completeNativeRequest, AGENT_SESSION_ID as sid, RUN_ID } from '../../../packages/core/test/fixtures/interaction-client'
 import { hostedTestOwner } from '../../../packages/core/test/helpers/hosted-runtime-port'
 import { MobileConversationSurface } from '../src/conversation/MobileConversationSurface'
@@ -21,7 +25,7 @@ import { createLocalDrafts } from '../src/conversation/local-drafts'
 import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { getDeviceWorkface, emptyDeviceWorkface, DEVICE_WORKFACE_KEY } from '../src/recovery/device-workface'
-import { button, click, editor, mount, mounted, paste } from './conversation-fixture'
+import { button, click, deferred, editor, mount, mounted, paste } from './conversation-fixture'
 import { fixtureEpoch as _historyTailFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 // Preserve Node's real HTTP/streams/AbortSignal primitives while mounting the original UI.
@@ -49,6 +53,30 @@ afterEach(async () => {
 async function unmount(element: HTMLElement) {
   const index = mounted.findIndex(view => view.element === element), view = mounted.splice(index, 1)[0]!
   await act(async () => view.root.unmount()); element.remove()
+}
+
+async function authenticatedConsumer(core: AgentMuxClient, root: string, agentSessionId: string, runtimeId = 'original-runtime') {
+  const hosted = new AgentMuxHostedRuntimeService(core, null, () => ({ ...hostedTestOwner(core), runtimeId, ownerInstanceId: runtimeId + '-owner' }))
+  closes.push(() => hosted.dispose())
+  const authenticated: string[] = [], device = { hostId: 'local', deviceId: 'approved-mobile-device', name: 'Controlled Mobile' }
+  const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'),
+    coreClients: () => [{ hostId: 'local', client: core }], hostedRuntime: () => hosted,
+    operationSource: context => context.principal?.id === device.deviceId ? device : undefined,
+    http: { host: '127.0.0.1', port: 0, authorize(request) {
+      if (request.headers.get('authorization') !== 'Bearer private-mobile-token') return null
+      authenticated.push(device.deviceId)
+      return { principal: { kind: 'device', id: device.deviceId }, assertCurrent() {
+        expect(request.headers.get('authorization')).toBe('Bearer private-mobile-token')
+      } }
+    } } })
+  await server.start(); closes.push(() => server.stop())
+  const url = `http://127.0.0.1:${server.httpAddress!.port}/`
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'http', url, token: 'private-mobile-token' } })
+  closes.push(() => rpc.dispose())
+  const client = await connectHostedAgentMux({ rpc }); closes.push(() => client.dispose())
+  const openTerminal = vi.fn()
+  const surface = () => <MobileConversationSurface client={client} agentSessionId={agentSessionId} connection={{ state: 'connected', message: 'Authenticated original Host' }} platform={createBrowserPlatform()} onShowTerminal={openTerminal} />
+  return { client, rpc, url, authenticated, device, openTerminal, surface }
 }
 
 /** Actual authenticated HTTP/JSON-RPC, Hosted codec/service and original Core owners.
@@ -103,32 +131,13 @@ async function authenticatedFixture(request?: AgentMuxInteractionRequest, retain
   // does not supply a live editor target or an automatic input capability.
   const submit = vi.spyOn(h.client, 'submitAgentPrompt'), reply = vi.spyOn(h.client, 'replySessionQuestion')
   const respond = vi.spyOn(h.client, 'respondAgentInteraction'), inspect = vi.spyOn(h.client, 'inspectAgentInteractionOperation')
-  const hosted = new AgentMuxHostedRuntimeService(h.client, null, () => hostedTestOwner(h.client))
-  closes.push(() => hosted.dispose())
-  const authenticated: string[] = [], device = { hostId: 'local', deviceId: 'approved-mobile-device', name: 'Controlled Mobile' }
-  const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'),
-    coreClients: () => [{ hostId: 'local', client: h.client }], hostedRuntime: () => hosted,
-    operationSource: context => context.principal?.id === device.deviceId ? device : undefined,
-    http: { host: '127.0.0.1', port: 0, authorize(request) {
-      if (request.headers.get('authorization') !== 'Bearer private-mobile-token') return null
-      authenticated.push(device.deviceId)
-      return { principal: { kind: 'device', id: device.deviceId }, assertCurrent() {
-        expect(request.headers.get('authorization')).toBe('Bearer private-mobile-token')
-      } }
-    } } })
-  await server.start(); closes.push(() => server.stop())
-  const url = `http://127.0.0.1:${server.httpAddress!.port}/`
-  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'http', url, token: 'private-mobile-token' } })
-  closes.push(() => rpc.dispose())
-  const client = await connectHostedAgentMux({ rpc }); closes.push(() => client.dispose())
-  const openTerminal = vi.fn()
-  const surface = () => <MobileConversationSurface client={client} agentSessionId={sid} connection={{ state: 'connected', message: 'Authenticated original Host' }} platform={createBrowserPlatform()} onShowTerminal={openTerminal} />
+  const transport = await authenticatedConsumer(h.client, root, sid)
   const recordProof = async (name: string, evidence: unknown) => {
     if (!process.env.AGENTMUX_MOBILE_PROTOCOL_EVIDENCE) return
     const target = join(process.env.AGENTMUX_MOBILE_PROTOCOL_EVIDENCE, name + '.json')
     await mkdir(process.env.AGENTMUX_MOBILE_PROTOCOL_EVIDENCE, { recursive: true }); await writeFile(target, JSON.stringify(evidence, null, 2) + '\n')
   }
-  return { ...h, core: h.client, client, rpc, url, authenticated, device, submit, reply, respond, inspect, openTerminal, surface, recordProof, retainedInput,
+  return { ...h, ...transport, core: h.client, submit, reply, respond, inspect, recordProof, retainedInput,
     setRecent(value: AgentSessionHistoryPage) { recent = value }, setOlder(value: AgentSessionHistoryPage) { older = value },
     invalidate() { observe?.({ kind: 'invalidated', source }) } }
 }
@@ -202,7 +211,7 @@ it('authenticated Mobile keeps captured original speech readable when the native
   const reply = view.element.querySelector<HTMLElement>('[data-message-id="retained-hook-reply"]')!
   expect(reply.closest('details:not([open]), [hidden], [inert]')).toBeNull()
   expect(view.element.querySelector('[data-native-record-id]')).toBeNull()
-  expect(view.element.textContent).toContain('Original native reader unavailable')
+  await vi.waitFor(() => expect(view.element.textContent).toContain('Original native reader unavailable'))
   expect(view.element.textContent).not.toContain('暂无已确认的对话内容')
   expect(reply.dataset.status).toBe('complete')
   expect(f.writes).toHaveLength(0); expect(f.submit).not.toHaveBeenCalled(); expect(f.reply).not.toHaveBeenCalled()
@@ -338,4 +347,216 @@ it('keeps original older-window text and selection while another entry records a
   expect(saved().questions[0][1]).toEqual(legacy)
   expect(view.element.textContent).toContain(legacy.diagnostic.message)
   expect(f.reply).not.toHaveBeenCalled(); expect(f.writes).toEqual([])
+}, 15000)
+
+
+async function mobileHook(requestId: string) {
+  const h = await interactionOperationHook(requestId)
+  const provider = h.client.providers.get('codex'), source = { providerId: 'codex', nativeSessionId: 'original-native' }
+  vi.spyOn(provider, 'readSessionHistoryPage').mockResolvedValue({ source, items: [], nextCursor: null })
+  vi.spyOn(provider, 'observeSessionHistory').mockImplementation(async context => ({ source: context.source, dispose() {} }))
+  return h
+}
+
+it('the authenticated Mobile card reaches an open original Hook and adopts its exact receipt independent of JSON property order', async () => {
+  const h = await mobileHook('mobile-open-hook'); closes.push(h.close)
+  vi.spyOn(h.client, 'connect').mockResolvedValue()
+  const respond = vi.spyOn(h.client, 'respondAgentInteraction'), inspect = vi.spyOn(h.client, 'inspectAgentInteractionOperation')
+  const transport = await authenticatedConsumer(h.client, h.root, OPERATION_SESSION_ID)
+  // Reorder the actual decoded Host result at the consumer leaf; no receipt is fabricated.
+  const originalRespond = transport.client.respondAgentInteraction.bind(transport.client)
+  vi.spyOn(transport.client, 'respondAgentInteraction').mockImplementation(async input => {
+    const receipt = await originalRespond(input)
+    const reverse = (value: unknown): unknown => Array.isArray(value) ? value.map(reverse)
+      : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).reverse().map(([key, item]) => [key, reverse(item)])) : value
+    return reverse(receipt) as typeof receipt
+  })
+  const view = await mount(transport.surface())
+  await vi.waitFor(() => expect(view.element.querySelector('[data-request-id="mobile-open-hook"]')).not.toBeNull())
+  await paste(view.element, 'Original newer draft remains editable')
+  await click(button(view.element, h.request.options.find(option => option.id === 'reject-once')!.label))
+  await vi.waitFor(() => expect(saved().responses[0]?.[1].phase, view.element.textContent!).toBe('confirmed'))
+  expect(respond).toHaveBeenCalledOnce()
+  const input = respond.mock.calls[0]![0]
+  expect(input).toMatchObject({ agentSessionId: OPERATION_SESSION_ID, expectedRun: { runId: OPERATION_RUN_ID },
+    operationId: expect.any(String), expectedRequest: h.request, response: h.input.response })
+  expect(await h.callback).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny' } } })
+  expect(await h.client.inspectAgentInteractionOperation(input)).toMatchObject({ operationId: input.operationId, delivery: 'hook-written', nativeAdoption: 'unknown' })
+  await click(button(view.element, '查询原答复回执'))
+  expect(inspect.mock.calls.some(([value]) => value.operationId === input.operationId)).toBe(true)
+  expect(saved().responses[0][1].original.input).toEqual(input)
+  expect(editor(view.element).textContent).toContain('Original newer draft remains editable')
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  expect(transport.authenticated.length).toBeGreaterThan(0)
+}, 15000)
+
+it('an authenticated Mobile response lost after the real Hook write survives remount and only inspects its original operation', async () => {
+  const h = await mobileHook('mobile-lost-hook'); closes.push(h.close)
+  vi.spyOn(h.client, 'connect').mockResolvedValue()
+  const respond = vi.spyOn(h.client, 'respondAgentInteraction'), inspect = vi.spyOn(h.client, 'inspectAgentInteractionOperation')
+  const transport = await authenticatedConsumer(h.client, h.root, OPERATION_SESSION_ID)
+  const original = transport.client.respondAgentInteraction.bind(transport.client)
+  vi.spyOn(transport.client, 'respondAgentInteraction').mockImplementation(async input => { await original(input); throw new Error('Original HTTP response lost') })
+  const view = await mount(transport.surface())
+  await vi.waitFor(() => expect(view.element.querySelector('[data-request-id="mobile-lost-hook"]')).not.toBeNull())
+  await click(button(view.element, h.request.options.find(option => option.id === 'reject-once')!.label))
+  await vi.waitFor(() => expect(saved().responses[0]?.[1].phase).toBe('unknown'))
+  expect(await h.callback).toMatchObject({ hookSpecificOutput: { decision: { behavior: 'deny' } } })
+  const frozen = structuredClone(saved().responses[0][1].original)
+  await paste(view.element, 'Draft edited after the unknown response')
+  await unmount(view.element)
+  const restored = await mount(transport.surface())
+  await vi.waitFor(() => expect(restored.element.querySelector('[data-original-response]')).not.toBeNull())
+  expect(saved().responses[0][1].phase).toBe('unknown')
+  expect(respond).toHaveBeenCalledOnce()
+  const originalInspect = transport.client.inspectAgentInteractionOperation.bind(transport.client)
+  const query = vi.spyOn(transport.client, 'inspectAgentInteractionOperation')
+  const foreignReceipts: Array<(receipt: AgentMuxInteractionOperationReceipt) => AgentMuxInteractionOperationReceipt> = [
+    receipt => ({ ...receipt, agentSessionId: 'another-session' }),
+    receipt => ({ ...receipt, operationId: 'another-operation' }),
+    receipt => ({ ...receipt, run: { runId: 'another-run' } }),
+    receipt => ({ ...receipt, expectedRequest: { ...receipt.expectedRequest, title: 'Another request content' } as typeof receipt.expectedRequest }),
+    receipt => ({ ...receipt, response: { kind: 'permission', requestId: 'mobile-lost-hook', decision: { outcome: 'selected', optionId: 'allow-once' } } })
+  ]
+  for (const alter of foreignReceipts) {
+    query.mockImplementationOnce(async input => { const receipt = await originalInspect(input); expect(receipt).not.toBeNull(); return alter(receipt!) })
+    const queriesBefore = query.mock.calls.length
+    await click(button(restored.element, '查询原答复回执'))
+    await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(queriesBefore + 1))
+    await act(async () => { await query.mock.results.at(-1)!.value })
+    await vi.waitFor(() => expect(restored.element.textContent).toContain('原答复查询未确认'))
+    expect(saved().responses[0][1].phase).toBe('unknown')
+    expect(saved().responses[0][1].original).toEqual(frozen)
+  }
+  await click(button(restored.element, '查询原答复回执'))
+  await vi.waitFor(() => expect(saved().responses[0][1].phase).toBe('confirmed'))
+  expect(inspect.mock.calls.some(([value]) => value.agentSessionId === OPERATION_SESSION_ID && value.operationId === frozen.input.operationId)).toBe(true)
+  expect(saved().responses[0][1].original).toEqual(frozen)
+  expect(editor(restored.element).textContent).toContain('Draft edited after the unknown response')
+  expect(respond).toHaveBeenCalledOnce(); expect(h.inner.kernel.input).not.toHaveBeenCalled()
+}, 15000)
+
+async function acpConsumerFixture() {
+  const h = await rpcOwnerFixture([OPERATION_SESSION_ID]); closes.push(h.close)
+  vi.spyOn(h.client, 'connect').mockResolvedValue()
+  // Unrelated activity probes cannot consume the deliberate dispatch-await race.
+  vi.spyOn(h.client, 'statusAgent').mockRejectedValue(new Error('Controlled ACP activity observation unavailable'))
+  // No built-in Provider advertises ACP. This controlled Provider declaration and
+  // last adapter callback exercise the real Core bridge, not a vendor capability.
+  const provider = h.client.providers.get('codex')
+  h.client.providers.replace({ ...provider, catalog: { ...provider.catalog, acpStrategy: { kind: 'adapter' } } })
+  let receive: Parameters<AgentMuxAcpBinding['onEvent']>[0] | undefined
+  const decisions: Array<{ requestId: string; decision: unknown }> = []
+  const binding: AgentMuxAcpBinding = { adapterId: 'mobile-controlled-adapter', sessionId: 'mobile-original-acp',
+    onEvent(listener) { receive = listener; return () => { receive = undefined } },
+    async respondPermission(requestId, decision, signal) { signal.throwIfAborted(); decisions.push({ requestId, decision }) }, async close() {} }
+  await h.client.bindAcp(OPERATION_SESSION_ID, binding)
+  receive!({ type: 'permission', requestId: 'mobile-acp-request', title: 'Original ACP permission',
+    options: [{ id: 'allow', label: 'Allow original ACP', kind: 'allow-once' }, { id: 'deny', label: 'Deny original ACP', kind: 'reject-once' }] })
+  await vi.waitFor(() => expect(h.client.agentSession(OPERATION_SESSION_ID).pendingInteraction?.request.id).toBe('mobile-acp-request'))
+  return { ...h, binding, decisions }
+}
+
+it('the authenticated Mobile card consumes the original Core ACP responder without PTY input or invented native adoption', async () => {
+  const h = await acpConsumerFixture(), { binding, decisions } = h
+  const respond = vi.spyOn(h.client, 'respondAgentInteraction')
+  const transport = await authenticatedConsumer(h.client, h.root, OPERATION_SESSION_ID), view = await mount(transport.surface())
+  await vi.waitFor(() => expect(view.element.querySelector('[data-request-id="mobile-acp-request"]')).not.toBeNull())
+  const displayed = structuredClone((await h.store.readMetadata(OPERATION_SESSION_ID))!.pendingInteraction!.request)
+  await click(button(view.element, 'Deny original ACP'))
+  await vi.waitFor(() => expect(respond).toHaveBeenCalledOnce())
+  expect(respond.mock.calls[0]![0].expectedRequest).toEqual(displayed)
+  await vi.waitFor(() => expect(saved().responses[0]?.[1].phase, view.element.textContent!).toBe('confirmed'))
+  expect(decisions).toEqual([{ requestId: 'mobile-acp-request', decision: { outcome: 'selected', optionId: 'deny' } }])
+  expect(respond).toHaveBeenCalledOnce()
+  const input = respond.mock.calls[0]![0]
+  expect(input.expectedRequest.evidence).toMatchObject({ source: 'acp', acpAdapterId: binding.adapterId, acpSessionId: binding.sessionId })
+  expect(await h.client.inspectAgentInteractionOperation(input)).toMatchObject({ operationId: input.operationId, delivery: 'acp-acknowledged', nativeAdoption: 'unknown' })
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
+}, 15000)
+
+it('the main Mobile conversation reads an exact native image through the authenticated Hosted resource owner', async () => {
+  const f = await authenticatedFixture()
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0K8AAAAASUVORK5CYII='
+  const record = { id: 'main-native-image', turnId: 'main-image-turn', kind: 'assistant-message' as const,
+    contentParts: [{ kind: 'resource' as const, resourceType: 'image' as const, reference: image, label: 'Original native image' }] }
+  f.setRecent({ ...page(), items: [record] })
+  const lookup = vi.spyOn(f.core.providers.get('codex'), 'readSessionHistoryRecord').mockResolvedValue(record)
+  const read = vi.spyOn(f.core, 'sessionHistoryResource'), view = await mount(f.surface())
+  await vi.waitFor(() => expect(view.element.querySelector<HTMLImageElement>('.conversation-native-thread img')?.src).toBe(image))
+  expect(read).toHaveBeenCalledWith(sid, expect.objectContaining({ source, recordId: record.id, turnId: record.turnId, partIndex: 0, expectedReference: image }))
+  expect(lookup).toHaveBeenCalledWith(expect.objectContaining({ source, recordId: record.id, turnId: record.turnId }))
+  await paste(view.element, 'Resource reads do not replace the draft')
+  expect(editor(view.element).textContent).toContain('Resource reads do not replace the draft')
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.reply).not.toHaveBeenCalled(); expect(f.writes).toEqual([])
+}, 15000)
+
+
+it.each(['adapter', 'native-session', 'run', 'request'] as const)('the authenticated Mobile ACP response rejects a replaced original %s across the Core await', async changed => {
+  const h = await acpConsumerFixture()
+  const transport = await authenticatedConsumer(h.client, h.root, OPERATION_SESSION_ID), view = await mount(transport.surface())
+  await vi.waitFor(() => expect(view.element.querySelector('[data-request-id="mobile-acp-request"]')).not.toBeNull())
+  await paste(view.element, 'New draft after the original request')
+  vi.mocked(h.client.connect).mockImplementationOnce(async () => {
+    const before = (await h.store.readMetadata(OPERATION_SESSION_ID))!
+    await h.store.compareAndSwapMetadata(before, { ...before,
+      ...(changed === 'adapter' || changed === 'native-session' ? { nativeHandle: { kind: 'acp',
+        adapterId: changed === 'adapter' ? 'replacement-adapter' : h.binding.adapterId,
+        sessionId: changed === 'native-session' ? 'replacement-session' : h.binding.sessionId } } : {}),
+      ...(changed === 'run' ? { run: { runId: 'replacement-run' }, pendingInteraction: { request: { ...before.pendingInteraction!.request,
+        evidence: { ...before.pendingInteraction!.request.evidence, run: { runId: 'replacement-run' } } } } } : {}),
+      ...(changed === 'request' ? { pendingInteraction: { request: { ...before.pendingInteraction!.request, title: 'Replacement request content' } as typeof before.pendingInteraction.request } } : {}) })
+    await h.inner.registry.load('local')
+  })
+  await click(button(view.element, 'Deny original ACP'))
+  await vi.waitFor(() => expect(view.element.textContent).toContain('The original interaction target changed before dispatch'))
+  expect(saved().responses[0]?.[1].phase).toBe('unknown')
+  expect(h.decisions).toEqual([])
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  expect(saved().responses[0][1].original.input.expectedRequest.id).toBe('mobile-acp-request')
+  expect(editor(view.element).textContent).toContain('New draft after the original request')
+}, 15000)
+
+
+it('keeps two authenticated Host owners with the same Session Run and request IDs independent across a delayed original receipt', async () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(_historyTailFixtureEpoch(0, 0, 1))
+  const first = await mobileHook('mobile-shared-request'); closes.push(first.close)
+  const second = await mobileHook('mobile-shared-request'); closes.push(second.close)
+  clock.mockRestore()
+  expect(first.request).toEqual(second.request)
+  vi.spyOn(first.client, 'connect').mockResolvedValue(); vi.spyOn(second.client, 'connect').mockResolvedValue()
+  const a = await authenticatedConsumer(first.client, first.root, OPERATION_SESSION_ID)
+  const b = await authenticatedConsumer(second.client, second.root, OPERATION_SESSION_ID, 'other-runtime')
+  const original = a.client.respondAgentInteraction.bind(a.client), release = deferred<void>()
+  const respondA = vi.spyOn(a.client, 'respondAgentInteraction').mockImplementation(async input => { const receipt = await original(input); await release.promise; return receipt })
+  const respondB = vi.spyOn(second.client, 'respondAgentInteraction')
+  const surface = (client: typeof a.client) => <MobileConversationSurface client={client} agentSessionId={OPERATION_SESSION_ID}
+    connection={{ state: 'connected', message: 'Authenticated selected owner' }} platform={createBrowserPlatform()} />
+  const view = await mount(surface(a.client)), label = first.request.options.find(option => option.id === 'reject-once')!.label
+  try {
+    await vi.waitFor(() => expect(view.element.querySelector('[data-request-id="mobile-shared-request"]')).not.toBeNull())
+    await click(button(view.element, label))
+    expect(await first.callback).toMatchObject({ hookSpecificOutput: { decision: { behavior: 'deny' } } })
+    const frozen = structuredClone(saved().responses[0][1].original)
+    await view.render(surface(b.client))
+    await vi.waitFor(() => expect(button(view.element, label).disabled).toBe(false))
+    await paste(view.element, 'New draft on the selected owner')
+    await act(async () => release.resolve())
+    await act(async () => { await respondA.mock.results[0]!.value })
+    expect(view.element.querySelector('[data-request-id] [data-original-response]')).toBeNull()
+    expect(button(view.element, label).disabled).toBe(false)
+    await click(button(view.element, label))
+    await vi.waitFor(() => expect(respondB).toHaveBeenCalledOnce())
+    expect(await second.callback).toMatchObject({ hookSpecificOutput: { decision: { behavior: 'deny' } } })
+    await vi.waitFor(() => expect(saved().responses).toHaveLength(2))
+    expect(saved().responses.find(([, attempt]: [string, { original: typeof frozen }]) => attempt.original.runtimeId === frozen.runtimeId)[1].original).toEqual(frozen)
+    const other = respondB.mock.calls[0]![0]
+    expect(other.operationId).not.toBe(frozen.input.operationId)
+    expect(editor(view.element).textContent).toContain('New draft on the selected owner')
+    await view.render(surface(a.client))
+    await vi.waitFor(() => expect(view.element.querySelector('[data-original-response]')?.getAttribute('data-original-response')).toBe(frozen.input.operationId))
+    await click(button(view.element, '查询原答复回执'))
+    expect(await first.client.inspectAgentInteractionOperation(frozen.input)).toMatchObject({ operationId: frozen.input.operationId, delivery: 'hook-written' })
+    expect(first.inner.kernel.input).not.toHaveBeenCalled(); expect(second.inner.kernel.input).not.toHaveBeenCalled()
+  } finally { release.resolve() }
 }, 15000)
