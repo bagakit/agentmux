@@ -1,3 +1,4 @@
+import { parseRendererV8ProfileInput, parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseBrowserDefaultInspection, parseBrowserDefaultSettingsRequest } from './browser-default.js'
 import { parseDemandPatrols } from '@agentmux/demand'
 import { parseDemandDelegations } from '@agentmux/demand/delegations'
@@ -300,6 +301,11 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     const edited = text(source.text, 'Edited message', code)
     if (!edited.trim() || edited.includes('\0')) throw new AgentMuxError('Edited message is invalid.', code)
     return { ...base, operation: source.operation, pendingId, expectedText: text(source.expectedText, 'Original message', code), text: edited }
+  }
+  if (source.operation === 'metrics.profile.capture') {
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'durationMs'], 'INVALID_CONTROL_REQUEST')
+    const input = parseRendererV8ProfileInput({ target: source.target, durationMs: source.durationMs })
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, ...input }
   }
   if (source.operation === 'metrics.get' || source.operation === 'metrics.watch') {
     if (Object.keys(source).some(key => !['schemaVersion', 'requestId', 'operation'].includes(key))) {
@@ -1149,6 +1155,11 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     const message = result.message === null ? null : parsePendingMessage(result.message)
     if (message && message.pendingId !== pendingId) throw new AgentMuxError('Pending message send result belongs to another input.', code)
     return { ...base, operation, result: { agentSessionId, pendingId, disposition: result.disposition, message } }
+  }
+  if (operation === 'metrics.profile.capture') {
+    settingsFields(result, ['capture'], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { capture: parseRendererV8ProfileResult(result.capture) } }
   }
   if (operation === 'metrics.get') {
     settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')

@@ -16,10 +16,15 @@ function source<T>(data: T | null, observedAt: number | null, reason: string | n
 /** This composes the original sampler; it owns neither a polling clock nor resource facts. */
 export function createResourceMetricsPort(args: {
   sampler: ProcessResourceSampler; currentWindow(): MetricsWindow | null; now?: () => number
+  profiler?: { capture: NonNullable<AgentMuxMetricsPort['captureProfile']>; dispose(): void }
 }): AgentMuxMetricsPort & { dispose(): void } {
   const consumers = new Set<() => void>()
   let disposed = false
   return {
+    ...(args.profiler ? { captureProfile: (async (input, signal) => {
+      if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
+      return args.profiler!.capture(input, signal)
+    }) satisfies NonNullable<AgentMuxMetricsPort['captureProfile']> } : {}),
     async subscribe(onSnapshot, onEnd, signal) {
       if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
       let released = false
@@ -64,6 +69,7 @@ export function createResourceMetricsPort(args: {
     dispose() {
       if (disposed) return
       disposed = true
+      args.profiler?.dispose()
       for (const close of [...consumers]) close()
     }
   }

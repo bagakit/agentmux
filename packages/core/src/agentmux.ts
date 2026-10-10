@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { writeRendererV8Profile } from './renderer-v8-profile-cli.js'
 import { writeCliResourceDocument } from './cli-resource-document.js'
 import process from 'node:process'
 import { randomUUID } from 'node:crypto'
@@ -45,6 +46,7 @@ function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if ((method === 'file.upload' || method === 'file.upload.inspect') && body.status !== 'uploaded') return true
   if (['file.build', 'file.build.inspect', 'file.build.cancel'].includes(method) && !['running', 'succeeded', 'cancelled'].includes(String(body.status))) return true
   if (method === 'file.format' && body.status !== 'formatted' && body.status !== 'unchanged') return true
+  if (method === 'system.metrics.profile.capture' && (body.capture as { status: string }).status !== 'completed') return true
   if (body.outcome === 'partial' || body.outcome === 'unknown' || body.outcome === 'refused') return true
   if (method === 'space.inspect' && Object.hasOwn(body, 'request')) {
     const request = body.request as { known?: boolean; report?: { outcome?: string } | null } | null
@@ -198,7 +200,17 @@ async function main(): Promise<number> {
       return await follow(client, method, invocation.params as AgentMuxRpcStreamParams<typeof method>)
     }
     const result = await client.call(method, invocation.params as AgentMuxRpcParams<AgentMuxRpcMethod>)
-    const output = invocation.output === undefined ? undefined : await writeCliResourceDocument(invocation.output, result)
+    let output: { path: string } | undefined
+    try {
+      output = invocation.output === undefined ? undefined : method === 'system.metrics.profile.capture'
+        ? await writeRendererV8Profile(invocation.output, result) : await writeCliResourceDocument(invocation.output, result)
+    } catch (error) {
+      if (method !== 'system.metrics.profile.capture') throw error
+      const source = error instanceof Error ? error as Error & { code?: string } : null
+      write({ ok: false, operation: method, result, outputError: { code: source?.code ?? 'PROFILE_FILE_WRITE_FAILED',
+        message: source?.message ?? String(error) } })
+      return 1
+    }
     write({ ok: true, operation: method, ...(output === undefined ? {} : { output }), ...(operationId === undefined ? {} : { operationId }), result })
     return partial(method, result) ? 1 : 0
   } finally { await client.dispose() }

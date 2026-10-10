@@ -1,3 +1,4 @@
+import { parseRendererV8ProfileInput } from './renderer-v8-profile.js'
 import { parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { parseMoteConnectionParams } from './mote-connection-codec.js'
 import { parseConversationChangesInput } from './conversation-changes.js'
@@ -699,6 +700,11 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   { ...command('system.endpoint', '[--stdio | --inspect]', 'Describe the endpoint, inspect its current owner publication, or relay strict RPC stdio.', { '--stdio': 'boolean', '--inspect': 'boolean' }, f => { if (f.booleans.has('--stdio') && f.booleans.has('--inspect')) throw new AgentMuxError('--stdio and --inspect are mutually exclusive.', 'INVALID_CLI_ARGUMENT'); return { stdio: f.booleans.has('--stdio'), inspect: f.booleans.has('--inspect') } }), local: true },
   empty('system.crash-log.inspect', 'Read retained original crash-log facts.'),
   empty('system.crash-log.reveal', 'Reveal the retained crash-log through the client owner.'),
+  command('system.metrics.profile.capture', '--window-id W --web-contents-id WC --generation G --pid PID --creation-time MS --duration-ms N [--output FILE]', 'Explicitly capture 1-5 seconds of this exact Renderer main-target V8 profile; no automatic sampling.',
+    { '--window-id': 'value', '--web-contents-id': 'value', '--generation': 'value', '--pid': 'value', '--creation-time': 'value', '--duration-ms': 'value', '--output': 'data' }, f =>
+      parseRendererV8ProfileInput({ target: numbers(f, { '--window-id': 'windowId', '--web-contents-id': 'webContentsId', '--generation': 'generation', '--pid': 'pid', '--creation-time': 'creationTime' }),
+        durationMs: Number(value(f, '--duration-ms', true)) }) as unknown as Record<string, unknown>,
+    'Use original metrics window/generation/PID/creationTime, never focus or a guessed PID. The original request returns a complete profile (at most 8 MiB), actual interval and stop/detach facts. DevTools or an existing debugger refuses only this capture. Profile function names/URLs/local paths are sensitive; no automatic upload, error logging, worker or native CPU coverage. --output creates a new local cpuprofile, never replaces a file/symlink. Lost replies, cancellation and local write failures never retry capture; no retained handle or restart history.'),
   empty('system.metrics.get', 'Read the first bounded metrics frame; sources may still be pending.'),
   { ...empty('system.metrics.watch', 'Watch source-timed metrics; frame count is not source sample count. Slow readers end without an unbounded queue.'), stream: true },
   toolkit('ls', '', 'List original saved Toolkit resources.', 0),
@@ -750,6 +756,10 @@ export async function parseAgentMuxCliInvocation(argv: readonly string[]): Promi
   if (!match) invalid('Unknown command. Run amux --help.')
   const command = match!.command.rpcMethod ? { ...match!.command, method: match!.command.rpcMethod } : match!.command
   let tail = match!.tail, output: string | undefined
+  if (command.method === 'system.metrics.profile.capture') {
+    output = value(flags(tail, command.flags!), '--output')
+    if (output !== undefined && (!output || output === '-')) invalid('--output requires a named new local cpuprofile file.')
+  }
   if (command.documentOutput && tail.length !== 1) {
     if (tail.length !== 3 || tail[1] !== '--output' || !tail[2]?.length || tail[2] === '-') invalid('Use inspect <id> --output FILE; output creates a new file and never overwrites an existing file.')
     output = tail[2]; tail = tail.slice(0, 1)
