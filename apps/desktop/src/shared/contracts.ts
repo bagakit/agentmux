@@ -1558,6 +1558,8 @@ export type BrowserPresentationRevocationReason =
 export type BrowserPresentationEvent =
   | { type: 'capture-revoked'; browserId: string; captureId: string; reason: BrowserPresentationRevocationReason }
   | { type: 'input-owner-changed'; browserId: string; leaseId: string | null }
+  /** Physical coverage of this exact media generation; never an input selection receipt. */
+  | { type: 'native-coverage-changed'; browserId: string; coverage: { leaseId: string; captureId: string } | null }
 export const BROWSER_PRESENTATION_EVENT_CHANNEL = 'agentmux:browser-presentation-event'
 
 export const WINDOW_RESIZE_EVENT_CHANNEL = 'agentmux:window-resize'

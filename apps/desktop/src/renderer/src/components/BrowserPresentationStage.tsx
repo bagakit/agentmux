@@ -1,6 +1,6 @@
 import { useWorkbenchWindowDocument } from '../lib/workbench-document'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref, type PointerEvent } from 'react'
-import type { BrowserPresentationOccurrence, BrowserPresentationLease, BrowserPresentationCapture, BrowserPresentationGeometry, BrowserPresentationActivationReceipt, BrowserPresentationMouseModifier, BrowserBounds } from '../../../shared/contracts'
+import type { BrowserPresentationOccurrence, BrowserPresentationLease, BrowserPresentationCapture, BrowserPresentationGeometry, BrowserPresentationActivationReceipt, BrowserPresentationMouseModifier, BrowserPresentationEvent, BrowserBounds } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { LatestBrowserBoundsSynchronizer, focusRingYieldOf, hasPositiveBrowserStageGeometry, nativeBoundsClearOfFocusRing, regionAncestorOf, rendererCssBoundsToWindowDip } from '../lib/browser-bounds-sync'
 import { observeBrowserStageGeometry } from '../lib/browser-stage-geometry'
@@ -27,6 +27,7 @@ function captureTrackIds(stream: MediaStream): readonly [string, ...string[]] {
 export function useBrowserPresentationCapture(browserId: string) {
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [captureId, setCaptureId] = useState<string | null>(null)
+  const [nativeCoverage, setNativeCoverage] = useState<Extract<BrowserPresentationEvent, { type: 'native-coverage-changed' }>['coverage']>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [capturePhase, setCapturePhase] = useState<'idle' | 'arming' | 'acquiring' | 'confirming' | 'ready' | 'failed'>('idle')
   const media = useRef<{ capture: BrowserPresentationCapture; stream: MediaStream; detach: () => void } | null>(null)
@@ -143,6 +144,13 @@ export function useBrowserPresentationCapture(browserId: string) {
   useEffect(() => {
     const stop = api.browser.onPresentationEvent(event => {
       if (event.browserId !== browserId) return
+      if (event.type === 'native-coverage-changed') {
+        // Ready ACK can publish before its promise resolves; retain the fact and
+        // match its capture generation at the consuming Stage.
+        setNativeCoverage(current => current?.leaseId === event.coverage?.leaseId &&
+          current?.captureId === event.coverage?.captureId ? current : event.coverage)
+        return
+      }
       if (event.type === 'input-owner-changed') {
         ownerRevision.current += 1
         // The expected pending selection confirms its own lease; it does not retire a newer queued UI intent.
@@ -170,7 +178,7 @@ export function useBrowserPresentationCapture(browserId: string) {
       }
     }
   }, [browserId, retireCapture])
-  return { stream, captureId, notice, capturePhase, registered, ensureCapture, retryCapture, ownerClearedRevision, readInputIntentRevision }
+  return { stream, captureId, nativeCoverage, notice, capturePhase, registered, ensureCapture, retryCapture, ownerClearedRevision, readInputIntentRevision }
 }
 
 type MediaOwner = ReturnType<typeof useBrowserPresentationCapture>
@@ -294,11 +302,21 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
   }, [inputSelected, media.ownerClearedRevision, geometry])
   const [playbackRevision, setPlaybackRevision] = useState(0)
   const [playback, setPlayback] = useState<{ stream: MediaStream | null; phase: 'idle' | 'starting' | 'first-frame' | 'ready' | 'failed'; message?: string }>({ stream: null, phase: 'idle' })
+  const nativeCovered = media.nativeCoverage !== null && media.nativeCoverage.captureId === media.captureId &&
+    media.nativeCoverage.leaseId === lease.current?.leaseId
   useLayoutEffect(() => {
     const node = video.current, stream = media.stream
     if (!node || !stream) { setPlayback({ stream: null, phase: 'idle' }); return }
     let cancelled = false, playing = false
-    node.srcObject = stream
+    if (node.srcObject !== stream) node.srcObject = stream
+    if (nativeCovered) {
+      // Retain the node, last frame and shared tracks. Only this redundant sink
+      // pauses; a passive mirror still consumes the same live source.
+      node.pause()
+      setPlayback(current => current.stream === stream && (current.phase === 'ready' || current.phase === 'failed')
+        ? current : { stream, phase: 'idle' })
+      return
+    }
     setPlayback({ stream, phase: 'starting' })
     const frame = () => {
       if (cancelled || node.srcObject !== stream || !playing) return
@@ -313,7 +331,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       if (!cancelled && node.srcObject === stream) setPlayback({ stream, phase: 'failed', message: error instanceof Error ? error.message : String(error) })
     })
     return () => { cancelled = true; node.removeEventListener('loadeddata', frame); node.removeEventListener('playing', frame) }
-  }, [media.stream, playbackRevision])
+  }, [media.stream, playbackRevision, nativeCovered])
   const press = useRef<Promise<BrowserPresentationActivationReceipt> | null>(null)
   const point = (event: PointerEvent<HTMLDivElement>) => {
     const stage = element.current, frame = video.current
@@ -396,7 +414,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     <div className="browser-stage" data-native-browser-stage={browserId} data-browser-presentation-id={presentation.occurrence.presentationId}
       ref={node => { element.current = node; if (typeof stageRef === 'function') stageRef(node); else if (stageRef) stageRef.current = node }}
       onPointerDown={down} onPointerUp={event => void up(event)} onPointerCancel={event => void up(event, true)}>
-      {media.stream ? <video ref={video} muted playsInline autoPlay style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} /> : null}
+      {media.stream ? <video ref={video} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} /> : null}
       {children}
     </div>
   </div>
