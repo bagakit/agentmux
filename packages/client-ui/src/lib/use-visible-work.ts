@@ -11,7 +11,7 @@ export function useVisibleWork<T extends HTMLElement>(active = true) {
   const [viewport, setViewport] = useState<{ target: T; document: Document; intersecting: boolean } | null>(null)
   const [foreground, setForeground] = useState<{ document: Document; visible: boolean } | null>(null)
   useEffect(() => {
-    if (!active || !target) return
+    if (!active || !target) { setViewport(null); return }
     const owner = target.ownerDocument, view = owner.defaultView
     let alive = true
     const update = (intersecting: boolean) => {
