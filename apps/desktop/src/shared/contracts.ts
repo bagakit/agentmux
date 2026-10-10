@@ -1701,6 +1701,9 @@ export type AgentMuxDesktopApi = {
     openSystem(workspaceId: string, path: string): Promise<void>
     reveal(workspaceId: string, path: string): Promise<void>
   }
+  moteConnections: {
+    call<M extends import('@agentmux/core').MoteConnectionMethod>(method: M, params: import('@agentmux/core').MoteConnectionParamsMap[M]): Promise<import('@agentmux/core').MoteConnectionResultMap[M]>
+  }
   motePreferences: {
     read(params: import('@agentmux/core/mote-preferences').MotePreferencesReadInput): Promise<import('@agentmux/core/mote-preferences').MotePreferencesReadResult>
     save(params: import('@agentmux/core/mote-preferences').MotePreferencesSaveParams): Promise<import('@agentmux/core/mote-preferences').MotePreferencesSaveResult>

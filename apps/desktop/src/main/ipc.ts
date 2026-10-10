@@ -1,4 +1,5 @@
 import { ConversationLandmarkStore } from '@agentmux/core'
+import { registerMoteConnectionIpc } from './mote-connection-ipc.js'
 import { MoteConnectionOperations } from './mote-connection-operations.js'
 import { MoteConnectionSourceOwner } from './mote-connection-source.js'
 import { goalRoleInputNote } from './goal-role-input.js'
@@ -2042,6 +2043,7 @@ export async function registerIpc(args: {
       workspace: id => config.workspaces.find(item => item.id === id),
       topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory) }) })
   registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), secrets: connectorServices.secrets })
+  registerMoteConnectionIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   const control = new AgentMuxControlServer({
     connections: connectorServices.connections,
