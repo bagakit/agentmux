@@ -724,7 +724,7 @@ asking the user to copy credentials. **Connect an existing bot** keeps the
 original credential-entry path. Opening Settings only reads local progress;
 checking platform confirmation is an explicit action on the original setup.
 Closing and reopening keeps that setup available, including earlier entries.
-To create a separate bot, expand **Create another bot** and choose
+To create a separate bot, expand **Other setup options** and choose
 **Start a separate setup**. Earlier requests remain available even if their
 results are unknown; a pending request does not block another explicit setup.
 After the application is saved, **View connection** opens its original details;
@@ -746,9 +746,24 @@ whose secure save was temporarily unavailable. A process lost before that save
 may leave an unrecoverable unknown result; expiry or closing a page does not
 prove that the remote application was never created.
 
+An operation may include a strictly parsed `diagnostic` with an observed
+`stage`, a finite `code`, and a response-only `httpStatus`. The same original
+operation exposes these facts through `begin`, `advance`, `inspect`, and `ls`;
+no separate RPC or CLI command is needed. Diagnostics distinguish request,
+response, confirmation and secure-storage problems without exposing response
+bodies, exception text or private authorization material. They do not establish
+whether the platform applied a request, permit replay, or invent a cause for an
+older unknown operation. Successful local recovery clears the earlier diagnosis.
+The setup page presents one main next action. Its details retain a separate
+read-only refresh of the saved result, including while a platform effect is in
+progress.
+
 The original SDK registration protocol is invoked as finite begin/poll effects,
 without its internal polling loop or implicit issuer migration. Requested bot
 permissions and configuration are not evidence that the platform granted them.
+The Feishu/Lark adapter also accepts the official CLI's public-code response
+shape when the complete confirmation URL is absent. It constructs that page only
+on the original frozen issuer; a supplied unsafe URL remains rejected.
 The existing credential-entry flow remains available independently.
 
 
