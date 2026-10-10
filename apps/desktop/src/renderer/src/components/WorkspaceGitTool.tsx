@@ -14,6 +14,7 @@ import { GitHistoryPanel } from '../features/git/history/GitHistoryPanel'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 
 const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
+const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
 const VIEWS = [{ value: 'changes', label: 'Changes' }, { value: 'history', label: 'History' }, { value: 'branches', label: 'Branches' }] as const
 
 export function WorkspaceGitTool(props: {
@@ -66,11 +67,15 @@ function SourceControl({ workspace, visible, history, shared, viewportState }: {
 
 export function WorkspaceChangesSummary({ workspace, active, onOpen }: { workspace: WorkspaceRecord; active: boolean; onOpen(): void }) {
   const { status, loading, error } = useGitStatus(workspace.id, active)
+  const displayPath = usePathDisplay()
   const label = error ? 'Changes unavailable' : status?.kind === 'git-repository'
     ? `${status.changes.length} changed ${status.changes.length === 1 ? 'file' : 'files'}`
     : loading ? 'Checking changes…' : status?.kind === 'not-a-git-repository' ? 'No Git repository' : 'Changes unknown'
-  return <button type="button" className="workspace-changes-summary" onClick={onOpen}
-    aria-label="Open changes for this Zone" title={error ?? `Changes in ${workspace.path}`}>
-    <ThemeObjectRepositoryIcon size={12} aria-hidden="true" /><span>{label}</span><small>Git</small>
+  const branch = status?.kind === 'git-repository' ? status.branch : workspace.branch
+  const scope = `${workspace.kind === 'worktree' ? 'Current worktree' : 'Current folder'} · ${branch ?? workspace.name}`
+  return <button type="button" className="workspace-changes-summary" onClick={onOpen} data-workspace-id={workspace.id}
+    aria-label="Open changes for this Zone" title={[scope, `${displayPath(workspace.path, workspace.hostId)} · ${workspace.hostId}`, error].filter(Boolean).join('\n')}>
+    <ThemeObjectRepositoryIcon size={13} aria-hidden="true" /><span><strong>{label}</strong><small>{scope}</small></span>
+    <ThemeNavigationForwardIcon size={12} aria-hidden="true" />
   </button>
 }
