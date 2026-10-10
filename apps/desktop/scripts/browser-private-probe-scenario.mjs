@@ -112,23 +112,22 @@ export async function reviewPrivate(ctx) {
     await ctx.resize(ctx.probe, 980, 700); await privateFrame(ctx, 'private-new-narrow')
     await ctx.resize(ctx.probe, 1440, 900)
   }
-  await ctx.click(ctx.probe.cdp, ctx.selectors('[aria-label="Space: show terminal and file workbench"]'))
-  // The ordinary UI creates the initial saved Workspace/Launcher. Every Browser creation below
-  // then crosses the actual public server, Renderer createControlBrowser and Main manager.
-  await ctx.click(ctx.probe.cdp, ctx.selectors(`.project-rail-row[data-workspace-id="${ctx.workspaceId}"]`))
-  const launcher = await ctx.waitFor('the original Workspace Launcher acknowledged by Core', async () => {
-    const catalog = await ctx.rpc.call('space.ls', { target: {} })
-    ctx.receipt.privateWorkspaceCatalog = catalog
-    const sourceTab = catalog.catalog.tabs.find(tab => tab.workspaceId === ctx.workspaceId && catalog.catalog.regions.some(region => region.tabId === tab.tabId && region.kind === 'launcher'))
-    return sourceTab ? catalog.catalog.regions.find(region => region.tabId === sourceTab.tabId && region.kind === 'launcher') : null
-  })
+  // The actual GUI-created Tab is already acknowledged by Core. Public new-tab placement
+  // uses that original identity, then crosses Renderer createControlBrowser and Main.
   const base = new URL(ctx.pageUrl).origin, normalUrl = base + '/normal-owner', firstUrl = base + '/private-owner-first', retainedUrl = base + '/private-owner-retained'
-  const normal = await ctx.rpc.call('browser.open', { url: normalUrl, destination: { kind: 'launcher', regionId: launcher.regionId } })
+  const normalDestination = { kind: 'new-tab', after: { kind: 'tab', tabId: guiRegion.tabId } }
+  const normal = await ctx.rpc.call('browser.open', { url: normalUrl, destination: normalDestination })
+  const workspaceId = normal.region.workspaceId
+  assert.equal(workspaceId, guiRegion.workspaceId, 'Public placement must preserve the original GUI Tab workspace')
   const first = await ctx.rpc.call('browser.open', { url: firstUrl, mode: 'private', destination: { kind: 'split', region: { kind: 'region', regionId: normal.region.regionId }, direction: 'right' } })
   const cliOpened = await cli(ctx, ['browser', 'open', '--url', retainedUrl, '--tab', normal.region.tabId, '--new-tab', '--private'])
   const retained = cliOpened.result.region
   assert.equal(normal.region.mode, 'normal'); assert.equal(first.region.mode, 'private'); assert.equal(retained.mode, 'private')
+  for (const region of [first.region, retained]) assert.equal(region.workspaceId, workspaceId)
   assert.equal(cliOpened.operation, 'browser.open')
+  const placed = await saved(ctx, [guiTarget.id, normal.region.browserId, first.region.browserId, retained.browserId])
+  assert.deepEqual(placed.graph.regions.find(region => region.regionId === guiRegion.regionId), guiFact, 'Public creation must retain the original GUI Region')
+  assert.deepEqual(placed.graph.resources['region:' + guiRegion.regionId], guiState.graph.resources['region:' + guiRegion.regionId])
   const targets = await ctx.rpc.call('browser.targets', {})
   for (const region of [normal.region, first.region, retained]) {
     const target = targets.targets.find(target => target.id === region.browserId)
@@ -140,7 +139,7 @@ export async function reviewPrivate(ctx) {
   for (const observation of observations.slice(1)) { assert.equal(observation.persistent, false, 'actual private Session must be in memory'); assert.equal(observation.storagePath, null) }
   const different = await ctx.probe.main.evaluate(`(()=>{const {webContents}=${electron(ctx)},find=url=>webContents.getAllWebContents().find(w=>w.getURL()===url).session;const sessions=${quote([normalUrl,firstUrl,retainedUrl])}.map(find);return new Set(sessions).size===3})()`)
   assert.equal(different, true, 'Normal and both private Browsers must own separate actual Sessions')
-  ctx.receipt.privatePublic = { sdk: [normal, first], cli: cliOpened, targets, sessions: observations, distinctSessions: different }
+  ctx.receipt.privatePublic = { normalDestination, sdk: [normal, first], cli: cliOpened, targets, sessions: observations, distinctSessions: different }
   const script = await ctx.runBrowser(retained.browserId, 'await pageInfo(); await snapshot({scope:"page",maxNodes:20}); return "private page consumer";')
   assert.equal(script.outcome.kind, 'completed'); assert.equal(script.runOperation.browserId, retained.browserId)
   ctx.receipt.privatePublic.privateProgram = script
@@ -163,7 +162,7 @@ export async function reviewPrivate(ctx) {
   await ctx.rpc.call('space.focus', { target: { kind: 'region', regionId: retained.regionId } })
   await contents(ctx, firstUrl, '(globalThis.__privateRetiredSession=contents.session,true)')
   await ctx.probe.cdp.evaluate(`window.agentmux.browser.release(${quote(first.region.browserId)})`)
-  await ctx.probe.cdp.evaluate(`window.agentmux.browser.restore(${quote(first.region.browserId)},{workspaceId:${quote(ctx.workspaceId)},profileId:null,mode:'private'})`)
+  await ctx.probe.cdp.evaluate(`window.agentmux.browser.restore(${quote(first.region.browserId)},{workspaceId:${quote(workspaceId)},profileId:null,mode:'private'})`)
   await actualPage(ctx, firstUrl)
   assert.equal(await contents(ctx, firstUrl, 'contents.session===globalThis.__privateRetiredSession'), true)
   expectSeeded(await page(ctx, firstUrl, pageRead), values[1])
@@ -176,7 +175,7 @@ export async function reviewPrivate(ctx) {
   assert.equal(await ctx.probe.main.evaluate(`(()=>{const {webContents}=${electron(ctx)};return webContents.getAllWebContents().some(w=>!w.isDestroyed()&&w.getURL()===${quote(popupUrl)})})()`), false)
   assert.deepEqual(await ctx.probe.main.evaluate('globalThis.__privateRetiredSession.cookies.get({})'), [])
   const newUrl = base + '/private-new-incarnation'
-  await ctx.probe.cdp.evaluate(`window.agentmux.browser.create(${quote(first.region.browserId)},${quote(newUrl)},${quote(ctx.workspaceId)},undefined,'private')`)
+  await ctx.probe.cdp.evaluate(`window.agentmux.browser.create(${quote(first.region.browserId)},${quote(newUrl)},${quote(workspaceId)},undefined,'private')`)
   await actualPage(ctx, newUrl)
   assert.equal(await contents(ctx, newUrl, 'contents.session===globalThis.__privateRetiredSession'), false, 'closed private Session must never be reused')
   // A late consumer retained by the test can write only the retired Session, never the new owner.
