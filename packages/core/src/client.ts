@@ -242,7 +242,8 @@ const localSessionObservation = Symbol('local-session-observation')
 type LocalSessionObservation = 'terminalOutputChannel' | 'terminalCapability'
 function sameNativeHandle(a: AgentNativeSessionHandle | undefined, b: AgentNativeSessionHandle | undefined): boolean {
   return a === b || a?.kind === 'provider' && b?.kind === 'provider' && a.providerId === b.providerId &&
-    a.sessionId === b.sessionId && a.transcriptPath === b.transcriptPath
+    a.sessionId === b.sessionId && a.transcriptPath === b.transcriptPath ||
+    a?.kind === 'acp' && b?.kind === 'acp' && a.adapterId === b.adapterId && a.sessionId === b.sessionId
 }
 
 type NativeHistoryBinding = {
