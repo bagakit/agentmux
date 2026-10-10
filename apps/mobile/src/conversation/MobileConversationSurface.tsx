@@ -7,7 +7,7 @@ import { questionReplyKey } from '@agentmux/client-ui/conversation-question-repl
 import { ClientDeliveryDiagnostics, startDeliveryAttempt, type DeliveryAttemptSeed } from '@agentmux/client-ui/delivery-diagnostics'
 import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDetails'
 import { initFollowState, onContentChange, onScroll, shouldShowJumpToLatest } from '@agentmux/client-ui/activity-autoscroll'
-import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionOperationReceiptMatches } from '@agentmux/core/agent-interaction-state'
+import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionOperationReceiptMatches, agentInteractionRequestsMatch } from '@agentmux/core/agent-interaction-state'
 import { currentAgentSemanticStatus } from '@agentmux/core/agent-status'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -498,17 +498,24 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const request = agentInteractionActiveRequest(pending)
   const responseUnavailableReason = pending && agentInteractionResponseUnavailableReason(pending)
   const requestRun = request?.evidence?.run ?? session?.run
+  const runtimeId = client?.runtimeOwnerIdentity()?.runtimeId
   const requestKey = session && request && requestRun
-    ? JSON.stringify([session.agentSessionId, requestRun.runId, request.id]) : null
-  const responseAttempt = requestKey ? responses.current.get(requestKey) : undefined
+    ? JSON.stringify([session.agentSessionId, session.hostId, runtimeId, requestRun.runId, request.id]) : null
+  const responseOwnerMatches = (attempt: ResponseAttempt) => Boolean(attempt.original && session && runtimeId &&
+    attempt.original.input.agentSessionId === session.agentSessionId && attempt.original.hostId === session.hostId &&
+    attempt.original.runtimeId === runtimeId)
+  const responseEntry = [...responses.current.forSession(agentSessionId ?? '')].reverse().find(([, attempt]) =>
+    responseOwnerMatches(attempt) && request && attempt.original!.input.expectedRun.runId === requestRun?.runId &&
+    agentInteractionRequestsMatch(attempt.original!.input.expectedRequest, request))
+  const responseAttempt = responseEntry?.[1]
   const responseDisabled = !available || request?.agentSessionId !== session?.agentSessionId
     || requestRun?.runId !== session?.run.runId || Boolean(responseUnavailableReason)
     || responseAttempt?.phase === 'unknown' || responseAttempt?.phase === 'sending' || responseAttempt?.phase === 'confirmed'
   async function respond(response: AgentMuxInteractionResponse, intent: import('@agentmux/core').AgentMuxInteractionOperationIntent): Promise<void | import('@agentmux/core').AgentMuxInteractionOperationReceipt> {
     if (!client || !session || !request || !requestRun || !requestKey || responseDisabled) return
-    const previous = responses.current.get(requestKey)
+    const previous = responseAttempt
     if (previous?.phase === 'sending' || previous?.phase === 'unknown' || previous?.phase === 'confirmed') return
-    const originalKey = requestKey
+    const originalKey = JSON.stringify([session.agentSessionId, requestRun.runId, request.id, intent.operationId])
     const original: ResponseAttempt = { phase: 'sending', message: '正在发送原请求的答复…', original: {
       input: structuredClone({ agentSessionId: session.agentSessionId, expectedRun: requestRun, response, ...intent }),
       hostId: session.hostId, runtimeId: client.runtimeOwnerIdentity()?.runtimeId ?? null } }
@@ -575,8 +582,8 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const captured = useMemo(() => agentSessionId && reading.timeline
     ? projectSessionUserMessages({ agentSessionId, timeline: reading.timeline }) : [], [agentSessionId, reading.timeline])
   const mailboxMessages = useMemo(() => agentSessionId ? projectSessionUserMessages({ agentSessionId,
-    ...(reading.page ? { historyPage: reading.page } : {}), ...(reading.timeline ? { timeline: reading.timeline } : {}) }) : [],
-  [agentSessionId, reading.page, reading.timeline])
+    ...(reading.page && reading.pageOwner?.client === client ? { historyPage: reading.page } : {}), ...(reading.timeline ? { timeline: reading.timeline } : {}) }) : [],
+  [agentSessionId, reading.page, reading.pageOwner, reading.timeline, client])
   const capturedById = useMemo(() => new Map(captured.map(message => [message.id, message])), [captured])
   const capturedSpeech = useMemo(() => reading.timeline?.items.filter(item => item.agentSessionId === agentSessionId &&
     (item.kind === 'user_message' || item.kind === 'assistant_message')) ?? [], [agentSessionId, reading.timeline])
@@ -585,6 +592,11 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     if (!client || !agentSessionId) throw new Error('原 Host 尚未连接，原资源引用和草稿保留。')
     return client.sessionHistoryResource(agentSessionId, input)
   }, [client, agentSessionId])
+  const pageClient = reading.pageOwner?.client, pageSessionId = reading.pageOwner?.agentSessionId
+  const readNativeResource = useCallback<NonNullable<ConversationMessageProps['readHistoryResource']>>(input => {
+    if (!pageClient || !pageSessionId) throw new Error('原阅读来源尚未确认，原资源引用和草稿保留。')
+    return pageClient.sessionHistoryResource(pageSessionId, input)
+  }, [pageClient, pageSessionId])
   const readingProps = {
     active: visible,
     ...(session ? { workspaceRoot: session.workspacePath, executionHostId: session.hostId } : {}),
@@ -594,6 +606,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     onSelectAnnotation: ({ messageId, quote }: Parameters<NonNullable<ConversationMessageProps['onSelectAnnotation']>>[0]) =>
       appendQuote(`引用会话 ${JSON.stringify(agentSessionId)}，消息 ${JSON.stringify(messageId)}：\n${quote.split('\n').map(line => `> ${line}`).join('\n')}`)
   }
+  const { executionHostId: _currentHost, workspaceRoot: _currentWorkspace, ...sharedReadingProps } = readingProps
+  const nativeReadingProps = { ...sharedReadingProps,
+    ...(reading.pageOwner?.hostId ? { executionHostId: reading.pageOwner.hostId } : {}),
+    workspaceRoot: reading.pageOwner?.workspacePath ?? '', readHistoryResource: readNativeResource }
   // Recent device intents remain editable memory; they are never promoted to native history or a delivery receipt.
   const historyLocalEntries = promptAttemptsForSession(attempts.current, agentSessionId)
     .filter(([, original]) => original.draft && session?.hostId && original.originalHostId === session.hostId)
@@ -679,19 +695,23 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         {reading.page && agentSessionId ? <>
           <ConversationView page={reading.page} questionAnswerContext={reading.answerContext} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
             renderProcess={props => <NativeProcessObservation {...props} compact />}
-            questionReplyState={target => mobileQuestionReplyState(local, agentSessionId, target)}
+            questionReplyState={target => {
+              const state = mobileQuestionReplyState(local, agentSessionId, target), original = state?.original
+              return original && (original.hostId !== reading.pageOwner?.hostId || original.runtimeId &&
+                original.runtimeId !== pageClient?.runtimeOwnerIdentity()?.runtimeId) ? undefined : state
+            }}
             questionReplyDraft={target => local.questionDrafts.get(questionReplyKey(agentSessionId, target))}
             onQuestionDraftChange={(target, answers) => {
               local.questionDrafts.set(questionReplyKey(agentSessionId, target), structuredClone(answers))
               void local.save().then(() => { if (mounted.current) redraw(value => value + 1) })
             }}
             questionReplyRoute={session?.providerId ? client?.catalog?.().find(provider => provider.id === session.providerId)?.capabilities.asyncQuestionReply : undefined}
-            questionTerminalTarget={!session?.nativeSourceObservation && session?.nativeHandle?.kind === 'provider' ? {
+            questionTerminalTarget={pageClient === client && !session?.nativeSourceObservation && session?.nativeHandle?.kind === 'provider' ? {
               source: { providerId: session.nativeHandle.providerId, nativeSessionId: session.nativeHandle.sessionId }, run: session.run
             } : undefined}
             questionReplyContext={JSON.stringify([session?.hostId, agentSessionId, session?.run.runId, client?.runtimeOwnerIdentity?.()?.runtimeId])}
-            {...(onShowTerminal ? { onOpenQuestionTerminal: onShowTerminal } : {})}
-            {...readingProps} />
+            {...(onShowTerminal && pageClient === client ? { onOpenQuestionTerminal: onShowTerminal } : {})}
+            {...nativeReadingProps} />
         </> : !reading.reading && capturedSpeech.length === 0 ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
         {capturedSpeech.length > 0 ? <section className="mobile-conversation__captured" aria-label="提交与运行记录">
           {capturedSpeech.map(item => {
@@ -716,13 +736,14 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       {request && requestKey ? <div className="mobile-conversation__interaction">
         <AgentInteractionCard key={requestKey} request={request} disabled={responseDisabled}
           {...(responseAttempt?.phase === 'unknown' ? { responseUnavailableReason: responseAttempt.message } : responseUnavailableReason ? { responseUnavailableReason } : {})}
-          responseStatus={responseAttempt?.original ? responseStatus(requestKey, responseAttempt) : undefined}
+          responseStatus={responseAttempt?.original ? responseStatus(responseEntry![0], responseAttempt) : undefined}
           {...(onShowTerminal ? { onOpenTerminal: onShowTerminal } : {})}
           onRespond={respond} />
-        {responseAttempt && !responseAttempt.original ? <p role="status">{responseAttempt.message}</p> : null}
       </div> : null}
       {[...responses.current.forSession(agentSessionId ?? '')].filter(([key, attempt]) =>
-        attempt.original?.input.agentSessionId === agentSessionId && key !== requestKey).map(([key, attempt]) => responseStatus(key, attempt))}
+        responseOwnerMatches(attempt) && key !== responseEntry?.[0]).map(([key, attempt]) => responseStatus(key, attempt))}
+      {[...responses.current.forSession(agentSessionId ?? '')].filter(([, attempt]) => !attempt.original)
+        .map(([key, attempt]) => <p key={key} role="status">{attempt.message}</p>)}
       <div className="mobile-conversation__composer">
         <AgentComposer insertionRef={insertion} aboveInput={<MobileAttachments client={client} session={session ?? null}
           connected={connection.state === 'connected' && !reading.disconnected} controls={attachmentControls}

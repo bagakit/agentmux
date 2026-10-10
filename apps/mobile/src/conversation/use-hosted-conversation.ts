@@ -15,6 +15,7 @@ type Projection = {
   session: AgentMuxAgentSession | null
   timeline: AgentTimelineSnapshot | null
   page: AgentSessionHistoryPage | null
+  pageOwner: { client: AgentMuxHostedClient; agentSessionId: string; hostId?: string; workspacePath?: string } | null
   answerContext: AgentSessionHistoryPage | null
   reading: boolean
   notice: string | null
@@ -24,7 +25,7 @@ type Projection = {
   activity: { owner: object; hostId: string; runId: string; observation: AgentObservation } | null
 }
 const empty = (id: string | null): Projection => ({
-  id, session: null, timeline: null, page: null, answerContext: null, reading: false, notice: null,
+  id, session: null, timeline: null, page: null, pageOwner: null, answerContext: null, reading: false, notice: null,
   disconnected: false, olderWindow: false, newerAvailable: false, activity: null
 })
 
@@ -159,9 +160,10 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
       try {
         // Each read fails independently: a native-history probe cannot suppress an existing
         // Session or its captured input projection, nor become an admission gate for a Prompt.
+        let pageSession: AgentMuxAgentSession | undefined
         try {
           const session = client!.agentSession(id!)
-          if (session.agentSessionId === id) patch({ session })
+          if (session.agentSessionId === id) { pageSession = session; patch({ session }) }
           else patch({ notice: 'The Host returned another Session’s metadata. The original reading is retained.' })
         }
         catch (error) { patch({ notice: errorMessage(error) }) }
@@ -181,7 +183,9 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
               return
             }
             currentPage.current = history.value
-            patch({ page: history.value, ...(!cursor ? { answerContext: history.value } : {}), olderWindow: Boolean(cursor), newerAvailable: false })
+            patch({ page: history.value, pageOwner: { client: client!, agentSessionId: id!,
+              ...(pageSession ? { hostId: pageSession.hostId, workspacePath: pageSession.workspacePath } : {}) },
+              ...(!cursor ? { answerContext: history.value } : {}), olderWindow: Boolean(cursor), newerAvailable: false })
             if (cursor) void refreshAnswers()
             // A successfully confirmed native source is the earliest valid point to establish its watch.
             // The initial failed probe never permanently retires this visible reader.

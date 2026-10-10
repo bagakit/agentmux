@@ -167,7 +167,8 @@ export function parseDraftRecord(value: unknown): DraftRecord {
       if (!id(original.hostId) || !(original.runtimeId === null || id(original.runtimeId)) || !id(input.agentSessionId) ||
           !id(input.operationId) || !id(run.runId) || !request || !id(request.id) || request.agentSessionId !== input.agentSessionId ||
           !['question', 'permission'].includes(String(request.kind)) || !response || response.kind !== request.kind || response.requestId !== request.id ||
-          key !== JSON.stringify([input.agentSessionId, run.runId, request.id]) || !body(JSON.stringify(input))) throw invalid()
+          (key !== JSON.stringify([input.agentSessionId, run.runId, request.id]) &&
+            key !== JSON.stringify([input.agentSessionId, run.runId, request.id, input.operationId])) || !body(JSON.stringify(input))) throw invalid()
     }
   }
   if (v.questions !== undefined) for (const [, item] of entries(v.questions)) {
