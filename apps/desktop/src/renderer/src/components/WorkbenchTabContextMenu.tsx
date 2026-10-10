@@ -165,6 +165,7 @@ export function WorkbenchTabContextMenu({
   fileActions,
   writeClipboardText,
   onRenameTab,
+  onOpenWindow,
   renameLabel = 'Rename tab',
   onClose,
   onCloseOthers,
@@ -191,6 +192,7 @@ export function WorkbenchTabContextMenu({
   fileActions?: WorkbenchTabFileActions
   writeClipboardText(text: string): Promise<void>
   // One explicit scope: the original Tab, or its same-name single Agent together with the Tab.
+  onOpenWindow?(): void
   onRenameTab(): void
   renameLabel?: 'Rename tab' | 'Rename tab and agent'
   onClose(): void
@@ -227,6 +229,7 @@ export function WorkbenchTabContextMenu({
           // already decline that, and the tab strip is the one place where the jump is visible.
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
+          {onOpenWindow ? <ContextMenu.Item className="tab-context-menu__item" onSelect={onOpenWindow}><ThemeActionRevealFileIcon size={14} /><span>Open original Tab in window</span></ContextMenu.Item> : null}
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onRenameTab}>
             <ThemeActionEditIcon size={14} />
             <span>{renameLabel}</span>

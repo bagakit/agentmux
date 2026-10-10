@@ -1,3 +1,6 @@
+import { useWorkbenchWindowRevision, workbenchWindowPlacement, useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
+import { openWorkbenchWindow } from '../lib/workbench-windows'
+import { useWorkbenchWindowDocument, useWorkbenchDocument } from '../lib/workbench-document'
 import { useAgentConnectorMenu } from '../lib/use-agent-connector-menu'
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
@@ -405,6 +408,7 @@ function SortableWorkbenchTab({
         canCloseRight={tabsToRight.length > 0}
         canMoveToNewGroup={group.tabOrder.length > 1}
         tabId={tab.id}
+        onOpenWindow={() => void openWorkbenchWindow({ kind: 'tab', displayWorkspaceId: workspaceId, groupId: group.id, tabId: tab.id })}
         copyableAgentSessionId={copyableAgentSessionId}
         {...(fileActions ? { fileActions } : {})}
         writeClipboardText={async (text) => {
@@ -675,6 +679,7 @@ function WorkbenchRegionTree(props: {
   regionTarget?: WorkbenchViewTarget | undefined
 }) {
   const { tab } = props
+  const documentVisible = useWorkbenchDocumentVisibility(useWorkbenchDocument())
   const [dragging, setDragging] = useState(false)
   const sessions = useWorkbenchTabSessions(tab)
   const sessionNameMetadata = useWorkbenchTabNameMetadata(tab)
@@ -692,7 +697,7 @@ function WorkbenchRegionTree(props: {
   // Layout slots may collapse or move; original Region content remains keyed by
   // its durable identity until that Region is actually removed.
   return <>
-    <WorkbenchRegionNode tab={tab} node={tab.layout.root} nodePath="" surfaceVisible={props.surfaceVisible} onDragging={setDragging} />
+    <WorkbenchRegionNode tab={tab} node={tab.layout.root} nodePath="" surfaceVisible={props.surfaceVisible && documentVisible} onDragging={setDragging} />
     {regionIds(tab.layout.root).filter(regionId => tab.regions[regionId]).map(regionId =>
       <WorkbenchRegionLeaf key={regionId} {...props} node={{ type: 'leaf', regionId }} swapTargets={swapTargets}
         interactiveResize={props.interactiveResize || dragging} />)}
@@ -727,10 +732,13 @@ function WorkbenchRegionSlot({ regionId }: { regionId: string }) {
   return <div id={`${parent.tabHostId}:region:${regionId}`} className="workbench-region-slot" />
 }
 function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProps) {
+  useWorkbenchWindowRevision()
+  const parentWindow = useWorkbenchWindowDocument()
   const parent = useWorkbenchBrowserPresentation()
   const target = confirmedRegionTarget(regionTarget, props.tab.id, props.node.regionId)
   const homeId = `${parent.tabHostId}:region:${props.node.regionId}`
-  const visible = target ? target.visible !== false : props.surfaceVisible
+  const detached = parent.reference && workbenchWindowPlacement({ kind: 'region', displayWorkspaceId: parent.reference.displayWorkspaceId, groupId: parent.reference.groupId, tabId: props.tab.id, regionId: props.node.regionId })
+  const visible = Boolean(detached || parentWindow) || (target ? target.visible !== false : props.surfaceVisible)
   return <StableWorkbenchView kind="region" nativeRegionId={props.node.regionId} homeId={homeId} targetId={target?.hostId ?? null} active={target?.active ?? parent.active}
       visible={visible}
       retainedRegionId={target?.retainedRegionId ?? parent.retainedRegionId}
@@ -739,7 +747,7 @@ function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProp
       onBrowserControlConfirmation={parent.onBrowserControlConfirmation} onSelectRegion={target?.onSelectRegion ?? parent.onSelectRegion}
       projection={target?.projection ?? parent.projection} reference={target?.reference ?? parent.reference}
       homeNotice={target && props.surfaceVisible ? <div role="status" className="workbench-restore-notice">This Region is shown in the selected presentation. Close that presentation to return it here.</div> : undefined}>
-      <WorkbenchRegionContent {...props} primaryPresentationHostId={target?.hostId ?? parent.tabHostId} surfaceVisible={visible} nativeSurfacesVisible={target ? visible : props.nativeSurfacesVisible}
+      <WorkbenchRegionContent {...props} primaryPresentationHostId={target?.hostId ?? parent.tabHostId} surfaceVisible={visible} nativeSurfacesVisible={detached || parentWindow ? visible : target ? visible : props.nativeSurfacesVisible}
         headerPortalTargetId={target?.surface === 'focus' ? null : target?.headerPortalTargetId ?? props.headerPortalTargetId} />
     </StableWorkbenchView>
 }
@@ -765,6 +773,9 @@ function WorkbenchRegionContent({
   headerPortalTargetId: string | null
   primaryPresentationHostId?: string | undefined
 }) {
+  const documentVisible = useWorkbenchDocumentVisibility(useWorkbenchDocument())
+  surfaceVisible = surfaceVisible && documentVisible
+  nativeSurfacesVisible = nativeSurfacesVisible && documentVisible
   const browserPresentation = useWorkbenchBrowserPresentation()
   const mote = useContext(MoteWorkfaceContext)
   const actualTopic = useAppStore(state => {
@@ -880,6 +891,7 @@ function WorkbenchRegionContent({
     const surveyBrowser = surface.kind === 'browser' &&
       (target ? target.surface === 'survey' : browserPresentation.surface === 'survey' || browserPresentation.survey === true)
     return <RegionContextMenu connector={connector}
+      onOpenWindow={browserPresentation.reference ? () => void openWorkbenchWindow({ kind: 'region', displayWorkspaceId: browserPresentation.reference!.displayWorkspaceId, groupId: browserPresentation.reference!.groupId, tabId: tab.id, regionId: node.regionId }) : undefined}
       regionId={node.regionId}
       // 只有承载 Agent 的一格才有语义身份可寻址。这个判定跟 Tab 级的唯一 Agent 判定同源
       // （tab-control-handoff 的 addressableAgentSessionId），所以第六种载 Agent 的 kind 只在那里声明一次。
@@ -1654,6 +1666,7 @@ export function WorkspaceWorkbench({
   /** One host action in the active Pane header; original content and controls stay shared. */
   presentationAction?: ReactNode
 }) {
+  useWorkbenchWindowRevision()
   const moteContext = useContext(MoteWorkfaceContext)
   const workbenchRef = useRef<HTMLDivElement>(null)
   const retainUnplacedTab = viewOwnership === 'projection' && !projection && Boolean(retainedTabId)
@@ -2080,7 +2093,8 @@ export function WorkspaceWorkbench({
         const retainedHere = primaryReference && retainedSpatialFocus?.tabId === tab.id &&
           primaryReference.displayWorkspaceId === retainedSpatialFocus.displayWorkspaceId && primaryReference.groupId === retainedSpatialFocus.groupId
         const primaryHostId = targetId ?? homeId
-        const tabVisible = (targetId !== null && (tabProjection?.surface ? tabProjection.visible === true : true)) || (targetId === null && visible && projectedGroup?.activeTabId === tab.id)
+        const detached = primaryReference && workbenchWindowPlacement({ kind: 'tab', displayWorkspaceId: primaryReference.displayWorkspaceId, groupId: primaryReference.groupId, tabId: tab.id })
+        const tabVisible = Boolean(detached) || (targetId !== null && (tabProjection?.surface ? tabProjection.visible === true : true)) || (targetId === null && visible && projectedGroup?.activeTabId === tab.id)
         return <WorkbenchBrowserTargetsContext.Provider key={tab.id} value={targets}>
         {targets.filter(target => target.hostId !== primaryHostId && target.hostId !== nativeRegionTarget?.hostId && target.reference).map(target =>
           <StableWorkbenchView key={target.hostId} homeId={`${target.hostId}:parked`} targetId={target.hostId}

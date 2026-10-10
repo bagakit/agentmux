@@ -37,7 +37,7 @@ export default defineConfig({
     resolve: { alias: { ...radixOverlayAliases, ...noteParsingAliases }, dedupe: ['react', 'react-dom'] },
     worker: { format: 'es' },
     plugins: [react(), pdfjsViewerAssets(), fileDiagramAssets(import.meta.dirname)],
-    build: { rollupOptions: { input: { index: resolve(import.meta.dirname, 'src/renderer/index.html'), 'file-diagram': resolve(import.meta.dirname, 'src/renderer/file-diagram/index.html') } } },
+    build: { rollupOptions: { input: { index: resolve(import.meta.dirname, 'src/renderer/index.html'), 'workbench-window': resolve(import.meta.dirname, 'src/renderer/workbench-window.html'), 'file-diagram': resolve(import.meta.dirname, 'src/renderer/file-diagram/index.html') } } },
     define: { __AGENTMUX_WEB_PREVIEW__: 'false' }
   }
 })

@@ -25,6 +25,7 @@ export type RegionMenuEntry =
   | { kind: 'split'; entry: WorkbenchSplitMenuEntry }
   | { kind: 'swap'; entry: RegionSwapMenuEntry }
   | { kind: 'promote'; onSelect(): void }
+  | { kind: 'window'; onSelect(): void }
 
 type ConnectorMenuGroup = { label: string; entries: readonly { label: string; onSelect(): void }[]; issue: string }
 export type RegionConnectorControls = { group: ConnectorMenuGroup | null; onOpen(open: boolean): void; dialogOpen: boolean }
@@ -165,6 +166,7 @@ export function RegionMenuEntryView({ entry, index, Item, Separator, Group = Con
       </Item>
     )
   }
+  if (entry.kind === 'window') return <Item className="tab-context-menu__item" onSelect={entry.onSelect}><ThemeActionOpenExternalIcon size={14} /><span>Open original Region in window</span></Item>
   if (entry.kind === 'promote') {
     return (
       <Item
@@ -198,10 +200,12 @@ export function RegionContextMenu({
   splitMenu,
   swapMenu,
   promote,
+  onOpenWindow,
   connector = NO_CONNECTOR
 }: {
   children: ReactNode
   connector?: RegionConnectorControls
+  onOpenWindow?: (() => void) | undefined
   regionId: string
   agentSessionId: string | null
   writeClipboardText(text: string): Promise<void>
@@ -217,7 +221,7 @@ export function RegionContextMenu({
     swapMenu,
     promote
   })
-  const model = { ...base, entries: [...base.entries, ...(connector.group ? [{ kind: 'connector-group' as const, group: connector.group }] : [])] }
+  const model = { ...base, entries: [...base.entries, ...(onOpenWindow ? [{ kind: 'window' as const, onSelect: onOpenWindow }] : []), ...(connector.group ? [{ kind: 'connector-group' as const, group: connector.group }] : [])] }
   // 让位不在这里接线：原生视图的让位由 App 的那一个 MutationObserver 按 Radix 的 DOM 协议
   // （portal 到 React 根之外 + data-state=open）统一观察，见 lib/native-surface-overlay.ts。
   // 这个菜单——#544 那个被浏览器盖住的——正是"逐个接线会漏"的证据本身。
