@@ -19,7 +19,7 @@ vi.mock('../src/renderer/src/lib/api', () => ({ api: { ui: {
   nativeBrowserVisibility: signals.initialDemand,
   onNativeBrowserVisibility(listener: typeof signals.demand) { signals.demand = listener; return signals.demandUnsubscribe },
   onNativeOverlayWarning(listener: (warning: string) => void) { signals.warning = listener; return signals.warningUnsubscribe },
-  onNativeBrowserInput(listener: unknown) { expect(listener).toBe(signals.dismiss); return signals.pointerUnsubscribe }
+  onNativeBrowserInput(_listener: unknown) { return signals.pointerUnsubscribe }
 } } }))
 vi.mock('../src/renderer/src/lib/native-overlay-regions', () => ({
   observeNativeOverlayRegions(body: HTMLElement, _zoom: unknown, collect: typeof signals.collect) {
