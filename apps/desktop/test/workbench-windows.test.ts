@@ -9,7 +9,7 @@ import type { AppWindowOperation, AppWindowTarget } from '@agentmux/core/control
 vi.mock('electron', () => ({ Menu: {}, webContents: {} }))
 import { WorkbenchWindows } from '../src/main/workbench-windows'
 import { WorkbenchWindowStore } from '../src/main/workbench-window-store'
-import { WORKBENCH_WINDOW_REQUEST } from '../src/shared/workbench-windows'
+import { WORKBENCH_WINDOW_REQUEST, WORKBENCH_WINDOW_CHANGED, type WorkbenchWindowSnapshot } from '../src/shared/workbench-windows'
 
 let nextId = 1
 class Contents extends EventEmitter {
@@ -87,6 +87,11 @@ async function opened(f: Awaited<ReturnType<typeof fixture>>, operationId = 'ope
   expect(page.recordedOperation?.state).toBe('confirmed')
   return { windowId: page.recordedOperation!.windowId!, documentGeneration: page.recordedOperation!.documentGeneration! }
 }
+function snapshot(f: Awaited<ReturnType<typeof fixture>>): WorkbenchWindowSnapshot {
+  const call = f.main.webContents.send.mock.calls.filter(([channel]) => channel === WORKBENCH_WINDOW_CHANGED).at(-1)
+  expect(call).toBeDefined()
+  return call![1] as WorkbenchWindowSnapshot
+}
 
 describe('original workface native presentation owner', () => {
   it('claims the original operation before disk I/O and refuses changed concurrent intent', async () => {
@@ -134,6 +139,50 @@ describe('original workface native presentation owner', () => {
     expect(() => f.owner.presentationWindow(undefined, occurrence)).toThrow('stale')
     expect(f.owner.presentationWindow(identity, occurrence)).toBe(f.children[0])
     expect(() => f.owner.windowForDocument({ ...identity, documentGeneration: 'older' })).toThrow('current')
+  })
+  it.each(['document action', 'native event'])('clears only the exact recovered native focus issue through its %s', async recovery => {
+    const f = await fixture(), identity = await opened(f), native = f.children[0]!
+    native.focused = false; native.focus = () => {}
+    expect(f.owner.focusDocument(identity)).toBe(false)
+    const issue = snapshot(f).issue
+    expect(issue).not.toBeNull()
+    f.main.focused = true; f.main.emit('focus')
+    expect(snapshot(f).issue).toBe(issue)
+    native.emit('focus')
+    expect(snapshot(f).issue).toBe(issue)
+    native.focus = () => { native.focused = true }
+    if (recovery === 'document action') expect(f.owner.focusDocument(identity)).toBe(true)
+    else { native.focused = true; native.emit('focus') }
+    expect(snapshot(f).windows.find(window => window.windowId === identity.windowId)?.focused).toBe(true)
+    expect(snapshot(f).issue).toBeNull()
+  })
+  it('retains an unrelated receipt warning when the original document focus recovers', async () => {
+    const f = await fixture(), identity = await opened(f), native = f.children[0]!
+    native.focused = false; native.focus = () => {}
+    expect(f.owner.focusDocument(identity)).toBe(false)
+    f.store.journalFailure = 'pending'
+    await f.owner.call('app.window.open', { operationId: 'unpersisted-other-window', target: { ...target, tabId: 'other-tab' } }, context)
+    const issue = snapshot(f).issue
+    expect(issue).toContain('persistence is unconfirmed')
+    native.focused = true; native.emit('focus')
+    expect(f.owner.focusDocument(identity)).toBe(true)
+    expect(snapshot(f).issue).toBe(issue)
+  })
+  it('ignores a retired native focus event and stale document when the current focus is unknown', async () => {
+    const f = await fixture(), original = await opened(f), retired = f.children[0]!
+    retired.webContents.emit('render-process-gone')
+    await vi.waitFor(() => expect(retired.destroyed).toBe(true))
+    const reopened = await f.owner.call('app.window.open', { operationId: 'reopen-for-current-focus', target }, context)
+    const current = { windowId: reopened.recordedOperation!.windowId!, documentGeneration: reopened.recordedOperation!.documentGeneration! }
+    expect(current.windowId).toBe(original.windowId); expect(current.documentGeneration).not.toBe(original.documentGeneration)
+    const native = f.children[1]!
+    native.focused = false; native.focus = () => {}
+    expect(f.owner.focusDocument(current)).toBe(false)
+    const issue = snapshot(f).issue
+    retired.focused = true; retired.emit('focus')
+    expect(() => f.owner.focusDocument(original)).toThrow('current')
+    expect(snapshot(f).issue).toBe(issue)
+    expect(snapshot(f).windows.find(window => window.windowId === current.windowId)?.focused).toBe(false)
   })
   it.each([
     { name: 'whole Tab in another Group', owned: target, requested: { ...target, groupId: 'other-group' } },
