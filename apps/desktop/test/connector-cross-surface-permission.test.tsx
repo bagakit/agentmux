@@ -99,6 +99,43 @@ describe('the original member access owner', () => {
     } finally { await act(async () => release()) }
   }, 25_000)
 
+  it.each(['approve', 'revoke'] as const)('keeps a previous group grant wait from taking the next group member %s action', async action => {
+    await open(); await toggle('Allow permission decisions')
+    const forward = f.forward; let previousOperation = '', release!: () => void
+    const barrier = new Promise<void>(resolve => { release = resolve })
+    vi.spyOn(api.connections, 'call').mockImplementation(async (method, input) => {
+      if (method === 'connection.binding.inspect' && 'operationId' in input && input.operationId === previousOperation) await barrier
+      const result = await forward(method, input)
+      if (method === 'connection.grant' && 'expectedBindingRevision' in input && input.expectedBindingRevision === 1) { previousOperation = input.operationId; throw Error('Controlled lost previous group grant receipt') }
+      return result
+    })
+    try {
+      await f.button('Approve this member'); await ready('not confirmed')
+      const binding = (await f.services.connections.bindings!.list({})).bindings[0]!
+      await f.button('Close')
+      const relink = await forward('connection.binding.relink', { ...f.original.input, operationId: 'member-next-group', bindingId: binding.bindingId, expectedRevision: 1,
+        connectionId: f.config.connectionId, expectedConnectionRevision: 1, externalConversationId: 'oc_next' })
+      expect(relink.state).toBe('applied')
+      if (action === 'revoke') {
+        const original = f.calls.find(call => call.method === 'connection.grant')!.input as import('@agentmux/core/connections').RoomBindingGrantInput
+        expect((await forward('connection.grant', { ...original, operationId: 'member-reassigned-current-group', expectedBindingRevision: 2, expectedRevision: 1 })).state).toBe('applied')
+      }
+      await f.menu('Shared group details'); await disclosure('People in this group'); await f.button('Choose')
+      if (action === 'approve') {
+        await toggle('Allow permission decisions'); await f.button('Approve this member')
+        await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.grant'), 'A wait for revision one cannot take a new revision two action').toHaveLength(2))
+      }
+      await vi.waitFor(async () => { await act(async () => {}); const revoke = [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Revoke permission decisions'); expect(revoke, 'The applied current group receipt remains usable').toBeDefined(); expect(revoke!.disabled, 'An older group read cannot hold the applied current grant').toBe(false) })
+      const read = await f.cli(['binding', 'inspect', '--binding', binding.bindingId])
+      expect(read.grants[0]).toMatchObject({ bindingRevision: 2, capabilities: ['permission'] })
+      expect(Object.values(useAppStore.getState().connectorRoomIntents).some(intent => intent.input.operationId === previousOperation)).toBe(true)
+      await f.button('Revoke permission decisions')
+      await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.grant'), 'Revocation uses the current group revision even with an older intent for the same grant ID').toHaveLength(3))
+      await vi.waitFor(async () => expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).grants[0].state).toBe('revoked'))
+      expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
+    } finally { await act(async () => release()) }
+  }, 25_000)
+
   it('retains the original grant intent after a lost IPC receipt and only inspects it', async () => {
     await open(); await toggle('Allow permission decisions')
     const forward = f.forward
