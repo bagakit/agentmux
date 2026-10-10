@@ -38,6 +38,7 @@ import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult, 
 import { isTopicMethod, parseTopicParams, parseTopicResult, type AgentMuxRpcTopicsOwner, type TopicMethod } from './public-rpc-topics.js'
 import { isFileMethod, parseFileHistoryParams, parseFileHistoryResult, parseFileCreateParams, parseFileCreateResult, parseFileWriteParams, parseFileWriteResult, parseFileRestoreParams, parseFileRestoreResult, parseFileUndoParams, parseFileUndoResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult, type AgentMuxRpcFilesOwner, type FileWriteResult } from './public-rpc-files.js'
 import { isGitMethod, parseGitParams, parseGitResult, type AgentMuxRpcGitOwner, type GitMethod } from './public-rpc-git.js'
+import { isAppWindowMethod, parseAppWindowPage, parseAppWindowParams, type AgentMuxRpcWindowsOwner, type AppWindowActor, type AppWindowMethod } from './public-rpc-windows.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult, type AgentMuxRpcSchedulesOwner, type ScheduleMethod } from './public-rpc-schedules.js'
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
 import { displayLabel, type AgentMuxNameContext } from './display-label.js'
@@ -96,6 +97,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   }
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
+  windows?: AgentMuxRpcWindowsOwner
   moteConnections?: MoteConnectionPort
   connections?: ConnectionPort
   goalDelegations?: GoalDelegationsOwner
@@ -227,7 +229,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | ScheduleMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -646,6 +648,18 @@ export class AgentMuxRpcService {
           ...(caller ? { hostId: caller.hostId, runId: caller.session.run.runId } : {}) }), input) as AgentMuxRpcResult<M>
     }
 
+    if (isAppWindowMethod(method)) {
+      const input = parseAppWindowParams(method, params)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      if (!this.ports.windows && !this.ports.forwardControl) throw new AgentMuxError('The original client window owner is unavailable. Original workfaces and Agents remain available.', 'CONTROL_UNAVAILABLE')
+      const actor: AppWindowActor | null = caller ? { kind: 'agent', id: caller.agentSessionId }
+        : context.principal && ['user', 'device'].includes(context.principal.kind) ? context.principal as AppWindowActor : null
+      if (!actor) throw new AgentMuxError('Window presentation requires its authenticated original actor.', 'CONTROL_PERMISSION_DENIED')
+      if (!this.ports.windows) return parseAppWindowPage(method, await this.ports.forwardControl!<AppWindowMethod>(method, input, context), input, actor) as AgentMuxRpcResult<M>
+      const result = await this.ports.windows.call(method, input, { actor,
+        ...(context.signal ? { signal: context.signal } : {}), ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}) })
+      return parseAppWindowPage(method, result, input, actor) as AgentMuxRpcResult<M>
+    }
     if (isGitMethod(method)) {
       const input = parseGitParams(method, params)
       context.signal?.throwIfAborted()

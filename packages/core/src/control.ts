@@ -1137,4 +1137,5 @@ export function isAgentMuxControlOperation(value: unknown): value is AgentMuxCon
 }
 
 export * from './public-rpc-topics.js'
+export * from './public-rpc-windows.js'
 export type { AgentMuxNameTarget, AgentMuxNameActor, AgentMuxNameContext, AgentMuxNameChangeIntent, AgentMuxNameChangeRecord, AgentMuxNameChangeAdmission, AgentMuxNameChangeSettlement, AgentMuxNameHistoryQuery, AgentMuxNameHistoryPage, AgentMuxDisplayLabelMutation, AgentMuxDisplayLabelResult } from './display-label.js'
