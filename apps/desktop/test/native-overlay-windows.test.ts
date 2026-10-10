@@ -109,3 +109,21 @@ it('refreshes only the requested native host and preserves the original Root def
   expect(native.surfaces[0].refresh).toHaveBeenCalledTimes(1)
   expect(native.surfaces[1].refresh).toHaveBeenCalledTimes(1)
 })
+
+it('closed workbench owners release native projections without reading a destroyed Window getter', () => {
+  registry.visibility(pair)
+  const contents = child.webContents, surface = native.surfaces[0]
+  let departed = false
+  Object.defineProperty(child, 'webContents', { configurable: true, get() {
+    if (departed) throw new Error('Object has been destroyed')
+    return contents
+  } })
+  try {
+    departed = true
+    expect(() => child.emit('closed')).not.toThrow()
+    expect(surface.dispose).toHaveBeenCalledTimes(1)
+    expect(contents.listenerCount('did-start-navigation')).toBe(0)
+    expect(contents.listenerCount('render-process-gone')).toBe(0)
+    expect(registry.resourceProcessIds()).toEqual([])
+  } finally { Object.defineProperty(child, 'webContents', { configurable: true, writable: true, value: contents }) }
+})

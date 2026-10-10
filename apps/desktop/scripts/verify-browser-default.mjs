@@ -23,6 +23,9 @@ const sourceFiles = [
   'packages/core/dist/browser-default.js', 'packages/core/dist/control-codec.js', 'packages/core/dist/public-rpc.js',
   'packages/core/package.json', 'packages/core/src/sharing.ts', 'packages/core/src/index.ts',
   'packages/core/dist/sharing.js', 'packages/core/dist/index.js',
+  'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/main/native-overlay-windows.ts',
+  'apps/desktop/test/browser-window-owner-lifecycle.test.ts', 'apps/desktop/test/browser-presentation-resource.test.ts',
+  'apps/desktop/test/native-overlay-windows.test.ts', 'apps/desktop/scripts/verify-browser-window-owners.mjs',
   ...files
 ]
 async function manifest() { return Object.fromEntries(await Promise.all(sourceFiles.map(async path => [path, hash(await readFile(join(repository, path)))]))) }
@@ -157,6 +160,11 @@ try {
     await check('survey-creation-disconnected', { path: 'apps/desktop/src/renderer/src/lib/survey-system-url.ts', from: "await get().createSurveyBrowser({ workspaceId: SCRATCH_WORKSPACE_ID, url: request.url, preparation: null, onPrepared(value) { preparation = value } })", to: "await Promise.reject(new Error('Private mutation disconnected original Survey creation'))", test: 'the system URL consumer uses the real Survey preparation and exact Scratch Browser creation without changing the original page' })
     await check('restored-source')
   }
+  execFileSync(process.execPath, [join(desktop, 'scripts/verify-browser-window-owners.mjs'), ...(process.argv.includes('--mutations') ? ['--mutations'] : [])],
+    { cwd: repository, stdio: 'inherit', env: process.env })
+  receipt.windowOwnerProof = JSON.parse(await readFile(join(repository, '.local/browser-default/window-owner-proof/receipt.json'), 'utf8'))
+  assert(receipt.windowOwnerProof.status === 'passed', 'The actual no-window owner proof must pass')
+  assert(JSON.stringify(await manifest()) === JSON.stringify(before), 'No original owner input may change during window lifecycle verification')
   receipt.status = 'passed'; await writeReceipt()
 } catch (error) {
   receipt.status = 'failed'; receipt.error = { name: error.name, message: error.message }; await writeReceipt(); throw error
