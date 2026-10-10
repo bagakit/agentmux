@@ -321,7 +321,10 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
       const contents=win.webContents;
       if(contents.isDestroyed()||contents.id!==${currentWindow.webContentsId}||contents.getURL()!==${JSON.stringify(rendererUrl)})throw new Error('The original native Renderer changed');
       ${requested ? `win.setBounds(${JSON.stringify(requested)});` : ''}
-      return {bounds:win.getBounds(),contentBounds:win.getContentBounds(),zoomFactor:contents.getZoomFactor()} })()`)
+      const nativeChildren=win.contentView.children.filter(view=>view.webContents&&view.webContents!==contents).map(view=>{
+        const child=view.webContents,destroyed=child.isDestroyed();
+        return {id:destroyed?null:child.id,url:destroyed?null:child.getURL(),destroyed,visible:view.getVisible(),bounds:view.getBounds()} });
+      return {bounds:win.getBounds(),contentBounds:win.getContentBounds(),zoomFactor:contents.getZoomFactor(),nativeChildren} })()`)
     receipt.mainInspector = { endpoint: inspectorUrl, identity: mainIdentity, window: currentWindow }
     await openSurveySettings()
     const originalTitle = await page.evaluate('document.querySelector(' + JSON.stringify(startPageTitleSelector) + ').value')
@@ -338,11 +341,19 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
       await page.evaluate('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
       const rendererViewport = await page.evaluate('({url:location.href,innerWidth,innerHeight,devicePixelRatio})')
       assert.equal(rendererViewport.url, rendererUrl, 'Settings capture keeps the same loaded Renderer')
+      const beforeCapture = await windowBounds()
+      const visibleNativeBefore = beforeCapture.nativeChildren.filter(child => child.visible && child.bounds.width > 0 && child.bounds.height > 0)
+      receipt.captureBoundary = { name, before: beforeCapture.nativeChildren }
+      assert.deepEqual(visibleNativeBefore, [], 'Settings Renderer capture must not omit a visible native child')
       const screenshot = await page.call('Page.captureScreenshot', { format: 'png' }), bytes = Buffer.from(screenshot.data, 'base64'), file = 'settings-survey-' + name + '.png'
       await writeFile(join(evidence, file), bytes)
       const actual = await windowBounds()
+      const visibleNative = actual.nativeChildren.filter(child => child.visible && child.bounds.width > 0 && child.bounds.height > 0)
+      receipt.captureBoundary.after = actual.nativeChildren
+      assert.deepEqual(visibleNative, [], 'Settings Renderer capture must keep the native-child boundary clear')
       receipt.images.push({ file, sha256: hash(bytes), requestedBounds, bounds: actual.bounds,
-        contentBounds: actual.contentBounds, zoomFactor: actual.zoomFactor, rendererViewport, window: currentWindow })
+        contentBounds: actual.contentBounds, zoomFactor: actual.zoomFactor, rendererViewport, window: currentWindow,
+        nativeChildrenBefore: beforeCapture.nativeChildren, nativeChildrenAfter: actual.nativeChildren, visibleNative })
     }
     const eligible = await systemHandlers()
     receipt.eligibility = eligible
