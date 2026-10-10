@@ -5,6 +5,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionConfigureInput, ConnectionObservation, ConnectionRecord, ConnectionStage } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
 import { BotEnrollmentPane, useBotEnrollment } from './BotEnrollmentPane'
+import { ConnectionProfilePanel } from './ConnectionProfilePanel'
 
 const LinkIcon = semanticIconComponent('action.open-external')
 const CheckIcon = semanticIconComponent('status.completed')
@@ -159,6 +160,7 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
         {feedback ? <p role="status" className="settings-group-note connector-check-feedback">{feedback}</p> : null}
         <details className="connector-setup-help"><summary>Finish setup in {platform(current.config.application.domain)}</summary><ol><li>Enable the bot capability in your application.</li><li>In Events & Callbacks, choose persistent connection and add <code>im.message.receive_v1</code>.</li><li>Enable the messaging and group permissions required by the features you use, then publish the application.</li></ol><p className="settings-group-note">Keep this application enabled here while finishing event setup.</p><button className="small-button" onClick={() => void openConsole()}>Open {platform(current.config.application.domain)} console <LinkIcon size={12} /></button></details>
         <div className="connector-next-step"><GroupIcon size={18} /><div><strong>Next, choose an Agent and a group</strong><p>Open an Agent’s menu → Create group or Connect existing group. You choose the audience and what to share there.</p></div></div>
+        <ConnectionProfilePanel key={JSON.stringify([current.config.connectionId, current.config.application, current.revision])} record={current} />
         <ConnectionDiagnostics record={current} />
       </> : null}
     </section> : null}
